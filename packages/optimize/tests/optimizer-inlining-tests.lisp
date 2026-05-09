@@ -60,6 +60,54 @@
          (instrs  (append (list closure fref jump-past lbl)
                           body
                           (list ret after arg call halt)))
+          (out     (cl-cc/optimize::opt-pass-inline instrs)))
+    (assert-true (inline-has-call-p out))))
+
+(deftest inline-force-large-function-via-policy
+  "INLINE policy bypasses the cost threshold but still uses the normal structural path."
+  (let* ((closure (cl-cc:make-vm-closure :dst :R0 :label "big-inline"
+                                          :params '(:R10)
+                                          :captured nil
+                                          :inline-policy :inline))
+         (fref    (cl-cc:make-vm-func-ref :dst :R5 :label "big-inline"))
+         (jump-past (cl-cc:make-vm-jump :label "after_big_inline"))
+         (lbl     (cl-cc:make-vm-label :name "big-inline"))
+         (body    (append
+                   (list (cl-cc:make-vm-const :dst :R20 :value 1))
+                   (loop for i from 21 below 40
+                         for prev = :R10 then (intern (format nil "R~A" (1- i)) :keyword)
+                         collect (cl-cc:make-vm-add
+                                  :dst (intern (format nil "R~A" i) :keyword)
+                                  :lhs prev
+                                  :rhs :R20))))
+         (ret     (cl-cc:make-vm-ret :reg :R39))
+         (after   (cl-cc:make-vm-label :name "after_big_inline"))
+         (arg     (cl-cc:make-vm-const :dst :R1 :value 0))
+         (call    (cl-cc:make-vm-call :dst :R6 :func :R5 :args '(:R1)))
+         (halt    (cl-cc:make-vm-halt))
+         (instrs  (append (list closure fref jump-past lbl)
+                          body
+                          (list ret after arg call halt)))
+         (out     (cl-cc/optimize::opt-pass-inline instrs)))
+    (assert-false (inline-has-call-p out))))
+
+(deftest inline-notinline-policy-blocks-small-function
+  "NOTINLINE policy keeps even a tiny function call intact."
+  (let* ((closure (cl-cc:make-vm-closure :dst :R0 :label "tiny-noinline"
+                                          :params '(:R10)
+                                          :captured nil
+                                          :inline-policy :notinline))
+         (fref    (cl-cc:make-vm-func-ref :dst :R5 :label "tiny-noinline"))
+         (jump-past (cl-cc:make-vm-jump :label "after_tiny_noinline"))
+         (lbl     (cl-cc:make-vm-label :name "tiny-noinline"))
+         (body1   (cl-cc:make-vm-const :dst :R11 :value 1))
+         (body2   (cl-cc:make-vm-add :dst :R12 :lhs :R10 :rhs :R11))
+         (ret     (cl-cc:make-vm-ret :reg :R12))
+         (after   (cl-cc:make-vm-label :name "after_tiny_noinline"))
+         (arg     (cl-cc:make-vm-const :dst :R1 :value 4))
+         (call    (cl-cc:make-vm-call :dst :R6 :func :R5 :args '(:R1)))
+         (halt    (cl-cc:make-vm-halt))
+         (instrs  (list closure fref jump-past lbl body1 body2 ret after arg call halt))
          (out     (cl-cc/optimize::opt-pass-inline instrs)))
     (assert-true (inline-has-call-p out))))
 
@@ -174,5 +222,4 @@
                               (and (cl-cc:vm-const-p i)
                                    (eql 4 (cl-cc/vm::vm-value i))))
                             out))))
-
 

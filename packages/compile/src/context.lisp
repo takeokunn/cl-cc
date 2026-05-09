@@ -30,10 +30,12 @@
                             :documentation "Entry label of the function currently being compiled")
     (current-function-params :initform nil :accessor ctx-current-function-params
                              :documentation "Required parameter symbols for the current function")
-    (current-function-simple-p :initform nil :accessor ctx-current-function-simple-p
-                               :documentation "Whether the current function has only required parameters")
-    (top-level-p :initform t :accessor ctx-top-level-p
-                 :documentation "Whether we are at top-level (not inside a function body)")
+     (current-function-simple-p :initform nil :accessor ctx-current-function-simple-p
+                                :documentation "Whether the current function has only required parameters")
+     (pending-inline-policy :initform nil :accessor ctx-pending-inline-policy
+                            :documentation "Temporary inline policy for a closure-valued expression being compiled in the current lexical context")
+     (top-level-p :initform t :accessor ctx-top-level-p
+                  :documentation "Whether we are at top-level (not inside a function body)")
    (boxed-vars :initform nil :accessor ctx-boxed-vars
                 :documentation "List of variable names that are boxed (stored in cons cells for capture-by-reference)")
    (noescape-cons-bindings :initform nil :accessor ctx-noescape-cons-bindings
@@ -45,7 +47,89 @@
    (noescape-closure-bindings :initform nil :accessor ctx-noescape-closure-bindings
                               :documentation "Alist mapping local variable names to directly inlinable non-escaping lambda ASTs.")
    (tail-position :initform nil :accessor ctx-tail-position
-                   :documentation "Whether the current compilation position is a tail position.")))
+                    :documentation "Whether the current compilation position is a tail position.")))
+
+(defun %merge-inline-policies (&rest policies)
+  (cond
+    ((some (lambda (policy) (eq policy :notinline)) policies) :notinline)
+    ((some (lambda (policy) (eq policy :inline)) policies) :inline)
+    (t nil)))
+
+(defun %global-optimize-quality (quality)
+  (and (symbolp quality)
+       (gethash quality cl-cc/expand:*declaim-optimize-registry*)))
+
+(defun %local-optimize-quality (declarations quality)
+  (cl-cc/expand:declaration-optimize-quality declarations quality))
+
+(defun %optimize-inline-policy-from-levels (speed debug space)
+  (cond
+    ((or (eql debug 3)
+         (and (integerp space) (>= space 2)))
+     :notinline)
+    ((eql speed 3)
+     :inline)
+    (t nil)))
+
+(defun %local-optimize-inline-policy (declarations)
+  (%optimize-inline-policy-from-levels
+   (%local-optimize-quality declarations 'speed)
+   (%local-optimize-quality declarations 'debug)
+   (%local-optimize-quality declarations 'space)))
+
+(defun %global-optimize-inline-policy ()
+  (%optimize-inline-policy-from-levels
+   (%global-optimize-quality 'speed)
+   (%global-optimize-quality 'debug)
+   (%global-optimize-quality 'space)))
+
+(defun %call-with-declaration-policies (ctx declarations thunk)
+  (let ((old-safety (ctx-safety ctx))
+        (old-inline-policy (ctx-pending-inline-policy ctx))
+        (local-safety (%local-optimize-quality declarations 'safety))
+        (local-inline-policy (%local-optimize-inline-policy declarations)))
+    (unwind-protect
+         (progn
+           (when (not (null local-safety))
+             (setf (ctx-safety ctx) local-safety))
+           (setf (ctx-pending-inline-policy ctx)
+                 (%merge-inline-policies old-inline-policy local-inline-policy))
+           (funcall thunk))
+      (setf (ctx-safety ctx) old-safety)
+      (setf (ctx-pending-inline-policy ctx) old-inline-policy))))
+
+(defun %declaration-inline-policy (declarations name)
+  "Return the effective local inline policy for NAME from DECLARATIONS.
+When both INLINE and NOTINLINE appear, NOTINLINE wins conservatively."
+  (let ((xs declarations)
+        (result nil))
+    (tagbody
+     scan
+       (if (null xs) (return-from %declaration-inline-policy result))
+       (let ((decl (car xs)))
+         (when (and (consp decl)
+                    (member (car decl) '(inline notinline))
+                    (symbolp name)
+                    (%member-eq-p name (cdr decl)))
+           (setf result (%merge-inline-policies
+                         result
+                         (if (eq (car decl) 'notinline) :notinline :inline)))))
+       (setq xs (cdr xs))
+       (go scan))))
+
+(defun %global-inline-policy (name)
+  (and (symbolp name)
+       (gethash name cl-cc/expand:*declaim-inline-registry*)))
+
+(defun %callable-inline-policy (declarations &key name pending-policy)
+  "Return the merged inline policy for a callable.
+Pending lexical policy, optimize declarations, and explicit declaim/declare
+inline policy are merged with NOTINLINE taking precedence over INLINE."
+  (%merge-inline-policies pending-policy
+                          (%global-optimize-inline-policy)
+                          (%local-optimize-inline-policy declarations)
+                          (%global-inline-policy name)
+                          (%declaration-inline-policy declarations name)))
 
 
 

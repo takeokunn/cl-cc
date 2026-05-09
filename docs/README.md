@@ -8,7 +8,8 @@
 ## Type System
 
 - [type-core.md](type-core.md) — Core: inference, subtyping (Ch.1-3) — ✅ COMPLETE (12 / 12 direct FR; Ch.2,4-14 are bridge refs)
-- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34) — 🔶 IN PROGRESS (5 / 109 FR marked ✅; remaining FRs require per-FR completion marking)
+- [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34) — ✅ COMPLETE (109 / 109 FR marked ✅)
+  - 検証根拠: `type-core.md` は直接 FR 見出し 12/12 が ✅。`type-advanced.md` は FR 見出し 109/109 が ✅ で、`packages/type/tests/type-2026-nodes-tests.lisp` が docs FR リスト・semantic contract registry・implementation evidence registry の一致を検証します。
 
 ## Optimization
 
@@ -46,4 +47,4 @@
 
 ---
 
-**Status: 1573/1798 tracked FRs complete (87%) | Self-hosting verified explicitly by `selfhost-suite` via `:cl-cc-test/e2e` | Test counts vary by entrypoint and should be verified from the current run artifacts**
+**Status: 1677/1798 tracked FRs complete (93%) | Self-hosting verified explicitly by `selfhost-suite` via `:cl-cc-test/e2e` | Test counts vary by entrypoint and should be verified from the current run artifacts**

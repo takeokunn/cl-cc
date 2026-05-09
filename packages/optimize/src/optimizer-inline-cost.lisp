@@ -48,17 +48,21 @@ call-heavy bodies are kept near the base threshold."
   "Return T if DEF satisfies all inlining preconditions:
 1. Has a vm-closure with zero captured variables
 2. Has only required params (no &optional/&rest/&key)
-3. Body cost ≤ THRESHOLD (excluding the final vm-ret)
+3. Body cost ≤ THRESHOLD (excluding the final vm-ret), unless forced INLINE
 4. All body instructions support lossless register renaming
-5. Body reads no global registers not defined by params or body."
+5. Body reads no global registers not defined by params or body.
+NOTINLINE always blocks inlining; INLINE only bypasses the cost threshold and
+does not weaken any structural safety checks."
   (let ((ci   (getf def :closure))
-        (body (getf def :body)))
+         (body (getf def :body)))
     (and (vm-closure-p ci)
+         (not (eq (vm-closure-inline-policy ci) :notinline))
          (null (vm-captured-vars ci))
          (null (vm-closure-optional-params ci))
          (null (vm-closure-rest-param ci))
          (null (vm-closure-key-params ci))
-         (<= (opt-inline-body-cost body) threshold)
+         (or (eq (vm-closure-inline-policy ci) :inline)
+             (<= (opt-inline-body-cost body) threshold))
          (opt-can-safely-rename-p body)
          (not (opt-body-has-global-refs-p body (vm-closure-params ci))))))
 

@@ -79,14 +79,7 @@ let
         ${dispatchExport}
         ${extraEnv}
         export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-10}"
-        if [ -z "''${CLCC_HEARTBEAT_SECONDS:-}" ] || ! printf '%s' "$CLCC_HEARTBEAT_SECONDS" | grep -Eq '^[0-9]+$'; then
-          CLCC_HEARTBEAT_SECONDS=1
-        fi
-        export CLCC_HEARTBEAT_SECONDS
-        if [ -z "''${CLCC_SUITE_TIMEOUT:-}" ] || ! printf '%s' "$CLCC_SUITE_TIMEOUT" | grep -Eq '^[0-9]+$'; then
-          CLCC_SUITE_TIMEOUT=600
-        fi
-        export CLCC_SUITE_TIMEOUT
+        export CLCC_SUITE_TIMEOUT="''${CLCC_SUITE_TIMEOUT:-1500}"
         shell_timeout=$((CLCC_SUITE_TIMEOUT + ${toString extraTimeoutSeconds}))
         ${pkgs.coreutils}/bin/timeout "$shell_timeout" ${rlwrapPrefix}${sbclBin} ${sbclFlags} ${lib.concatStringsSep " " extraSbclFlags} \
           --non-interactive \

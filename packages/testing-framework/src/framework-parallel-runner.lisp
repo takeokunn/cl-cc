@@ -180,36 +180,48 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
   (when update-snapshots
     (format t "# Snapshot update mode enabled~%"))
 
-  (let ((suite-timeout (%default-suite-timeout)))
+  (let* ((suite-timeout (%default-suite-timeout))
+         (suite-deadline (and suite-timeout
+                              (+ (get-internal-real-time)
+                                 (round (* suite-timeout
+                                           internal-time-units-per-second))))))
     (handler-case
-        (sb-ext:with-timeout suite-timeout
-          (let* ((actual-seed     (or seed (random most-positive-fixnum)))
-                 (*random-state*  (sb-ext:seed-random-state actual-seed))
-                 (tests-plists    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))
-                 (n               (length tests-plists))
-                 (test-vec        (coerce (%number-tests tests-plists) 'vector)))
-            (when random (%fisher-yates-shuffle test-vec))
-            (let* ((ordered-tests     (%order-tests-for-dependencies (coerce test-vec 'list)))
-                   (effective-workers (%effective-worker-count ordered-tests parallel workers)))
-              (%print-tap-header n repeat actual-seed effective-workers)
-              (when warm-stdlib (ignore-errors (cl-cc:warm-stdlib-cache)))
-              (when coverage (format t "# Coverage report enabled~%"))
-              (let* ((prior-timings   (%load-prior-timings))
-                     (all-run-results
-                       (loop for r from 1 to repeat
-                             do (when (> repeat 1) (format t "# Run ~A/~A~%" r repeat))
-                             collect (if (and parallel (> effective-workers 1))
-                                         (%run-tests-mixed ordered-tests effective-workers prior-timings)
-                                         (%run-tests-sequential ordered-tests)))))
-                (when (> repeat 1) (%detect-flaky (reverse all-run-results) repeat))
-                (format t "# To reproduce this run: (run-suite '~A :seed ~A)~%" suite-name actual-seed)
-                (let* ((flat-results (apply #'append (reverse all-run-results)))
-                       (any-fail     (%print-result-summary flat-results)))
-                  (when coverage (%print-coverage-report flat-results))
-                  (%emit-postrun-artifacts flat-results)
-                  (if quit-p
-                      (uiop:quit (if any-fail 1 0))
-                      any-fail))))))
+        (let ((*parallel-suite-deadline* suite-deadline))
+          (sb-ext:with-timeout suite-timeout
+            (let* ((actual-seed     (or seed (random most-positive-fixnum)))
+                   (*random-state*  (sb-ext:seed-random-state actual-seed))
+                   (tests-plists    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))
+                   (n               (length tests-plists))
+                   (test-vec        (coerce (%number-tests tests-plists) 'vector)))
+              (when random (%fisher-yates-shuffle test-vec))
+              (let* ((ordered-tests     (%order-tests-for-dependencies (coerce test-vec 'list)))
+                     (effective-workers (%effective-worker-count ordered-tests parallel workers)))
+                (%print-tap-header n repeat actual-seed effective-workers)
+                (when warm-stdlib
+                  (handler-case
+                      (sb-ext:with-timeout (if suite-timeout (min 60 suite-timeout) 60)
+                        (ignore-errors (cl-cc:warm-stdlib-cache)))
+                    (sb-ext:timeout ()
+                      (format *error-output*
+                              "# WARNING: warm-stdlib-cache timed out; continuing without warm cache~%")
+                      (finish-output *error-output*))))
+                (when coverage (format t "# Coverage report enabled~%"))
+                (let* ((prior-timings   (%load-prior-timings))
+                       (all-run-results
+                         (loop for r from 1 to repeat
+                               do (when (> repeat 1) (format t "# Run ~A/~A~%" r repeat))
+                               collect (if (and parallel (> effective-workers 1))
+                                           (%run-tests-mixed ordered-tests effective-workers prior-timings)
+                                           (%run-tests-sequential ordered-tests)))))
+                  (when (> repeat 1) (%detect-flaky (reverse all-run-results) repeat))
+                  (format t "# To reproduce this run: (run-suite '~A :seed ~A)~%" suite-name actual-seed)
+                  (let* ((flat-results (apply #'append (reverse all-run-results)))
+                         (any-fail     (%print-result-summary flat-results)))
+                    (when coverage (%print-coverage-report flat-results))
+                    (%emit-postrun-artifacts flat-results)
+                    (if quit-p
+                        (uiop:quit (if any-fail 1 0))
+                        any-fail)))))))
       (sb-ext:timeout ()
         (%suite-timeout-result suite-name suite-timeout quit-p)))))
 

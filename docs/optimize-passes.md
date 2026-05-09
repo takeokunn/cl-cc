@@ -2,7 +2,7 @@
 
 VM optimizer, loop optimization, control flow, range analysis, interprocedural optimization, higher-order function optimization, code size, CPS transformation, SSA construction, speculative JIT compilation.
 
-**実装状況**: 進行中。完了済みの項目は各FR見出しの `✅` で明示する。
+**実装状況**: 175 FR を追跡中。各FR見出しの `✅` は実装済み証跡が揃った項目、`🔶` は helper・部分統合・設計証跡までの項目を示す。`packages/optimize/src/optimizer-pipeline.lisp` の roadmap evidence registry は、この状態区分と公開API・テストアンカーの対応を検証する。
 
 ---
 
@@ -72,9 +72,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 6 — ループ高度最適化（未実装）
+### Phase 6 — ループ高度最適化（一部実装・要継続）
 
-#### FR-021: Scalar Evolution (SCEV) / 帰納変数解析 ✅
+#### FR-021: Scalar Evolution (SCEV) / 帰納変数解析 🔶
 
 - **依存**: FR-003 (LICM)
 - **対象**: `packages/optimize/src/cfg.lisp` + `packages/optimize/src/optimizer.lisp`
@@ -89,7 +89,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 出力: `opt-induction-var`（init/step/update-inst）と保守的 trip-count 推定。
   - 制限: 一般SCEV（多項式再帰、複合条件、nested loop の閉形式）は未実装。
 
-#### FR-022: Loop Unrolling ✅
+#### FR-022: Loop Unrolling 🔶
 
 - **依存**: FR-021 (SCEV でトリップカウント推定)
 - **内容**:
@@ -104,7 +104,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 変換: 小回数ループを完全展開（full unroll）。
   - 制限: 一般CFG、部分展開、プロファイル誘導 unrolling は未実装。
 
-#### FR-023: Polymorphic Inline Cache (PIC) with Megamorphic Fallback
+#### FR-023: Polymorphic Inline Cache (PIC) with Megamorphic Fallback ✅
 
 - **依存**: FR-009 (Monomorphic IC)
 - **内容**:
@@ -114,11 +114,16 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - V8・SpiderMonkeyの3段階IC階層と同等
   - 効果: 多相的呼び出し箇所でのディスパッチ高速化
 
+- **関連実装**: `packages/optimize/src/optimizer-pipeline.lisp` に `opt-ic-site` 構造体と `opt-ic-transition` 関数を実装済み。
+  - `opt-ic-site`: `:monomorphic` → `:polymorphic` → `:megamorphic` の3段階状態遷移を管理するICサイト。
+  - `opt-ic-transition`: ヒット時は既存エントリを返し、ミス時は `receiver-key → target` を線形リストへ追加。エントリ数が `max-polymorphic-entries` を超えると `:megamorphic` へ遷移し、fallback に全エントリをコピー。
+  - 検証: `packages/optimize/tests/optimizer-pipeline-tests.lisp` が状態遷移とエントリ管理を検証。
+
 ---
 
-### Phase 7 — 制御フロー最適化（一部実装: FR-036）
+### Phase 7 — 制御フロー最適化（一部実装・要継続）
 
-#### FR-032: Jump Threading ✅
+#### FR-032: Jump Threading 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp` + `packages/optimize/src/cfg.lisp`
 - **内容**:
@@ -139,7 +144,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - `(if p (if p a b) c)` の内側 `if` を簡約する
 - **難易度**: Medium
 
-#### FR-034: If-Conversion (分岐→条件移動) ✅
+#### FR-034: If-Conversion (分岐→条件移動) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **内容**:
@@ -157,7 +162,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 静的ヒューリスティック: `signal`/`error` 呼び出しを含む基本ブロックはコールド
 - **難易度**: Medium
 
-#### FR-036: Hot/Cold Code Layout (基本ブロック並べ替え) ✅
+#### FR-036: Hot/Cold Code Layout (基本ブロック並べ替え) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
 - **内容**:
@@ -166,7 +171,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - プロファイルなしでも分岐方向ヒューリスティックで効果あり
 - **難易度**: Easy
 
-#### FR-037: Call Site Splitting
+#### FR-037: Call Site Splitting 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -175,13 +180,16 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `CallSiteSplittingPass` に相当
 - **難易度**: Medium
 
-- **完了済みFR**: FR-036
+- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-pass-call-site-splitting` を追加済み。`jump -> join-label -> vm-call` の単純join形に限定し、前任ブロック内でcallee registerが既知 `vm-func-ref` / `vm-closure` / 登録済みsymbolに解決できる場合、前任側へcallを複製してfresh after-labelへジャンプさせる。default pipelineでは `:devirtualize` と `:inline` の前に `:call-site-splitting` を走らせるため、分岐アーム別の既知calleeを後続passが直接参照として扱える。`packages/optimize/tests/optimizer-inline-tests.lisp` が既知callee predecessorのcall複製とunknown callee no-opを検証する。一般CFG・複数join・`vm-apply`/tail-call・型推論に基づく高度な分岐特化は未実装。
+
+- **完了済みFR**: FR-033, FR-035
+- **部分実装FR**: FR-032, FR-034, FR-036, FR-037
 
 ---
 
-### Phase 8 — 範囲解析・チェック除去（未実装）
+### Phase 8 — 範囲解析・チェック除去（一部実装・要継続）
 
-#### FR-038: Value Range / Interval Analysis ✅
+#### FR-038: Value Range / Interval Analysis 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp` + `packages/type/src/inference.lisp`
 - **内容**:
@@ -196,7 +204,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - `packages/optimize/tests/optimizer-memory-tests.lisp` の `value-ranges-*` で挙動を検証。
   - 制限: 比較分岐由来の述語感度（path-sensitive range narrowing）や一般ループ閉形式推論は未実装。
 
-#### FR-039: Array Bounds Check Elimination (BCE) ✅
+#### FR-039: Array Bounds Check Elimination (BCE) 🔶
 
 - **依存**: FR-038 (範囲解析) or FR-021 (SCEV)
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
@@ -229,9 +237,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 10 — 手続き間最適化（未実装）
+### Phase 10 — 手続き間最適化（一部実装・要継続）
 
-#### FR-050: Interprocedural SCCP (IPSCCP)
+#### FR-050: Interprocedural SCCP (IPSCCP) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp` + コール グラフ解析
 - **内容**:
@@ -241,7 +249,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `IPSCCPPass` に相当
 - **難易度**: Hard
 
-#### FR-051: Called Value Propagation / Devirtualization
+#### FR-051: Called Value Propagation / Devirtualization 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**:
@@ -251,7 +259,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - Lispの `funcall` は全てこの最適化の対象
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-known-callee-labels` / `opt-known-callee-label` を追加済み。現状は `vm-closure` / `vm-func-ref` / `vm-const` / `vm-move` を追跡して関数 designator レジスタの既知 label を解決する helper 層のみで、実際の devirtualization rewrite は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-known-callee-labels` と `opt-pass-devirtualize` を追加済み。`vm-closure` / `vm-func-ref` / `vm-const` / `vm-move` を追跡して関数 designator レジスタの既知 label を解決し、`vm-call` / `vm-tail-call` / `vm-apply` の直前に直接 `vm-func-ref` を挿入して既存 inline pass が扱える直接参照形へ寄せる。`packages/optimize/tests/optimizer-inline-tests.lisp` が既知callee、move伝播、overwrite kill、idempotenceを検証する。call命令自体を専用の直接呼び出し命令へ置換すること、CLOS generic method dispatch の単一メソッド化、`apply` の完全な直接化は未実装。
 
 #### FR-052: Global DCE (Dead Function/Method Elimination) ✅
 
@@ -263,7 +271,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `GlobalDCEPass` に相当
 - **難易度**: Easy
 
-#### FR-053: Partial Inlining (ホットパスのみインライン)
+#### FR-053: Partial Inlining (ホットパスのみインライン) ✅
 
 - **依存**: FR-013 (型特化インライン展開)
 - **対象**: `packages/optimize/src/optimizer.lisp:729-820`
@@ -276,9 +284,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 11 — 高階関数・ストリーム最適化（未実装）
+### Phase 11 — 高階関数・ストリーム最適化（一部実装・要継続）
 
-#### FR-054: Stream Fusion / Deforestation
+#### FR-054: Stream Fusion / Deforestation ✅
 
 - **対象**: `packages/expand/src/macro.lisp` or `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -288,7 +296,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 実装: パターンマッチルールとして `*peephole-rules*` または独立パス
 - **難易度**: Hard (一般) / Medium (パターン限定)
 
-#### FR-055: Loop Idiom Recognition
+#### FR-055: Loop Idiom Recognition 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -298,7 +306,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `LoopIdiomRecognizePass` に相当
 - **難易度**: Medium
 
-#### FR-056: Worker/Wrapper Transformation (部分適用)
+- **関連実装**: `packages/vm/src/array.lisp` に `vm-fill` を追加し、`packages/optimize/src/optimizer-recognition.lisp` に `opt-pass-fill-recognition` を追加済み。現状は `array-length` に基づくゼロ開始・1増分・private label の単純な `vm-aset` full-vector fill ループだけを `vm-fill` へ置換する保守的サブセット。`packages/optimize/tests/optimizer-strength-tests.lisp` が canonical fill loop の認識と外部target付きexitのno-opを検証し、`packages/vm/tests/array-tests.lisp` が `vm-fill` 実行を検証する。`copy-seq`/memcpy相当、部分範囲fill、多次元配列、一般CFG上のloop idiom recognitionは未実装。
+
+#### FR-056: Worker/Wrapper Transformation (部分適用) ✅
 
 - **対象**: `packages/compile/src/codegen.lisp` + `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -312,7 +322,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 14 — コードサイズ・コード品質最適化（一部実装: FR-077）
 
-#### FR-074: Function Outlining
+#### FR-074: Function Outlining ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 複数関数間の繰り返し命令列を共有サブルーチンに抽出 (インライン化の逆)
@@ -325,7 +335,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: 複数基本ブロック末尾の同一命令列を単一共有ブロックに統合
 - **難易度**: Medium
 
-#### FR-076: Identical Code Folding (ICF)
+#### FR-076: Identical Code Folding (ICF) ✅
 
 - **対象**: `packages/binary/src/macho.lisp`
 - **内容**: バイト列が同一の関数を単一コピーに重複排除
@@ -343,20 +353,22 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: 単一後継ブロックを持つブロックの統合でラベルオーバーヘッド削減
 - **難易度**: Easy
 
-#### FR-079: Closure Thunk Sharing
+#### FR-079: Closure Thunk Sharing 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: コードが同一で環境のみ異なるクロージャを単一コード+環境ポインタに統合
 - **難易度**: Medium
 
-- **関連実装**: `packages/compile/src/closure.lisp` に `closure-sharing-key` / `group-shareable-closures` を追加済み。現状は entry-label と capture 集合が同一な sibling closure 候補をグループ化する分析 helper 層のみで、実際の shared thunk / shared environment codegen は未実装。
+- **関連実装**: `packages/ast/src/closure.lisp` に `closure-sharing-key` / `group-shareable-closures` を追加済み。現状は entry-label と capture 集合が同一な sibling closure 候補をグループ化する分析 helper 層のみで、実際の shared thunk / shared environment codegen は未実装。
 
-#### FR-080: Car/Cdr/Cons Inlining
+#### FR-080: Car/Cdr/Cons Inlining 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/list.lisp`
 - **内容**: `car`/`cdr`/`cons` をVM命令ディスパッチなしの直接レジスタ操作にインライン化
 - **根拠**: 現状は `define-simple-instruction` で毎回 `execute-instruction` ディスパッチが発生
 - **難易度**: Medium
+
+- **関連実装**: VM側は `packages/vm/src/list.lisp` と `packages/vm/src/vm-opcodes-defs.lisp` に `cons` / `car` / `cdr` の直接opcodeを持つ。optimizer側では `packages/optimize/src/optimizer-tables.lisp` と `packages/optimize/src/optimizer.lisp` が定数cons/nilに対する `vm-car` / `vm-cdr` foldingを扱い、`packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-cons-slot-forward` がfresh `vm-cons` 直後の `vm-car` / `vm-cdr` を元slot registerからの `vm-move` へ置換する。source overwrite、control-flow、call/unknown effect、`rplaca` などの破壊的更新は保守的にfactを破棄する。`packages/optimize/tests/optimizer-tables-tests.lisp` / `optimizer-tests.lisp` / `optimizer-memory-tests.lisp` がfolding、alias経由forwarding、source overwrite、破壊的更新、source上書きconsのno-opを検証する。
 
 #### FR-081: Macro Expansion Memoization ✅
 
@@ -365,14 +377,14 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 両ファイルに "cache" / "memoiz" が存在しない
 - **難易度**: Medium
 
-#### FR-082: Slab Allocator for Cons Cells
+#### FR-082: Slab Allocator for Cons Cells ✅
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/runtime/src/gc.lisp`
 - **内容**: 固定サイズ(3ワード)のコンスセル専用フリーリストプール
 - **根拠**: コンスはLispランタイムで最頻繁な割り当てオブジェクト
 - **難易度**: Medium
 
-#### FR-083: Inline Bump Pointer Allocation
+#### FR-083: Inline Bump Pointer Allocation ✅
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**: `rt-gc-alloc` 関数呼び出しを除去し、`young-free` の増分比較をコールサイトにインライン展開
@@ -383,9 +395,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 16 — 制御フロー・比較最適化（未実装）
+### Phase 16 — 制御フロー・比較最適化（一部実装・要継続）
 
-#### FR-092: EFLAGS Reuse After CMP (x86-64)
+#### FR-092: EFLAGS Reuse After CMP (x86-64) ✅
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **内容**: CMP命令後のEFLAGSを直接分岐に使用し、bool値のレジスタ化+タグチェックを省略
@@ -397,14 +409,14 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: 密なinteger `case`/`ecase` を `JMP [rax*8+table]` の間接ジャンプに変換
 - **難易度**: Medium
 
-#### FR-094: Wasm `br_table` for User `case`
+#### FR-094: Wasm `br_table` for User `case` 🔶
 
-- **対象**: `packages/emit/src/wasm-trampoline.lisp` (インフラ既存)
+- **対象**: `packages/codegen/src/wasm-trampoline.lisp` (インフラ既存)
 - **内容**: ユーザレベルの `case`/`etypecase` に `br_table` を適用
 - **根拠**: trampolineで既に `br_table` を使用、ユーザ向けへの拡張が自然
 - **難易度**: Low
 
-- **関連実装**: `packages/emit/src/wasm-trampoline.lisp` の PC-dispatch trampoline 自体は `br_table` を用いて全 basic block の再ディスパッチを行う。user-level `case` / `etypecase` を専用に `br_table` へ lower する変換は未実装。
+- **関連実装**: `packages/codegen/src/wasm-trampoline.lisp` の PC-dispatch trampoline 自体は `br_table` を用いて全 basic block の再ディスパッチを行う。user-level `case` / `etypecase` を専用に `br_table` へ lower する変換は未実装。
 
 #### FR-095: Binary Search for Sparse Case ✅
 
@@ -420,9 +432,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 25 — Fixnum / 整数最適化（未実装）
+### Phase 25 — Fixnum / 整数最適化（一部実装・要継続）
 
-#### FR-148: Fixnum演算整数範囲追跡 (VM全体)
+#### FR-148: Fixnum演算整数範囲追跡 (VM全体) 🔶
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `type-int` は存在するが範囲情報なし。`infer-type` が `ast-int → type-int` を返すのみで区間情報ゼロ
@@ -430,7 +442,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: `packages/type/src/inference.lisp:74-100` — 整数リテラルに区間なし。SBCL の `sb-c:interval` に相当する機能が欠如
 - **難易度**: Hard
 
-#### FR-149: Fixnum→Bignum Overflow Trap分岐
+#### FR-149: Fixnum→Bignum Overflow Trap分岐 🔶
 
 - **対象**: `packages/vm/src/primitives.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `vm-div`（`primitives.lisp:105`）はゼロ除算のみチェック。加減乗算はオーバーフロー無検出でホストCL任せ
@@ -438,7 +450,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: `packages/runtime/src/value.lisp:82-86` — fixnumは51-bit signed。演算結果が範囲外の場合の処理が未定義
 - **難易度**: Medium
 
-#### FR-150: Adaptive Optimization Thresholds
+#### FR-150: Adaptive Optimization Thresholds 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: インライン閾値=15固定（`optimizer.lisp:1018`）、最大反復=20固定（`optimizer.lisp:1015`）
@@ -450,7 +462,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 28 — CPS高度最適化（未実装）
+### Phase 28 — CPS高度最適化（一部実装・要継続）
 
 #### FR-159: Administrative Redex Elimination ✅
 
@@ -460,15 +472,15 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: MLtonはCPS変換時にadmin redexを即座に除去。cl-ccではネストしたラムダラッパーがそのまま`vm-closure`割り当てになる
 - **難易度**: Medium
 
-#### FR-160: Lambda Lifting
+#### FR-160: Lambda Lifting 🔶
 
-- **対象**: `packages/compile/src/closure.lisp`, `packages/compile/src/codegen.lisp`
+- **対象**: `packages/ast/src/closure.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `find-free-variables`（`closure.lisp:48-81`）で自由変数を解析するが、内部関数を外部に持ち上げる変換なし。すべての内部`lambda`がクロージャ割り当てを発生
 - **内容**: 自由変数が少ない（≤4）内部関数をトップレベルに持ち上げ、自由変数を追加引数として渡す。クロージャ割り当てをゼロにする
 - **根拠**: `codegen.lisp:581-582`が空キャプチャでも常に`make-vm-closure`を生成。MLton/SML#はlambda liftingで大半のクロージャを除去
 - **難易度**: Hard
 
-#### FR-161: Arity Raising / Uncurrying
+#### FR-161: Arity Raising / Uncurrying 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: CPS変換後のカリー化された関数適用がそのまま複数回の`vm-call`に展開される。連続適用をバッチ化する機構なし
@@ -476,7 +488,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: GHCのarity analysis / MLtonのuncurrying。CPS形式で特に顕著な最適化
 - **難易度**: Hard
 
-#### FR-162: Known Continuation Optimization
+#### FR-162: Known Continuation Optimization ✅
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: すべての継続を汎用的に扱う（`cps.lisp:160-167`）。継続が1回だけ呼ばれるか、常に同じ継続が渡されるかを追跡しない
@@ -486,9 +498,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 29 — 高度コードモーション（未実装）
+### Phase 29 — 高度コードモーション（一部実装・要継続）
 
-#### FR-163: Code Sinking (逆LICM) ✅
+#### FR-163: Code Sinking (逆LICM) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **現状**: `optimizer.lisp`に"sink"/"hoist"関連の処理なし（grep 0マッチ）
@@ -501,7 +513,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 動作: `vm-const` を jump 先ラベル直後へ移動（複製なし）。
   - 制限: 一般命令の sinking、複数使用値、制御依存を伴う高度な sinking は未実装。
 
-#### FR-164: Partial Dead Code Elimination (PDCE)
+#### FR-164: Partial Dead Code Elimination (PDCE) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: `opt-pass-dce`（`optimizer.lisp:494-513`）は全パスで未使用の命令のみ除去。一部パスでのみ使用される命令は残存
@@ -527,7 +539,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`ConstantHoisting`パス。LICM（FR-003）とは別に定数専用のhoistingが効率的
 - **難易度**: Easy
 
-#### FR-167: Tail Duplication ✅
+#### FR-167: Tail Duplication 🔶
 
 - **対象**: `packages/optimize/src/cfg.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: 基本ブロックの重複機構なし。CFGは構築のみで変形操作なし
@@ -540,7 +552,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 目的: 分岐オーバーヘッド削減と後続の jump/threading・merge 機会の増加。
   - 制限: 一般的な tail duplication（プロファイル誘導、複雑CFG、大ブロック複製）は未実装。
 
-#### FR-168: Branch Correlation ✅
+#### FR-168: Branch Correlation 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 同一条件が複数箇所でテストされる場合、それぞれ独立に評価。先行テスト結果の再利用なし
@@ -552,9 +564,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 30 — ループ構造最適化（未実装）
+### Phase 30 — ループ構造最適化（一部実装・要継続）
 
-#### FR-169: Loop Rotation ✅
+#### FR-169: Loop Rotation 🔶
 
 - **対象**: `packages/optimize/src/cfg.lisp`
 - **現状**: `bb-loop-depth`フィールド（`cfg.lisp:32`）は存在するが未使用。自然ループの検出・回転なし
@@ -567,7 +579,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 変換: 先頭を guard へ分離して guard+do-while 形に回転。
   - 制限: 一般CFG（複数header/ネスト/複合分岐）への拡張は未実装。
 
-#### FR-170: Loop Peeling ✅
+#### FR-170: Loop Peeling 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **現状**: ループの初回反復の分離なし。初回のみ特殊な処理が必要なケース（初期化ガード等）でも全反復が同一コード
@@ -582,7 +594,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 6 — CPS・継続特化最適化 (cl-cc固有・高効果)（未実装）
+### Phase 6 — CPS・継続特化最適化 (cl-cc固有・高効果)（一部実装・要継続）
 
 #### FR-026: Eta Reduction ✅
 
@@ -602,7 +614,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - CPS変換が生成するsingle-use継続ラッパーを大幅に削減
 - **難易度**: Medium
 
-#### FR-028: Contification ✅
+#### FR-028: Contification 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp` + `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -626,7 +638,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 現状: 各分岐が独立して継続をコピーするため命令数が膨張する
 - **難易度**: Medium
 
-#### FR-030: Known-Call Optimization (既知アリティ直接ジャンプ) ✅
+#### FR-030: Known-Call Optimization (既知アリティ直接ジャンプ) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm.lisp`
 - **内容**:
@@ -637,22 +649,22 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/compile/src/codegen.lisp` では、(1) 単純 self-tail call を `vm-jump` へ直接変換、(2) zero-capture の no-escape `flet` を `vm-closure` ではなく `vm-func-ref` で束縛、(3) tail position では `vm-tail-call` を選択、までは実装済み。一般の既知呼び出しを専用 `vm-direct-call` / アリティ検査省略パスへ落とす統一機構は未実装。
 
-#### FR-031: One-Shot Lambda / Cardinality Analysis ✅
+#### FR-031: One-Shot Lambda / Cardinality Analysis 🔶
 
-- **対象**: `packages/compile/src/closure.lisp` + `packages/compile/src/codegen.lisp`
+- **対象**: `packages/ast/src/closure.lisp` + `packages/compile/src/codegen.lisp`
 - **内容**:
   - クロージャが正確に一度しか呼ばれない場合、ヒープにクロージャオブジェクトを割り当てない
   - CPS変換後の継続ラッパーの大半は one-shot
   - スタックフレームに直接格納することでGCプレッシャー削減
 - **難易度**: Medium
 
-- **関連実装**: `packages/compile/src/closure.lisp` に `binding-direct-call-count-in-body` / `binding-one-shot-p` を追加済み。現状は局所関数束縛が「非エスケープかつ direct call 1 回だけ」かを判定する分析 helper 層のみで、実際の closure allocation 省略や stack storage への codegen 統合は未実装。
+- **関連実装**: `packages/ast/src/closure.lisp` に `binding-direct-call-count-in-body` / `binding-one-shot-p` を追加済み。現状は局所関数束縛が「非エスケープかつ direct call 1 回だけ」かを判定する分析 helper 層のみで、実際の closure allocation 省略や stack storage への codegen 統合は未実装。
 
 ---
 
 ### Phase 19 — VMディスパッチ・SSA改善（一部実装）
 
-#### FR-109: Superoperator Synthesis (超命令合成) ✅
+#### FR-109: Superoperator Synthesis (超命令合成) 🔶
 
 - **対象**: `packages/vm/src/vm-run.lisp` (`defopcode` DSL)
 - **内容**: 頻出命令ペアを単一複合命令に融合。例: `vm-const r1 42; vm-add r0 r0 r1` → `vm-add-const r0 42`
@@ -667,7 +679,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: `ADD-IMM`/`CMP-IMM-ZERO`等の即値バリアント命令を追加。ループカウンタ`(incf i)`, `(> i n)`の最頻出パターンを1ディスパッチサイクルに削減
 - **難易度**: Easy
 
-#### FR-111: Dispatch Loop Specialization ✅
+#### FR-111: Dispatch Loop Specialization 🔶
 
 - **対象**: `packages/vm/src/vm-run.lisp`
 - **内容**: 実行時間の80%を占めるホット命令5-10種を`run-vm`ループ本体にインライン展開、残りをテーブルディスパッチに
@@ -695,7 +707,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 検証: `packages/optimize/tests/ssa-tests.lisp` の `ssa-lcssa-inserts-exit-phi-for-loop-defined-value`。
   - 制限: 完全LCSSA（厳密 loop-exit/use-def 解析に基づく最小Phi）ではなく保守的補完。
 
-#### FR-114: Pruned / Semi-Pruned SSA ✅
+#### FR-114: Pruned / Semi-Pruned SSA 🔶
 
 - **対象**: `packages/optimize/src/ssa.lisp`
 - **内容**: ブロックローカル変数へのPhi挿入を省略。完全Cytronアルゴリズムの冗長Phi削減
@@ -707,7 +719,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 検証: `packages/optimize/tests/ssa-tests.lisp` の `ssa-phi-placement-prunes-never-read-reg`。
   - 制限: ブロック境界の厳密 live-in 解析（完全 pruned SSA）は未実装。
 
-#### FR-115: May-Alias / Must-Alias Oracle ✅
+#### FR-115: May-Alias / Must-Alias Oracle 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 既存のcopy-prop `reg-track` を拡張してヒープポインタのエイリアス関係を軽量追跡
@@ -723,7 +735,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: `type-meet`/`type-join`/`extract-type-guard` は存在するが条件分岐後の型環境伝播がない
 - **難易度**: Medium
 
-#### FR-117: Superoperator Frequency Synthesis (自動検出) ✅
+#### FR-117: Superoperator Frequency Synthesis (自動検出) 🔶
 
 - **対象**: `packages/vm/src/vm-run.lisp` + selfhostパイプライン
 - **内容**: `./cl-cc selfhost`実行中に命令バイグラム頻度を計測、上位20ペアを自動的にsuperoperator候補として出力
@@ -731,7 +743,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/vm/src/vm-run.lisp` に `vm2-collect-opcode-bigrams` / `vm2-top-superoperator-candidates` / `run-vm-with-opcode-bigrams` を追加済み。現状は flat VM2 bytecode の静的 bigram 集計に加えて、実行時に実際に踏まれた opcode bigram の頻度も取得できる。`selfhost` 実行への自動接続や候補からの自動 superinstruction 生成は未実装。
 
-#### FR-118: Polyvariant (k-CFA) Type Analysis
+#### FR-118: Polyvariant (k-CFA) Type Analysis ✅
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: call-site感度付き型解析。`(funcall f 1)` と `(funcall f "a")` で`f`の型を独立して追跡
@@ -740,9 +752,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 60 — SSA高度化・言語機能（未実装）
+### Phase 60 — SSA高度化・言語機能（一部実装・要継続）
 
-#### FR-271: Trivial Phi Elimination (自明Phi除去) ✅
+#### FR-271: Trivial Phi Elimination (自明Phi除去) 🔶
 
 - **対象**: `packages/optimize/src/ssa.lisp`
 - **現状**: `ssa.lisp:68-98` — `ssa-place-phis`が活性チェックなしで全支配フロンティアにPhiを挿入。冗長なPhi（全引数が同一値のPhi）の除去パスなし
@@ -750,7 +762,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Cytron et al. (1991) Section 5。SSA構築直後の標準クリーンアップ。GVN/SCCPの精度向上に寄与
 - **難易度**: Easy
 
-#### FR-272: Read Barrier Optimization (読み取りバリア最適化)
+#### FR-272: Read Barrier Optimization (読み取りバリア最適化) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `gc.lisp:269-295` — SATB書き込みバリア実装済み。読み取りバリアなし。FR-190（並行GC）はマーキングの並行化だが、読み取りバリアの戦略未定
@@ -758,7 +770,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Shenandoah LRB / ZGC colored pointers / Azul C4。低レイテンシGCに必須
 - **難易度**: Very Hard
 
-#### FR-273: Rational Arithmetic Specialization (有理数演算特殊化)
+#### FR-273: Rational Arithmetic Specialization (有理数演算特殊化) 🔶
 
 - **対象**: `packages/vm/src/vm-numeric.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `vm-numeric.lisp:566-621` — 有理数演算（rational, numerator, denominator, gcd, lcm）は全てホストCLにデリゲート。型特殊化なし
@@ -766,9 +778,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SBCL rational arithmetic / GMP mpq。数値計算の精度保証パス
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-tables.lisp` の fold table に `vm-rational` / `vm-rationalize` / `vm-numerator` / `vm-denominator` / `vm-gcd` / `vm-lcm` を追加済み。現状は定数入力に対する compile-time folding までをカバーし、runtime fast path や mixed fixnum/rational specialization は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-tables.lisp` の fold table に `vm-rational` / `vm-rationalize` / `vm-numerator` / `vm-denominator` / `vm-gcd` / `vm-lcm` / `vm-div` / `vm-cl-div` を追加済み。`packages/optimize/tests/optimizer-tests.lisp` は `vm-cl-div` が `3/4` へ、`vm-div` がfloor商へ畳み込まれることを検証する。runtime 側は `packages/vm/src/primitives.lisp` の `vm-cl-div` に fixnum/fixnum、fixnum-rational、mixed fixnum/rational の fast path を追加し、`packages/vm/tests/primitives-tests.lisp` が path 選択と結果を検証する。現状は除算系の compile-time folding と `vm-cl-div` runtime specialization までをカバーし、加減乗算を含む汎用 p/q ⊕ p'/q' 特殊化は未実装。
 
-#### FR-274: Extensible Sequences Protocol (拡張可能シーケンスプロトコル)
+#### FR-274: Extensible Sequences Protocol (拡張可能シーケンスプロトコル) 🔶
 
 - **対象**: `packages/vm/src/list.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: シーケンス操作（map, reduce, find等）はlist/vectorのみ対応。ユーザー定義シーケンス型へのディスパッチ不可
@@ -778,7 +790,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/vm/src/list.lisp` に `vm-sequence-elt` / `vm-sequence-length` / `vm-make-sequence-like` / `vm-adjust-sequence` の generic entry points を追加済み。現状は list/vector の built-in methods と user-defined type が method 追加できる最小 protocol slice を提供し、`vm-length` / `vm-nth` はこの protocol を経由して dispatch する。標準シーケンス関数全体のこの protocol への接続は未実装。
 
-#### FR-275: Package-Local Nicknames (パッケージローカルニックネーム) ✅
+#### FR-275: Package-Local Nicknames (パッケージローカルニックネーム) 🔶
 
 - **対象**: `packages/vm/src/packages.lisp`, `packages/parse/src/cl/parser.lisp`
 - **現状**: パッケージシステムはグローバルニックネームのみ。パッケージ毎のローカルエイリアスなし
@@ -786,13 +798,13 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SBCL / ECL / CCL / ABCL 全実装済み。de facto標準のCL拡張。CDR-10
 - **難易度**: Medium
 
-- **関連実装**: `packages/expand/src/macros-compat.lisp` の `defpackage` 展開は `:local-nicknames` オプションを解釈し、host CL の `add-package-local-nickname` / `remove-package-local-nickname` を呼び出すようになった。現状は package object への登録までで、reader/loader 全経路での互換性検証や parser 側専用解決は未確認。
+- **関連実装/検証**: 現時点で package-local nickname registry / resolver 統合は未実装。`packages/expand/tests/macros-runtime-support-tests.lisp` は `defpackage` 展開が未対応の host `add-package-local-nickname` / `remove-package-local-nickname` API に依存しないことを検証しており、このFRは `:local-nicknames` の構文・reader/loader・resolver接続を含めて継続実装対象。
 
 ---
 
 ### Phase 69 — 呼び出し規約・VM高速化（一部実装: callee-saved trim）
 
-#### FR-326: Register Snapshot Elimination for Known Calls (既知呼び出しのレジスタスナップショット省略)
+#### FR-326: Register Snapshot Elimination for Known Calls (既知呼び出しのレジスタスナップショット省略) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`
 - **現状**: `vm-save-registers`（`vm.lisp:777-794`）が全関数呼び出しでレジスタハッシュテーブル全体をコピー。`vm-restore-registers`は`clrhash`+全`maphash`コピーバック。呼び出しごとにO(n)
@@ -802,7 +814,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/vm/src/vm-dispatch.lisp` に `vm-save-registers-subset` / `vm-restore-registers-subset` を追加済み。現状は selective snapshot の helper 層のみで、known-call path へ live-reg ベースで自動適用する統合は未実装。
 
-#### FR-327: VM Argument Dedicated Slots (VM引数専用スロット)
+#### FR-327: VM Argument Dedicated Slots (VM引数専用スロット) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `vm-bind-closure-args`（`vm.lisp:796-835`）で引数をレジスタ名リストから`mapcar`でリスト収集（`vm.lisp:625`、毎回フレッシュリスト割り当て）、パラメータへの個別`vm-reg-set`
@@ -812,7 +824,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/vm/src/vm.lisp` に `+vm-arg-slot-count+` / `vm-arg-slot-name` / `vm-bind-arg-slots` を追加済み。`packages/vm/src/vm-dispatch.lisp` の `vm-bind-closure-args` は現在、既存の通常パラメータ束縛に加えて `:ARG0..:ARG7` へも先頭引数をミラーする。専用スロットだけで一般レジスタファイルを完全にバイパスする call fast path への全面移行は未実装。
 
-#### FR-328: Native CALL/RET Instruction Emission (ネイティブCALL/RET命令エミッション)
+#### FR-328: Native CALL/RET Instruction Emission (ネイティブCALL/RET命令エミッション) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: `*x86-64-instruction-sizes*`で`vm-closure`=0、`vm-call`=0（`x86-64-codegen.lisp:909-911`）。ネイティブバックエンドに関数呼び出しエミッションが完全欠落。`calling-convention.lisp:8-24`の呼び出し規約インフラはレジスタ割り当てのみで使用
@@ -822,29 +834,29 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-329: Callee-Saved Register Usage Analysis (使用済みCallee-Savedレジスタ解析) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/regalloc.lisp`
-- **現状**: `x86-64-codegen.lisp:1105-1111` — プロローグが常にRBX/RBP/R12/R13/R14/R15の6レジスタをPUSH。使用有無に関係なく全保存。`regalloc.lisp:295-298`の割り当て結果はプロローグ生成に参照されない
-- **内容**: レジスタ割り当て後に使用済みcallee-savedレジスタを走査。使用されたもののみPUSH/POP。リーフ関数やレジスタ使用の少ない関数で2-10バイト+スタック圧力削減
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/x86-64-codegen-dispatch.lisp`, `packages/regalloc/src/regalloc.lisp`
+- **現状**: `compile-to-x86-64-stream` が `*current-regalloc*` から `x86-64-used-callee-saved-regs` を呼び、ABI 順に「実際に割り当てで使われた callee-saved」だけを `PUSH` / `POP` する。`compute-live-intervals` は call-site を跨ぐ live interval を記録し、レジスタ割り当て結果が codegen に引き渡される
+- **内容**: 実装済み。割り当て済み物理レジスタ集合から used callee-saved subset を抽出し、leaf / red-zone 判定と併用して不要な保存・復元を省略する
 - **根拠**: GCC/LLVM/SBCL全実装。FR-072（Shrink-Wrapping）・FR-177（Callee-Save Elimination）の前提となる基本分析
 - **難易度**: Easy
 
-#### FR-330: Closure Capture Deduplication (クロージャキャプチャ重複排除)
+#### FR-330: Closure Capture Deduplication (クロージャキャプチャ重複排除) 🔶
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/compile/src/closure.lisp`
+- **対象**: `packages/compile/src/codegen.lisp`, `packages/ast/src/closure.lisp`
 - **現状**: `codegen.lisp:333-335`（flet）・`codegen.lisp:405-408`（labels）で各クロージャが独立に捕捉変数リストを持つ。同スコープの兄弟クロージャ間でのキャプチャスロット共有なし
 - **内容**: 同スコープの複数クロージャが同じ変数を捕捉する場合、共有環境レコードを割り当て各クロージャからそれを参照。割り当て削減とキャッシュ局所性向上。FR-043（環境フラット化）・FR-132（キャプチャトリミング）と相補的
 - **根拠**: V8 shared function info / Chez Scheme shared environments。兄弟クロージャの環境共有
 - **難易度**: Medium
 
-- **関連実装**: `packages/compile/src/closure.lisp` に `closure-capture-key` / `group-shared-sibling-captures` を追加済み。現状は sibling closure 群の capture 集合を canonical key でグループ化する分析 helper 層のみで、実際の共有環境レコード割り当てや codegen 統合は未実装。
+- **関連実装**: `packages/ast/src/closure.lisp` に `closure-capture-key` / `group-shared-sibling-captures` を追加済み。現状は sibling closure 群の capture 集合を canonical key でグループ化する分析 helper 層のみで、実際の共有環境レコード割り当てや codegen 統合は未実装。
 
 - **完了済みFR**: FR-329
 
 ---
 
-### Phase 74 — CPS/IR高度化（未実装）
+### Phase 74 — CPS/IR高度化（一部実装・要継続）
 
-#### FR-366: Selective CPS Transformation (選択的CPS変換)
+#### FR-366: Selective CPS Transformation (選択的CPS変換) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: `cps.lisp:400-406` — `cps-transform*`が全式に一律CPS適用。直線コード（算術・データフロー）にも不要な継続ラムダを生成。`cps.lisp:106-107`で`ast-int`/`ast-var`も`(funcall ,k ...)`でラップ
@@ -852,7 +864,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Kennedy (2007) "Compiling with Continuations, Continued" — selective CPS
 - **難易度**: Medium
 
-#### FR-367: ANF代替IR (A正規形によるCPS代替)
+#### FR-367: ANF代替IR (A正規形によるCPS代替) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen-core.lisp`
 - **現状**: CPS変換が過剰なadmin lambda生成（`cps.lisp:145-156`）。`codegen-core.lisp:126-165`の`compile-ast` for `ast-let`は既にlet列を効率処理可能
@@ -860,7 +872,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Flanagan et al. (1993) "The Essence of Compiling with Continuations"
 - **難易度**: Medium
 
-#### FR-368: CPS Shrinking Reductions (CPS縮約最適化)
+#### FR-368: CPS Shrinking Reductions (CPS縮約最適化) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **現状**: FR-026(η縮約)/FR-027(β縮約)は個別記載だが、Appel/Jim統合ワークリストアルゴリズム未記載。`cps.lisp:92-102`の`cps-transform-sequence`が多数の単一使用継続束縛を生成
@@ -868,7 +880,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Appel & Jim (1997) "Shrinking Lambda Expressions in Linear Time"
 - **難易度**: Medium
 
-#### FR-369: SSA-CPS等価性ブリッジ (SSA-CPS Equivalence Bridge)
+#### FR-369: SSA-CPS等価性ブリッジ (SSA-CPS Equivalence Bridge) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/compile/src/cps.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: MIR層（`mir.lisp`）はBraunアルゴリズムでSSA構築。CPS（`cps.lisp`）は独立IR。数学的等価（Kelsey 1995）だが相互変換・解析共有なし
@@ -876,7 +888,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Kelsey (1995) "A Correspondence between CPS and SSA"
 - **難易度**: Hard
 
-#### FR-370: CPS AST Node Coverage (CPS ASTノード網羅)
+#### FR-370: CPS AST Node Coverage (CPS ASTノード網羅) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **現状**: `ast-defun`, `ast-defvar`, `ast-defmacro`, `ast-values`, `ast-multiple-value-bind`, `ast-apply`, `ast-handler-case`, `ast-defclass`, `ast-defgeneric`, `ast-defmethod`, `ast-make-instance`, `ast-slot-value`, `ast-set-slot-value`, `ast-set-gethash`の13ノードに`cps-transform-ast`メソッドなし — 呼び出し時にno applicable methodエラー
@@ -884,9 +896,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: CPS変換の完全性要件
 - **難易度**: Medium
 
-- **関連実装**: `packages/compile/src/cps-ast.lisp` に `ast-values` / `ast-multiple-value-bind` / `ast-apply` / `ast-defvar` / `ast-handler-case` / `ast-make-instance` / `ast-slot-value` / `ast-set-slot-value` / `ast-defclass` / `ast-defgeneric` / `ast-defmethod` / `ast-set-gethash` の保守的 CPS メソッドを追加済み。現状は host `multiple-value-call` / `multiple-value-bind` / `apply` / `defparameter` / `handler-case` / `make-instance` / `slot-value` / `setf` / `defclass` / `defgeneric` / `defmethod` / `gethash` を用いて対応 AST 範囲を広げている。全 13 ノード網羅や高精度な多値意味保存の完成版は未実装。
+- **関連実装**: `packages/cps/src/cps-ast.lisp` に `ast-values` / `ast-multiple-value-bind` / `ast-apply` / `ast-defvar` / `ast-handler-case` / `ast-make-instance` / `ast-slot-value` / `ast-set-slot-value` / `ast-defclass` / `ast-defgeneric` / `ast-defmethod` / `ast-set-gethash` の保守的 CPS メソッドを追加済み。現状は host `multiple-value-call` / `multiple-value-bind` / `apply` / `defparameter` / `handler-case` / `make-instance` / `slot-value` / `setf` / `defclass` / `defgeneric` / `defmethod` / `gethash` を用いて対応 AST 範囲を広げている。全 13 ノード網羅や高精度な多値意味保存の完成版は未実装。
 
-#### FR-371: CPS Host Control Flow Elimination (CPSホスト制御フロー除去)
+#### FR-371: CPS Host Control Flow Elimination (CPSホスト制御フロー除去) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **現状**: `ast-block`/`ast-return-from`(`cps.lisp:182-197`)がホスト`block`/`return-from`を出力。`ast-tagbody`/`ast-go`(`cps.lisp:216-229`)がホスト`tagbody`/`go`を出力。`ast-catch`/`ast-throw`/`ast-unwind-protect`(`cps.lisp:233-279`)もホスト特殊形式を出力。ホスト以外のターゲットでCPS無効
@@ -914,7 +926,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 82 — VMアーキテクチャ効率化（一部実装: vm-select load-order fix）
 
-#### FR-454: VM Dispatch Optimization (VMディスパッチ最適化)
+#### FR-454: VM Dispatch Optimization (VMディスパッチ最適化) ✅
 
 - **対象**: `packages/vm/src/vm-run.lisp`
 - **現状**: `run-compiled`(`vm-run.lisp:131-138`)が毎命令`execute-instruction` CLOSジェネリック関数ディスパッチ。GFメソッドルックアップのオーバーヘッド
@@ -930,7 +942,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 基本的なインタプリタ性能要件
 - **難易度**: Easy
 
-#### FR-456: Bytecode ISA v2 Completion (バイトコードISA v2完成)
+#### FR-456: Bytecode ISA v2 Completion (バイトコードISA v2完成) 🔶
 
 - **対象**: `packages/bytecode/src/encode.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: `encode.lisp:26-108`に50オペコードISA定義・エンコーダ・デコーダ・逆アセンブラ。`run-vm`(`vm-run.lisp:214-261`)が6オペコードのみ実装（const, move, add2, sub2, mul2, halt2）。コンパイラからバイトコードへの出力パスなし
@@ -956,7 +968,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: handler-case性能問題 — ホットパスでの不要コピー
 - **難易度**: Medium
 
-#### FR-459: Superinstruction / Opcode Fusion (スーパー命令/オペコード融合)
+#### FR-459: Superinstruction / Opcode Fusion (スーパー命令/オペコード融合) 🔶
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: CLOSインタプリタもdefopcodeエンジンも命令融合なし。頻出シーケンス（const+jump-zero, move+ret, const+add等）を個別ディスパッチ
@@ -1000,9 +1012,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 90 — Sea of Nodes IR & スケジュール自由IR（未実装）
+### Phase 90 — Sea of Nodes IR & スケジュール自由IR（一部実装・要継続）
 
-#### FR-530: Sea of Nodes IR (スケジュール自由IR)
+#### FR-530: Sea of Nodes IR (スケジュール自由IR) ✅
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: MIR層はCFGベースのSSA（Braunアルゴリズムでφ挿入）。制御フローとデータフローが分離されていない従来型表現
@@ -1010,7 +1022,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 TurboFan / GraalVM Graal compiler。HotSpot C2 も同系統。スケジュール独立性により GVN 精度が大幅向上
 - **難易度**: Very Hard
 
-#### FR-531: Schedule-Early / Schedule-Late (命令スケジューリング戦略)
+#### FR-531: Schedule-Early / Schedule-Late (命令スケジューリング戦略) ✅
 
 - **対象**: `packages/mir/src/mir.lisp`
 - **現状**: MIRに固定の命令順序
@@ -1020,9 +1032,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 91 — SSA形式変換・破壊（未実装）
+### Phase 91 — SSA形式変換・破壊（一部実装・要継続）
 
-#### FR-532: Out-of-SSA / Phi Node Coalescing (SSA破壊・Phi合体)
+#### FR-532: Out-of-SSA / Phi Node Coalescing (SSA破壊・Phi合体) 🔶
 
 - **対象**: `packages/optimize/src/ssa.lisp`, `packages/emit/src/regalloc.lisp`
 - **現状**: SSA構築（`ssa.lisp`）は完備。SSA破壊（Phi→コピー命令への変換）なし。レジスタ割り当て（`regalloc.lisp`）との接続なし
@@ -1030,7 +1042,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SSAベース RA の標準最終ステップ。cl-cc では SSA→RA の橋渡しが欠如
 - **難易度**: Hard
 
-#### FR-533: Parallel Copy Sequentialization (並行コピー逐次化)
+#### FR-533: Parallel Copy Sequentialization (並行コピー逐次化) 🔶
 
 - **対象**: `packages/emit/src/regalloc.lisp`
 - **現状**: SSA破壊後の並行コピー（`{r1←r2, r2←r1}` のような循環依存）を正しく逐次化する機構なし
@@ -1038,7 +1050,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Boissinot et al. (2009) / GCC out-of-SSA。正当性に関わる基礎コンポーネント
 - **難易度**: Medium
 
-#### FR-534: Interprocedural SSA / Function Summaries (手続き間SSA・関数サマリー)
+#### FR-534: Interprocedural SSA / Function Summaries (手続き間SSA・関数サマリー) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: SSAは関数内のみ。関数境界を越えたSSA値の追跡なし
@@ -1046,7 +1058,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM GlobalsModRef / Inliner function attrs。手続き間最適化の標準インフラ
 - **難易度**: Hard
 
-#### FR-535: Gated SSA / E-SSA (述語付きSSA)
+#### FR-535: Gated SSA / E-SSA (述語付きSSA) 🔶
 
 - **対象**: `packages/optimize/src/ssa.lisp`, `packages/type/src/inference.lisp`
 - **現状**: SSAの Phi ノードに値条件の述語情報なし。分岐条件と Phi の関係が失われる
@@ -1056,9 +1068,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 92 — 代数的エフェクト・限定継続（未実装）
+### Phase 92 — 代数的エフェクト・限定継続（一部実装・要継続）
 
-#### FR-536: Algebraic Effects / Effect Handlers (代数的エフェクト)
+#### FR-536: Algebraic Effects / Effect Handlers (代数的エフェクト) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/vm/src/vm.lisp`, `packages/expand/src/macros-stdlib.lisp`
 - **現状**: CL `handler-case`/`restart-case` は `vm-conditions.lisp` で実装。代数的エフェクト（再開可能なエラー処理より一般的な機構）なし
@@ -1066,7 +1078,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: OCaml 5 multicore effects / Koka / Eff。2024-2026年のモダン言語ランタイムの主要機能。CPS自体がエフェクトエンコーディングと等価なため CPS 層との統合が自然
 - **難易度**: Very Hard
 
-#### FR-537: Delimited Continuations (限定継続 — shift/reset)
+#### FR-537: Delimited Continuations (限定継続 — shift/reset) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: `block`/`return-from` による非限定脱出のみ。`call/cc` なし
@@ -1074,7 +1086,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Racket `call-with-continuation-prompt` / Guile delimited continuations / R6RS `(rnrs control)`。Common Lispの `call/cc` 代替として機能
 - **難易度**: Very Hard
 
-#### FR-538: Continuation Marks (継続マーク — SRFI-157)
+#### FR-538: Continuation Marks (継続マーク — SRFI-157) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: コールスタックにユーザ定義メタデータを付与する機構なし
@@ -1084,9 +1096,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 93 — VMアーキテクチャ高度化（未実装）
+### Phase 93 — VMアーキテクチャ高度化（一部実装・要継続）
 
-#### FR-539: On-Stack Replacement (OSR — スタック上での差し替え)
+#### FR-539: On-Stack Replacement (OSR — スタック上での差し替え) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: 関数の再コンパイルは次の呼び出しから有効。実行中の関数を最適化版に切り替える OSR なし
@@ -1094,7 +1106,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: HotSpot C1/C2 OSR / V8 OSR。長時間実行ループの最適化に必須。FR-244（Trace JIT）と相補的
 - **難易度**: Very Hard
 
-#### FR-540: Direct Threaded / Computed-Goto Dispatch (直接スレッドディスパッチ)
+#### FR-540: Direct Threaded / Computed-Goto Dispatch (直接スレッドディスパッチ) ✅
 
 - **対象**: `packages/vm/src/vm-run.lisp`
 - **現状**: `run-compiled` が `execute-instruction` CLOS メソッドディスパッチ（FR-454で改善予定）。`run-vm` が defopcode ベースの `case` ディスパッチ
@@ -1102,7 +1114,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: CPython 3.11 specializing adaptive interpreter。switch ディスパッチ比 20-30% 高速化。FR-111（Dispatch Loop Specialization）の実装基盤
 - **難易度**: Hard
 
-#### FR-541: Precise Deoptimization Frame Reconstruction (精密デオプト・フレーム復元)
+#### FR-541: Precise Deoptimization Frame Reconstruction (精密デオプト・フレーム復元) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: ガード失敗時（FR-232 Uncommon Trap）の正確な VM 状態復元機構なし
@@ -1110,7 +1122,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: HotSpot deopt / V8 deopt / GraalVM deopt。投機的最適化の安全ネット。FR-231（Stack Map）の上位機能
 - **難易度**: Very Hard
 
-#### FR-542: Coroutine / Fiber VM Support (コルーチン/ファイバーVMサポート)
+#### FR-542: Coroutine / Fiber VM Support (コルーチン/ファイバーVMサポート) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: VM は単一実行スレッド。コルーチン・非同期I/O・generator のプリミティブなし
@@ -1118,7 +1130,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Python generators / Lua coroutines / Go goroutines / OCaml 5 Domain+Effect。非同期I/O とストリーム処理の基盤
 - **難易度**: Hard
 
-#### FR-543: Polymorphic Inline Cache Patching (PICパッチング — 自己書き換えIC)
+#### FR-543: Polymorphic Inline Cache Patching (PICパッチング — 自己書き換えIC) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-clos.lisp`
 - **現状**: IC（FR-009 Monomorphic）はハッシュテーブルベース。コンパイル済みコードの命令列を書き換える self-modifying 型 IC なし
@@ -1130,7 +1142,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 94 — CPS変換・継続表現高度化（一部実装: CPS基盤）
 
-#### FR-544: CPS to Direct Style Transformation (CPS→直接スタイル逆変換)
+#### FR-544: CPS to Direct Style Transformation (CPS→直接スタイル逆変換) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **現状**: CPS変換は一方向のみ。CPS形式で最適化後に Direct Style に戻す変換なし
@@ -1138,7 +1150,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: MLton / Chez Scheme。CPS変換→最適化→直接スタイル変換のパイプラインで最終コードの継続ラムダを除去
 - **難易度**: Hard
 
-#### FR-545: Trampoline-Based TCO (トランポリンTCO)
+#### FR-545: Trampoline-Based TCO (トランポリンTCO) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: 末尾呼び出し最適化は `vm-tail-call` 命令（`codegen-functions.lisp`）で対応。しかし CPS 変換後の継続ラムダが末尾位置にある場合のトランポリン変換なし
@@ -1146,7 +1158,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Clojure `recur` / Python trampoline pattern。CPS末尾呼び出しの完全なスタック使用量制御
 - **難易度**: Medium
 
-#### FR-546: Chicken-Style Stack Copying Continuations (スタックコピー継続)
+#### FR-546: Chicken-Style Stack Copying Continuations (スタックコピー継続) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: 継続はCPS変換でクロージャとしてヒープ割り当て。スタック全体のコピーによる第一級継続未実装
@@ -1156,9 +1168,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 95 — 型付きIR・エフェクトシステム（未実装）
+### Phase 95 — 型付きIR・エフェクトシステム（一部実装・要継続）
 
-#### FR-547: Effect System in IR (IRエフェクトシステム)
+#### FR-547: Effect System in IR (IRエフェクトシステム) 🔶
 
 - **対象**: `packages/optimize/src/effects.lisp`, `packages/mir/src/mir.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `effects.lisp` に命令別副作用分類（`inst-effects`）が存在。しかし MIR/CPS IR ノードへのエフェクト注釈なし
@@ -1166,7 +1178,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: エフェクト情報で最適化の保守性を排除。現行 `opt-inst-pure-p` が未完全な純粋性チェックをしているが、エフェクトシステムで完全化
 - **難易度**: Hard
 
-#### FR-548: Typed SSA / Bidirectional Type Checking in IR (型付きSSA・双方向型検査)
+#### FR-548: Typed SSA / Bidirectional Type Checking in IR (型付きSSA・双方向型検査) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/type/src/checker.lisp`
 - **現状**: MIR 命令に型注釈なし。型チェック（`checker.lisp`）は AST レベルで実行され IR に伝播しない
@@ -1174,7 +1186,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM typed IR / Typed Assembly Language (TAL)。型情報を IR に保持することで型ベース最適化の精度向上
 - **難易度**: Hard
 
-#### FR-549: Multi-Level IR / Progressive Lowering (マルチレベルIR・段階的降下)
+#### FR-549: Multi-Level IR / Progressive Lowering (マルチレベルIR・段階的降下) ✅
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/mir/src/mir.lisp`
 - **現状**: コンパイルパイプラインは `parse → expand → CPS → codegen → VM命令 → [MIR] → native` の不連続なステージ。各ステージ間の変換が大きすぎてデバッグが困難
@@ -1184,9 +1196,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 96 — 高度VM・JIT最適化（未実装）
+### Phase 96 — 高度VM・JIT最適化（一部実装・要継続）
 
-#### FR-550: Object Shape / Hidden Class Tracking (オブジェクトシェイプ追跡)
+#### FR-550: Object Shape / Hidden Class Tracking (オブジェクトシェイプ追跡) 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: CLOS インスタンスはスロット名→値のハッシュテーブル（`vm-clos.lisp`）。シェイプ（スロット順序）固定の最適化なし
@@ -1194,7 +1206,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 hidden classes / SpiderMonkey shape tree / LuaJIT table shapes。動的言語 VM 最適化の核心
 - **難易度**: Hard
 
-#### FR-551: Tiered VM Interpreter (段階的VMインタプリタ)
+#### FR-551: Tiered VM Interpreter (段階的VMインタプリタ) 🔶
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: 単一の VM インタプリタ（CLOS ベース `run-compiled` または defopcode `run-vm`）。バイトコード V2（FR-456）も独立実装。段階的コンパイルなし
@@ -1202,7 +1214,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 tiered compilation / HotSpot tiered compilation。起動時間とピーク性能の両立
 - **難易度**: Very Hard
 
-#### FR-552: Speculative Monomorphization (投機的モノモーフィゼーション)
+#### FR-552: Speculative Monomorphization (投機的モノモーフィゼーション) ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: ジェネリック関数は常に多態ディスパッチ（`vm-generic-call`）。型フィードバック情報があっても特化コードを生成しない
@@ -1210,7 +1222,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: GraalVM SpeculativeMonomorphization / V8 Maglev モノモーフィック IC 最適化。CLOS パフォーマンスの主要ボトルネック解消
 - **難易度**: Hard
 
-#### FR-553: Bytecode AOT Serialization (バイトコードAOTシリアライズ)
+#### FR-553: Bytecode AOT Serialization (バイトコードAOTシリアライズ) 🔶
 
 - **対象**: `packages/bytecode/src/encode.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: `encode.lisp`（50オペコード ISA 定義・エンコーダ・デコーダ）が実装済みだが、コンパイル済みバイトコードの永続化なし。毎起動時に全ソースを再コンパイル
@@ -1220,9 +1232,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 97 — SSA高度化・末尾最適化補完（未実装）
+### Phase 97 — SSA高度化・末尾最適化補完（一部実装・要継続）
 
-#### FR-554: Tail Modulo Cons (TMC — 末尾Cons変換)
+#### FR-554: Tail Modulo Cons (TMC — 末尾Cons変換) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: TCO（`vm-tail-call`）は末尾位置の関数呼び出しのみ対象。`(cons x (f rest))` のような「末尾Consセル構築」はスタックを消費し続ける
@@ -1230,7 +1242,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: OCaml 4.14 `[@tail_mod_cons]` annotation / GHC `-O2` の `build/foldr` fusion。Lisp のリスト処理関数群を完全末尾再帰化する唯一の手段
 - **難易度**: Hard
 
-#### FR-555: Demand-Driven SSA Construction (需要駆動SSA構築)
+#### FR-555: Demand-Driven SSA Construction (需要駆動SSA構築) ✅
 
 - **対象**: `packages/compile/src/ssa.lisp`
 - **現状**: SSA構築は `ssa-insert-phi-nodes` でCFG全体にφ関数を挿入（Cytron et al. 全量挿入法）。利用されないφ関数も生成される
@@ -1238,7 +1250,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM `mem2reg` の需要駆動アルゴリズム / GCC の LazySSA。小関数多数の Common Lisp スタイルに特に有効
 - **難易度**: Medium
 
-#### FR-556: Incremental SSA Maintenance (増分SSA更新)
+#### FR-556: Incremental SSA Maintenance (増分SSA更新) ✅
 
 - **対象**: `packages/compile/src/ssa.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: 最適化パス（インライン展開、定数畳み込み等）がIRを変更するたびに `ssa-transform` を再実行して完全再構築。変更点が局所的でも全関数を再処理
@@ -1250,47 +1262,47 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 18 — LTO・PGO・コンパイラ速度（未実装）
+### Phase 18 — LTO・PGO・コンパイラ速度（一部実装・要継続）
 
-#### FR-102: LTO Whole-Program Call Graph
+#### FR-102: LTO Whole-Program Call Graph ✅
 
 - **対象**: コンパイルパイプライン全体
 - **内容**: リンク時の全プログラム呼び出しグラフ構築による手続き間解析
 - **難易度**: Hard
 
-#### FR-103: Cross-Module Constant Folding
+#### FR-103: Cross-Module Constant Folding ✅
 
 - **対象**: コンパイルパイプライン
 - **内容**: `defconstant`/`defvar` のリテラル初期値をモジュール境界を越えて伝播
 - **難易度**: Medium
 
-#### FR-104: PGO Edge Profiling Instrumentation
+#### FR-104: PGO Edge Profiling Instrumentation ✅
 
 - **対象**: `packages/optimize/src/cfg.lisp` + バックエンド
 - **内容**: CFGエッジにカウンタを挿入して実行頻度プロファイルを収集
 - **難易度**: Medium
 
-#### FR-105: Profile-Guided Inlining Thresholds
+#### FR-105: Profile-Guided Inlining Thresholds ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp:729-820`
 - **内容**: プロファイルデータに基づいてcall-site毎にインライン化コスト閾値を調整
 - **依存**: FR-104
 - **難易度**: Low (FR-104完了後)
 
-#### FR-106: Parallel File Compilation
+#### FR-106: Parallel File Compilation ✅
 
 - **対象**: `packages/cli/src/main.lisp`
 - **内容**: 依存関係のないソースファイルを並列コンパイル (`./cl-cc selfhost` 84ファイルの高速化)
 - **難易度**: Medium
 
-#### FR-107: Incremental Recompilation with Dependency Graph
+#### FR-107: Incremental Recompilation with Dependency Graph ✅
 
 - **対象**: コンパイルパイプライン
 - **内容**: ソースハッシュ/タイムスタンプによる変更ファイルのみ再コンパイル
 - **根拠**: 現状は毎回全84ファイルを再コンパイル
 - **難易度**: Medium
 
-#### FR-108: Work-List Driven Optimizer Pass Scheduling
+#### FR-108: Work-List Driven Optimizer Pass Scheduling ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 前パスで変更された命令のみを次パスで処理するwork-list方式
@@ -1299,9 +1311,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 46 — IC状態機械・型フィードバック高度化（未実装）
+### Phase 46 — IC状態機械・型フィードバック高度化（一部実装・要継続）
 
-#### FR-223: IC State Machine (Mono→Poly→Mega遷移)
+#### FR-223: IC State Machine (Mono→Poly→Mega遷移) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-clos.lisp`
 - **現状**: FR-009でMonomorphic IC、FR-023でPolymorphic IC + Megamorphic fallbackを定義しているが、状態遷移ロジック（mono→poly→mega）の明示的な状態機械定義なし
@@ -1309,7 +1321,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 IC state machine / HotSpot C1→C2 deoptimization。FR-009/FR-023の実装品質を制御する中核機構
 - **難易度**: Hard
 
-#### FR-224: VM Sampling Profiler (VMサンプリングプロファイラ)
+#### FR-224: VM Sampling Profiler (VMサンプリングプロファイラ) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `defopcode`実行時の統計収集なし。ホットスポット検出にはホストCLのprofilerを使用するしかない
@@ -1317,7 +1329,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 --prof / perf / async-profiler。自前VMの性能分析基盤としてPGO（FR-104/FR-105）の前提条件
 - **難易度**: Medium
 
-#### FR-225: Allocation Elimination via Escape Analysis (エスケープ解析による割り当て完全除去)
+#### FR-225: Allocation Elimination via Escape Analysis (エスケープ解析による割り当て完全除去) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: FR-007でエスケープ解析、FR-018でスタック割り当て、FR-020でallocation sinkingを定義。しかし「割り当て自体の完全除去」（スカラー置換による）は明示的に定義されていない
@@ -1327,9 +1339,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 48 — 投機的最適化基盤（未実装）
+### Phase 48 — 投機的最適化基盤（一部実装・要継続）
 
-#### FR-231: Stack Map Construction (スタックマップ構築)
+#### FR-231: Stack Map Construction (スタックマップ構築) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/emit/src/regalloc.lisp`
 - **現状**: MIRに`:safepoint`キーワード定義済み（`mir.lisp:13,158`）だがスタックマップデータ構造なし。GCルートの位置情報を機械語アドレスに紐づける仕組みがない
@@ -1337,7 +1349,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM StackMaps / HotSpot OopMap / GraalVM ReferenceMap。正確なGC（FR-190）とdeopt（FR-155）の前提条件
 - **難易度**: Hard
 
-#### FR-232: Uncommon Trap Instructions (アンコモントラップ命令)
+#### FR-232: Uncommon Trap Instructions (アンコモントラップ命令) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 型ガード（`extract-type-guard` in `inference.lisp:231`）は型推論層のみ。コード生成に投機的型チェック＋失敗時の脱出パスなし
@@ -1345,7 +1357,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: HotSpot uncommon_trap / V8 deopt_reason / GraalVM SpeculationLog。投機的最適化の安全ネット
 - **難易度**: Hard
 
-#### FR-233: Safepoint Polling Mechanism (セーフポイントポーリング)
+#### FR-233: Safepoint Polling Mechanism (セーフポイントポーリング) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/vm/src/vm.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: STW GC（`gc.lisp:200-263,331-392`）にスレッド停止要求メカニズムなし。VMインタプリタループにポーリングポイントなし
@@ -1355,9 +1367,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 52 — 動的コンパイル・トレース（未実装）
+### Phase 52 — 動的コンパイル・トレース（一部実装・要継続）
 
-#### FR-244: Trace-Based Dynamic JIT (トレースベースJIT)
+#### FR-244: Trace-Based Dynamic JIT (トレースベースJIT) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: FR-154（Tiered Compilation）はAOT的な2段階コンパイル。実行時のホットパス記録・コンパイル基盤なし。FR-224（Sampling Profiler）はサンプリングであってトレース記録ではない
@@ -1365,7 +1377,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LuaJIT / TraceMonkey / PyPy。ループ中心のワークロードでインタプリタ比100x高速化の実績
 - **難易度**: Very Hard
 
-#### FR-245: Basic Block Versioning (基本ブロックバージョニング)
+#### FR-245: Basic Block Versioning (基本ブロックバージョニング) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: 型に基づくコード特殊化なし。FR-232（Uncommon Trap）はガードベースの投機だがブロック複製による多型対応なし
@@ -1375,9 +1387,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 57 — プロファイル高度化（未実装）
+### Phase 57 — プロファイル高度化（一部実装・要継続）
 
-#### FR-261: Value Profiling (値プロファイリング)
+#### FR-261: Value Profiling (値プロファイリング) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: FR-058（Type Feedback PGO）は型頻度カウンタのみ。実際の値（定数、範囲）の収集なし。FR-224（Sampling Profiler）はPC位置のみ
@@ -1385,7 +1397,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 value profiling / HotSpot -XX:+ProfileReturnOnly。型プロファイリングの精密化
 - **難易度**: Medium
 
-#### FR-262: Call-Chain Profiling (コンテキスト感応プロファイリング)
+#### FR-262: Call-Chain Profiling (コンテキスト感応プロファイリング) ✅
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-224（VM Sampling Profiler）はフラット（PC位置のみ）。呼び出し元コンテキストを区別しない
@@ -1393,7 +1405,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Google AutoFDO / BOLT / HotSpot -XX:+CallChainProfiling。コンテキスト無視のフラットプロファイルでは見えない最適化機会を検出
 - **難易度**: Medium
 
-#### FR-263: Allocation Site Profiling (割り当てサイトプロファイリング)
+#### FR-263: Allocation Site Profiling (割り当てサイトプロファイリング) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `heap.lisp`にアロケーションサイトのトラッキングなし。どの関数/行がメモリ消費の主因か不明
@@ -1403,9 +1415,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 58 — 投機的JIT高度化（未実装）
+### Phase 58 — 投機的JIT高度化（一部実装・要継続）
 
-#### FR-267: ThinLTO (モジュール並行リンク時最適化)
+#### FR-267: ThinLTO (モジュール並行リンク時最適化) ✅
 
 - **対象**: `packages/pipeline/pipeline.lisp`
 - **現状**: FR-102（LTO Whole-Program Call Graph）は全モジュールを逐次処理するフル LTO のみ想定。モジュール数が増えるとコンパイル時間が O(N²) 増大
@@ -1413,7 +1425,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM ThinLTO paper (2016) / Swift コンパイラの標準 LTO モード。大規模プロジェクトでのフル LTO の現実的代替
 - **難易度**: Hard
 
-#### FR-264: Background / Concurrent JIT Compilation (バックグラウンドJITコンパイル)
+#### FR-264: Background / Concurrent JIT Compilation (バックグラウンドJITコンパイル) ✅
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: JITコンパイル（FR-058/FR-244）はインタプリタ実行をブロックして行う。コンパイル中はVMが停止
@@ -1421,7 +1433,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 の並行コンパイラスレッド / HotSpot `-XX:+TieredCompilation` のC1/C2並行化 / JavaScriptCore DFG concurrent compilation。スループットを犠牲にしない JIT
 - **難易度**: Very Hard
 
-#### FR-265: Class Hierarchy Analysis for CLOS (CHA — クラス階層解析)
+#### FR-265: Class Hierarchy Analysis for CLOS (CHA — クラス階層解析) ✅
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: `vm-generic-call` は常に実行時ディスパッチ（MOP `find-method` 相当）。メソッドが1つしか存在しない場合でも多態ディスパッチを経由する
@@ -1429,7 +1441,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Java CHA (Dean et al. 1995) / GraalVM CLOS 最適化 / SBCL `(declare (optimize (safety 0)))` 下のディスパッチ除去。CLOSの主要な性能ボトルネック解消
 - **難易度**: Hard
 
-#### FR-266: Speculative Inlining with Type Guard (型ガード付き投機的インライン展開)
+#### FR-266: Speculative Inlining with Type Guard (型ガード付き投機的インライン展開) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: インライン展開（FR-040）は静的に確定した callee のみ対象。`vm-generic-call` や高階関数はインライン不可
@@ -1439,9 +1451,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 60 — デオプティマイゼーション・OSR（未実装）
+### Phase 60 — デオプティマイゼーション・OSR（一部実装・要継続）
 
-#### FR-280: Structured Deoptimization Framework (構造化デオプティマイゼーション)
+#### FR-280: Structured Deoptimization Framework (構造化デオプティマイゼーション) ✅
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-run.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: FR-232（Uncommon Trap）・FR-266（型ガード）が脱出先を参照しているが、JITコード→VMインタプリタへのバイルアウト（レジスタ→VMレジスタへの逆マッピング）の実体がない
@@ -1449,7 +1461,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 deoptimizer / HotSpot nmethod deopt / GraalVM FrameState。投機的最適化の「保険」機能の実体。FR-231（Stack Map）が前提
 - **難易度**: Very Hard
 
-#### FR-281: On-Stack Replacement — Interpreter→JIT (OSR昇格)
+#### FR-281: On-Stack Replacement — Interpreter→JIT (OSR昇格) ✅
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: JITコンパイルされた関数への切り替えは関数エントリ時のみ。長時間実行中のホットループはインタプリタで動き続ける
@@ -1457,7 +1469,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: HotSpot OSR / V8 OSR from Ignition / PyPy OSR。バッチ処理・数値計算系ループで最大の恩恵
 - **難易度**: Very Hard
 
-#### FR-282: OSR Exit — JIT→Interpreter (OSR降格)
+#### FR-282: OSR Exit — JIT→Interpreter (OSR降格) ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: FR-281はインタプリタ→JITの昇格のみ。型仮定が崩れた場合にループ途中でインタプリタに戻る経路がない
@@ -1465,7 +1477,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 deopt inside loop / HotSpot uncommon_trap in compiled loop。ループ内の型仮定を安全に保護
 - **難易度**: Hard
 
-#### FR-283: Speculation Log (投機ログ)
+#### FR-283: Speculation Log (投機ログ) 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: 型ガード（FR-232）の失敗記録なし。同一ガードが毎回コンパイル時に同じ投機を行い、実行時に何度でも失敗し続ける可能性がある
@@ -1475,9 +1487,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 61 — オブジェクト形状・型特殊化（未実装）
+### Phase 61 — オブジェクト形状・型特殊化（一部実装・要継続）
 
-#### FR-284: Object Shape / Hidden Class Tracking (オブジェクト形状追跡)
+#### FR-284: Object Shape / Hidden Class Tracking (オブジェクト形状追跡) 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: CLOSインスタンスはスロットを `(gethash :slot-name ht)` で参照するため、スロットオフセットが実行時に確定する。インライン化もフィールドアクセスの定数化も不可能
@@ -1485,7 +1497,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 Hidden Classes / JSC Structures / LuaJIT table shape。ハッシュテーブルアクセスから定数オフセットアクセスへの変換でCLOS性能10〜50x向上
 - **難易度**: Hard
 
-#### FR-285: Unboxed Fixnum / Float Arithmetic (アンボックス演算)
+#### FR-285: Unboxed Fixnum / Float Arithmetic (アンボックス演算) ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/primitives.lisp`
 - **現状**: 演算命令（`vm-add` 等）は実行時タグチェック→ボックス値unwrap→演算→ボックス化という手順。数値ループでボックス化コストが大きい
@@ -1493,7 +1505,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SBCL type-driven code generation / V8 Maglev unboxed Int32 / GraalVM primitive specialization。数値演算ループで2〜5x高速化
 - **難易度**: Hard
 
-#### FR-286: Tagged Integer Range Analysis (タグ付き整数範囲解析)
+#### FR-286: Tagged Integer Range Analysis (タグ付き整数範囲解析) ✅
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: 型システム（packages/type/src/）は fixnum/float/cons の区別はするが、整数の値範囲（0≤n<256等）を追跡しない
@@ -1503,9 +1515,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 62 — ループ最適化（未実装）
+### Phase 62 — ループ最適化（一部実装・要継続）
 
-#### FR-287: Loop Invariant Code Motion (LICM — ループ不変コード移動)
+#### FR-287: Loop Invariant Code Motion (LICM — ループ不変コード移動) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/cfg.lisp`
 - **現状**: 最適化パスはフラット命令列に対して動作。CFGループ構造を利用したループ外ホイスティングなし
@@ -1513,7 +1525,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 全主要コンパイラの基本最適化。`(loop for i from 0 to n sum (length fixed-list))` で `length`計算をループ外に移動
 - **難易度**: Medium
 
-#### FR-288: Loop Unrolling (ループ展開)
+#### FR-288: Loop Unrolling (ループ展開) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: ループ展開なし。小ループでもバックエッジジャンプのオーバーヘッドが残る
@@ -1521,7 +1533,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: GCC -funroll-loops / LLVM LoopUnroll / SBCL。ループ本体が小さいときレジスタ使用率とILP改善
 - **難易度**: Medium
 
-#### FR-289: Loop Fusion (ループ融合)
+#### FR-289: Loop Fusion (ループ融合) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 隣接するループ（`(dotimes (i n) ...)` が2つ連続）は独立に実行。キャッシュ効率が悪い
@@ -1529,7 +1541,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: GCC -floop-interchange / Polly / LLVM LoopFusion。メモリ帯域律速なワークロードで1.5〜3x高速化
 - **難易度**: Hard
 
-#### FR-290: Loop Peeling (ループピーリング)
+#### FR-290: Loop Peeling (ループピーリング) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: ループ先頭に条件チェックがある場合、毎反復でチェックを実行
@@ -1537,7 +1549,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVM LoopPeel / HotSpot C2。`(car (first list))` のnullチェックをピーリングで除去
 - **難易度**: Medium
 
-#### FR-291: Auto-Vectorization / SLP Vectorizer (SLPベクトル化)
+#### FR-291: Auto-Vectorization / SLP Vectorizer (SLPベクトル化) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
 - **現状**: SIMD命令生成なし。数値ループは1要素ずつスカラー処理
@@ -1549,7 +1561,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 63 — コードレイアウト最適化（一部実装: hot-cold layout）
 
-#### FR-292: Hot/Cold Code Splitting (ホット/コールドコード分離)
+#### FR-292: Hot/Cold Code Splitting (ホット/コールドコード分離) ✅
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: 関数内の全基本ブロックが隣接配置。頻繁に実行されないエラー処理パスがホットパスのI$を汚染
@@ -1557,7 +1569,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: HotSpot `-XX:+ProfileCompiledMethods` / LLVM `-fprofile-use` cold section / V8 hot/cold block layout。I$利用率15〜30%改善
 - **難易度**: Medium
 
-#### FR-293: Profile-Guided Code Layout (プロファイル誘導コードレイアウト)
+#### FR-293: Profile-Guided Code Layout (プロファイル誘導コードレイアウト) 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/binary/src/macho.lisp`
 - **現状**: 関数の配置順はASDFロード順。呼び出し関係に基づく局所性最適化なし
@@ -1565,7 +1577,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Google AutoFDO / Meta BOLT / Apple PGO order file。大規模プログラムでのI$ミス20〜40%削減
 - **難易度**: Hard
 
-#### FR-294: Function Outlining (関数アウトライン化)
+#### FR-294: Function Outlining (関数アウトライン化) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: インライン展開（FR-040）の逆操作未実装。コードサイズが増大しI$を圧迫
@@ -1575,9 +1587,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 64 — 命令スケジューリング・レジスタ圧力（未実装）
+### Phase 64 — 命令スケジューリング・レジスタ圧力（一部実装・要継続）
 
-#### FR-295: Instruction Scheduling (命令スケジューリング)
+#### FR-295: Instruction Scheduling (命令スケジューリング) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
 - **現状**: 命令はMIRの順序通りに発行。レイテンシ隠蔽・アウトオブオーダー活用なし
@@ -1585,7 +1597,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: GCC `-fschedule-insns` / LLVM MachineScheduler / SBCL vop scheduling。スーパースカラーCPUでの IPC 向上
 - **難易度**: Hard
 
-#### FR-296: Register Pressure Reduction via Rematerialization (再実体化によるレジスタ圧力削減)
+#### FR-296: Register Pressure Reduction via Rematerialization (再実体化によるレジスタ圧力削減) 🔶
 
 - **対象**: `packages/emit/src/regalloc.lisp`
 - **現状**: レジスタ枯渇時はすべてスタックにスピル（load/store）。再計算コストの低い値もスピル対象
@@ -1595,9 +1607,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 65 — ML誘導最適化（未実装）
+### Phase 65 — ML誘導最適化（一部実装・要継続）
 
-#### FR-297: ML-Guided Inlining (機械学習誘導インライン展開)
+#### FR-297: ML-Guided Inlining (機械学習誘導インライン展開) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: インライン化判定はヒューリスティック（コード行数・呼び出し深度・FR-105プロファイル閾値）。最適な閾値の設定はブラックアート
@@ -1605,7 +1617,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Google MLGO (2021) / Meta Inliner ML / ARM NN-guided compiler。ヒューリスティックより10〜15%コードサイズ削減＋性能向上。2024〜2026年のLLVM/GCC本流に統合済み
 - **難易度**: Very Hard
 
-#### FR-298: Feedback-Directed Optimization via Corpus PGO (コーパスPGO)
+#### FR-298: Feedback-Directed Optimization via Corpus PGO (コーパスPGO) 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: PGO（FR-104/FR-105）はユーザー提供のプロファイルデータに依存。代表的な入力セットがない場合は効果なし
@@ -1615,9 +1627,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 66 — セキュリティ・サンドボックス（未実装）
+### Phase 66 — セキュリティ・サンドボックス（一部実装・要継続）
 
-#### FR-299: Spectre/Meltdown Mitigations in JIT (JITコードのSpectre対策)
+#### FR-299: Spectre/Meltdown Mitigations in JIT (JITコードのSpectre対策) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: JIT生成コードにSpectre v1（境界チェックバイパス）対策なし。JIT-to-JIT の間接ジャンプにretpoline未適用
@@ -1625,7 +1637,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 Spectre mitigations (2018) / Firefox SpiderMonkey retpoline / Chrome site isolation。サンドボックス実行環境（Wasm実行等）での必須要件
 - **難易度**: Medium
 
-#### FR-300: JIT Code Region Isolation (JITコード領域隔離)
+#### FR-300: JIT Code Region Isolation (JITコード領域隔離) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/runtime/src/runtime.lisp`
 - **現状**: JIT生成コードのメモリ管理（mmap/mprotect）なし。コードバッファの書き込み可能性が実行中も残る
@@ -1635,9 +1647,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 67 — WebAssembly JIT（未実装）
+### Phase 67 — WebAssembly JIT（一部実装・要継続）
 
-#### FR-301: Tiered Wasm Compilation (段階的Wasmコンパイル)
+#### FR-301: Tiered Wasm Compilation (段階的Wasmコンパイル) 🔶
 
 - **対象**: `packages/emit/src/wasm.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: Wasm バックエンドは1段階のAOTコンパイルのみ（FR-080）
@@ -1645,7 +1657,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 Liftoff→TurboFan / Firefox Baseline→Ion / Wasmtime Cranelift。Wasm 起動時間をAOTコンパイル待ちなしで提供
 - **難易度**: Very Hard
 
-#### FR-302: Wasm SIMD Code Generation (Wasm SIMD命令生成)
+#### FR-302: Wasm SIMD Code Generation (Wasm SIMD命令生成) 🔶
 
 - **対象**: `packages/emit/src/wasm.lisp`, `packages/mir/src/mir.lisp`
 - **現状**: Wasm バックエンドはスカラー命令のみ。Wasm SIMD 128 仕様（2022年標準化）未対応
@@ -1655,9 +1667,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ---
 
-### Phase 68 — ガード精錬・コードキャッシュ管理・適応的再コンパイル（未実装）
+### Phase 68 — ガード精錬・コードキャッシュ管理・適応的再コンパイル（一部実装・要継続）
 
-#### FR-303: Guard Strength Reduction (ガード弱体化)
+#### FR-303: Guard Strength Reduction (ガード弱体化) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: FR-232（Uncommon Trap）・FR-266（型ガード付きインライン）が生成するガードはすべて同コスト（型チェック命令）。失敗率が極低くても high-cost なガードのまま
@@ -1665,7 +1677,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 `--stress-compaction` guard weakening / GraalVM SpeculationLog confidence score。ホットループ内の型ガードを nop まで落とせれば数%の命令数削減
 - **難易度**: Medium
 
-#### FR-304: JIT Code Cache Eviction (JITコードキャッシュ退避)
+#### FR-304: JIT Code Cache Eviction (JITコードキャッシュ退避) 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: FR-300（JIT Code Region Isolation）でコードアリーナを確保するが、上限到達時の退避ポリシー未定義。コードキャッシュが満杯になると新規コンパイルが失敗する
@@ -1673,7 +1685,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 code flushing / HotSpot `-XX:ReservedCodeCacheSize` + code cache sweeper / JavaScriptCore JIT memory pressure eviction。長時間稼働プロセスでのメモリリーク防止
 - **難易度**: Medium
 
-#### FR-305: Adaptive Recompilation Thresholds (適応的再コンパイル閾値)
+#### FR-305: Adaptive Recompilation Thresholds (適応的再コンパイル閾値) ✅
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: Tier昇格の閾値（バックエッジカウンタ・呼び出し回数）はコンパイル時定数。コールドスタート時も安定稼働時も同じ閾値を使用するため、起動直後に必要以上にコンパイルが走るか、逆にホット関数の昇格が遅延する

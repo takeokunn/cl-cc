@@ -123,8 +123,9 @@
    make-vm-tenth
    make-vm-file-length
    make-vm-fill-pointer-inst
-   make-vm-file-position
-   make-vm-first
+    make-vm-file-position
+    make-vm-fill
+    make-vm-first
    make-vm-floor-inst
    make-vm-fdefinition
    make-vm-format-inst

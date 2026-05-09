@@ -208,3 +208,76 @@
          (env  (make-hash-table :test #'eq)))
     (setf (gethash :r0 env) 1)
     (assert-null (cl-cc/optimize::%sccp-fold-inst inst env))))
+
+;;; ─── Generic dataflow worklist ───────────────────────────────────────────
+
+(deftest dataflow-worklist-forward-branch-join-converges
+  "opt-run-dataflow converges on a branch/join CFG and merges predecessor flow."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-jump-zero :reg :r9 :label "else")
+                     (make-vm-const :dst :r0 :value 1)
+                     (make-vm-jump :label "join")
+                     (make-vm-label :name "else")
+                     (make-vm-const :dst :r1 :value 2)
+                     (make-vm-label :name "join")
+                     (make-vm-ret :reg :r0))))
+         (join (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (result (cl-cc/optimize:opt-run-dataflow
+                  cfg
+                  :direction :forward
+                  :meet (lambda (states)
+                          (remove-duplicates (apply #'append states) :test #'eql))
+                  :transfer (lambda (block state)
+                              (adjoin (cl-cc:bb-id block) state :test #'eql))
+                  :state-equal (lambda (a b)
+                                 (and (subsetp a b :test #'eql)
+                                      (subsetp b a :test #'eql)))
+                  :initial-state nil
+                  :boundary-state nil
+                  :copy-state #'copy-list))
+         (join-in (gethash join (cl-cc/optimize:opt-dataflow-result-in result))))
+    (assert-true (member 0 join-in :test #'eql))
+    (dolist (pred (cl-cc:bb-predecessors join))
+      (assert-true (member (cl-cc:bb-id pred) join-in :test #'eql)))))
+
+;;; ─── Available expressions ───────────────────────────────────────────────
+
+(deftest available-expressions-join-intersects-predecessors
+  "Available expressions at a join keep only keys present on every predecessor."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-jump-zero :reg :r9 :label "else")
+                     (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                     (make-vm-sub :dst :r3 :lhs :r0 :rhs :r1)
+                     (make-vm-jump :label "join")
+                     (make-vm-label :name "else")
+                     (make-vm-add :dst :r4 :lhs :r0 :rhs :r1)
+                     (make-vm-label :name "join")
+                     (make-vm-ret :reg :r0))))
+         (join (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (result (cl-cc/optimize:opt-compute-available-expressions cfg))
+         (join-in (gethash join (cl-cc/optimize:opt-dataflow-result-in result)))
+         (keys (mapcar #'cl-cc/optimize::%available-expression-entry-key join-in)))
+    (assert-true (member '(cl-cc/vm::vm-add :r0 :r1) keys :test #'equal))
+    (assert-false (member '(cl-cc/vm::vm-sub :r0 :r1) keys :test #'equal))))
+
+;;; ─── Reaching definitions ────────────────────────────────────────────────
+
+(deftest reaching-definitions-join-unions-predecessors
+  "Reaching definitions at a join contain definitions from both predecessor blocks."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-jump-zero :reg :r9 :label "else")
+                     (make-vm-const :dst :r1 :value 1)
+                     (make-vm-jump :label "join")
+                     (make-vm-label :name "else")
+                     (make-vm-const :dst :r1 :value 2)
+                     (make-vm-label :name "join")
+                     (make-vm-ret :reg :r1))))
+         (join (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (result (cl-cc/optimize:opt-compute-reaching-definitions cfg))
+         (join-in (gethash join (cl-cc/optimize:opt-dataflow-result-in result)))
+         (r1-defs (remove :r1 join-in :test-not #'eq :key #'first)))
+    (assert-= 2 (length r1-defs))
+    (dolist (pred (cl-cc:bb-predecessors join))
+      (assert-true (some (lambda (definition)
+                           (= (cl-cc:bb-id pred) (second definition)))
+                         r1-defs)))))

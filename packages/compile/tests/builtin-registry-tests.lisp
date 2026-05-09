@@ -226,9 +226,10 @@
   (let ((entry (gethash "READ-CHAR" cl-cc/compile::*builtin-registry*)))
     (assert-true entry)
     (assert-eq :stream-input-opt (cl-cc/compile::be-convention entry)))
-  (assert-equal #\A (cl-cc:run-string "(write-char #\\A)"))
-  (assert-null (cl-cc:run-string "(force-output)"))
-  (assert-null (cl-cc:run-string "(clear-input)")))
+  (let ((*standard-output* (make-broadcast-stream)))
+    (assert-equal #\A (cl-cc:run-string "(write-char #\\A)"))
+    (assert-null (cl-cc:run-string "(force-output)"))
+    (assert-null (cl-cc:run-string "(clear-input)"))))
 
 ;;; ─── *convention-arity* completeness ─────────────────────────────────────────
 

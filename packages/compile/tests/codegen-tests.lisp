@@ -202,6 +202,49 @@ stable, isolated context."
     (assert-true (typep (first (cl-cc/ast:ast-progn-forms result)) 'cl-cc::ast-int))
     (assert-= 5 (cl-cc/ast:ast-int-value (first (cl-cc/ast:ast-progn-forms result))))))
 
+(deftest optimize-ast-folds-defconstant-backed-binop
+  "optimize-ast rewrites defconstant-backed ast-var nodes so surrounding binops can fold."
+  (cl-cc/expand::compiler-macroexpand-all '(defconstant +optimize-ast-inline-constant+ 41))
+  (let* ((node (make-ast-binop :op '+
+                               :lhs (make-ast-var :name '+optimize-ast-inline-constant+)
+                               :rhs (make-ast-int :value 1)))
+         (result (cl-cc/compile:optimize-ast node)))
+    (assert-true (typep result 'cl-cc::ast-int))
+    (assert-= 42 (cl-cc/ast:ast-int-value result))))
+
+(deftest-each optimize-ast-keeps-shadowed-defconstant-as-variable
+  "optimize-ast must not inline a defconstant when an inner lexical binding shadows the name."
+  :cases (("let-body"
+           (make-ast-let :bindings (list (cons 'optimize-shadowed-constant
+                                               (make-ast-int :value 2)))
+                         :declarations nil
+                         :body (list (make-ast-var :name 'optimize-shadowed-constant)))
+           #'cl-cc/ast:ast-let-body)
+          ("lambda-key-param"
+           (make-ast-lambda :params nil
+                            :optional-params nil
+                            :rest-param nil
+                            :key-params (list (list 'optimize-shadowed-constant nil nil nil))
+                            :declarations nil
+                            :body (list (make-ast-var :name 'optimize-shadowed-constant)))
+           #'cl-cc/ast:ast-lambda-body)
+          ("defun-optional-param"
+           (cl-cc/ast:make-ast-defun :name 'optimize-shadowed-constant-user
+                                     :params nil
+                                     :optional-params (list (list 'optimize-shadowed-constant nil nil))
+                                     :rest-param nil
+                                     :key-params nil
+                                     :declarations nil
+                                     :documentation nil
+                                     :body (list (make-ast-var :name 'optimize-shadowed-constant)))
+           #'cl-cc/ast:ast-defun-body))
+  (node body-reader)
+  (cl-cc/expand::compiler-macroexpand-all '(defconstant optimize-shadowed-constant 99))
+  (let* ((result (cl-cc/compile:optimize-ast node))
+         (body-form (first (funcall body-reader result))))
+    (assert-true (typep body-form 'cl-cc::ast-var))
+    (assert-eq 'optimize-shadowed-constant (cl-cc/ast:ast-var-name body-form))))
+
 ;;; ─── %let-binding-special-p ─────────────────────────────────────────────
 
 (deftest-each let-binding-special-p-dispatch
@@ -226,7 +269,7 @@ stable, isolated context."
                                 :body (list (make-ast-var :name 'x))))
          (body (list (make-ast-call :func (make-ast-var :name 'f)
                                     :args (list (make-ast-int :value 1)))))
-         (result (cl-cc/compile::%let-noescape-closure 'f lam nil nil body)))
+         (result (cl-cc/compile::%let-noescape-closure 'f lam nil nil nil body)))
     (assert-eq lam result)))
 
 (deftest let-noescape-closure-mutated-binding-returns-nil
@@ -237,16 +280,16 @@ stable, isolated context."
                                :key-params nil
                                :body (list (make-ast-var :name 'x))))
          (body (list (make-ast-int :value 1))))
-    (assert-null (cl-cc/compile::%let-noescape-closure 'f lam '(f) nil body))))
+    (assert-null (cl-cc/compile::%let-noescape-closure 'f lam nil '(f) nil body))))
 
 ;;; ─── %let-noescape-array-size ───────────────────────────────────────────
 
 (deftest let-noescape-array-size-non-make-array-returns-nil
   "%let-noescape-array-size returns NIL when the expression is not a make-array call."
   (let ((expr (make-ast-int :value 5)))
-    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil))))
+    (assert-null (cl-cc/compile::%let-noescape-array-size 'arr expr nil nil nil nil))))
 
 (deftest let-noescape-cons-p-non-cons-expr-returns-nil
   "%let-noescape-cons-p returns NIL when the expression is not a cons call."
   (let ((expr (make-ast-int :value 5)))
-    (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil))))
+    (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil nil))))

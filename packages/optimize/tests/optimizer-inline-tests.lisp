@@ -163,6 +163,85 @@
   (let ((table (cl-cc/optimize:opt-known-callee-labels insts)))
     (assert-equal expected (gethash reg table))))
 
+(deftest-each opt-pass-devirtualize-cases
+  "opt-pass-devirtualize inserts vm-func-ref before calls with known callee registers."
+  :cases (("direct-closure-call"
+           (list (make-vm-closure :dst :r0 :label "target" :params nil :captured nil)
+                 (make-vm-call :dst :r1 :func :r0 :args '(:r2)))
+           1 "target")
+          ("move-propagated-call"
+           (list (make-vm-closure :dst :r0 :label "moved" :params nil :captured nil)
+                 (make-vm-move :dst :r3 :src :r0)
+                 (make-vm-call :dst :r1 :func :r3 :args nil))
+           1 "moved")
+          ("overwrite-clears-callee"
+           (list (make-vm-closure :dst :r0 :label "cleared" :params nil :captured nil)
+                 (make-vm-const :dst :r0 :value 42)
+                 (make-vm-call :dst :r1 :func :r0 :args nil))
+           0 nil))
+  (insts expected-count expected-label)
+  (let* ((result (cl-cc/optimize:opt-pass-devirtualize insts))
+         (refs (remove-if-not (lambda (inst)
+                                (typep inst 'cl-cc/vm::vm-func-ref))
+                              result)))
+    (assert-= expected-count (length refs))
+    (when expected-label
+      (assert-equal expected-label (cl-cc:vm-label-name (first refs))))))
+
+(deftest opt-pass-devirtualize-is-idempotent-for-already-direct-call
+  "opt-pass-devirtualize does not duplicate an immediately preceding direct func-ref."
+  (let* ((insts (list (make-vm-func-ref :dst :r0 :label "target")
+                      (make-vm-call :dst :r1 :func :r0 :args nil)))
+         (once (cl-cc/optimize:opt-pass-devirtualize insts))
+         (twice (cl-cc/optimize:opt-pass-devirtualize once)))
+    (assert-= 1 (count-if (lambda (inst)
+                            (typep inst 'cl-cc/vm::vm-func-ref))
+                          once))
+    (assert-= 1 (count-if (lambda (inst)
+                            (typep inst 'cl-cc/vm::vm-func-ref))
+                          twice))))
+
+(deftest opt-pass-call-site-splitting-duplicates-known-predecessor-call
+  "opt-pass-call-site-splitting clones a join call into a predecessor with a known callee."
+  (let* ((insts (list (make-vm-jump-zero :reg :cond :label "else")
+                      (make-vm-func-ref :dst :fn :label "then-fn")
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-func-ref :dst :fn :label "else-fn")
+                      (make-vm-label :name "join")
+                      (make-vm-call :dst :out :func :fn :args '(:arg))
+                      (make-vm-halt :reg :out)))
+         (out (cl-cc/optimize:opt-pass-call-site-splitting insts))
+         (calls (remove-if-not #'cl-cc:vm-call-p out))
+         (after-jump (find-if (lambda (inst)
+                                (and (typep inst 'cl-cc/vm::vm-jump)
+                                     (search "CALL-SITE-SPLIT-AFTER-"
+                                             (cl-cc:vm-label-name inst))))
+                              out))
+         (after-label (and after-jump (cl-cc:vm-label-name after-jump))))
+    (assert-= 2 (length calls))
+    (assert-true after-jump)
+    (assert-true (find-if (lambda (inst)
+                            (and (typep inst 'cl-cc/vm::vm-label)
+                                 (equal after-label (cl-cc/vm::vm-name inst))))
+                          out))
+    (assert-true (find-if (lambda (inst)
+                            (and (typep inst 'cl-cc/vm::vm-func-ref)
+                                 (equal "then-fn" (cl-cc:vm-label-name inst))))
+                          out))))
+
+(deftest opt-pass-call-site-splitting-noops-without-known-callee
+  "opt-pass-call-site-splitting leaves join calls alone when the predecessor callee is unknown."
+  (let* ((insts (list (make-vm-jump-zero :reg :cond :label "else")
+                      (make-vm-const :dst :fn :value 42)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-label :name "join")
+                      (make-vm-call :dst :out :func :fn :args nil)))
+         (out (cl-cc/optimize:opt-pass-call-site-splitting insts)))
+    (assert-equal (mapcar #'instruction->sexp insts)
+                  (mapcar #'instruction->sexp out))))
+
 ;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────
 
 (deftest-each opt-can-safely-rename-p-cases

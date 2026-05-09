@@ -3,6 +3,7 @@
 ;;;;
 ;;;; Covers: opt-heap-root-inst-p, opt-heap-root-kind,
 ;;;;   %opt-build-root-map / opt-compute-heap-aliases,
+;;;;   opt-compute-points-to / opt-points-to-root,
 ;;;;   opt-interval-* arithmetic,
 ;;;;   opt-compute-constant-intervals,
 ;;;;   opt-must-alias-p, opt-may-alias-p, opt-may-alias-by-type-p,
@@ -72,6 +73,29 @@
   (let ((pt (make-hash-table :test #'eq)))
     (setf (gethash :r0 pt) :r0)
     (assert-eq :r0 (gethash :r0 pt))))
+
+(deftest points-to-tracks-fresh-root-and-move
+  "opt-compute-points-to tracks fresh heap roots and vm-move aliases."
+  (let* ((insts (list (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)
+                      (make-vm-move :dst :r3 :src :r0)))
+         (points-to (cl-cc/optimize:opt-compute-points-to insts)))
+    (assert-eq :r0 (cl-cc/optimize:opt-points-to-root :r0 points-to))
+    (assert-eq :r0 (cl-cc/optimize:opt-points-to-root :r3 points-to))))
+
+(deftest points-to-root-reports-unknown-register
+  "opt-points-to-root returns NIL/NIL for an unknown register."
+  (let ((points-to (cl-cc/optimize:opt-compute-points-to nil)))
+    (multiple-value-bind (root found-p)
+        (cl-cc/optimize:opt-points-to-root :missing points-to)
+      (assert-null root)
+      (assert-false found-p))))
+
+(deftest points-to-overwrite-kills-stale-root
+  "opt-compute-points-to kills a stale points-to fact after a non-heap write."
+  (let* ((insts (list (make-vm-cons :dst :r0 :car-src :r1 :cdr-src :r2)
+                      (make-vm-add :dst :r0 :lhs :r1 :rhs :r2)))
+         (points-to (cl-cc/optimize:opt-compute-points-to insts)))
+    (assert-false (nth-value 1 (cl-cc/optimize:opt-points-to-root :r0 points-to)))))
 
 ;;; ─── opt-interval-* arithmetic ───────────────────────────────────────────
 
@@ -146,6 +170,75 @@
                       (make-vm-const :dst :len :value 5)))
          (ivals (cl-cc/optimize::opt-compute-value-ranges insts)))
     (assert-false (cl-cc/optimize::opt-array-bounds-check-eliminable-p :idx :len ivals))))
+
+(deftest cfg-value-ranges-join-unions-constant-predecessors
+  "CFG range analysis unions predecessor intervals at joins conservatively."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-jump-zero :reg :cond :label "else")
+                     (make-vm-const :dst :r0 :value 1)
+                     (make-vm-jump :label "join")
+                     (make-vm-label :name "else")
+                     (make-vm-const :dst :r0 :value 3)
+                     (make-vm-label :name "join")
+                     (make-vm-ret :reg :r0))))
+         (join (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (result (cl-cc/optimize:opt-compute-cfg-value-ranges cfg))
+         (join-in (gethash join (cl-cc/optimize:opt-dataflow-result-in result)))
+         (iv (gethash :r0 join-in)))
+    (assert-true iv)
+    (assert-= 1 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 3 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest cfg-value-ranges-join-drops-missing-predecessor-fact
+  "CFG range analysis drops a register that is not known on every predecessor."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-jump-zero :reg :cond :label "else")
+                     (make-vm-const :dst :r0 :value 1)
+                     (make-vm-jump :label "join")
+                     (make-vm-label :name "else")
+                     (make-vm-const :dst :r1 :value 3)
+                     (make-vm-label :name "join")
+                     (make-vm-ret :reg :r1))))
+         (join (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (result (cl-cc/optimize:opt-compute-cfg-value-ranges cfg))
+         (join-in (gethash join (cl-cc/optimize:opt-dataflow-result-in result))))
+    (assert-false (nth-value 1 (gethash :r0 join-in)))))
+
+(deftest cfg-value-ranges-loop-self-update-kills-unsafe-fact
+  "Loop-carried self-updates kill their destination fact instead of diverging."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-const :dst :i :value 0)
+                     (make-vm-label :name "loop")
+                     (make-vm-const :dst :one :value 1)
+                     (make-vm-add :dst :i :lhs :i :rhs :one)
+                     (make-vm-jump-zero :reg :exit-flag :label "exit")
+                     (make-vm-jump :label "loop")
+                     (make-vm-label :name "exit")
+                     (make-vm-ret :reg :i))))
+         (loop-block (cl-cc/optimize:cfg-get-block-by-label cfg "loop"))
+         (exit-block (cl-cc/optimize:cfg-get-block-by-label cfg "exit"))
+         (result (cl-cc/optimize:opt-compute-cfg-value-ranges cfg))
+         (loop-in (gethash loop-block (cl-cc/optimize:opt-dataflow-result-in result)))
+         (loop-out (gethash loop-block (cl-cc/optimize:opt-dataflow-result-out result)))
+         (exit-in (gethash exit-block (cl-cc/optimize:opt-dataflow-result-in result))))
+    (assert-false (nth-value 1 (gethash :i loop-in)))
+    (assert-false (nth-value 1 (gethash :i loop-out)))
+    (assert-false (nth-value 1 (gethash :i exit-in)))))
+
+(deftest value-ranges-convenience-wrapper-merges-branch-exit-ranges
+  "opt-compute-value-ranges keeps the old API while using CFG analysis on branches."
+  (let* ((insts (list (make-vm-jump-zero :reg :cond :label "else")
+                      (make-vm-const :dst :r0 :value 1)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-const :dst :r0 :value 3)
+                      (make-vm-label :name "join")
+                      (make-vm-ret :reg :r0)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :r0 ivals)))
+    (assert-true iv)
+    (assert-= 1 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 3 (cl-cc/optimize::opt-interval-hi iv))))
 
 (deftest simple-induction-detects-affine-update
   "opt-compute-simple-inductions records init and step for affine self updates."
@@ -292,6 +385,56 @@
                   (list (make-vm-get-global :dst :r0 :name 'unknown)
                         (make-vm-ret :reg :r0)))))
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
+
+;;; ─── opt-pass-cons-slot-forward ──────────────────────────────────────────
+
+(deftest cons-slot-forward-replaces-car-with-original-car-register
+  "opt-pass-cons-slot-forward rewrites car of a fresh cons to a move from car-src."
+  (let* ((result (cl-cc/optimize::opt-pass-cons-slot-forward
+                  (list (make-vm-cons :dst :cell :car-src :head :cdr-src :tail)
+                        (make-vm-car  :dst :out  :src :cell))))
+         (move (second result)))
+    (assert-true (typep move 'cl-cc/vm::vm-move))
+    (assert-eq :out (cl-cc/vm::vm-dst move))
+    (assert-eq :head (cl-cc/vm::vm-src move))))
+
+(deftest cons-slot-forward-replaces-cdr-through-move-alias
+  "opt-pass-cons-slot-forward propagates the fresh cons fact through vm-move aliases."
+  (let* ((result (cl-cc/optimize::opt-pass-cons-slot-forward
+                  (list (make-vm-cons :dst :cell :car-src :head :cdr-src :tail)
+                        (make-vm-move :dst :alias :src :cell)
+                        (make-vm-cdr  :dst :out   :src :alias))))
+         (move (third result)))
+    (assert-true (typep move 'cl-cc/vm::vm-move))
+    (assert-eq :out (cl-cc/vm::vm-dst move))
+    (assert-eq :tail (cl-cc/vm::vm-src move))))
+
+(deftest cons-slot-forward-source-overwrite-kills-fact
+  "Overwriting a source register kills dependent cons-slot facts before forwarding."
+  (let* ((result (cl-cc/optimize::opt-pass-cons-slot-forward
+                  (list (make-vm-cons  :dst :cell :car-src :head :cdr-src :tail)
+                        (make-vm-const :dst :head :value 99)
+                        (make-vm-car   :dst :out  :src :cell)))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-car)) result))
+    (assert-false (some (lambda (i)
+                          (and (typep i 'cl-cc/vm::vm-move)
+                               (eq :out (cl-cc/vm::vm-dst i))))
+                        result))))
+
+(deftest cons-slot-forward-rplaca-kills-fact
+  "Destructive cons mutation prevents stale car/cdr forwarding."
+  (let* ((result (cl-cc/optimize::opt-pass-cons-slot-forward
+                  (list (make-vm-cons   :dst :cell :car-src :head :cdr-src :tail)
+                        (make-vm-rplaca :cons :cell :val :new-head)
+                        (make-vm-car    :dst :out :src :cell)))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-car)) result))))
+
+(deftest cons-slot-forward-cons-overwriting-source-is-conservative
+  "When vm-cons overwrites a slot source, the old slot value has no forwarding register."
+  (let* ((result (cl-cc/optimize::opt-pass-cons-slot-forward
+                  (list (make-vm-cons :dst :head :car-src :head :cdr-src :tail)
+                        (make-vm-car  :dst :out  :src :head)))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-car)) result))))
 
 ;;; ─── mem-pass-state struct helpers ──────────────────────────────────────────
 

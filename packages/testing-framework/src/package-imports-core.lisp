@@ -139,6 +139,7 @@
           cl-cc:make-vm-eq cl-cc:make-vm-num-eq
           cl-cc:make-vm-div cl-cc:make-vm-mod cl-cc:make-vm-rem cl-cc:make-vm-truncate
           cl-cc:make-vm-min cl-cc:make-vm-max cl-cc:make-vm-rotate
+          cl-cc:make-vm-array-length cl-cc:make-vm-aset
           cl-cc:make-vm-concatenate cl-cc:make-vm-make-array
           cl-cc:make-vm-float-add cl-cc:make-vm-integer-add cl-cc:make-vm-integer-mul
           cl-cc:make-vm-register-function cl-cc:make-vm-select

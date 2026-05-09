@@ -88,9 +88,10 @@
   (rest-param nil :reader vm-closure-rest-param)
   (key-params nil :reader vm-closure-key-params)
   (rest-stack-alloc-p nil :reader vm-closure-rest-stack-alloc-p)
+  (inline-policy nil :reader vm-closure-inline-policy)
   (captured nil :reader vm-captured-vars)
   (:sexp-tag :closure)
-  (:sexp-slots dst label params optional-params rest-param key-params rest-stack-alloc-p captured)
+  (:sexp-slots dst label params optional-params rest-param key-params rest-stack-alloc-p inline-policy captured)
   (:conc-name vm-closure-inst-))
 
 ;; vm-make-closure uses list* for instruction->sexp (custom sexp handling)

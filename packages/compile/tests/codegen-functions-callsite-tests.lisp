@@ -66,6 +66,41 @@
           (progn (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
                  (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call)))))))
 
+(deftest-each codegen-let-dynamic-extent-closure-declaration-controls-noescape
+  "A captured let-bound lambda only takes the noescape call path when declared dynamic-extent."
+  :cases (("no-declaration"        nil                  nil)
+          ("with-dynamic-extent" '((dynamic-extent f)) t))
+  (declarations noescape-p)
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'f (make-ast-lambda
+                                           :params '(x)
+                                           :body (list (make-ast-binop
+                                                        :op '+
+                                                        :lhs (make-ast-var :name 'x)
+                                                        :rhs (make-ast-int :value 1))))))
+                :declarations declarations
+                :body (list (make-ast-let
+                             :bindings (list (cons 'caller
+                                                    (make-ast-lambda
+                                                     :params '()
+                                                     :body (list (make-ast-call
+                                                                  :func (make-ast-var :name 'f)
+                                                                  :args (list (make-ast-int :value 7)))))))
+                             :body (list (make-ast-call :func (make-ast-var :name 'caller)
+                                                         :args nil)))))
+                ctx)))
+    (assert-true (keywordp reg))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-add))
+    (if noescape-p
+        (progn
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call)))
+        (progn
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))))))
+
 ;;; ─── call ─────────────────────────────────────────────────────────────────
 
 (deftest codegen-call-known-function

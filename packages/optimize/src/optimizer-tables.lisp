@@ -75,11 +75,13 @@ both NIL and numeric zero are false."
      (vm-logxor      . ,#'logxor)
      (vm-logeqv      . ,#'logeqv)
      (vm-ash         . ,#'ash)
-     (vm-rotate      . ,#'rotate-right)
-     (vm-bswap       . ,#'bswap)
-     (vm-float-div   . ,#'/)
-     (vm-gcd         . ,#'gcd)
-     (vm-lcm         . ,#'lcm)))
+      (vm-rotate      . ,#'rotate-right)
+      (vm-bswap       . ,#'bswap)
+      (vm-div         . ,#'floor)
+      (vm-cl-div      . ,#'/)
+      (vm-float-div   . ,#'/)
+      (vm-gcd         . ,#'gcd)
+      (vm-lcm         . ,#'lcm)))
   "Maps binary VM instruction types to their CL fold functions.
    Used by opt-fold-binop-value for constant folding.")
 
@@ -109,10 +111,12 @@ both NIL and numeric zero are false."
      (vm-dec         . ,#'1-)
      (vm-lognot      . ,#'lognot)
      (vm-rational    . ,#'rational)
-     (vm-rationalize . ,#'rationalize)
-     (vm-numerator   . ,#'numerator)
-     (vm-denominator . ,#'denominator)
-     (vm-not         . ,(lambda (x) (if (null x) t nil)))))
+      (vm-rationalize . ,#'rationalize)
+      (vm-numerator   . ,#'numerator)
+      (vm-denominator . ,#'denominator)
+      (vm-car         . ,#'car)
+      (vm-cdr         . ,#'cdr)
+      (vm-not         . ,(lambda (x) (if (null x) t nil)))))
   "Maps unary VM instruction types to their CL fold functions.")
 
 (defparameter *opt-type-pred-fold-table*
@@ -151,6 +155,7 @@ both NIL and numeric zero are false."
 
 (defparameter *opt-unary-src-types*
   '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-bswap vm-not
+    vm-car vm-cdr
     vm-rational vm-rationalize vm-numerator vm-denominator
     vm-cons-p vm-null-p vm-symbol-p vm-number-p
     vm-integer-p vm-function-p)
@@ -202,7 +207,9 @@ both NIL and numeric zero are false."
             (remove nil (list (vm-src inst) (cl-cc/vm:vm-intern-pkg inst)))))
     (setf (gethash 'vm-make-array ht)
           (lambda (inst) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
-                                           (vm-fill-pointer inst) (vm-adjustable inst)))))
+                                            (vm-fill-pointer inst) (vm-adjustable inst)))))
+    (setf (gethash 'vm-fill ht)
+          (lambda (inst) (list (vm-array-reg inst) (vm-val-reg inst))))
     ht)
   "Maps VM instruction type symbols to (lambda (inst) ...) read-reg extractors.
    Used by opt-inst-read-regs for types not covered by the bulk tables.")

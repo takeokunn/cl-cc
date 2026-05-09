@@ -7,6 +7,12 @@
 ;; during compile-file, even though framework-runner.lisp defines it later.
 (defvar *test-runner-mode*)
 
+(defvar *parallel-suite-deadline* nil
+  "Absolute internal-real-time deadline for the active parallel suite run, or NIL.
+The parallel worker join loop checks this explicitly because SBCL's
+`sb-ext:with-timeout' cannot reliably interrupt a thread blocked in
+`sb-thread:join-thread'.")
+
 (defparameter *heartbeat-interval-seconds*
   (or (let ((raw (uiop:getenv "CLCC_HEARTBEAT_SECONDS")))
         (and raw
@@ -49,6 +55,70 @@ which would block forever on the very threads the watchdog is trying to
 (defstruct escalation
   "Pending hard-kill record: epoch was captured when the interrupt fired."
   worker-idx epoch deadline)
+
+(defun %deadline-expired-p (deadline)
+  "Return true when absolute internal-time DEADLINE has passed."
+  (and deadline (>= (get-internal-real-time) deadline)))
+
+(defun %join-poll-seconds (deadline)
+  "Return a short bounded join timeout, clipped by DEADLINE when present."
+  (let ((poll (or (%normalize-positive-timeout *watchdog-poll-seconds*) 0.5)))
+    (if deadline
+        (let* ((now (get-internal-real-time))
+               (remaining (/ (max 0 (- deadline now))
+                             (float internal-time-units-per-second))))
+          (max 0.001 (min poll remaining)))
+        poll)))
+
+(defun %thread-joined-p (thread timeout-seconds)
+  "Poll THREAD for termination; return T when it exits, NIL on timeout.
+Uses thread-alive-p + sleep instead of join-thread to avoid the GC-safepoint
+deadlock on macOS AArch64: join-thread blocks inside without-gcing via
+__ulock_wait2, which prevents GC safepoint delivery when workers trigger GC.
+sleep is GC-interruptible so the main thread can reach its safepoint normally."
+  (unless (sb-thread:thread-alive-p thread)
+    (return-from %thread-joined-p t))
+  (if (null timeout-seconds)
+      (loop
+        (sleep 0.005)
+        (unless (sb-thread:thread-alive-p thread)
+          (return t)))
+      (let ((deadline (+ (get-internal-real-time)
+                         (round (* timeout-seconds
+                                   (float internal-time-units-per-second))))))
+        (loop
+          (sleep 0.005)
+          (unless (sb-thread:thread-alive-p thread)
+            (return t))
+          (when (>= (get-internal-real-time) deadline)
+            (return nil))))))
+
+(defun %terminate-thread-safely (thread)
+  "Terminate THREAD when it is still alive, ignoring races during shutdown."
+  (when (and thread (sb-thread:thread-alive-p thread))
+    (ignore-errors (sb-thread:terminate-thread thread))))
+
+(defun %terminate-live-threads (threads)
+  "Terminate every live thread in THREADS without waiting indefinitely."
+  (dolist (thread threads)
+    (%terminate-thread-safely thread)))
+
+(defun %join-worker-threads-until-deadline (threads deadline)
+  "Join worker THREADS with bounded waits.
+Return :SUITE-TIMEOUT when DEADLINE passes before all workers finish."
+  (dolist (thread threads nil)
+    (loop
+      (when (%thread-joined-p thread (%join-poll-seconds deadline))
+        (return))
+      (when (%deadline-expired-p deadline)
+        (return-from %join-worker-threads-until-deadline :suite-timeout)))))
+
+(defun %join-support-thread (thread)
+  "Join a watchdog/heartbeat helper without allowing shutdown to hang forever."
+  (when thread
+    (unless (%thread-joined-p thread (%join-poll-seconds nil))
+      (%terminate-thread-safely thread)
+      (%thread-joined-p thread (%join-poll-seconds nil)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Parallel Worker Pool
@@ -192,6 +262,7 @@ Correctness invariants:
          (current-tests   (make-array workers :initial-element nil))
          (watchdog-lock   (sb-thread:make-mutex :name "watchdog-lock"))
          (watchdog-stop   nil)
+         (suite-deadline  *parallel-suite-deadline*)
          (threads         '()))
     (labels
         ((watchdog ()
@@ -260,15 +331,28 @@ Correctness invariants:
       (let ((watchdog-thread
                (sb-thread:make-thread #'watchdog :name "test-watchdog"))
             (heartbeat-thread
-               (sb-thread:make-thread #'heartbeat :name "test-heartbeat")))
-        (dotimes (i workers)
-          (push (sb-thread:make-thread (make-worker i)
-                                       :name (format nil "test-worker-~A" i))
-                threads))
-        (dolist (th (nreverse threads))
-          (sb-thread:join-thread th))
-        (sb-thread:with-mutex (watchdog-lock)
-          (setf watchdog-stop t))
-        (sb-thread:join-thread watchdog-thread)
-        (sb-thread:join-thread heartbeat-thread)))
+               (sb-thread:make-thread #'heartbeat :name "test-heartbeat"))
+            (suite-timed-out-p nil))
+        (unwind-protect
+             (progn
+               (dotimes (i workers)
+                 (push (sb-thread:make-thread (make-worker i)
+                                              :name (format nil "test-worker-~A" i))
+                       threads))
+               (setf threads (nreverse threads))
+               (setf suite-timed-out-p
+                     (eq (%join-worker-threads-until-deadline threads suite-deadline)
+                         :suite-timeout))
+               (when suite-timed-out-p
+                 (format *error-output*
+                         "# ERROR: parallel suite deadline reached; terminating workers~%")
+                 (finish-output *error-output*)
+                 (%terminate-live-threads threads)
+                 (error 'sb-ext:timeout)))
+          (when (or suite-timed-out-p (%deadline-expired-p suite-deadline))
+            (%terminate-live-threads threads))
+          (sb-thread:with-mutex (watchdog-lock)
+            (setf watchdog-stop t))
+          (%join-support-thread watchdog-thread)
+          (%join-support-thread heartbeat-thread))))
     (coerce results 'list)))

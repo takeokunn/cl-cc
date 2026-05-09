@@ -154,11 +154,135 @@
        (when (and (opt-inst-pure-p inst) reads)
          (let ((vals (mapcar (lambda (reg) (%gvn-get-val reg gen val-env)) reads)))
            (if (%opt-commutative-inst-p inst)
-               (destructuring-bind (a b) vals
-                 (if (%opt-value< a b)
-                     (list (type-of inst) a b)
-                     (list (type-of inst) b a)))
-               (cons (type-of inst) vals))))))))
+                (destructuring-bind (a b) vals
+                  (if (%opt-value< a b)
+                      (list (type-of inst) a b)
+                      (list (type-of inst) b a)))
+                (cons (type-of inst) vals))))))))
+
+;;; ─── Conservative Global CSE via Available Expressions ────────────────────
+
+(defun %gcse-expression-key (inst)
+  "Return the exact available-expression key tracked for INST, or NIL.
+
+This intentionally stays conservative:
+  - only effect-proven CSE-eligible instructions participate;
+  - vm-move is handled as value propagation, not as an expression rewrite;
+  - operand order must match exactly, mirroring the available-expression helper."
+  (let ((reads (opt-inst-read-regs inst)))
+    (and (opt-inst-cse-eligible-p inst)
+         (opt-inst-dst inst)
+         reads
+         (not (typep inst 'vm-move))
+         (cons (type-of inst) (copy-list reads)))))
+
+(defun %gcse-key-mentions-reg-p (key reg)
+  "Return T when KEY's operand list mentions REG."
+  (member reg (cdr key) :test #'eq))
+
+(defun %gcse-record-expression-if-safe (env key dst)
+  "Record KEY → DST only when overwriting DST does not invalidate KEY syntax."
+  (unless (%gcse-key-mentions-reg-p key dst)
+    (setf (gethash key env) dst))
+  env)
+
+(defun %gcse-kill-dst (env dst)
+  "Remove ENV entries invalidated by overwriting DST."
+  (let ((stale nil))
+    (maphash (lambda (key holder)
+               (when (or (eq holder dst)
+                         (member dst (cdr key) :test #'eq))
+                 (push key stale)))
+             env)
+    (dolist (key stale)
+      (remhash key env)))
+  env)
+
+(defun %gcse-forward-copy (env src dst)
+  "Forward all ENV-held values currently rooted in SRC into DST."
+  (let ((copied nil))
+    (maphash (lambda (key holder)
+               (when (eq holder src)
+                 (push key copied)))
+             env)
+    (dolist (key copied)
+      (setf (gethash key env) dst)))
+  env)
+
+(defun %gcse-seed-env (block available reaching)
+  "Seed BLOCK's key→register environment from AVAILABLE and REACHING results.
+
+An expression is only seeded when every reaching definition that realizes the
+available expression agrees on a single destination register.  This avoids
+unsafe join-point reuse when different predecessor registers hold the same
+value."
+  (let ((env (make-hash-table :test #'equal))
+        (available-in (gethash block (opt-dataflow-result-in available)))
+        (reaching-in (gethash block (opt-dataflow-result-in reaching))))
+    (dolist (entry available-in env)
+      (let* ((key (%available-expression-entry-key entry))
+             (regs (remove-duplicates
+                    (loop for definition in reaching-in
+                          for inst = (fourth definition)
+                          for def-key = (%gcse-expression-key inst)
+                          when (and def-key (equal def-key key))
+                            collect (%reaching-definition-reg definition))
+                    :test #'eq)))
+        (when (= (length regs) 1)
+          (setf (gethash key env) (first regs)))))))
+
+(defun %gcse-process-block (block available reaching)
+  "Rewrite redundant pure expressions in BLOCK using global entry facts."
+  (let ((env (%gcse-seed-env block available reaching))
+        (changed nil)
+        (new-insts nil))
+    (dolist (inst (bb-instructions block))
+      (let* ((dst (opt-inst-dst inst))
+             (key (%gcse-expression-key inst))
+             (existing (and key (gethash key env))))
+        (when dst
+          (%gcse-kill-dst env dst))
+        (cond
+          ((and key existing (not (eq existing dst)))
+            (push (make-vm-move :dst dst :src existing) new-insts)
+            (%gcse-record-expression-if-safe env key dst)
+            (setf changed t))
+          (t
+            (push inst new-insts)
+            (cond
+              ((and dst key)
+               (%gcse-record-expression-if-safe env key dst))
+              ((and dst (typep inst 'vm-move))
+               (%gcse-forward-copy env (vm-src inst) dst)))))))
+    (setf (bb-instructions block) (nreverse new-insts))
+    changed))
+
+(defun %gcse-apply-to-cfg (cfg)
+  "Apply conservative available-expression-based GCSE to CFG.
+
+This is intentionally narrower than full PRE / global value numbering: it only
+reuses pure expressions already available at block entry, and only when the
+reaching definitions prove that a single register name carries the value on all
+incoming paths."
+  (let ((available (opt-compute-available-expressions cfg))
+        (reaching (opt-compute-reaching-definitions cfg))
+        (changed nil))
+    (loop for block across (cfg-blocks cfg)
+          when block
+            do (when (%gcse-process-block block available reaching)
+                 (setf changed t)))
+    changed))
+
+(defun opt-pass-global-cse (instructions)
+  "Conservative global common-subexpression elimination for simple CFG regions.
+
+The pass uses available-expressions and reaching-definitions analyses to reuse
+pure values at block entry.  It deliberately avoids PRE-style compensation,
+memory reads, calls, allocations, and any case where different incoming paths
+would require different source registers."
+  (let ((cfg (cfg-build instructions)))
+    (%gcse-apply-to-cfg cfg)
+    (cfg-flatten cfg)))
 
 ;;; ─── Pass: Global Value Numbering ────────────────────────────────────────
 
@@ -212,11 +336,11 @@
 (defun opt-pass-gvn (instructions)
   "Conservative global value numbering over the dominator tree.
 
-   Unlike opt-pass-cse, knowledge is propagated into dominated basic blocks
-   instead of being flushed at every label. This lets a computation in a
-   dominator block replace an equivalent computation in a dominated block,
-   while still avoiding cross-join speculation."
-  (let ((cfg (cfg-build instructions)))
+   The pass first applies a narrow FR-518-style global CSE step using
+   available-expressions / reaching-definitions at block entries, then performs
+   dominator-tree value numbering. Unlike opt-pass-cse, knowledge is propagated
+   into dominated basic blocks instead of being flushed at every label."
+  (let ((cfg (cfg-build (opt-pass-global-cse instructions))))
     (when (cfg-entry cfg)
       (cfg-compute-dominators cfg)
       (%gvn-process-block (cfg-entry cfg)

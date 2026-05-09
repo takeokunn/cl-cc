@@ -9,12 +9,17 @@
 
 (defpackage :cl-cc/expand
   (:use :cl :cl-cc/bootstrap)
+  (:shadow #:compiler-macro-function)
   (:export
    ;; --- expander-data.lisp --- constant table + accessor/struct maps -----
    #:*constant-table*
-   #:*accessor-slot-map*
-   #:*defstruct-slot-registry*
-   #:*defstruct-type-registry*
+    #:*accessor-slot-map*
+    #:*defstruct-slot-registry*
+    #:*defstruct-type-registry*
+    #:*declaim-inline-registry*
+    #:*declaim-optimize-registry*
+    #:with-fresh-defstruct-registries
+    #:declaration-optimize-quality
 
    ;; --- expander-core.lisp --- macro expander construction -------------
    #:make-macro-expander

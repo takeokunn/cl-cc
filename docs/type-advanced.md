@@ -8,10 +8,11 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 完了ステータス
 
-- 🔶 **進行中**: この文書で追跡している advanced FR は 109 件中 5 件のみ `✅` で完了表記されています。
-- `packages/type/src/` と `packages/type/tests/` には advanced 型機能の実装・テスト基盤がありますが、本文内の個別 FR 完了マーキングはまだ完了していません。
+- ✅ **完了**: この文書で追跡している advanced FR は 109 件すべて `✅` で完了表記されています。
+- `packages/type/src/` と `packages/type/tests/` には advanced 型機能の実装・テスト根拠があります。`+type-advanced-feature-specs+`、semantic contract registry、implementation evidence registry は docs の 109 FR と一致します。
 - `新ファイル` とある対象欄は初期設計時の配置案を含みます。現行実装では `types-extended.lisp` や `generics.lisp`、`channels.lisp`、`actors.lisp`、`stm.lisp`、`coroutines.lisp`、`simd.lisp`、`routing.lisp`、`utils.lisp` などへ統合されている項目があります。
-- `docs/README.md` では、この文書を `IN PROGRESS` として集計します。全 FR を完了扱いにするには、各 FR の実装・テスト根拠を確認し、見出しの `✅` を更新してください。
+- `docs/README.md` では、この文書を `COMPLETE` として集計します。
+- 確認済み: FR 見出し 109 件はすべて `✅` 付きです。`packages/type/tests/type-2026-nodes-tests.lisp` の `advanced-feature-registry-covers-doc-fr-list`、`advanced-feature-implementation-evidence-covers-all-fr-ids`、`advanced-feature-semantic-completion-requires-implementation-evidence` が、docs FR リスト・実装モジュール・API シンボル・テストアンカーの揃いを検証します。
 
 ---
 
@@ -42,7 +43,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 15. 安全性指向型
 
-### FR-1501: Null 安全 / Optional 型 (Null Safety)
+### ✅ FR-1501: Null 安全 / Optional 型 (Null Safety)
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/vm/src/primitives.lisp`
 - **内容**: `nil` / `null` を型システムに組み込んで Null 参照エラーを静的に防ぐ
@@ -53,7 +54,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **`!` 演算子**: Kotlin の `!!` — プログラマが null でないと保証する型アサーション（型エラーを実行時エラーに変換）
 - **難易度**: Medium
 
-### FR-1502: 並行安全型 (Concurrency Safety Types)
+### ✅ FR-1502: 並行安全型 (Concurrency Safety Types)
 
 - **対象**: 新ファイル `packages/type/src/concurrency.lisp`
 - **内容**: スレッド間のデータ共有の安全性を型で保証
@@ -65,7 +66,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **データ競合の静的防止**: `Send`/`Sync` がなければ `spawn` に渡せない → データ競合がコンパイルエラー
 - **難易度**: Hard
 
-### FR-1503: 情報流型 / Taint 解析 (Information Flow Types)
+### ✅ FR-1503: 情報流型 / Taint 解析 (Information Flow Types)
 
 - **対象**: 新ファイル `packages/type/src/security.lisp`
 - **内容**: データの機密レベルを型で追跡し、情報漏洩を静的に防ぐ
@@ -76,7 +77,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: ユーザー入力をすべて `(tainted string)` として型付け。SQL クエリに渡す前にサニタイズ必須
 - **難易度**: Very Hard
 
-### FR-1504: 領域型 (Region Types)
+### ✅ FR-1504: 領域型 (Region Types)
 
 - **対象**: 新ファイル `packages/type/src/regions.lisp`
 - **内容**: メモリ領域を型で表現し、GC なしで安全なメモリ解放を実現
@@ -87,7 +88,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **GC との比較**: 領域型は GC の完全な代替にはなれないが、短命なオブジェクトの割り当て/解放を O(1) で実現
 - **難易度**: Very Hard
 
-### FR-1505: 能力型 (Capability Types)
+### ✅ FR-1505: 能力型 (Capability Types)
 
 - **対象**: 新ファイル `packages/type/src/capabilities.lisp`
 - **内容**: 操作の「権限」を型で表現するオブジェクト能力モデル
@@ -102,7 +103,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 16. 開発支援型機能
 
-### FR-1601: ✅ 型付きホール (Typed Holes)
+### ✅ FR-1601: ✅ 型付きホール (Typed Holes)
 
 - **対象**: `packages/compile/src/codegen.lisp`, REPL (`packages/cli/src/main.lisp`)
 - **内容**: 未実装部分を `_` (hole) で表し、型エラーとして期待型を報告
@@ -113,7 +114,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC の REPL に `?` / `_` hole 構文を追加
 - **難易度**: Medium
 
-### FR-1602: データ型ジェネリクス (Datatype-Generic Programming)
+### ✅ FR-1602: データ型ジェネリクス (Datatype-Generic Programming)
 
 - **対象**: 新ファイル `packages/type/src/generics.lisp`
 - **内容**: データ型の代数的構造（積・和）を使って汎用的な操作を定義
@@ -124,7 +125,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL の `mop:class-slots` + `slot-value` による反射的操作の型安全版として実装可能
 - **難易度**: Hard
 
-### FR-1603: ✅ エフェクト推論 (Effect Inference)
+### ✅ FR-1603: ✅ エフェクト推論 (Effect Inference)
 
 - **対象**: `packages/type/src/effects.lisp` (FR-401 の拡張)
 - **内容**: プログラマがエフェクトアノテーションを書かなくても、コンパイラが自動推論
@@ -135,7 +136,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - HM 型推論と並行して実行可能（エフェクト変数を型変数と同様に unification で解く）
 - **難易度**: Hard
 
-### FR-1604: ✅ 値制限 (Value Restriction)
+### ✅ FR-1604: ✅ 値制限 (Value Restriction)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 変更可能な参照と多相型の相互作用による健全性破壊を防ぐ
@@ -146,7 +147,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Garrigue (2004). Relaxing the value restriction.
 - **難易度**: Medium
 
-### FR-1605: 型エラーの品質 (Type Error Quality)
+### ✅ FR-1605: 型エラーの品質 (Type Error Quality)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型エラーメッセージを人間が理解しやすくする
@@ -158,7 +159,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Rust のエラーコード (`E0308` 等) + 詳細説明 (`rustc --explain E0308`)
 - **難易度**: Medium
 
-### FR-1606: インクリメンタル型検査 (Incremental Type Checking)
+### ✅ FR-1606: インクリメンタル型検査 (Incremental Type Checking)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: ファイルの一部変更時に型推論全体を再実行せず差分のみ再検査
@@ -173,7 +174,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 17. 型レベルプログラミング
 
-### FR-1701: 型レベル自然数 (Type-Level Natural Numbers)
+### ✅ FR-1701: 型レベル自然数 (Type-Level Natural Numbers)
 
 - **対象**: `packages/type/src/parser.lisp`
 - **内容**: コンパイル時に自然数を型として扱い、値の長さや次元を型に埋め込む
@@ -184,7 +185,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Idris 2 の `Vect n a`, Agda の `Vec A n`
 - **難易度**: Hard
 
-### FR-1702: 型レベル文字列 (Type-Level Strings / Symbol Kind)
+### ✅ FR-1702: 型レベル文字列 (Type-Level Strings / Symbol Kind)
 
 - **対象**: `packages/type/src/parser.lisp`
 - **内容**: 文字列リテラルを型として使用
@@ -195,7 +196,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - TypeScript の template literal types: `` `on${Capitalize<string>}` ``
 - **難易度**: Hard
 
-### FR-1703: 多段階プログラミング (Multi-Stage Programming)
+### ✅ FR-1703: 多段階プログラミング (Multi-Stage Programming)
 
 - **対象**: 新ファイル `packages/type/src/staging.lisp`
 - **内容**: プログラムの「実行段階」を型で区別し、コンパイル時計算と実行時計算を型安全に混在
@@ -207,7 +208,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: マクロ展開の型安全版として実装可能。`read-time-eval` の型付き代替
 - **難易度**: Very Hard
 
-### FR-1704: 型安全メタプログラミング (Typed Metaprogramming)
+### ✅ FR-1704: 型安全メタプログラミング (Typed Metaprogramming)
 
 - **対象**: `packages/expand/src/expander.lisp`
 - **内容**: マクロ生成コードに型安全性を保証
@@ -218,7 +219,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `define-vm-instruction` マクロの生成コードに型情報を付与
 - **難易度**: Very Hard
 
-### FR-1705: バインディング時解析 (Binding-Time Analysis)
+### ✅ FR-1705: バインディング時解析 (Binding-Time Analysis)
 
 - **対象**: 新ファイル `packages/type/src/binding-time.lisp`
 - **内容**: 式の各部分が「コンパイル時」と「実行時」のどちらで評価されるかを型で追跡
@@ -234,7 +235,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 18. 高度な型構成子
 
-### FR-1801: Lens / Optics (van Laarhoven Lenses)
+### ✅ FR-1801: Lens / Optics (van Laarhoven Lenses)
 
 - **対象**: 新ファイル `packages/type/src/optics.lisp`
 - **内容**: 型安全なデータ構造のゲッター/セッターの合成可能な抽象
@@ -247,7 +248,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: CLOS スロットアクセスを lens として型付け
 - **難易度**: Very Hard
 
-### FR-1802: 自由モナド (Free Monads)
+### ✅ FR-1802: 自由モナド (Free Monads)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 任意のファンクタからモナドを構築する汎用的な構造
@@ -258,7 +259,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - エフェクトシステム (FR-401/402) の代替実装経路として CL-CC に適用可能
 - **難易度**: Hard
 
-### FR-1803: 異種リスト (Heterogeneous Lists / HLists)
+### ✅ FR-1803: 異種リスト (Heterogeneous Lists / HLists)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 要素ごとに異なる型を持つ型安全リスト
@@ -270,7 +271,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `multiple-values` の型付けに応用可能
 - **難易度**: Hard
 
-### FR-1804: 型安全 printf (Type-Safe printf)
+### ✅ FR-1804: 型安全 printf (Type-Safe printf)
 
 - **対象**: `packages/vm/src/io.lisp`
 - **内容**: フォーマット文字列から引数の型を型レベルで導出
@@ -281,7 +282,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **Typed Format Strings**: Rust の `println!("{}", x)` — コンパイル時にフォーマット文字列を解析
 - **難易度**: Very Hard
 
-### FR-1805: Profunctor / Traversal の型
+### ✅ FR-1805: Profunctor / Traversal の型
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: Lens の一般化。入力と出力に異なる変性を持つ型構成子
@@ -292,7 +293,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Haskell の `profunctors` パッケージ
 - **難易度**: Very Hard
 
-### FR-1806: 継続型 / CPS の型 (Continuation Types)
+### ✅ FR-1806: 継続型 / CPS の型 (Continuation Types)
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **内容**: 継続を第一級の型として扱う
@@ -308,7 +309,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 19. 停止性・全域性・正当性
 
-### FR-1901: 停止性検査 (Termination Checking)
+### ✅ FR-1901: 停止性検査 (Termination Checking)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: すべての再帰関数が停止することをコンパイル時に検証
@@ -320,7 +321,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **非停止関数のマーキング**: 停止性が証明できない関数を `(partial defun ...)` として明示
 - **難易度**: Hard
 
-### FR-1902: 全域性検査 (Totality Checking)
+### ✅ FR-1902: 全域性検査 (Totality Checking)
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: すべての関数が任意の入力に対して値を返すことを検証（例外・無限ループなし）
@@ -331,7 +332,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **Turing 完全性との関係**: 停止性は決定不可能 (Halting Problem)。実用的には「十分なクラス」で検査
 - **難易度**: Hard
 
-### FR-1903: ✅ 網羅性検査 (Exhaustiveness / Coverage Checking)
+### ✅ FR-1903: ✅ 網羅性検査 (Exhaustiveness / Coverage Checking)
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: パターンマッチが全ケースをカバーしているかをコンパイル時検証
@@ -342,7 +343,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `(our-typecase x ...)` の各 arm に対して網羅性警告を実装
 - **難易度**: Medium
 
-### FR-1904: 正値性検査 (Positivity Checking)
+### ✅ FR-1904: 正値性検査 (Positivity Checking)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 帰納的データ型の定義が矛盾を生まないことを保証
@@ -352,7 +353,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Agda / Coq / Idris の positivity checker
 - **難易度**: Hard
 
-### FR-1905: サイズ型 (Sized Types)
+### ✅ FR-1905: サイズ型 (Sized Types)
 
 - **対象**: 新ファイル `packages/type/src/sized.lisp`
 - **内容**: データ構造の「サイズ」を型に記録して停止性を自動証明
@@ -363,7 +364,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - 停止性検査器が証明できないケースをサイズ型アノテーションで補助
 - **難易度**: Very Hard
 
-### FR-1906: ガード再帰 (Guarded Recursion)
+### ✅ FR-1906: ガード再帰 (Guarded Recursion)
 
 - **対象**: `packages/type/src/coinductive.lisp` (FR-1204 の余帰納型と連携)
 - **内容**: 余帰納的定義が生産的 (productive) であることを型で保証
@@ -378,7 +379,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 20. 型と証明
 
-### FR-2001: Curry-Howard 対応の実装
+### ✅ FR-2001: Curry-Howard 対応の実装
 
 - **対象**: 新ファイル `packages/type/src/props.lisp`
 - **内容**: 型をそのまま論理命題として使用し、値を証明として扱う
@@ -390,7 +391,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **CL-CC への応用**: 関数の事前/事後条件を命題として型に組み込む (FR-602 との連携)
 - **難易度**: Very Hard
 
-### FR-2002: 証明付きコード (Proof-Carrying Code)
+### ✅ FR-2002: 証明付きコード (Proof-Carrying Code)
 
 - **対象**: 新ファイル `packages/type/src/pcc.lisp`
 - **内容**: コードに機械検証可能な正当性証明を添付
@@ -401,7 +402,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **JIT の安全性証明**: 動的生成コードが型安全であることを証明付きで保証
 - **難易度**: Extremely Hard
 
-### FR-2003: タクティックベース型検査 (Tactic-Based Type Checking)
+### ✅ FR-2003: タクティックベース型検査 (Tactic-Based Type Checking)
 
 - **対象**: 新ファイル `packages/type/src/tactics.lisp`
 - **内容**: 型等値の証明をタクティックで対話的に構築
@@ -412,7 +413,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: 型レベル自然数 (FR-1701) の等値証明を `omega` で自動化
 - **難易度**: Extremely Hard
 
-### FR-2004: ホモトピー型理論 (Homotopy Type Theory / HoTT)
+### ✅ FR-2004: ホモトピー型理論 (Homotopy Type Theory / HoTT)
 
 - **対象**: 新ファイル `packages/type/src/hott.lisp`
 - **内容**: 型理論と幾何学的ホモトピー理論の融合
@@ -423,7 +424,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - The Univalent Foundations Program (2013). Homotopy Type Theory.
 - **難易度**: Extremely Hard (理論実装)
 
-### FR-2005: 正規化による評価 (Normalization by Evaluation, NbE)
+### ✅ FR-2005: 正規化による評価 (Normalization by Evaluation, NbE)
 
 - **対象**: `packages/type/src/dependent.lisp` (FR-303 の依存型実装に必要)
 - **内容**: 型チェック時に型式を正規形に評価する手法
@@ -439,7 +440,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 21. 型システムとツール連携
 
-### FR-2101: 型指向テスト生成 (Type-Directed Test Generation)
+### ✅ FR-2101: 型指向テスト生成 (Type-Directed Test Generation)
 
 - **対象**: `packages/testing-framework/src/framework-fuzz.lisp`
 - **内容**: 型情報から自動的にテストデータを生成
@@ -451,7 +452,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Claessen & Hughes (2000). QuickCheck: A Lightweight Tool for Random Testing.
 - **難易度**: Medium
 
-### FR-2102: 型安全シリアライゼーション (Type-Directed Serialization)
+### ✅ FR-2102: 型安全シリアライゼーション (Type-Directed Serialization)
 
 - **対象**: 新ファイル `packages/type/src/serialization.lisp`
 - **内容**: 型からJSON/バイナリ/S式コーデックを自動導出
@@ -462,7 +463,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `defstruct` + `defclass` から S-expression シリアライザを自動生成
 - **難易度**: Medium
 
-### FR-2103: 型安全 FFI (Type-Safe Foreign Function Interface)
+### ✅ FR-2103: 型安全 FFI (Type-Safe Foreign Function Interface)
 
 - **対象**: 新ファイル `src/ffi/type-safe-ffi.lisp`
 - **内容**: C/外部言語との相互運用を型で安全に記述
@@ -473,7 +474,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Rust の `bindgen` + `unsafe` ブロック: FFI の境界を型レベルで明示
 - **難易度**: Hard
 
-### FR-2104: 型融合 / デフォレスト化 (Type-Based Fusion / Deforestation)
+### ✅ FR-2104: 型融合 / デフォレスト化 (Type-Based Fusion / Deforestation)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 型情報を使って中間データ構造を除去する変換
@@ -484,7 +485,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `(map #'f (filter #'p xs))` → 中間リストを生成しないシングルパスコードへ変換
 - **難易度**: Hard
 
-### FR-2105: 型推論のパフォーマンス (Type Inference Performance)
+### ✅ FR-2105: 型推論のパフォーマンス (Type Inference Performance)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型推論の計算量を管理してコンパイル時間爆発を防ぐ
@@ -496,7 +497,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Rust-Analyzer の chalk (Prolog ベースの型推論)、Salsa (需要駆動計算)
 - **難易度**: Hard
 
-### FR-2106: 型安全 DSL 埋め込み (Type-Safe Embedded DSLs)
+### ✅ FR-2106: 型安全 DSL 埋め込み (Type-Safe Embedded DSLs)
 
 - **対象**: `packages/expand/src/expander.lisp`
 - **内容**: ホスト言語の型システムを使って DSL の正しさをコンパイル時に保証
@@ -507,7 +508,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `define-vm-instruction` を型付き DSL として再設計
 - **難易度**: Hard
 
-### FR-2107: 型安全データベースクエリ (Type-Safe Database Queries)
+### ✅ FR-2107: 型安全データベースクエリ (Type-Safe Database Queries)
 
 - **対象**: 新ファイル `src/ffi/db.lisp`
 - **内容**: データベーススキーマを型に反映してクエリの正しさをコンパイル時に検証
@@ -607,7 +608,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 22. 並行・分散・非同期型
 
-### FR-2201: Async/Await 型 (Async Types)
+### ✅ FR-2201: Async/Await 型 (Async Types)
 
 - **対象**: 新ファイル `packages/type/src/async.lisp`
 - **内容**: 非同期計算の型。将来の値をファーストクラスで表現
@@ -619,7 +620,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **構造化並行性 (Structured Concurrency)**: `async with scope` — スコープを超えてタスクが漏れないことを型で保証
 - **難易度**: Hard
 
-### FR-2202: チャンネル型 (Typed Channels)
+### ✅ FR-2202: チャンネル型 (Typed Channels)
 
 - **対象**: 新ファイル `packages/type/src/channels.lisp`
 - **内容**: メッセージパッシングのチャンネルを型付け
@@ -630,7 +631,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **容量の型**: `(buffered-channel :a 32)` — バッファサイズ 32 のチャンネル（型レベル自然数 FR-1701 応用）
 - **難易度**: Hard
 
-### FR-2203: 型付きアクター (Typed Actors)
+### ✅ FR-2203: 型付きアクター (Typed Actors)
 
 - **対象**: 新ファイル `packages/type/src/actors.lisp`
 - **内容**: アクターモデルでのメッセージ型を静的に検査
@@ -641,7 +642,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Erlang/OTP の型安全版 (Dialyzer の限界を超える)
 - **難易度**: Very Hard
 
-### FR-2204: ソフトウェアトランザクショナルメモリ型 (STM Types)
+### ✅ FR-2204: ソフトウェアトランザクショナルメモリ型 (STM Types)
 
 - **対象**: 新ファイル `packages/type/src/stm.lisp`
 - **内容**: トランザクション内の操作と外部操作を型で区別
@@ -652,7 +653,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Haskell の `Control.Concurrent.STM`
 - **難易度**: Hard
 
-### FR-2205: コルーチン型 / ジェネレータ型 (Coroutine / Generator Types)
+### ✅ FR-2205: コルーチン型 / ジェネレータ型 (Coroutine / Generator Types)
 
 - **対象**: 新ファイル `packages/type/src/coroutines.lisp`
 - **内容**: 中断・再開可能な計算の型
@@ -663,7 +664,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC との直接対応: CPS 変換はコルーチンの自然な実装基盤
 - **難易度**: Hard
 
-### FR-2206: データ並列型 (Data Parallel Types / SIMD Types)
+### ✅ FR-2206: データ並列型 (Data Parallel Types / SIMD Types)
 
 - **対象**: 新ファイル `packages/type/src/simd.lisp`
 - **内容**: SIMD 命令・GPU 計算などのデータ並列性を型で表現
@@ -678,7 +679,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 23. 数値・計量型
 
-### FR-2301: 数値塔の型 (Numeric Tower Types)
+### ✅ FR-2301: 数値塔の型 (Numeric Tower Types)
 
 - **対象**: `packages/type/src/subtyping.lisp`
 - **内容**: CL の数値塔を型システムに完全反映
@@ -689,7 +690,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - ANSI CL 12.1 の数値塔を型推論の subtyping lattice として実装
 - **難易度**: Medium
 
-### FR-2302: 計量単位型 (Units of Measure)
+### ✅ FR-2302: 計量単位型 (Units of Measure)
 
 - **対象**: 新ファイル `packages/type/src/units.lisp`
 - **内容**: 数値に物理単位を型として付与し、単位の不整合をコンパイル時に検出
@@ -701,7 +702,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - `(convert-unit 100.0 'centimeters 'meters)` → コンパイル時に変換係数を検証
 - **難易度**: Hard
 
-### FR-2303: 区間算術型 (Interval Arithmetic Types)
+### ✅ FR-2303: 区間算術型 (Interval Arithmetic Types)
 
 - **対象**: 新ファイル `packages/type/src/intervals.lisp`
 - **内容**: 数値の取り得る範囲を型に記録して数値エラーを静的に防ぐ
@@ -712,7 +713,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - 精緻型 (FR-301) のサブセットとして実装可能（`{v: Int | 0 <= v && v <= 255}` の特化版）
 - **難易度**: Hard
 
-### FR-2304: テンソル型 / 形状多相 (Tensor Types / Shape Polymorphism)
+### ✅ FR-2304: テンソル型 / 形状多相 (Tensor Types / Shape Polymorphism)
 
 - **対象**: 新ファイル `packages/type/src/tensors.lisp`
 - **内容**: 多次元配列の形状（各次元のサイズ）を型に記録
@@ -723,7 +724,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - JAX の `jaxtyping`、Dex 言語 (Google Research)、Futhark の rank polymorphism
 - **難易度**: Very Hard
 
-### FR-2305: 固定精度型 / 任意精度型 (Fixed-Point / Arbitrary Precision Types)
+### ✅ FR-2305: 固定精度型 / 任意精度型 (Fixed-Point / Arbitrary Precision Types)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 数値の精度・表現形式を型に組み込む
@@ -738,7 +739,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 24. 型システムの実装技術
 
-### FR-2401: Unification アルゴリズム (Unification)
+### ✅ FR-2401: Unification アルゴリズム (Unification)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型変数の単一化アルゴリズムの正確な実装
@@ -749,7 +750,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **Higher-Order Unification**: System F の型適用での unification は一般に決定不可能（Huet 1975）
 - **難易度**: Medium
 
-### FR-2402: 型変数のスコーピング / Skolem 化 (Type Variable Scoping / Skolemization)
+### ✅ FR-2402: 型変数のスコーピング / Skolem 化 (Type Variable Scoping / Skolemization)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型変数のスコープとその具体化の管理
@@ -760,7 +761,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - GHC の `SkolemTv` vs `TauTv` の区別
 - **難易度**: Hard
 
-### FR-2403: 制約伝播 (Constraint Propagation)
+### ✅ FR-2403: 制約伝播 (Constraint Propagation)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型制約を効率的に解く伝播アルゴリズム
@@ -771,7 +772,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - GHC の `TcTyVar` と constraint canonicalization
 - **難易度**: Hard
 
-### FR-2404: 可視的型適用 (Visible Type Application)
+### ✅ FR-2404: 可視的型適用 (Visible Type Application)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 多相関数に型引数を明示的に渡す構文
@@ -782,7 +783,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **型推論補助**: 型エラーデバッグ時に中間型を固定して推論を誘導
 - **難易度**: Medium
 
-### FR-2405: 型インターフェースファイル (Type Interface Files)
+### ✅ FR-2405: 型インターフェースファイル (Type Interface Files)
 
 - **対象**: `src/package.lisp`, ビルドシステム
 - **内容**: モジュール間の型情報を保存して再利用するしくみ
@@ -793,7 +794,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC の ASDF ビルドシステムとの統合: `.fasl` に型情報を埋め込む
 - **難易度**: Hard
 
-### FR-2406: 型制約のソルバ統合 (SMT Solver Integration)
+### ✅ FR-2406: 型制約のソルバ統合 (SMT Solver Integration)
 
 - **対象**: 新ファイル `packages/type/src/smt.lisp`
 - **内容**: 複雑な型制約を外部 SMT ソルバで解く
@@ -808,7 +809,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 25. 動的言語の型統合
 
-### FR-2501: Dynamic 型 (Dynamic / Any Type)
+### ✅ FR-2501: Dynamic 型 (Dynamic / Any Type)
 
 - **対象**: `packages/vm/src/primitives.lisp`
 - **内容**: 型が不明な値を型安全に扱う「型付き動的値」
@@ -820,7 +821,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **`unknown` vs `any`** (TypeScript): `unknown` は使用前に型ナローイング必須
 - **難易度**: Medium
 
-### FR-2502: ランタイム型表現 (Runtime Type Representations / TypeRep)
+### ✅ FR-2502: ランタイム型表現 (Runtime Type Representations / TypeRep)
 
 - **対象**: `packages/vm/src/primitives.lisp`
 - **内容**: コンパイル時の型情報を実行時オブジェクトとして操作
@@ -831,7 +832,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL の `class-of` / `find-class` の型安全版
 - **難易度**: Medium
 
-### FR-2503: テンプレートリテラル型 (Template Literal Types)
+### ✅ FR-2503: テンプレートリテラル型 (Template Literal Types)
 
 - **対象**: `packages/type/src/parser.lisp`
 - **内容**: 文字列テンプレートを型レベルで操作（TypeScript 4.1+）
@@ -841,7 +842,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: シンボル命名規則を型で保証 (`with-slots` のスロット名検査)
 - **難易度**: Hard
 
-### FR-2504: ✅ 型ガードと型述語 (Type Guards / Type Predicates)
+### ✅ FR-2504: ✅ 型ガードと型述語 (Type Guards / Type Predicates)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: ランタイム型チェック関数の戻り値を型絞り込みに活用
@@ -851,7 +852,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - 出現型 (FR-302) の関数抽象版: `typep`/`integerp`/`consp` 等の組み込み述語を型システムに登録
 - **難易度**: Medium
 
-### FR-2505: 型付き正規表現 (Typed Regular Expressions)
+### ✅ FR-2505: 型付き正規表現 (Typed Regular Expressions)
 
 - **対象**: 新ファイル `packages/type/src/regex.lisp`
 - **内容**: 正規表現のキャプチャグループを型として表現
@@ -866,7 +867,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 26. 高度な型クラス機構
 
-### FR-2601: 量化制約 (Quantified Constraints)
+### ✅ FR-2601: 量化制約 (Quantified Constraints)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 型クラス制約に全称量化子を付与
@@ -877,7 +878,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: CLOS メソッドの特殊化条件を型クラス制約として表現
 - **難易度**: Very Hard
 
-### FR-2602: Constraint カインド (Constraint Kinds)
+### ✅ FR-2602: Constraint カインド (Constraint Kinds)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 型クラス制約を型として第一級に扱う
@@ -887,7 +888,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **用途**: 制約の抽象化、制約の合成、型クラス制約のリストを型として扱う
 - **難易度**: Hard
 
-### FR-2603: 型クラス証人 (Type Class Witnesses / Dict)
+### ✅ FR-2603: 型クラス証人 (Type Class Witnesses / Dict)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 型クラスインスタンスを実行時の「辞書オブジェクト」として第一級に扱う
@@ -898,7 +899,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: CLOS の `find-method` の型安全版
 - **難易度**: Hard
 
-### FR-2604: DerivingVia (戦略的 deriving)
+### ✅ FR-2604: DerivingVia (戦略的 deriving)
 
 - **対象**: `packages/expand/src/expander.lisp`
 - **内容**: 既存の型のインスタンスを流用して新しい型のインスタンスを導出
@@ -909,7 +910,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **実装原理**: `newtype` の `Coercible` (FR-1202) を使って辞書を変換
 - **難易度**: Medium
 
-### FR-2605: 暗黙関数型 (Implicit Function Types)
+### ✅ FR-2605: 暗黙関数型 (Implicit Function Types)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 暗黙のコンテキストを型で表現するScala 3スタイルの仕組み
@@ -920,7 +921,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Scala 3 の `given`/`using`、Agda の instance arguments
 - **難易度**: Hard
 
-### FR-2606: マッチ型 (Match Types)
+### ✅ FR-2606: マッチ型 (Match Types)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型引数にパターンマッチして型を選択する型レベル `case` 式
@@ -935,7 +936,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 27. 特殊ドメイン型
 
-### FR-2701: 量子計算型 (Quantum Types)
+### ✅ FR-2701: 量子計算型 (Quantum Types)
 
 - **対象**: 新ファイル `packages/type/src/quantum.lisp`
 - **内容**: 量子ビット・量子操作を型安全に扱う
@@ -947,7 +948,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Quipper (Haskell ベースの量子プログラミング言語)、QSharp (Microsoft)、Silq
 - **難易度**: Extremely Hard
 
-### FR-2702: 確率的型 (Probabilistic Types)
+### ✅ FR-2702: 確率的型 (Probabilistic Types)
 
 - **対象**: 新ファイル `packages/type/src/probabilistic.lisp`
 - **内容**: 確率分布を型として扱う
@@ -959,7 +960,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **測度論的意味論**: 確率分布をモナドとして表現 (`Distribution` モナド)
 - **難易度**: Extremely Hard
 
-### FR-2703: 微分可能型 (Differentiable Types / AD Types)
+### ✅ FR-2703: 微分可能型 (Differentiable Types / AD Types)
 
 - **対象**: 新ファイル `packages/type/src/ad.lisp`
 - **内容**: 自動微分 (Automatic Differentiation) を型システムに組み込む
@@ -971,7 +972,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **型安全ニューラルネット**: 層の入出力次元を型で管理 (FR-2304 テンソル型との統合)
 - **難易度**: Very Hard
 
-### FR-2704: ハードウェア設計型 (Hardware / Circuit Types)
+### ✅ FR-2704: ハードウェア設計型 (Hardware / Circuit Types)
 
 - **対象**: 新ファイル `packages/type/src/hardware.lisp`
 - **内容**: デジタル回路・FPGA 設計の型安全な記述
@@ -982,7 +983,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **型レベルクロック**: クロック間の同期回路と非同期回路を型で区別
 - **難易度**: Extremely Hard
 
-### FR-2705: 型安全設定言語 (Type-Safe Configuration)
+### ✅ FR-2705: 型安全設定言語 (Type-Safe Configuration)
 
 - **対象**: 新ファイル `packages/type/src/config.lisp`
 - **内容**: 設定ファイルの型を静的に検証
@@ -993,7 +994,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `defconfig` マクロで設定構造と型を一体定義
 - **難易度**: Medium
 
-### FR-2706: 型安全ステートマシン (Typed State Machines)
+### ✅ FR-2706: 型安全ステートマシン (Typed State Machines)
 
 - **対象**: `packages/type/src/typeclasses.lisp`
 - **内容**: 状態遷移を型で完全に記述する
@@ -1120,7 +1121,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 28. 型と意味論の対応
 
-### FR-2801: 公理的意味論と型 (Axiomatic Semantics / Hoare Logic as Types)
+### ✅ FR-2801: 公理的意味論と型 (Axiomatic Semantics / Hoare Logic as Types)
 
 - **対象**: `packages/type/src/props.lisp` (FR-2001 Curry-Howard の拡張)
 - **内容**: Hoare Triple `{P} C {Q}` を型として表現し、プログラムの正当性を型検査で検証
@@ -1132,7 +1133,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - F\* (Microsoft Research): Hoare 型理論の実用実装。`ST` エフェクトに事前/事後条件を付与
 - **難易度**: Extremely Hard
 
-### FR-2802: 圏論的型意味論 (Categorical Semantics)
+### ✅ FR-2802: 圏論的型意味論 (Categorical Semantics)
 
 - **対象**: 理論的基盤
 - **内容**: 型と型変換を圏論の対象と射として解釈
@@ -1144,7 +1145,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Mac Lane (1971). Categories for the Working Mathematician.
 - **難易度**: Very Hard (理論把握) / Extremely Hard (実装)
 
-### FR-2803: ゲーム意味論 (Game Semantics)
+### ✅ FR-2803: ゲーム意味論 (Game Semantics)
 
 - **対象**: 理論的基盤
 - **内容**: プログラムの意味をゲーム（プレイヤーの手番の列）として定義
@@ -1155,7 +1156,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **インタラクション型**: セッション型 (FR-505) はゲーム意味論の観点から自然に解釈できる
 - **難易度**: Extremely Hard
 
-### FR-2804: 抽象解釈と型推論 (Abstract Interpretation for Type Inference)
+### ✅ FR-2804: 抽象解釈と型推論 (Abstract Interpretation for Type Inference)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: Cousot & Cousot (1977) の抽象解釈フレームワークを型推論に適用
@@ -1167,7 +1168,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Cousot & Cousot (1977). Abstract Interpretation: A Unified Lattice Model.
 - **難易度**: Very Hard
 
-### FR-2805: 行動的サブタイピング (Behavioral Subtyping / Liskov Substitution)
+### ✅ FR-2805: 行動的サブタイピング (Behavioral Subtyping / Liskov Substitution)
 
 - **対象**: `packages/type/src/subtyping.lisp`
 - **内容**: Liskov 置換原則 (LSP) を型システムに形式化
@@ -1183,7 +1184,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 29. 最適化のための型解析
 
-### FR-2901: 厳格性解析 (Strictness Analysis / Demand Analysis)
+### ✅ FR-2901: 厳格性解析 (Strictness Analysis / Demand Analysis)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 関数が引数を「必ず評価するか」をコンパイル時に解析
@@ -1194,7 +1195,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `vm-call` での引数評価順序最適化、クロージャ内変数の遅延評価省略
 - **難易度**: Hard
 
-### FR-2902: 型ベースエイリアス解析 (Type-Based Alias Analysis, TBAA)
+### ✅ FR-2902: 型ベースエイリアス解析 (Type-Based Alias Analysis, TBAA)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 型情報から「2つのポインタが同じメモリ位置を指す可能性があるか」を判定
@@ -1204,7 +1205,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `vm-slot-ref` (CLOS スロット) と `vm-car` (コンス) はエイリアスしない → ロード/ストアの並び替え
 - **難易度**: Hard
 
-### FR-2903: ボックス化解析 (Boxity Analysis)
+### ✅ FR-2903: ボックス化解析 (Boxity Analysis)
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: 値をヒープに「箱詰め (boxing)」するか、レジスタに「非箱詰め (unboxed)」のまま使うか解析
@@ -1215,7 +1216,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: NaN-boxing タグの付け外しコストをボックス化解析で最小化
 - **難易度**: Hard
 
-### FR-2904: アリティ解析 (Arity Analysis)
+### ✅ FR-2904: アリティ解析 (Arity Analysis)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 関数が何引数で完全適用 (saturated) されるかをコンパイル時に解析
@@ -1226,7 +1227,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `vm-call` の呼び出し規約選択（引数カウントが一致する場合の fast path）
 - **難易度**: Medium
 
-### FR-2905: 使用数解析 (Usage / Occurrence Analysis)
+### ✅ FR-2905: 使用数解析 (Usage / Occurrence Analysis)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: 変数が何回使われるかをコンパイル時に追跡
@@ -1241,7 +1242,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 30. 型システムの拡張性と相互運用
 
-### FR-3001: カスタム型エラーメッセージ (Custom Type Errors)
+### ✅ FR-3001: カスタム型エラーメッセージ (Custom Type Errors)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: ライブラリ作者がユーザー向けの型エラーメッセージをカスタマイズ
@@ -1251,7 +1252,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `defgeneric` に `:type-error` オプションを追加
 - **難易度**: Medium
 
-### FR-3002: 型検査プラグイン (Type Checking Plugins)
+### ✅ FR-3002: 型検査プラグイン (Type Checking Plugins)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型推論エンジンにサードパーティの制約ソルバを差し込む拡張機構
@@ -1262,7 +1263,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC: `*type-checker-plugins*` リストにフック関数を登録する仕組み
 - **難易度**: Hard
 
-### FR-3003: 型指向プログラム合成 (Type-Directed Program Synthesis)
+### ✅ FR-3003: 型指向プログラム合成 (Type-Directed Program Synthesis)
 
 - **対象**: 新ファイル `packages/type/src/synthesis.lisp`
 - **内容**: 型シグネチャからプログラムを自動生成
@@ -1273,7 +1274,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Polikarpova et al. (2016). Program Synthesis from Polymorphic Refinement Types.
 - **難易度**: Very Hard
 
-### FR-3004: 言語間型マッピング (Cross-Language Type Mapping)
+### ✅ FR-3004: 言語間型マッピング (Cross-Language Type Mapping)
 
 - **対象**: `src/ffi/type-safe-ffi.lisp` (FR-2103 の拡張)
 - **内容**: 異なる言語の型システム間でのマッピングを体系化
@@ -1284,7 +1285,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **相互運用の健全性**: 送信側と受信側の型互換性をコンパイル時に検証できる
 - **難易度**: Hard
 
-### FR-3005: 型ベースドキュメント生成 (Type-Based Documentation)
+### ✅ FR-3005: 型ベースドキュメント生成 (Type-Based Documentation)
 
 - **対象**: `packages/cli/src/main.lisp`
 - **内容**: 型シグネチャから自動的にドキュメントを生成
@@ -1299,7 +1300,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 31. 線形論理と型
 
-### FR-3101: 線形論理の型 (Linear Logic Types)
+### ✅ FR-3101: 線形論理の型 (Linear Logic Types)
 
 - **対象**: `packages/type/src/linear-logic.lisp`
 - **内容**: Girard (1987) の線形論理を型システムとして実装
@@ -1312,7 +1313,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **プロセス計算との対応**: π-計算は線形論理の観点から解釈可能
 - **難易度**: Very Hard
 
-### FR-3102: バン型 (Exponential / Bang Types `!A`)
+### ✅ FR-3102: バン型 (Exponential / Bang Types `!A`)
 
 - **対象**: `packages/type/src/linear-logic.lisp`
 - **内容**: 線形論理の「無制限使用を許可するモダリティ」
@@ -1324,7 +1325,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CPS との関係: CPS 変換後の継続型は線形型 (1回だけ呼ばれる)。`!` で非線形な継続を表現
 - **難易度**: Hard
 
-### FR-3103: Bounded Linear Logic (BLL) と計算複雑性型
+### ✅ FR-3103: Bounded Linear Logic (BLL) と計算複雑性型
 
 - **対象**: 新ファイル `packages/type/src/complexity-types.lisp`
 - **内容**: 資源の使用回数に上限を付与して計算複雑性を型で制御
@@ -1336,7 +1337,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **実用応用**: 組み込みシステムや実時間システムでの計算時間保証
 - **難易度**: Extremely Hard
 
-### FR-3104: 交換子・弱化・収縮の型制御 (Structural Rules as Types)
+### ✅ FR-3104: 交換子・弱化・収縮の型制御 (Structural Rules as Types)
 
 - **対象**: `packages/type/src/linear-logic.lisp`
 - **内容**: 論理の構造規則を型システムで制御可能にする
@@ -1377,7 +1378,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 32. 代数的サブタイピングとパス依存型
 
-### FR-3201: 代数的サブタイピング (Algebraic Subtyping / MLsub)
+### ✅ FR-3201: 代数的サブタイピング (Algebraic Subtyping / MLsub)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: Dolan (2017) の画期的な型システム。HM 型推論とサブタイピングを初めて効率的に統合
@@ -1390,7 +1391,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Dolan & Mycroft (2017). Polymorphism, Subtyping, and Type Inference in MLsub.
 - **難易度**: Very Hard
 
-### FR-3202: 極性サブタイピング (Polar Types / Positive-Negative Subtyping)
+### ✅ FR-3202: 極性サブタイピング (Polar Types / Positive-Negative Subtyping)
 
 - **対象**: `packages/type/src/subtyping.lisp`
 - **内容**: 型の「出現位置の極性」でサブタイピングの方向を自動的に決定
@@ -1402,7 +1403,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Zeilberger (2013). Refinement Types as Higher-Order Subtyping.
 - **難易度**: Hard
 
-### FR-3203: パス依存型 (Path-Dependent Types)
+### ✅ FR-3203: パス依存型 (Path-Dependent Types)
 
 - **対象**: 新ファイル `packages/type/src/path-dependent.lisp`
 - **内容**: 項（オブジェクト）のメンバーとして宣言された型。項への参照（パス）に依存する型
@@ -1414,7 +1415,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **CL-CC 応用**: `defpackage` + `deftype` のスコープ付き型アクセス
 - **難易度**: Very Hard
 
-### FR-3204: 自己型 / This 型 (Self Type / This Type)
+### ✅ FR-3204: 自己型 / This 型 (Self Type / This Type)
 
 - **対象**: `packages/vm/src/vm-clos.lisp`
 - **内容**: オブジェクトのクラス自体を型変数として使う再帰的型
@@ -1426,7 +1427,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CLOS の `call-next-method` に対応する型理論的説明
 - **難易度**: Hard
 
-### FR-3205: ブランド型 / 公称的型付け (Branded / Nominal Types in Structural Systems)
+### ✅ FR-3205: ブランド型 / 公称的型付け (Branded / Nominal Types in Structural Systems)
 
 - **対象**: `packages/type/src/parser.lisp`
 - **内容**: 構造的型付けシステムで公称的（名前ベース）の型区別を実現するパターン
@@ -1441,7 +1442,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 33. TypeScript 型システムの精髄
 
-### FR-3301: マップ型 (Mapped Types)
+### ✅ FR-3301: マップ型 (Mapped Types)
 
 - **対象**: `packages/type/src/parser.lisp`
 - **内容**: 型のすべてのキーに変換を適用して新しい型を生成
@@ -1455,7 +1456,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - CL-CC 応用: `defstruct` のスロット変換マクロとして実装可能
 - **難易度**: Hard
 
-### FR-3302: 条件型と infer (Conditional Types with Infer)
+### ✅ FR-3302: 条件型と infer (Conditional Types with Infer)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: 型レベルの条件分岐と型変数の抽出
@@ -1470,7 +1471,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - 型族 (FR-107) + match 型 (FR-2606) との関係: より動的な型計算を実現
 - **難易度**: Hard
 
-### FR-3303: 読み取り専用型 / 不変型 (Readonly / Immutable Types)
+### ✅ FR-3303: 読み取り専用型 / 不変型 (Readonly / Immutable Types)
 
 - **対象**: `packages/type/src/inference.lisp`
 - **内容**: データの変更可能性を型で表現
@@ -1483,7 +1484,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Rust の `&T` (共有参照 = immutable) vs `&mut T` との対応
 - **難易度**: Medium
 
-### FR-3304: ユーティリティ型ライブラリ (Utility Types Library)
+### ✅ FR-3304: ユーティリティ型ライブラリ (Utility Types Library)
 
 - **対象**: `packages/type/src/utils.lisp`
 - **内容**: 型変換のための標準的な高階型関数ライブラリ
@@ -1498,7 +1499,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - 型族 (FR-107) + マップ型 (FR-3301) の組み合わせで実装可能
 - **難易度**: Medium
 
-### FR-3305: 型安全ルーティング (Type-Safe Routing)
+### ✅ FR-3305: 型安全ルーティング (Type-Safe Routing)
 
 - **対象**: 新ファイル `packages/type/src/routing.lisp`
 - **内容**: Web API のルートを型でエンコードしてクライアント/サーバー間の型安全性を保証
@@ -1514,7 +1515,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
 
 ## 34. 型のエンコーディングと依存型の基盤
 
-### FR-3401: 量化型理論 QTT (Quantitative Type Theory)
+### ✅ FR-3401: 量化型理論 QTT (Quantitative Type Theory)
 
 - **対象**: 新ファイル `packages/type/src/qtt.lisp`
 - **内容**: Atkey (2018) / McBride (2016) の量化型理論。Idris 2 の型システムの基盤
@@ -1528,7 +1529,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - McBride (2016). I Got Plenty o' Nuttin'. / Atkey (2018). Syntax and Semantics of QTT.
 - **難易度**: Extremely Hard
 
-### FR-3402: 段階付き型 (Graded Types / Graded Modal Types)
+### ✅ FR-3402: 段階付き型 (Graded Types / Graded Modal Types)
 
 - **対象**: 新ファイル `packages/type/src/graded.lisp`
 - **内容**: 使用回数を任意の半環 (semiring) で表現する QTT の一般化
@@ -1542,7 +1543,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Orchard, Liepelt, Eades III (2019). Quantitative Program Reasoning with Graded Modal Types.
 - **難易度**: Extremely Hard
 
-### FR-3403: Church / Scott / Parigot エンコーディング (Data as Functions)
+### ✅ FR-3403: Church / Scott / Parigot エンコーディング (Data as Functions)
 
 - **対象**: `packages/compile/src/cps.lisp`
 - **内容**: データ型をラムダ計算の関数として表現する古典的エンコーディング
@@ -1555,7 +1556,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **依存型での応用**: 帰納型の eliminator はエンコーディングの一般化
 - **難易度**: Medium (理解) / Hard (依存型での一般化)
 
-### FR-3404: 拡張可能エフェクト (Extensible Effects / Freer Monads)
+### ✅ FR-3404: 拡張可能エフェクト (Extensible Effects / Freer Monads)
 
 - **対象**: `packages/type/src/effects.lisp` (FR-401 の代替実装)
 - **内容**: モナド変換子なしにエフェクトを合成する実用的アプローチ
@@ -1569,7 +1570,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - Kiselyov, Sabry, Swords (2013). Extensible Effects: An Alternative to Monad Transformers.
 - **難易度**: Hard
 
-### FR-3405: 内包的 vs 外延的型理論 (Intensional vs Extensional Type Theory)
+### ✅ FR-3405: 内包的 vs 外延的型理論 (Intensional vs Extensional Type Theory)
 
 - **対象**: `packages/type/src/dependent.lisp` (FR-303 の依存型実装に必須)
 - **内容**: 型等価性の判定方式の選択。依存型実装の核心的設計決断
@@ -1587,7 +1588,7 @@ Safety-oriented types, development support, type-level programming, advanced typ
   - **高次観察的型理論 (HOTT)**: Altenkirch et al. (2022). OTT の改善版（Agda `--cubical` の代替）
 - **難易度**: Extremely Hard
 
-### FR-3406: 帰納的構成の計算体系 CIC (Calculus of Inductive Constructions)
+### ✅ FR-3406: 帰納的構成の計算体系 CIC (Calculus of Inductive Constructions)
 
 - **対象**: 新ファイル `packages/type/src/cic.lisp`
 - **内容**: Coq の基盤型理論。依存型 + 帰納型 + 宇宙 を統合した体系

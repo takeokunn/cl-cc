@@ -25,16 +25,16 @@
        (if (null decls) (return-from %ast-let-binding-ignored-p nil))
        (let ((decl (car decls)))
          (if (and (consp decl)
-                  (or (eq (car decl) 'ignore) (eq (car decl) 'ignorable)))
+                  (eq (car decl) 'ignore))
              (let ((names (cdr decl)))
                (tagbody
                 scan-names
-                  (if (null names) (go done-names))
-                  (if (eq name (car names))
-                      (return-from %ast-let-binding-ignored-p t))
-                  (setq names (cdr names))
-                  (go scan-names)
-                done-names))))
+                 (if (null names) (go done-names))
+                 (if (eq name (car names))
+                     (return-from %ast-let-binding-ignored-p t))
+                 (setq names (cdr names))
+                 (go scan-names)
+               done-names))))
        (setq decls (cdr decls))
        (go scan-decls))))
 

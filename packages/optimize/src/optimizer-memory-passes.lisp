@@ -59,9 +59,92 @@
   (dolist (key (copy-list (mps-pending-order state)))
     (let ((pending (%mps-pending-store state key)))
       (when (and pending
-                 (not (equal key exclude-key))
-                 (%mps-pending-uses-reg-p pending reg))
+                  (not (equal key exclude-key))
+                  (%mps-pending-uses-reg-p pending reg))
         (%mps-flush-one state key)))))
+
+;;; ─── Cons slot forwarding ─────────────────────────────────────────────────
+
+(defun %opt-cons-slot-kill-dependent-on-reg (facts reg)
+  "Remove cons-slot facts made stale when REG is overwritten."
+  (when reg
+    (let ((dead nil))
+      (maphash (lambda (cell-reg entry)
+                 (when (or (eq cell-reg reg)
+                           (eq (car entry) reg)
+                           (eq (cdr entry) reg))
+                   (push cell-reg dead)))
+               facts)
+      (dolist (cell-reg dead)
+        (remhash cell-reg facts)))))
+
+(defun %opt-cons-slot-safe-source-p (dst car-reg cdr-reg)
+  "Return T when a vm-cons DST write does not destroy either slot source."
+  (and (not (eq dst car-reg))
+       (not (eq dst cdr-reg))))
+
+(defun %opt-cons-slot-mutation-boundary-p (inst)
+  "Return T when INST may mutate heap/global state or call arbitrary code."
+  (member (vm-inst-effect-kind inst)
+          '(:write-global :io :control :unknown)
+          :test #'eq))
+
+(defun opt-pass-cons-slot-forward (instructions)
+  "Forward car/cdr of a fresh vm-cons to moves from the original slot registers.
+
+The pass is intentionally straight-line and conservative: labels/control-flow,
+calls, unknown effects, and heap mutations clear all facts, while overwrites of a
+tracked cell register or slot source kill only the dependent facts."
+  (let ((facts (make-hash-table :test #'eq))
+        (result nil))
+    (labels ((emit (inst) (push inst result))
+             (remember-cons (dst car-reg cdr-reg)
+               (if (%opt-cons-slot-safe-source-p dst car-reg cdr-reg)
+                   (setf (gethash dst facts) (cons car-reg cdr-reg))
+                   (remhash dst facts)))
+             (copy-fact (dst src)
+               (multiple-value-bind (entry found-p) (gethash src facts)
+                 (if found-p
+                     (setf (gethash dst facts) entry)
+                     (remhash dst facts)))))
+      (dolist (inst instructions (nreverse result))
+        (typecase inst
+          (vm-cons
+           (let ((dst (vm-dst inst)))
+             (%opt-cons-slot-kill-dependent-on-reg facts dst)
+             (remember-cons dst (vm-car-reg inst) (vm-cdr-reg inst))
+             (emit inst)))
+          (vm-move
+           (let ((dst (vm-dst inst))
+                 (src (vm-src inst)))
+             (unless (eq dst src)
+               (%opt-cons-slot-kill-dependent-on-reg facts dst)
+               (copy-fact dst src))
+             (emit inst)))
+          (vm-car
+           (let* ((dst (vm-dst inst))
+                  (entry (gethash (vm-src inst) facts)))
+             (%opt-cons-slot-kill-dependent-on-reg facts dst)
+             (if entry
+                 (emit (make-vm-move :dst dst :src (car entry)))
+                 (emit inst))))
+          (vm-cdr
+           (let* ((dst (vm-dst inst))
+                  (entry (gethash (vm-src inst) facts)))
+             (%opt-cons-slot-kill-dependent-on-reg facts dst)
+             (if entry
+                 (emit (make-vm-move :dst dst :src (cdr entry)))
+                 (emit inst))))
+          ((or vm-label vm-jump vm-jump-zero vm-ret vm-halt)
+           (clrhash facts)
+           (emit inst))
+          (t
+           (let ((dst (opt-inst-dst inst)))
+             (when dst
+               (%opt-cons-slot-kill-dependent-on-reg facts dst)))
+           (when (%opt-cons-slot-mutation-boundary-p inst)
+             (clrhash facts))
+           (emit inst)))))))
 
 (defun opt-pass-dead-store-elim (instructions)
   "Eliminate overwritten stores in straight-line code.

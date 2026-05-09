@@ -116,7 +116,7 @@
     vm-symbol-set vm-remprop vm-set-symbol-plist
     ;; Heap mutation
     vm-rplaca vm-rplacd vm-slot-write
-    vm-aset vm-svset vm-set-fill-pointer vm-vector-push vm-vector-pop
+    vm-aset vm-fill vm-svset vm-set-fill-pointer vm-vector-push vm-vector-pop
     vm-vector-push-extend vm-adjust-array vm-array-displacement
     vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not
     vm-push vm-pop vm-nconc vm-nreverse

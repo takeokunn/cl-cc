@@ -177,11 +177,153 @@
          (multiple-value-bind (label found-p)
              (gethash (vm-move-src inst) reg-track)
            (if found-p
-               (setf (gethash (vm-dst inst) reg-track) label)
-               (remhash (vm-dst inst) reg-track))))
+                (setf (gethash (vm-dst inst) reg-track) label)
+                (remhash (vm-dst inst) reg-track))))
         (t
          (let ((dst (opt-inst-dst inst)))
-           (when dst
-             (remhash dst reg-track))))))))
+             (when dst
+               (remhash dst reg-track))))))))
 
+(defun %opt-call-site-split-fresh-label (used-labels)
+  "Return a fresh after-call label not present in USED-LABELS."
+  (loop for i from 0
+        for label = (format nil "CALL-SITE-SPLIT-AFTER-~D" i)
+        unless (gethash label used-labels)
+          do (setf (gethash label used-labels) t)
+             (return label)))
 
+(defun %opt-known-callee-before-index (instructions end-index func-reg name-to-label)
+  "Return FUNC-REG's known label immediately before END-INDEX, within one block."
+  (loop for i downfrom (1- end-index) downto 0
+        for inst = (nth i instructions)
+        do (cond
+             ((or (typep inst 'vm-label)
+                  (typep inst 'vm-jump)
+                  (typep inst 'vm-jump-zero)
+                  (typep inst 'vm-ret)
+                  (typep inst 'vm-halt))
+              (return nil))
+             ((eq (opt-inst-dst inst) func-reg)
+              (return
+                (typecase inst
+                  ((or vm-closure vm-func-ref)
+                   (vm-label-name inst))
+                  (vm-const
+                   (and (symbolp (vm-value inst))
+                        (gethash (vm-value inst) name-to-label)))
+                  (t nil)))))))
+
+(defun %opt-copy-vm-call (call)
+  "Return a fresh copy of CALL for predecessor-local call-site splitting."
+  (make-vm-call :dst (vm-dst call)
+                :func (vm-func-reg call)
+                :args (copy-list (vm-args call))))
+
+(defun opt-pass-call-site-splitting (instructions)
+  "Duplicate simple join-block call sites into predecessors with known callees.
+This conservative subset handles `jump -> join-label -> vm-call` shapes.  When a
+predecessor block assigns the call's function register to a known label before
+jumping to the join, the pass replaces that jump with a direct func-ref, a copy
+of the call, and a jump to a fresh after-call label.  The original join call is
+kept for fall-through/unknown predecessors."
+  (let* ((len (length instructions))
+         (name-to-label (opt-build-function-name-map instructions))
+         (used-labels (make-hash-table :test #'equal))
+         (replacements (make-hash-table :test #'eql))
+         (after-labels (make-hash-table :test #'eql)))
+    (dolist (inst instructions)
+      (when (typep inst 'vm-label)
+        (setf (gethash (vm-name inst) used-labels) t)))
+    (loop for call-index from 1 below len
+          for label-inst = (nth (1- call-index) instructions)
+          for call-inst = (nth call-index instructions)
+          when (and (typep label-inst 'vm-label)
+                    (typep call-inst 'vm-call))
+            do (let ((join-label (vm-name label-inst))
+                     (func-reg (vm-func-reg call-inst))
+                     (split-jumps nil))
+                 (loop for jump-index from 0 below (1- call-index)
+                       for jump-inst = (nth jump-index instructions)
+                       when (and (typep jump-inst 'vm-jump)
+                                 (equal (vm-label-name jump-inst) join-label))
+                         do (let ((callee-label
+                                    (%opt-known-callee-before-index
+                                     instructions jump-index func-reg name-to-label)))
+                              (when callee-label
+                                (push (list jump-index callee-label) split-jumps))))
+                 (when split-jumps
+                   (let ((after-label (%opt-call-site-split-fresh-label used-labels)))
+                     (setf (gethash call-index after-labels) after-label)
+                     (dolist (split split-jumps)
+                       (destructuring-bind (jump-index callee-label) split
+                         (setf (gethash jump-index replacements)
+                               (list (make-vm-func-ref :dst func-reg :label callee-label)
+                                     (%opt-copy-vm-call call-inst)
+                                     (make-vm-jump :label after-label)))))))))
+    (loop for index from 0 below len
+          for inst = (nth index instructions)
+          append (or (gethash index replacements)
+                     (let ((after-label (gethash index after-labels)))
+                       (if after-label
+                           (list inst (make-vm-label :name after-label))
+                           (list inst)))))))
+
+(defun %opt-devirt-track-designator (inst name-to-label reg-track)
+  "Update REG-TRACK with known callee information produced by INST."
+  (typecase inst
+    ((or vm-closure vm-func-ref)
+     (setf (gethash (vm-dst inst) reg-track) (vm-label-name inst)))
+    (vm-const
+     (let ((label (and (symbolp (vm-value inst))
+                       (gethash (vm-value inst) name-to-label))))
+       (if label
+           (setf (gethash (vm-dst inst) reg-track) label)
+           (remhash (vm-dst inst) reg-track))))
+    (vm-move
+     (multiple-value-bind (label found-p)
+         (gethash (vm-move-src inst) reg-track)
+       (if found-p
+           (setf (gethash (vm-dst inst) reg-track) label)
+           (remhash (vm-dst inst) reg-track))))
+    (t
+     (let ((dst (opt-inst-dst inst)))
+       (when dst
+         (remhash dst reg-track))))))
+
+(defun %opt-last-emitted-func-ref-p (result reg label)
+  "Return T when RESULT already starts with REG's direct reference to LABEL."
+  (let ((last (first result)))
+    (and (typep last 'vm-func-ref)
+         (eq (vm-dst last) reg)
+         (equal (vm-label-name last) label))))
+
+(defun %opt-devirt-call (inst reg-track result)
+  "Emit a direct callee reference before INST when its callee register is known."
+  (let* ((func-reg (vm-func-reg inst))
+         (label (gethash func-reg reg-track)))
+    (when (and label
+               (not (%opt-last-emitted-func-ref-p result func-reg label)))
+      (push (make-vm-func-ref :dst func-reg :label label) result))
+    (push inst result)
+    (let ((dst (opt-inst-dst inst)))
+      (when dst
+        (remhash dst reg-track)))
+    result))
+
+(defun opt-pass-devirtualize (instructions)
+  "Insert direct function references before calls whose callee register is known.
+This implements a conservative called-value propagation slice: closure,
+function-reference, registered symbol, and move designators are tracked through a
+single forward scan, and `vm-call`/`vm-tail-call`/`vm-apply` sites with a known
+callee receive a `vm-func-ref` immediately before the call.  The call itself is
+left in place so existing VM semantics and the inline pass remain unchanged."
+  (let ((name-to-label (opt-build-function-name-map instructions))
+        (reg-track (make-hash-table :test #'eq))
+        (result nil))
+    (dolist (inst instructions (nreverse result))
+      (typecase inst
+        ((or vm-call vm-tail-call vm-apply)
+         (setf result (%opt-devirt-call inst reg-track result)))
+        (t
+         (%opt-devirt-track-designator inst name-to-label reg-track)
+         (push inst result))))))

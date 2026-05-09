@@ -15,6 +15,7 @@
         fileset = lib.fileset.unions [
           ../packages
           ../tests
+          ../docs
           ../nix
           ../cl-cc.asd
           ../cl-cc-test.asd

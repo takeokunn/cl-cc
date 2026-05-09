@@ -7,6 +7,36 @@
 
 (in-suite cl-cc-unit-suite)
 
+(defun %advanced-doc-fr-ids ()
+  "Return the ordered FR headings from docs/type-advanced.md."
+  (let ((ids nil))
+    (dolist (line (uiop:split-string
+                   (uiop:read-file-string
+                    (merge-pathnames #P"docs/type-advanced.md" (uiop:getcwd)))
+                   :separator '(#\Newline))
+              (nreverse ids))
+      (let ((fr-pos (and (>= (length line) 7)
+                         (string= "### " (subseq line 0 4))
+                         (search "FR-" line))))
+        (when (and fr-pos
+                   (<= (+ fr-pos 7) (length line)))
+          (push (subseq line fr-pos (+ fr-pos 7)) ids))))))
+
+(defun %test-anchor-registered-p (anchor)
+  "Return T when ANCHOR names a registered cl-cc/test test."
+  (let ((test-symbol (find-symbol (symbol-name anchor) :cl-cc/test)))
+    (or (and test-symbol
+             (cl-cc/test:persist-lookup cl-cc/test::*test-registry* test-symbol))
+        (let ((case-prefix (concatenate 'string "/" (symbol-name anchor) " ["))
+              (found nil))
+          (cl-cc/test:persist-each
+           cl-cc/test::*test-registry*
+           (lambda (name _plist)
+             (declare (ignore _plist))
+             (when (search case-prefix (symbol-name name))
+               (setf found t))))
+          found))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; 2026 Type System: New Type Node Tests (direct new API)
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -180,38 +210,131 @@
 
 (deftest advanced-feature-registry-covers-doc-fr-list
   "The advanced feature registry covers every represented docs/type-advanced.md FR id."
-  (let ((expected-ids (mapcar #'first cl-cc/type:+type-advanced-feature-specs+))
+  (let ((expected-ids (%advanced-doc-fr-ids))
         (actual-ids (cl-cc/type:list-type-advanced-feature-ids))
-        (contract-count (hash-table-count cl-cc/type::*type-advanced-contract-registry*)))
+        (contract-count (hash-table-count cl-cc/type::*type-advanced-contract-registry*))
+        (evidence-count (hash-table-count cl-cc/type::*type-advanced-implementation-evidence-registry*)))
     (assert-= (length expected-ids) (length actual-ids))
     (assert-= (length expected-ids) contract-count)
+    (assert-= (length expected-ids) evidence-count)
     (assert-equal expected-ids actual-ids)
     (dolist (feature-id expected-ids)
       (assert-true (cl-cc/type:lookup-type-advanced-feature feature-id))
       (assert-true (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
-      (assert-true (cl-cc/type::lookup-type-advanced-contract feature-id)))))
+      (assert-true (cl-cc/type::lookup-type-advanced-contract feature-id))
+      (assert-true (cl-cc/type::lookup-type-advanced-implementation-evidence feature-id)))))
 
-(deftest advanced-feature-contract-registry-rejects-unknown-and-missing-contracts
-  "Unknown FR ids and registry entries with no explicit contract are rejected at construction time."
-  (assert-false (cl-cc/type:type-advanced-semantics-implemented-p "FR-9999"))
-  (assert-signals error
-      (cl-cc/type:parse-type-specifier '(advanced fr-9999 integer)))
-  (let* ((feature-id "FR-1606")
-         (table cl-cc/type::*type-advanced-contract-registry*)
-         (saved (cl-cc/type::lookup-type-advanced-contract feature-id)))
+(deftest advanced-feature-implementation-evidence-covers-all-fr-ids
+  "Every advanced FR id has a concrete implementation evidence record with callable APIs."
+  (let* ((expected-ids (mapcar #'first cl-cc/type:+type-advanced-feature-specs+))
+         (table cl-cc/type::*type-advanced-implementation-evidence-registry*)
+         (actual-ids nil))
+    (maphash (lambda (feature-id evidence)
+               (declare (ignore evidence))
+               (push feature-id actual-ids))
+             table)
+    (setf actual-ids (sort actual-ids #'string<))
+    (assert-= (length expected-ids) (hash-table-count table))
+    (assert-equal expected-ids actual-ids)
+    (dolist (feature-id expected-ids)
+      (let ((evidence (cl-cc/type::lookup-type-advanced-implementation-evidence feature-id)))
+        (assert-true evidence)
+        (assert-true (consp (cl-cc/type::type-advanced-implementation-evidence-modules evidence)))
+        (assert-true (consp (cl-cc/type::type-advanced-implementation-evidence-api-symbols evidence)))
+        (assert-true (consp (cl-cc/type::type-advanced-implementation-evidence-test-anchors evidence)))
+        (dolist (module (cl-cc/type::type-advanced-implementation-evidence-modules evidence))
+          (assert-true (cl-cc/type::%type-advanced-implementation-module-present-p module)))
+        (dolist (api (cl-cc/type::type-advanced-implementation-evidence-api-symbols evidence))
+          (assert-true (fboundp api)))
+        (dolist (anchor (cl-cc/type::type-advanced-implementation-evidence-test-anchors evidence))
+          (assert-true (%test-anchor-registered-p anchor)))
+        (assert-true (cl-cc/type::%type-advanced-implementation-evidence-complete-p evidence))))))
+
+(deftest advanced-feature-semantic-completion-requires-implementation-evidence
+  "Contract lookup alone is insufficient: completion requires a concrete evidence record."
+  (let* ((cl-cc/type::*type-advanced-implementation-evidence-registry*
+           (%copy-hash-table-shallow
+            cl-cc/type::*type-advanced-implementation-evidence-registry*))
+         (feature-id "FR-2501")
+         (contract (cl-cc/type::lookup-type-advanced-contract feature-id))
+         (table cl-cc/type::*type-advanced-implementation-evidence-registry*)
+         (saved (cl-cc/type::lookup-type-advanced-implementation-evidence feature-id))
+         (modules (cl-cc/type::type-advanced-implementation-evidence-modules saved))
+         (api-symbols (cl-cc/type::type-advanced-implementation-evidence-api-symbols saved))
+         (test-anchors (cl-cc/type::type-advanced-implementation-evidence-test-anchors saved)))
+    (assert-true contract)
     (assert-true saved)
+    (assert-true (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
     (unwind-protect
         (progn
           (remhash feature-id table)
+          (assert-true (cl-cc/type::lookup-type-advanced-contract feature-id))
+          (assert-false (cl-cc/type::lookup-type-advanced-implementation-evidence feature-id))
           (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
-          (assert-signals error
-              (cl-cc/type:make-type-advanced
-               :feature-id feature-id
-               :args (list 'cache-entry)
-               :properties (list (cons :dependency-graph 'call-graph)
-                                 (cons :cache 'module-cache)))))
+          (assert-true (cl-cc/type:type-advanced-valid-p
+                        (cl-cc/type:make-type-dynamic cl-cc/type:type-int))))
+      (setf (gethash feature-id table) saved))
+    (unwind-protect
+        (progn
+          (setf (gethash feature-id table)
+                (cl-cc/type::%make-type-advanced-implementation-evidence
+                 :feature-id feature-id
+                 :modules modules
+                 :api-symbols nil
+                 :test-anchors test-anchors
+                 :summary "missing API symbols should not satisfy completion"))
+          (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
+          (setf (gethash feature-id table)
+                (cl-cc/type::%make-type-advanced-implementation-evidence
+                 :feature-id feature-id
+                 :modules modules
+                 :api-symbols '(cl-cc/type::definitely-missing-advanced-api)
+                 :test-anchors test-anchors
+                 :summary "unbound API symbols should not satisfy completion"))
+          (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
+          (setf (gethash feature-id table)
+                (cl-cc/type::%make-type-advanced-implementation-evidence
+                 :feature-id feature-id
+                 :modules modules
+                 :api-symbols api-symbols
+                 :test-anchors nil
+                 :summary "missing test anchors should not satisfy completion"))
+          (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
+          (setf (gethash feature-id table)
+                (cl-cc/type::%make-type-advanced-implementation-evidence
+                 :feature-id feature-id
+                 :modules modules
+                 :api-symbols api-symbols
+                 :test-anchors '(cl-cc/test::definitely-missing-advanced-test-anchor)
+                 :summary "unregistered test anchors should not satisfy completion"))
+          (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id)))
       (setf (gethash feature-id table) saved))
     (assert-true (cl-cc/type:type-advanced-semantics-implemented-p feature-id))))
+
+(deftest advanced-feature-contract-registry-rejects-unknown-and-missing-contracts
+  "Unknown FR ids and registry entries with no explicit contract are rejected at construction time."
+  (let ((cl-cc/type::*type-advanced-contract-registry*
+          (%copy-hash-table-shallow
+           cl-cc/type::*type-advanced-contract-registry*)))
+    (assert-false (cl-cc/type:type-advanced-semantics-implemented-p "FR-9999"))
+    (assert-signals error
+        (cl-cc/type:parse-type-specifier '(advanced fr-9999 integer)))
+    (let* ((feature-id "FR-1606")
+           (table cl-cc/type::*type-advanced-contract-registry*)
+           (saved (cl-cc/type::lookup-type-advanced-contract feature-id)))
+      (assert-true saved)
+      (unwind-protect
+           (progn
+             (remhash feature-id table)
+             (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id))
+             (assert-signals error
+                 (cl-cc/type:make-type-advanced
+                  :feature-id feature-id
+                  :args (list 'cache-entry)
+                  :properties (list (cons :dependency-graph 'call-graph)
+                                    (cons :cache 'module-cache)))))
+        (setf (gethash feature-id table) saved))
+      (assert-true (cl-cc/type:type-advanced-semantics-implemented-p feature-id)))))
 
 (deftest-each advanced-feature-parser-roundtrips
   "Representative advanced feature forms parse, unparse, and print through type-advanced."
@@ -419,9 +542,173 @@
          (sanitized (cl-cc/type:sanitize-labeled-value secret #'identity :audit-entry '(:sanitize sql))))
     (assert-false (cl-cc/type:labeled-value-flow-allowed-p secret :public))
     (assert-false (cl-cc/type:labeled-value-tainted-p sanitized))
-    (let ((public (cl-cc/type:declassify-labeled-value secret :public 'audit-log)))
+  (let ((public (cl-cc/type:declassify-labeled-value secret :public 'audit-log)))
       (assert-true (cl-cc/type:labeled-value-flow-allowed-p public :public))
       (assert-= 1 (length (cl-cc/type:labeled-value-audit-trail public))))))
+
+(deftest concrete-generics-registry-and-structural-traversal-work
+  "Datatype-generic registrations produce custom reps while structural traversal still works on lists."
+  (let* ((table cl-cc/type:*generic-instance-registry*)
+         (saved (cl-cc/type:lookup-generic-instance 'keyword)))
+    (unwind-protect
+        (progn
+          (cl-cc/type:register-generic-instance
+           'keyword
+           (lambda (value)
+             (cl-cc/type:make-generic-sum
+              :tag :keyword
+              :value (cl-cc/type:make-generic-k1 :value value :type 'keyword)))
+           :show (lambda (value) (string-downcase (symbol-name value)))
+           :traverse (lambda (fn value) (funcall fn value)))
+          (let ((representation (cl-cc/type:generic-representation-of :TOKEN)))
+            (assert-true (cl-cc/type:generic-sum-p representation))
+            (assert-true (cl-cc/type:generic-representation-valid-p representation))
+            (assert-string= "token" (cl-cc/type:generic-show :TOKEN)))
+          (assert-equal '(2 3 4) (cl-cc/type:generic-transform #'1+ '(1 2 3)))
+          (assert-equal '(2 4) (cl-cc/type:generic-query #'evenp '(1 2 3 4))))
+      (if saved
+          (setf (gethash 'keyword table) saved)
+          (remhash 'keyword table)))))
+
+(deftest concrete-channels-enforce-capacity-type-and-close-semantics
+  "Typed channels enforce payload type, bounded capacity, and closed-channel rejection."
+  (multiple-value-bind (sender receiver) (cl-cc/type:make-buffered-channel 'integer 1)
+    (assert-eq 'integer (cl-cc/type:channel-payload-type sender))
+    (assert-true (cl-cc/type:channel-send sender 7))
+    (assert-signals error
+        (cl-cc/type:channel-send sender 8))
+    (assert-= 7 (cl-cc/type:channel-recv receiver))
+    (assert-null (cl-cc/type:channel-recv receiver))
+    (assert-signals error
+        (cl-cc/type:channel-send sender "wrong"))
+    (cl-cc/type:close-typed-channel sender)
+    (assert-signals error
+        (cl-cc/type:channel-send sender 9))))
+
+(deftest concrete-actors-accept-typed-messages-and-stop-cleanly
+  "Typed actors accept matching protocol messages, invoke handlers, and reject sends after stop."
+  (let* ((seen nil)
+         (actor (cl-cc/type:make-actor-ref '(:ping integer)
+                                           :handler (lambda (message) (setf seen message)))))
+    (assert-true (cl-cc/type:actor-message-accepted-p actor '(:ping 5)))
+    (assert-false (cl-cc/type:actor-message-accepted-p actor '(:pong 5)))
+    (assert-true (cl-cc/type:actor-send actor '(:ping 5)))
+    (assert-equal '(:ping 5) seen)
+    (cl-cc/type:actor-stop actor)
+    (assert-false (cl-cc/type:actor-message-accepted-p actor '(:ping 6)))
+    (assert-signals error
+        (cl-cc/type:actor-send actor '(:ping 6)))))
+
+(deftest concrete-stm-actions-sequence-and-reject-io-effects
+  "STM actions compose through bind, mutate TVars atomically, and reject IO effects."
+  (let* ((cell (cl-cc/type:make-tvar 'integer 1))
+         (action (cl-cc/type:stm-bind
+                  (cl-cc/type:stm-read cell)
+                  (lambda (current)
+                    (cl-cc/type:stm-bind
+                     (cl-cc/type:stm-write cell (+ current 1))
+                     (lambda (_)
+                       (declare (ignore _))
+                       (cl-cc/type:stm-read cell)))))))
+    (assert-= 2 (cl-cc/type:atomically action))
+    (assert-= 2 (cl-cc/type:atomically (cl-cc/type:stm-read cell)))
+    (assert-signals error
+        (cl-cc/type:atomically
+         (cl-cc/type::%make-stm-action :result-type cl-cc/type:type-int
+                                       :thunk (lambda () 0)
+                                       :effects '(:io))))))
+
+(deftest concrete-coroutines-generators-and-coroutines-enforce-runtime-types
+  "Generators yield finite values and coroutines validate both send and receive sides."
+  (let ((generator (cl-cc/type:make-generator 'integer '(1 2)
+                                              :return-type 'string
+                                              :final-value "done")))
+    (multiple-value-bind (value done-p) (cl-cc/type:generator-next generator)
+      (assert-= 1 value)
+      (assert-false done-p))
+    (multiple-value-bind (value done-p) (cl-cc/type:generator-next generator)
+      (assert-= 2 value)
+      (assert-false done-p))
+    (multiple-value-bind (value done-p) (cl-cc/type:generator-next generator)
+      (assert-string= "done" value)
+      (assert-true done-p)))
+  (let ((coroutine (cl-cc/type:make-coroutine
+                    'integer 'integer 'string
+                    (lambda (value)
+                      (if (plusp value)
+                          (values (+ value 1) nil)
+                          (values "done" t))))))
+    (multiple-value-bind (value done-p) (cl-cc/type:coroutine-resume coroutine 3)
+      (assert-= 4 value)
+      (assert-false done-p))
+    (multiple-value-bind (value done-p) (cl-cc/type:coroutine-resume coroutine 0)
+      (assert-string= "done" value)
+      (assert-true done-p)))
+  (assert-signals error
+      (let ((coroutine (cl-cc/type:make-coroutine
+                        'integer 'integer 'string
+                        (lambda (_value)
+                          (declare (ignore _value))
+                          (values :wrong nil)))))
+        (cl-cc/type:coroutine-resume coroutine 1))))
+
+(deftest concrete-simd-vectors-preserve-lanes-and-element-types
+  "SIMD helpers preserve lane counts on map and reject incompatible additions."
+  (let* ((left (cl-cc/type:make-simd-vector 'integer '(1 2 3)))
+         (right (cl-cc/type:make-simd-vector 'integer '(4 5 6)))
+         (sum (cl-cc/type:simd-add left right))
+         (mapped (cl-cc/type:simd-map (lambda (value) (* value 2)) left)))
+    (assert-= 3 (cl-cc/type:simd-vector-lanes sum))
+    (assert-equal '(5 7 9) (cl-cc/type:simd-vector-values sum))
+    (assert-equal '(2 4 6) (cl-cc/type:simd-vector-values mapped))
+    (assert-signals error
+        (cl-cc/type:simd-add left (cl-cc/type:make-simd-vector 'integer '(1 2))))))
+
+(deftest concrete-routing-api-lookup-and-response-type-work
+  "Routing helpers build FR-3305 API types and resolve typed routes from an api-spec."
+  (let* ((users (cl-cc/type:make-route :get "/users/{id}"
+                                       :parameters '((id integer))
+                                       :response-type 'user))
+         (health (cl-cc/type:make-route :get "/health"
+                                        :parameters nil
+                                        :response-type 'status))
+         (api-spec (cl-cc/type::make-api-spec :routes (list users health)))
+         (api-type (cl-cc/type:make-api-type :get "/users/{id}" '((id integer)) 'user)))
+    (assert-true (cl-cc/type:type-advanced-p api-type))
+    (assert-true (cl-cc/type:api-spec-valid-p api-spec))
+    (multiple-value-bind (route params) (cl-cc/type:api-route-lookup api-spec :get "/users/42")
+      (assert-true route)
+      (assert-equal '((:ID . 42)) params))
+    (assert-eq 'user (cl-cc/type:route-response-type-for api-spec :get "/users/42"))
+    (assert-null (cl-cc/type:route-response-type-for api-spec :get "/missing"))))
+
+(deftest concrete-utility-type-helpers-operate-on-nats-strings-and-record-transforms
+  "Utility helpers compute type-level naturals/strings and structural readonly/partial transforms."
+  (let* ((nat-two (cl-cc/type:make-type-level-natural 2))
+         (nat-five (cl-cc/type:type-plus nat-two 3))
+         (template (cl-cc/type:template-literal-type "user-" (cl-cc/type:make-type-level-string "id")))
+         (record (cl-cc/type:make-type-record :fields (list (cons 'name cl-cc/type:type-string)
+                                                            (cons 'age cl-cc/type:type-int))
+                                              :row-var nil))
+         (partial (cl-cc/type:partial-type record))
+         (required (cl-cc/type:required-type partial))
+         (frozen (cl-cc/type:freeze "value" cl-cc/type:type-string))
+         (matrix-product (cl-cc/type:matrix-mul-type
+                          (cl-cc/type:make-matrix-type 2 3 cl-cc/type:type-int)
+                          (cl-cc/type:make-matrix-type 3 4 cl-cc/type:type-int)))
+         (format-fn (cl-cc/type:format-type "~A => ~D")))
+    (assert-= 5 (cl-cc/type:type-level-natural-value nat-five))
+    (assert-string= "user-id" (cl-cc/type:type-level-string-value template))
+    (assert-true (cl-cc/type:type-union-p (cl-cc/type:get-field-type 'name partial)))
+    (assert-true (cl-cc/type:type-equal-p cl-cc/type:type-string
+                                          (cl-cc/type:get-field-type 'name required)))
+    (assert-true (cl-cc/type:frozen-value-p frozen))
+    (let ((args (cl-cc/type:type-constructor-args matrix-product)))
+      (assert-= 2 (cl-cc/type:type-level-natural-value (first args)))
+      (assert-= 4 (cl-cc/type:type-level-natural-value (second args)))
+      (assert-true (cl-cc/type:type-equal-p cl-cc/type:type-int (third args))))
+    (assert-true (cl-cc/type:type-arrow-p format-fn))
+    (assert-= 2 (length (cl-cc/type:type-arrow-params format-fn)))))
 
 (deftest region-tokens-enforce-lifetimes
   "Region references become invalid as soon as their owning region closes."

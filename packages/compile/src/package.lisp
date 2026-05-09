@@ -83,11 +83,12 @@
    #:ctx-instructions #:ctx-next-register #:ctx-next-label
    #:ctx-env #:ctx-type-env #:ctx-safety
    #:ctx-block-env #:ctx-tagbody-env
-   #:ctx-global-functions #:ctx-global-variables
-   #:ctx-global-classes #:ctx-global-generics #:ctx-global-generic-params
-   #:ctx-current-function-name #:ctx-current-function-label
-   #:ctx-current-function-params #:ctx-current-function-simple-p
-   #:ctx-top-level-p #:ctx-boxed-vars
+    #:ctx-global-functions #:ctx-global-variables
+    #:ctx-global-classes #:ctx-global-generics #:ctx-global-generic-params
+    #:ctx-current-function-name #:ctx-current-function-label
+    #:ctx-current-function-params #:ctx-current-function-simple-p
+    #:ctx-pending-inline-policy
+    #:ctx-top-level-p #:ctx-boxed-vars
    #:ctx-noescape-cons-bindings #:ctx-noescape-array-bindings
    #:ctx-noescape-instance-bindings #:ctx-noescape-closure-bindings
    #:ctx-tail-position

@@ -13,11 +13,11 @@
 ;;; ─── %ast-let-binding-ignored-p ───────────────────────────────────────────
 
 (deftest-each ast-let-binding-ignored-p
-  "%ast-let-binding-ignored-p: true for ignore/ignorable declarations, false otherwise."
-  :cases (("ignore"    t   'x '((ignore x)))
-          ("ignorable" t   'x '((ignorable x)))
-          ("absent"    nil 'x '((ignore y)))
-          ("empty"     nil 'x nil))
+  "%ast-let-binding-ignored-p: true only for ignore declarations on the same name."
+  :cases (("ignore"     t   'x '((ignore x)))
+          ("ignorable"  nil 'x '((ignorable x)))
+          ("wrong-name" nil 'x '((ignore y)))
+          ("empty"      nil 'x nil))
   (expected name decls)
   (if expected
       (assert-true  (cl-cc/compile::%ast-let-binding-ignored-p name decls))

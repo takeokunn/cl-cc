@@ -38,7 +38,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 43 — メモリ解析・ストア最適化（一部実装: FR-216）
 
-#### FR-216: Store-to-Load Forwarding (ストア→ロード転送) ✅
+#### FR-216: Store-to-Load Forwarding (ストア→ロード転送) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: DSE（`optimizer.lisp` FR-016）は死んだストアを除去するが、直前のストアと同一アドレスへのロードを検出してストア値を直接転送する最適化なし
@@ -212,7 +212,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: x86-64 ISA / ARM Architecture Reference。定数除算・bignum演算の基盤命令
 - **難易度**: Medium
 
-#### FR-284: Rotate Instructions (ビット回転命令) ✅
+#### FR-284: Rotate Instructions (ビット回転命令) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
 - **現状**: `x86-64-codegen.lisp`にシフト命令（`emit-vm-ash`）のみ。回転命令なし。`(logior (ash x k) (ash x (- 64 k)))` パターンの検出なし
@@ -220,7 +220,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC/LLVM rotate idiom recognition。暗号・ハッシュ計算の標準最適化
 - **難易度**: Medium
 
-#### FR-285: Byte Swap Instruction (バイトスワップ命令) ✅
+#### FR-285: Byte Swap Instruction (バイトスワップ命令) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
 - **現状**: バイト順変換パターンの検出なし。`BSWAP`命令のエミッションなし
@@ -236,7 +236,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `sb-vm::sqrtsd` / GCC `-ffast-math`。数値計算のVM解釈オーバーヘッド除去
 - **難易度**: Hard
 
-#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化) ✅
+#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:853-898`）は`vm-mul`のみ処理。`vm-mod`/`vm-rem`分岐なし。代数恒等式テーブル（`optimizer.lisp:265`）に`(mod 0 x) -> 0`のみ
@@ -252,17 +252,17 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `pseudo-atomic` + overflow trap / ANSI CL fixnum→bignum promotion。数値計算の正確性保証
 - **難易度**: Hard
 
-#### FR-304: Integer Range Analysis (整数範囲解析)
+#### FR-304: Integer Range Analysis (整数範囲解析) 🔶
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/type/src/inference.lisp`
-- **現状**: `opt-pass-fold`（`optimizer.lisp:341-439`）は定数値のみ追跡。範囲/区間の伝播なし。型システム（`packages/type/src/`）にHM型推論はあるが整数範囲型（`(integer 0 255)`）なし
-- **内容**: 値範囲解析: 算術演算を通じて`[min, max]`区間を伝播。両オペランドがfixnum範囲内かつ結果が確実にfixnum範囲なら、オーバーフロー検査をスキップ（FR-303と相補的）。制御フロー合流点でのラティスベース解析
-- **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation)。オーバーフロー検査除去で分岐を削減
+- **対象**: `packages/optimize/src/optimizer-memory.lisp`
+- **現状**: 🔶 一部完了 — `opt-compute-cfg-value-ranges` が `opt-dataflow-result` を返す CFG-aware integer range analysis を実装。合流点では「全 predecessor で既知のレジスタのみ保持 + 区間 union `[min lo, max hi]`」で meet し、`opt-compute-value-ranges` / `opt-compute-constant-intervals` は straight-line 呼び出し互換を保ったまま branch/join を含む instruction list でも exit 側の保守的な range map を返す。ループで `dst` が read regs に含まれる自己更新は range fact を kill して固定点発散を防止
+- **内容**: `vm-const` / `vm-move` / `vm-add` / `vm-sub` / `vm-mul` / `vm-neg` / `vm-abs` / `vm-inc` / `vm-dec` を対象に整数区間を伝播し、unknown write は destination fact を kill する。CFG 合流でのラティス計算により backend 側で配列境界チェックやオーバーフロー検査削減のための保守的 oracle を供給
+- **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation) と同じく CFG join での保守的 meet に基づく。`packages/optimize/tests/optimizer-memory-tests.lisp` が join union・片側欠落 fact の drop・loop self-update kill・既存 straight-line API の回帰を検証
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer.lisp` に `opt-make-interval` / `opt-interval-add` / `opt-interval-sub` / `opt-interval-mul` / `opt-compute-constant-intervals` を追加済み。現状は straight-line な `vm-const`・`vm-add`・`vm-sub`・`vm-mul` に対して区間を保守的に伝播する helper 層のみで、CFG 合流・ループ・型システムとの統合は未実装。
+- **残る制約**: path-sensitive な条件分岐 refinement、比較命令からの範囲絞り込み、除算/剰余/bitwise の精密 transfer、型推論系への `(integer lo hi)` 統合は未実装。該当ケースでは facts を保守的に落として安全側に倒す。
 
-#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) ✅
+#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:869-897`）は`opt-power-of-2-p`チェックのみ。`(* x 3)` → `(+ x (ash x 1))`等の分解なし
@@ -291,47 +291,57 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC `-O2`の算術再結合パス
 - **難易度**: Medium
 
-#### FR-517: 汎用データフロー基盤 (Generic Dataflow Framework)
+#### FR-517: 汎用データフロー基盤 (Generic Dataflow Framework) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: 各最適化パスが独自のlattice/worklist実装。共通基盤なし
+- **現状**: `optimizer-dataflow.lisp` に汎用 worklist 基盤を追加済み。既存パスの個別実装を段階的に置換可能
 - **内容**: `defmacro define-dataflow-pass (name direction lattice transfer-fn merge-fn)` — 汎用データフロー解析フレームワーク。前向き/後ろ向き、meet演算、transfer関数をパラメータ化
 - **根拠**: LLVM `DataFlowSanitizer`, GCC `df.*` infrastructure
 - **難易度**: Hard
 
-#### FR-518: 利用可能式・到達定義 (Available Expressions / Reaching Definitions)
+- **関連実装**: `packages/optimize/src/optimizer-dataflow.lisp` に `opt-run-dataflow`、`define-dataflow-pass`、`opt-dataflow-result` を追加済み。既存 `cfg` / `basic-block` 構造上で前向き・後ろ向き worklist、meet、transfer、状態コピー、境界状態をパラメータ化できる。`packages/optimize/tests/optimizer-dataflow-tests.lisp` に分岐/合流 CFG での収束テストを追加済み。
+
+#### FR-518: 利用可能式・到達定義 (Available Expressions / Reaching Definitions) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: CSEがローカルスコープのみ。グローバルな利用可能式解析なし
+- **現状**: CSEの主力は依然としてローカル CSE / GVN。利用可能式・到達定義を使った保守的な join-entry reuse は入ったが、PRE 風の補償コード挿入を伴う一般形 global CSE ではない
 - **内容**: FR-517の汎用フレームワーク上で前向きビットベクタ解析を実装。利用可能式集合でグローバルCSEを実現
 - **根拠**: Dragon Book §9.5 — available expressions
 - **難易度**: Hard
 
-#### FR-519: e-graph 抽出実装 (E-graph Extraction)
+- **関連実装**: `packages/optimize/src/optimizer-dataflow.lisp` に `opt-compute-available-expressions` / `opt-compute-reaching-definitions` を追加済み。利用可能式は predecessor intersection、到達定義は predecessor union で合流する。加えて `packages/optimize/src/optimizer-cse-gvn.lisp` の `opt-pass-gvn` は、block entry で利用可能な pure 式について「到達定義が単一レジスタ名に合意している」場合だけ `vm-move` へ置換する保守的な global CSE ステップを前段適用する。`packages/optimize/tests/optimizer-dataflow-tests.lisp` と `packages/optimize/tests/optimizer-cse-gvn-tests.lisp` に join 点での解析/変換回帰テストを追加済み。PRE 風の補償コード挿入や、異なる predecessor レジスタを統合する一般形は未実装。
+
+#### FR-519: e-graph 抽出実装 (E-graph Extraction) ✅
 
 - **対象**: `packages/optimize/src/egraph-rules.lisp`
-- **現状**: `packages/optimize/src/egraph.lisp`に等価飽和エンジンは存在するが抽出が`(car (first (gethash eclass (egraph-classes eg))))` — 常に最初の要素を返すno-opスタブ
+- **現状**: `packages/optimize/src/egraph-saturation.lisp` に cost-based extraction が実装済み。e-class ごとに子コストが解決済みの e-node を評価し、固定点まで最小コスト node を更新する
 - **内容**: コスト関数ベースのe-class抽出アルゴリズム実装。各e-nodeのコストをボトムアップで計算し最小コストのnodeを選択
 - **根拠**: egg (equality saturation framework) の抽出アルゴリズム
 - **難易度**: Hard
 
-#### FR-520: グローバルコピー伝播 (Global Copy Propagation)
+- **関連実装**: `packages/optimize/src/egraph-saturation.lisp` の `egraph-extract` / `egraph-default-cost` と `packages/optimize/tests/egraph-extraction-tests.lisp` が実装根拠。以前の no-op stub 記述は古い。
+
+#### FR-520: グローバルコピー伝播 (Global Copy Propagation) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: コピー伝播がローカル (`opt-pass-copy-prop` は単一基本ブロック相当)
+- **現状**: `packages/optimize/src/optimizer-copyprop.lisp` に CFG worklist ベースのグローバルコピー伝播を実装済み。copy facts は predecessor join で intersection し、到達する全経路で同一のコピーだけを各基本ブロック内で canonical register に書き換える
 - **内容**: CFGを跨いだグローバルコピー伝播。到達定義解析 (FR-518) を利用してCFG合流点でのコピー伝播
 - **根拠**: LLVM `GVNPass` のコピー伝播コンポーネント
 - **難易度**: Medium
 
-#### FR-521: 支配木値番号付け (Dominator-Tree Value Numbering)
+- **関連実装**: `opt-pass-copy-prop` は `cfg-build` 後に `copyprop-pass-state` の worklist を回し、`%opt-copy-prop-merge` で複数 predecessor の copy environment を交差、`%opt-copy-prop-rewrite-block` で命令operandを安定した canonical register に置換する。`packages/optimize/tests/optimizer-copyprop-tests.lisp` に基本伝播、chain rewrite、kill、successor enqueue、merge の回帰テストがある。
+
+#### FR-521: 支配木値番号付け (Dominator-Tree Value Numbering) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: GVN未実装。CSEはローカルのみ
+- **現状**: `packages/optimize/src/optimizer-cse-gvn.lisp` に支配木を走査する `opt-pass-gvn` を実装済み。`cfg-compute-dominators` 後、`%gvn-process-block` が scoped hash table を子支配ブロックへ引き継ぐため、支配ブロックで計算済みの pure 式を dominated block で `vm-move` に置換できる
 - **内容**: 支配木をトップダウン走査しながらscoped hash tableで値番号付け。基本ブロック内の冗長計算と、支配ブロック内で既計算の式を除去
 - **根拠**: Click & Cooper "Simple and Efficient Construction of SSA Form" VN algorithm
 - **難易度**: Medium
 
-#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph) ✅
+- **関連実装**: `opt-pass-gvn` は FR-518 の保守的 global CSE 前段を適用したうえで、支配木上に value environment / memo を伝播する。`packages/optimize/tests/optimizer-cse-gvn-tests.lisp` と `packages/optimize/tests/optimizer-tests-lowlevel2.lisp` の `optimizer-gvn-dominates-branch` が、支配ブロックの同一式を dominated block で再利用する挙動を検証する。
+
+#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: インライン展開 (`opt-pass-inline`) が再帰/相互再帰を無制限に展開するリスク (ガードなし: `optimizer.lisp:504-576`)
@@ -399,7 +409,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 2 — 末尾呼び出し最適化 (Tail Call Optimization)（一部実装: FR-004/005/006）
 
-#### FR-004: Proper Tail Call Elimination (TCE) ✅
+#### FR-004: Proper Tail Call Elimination (TCE) 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-execute.lisp`
 - **現状**: CPS変換済み呼び出しの末尾位置検出はあるが、VM実行レベルでのフレーム再利用が未実装。末尾呼び出しが新規コールフレームを積む
@@ -453,7 +463,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 4 — メモリ依存解析 & デッドストア除去（一部実装: FR-016）
 
-#### FR-016: Dead Store Elimination (DSE) ✅
+#### FR-016: Dead Store Elimination (DSE) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: `opt-pass-dce` は命令レベルのDCEのみ。後続ロードのないストア命令 (`vm-set-global`, `vm-set-slot`) の除去がない
@@ -477,7 +487,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Andersen (1994) / Steensgaard (1996)。ポインタ解析精度は alias analysis・devirtualization の品質を直接左右する
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer.lisp` に `opt-compute-points-to` / `opt-points-to-root` を追加済み。現状は線形命令列上で fresh heap allocator と `vm-move` を追跡する single-root の flow-sensitive helper で、再定義時には facts を kill する。分岐合流や setf/slot 更新を含む完全な intraprocedural pointer analysis は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` に `opt-compute-points-to` / `opt-points-to-root` を追加済み。現状は線形命令列上で fresh heap allocator と `vm-move` を追跡する single-root の flow-sensitive helper で、再定義時には facts を kill する。分岐合流や setf/slot 更新を含む完全な intraprocedural pointer analysis は未実装。
 
 ---
 
@@ -581,7 +591,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 17 — 呼び出し規約 & ABI（一部実装: callee-saved trim）
 
-#### FR-176: Custom Calling Convention (カスタム呼び出し規約) ✅
+#### FR-176: Custom Calling Convention (カスタム呼び出し規約) 🔶
 
 - **対象**: `packages/emit/src/calling-convention.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: System V AMD64 ABI 固定 (RDI, RSI, RDX, RCX, R8, R9 引数レジスタ)。内部ローカル関数でも全 caller-saved レジスタをスタックに保存
@@ -616,17 +626,17 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 19 — 副作用・純粋性解析（未実装）
+### Phase 19 — 副作用・純粋性解析（一部実装）
 
-#### FR-152: Transitive Function Purity Inference (推移的純粋性推論)
+#### FR-152: Transitive Function Purity Inference (推移的純粋性推論) ✅
 
-- **対象**: `packages/optimize/src/effects.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: `effects.lisp` に命令単位の副作用分類はあるが、`defun` 全体の純粋性を関数呼び出しグラフを伝播して推論するパスがない
+- **対象**: `packages/optimize/src/effects.lisp`, `packages/optimize/src/optimizer-purity.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
+- **現状**: 命令単位の副作用分類に加え、既知 direct-call グラフ上の推移的純粋性推論と、その結果を使う保守的な pure-call 最適化パスが optimizer pipeline に接続済み
 - **内容**: コールグラフのボトムアップ走査で関数の副作用を推移的に計算。リーフ関数が pure と判定されれば呼び出し元も pure に。`(defun square (x) (* x x))` は自動的に `pure` マーク。純粋と判定された関数は (1) CSE の対象、(2) DCE の対象、(3) 自動メモ化 (FR-256) の対象
 - **根拠**: GHC purity analysis / LLVM `@llvm.readnone` / SBCL `sb-c:no-side-effects`. 純粋性はほぼ全最適化パスの精度向上に使える
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-infer-transitive-function-purity` / `opt-function-body-transitively-pure-p` を追加済み。現状は `opt-collect-function-defs` と既知 direct-call グラフを再利用し、非再帰な線形関数本体についてボトムアップ固定点で純粋性を推論する保守的実装。未知 call / `vm-apply` / `vm-generic-call` / 再帰 SCC は引き続き impure 扱いのため、全面的な手続き間 purity inference は未完了。
+- **関連実装**: `packages/optimize/src/optimizer-purity.lisp` に `opt-function-body-transitively-pure-p` / `opt-infer-transitive-function-purity` と `opt-pass-pure-call-optimization` を実装済み。現状の pass は `optimize-instructions` の既定 convergence pipeline に組み込まれ、straight-line region 内の known-pure direct `vm-call` に対してのみ (1) 同一 callee label + 同一 argument register の再呼び出しを `vm-move` に置換し、(2) 未使用 destination の pure direct call を除去する。未知 call / `vm-apply` / `vm-generic-call` / 未解決 indirect call / `vm-tail-call` / 再帰 SCC / ラベル・制御フロー境界をまたぐ再利用は引き続き保守的に非最適化であり、FR-256 の全面的な自動メモ化は別項目のまま。
 
 ---
 
@@ -1027,10 +1037,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL reader optimization / CCL fast reader。CL の自己ホスティングではソース読み込みがボトルネックになる
 - **難易度**: Medium
 
-#### FR-357: AST レベルの定数畳み込み
+#### FR-357: AST レベルの定数畳み込み ✅
 
-- **対象**: `packages/parse/src/cl/parser.lisp`, `packages/compile/src/codegen.lisp`
+- **対象**: `packages/compile/src/codegen-fold-optimize.lisp`, `packages/compile/src/codegen-fold.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: VM 命令生成前の AST レベルで定数式を畳み込む。`(+ 1 2)` → `ast-int(3)`、`(string-length "hello")` → `ast-int(5)`。特に `defconstant` で定義された値の使用箇所を AST 変換時に置換。VM 命令列を生成する前に冗長な変数参照を除去
+- **関連実装**: `packages/compile/src/codegen-fold-optimize.lisp` の `optimize-ast` が VM 命令生成前に `ast-call`/`ast-progn`/`ast-let`/`ast-if`/`ast-lambda`/`ast-defun`/`ast-defclass` などを再帰最適化し、`packages/compile/src/codegen-fold.lisp` の `%fold-ast-binop` と `packages/compile/src/codegen-fold-eval.lisp` の `%evaluate-ast` / `%compile-time-eval-call` で算術式と compile-time call を畳み込む。`string-length` は `%compile-time-eval-call` の special case、`defconstant` 置換は `cl-cc/expand:*constant-table*` を参照して lexical shadowing を回避する。回帰テスト: `packages/compile/tests/codegen-fold-tests.lisp`, `packages/compile/tests/codegen-tests.lisp`, `packages/compile/tests/codegen-core-tests.lisp`, `packages/compile/tests/codegen-clos-tests.lisp`
 - **根拠**: GCC fold-const / SBCL constant-folding。早期の定数畳み込みで後段パスの入力を単純化
 - **難易度**: Easy
 
@@ -1046,18 +1057,21 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL type declarations / GHC type signatures。コンパイラへの型ヒントは最も費用対効果が高い最適化
 - **難易度**: Medium
 
-#### FR-361: `declare (inline/notinline)` 処理
+#### FR-361: `declare (inline/notinline)` 処理 ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: インライン展開は optimizer のヒューリスティックのみ。ユーザの `inline` 宣言が尊重されない
-- **内容**: `(declare (inline f))` → `f` の呼び出しサイトでヒューリスティックを無視して強制インライン。`(declare (notinline f))` → インライン禁止フラグを設定（プロファイリング・デバッグ用）。`(declaim (inline f))` はグローバルに適用
+- **対象**: `packages/expand/src/macros-runtime-support.lisp`, `packages/compile/src/codegen-functions-emit.lisp`, `packages/compile/src/codegen-core-let-emit.lisp`, `packages/optimize/src/optimizer-inline-cost.lisp`
+- **現状**: ✅ 完了 — `declaim` は `cl-cc/expand:*declaim-inline-registry*` に global policy を登録し、`defun` / `let` 束縛 `lambda` は `vm-closure` の `:inline-policy` メタデータへ伝播する。optimizer は `:inline` でコスト閾値だけをバイパスし、`:notinline` では常にインラインを抑止する。captured vars / extended params / rename safety / global refs など既存の安全条件は維持される
+- **内容**: `(declare (inline f))` → `f` の呼び出しサイトでヒューリスティックを無視して強制インライン。`(declare (notinline f))` → インライン禁止フラグを設定（プロファイリング・デバッグ用）。`(declaim (inline f))` / `(declaim (notinline f))` はグローバルに適用
+- **関連実装**: `packages/expand/src/expander-data.lisp` に global registry `*declaim-inline-registry*` を追加し、`packages/expand/src/macros-runtime-support.lisp` が `declaim` から `(inline ...)` / `(notinline ...)` を登録する。`packages/compile/src/context.lisp` の helper 群が pending/local/global policy を保守的に merge し、`packages/compile/src/codegen-functions-emit.lisp` と `packages/compile/src/codegen-core-let-emit.lisp` が `vm-closure` の `:inline-policy` へ反映する。`packages/optimize/src/optimizer-inline-cost.lisp` は `:notinline` を最優先で拒否し、`:inline` 時も既存の structural safety check を維持したまま cost threshold のみ無視する。回帰テスト: `packages/expand/tests/macros-runtime-support-tests.lisp`, `packages/compile/tests/codegen-functions-tests.lisp`, `packages/compile/tests/compiler-tests-extended-stdlib.lisp`, `packages/optimize/tests/optimizer-strength-inline-tests.lisp`, `packages/optimize/tests/optimizer-inlining-tests.lisp`
 - **根拠**: ANSI CL 3.3.4 / SBCL `inline` declaration。ユーザの明示的インライン指示は最適化の重要なヒント
 - **難易度**: Easy
 
-#### FR-362: `declare (dynamic-extent)` スタック割り当て
+#### FR-362: `declare (dynamic-extent)` スタック割り当て ✅
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/heap.lisp`
+- **対象**: `packages/compile/src/codegen-functions-params.lisp`, `packages/compile/src/codegen-functions-emit.lisp`, `packages/compile/src/codegen-core-let-emit.lisp`, `packages/vm/src/vm-dispatch.lisp`, `packages/vm/src/vm-state-init.lisp`
+- **現状**: ✅ 完了 — `dynamic-extent-declared-p` が `(dynamic-extent name)` を検出し、`&rest` パラメータは `vm-closure` の `:rest-stack-alloc-p` へ伝播する。VM は `:stack-allocate-p` 時に rest tail をコピーせず再利用し、let 束縛の cons / closure / fixed array は既存 noescape 解析でヒープ生成命令を省略する
 - **内容**: `(declare (dynamic-extent x))` でオブジェクト `x` のライフタイムが現在のフォームのダイナミックエクステントに限定されると宣言。エスケープ解析 (FR-007) の静的版。cons・クロージャ・ベクタをスタック上に割り当て可能。`&rest` リストの `dynamic-extent` 宣言でヒープ割り当てゼロ化
+- **関連実装**: `packages/compile/src/codegen-functions-params.lisp` の `dynamic-extent-declared-p` / `rest-param-stack-alloc-p`、`packages/compile/src/codegen-functions-emit.lisp` の `:rest-stack-alloc-p` 伝播、`packages/vm/src/vm-dispatch.lisp` と `packages/vm/src/vm-state-init.lisp` の `vm-build-list` stack allocation path。cons / closure / vector 相当の let 束縛は `packages/compile/src/codegen-core-let-emit.lisp` の noescape cons / closure / array bindings でヒープ命令を省略する。回帰テスト: `packages/compile/tests/codegen-functions-params-tests.lisp`, `packages/compile/tests/codegen-functions-callsite-tests.lisp`, `packages/compile/tests/codegen-core-tests.lisp`, `packages/vm/tests/vm-tests.lisp`
 - **根拠**: SBCL `dynamic-extent` / ANSI CL 3.3.4。実測でヒープ割り当て数が 50〜90% 削減されるケースあり
 - **難易度**: Medium
 
@@ -1075,11 +1089,12 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: ANSI CL 3.2.2.1 / SBCL `deftransform`。数値計算・コンテナ操作の型特化の主要メカニズム
 - **難易度**: Medium
 
-#### FR-365: `defconstant` 全使用箇所での定数置換
+#### FR-365: `defconstant` 全使用箇所での定数置換 ✅
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `(defconstant +pi+ 3.14159...)` は変数バインディングとして扱われ、使用箇所でグローバル変数ルックアップが発生
 - **内容**: `defconstant` で定義された名前の参照を、コンパイル時に即値 `vm-const` に置換。EQL 等価な値は全使用箇所でインライン化。`(speed 1)` 以上で有効。CLOS クラス定義の定数スロット初期値にも適用
+- **関連実装**: `packages/compile/src/codegen-fold-optimize.lisp` で `optimize-ast` が `cl-cc/expand:*constant-table*` を参照して `ast-var` を `%compile-time-value->ast` に置換し、`ast-let` / `ast-lambda` / `ast-defun` の lexical shadowing を回避。`ast-defclass` の slot `:initform`・`:default-initargs`・`:metaclass` も同パスで再帰最適化。回帰テスト: `packages/compile/tests/codegen-tests.lisp`, `packages/compile/tests/codegen-clos-tests.lisp`, 既存直接 codegen 検証 `packages/compile/tests/codegen-functions-tests.lisp`
 - **根拠**: ANSI CL 3.1.2.1.1 / SBCL constant inlining。定数の実行時ルックアップをゼロに
 - **難易度**: Easy
 
@@ -1090,10 +1105,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: ANSI CL 3.2.2.2 / SBCL `load-time-value` compilation。正規表現コンパイル・ハッシュテーブル初期化のイディオムで使用
 - **難易度**: Medium
 
-#### FR-367: `declare (ignore/ignorable)` と DCE 統合
+#### FR-367: `declare (ignore/ignorable)` と DCE 統合 🔶
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
-- **内容**: `(declare (ignore x))` で変数 `x` が意図的に未使用と宣言。DCE パスで `x` のバインディング生成命令を除去。`(declare (ignorable x))` は警告抑制のみ（コード生成に影響なし）。`&aux` パラメータ・`let` バインディングの未使用除去に特に有効
+- **対象**: `packages/compile/src/codegen-core-let.lisp`, `packages/compile/src/codegen-core-let-emit.lisp`
+- **内容**: `(declare (ignore x))` で変数 `x` が意図的に未使用と宣言される場合だけ、`let` バインディングの余分な move を省略し、純粋な初期化式は後段 DCE で除去可能にする。`(declare (ignorable x))` は警告抑制のみ（コード生成に影響なし）。`&aux` サポートは未実装のまま。
+- **関連実装**: `packages/compile/src/codegen-core-let.lisp` の `%ast-let-binding-ignored-p` を `(ignore x)` 専用に制限し、`packages/compile/src/codegen-core-let-emit.lisp` では既存 helper 経由で ignored `let` 束縛だけ extra `vm-move` を省略する。回帰テスト: `packages/compile/tests/codegen-core-let-tests.lisp`, `packages/compile/tests/codegen-core-tests.lisp`
 - **根拠**: ANSI CL 3.3.4 / SBCL unused variable analysis
 - **難易度**: Easy
 

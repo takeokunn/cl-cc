@@ -232,7 +232,7 @@ block are replaced with vm-const 1/0."
          (notany #'vm-label-p insts)
          (or (vm-ret-p (%tail-dup-terminator succ))
              (vm-jump-p (%tail-dup-terminator succ))
-             (vm-jump-zero-p (%tail-dup-terminator succ))))))
+             (typep (%tail-dup-terminator succ) 'vm-jump-zero)))))
 
 (defun %tail-dup-rewrite-pred (pred succ)
   "Duplicate SUCC instructions into PRED by replacing trailing jump-to-SUCC."

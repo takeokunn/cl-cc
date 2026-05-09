@@ -13,8 +13,9 @@
 
 (defbefore :each (cl-cc-codegen-functions-serial-suite)
   (setf cl-cc/compile:*labels-boxed-fns* nil
-        cl-cc/compile:*compiling-typed-fn* nil)
-  (clrhash cl-cc/expand:*function-type-registry*))
+         cl-cc/compile:*compiling-typed-fn* nil)
+  (clrhash cl-cc/expand:*function-type-registry*)
+  (clrhash cl-cc/expand:*declaim-inline-registry*))
 
 (in-suite cl-cc-codegen-functions-serial-suite)
 
@@ -53,8 +54,51 @@ test, which isn't worth the test-quality tradeoff."
     (compile-ast (cl-cc/ast:make-ast-defun :name 'my-fn
                                    :params '(x)
                                    :body (list (make-ast-var :name 'x)))
-                 ctx)
+                  ctx)
     (assert-true (gethash 'my-fn (cl-cc/compile:ctx-global-functions ctx)))))
+
+(deftest-each codegen-callable-inline-policy-merge-cases
+  "Inline policy helper merges pending/local/global declarations conservatively."
+  :cases (("local-inline" '((inline f)) nil nil :inline)
+          ("global-inline" nil :inline nil :inline)
+          ("pending-inline" nil nil :inline :inline)
+          ("notinline-wins-local-over-global" '((notinline f)) :inline nil :notinline)
+          ("notinline-wins-global-over-pending" nil :notinline :inline :notinline))
+  (declarations global-policy pending-policy expected)
+  (let ((cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq)))
+    (when global-policy
+      (setf (gethash 'f cl-cc/expand:*declaim-inline-registry*) global-policy))
+    (assert-eq expected
+               (cl-cc/compile::%callable-inline-policy declarations
+                                                       :name 'f
+                                                       :pending-policy pending-policy))))
+
+(deftest codegen-let-inline-declaration-propagates-to-lambda-closure
+  "(declare (inline f)) on a let-bound lambda annotates the emitted vm-closure."
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-let
+               :bindings (list (cons 'f (make-ast-lambda
+                                        :params '(x)
+                                        :body (list (make-ast-var :name 'x)))))
+               :declarations '((inline f))
+               :body (list (make-ast-var :name 'f)))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+      (assert-true inst)
+      (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy inst)))))
+
+(deftest codegen-defun-global-inline-policy-propagates-to-closure
+  "Global declaim inline policy is attached to the emitted defun closure metadata."
+  (let ((ctx (make-codegen-ctx))
+        (cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq)))
+    (setf (gethash 'my-fn cl-cc/expand:*declaim-inline-registry*) :inline)
+    (compile-ast (cl-cc/ast:make-ast-defun :name 'my-fn
+                                           :params '(x)
+                                           :body (list (make-ast-var :name 'x)))
+                 ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+      (assert-true inst)
+      (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy inst)))))
 
 (deftest codegen-defun-self-tail-call-loops
   "A simple self-tail call in defun compiles to a jump back to the entry label."

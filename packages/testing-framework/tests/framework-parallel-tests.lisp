@@ -322,6 +322,15 @@
         :tags nil
         :number 1))
 
+(defun %make-parallel-hung-suite-demo-test ()
+  (list :name 'parallel-hung-suite-demo
+        :fn (lambda () (loop (sleep 1)))
+        :suite 'runner-regression-suite
+        :timeout 5
+        :depends-on nil
+        :tags nil
+        :number 1))
+
 (deftest check-escalations-triggers-exit-fn-when-epoch-matches-and-deadline-passed
   "%check-escalations fires *watchdog-exit-fn* when deadline has passed and epoch still matches."
   (multiple-value-bind (epochs current-tests lock esc)
@@ -376,6 +385,40 @@
                   (assert-true (search "timeout after 0.02 seconds"
                                        (getf (first results) :detail)))
                   (assert-null captured)))))
+      (setf *watchdog-exit-fn* saved-exit-fn
+            *kill-grace-seconds* saved-kill-grace
+            *heartbeat-interval-seconds* saved-heartbeat
+            *watchdog-poll-seconds* saved-watchdog-poll))))
+
+(deftest run-tests-parallel-suite-deadline-terminates-hung-worker
+  "%run-tests-parallel converts a stuck worker join into sb-ext:timeout when the suite deadline has passed."
+  (let ((captured nil)
+        (timed-out nil)
+        (saved-exit-fn *watchdog-exit-fn*)
+        (saved-kill-grace *kill-grace-seconds*)
+        (saved-heartbeat *heartbeat-interval-seconds*)
+        (saved-watchdog-poll *watchdog-poll-seconds*))
+    (unwind-protect
+         (progn
+           (setf *watchdog-exit-fn* (lambda (&key code &allow-other-keys)
+                                      (setf captured code))
+                 *kill-grace-seconds* 0.01
+                 *heartbeat-interval-seconds* 0
+                 *watchdog-poll-seconds* 0.01)
+           (with-replaced-function (%tap-print-result
+                                    (lambda (&rest args)
+                                      (declare (ignore args))
+                                      nil))
+             (let ((*parallel-suite-deadline*
+                     (+ (get-internal-real-time)
+                        (round (* 0.05 internal-time-units-per-second))))
+                   (*error-output* (make-string-output-stream)))
+               (handler-case
+                   (%run-tests-parallel (list (%make-parallel-hung-suite-demo-test)) 1)
+                 (sb-ext:timeout ()
+                   (setf timed-out t)))))
+           (assert-true timed-out)
+           (assert-null captured))
       (setf *watchdog-exit-fn* saved-exit-fn
             *kill-grace-seconds* saved-kill-grace
             *heartbeat-interval-seconds* saved-heartbeat

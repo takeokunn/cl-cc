@@ -79,6 +79,89 @@
     (assert-true (listp result))
     (assert-true (> (length result) 0))))
 
+(deftest gvn-uses-available-expressions-at-join
+  "opt-pass-gvn reuses a pure expression at a join when all incoming paths agree on one register."
+  (let* ((insts (list (make-vm-jump-zero :reg :r9 :label "else")
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-label :name "join")
+                      (make-vm-add :dst :r3 :lhs :r0 :rhs :r1)
+                      (make-vm-ret :reg :r3)))
+         (result (cl-cc/optimize::opt-pass-gvn insts)))
+    (assert-= 2 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) result))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r3 (vm-dst i))
+                  (eq :r2 (vm-src i))))
+           result))))
+
+(deftest gvn-redundant-overwrite-does-not-poison-same-syntax-expression
+  "Replacing a redundant expr into one of its operands must not poison later same-syntax expressions."
+  (let* ((insts (list (make-vm-jump-zero :reg :r9 :label "else")
+                      (make-vm-add :dst :r4 :lhs :r1 :rhs :r2)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-add :dst :r4 :lhs :r1 :rhs :r2)
+                      (make-vm-label :name "join")
+                      (make-vm-add :dst :r1 :lhs :r1 :rhs :r2)
+                      (make-vm-add :dst :r5 :lhs :r1 :rhs :r2)
+                      (make-vm-ret :reg :r5)))
+         (result (cl-cc/optimize::opt-pass-gvn insts)))
+    (assert-= 3 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) result))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r1 (vm-dst i))
+                  (eq :r4 (vm-src i))))
+           result))
+    (assert-false
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r5 (vm-dst i))))
+           result))))
+
+(deftest gvn-global-cse-does-not-reuse-memory-reads
+  "opt-pass-gvn does not eliminate read-only / memory-backed expressions such as vm-car."
+  (let* ((insts (list (make-vm-jump-zero :reg :r9 :label "else")
+                      (make-vm-car :dst :r2 :src :r0)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-car :dst :r2 :src :r0)
+                      (make-vm-label :name "join")
+                      (make-vm-car :dst :r3 :src :r0)
+                      (make-vm-ret :reg :r3)))
+         (result (cl-cc/optimize::opt-pass-gvn insts)))
+    (assert-= 3 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-car)) result))
+    (assert-false
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r3 (vm-dst i))))
+           result))))
+
+(deftest gvn-join-reuse-runs-through-optimize-instructions
+  "The optimizer pipeline can trigger the conservative FR-518 join reuse step via :gvn."
+  (let* ((insts (list (make-vm-jump-zero :reg :r9 :label "else")
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-label :name "join")
+                      (make-vm-add :dst :r3 :lhs :r0 :rhs :r1)
+                      (make-vm-ret :reg :r3)))
+         (result (cl-cc/optimize:optimize-instructions
+                  insts
+                  :max-iterations 1
+                  :pass-pipeline '(:gvn))))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r3 (vm-dst i))
+                  (eq :r2 (vm-src i))))
+           result))))
+
 ;;; ─── opt-pass-dead-labels ────────────────────────────────────────────────
 
 (deftest-each dead-labels-label-presence

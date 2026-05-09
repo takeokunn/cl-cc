@@ -40,37 +40,36 @@
 
 (deftest timing-tap-diagnostic-compact-pass-emits-nothing
   "In compact mode (default), passing tests emit no output."
-  (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
-         (result (%run-single-test plist 42 '()))
-         (output (with-output-to-string (*standard-output*)
-                   (%tap-print-result result))))
-    (assert-true (zerop (length output)))))
+  (let ((*verbose-tap-mode* :compact))
+    (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
+           (result (%run-single-test plist 42 '()))
+           (output (with-output-to-string (*standard-output*)
+                     (%tap-print-result result))))
+      (assert-true (zerop (length output))))))
 
 (deftest timing-tap-diagnostic-verbose-pass-contains-duration-ms
   "In verbose TAP mode, a passing test emits duration_ms: in its YAML diagnostic."
-  (unwind-protect
-       (progn
-         (sb-posix:setenv "CLCC_VERBOSE_TAP" "1" 1)
-         (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
-                (result (%run-single-test plist 42 '()))
-                (output (with-output-to-string (*standard-output*)
-                          (%tap-print-result result))))
-           (assert-true (search "duration_ms:" output))
-           (assert-true (search "ok 42 - TIMING-TAP-PASS" output))))
-    (sb-posix:unsetenv "CLCC_VERBOSE_TAP")))
+  (let ((*verbose-tap-mode* :verbose))
+    (let* ((plist  (%timing-test-plist 'timing-tap-pass (lambda () t)))
+           (result (%run-single-test plist 42 '()))
+           (output (with-output-to-string (*standard-output*)
+                     (%tap-print-result result))))
+      (assert-true (search "duration_ms:" output))
+      (assert-true (search "ok 42 - TIMING-TAP-PASS" output)))))
 
 (deftest timing-tap-diagnostic-fail-preserves-existing-yaml
   "Failure results still carry their failure YAML and gain duration_ms."
-  (let* ((plist (%timing-test-plist
-                 'timing-tap-fail
-                 (lambda () (error 'test-failure
-                                   :message (format nil "  ---~%  message: \"x\"~%  ...")))))
-         (result (%run-single-test plist 7 '()))
-         (output (with-output-to-string (*standard-output*)
-                   (%tap-print-result result))))
-    (assert-true (search "not ok - " output))
-    (assert-true (search "message:" output))
-    (assert-true (search "duration_ms:" output))))
+  (let ((*verbose-tap-mode* :compact))
+    (let* ((plist (%timing-test-plist
+                   'timing-tap-fail
+                   (lambda () (error 'test-failure
+                                     :message (format nil "  ---~%  message: \"x\"~%  ...")))))
+           (result (%run-single-test plist 7 '()))
+           (output (with-output-to-string (*standard-output*)
+                     (%tap-print-result result))))
+      (assert-true (search "not ok - " output))
+      (assert-true (search "message:" output))
+      (assert-true (search "duration_ms:" output)))))
 
 ;;; ── %tap-verbose-first-line (T-V) ──────────────────────────────────────────
 
@@ -297,7 +296,8 @@ the frozen order suite\\ttest-name\\tduration-ns\\tstatus\\tbatch-id."
 
 (deftest timing-print-result-summary-reports-failures-and-skips
   "%print-result-summary prints aggregated counts and the failed test list."
-  (let* ((results (list (list :name 'alpha :status :pass :number 1)
+  (let* ((*verbose-tap-mode* :compact)
+         (results (list (list :name 'alpha :status :pass :number 1)
                         (list :name 'beta :status :skip :number 2)
                         (list :name 'gamma :status :fail :number 3)))
          (output (with-output-to-string (*standard-output*)

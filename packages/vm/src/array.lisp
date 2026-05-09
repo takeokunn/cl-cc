@@ -51,6 +51,13 @@
   (:sexp-tag :aset)
   (:sexp-slots array-reg index-reg val-reg))
 
+(define-vm-instruction vm-fill (vm-instruction)
+  "Fill ARRAY with VAL."
+  (array-reg nil :reader vm-array-reg)
+  (val-reg nil :reader vm-val-reg)
+  (:sexp-tag :fill)
+  (:sexp-slots array-reg val-reg))
+
 (define-vm-instruction vm-vector-push-extend (vm-instruction)
   "Push VAL onto adjustable ARRAY, extending if needed. Store new index in DST."
   (dst nil :reader vm-dst)
@@ -122,6 +129,13 @@
         (idx (vm-reg-get state (vm-index-reg inst)))
         (val (vm-reg-get state (vm-val-reg inst))))
     (setf (aref arr idx) val)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-fill) state pc labels)
+  (declare (ignore labels))
+  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+        (val (vm-reg-get state (vm-val-reg inst))))
+    (fill arr val)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-vector-push-extend) state pc labels)

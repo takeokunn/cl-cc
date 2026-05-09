@@ -46,6 +46,19 @@ vm-move propagates the source root. Any other destination write kills the root f
 This is a small FR-115 style oracle intended for downstream passes."
   (%opt-build-root-map instructions))
 
+(defun opt-compute-points-to (instructions)
+  "Compute conservative flow-sensitive points-to roots for INSTRUCTIONS.
+
+This FR-018 helper intentionally models a single canonical fresh heap root per
+register in straight-line code. Fresh heap producers create roots, vm-move
+propagates them, and later non-heap writes kill stale facts. Branch joins and
+field-sensitive object graphs remain out of scope for this helper."
+  (opt-compute-heap-aliases instructions))
+
+(defun opt-points-to-root (reg points-to)
+  "Return REG's canonical root under POINTS-TO as two values: root and found-p."
+  (gethash reg points-to))
+
 
 (defun opt-make-interval (lo hi)
   "Construct a closed integer interval [LO, HI]."
@@ -129,6 +142,57 @@ strictly below the minimum possible array length."
     (vm-dec . ,(lambda (a) (opt-interval-sub a (opt-make-interval 1 1)))))
   "Maps unary arithmetic instruction types to interval transformers.")
 
+(defun %opt-copy-interval-state (intervals)
+  "Return a deep EQ hash-table copy of INTERVALS."
+  (let ((copy (make-hash-table :test #'eq)))
+    (when intervals
+      (maphash (lambda (reg interval)
+                 (setf (gethash reg copy)
+                       (opt-make-interval (opt-interval-lo interval)
+                                          (opt-interval-hi interval))))
+               intervals))
+    copy))
+
+(defun %opt-interval-equal-p (a b)
+  "Return T when intervals A and B have identical closed bounds."
+  (and (= (opt-interval-lo a) (opt-interval-lo b))
+       (= (opt-interval-hi a) (opt-interval-hi b))))
+
+(defun %opt-interval-state-equal-p (a b)
+  "Return T when A and B contain the same reg -> interval facts."
+  (and (= (hash-table-count a) (hash-table-count b))
+       (loop for reg being the hash-keys of a
+             for interval = (gethash reg a)
+             always (multiple-value-bind (other found-p) (gethash reg b)
+                      (and found-p
+                           (%opt-interval-equal-p interval other))))))
+
+(defun %opt-merge-interval-states (states)
+  "Meet interval STATES at a CFG join.
+
+Only registers known on every incoming path are preserved. Their intervals are
+unioned conservatively as [min lo, max hi]."
+  (if (null states)
+      (make-hash-table :test #'eq)
+      (let* ((merged (%opt-copy-interval-state (first states)))
+             (rest-states (rest states))
+             (keys (loop for reg being the hash-keys of merged collect reg)))
+        (dolist (reg keys merged)
+          (let* ((base (gethash reg merged))
+                 (lo (opt-interval-lo base))
+                 (hi (opt-interval-hi base))
+                 (keep-p t))
+            (dolist (state rest-states)
+              (multiple-value-bind (other found-p) (gethash reg state)
+                (unless found-p
+                  (setf keep-p nil)
+                  (return))
+                (setf lo (min lo (opt-interval-lo other))
+                      hi (max hi (opt-interval-hi other)))))
+            (if keep-p
+                (setf (gethash reg merged) (opt-make-interval lo hi))
+                (remhash reg merged)))))))
+
 (defun %opt-update-interval-binop (inst intervals fn)
   "Update INTERVALS for binary arithmetic INST using interval combinator FN.
 If either operand has no known interval, conservatively kills the destination."
@@ -163,38 +227,103 @@ If either operand has no known interval, conservatively kills the destination."
     (symbol (symbol-function designator))
     (function designator)))
 
-(defun opt-compute-value-ranges (instructions)
-  "Compute conservative integer value ranges for a straight-line instruction list.
+(defun %opt-self-referential-range-update-p (inst)
+  "Return T when INST reads and overwrites the same destination register."
+  (let ((dst (opt-inst-dst inst)))
+    (and dst
+         (not (typep inst 'vm-move))
+         (member dst (opt-inst-read-regs inst) :test #'eq))))
 
-This extends the older constant-only interval analysis with vm-move propagation and
-small unary arithmetic. It intentionally remains path-insensitive: unknown writes
-kill the destination fact instead of guessing."
+(defun %opt-transfer-interval-inst (inst intervals &key kill-self-updates)
+  "Apply INST to INTERVALS conservatively and return INTERVALS.
+
+With KILL-SELF-UPDATES, instructions that read their own destination kill that
+fact instead of expanding ranges indefinitely across loop backedges."
+  (cond
+    ((typep inst 'vm-const)
+     (if (integerp (vm-value inst))
+         (setf (gethash (vm-dst inst) intervals)
+               (opt-make-interval (vm-value inst) (vm-value inst)))
+         (remhash (vm-dst inst) intervals)))
+    ((typep inst 'vm-move)
+     (let ((src (gethash (vm-src inst) intervals)))
+       (if src
+           (setf (gethash (vm-dst inst) intervals) src)
+           (remhash (vm-dst inst) intervals))))
+    ((and kill-self-updates (%opt-self-referential-range-update-p inst))
+     (let ((dst (opt-inst-dst inst)))
+       (when dst
+         (remhash dst intervals))))
+    (t
+     (let ((binop-entry (%opt-interval-binop-entry inst))
+           (unary-entry (%opt-interval-unary-entry inst)))
+       (cond
+         (binop-entry
+          (%opt-update-interval-binop inst intervals
+                                      (%opt-interval-function binop-entry)))
+         (unary-entry
+          (%opt-update-interval-unary inst intervals
+                                      (%opt-interval-function unary-entry)))
+         (t
+          (let ((dst (opt-inst-dst inst)))
+            (when dst
+              (remhash dst intervals))))))))
+  intervals)
+
+(defun %opt-compute-value-ranges-linear (instructions)
+  "Compute conservative intervals for a straight-line instruction list."
   (let ((intervals (make-hash-table :test #'eq)))
     (dolist (inst instructions intervals)
-      (cond
-        ((typep inst 'vm-const)
-         (if (integerp (vm-value inst))
-             (setf (gethash (vm-dst inst) intervals)
-                   (opt-make-interval (vm-value inst) (vm-value inst)))
-             (remhash (vm-dst inst) intervals)))
-        ((typep inst 'vm-move)
-         (let ((src (gethash (vm-src inst) intervals)))
-           (if src
-               (setf (gethash (vm-dst inst) intervals) src)
-               (remhash (vm-dst inst) intervals))))
-        (t
-         (let ((binop-entry (%opt-interval-binop-entry inst))
-               (unary-entry (%opt-interval-unary-entry inst)))
-           (cond
-             (binop-entry
-              (%opt-update-interval-binop inst intervals
-                                          (%opt-interval-function binop-entry)))
-             (unary-entry
-              (%opt-update-interval-unary inst intervals
-                                          (%opt-interval-function unary-entry)))
-             (t
-              (let ((dst (opt-inst-dst inst)))
-                (when dst (remhash dst intervals)))))))))))
+      (%opt-transfer-interval-inst inst intervals))))
+
+(defun %opt-cfg-value-ranges-transfer (block state-in)
+  "Transfer interval facts through BLOCK using CFG-safe updates."
+  (let ((state-out (%opt-copy-interval-state state-in)))
+    (dolist (inst (bb-instructions block) state-out)
+      (%opt-transfer-interval-inst inst state-out :kill-self-updates t))))
+
+(defun opt-compute-cfg-value-ranges (cfg-or-instructions)
+  "Compute conservative CFG-aware integer value ranges.
+
+Returns an OPT-DATAFLOW-RESULT with per-block IN/OUT maps. Join points keep
+only registers known on every incoming path and union their intervals.
+Self-updating destinations are killed conservatively to guarantee termination."
+  (let* ((cfg (if (cfg-p cfg-or-instructions)
+                  cfg-or-instructions
+                  (cfg-build cfg-or-instructions)))
+         (empty-state (make-hash-table :test #'eq)))
+    (opt-run-dataflow cfg
+                      :direction :forward
+                      :meet #'%opt-merge-interval-states
+                      :transfer #'%opt-cfg-value-ranges-transfer
+                      :state-equal #'%opt-interval-state-equal-p
+                      :initial-state empty-state
+                      :boundary-state empty-state
+                      :copy-state #'%opt-copy-interval-state)))
+
+(defun %opt-control-flow-range-analysis-p (instructions)
+  "Return T when INSTRUCTIONS require CFG-aware range analysis."
+  (loop for inst in instructions
+        thereis (typep inst '(or vm-label vm-jump vm-jump-zero))))
+
+(defun %opt-cfg-result-exit-state (result)
+  "Extract a copy of RESULT's exit OUT state as a plain interval table."
+  (let* ((cfg (opt-dataflow-result-cfg result))
+         (exit (and cfg (cfg-exit cfg))))
+    (if exit
+        (%opt-copy-interval-state
+         (gethash exit (opt-dataflow-result-out result)))
+        (make-hash-table :test #'eq))))
+
+(defun opt-compute-value-ranges (instructions)
+  "Compute conservative integer value ranges.
+
+Straight-line callers keep the existing reg -> interval hash-table API. When
+INSTRUCTIONS contain control flow, this wrapper runs CFG-aware analysis and
+returns the merged exit-state interval table for convenience callers."
+  (if (%opt-control-flow-range-analysis-p instructions)
+      (%opt-cfg-result-exit-state (opt-compute-cfg-value-ranges instructions))
+      (%opt-compute-value-ranges-linear instructions)))
 
 (defun opt-compute-constant-intervals (instructions)
   "Compute a conservative interval map from straight-line constant arithmetic.

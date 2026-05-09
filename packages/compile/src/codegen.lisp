@@ -134,14 +134,15 @@ Values: inferred-type, updated-type-env."
     (setf next-type-env (%extend-type-env-for-defun ast next-type-env best-effort-type))
     (values last-type next-type-env)))
 
-(defun %compile-toplevel-ast-into-context (ast ctx target type-check safety opts)
+(defun %compile-toplevel-ast-into-context (ast ctx target type-check opts)
   "Compile AST into CTX, preferring the CPS VM path when allowed.
 Returns two values: result register and CPS form used for the AST."
   (let* ((last-cps (and (eq target :vm)
                         (%cps-vm-compile-safe-ast-p ast)
                         (cps-transform-ast* ast)))
          (cps-result (and (eq target :vm)
-                          (%maybe-compile-toplevel-form-via-cps ast type-check safety opts))))
+                          (%maybe-compile-toplevel-form-via-cps
+                           ast type-check (ctx-safety ctx) opts))))
     (if cps-result
         (progn
           (setf (ctx-instructions ctx)
@@ -166,6 +167,7 @@ Returns two values: result register and CPS form used for the AST."
 Values: last-reg, last-type, last-cps, updated-type-env."
   (let* ((ast (%lower-toplevel-form-to-ast form))
          (last-reg nil) (last-type nil) (last-cps nil))
+    (setf (ctx-safety ctx) (or (%global-optimize-quality 'safety) safety))
     (when (typep ast 'ast-defvar)
       (setf (gethash (ast-defvar-name ast) (ctx-global-variables ctx)) t))
     (%record-toplevel-defun-for-ct-env ast)
@@ -175,7 +177,7 @@ Values: last-reg, last-type, last-cps, updated-type-env."
     (setf (ctx-type-env ctx) type-env)
     (%maybe-extend-ct-value-env ast)
     (multiple-value-setq (last-reg last-cps)
-      (%compile-toplevel-ast-into-context ast ctx target type-check safety opts))
+      (%compile-toplevel-ast-into-context ast ctx target type-check opts))
     (values last-reg last-type last-cps type-env)))
 
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts)

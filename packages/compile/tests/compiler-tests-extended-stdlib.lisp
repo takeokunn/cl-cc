@@ -1,5 +1,11 @@
 (in-package :cl-cc/test)
 
+(defun %fr-361-large-body-form ()
+  (let ((expr 'x))
+    (dotimes (_ 16 expr)
+      (declare (ignore _))
+      (setf expr `(+ ,expr 1)))))
+
 ;;; ─── FR-502/507: fill/replace/copy-seq vector support ───────────────────────
 
 (deftest compile-fill-vector
@@ -260,14 +266,82 @@
   (assert-true (run-string "(bignump (expt 2 100))" :stdlib t))
   (assert-false (run-string "(bignump 42)" :stdlib t)))
 
-;;; ─── FR-396: declaim macro stub ─────────────────────────────────────────────
+;;; ─── FR-361/363/396: declaim inline policy + optimize quality handling ─────
 
-(deftest-each compile-declaim-forms
-  "declaim at top level is silently ignored; inline-declared functions still work."
-  :cases (("optimize-nil" nil "(declaim (optimize (speed 3))) nil")
-          ("inline-works" 25  "(declaim (inline square)) (defun square (x) (* x x)) (square 5)"))
-  (expected form)
-  (assert-equal expected (run-string form :stdlib t)))
+(deftest compile-declaim-optimize-form-records-global-policy
+  "DECLAIM optimize still evaluates to NIL while recording global quality levels."
+  (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil
+                  (run-string "(declaim (optimize speed (safety 0) (debug 3))) nil" :stdlib t))
+    (assert-= 3 (gethash 'speed cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 0 (gethash 'safety cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 3 (gethash 'debug cl-cc/expand:*declaim-optimize-registry*))))
+
+(deftest compile-declaim-safety-zero-suppresses-later-defun-type-assertion
+  "A global `(declaim (optimize (safety 0)))` suppresses vm-typep in later defuns."
+  (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (let* ((result (cl-cc/compile:compile-toplevel-forms
+                    '((declaim (optimize (safety 0)))
+                      (defun later-safe (x) (the integer x)))
+                    :target :vm))
+           (insts (cl-cc/compile:compilation-result-vm-instructions result)))
+      (assert-true (find-if #'cl-cc:vm-closure-p insts))
+      (assert-null (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-typep)) insts)))))
+
+(deftest compile-declaim-safety-zero-suppresses-top-level-the-type-assertion
+  "Global safety 0 is honored by the VM CPS top-level path for THE forms."
+  (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (let* ((result (cl-cc/compile:compile-toplevel-forms
+                    '((declaim (optimize (safety 0)))
+                      (the integer 42))
+                    :target :vm))
+           (insts (cl-cc/compile:compilation-result-vm-instructions result)))
+      (assert-null (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-typep)) insts)))))
+
+(deftest-each compile-declaim-optimize-inline-policy-applies-globally-across-compilations
+  "Global optimize qualities annotate later defun closures through the existing inline policy path."
+  :cases (("speed-three" '(declaim (optimize (speed 3))) :inline)
+          ("debug-three" '(declaim (optimize (debug 3))) :notinline)
+          ("space-two" '(declaim (optimize (space 2))) :notinline))
+  (declaim-form expected-policy)
+  (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil (our-macroexpand-1 declaim-form))
+    (let* ((result (cl-cc/compile:compile-toplevel-forms
+                    '((defun mapped-inline-policy (x) (+ x 1)))
+                    :target :vm
+                    :pass-pipeline '(:inline)))
+           (closure (find-if #'cl-cc:vm-closure-p
+                             (cl-cc/compile:compilation-result-vm-instructions result))))
+      (assert-true closure)
+      (assert-eq expected-policy (cl-cc/vm:vm-closure-inline-policy closure)))))
+
+(deftest compile-declaim-inline-applies-globally-across-compilations
+  "A prior `(declaim (inline f))` annotates later defuns compiled in another unit."
+  (let ((cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil (our-macroexpand-1 '(declaim (inline big))))
+    (let* ((result (cl-cc/compile:compile-toplevel-forms
+                    (list `(defun big (x) ,(%fr-361-large-body-form)))
+                    :target :vm
+                    :pass-pipeline '(:inline)))
+           (closure (find-if #'cl-cc:vm-closure-p
+                             (cl-cc/compile:compilation-result-vm-instructions result))))
+      (assert-true closure)
+      (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy closure)))))
+
+(deftest compile-declaim-notinline-applies-globally-across-compilations
+  "Explicit NOTINLINE still wins even when optimize speed 3 would prefer inlining."
+  (let ((cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq))
+        (cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil (our-macroexpand-1 '(declaim (optimize (speed 3)))))
+    (assert-equal nil (our-macroexpand-1 '(declaim (notinline inc))))
+    (let* ((result (cl-cc/compile:compile-toplevel-forms
+                    '((defun inc (x) (+ x 1)))
+                    :target :vm
+                    :pass-pipeline '(:inline)))
+           (closure (find-if #'cl-cc:vm-closure-p
+                             (cl-cc/compile:compilation-result-vm-instructions result))))
+      (assert-true closure)
+      (assert-eq :notinline (cl-cc/vm:vm-closure-inline-policy closure)))))
 
 ;;; ─── FR-598: stream typep ────────────────────────────────────────────────────
 

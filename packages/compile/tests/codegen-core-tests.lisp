@@ -61,18 +61,39 @@ sink/fold paths."
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-const))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move))))
 
-(deftest codegen-let-ignore-binding-skips-own-move
-  "Compiling let with (declare (ignore x)) avoids the extra binding move."
+(deftest-each codegen-let-binding-declaration-controls-own-move
+  "Compiling let distinguishes ignore from ignorable when emitting the binding move."
+  :cases (("ignore"    '((ignore x))    0)
+          ("ignorable" '((ignorable x)) 1))
+  (declarations expected-moves)
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (make-ast-let
+                             :bindings (list (cons 'x (make-ast-int :value 42)))
+                             :declarations declarations
+                             :body (list (make-ast-int :value 0)))
+                           ctx))
+         (moves (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-move))
+                               (codegen-instructions ctx))))
+    (assert-true (keywordp reg))
+    (assert-= expected-moves (length moves))))
+
+(deftest codegen-let-ignore-binding-enables-dce-of-unused-initializer
+  "DCE removes the pure initializer for an ignored let binding while preserving the body result."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (make-ast-let
                              :bindings (list (cons 'x (make-ast-int :value 42)))
                              :declarations '((ignore x))
                              :body (list (make-ast-int :value 0)))
                            ctx))
-         (moves (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-move))
-                               (codegen-instructions ctx))))
-    (assert-true (keywordp reg))
-    (assert-= 0 (length moves))))
+         (instructions (append (codegen-instructions ctx)
+                               (list (cl-cc:make-vm-ret :reg reg))))
+         (optimized (cl-cc/optimize::opt-pass-dce instructions))
+         (const-values (mapcar #'cl-cc::vm-const-value
+                               (remove-if-not (lambda (i)
+                                                (typep i 'cl-cc/vm::vm-const))
+                                              optimized))))
+    (assert-false (member 42 const-values :test #'eql))
+    (assert-true (member 0 const-values :test #'eql))))
 
 (deftest codegen-let-noescape-cons-car-bypasses-vm-car
   "A non-escaping let-bound cons lets car read the original component register."
@@ -93,6 +114,66 @@ sink/fold paths."
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-cons))
     (assert-= 0 (length cars))
     (assert-true (> (length moves) 0))))
+
+(deftest-each codegen-let-dynamic-extent-cons-declaration-controls-noescape
+  "A captured cons binding only takes the noescape path when declared dynamic-extent."
+  :cases (("no-declaration"        nil                  nil)
+          ("with-dynamic-extent" '((dynamic-extent p)) t))
+  (declarations noescape-p)
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'p (make-ast-call
+                                         :func 'cons
+                                         :args (list (make-ast-int :value 1)
+                                                     (make-ast-int :value 2)))))
+                :declarations declarations
+                :body (list (make-ast-let
+                             :bindings (list (cons 'reader
+                                                    (make-ast-lambda
+                                                     :params '()
+                                                     :body (list (make-ast-call
+                                                                  :func 'cdr
+                                                                  :args (list (make-ast-var :name 'p)))))))
+                             :body (list (make-ast-call :func (make-ast-var :name 'reader)
+                                                         :args nil)))))
+                ctx)))
+    (assert-true (keywordp reg))
+    (if noescape-p
+        (progn
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-cons))
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-cdr))
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move)))
+        (progn
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-cons))
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-cdr))))))
+
+(deftest codegen-let-dynamic-extent-cons-unsafe-nested-consumer-falls-back
+  "dynamic-extent does not noescape-optimize cons when the binding is not the direct CAR/CDR operand."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'p (make-ast-call
+                                         :func 'cons
+                                         :args (list (make-ast-int :value 1)
+                                                     (make-ast-int :value 2)))))
+                :declarations '((dynamic-extent p))
+                :body (list (make-ast-let
+                             :bindings (list (cons 'reader
+                                                    (make-ast-lambda
+                                                     :params '()
+                                                     :body (list (make-ast-call
+                                                                  :func 'car
+                                                                  :args (list (make-ast-call
+                                                                               :func 'cons
+                                                                               :args (list (make-ast-int :value 0)
+                                                                                           (make-ast-var :name 'p)))))))))
+                             :body (list (make-ast-call :func (make-ast-var :name 'reader)
+                                                         :args nil)))))
+                ctx)))
+    (assert-true (keywordp reg))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-cons))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-car))))
 
 (deftest codegen-let-escaped-cons-car-falls-back-to-vm-car
   "Captured cons bindings are not treated as non-escaping car/cdr shortcuts."
@@ -237,6 +318,65 @@ sink/fold paths."
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aset))
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aref))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move))))
+
+(deftest-each codegen-let-dynamic-extent-array-declaration-controls-noescape
+  "A captured fixed array binding only takes the noescape path when declared dynamic-extent."
+  :cases (("no-declaration"        nil                    nil)
+          ("with-dynamic-extent" '((dynamic-extent arr)) t))
+  (declarations noescape-p)
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'arr (make-ast-call
+                                           :func 'make-array
+                                           :args (list (make-ast-int :value 2)))))
+                :declarations declarations
+                :body (list (make-ast-let
+                             :bindings (list (cons 'reader
+                                                    (make-ast-lambda
+                                                     :params '()
+                                                     :body (list (make-ast-call
+                                                                  :func 'aref
+                                                                  :args (list (make-ast-var :name 'arr)
+                                                                              (make-ast-int :value 0)))))))
+                             :body (list (make-ast-call :func (make-ast-var :name 'reader)
+                                                         :args nil)))))
+                ctx)))
+    (assert-true (keywordp reg))
+    (if noescape-p
+        (progn
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))
+          (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aref))
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-move)))
+        (progn
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))
+          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-aref))))))
+
+(deftest codegen-let-dynamic-extent-array-unsafe-operand-falls-back
+  "dynamic-extent does not noescape-optimize arrays when the binding is used outside the direct array operand position."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'arr (make-ast-call
+                                           :func 'make-array
+                                           :args (list (make-ast-int :value 2)))))
+                :declarations '((dynamic-extent arr))
+                :body (list (make-ast-let
+                             :bindings (list (cons 'reader
+                                                    (make-ast-lambda
+                                                     :params '()
+                                                     :body (list (make-ast-call
+                                                                  :func 'aref
+                                                                  :args (list (make-ast-call
+                                                                               :func 'make-array
+                                                                               :args (list (make-ast-int :value 3)))
+                                                                             (make-ast-var :name 'arr)))))))
+                             :body (list (make-ast-call :func (make-ast-var :name 'reader)
+                                                         :args nil)))))
+                ctx)))
+    (assert-true (keywordp reg))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-aref))))
 
 (deftest codegen-result-vm-instructions-without-halt-strips-terminal-halt
   "%result-vm-instructions-without-halt removes only the final vm-halt instruction."

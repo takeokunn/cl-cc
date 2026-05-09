@@ -131,7 +131,14 @@
                   (setf (gethash dst env) (vm-const-value simp)))
                 (unless (vm-const-p simp) (funcall clear dst))
                 (funcall emit simp))
-               (t (funcall clear dst) (funcall emit inst))))))))))
+                (t (funcall clear dst) (funcall emit inst))))))))))
+
+(defun %fold-unary-constant-eligible-p (inst value)
+  "Return T when unary INST can be safely folded for constant VALUE."
+  (or (numberp value)
+      (eq (type-of inst) 'vm-not)
+      (and (member (type-of inst) '(vm-car vm-cdr) :test #'eq)
+           (or (consp value) (null value)))))
 
 (defun %fold-unary-inst (inst env emit emit-const clear)
   "Unary arithmetic: data-driven via opt-foldable-unary-arith-p → *opt-unary-fold-table*."
@@ -139,9 +146,7 @@
          (fold-fn (gethash (type-of inst) *opt-unary-fold-table*)))
     (multiple-value-bind (sval found) (gethash src env)
       (if (and found fold-fn
-               (or (numberp sval)
-                   ;; vm-not handles non-numeric values (nil → t)
-                   (eq (type-of inst) 'vm-not)))
+               (%fold-unary-constant-eligible-p inst sval))
           (funcall emit-const dst (funcall fold-fn sval))
           (progn (funcall clear dst) (funcall emit inst))))))
 

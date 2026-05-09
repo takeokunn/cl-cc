@@ -16,12 +16,56 @@
     (assert-eq 'setq (car (second result)))
     (assert-equal '(quote :cl-cc) (third result))))
 
-(deftest-each declare-declaim-expand-to-nil
-  "DECLARE and DECLAIM expand to NIL in the current macro runtime."
-  :cases (("declare" '(declare (special x)))
-          ("declaim" '(declaim (special x))))
-  (form)
-  (assert-equal nil (our-macroexpand-1 form)))
+(deftest declare-expansion-preserves-form
+  "DECLARE survives macroexpansion so lowering can still see it."
+  (assert-equal '(declare (special x))
+                (our-macroexpand-1 '(declare (special x)))))
+
+(deftest declaim-non-inline-forms-still-expand-to-nil
+  "DECLAIM still expands away for non-inline/non-optimize clauses."
+  (assert-equal nil (our-macroexpand-1 '(declaim (special x)))))
+
+(deftest declaim-inline-updates-registry
+  "DECLAIM records global inline/notinline policy while still expanding to NIL."
+  (let ((cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil
+                  (our-macroexpand-1
+                   '(declaim (inline fast slow)
+                             (notinline slow)
+                             (special x))))
+    (assert-eq :inline (gethash 'fast cl-cc/expand:*declaim-inline-registry*))
+    (assert-eq :notinline (gethash 'slow cl-cc/expand:*declaim-inline-registry*))
+    (assert-false (gethash 'x cl-cc/expand:*declaim-inline-registry*))))
+
+(deftest declaim-optimize-updates-registry
+  "DECLAIM records optimize quality levels while still expanding to NIL."
+  (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+    (assert-equal nil
+                  (our-macroexpand-1
+                   '(declaim (optimize speed
+                                       (safety 0)
+                                       (debug 3)
+                                       (space 2)
+                                       (compilation-speed 1)
+                                       (speed 4)
+                                       (unknown-quality 2))
+                             (special x))))
+    (assert-= 3 (gethash 'speed cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 0 (gethash 'safety cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 3 (gethash 'debug cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 2 (gethash 'space cl-cc/expand:*declaim-optimize-registry*))
+    (assert-= 1 (gethash 'compilation-speed cl-cc/expand:*declaim-optimize-registry*))
+    (assert-false (gethash 'unknown-quality cl-cc/expand:*declaim-optimize-registry*))))
+
+(deftest declaim-optimize-updates-fresh-registry-after-repeat-expansion
+  "DECLAIM optimize side effects are not hidden by macroexpansion caches."
+  (let ((form '(declaim (optimize (safety 0)))))
+    (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+      (assert-equal nil (our-macroexpand-1 form))
+      (assert-= 0 (gethash 'safety cl-cc/expand:*declaim-optimize-registry*)))
+    (let ((cl-cc/expand:*declaim-optimize-registry* (make-hash-table :test #'eq)))
+      (assert-equal nil (our-macroexpand-1 form))
+      (assert-= 0 (gethash 'safety cl-cc/expand:*declaim-optimize-registry*)))))
 
 (deftest locally-preserves-declarations
   "LOCALLY keeps declarations in a LET wrapper."

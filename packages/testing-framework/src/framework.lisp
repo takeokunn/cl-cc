@@ -18,10 +18,17 @@
     (format t "~A~%" line)
     (force-output)))
 
+(defparameter *verbose-tap-mode* :environment
+  "Controls verbose TAP output. :environment reads CLCC_VERBOSE_TAP, :verbose forces verbose output, and :compact forces compact output.")
+
 (defun %verbose-tap-p ()
-  "Return T when CLCC_VERBOSE_TAP is set to a non-empty value."
-  (let ((v (uiop:getenv "CLCC_VERBOSE_TAP")))
-    (and v (not (zerop (length v))))))
+  "Return T when verbose TAP output is enabled."
+  (ecase *verbose-tap-mode*
+    (:environment
+     (let ((v (uiop:getenv "CLCC_VERBOSE_TAP")))
+       (and v (not (zerop (length v))))))
+    (:verbose t)
+    (:compact nil)))
 
 (defun %source-file-display (path)
   "Return PATH as a relative string when under cwd, else its namestring."
@@ -102,30 +109,34 @@ so subseq/string= never see negative bounds."
 
 (defun %tap-print-result (result)
   "Print a single test result. Compact mode (default) emits only failures.
-CLCC_VERBOSE_TAP=1 restores full TAP v13 output."
-  (let* ((number      (getf result :number))
-         (name        (getf result :name))
-         (status      (getf result :status))
-         (detail      (getf result :detail))
-         (suite       (getf result :suite))
-         (source-file (getf result :source-file))
-         (duration-ms (%duration-ms-from-result result))
-         (verbose-p   (%verbose-tap-p)))
-    (sb-thread:with-mutex (*tap-mutex*)
-      (if verbose-p
-          (let ((first-line (%tap-verbose-first-line number name status detail))
-                (yaml-line  (if (eq status :fail)
-                                (if detail
-                                    (%detail-inject-duration detail duration-ms)
-                                    (%format-minimal-yaml-duration duration-ms))
-                                (%format-minimal-yaml-duration duration-ms))))
-            (format t "~A~%" first-line)
-            (format t "~A~%" yaml-line))
-          (when (eq status :fail)
-            (format t "not ok - ~A~%" name)
-            (format t "~A~%~%"
-                    (%detail-inject-context detail suite source-file duration-ms))))
-      (force-output))))
+CLCC_VERBOSE_TAP=1 restores full TAP v13 output. In compact mode passing
+tests skip the mutex + force-output entirely; 16 parallel workers calling
+those for ~99% silent passes was the dominant runtime cost."
+  (let* ((status    (getf result :status))
+         (verbose-p (%verbose-tap-p)))
+    (when (or verbose-p (eq status :fail))
+      (let* ((number      (getf result :number))
+             (name        (getf result :name))
+             (detail      (getf result :detail))
+             (suite       (getf result :suite))
+             (source-file (getf result :source-file))
+             (duration-ms (%duration-ms-from-result result)))
+        (sb-thread:with-mutex (*tap-mutex*)
+          (cond
+            (verbose-p
+             (let ((first-line (%tap-verbose-first-line number name status detail))
+                   (yaml-line  (if (eq status :fail)
+                                   (if detail
+                                       (%detail-inject-duration detail duration-ms)
+                                       (%format-minimal-yaml-duration duration-ms))
+                                   (%format-minimal-yaml-duration duration-ms))))
+               (format t "~A~%" first-line)
+               (format t "~A~%" yaml-line)))
+            (t
+             (format t "not ok - ~A~%" name)
+             (format t "~A~%~%"
+                     (%detail-inject-context detail suite source-file duration-ms))))
+          (force-output))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Canonical Suite Definitions

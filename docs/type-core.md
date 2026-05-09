@@ -8,6 +8,7 @@ Core type system contract for the compiler: inference, bidirectional checking, c
 - 対象範囲は Ch.1「型推論エンジン」と Ch.3「サブタイピングと構造的型付け」の直接 FR です。
 - Ch.2 および Ch.4-14 は `type-advanced.md` へのブリッジ参照であり、この文書の完了数には含めません。
 - 実装・テストの主な根拠は `packages/type/src/`、`packages/type/tests/`、および `cl-cc-test.asd` の `type-tests` 登録です。
+- 確認済み: 直接 FR 見出し 12 件はすべて `✅` 付きで、`packages/type/tests/` の inference / solver / unification / subtyping / checker 系テストが `cl-cc-test.asd` の `type-tests` モジュールから canonical test plan に含まれます。
 
 ---
 

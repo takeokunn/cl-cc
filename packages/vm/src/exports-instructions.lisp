@@ -71,9 +71,16 @@
    vm-rational
    vm-rationalize
    vm-numerator
-   vm-denominator
-   vm-make-array
-   vm-eq
+    vm-denominator
+    vm-make-array
+    vm-array-length
+    vm-array-reg
+    vm-index-reg
+    vm-val-reg
+    vm-aref
+    vm-aset
+    vm-fill
+    vm-eq
    vm-num-eq
    vm-lt
    vm-gt
@@ -160,6 +167,7 @@
    vm-call-next-method-args-reg
    vm-make-string-char
    vm-closure-rest-stack-alloc-p
+   vm-closure-inline-policy
    vm-func-name
    vm-parts
    vm-size-reg

@@ -37,6 +37,9 @@
         (func-label (make-label ctx "lambda"))
         (end-label (make-label ctx "lambda_end"))
         (closure-reg (make-register ctx))
+        (inline-policy (%callable-inline-policy
+                        (ast-lambda-declarations node)
+                        :pending-policy (ctx-pending-inline-policy ctx)))
         (free-vars (find-free-variables node))
         (captured-vars nil)
         (param-regs nil)
@@ -74,15 +77,20 @@
                                   (ast-lambda-optional-params node)
                                   (ast-lambda-rest-param node)
                                   (ast-lambda-key-params node))
-      (emit ctx (make-vm-closure
-                 :dst closure-reg :label func-label :params param-regs
-                 :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data
-                 :rest-stack-alloc-p rest-stack-alloc-p
-                 :captured captured-vars))
-      (%emit-closure-body ctx func-label end-label params param-regs
-                          opt-bindings rest-binding key-bindings
-                          non-constant-defaults body supplied-p-entries)
+       (emit ctx (make-vm-closure
+                  :dst closure-reg :label func-label :params param-regs
+                  :optional-params opt-closure-data :rest-param rest-reg
+                  :key-params key-closure-data
+                  :rest-stack-alloc-p rest-stack-alloc-p
+                  :inline-policy inline-policy
+                  :captured captured-vars))
+      (%call-with-declaration-policies
+       ctx
+       (ast-lambda-declarations node)
+       (lambda ()
+         (%emit-closure-body ctx func-label end-label params param-regs
+                             opt-bindings rest-binding key-bindings
+                             non-constant-defaults body supplied-p-entries)))
       closure-reg)))
 
 (defmethod compile-ast ((node ast-defun) ctx)
@@ -95,6 +103,10 @@
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
          (closure-reg (make-register ctx))
+         (inline-policy (%callable-inline-policy
+                         (ast-defun-declarations node)
+                         :name name
+                         :pending-policy (ctx-pending-inline-policy ctx)))
          (free-vars (let ((temp-ast (make-ast-lambda :params params
                                                      :body body)))
                       (find-free-variables temp-ast)))
@@ -142,19 +154,24 @@
                                   (ast-defun-optional-params node)
                                   (ast-defun-rest-param node)
                                   (ast-defun-key-params node))
-      (emit ctx (make-vm-closure
-                 :dst closure-reg :label func-label :params param-regs
-                 :optional-params opt-closure-data :rest-param rest-reg
-                 :key-params key-closure-data
-                 :rest-stack-alloc-p rest-stack-alloc-p
-                 :captured captured-vars))
+       (emit ctx (make-vm-closure
+                  :dst closure-reg :label func-label :params param-regs
+                  :optional-params opt-closure-data :rest-param rest-reg
+                  :key-params key-closure-data
+                  :rest-stack-alloc-p rest-stack-alloc-p
+                  :inline-policy inline-policy
+                  :captured captured-vars))
       (setf (ctx-env ctx) (cons (cons name closure-reg) (ctx-env ctx)))
       (emit ctx (make-vm-register-function :name name :src closure-reg))
       (let ((*compiling-typed-fn* (or name t)))
-        (%emit-closure-body ctx func-label end-label params param-regs
-                            opt-bindings rest-binding key-bindings
-                            non-constant-defaults body supplied-p-entries
-                            type-bindings name func-label))
+        (%call-with-declaration-policies
+         ctx
+         (ast-defun-declarations node)
+         (lambda ()
+           (%emit-closure-body ctx func-label end-label params param-regs
+                               opt-bindings rest-binding key-bindings
+                               non-constant-defaults body supplied-p-entries
+                               type-bindings name func-label))))
       closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────

@@ -46,8 +46,9 @@
            (%copy-hash-table-shallow cl-cc/expand:*symbol-macro-table*))
          (cl-cc/expand:*compiler-macro-table*
            (%copy-hash-table-shallow cl-cc/expand:*compiler-macro-table*))
-         (cl-cc/expand:*macroexpand-step-cache*  (make-hash-table :test #'eq :weakness :key))
-         (cl-cc/expand:*macroexpand-all-cache*   (make-hash-table :test #'eq :weakness :key)))
+         (cl-cc/expand:*macroexpand-step-cache*  (make-hash-table :test #'eq))
+         (cl-cc/expand:*macroexpand-all-cache*   (make-hash-table :test #'eq))
+         (cl-cc/expand:*macro-eval-fn*            cl-cc/expand:*macro-eval-fn*))
      ,@body))
 
 (defvar *test-runner-mode* :sequential

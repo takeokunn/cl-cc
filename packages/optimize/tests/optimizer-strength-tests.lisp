@@ -137,3 +137,43 @@
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-rotate)) result))
     ;; vm-logior should not appear in the output
     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-logior)) result))))
+
+;;; ─── opt-pass-fill-recognition ───────────────────────────────────────────
+
+(defun make-fill-loop-instructions (&key extra-exit-jump)
+  (append (when extra-exit-jump
+            (list (make-vm-jump :label "Lexit")))
+          (list (make-vm-array-length :dst :rlen :src :rvec)
+                (make-vm-const :dst :ri :value 0)
+                (make-vm-label :name "Lfill")
+                (make-vm-lt :dst :rcond :lhs :ri :rhs :rlen)
+                (make-vm-jump-zero :reg :rcond :label "Lexit")
+                (make-vm-aset :array-reg :rvec :index-reg :ri :val-reg :rval)
+                (make-vm-const :dst :rone :value 1)
+                (make-vm-add :dst :rnext :lhs :ri :rhs :rone)
+                (make-vm-move :dst :ri :src :rnext)
+                (make-vm-jump :label "Lfill")
+                (make-vm-label :name "Lexit")
+                (make-vm-ret :reg :rvec))))
+
+(defun fill-inst-p (inst)
+  (eq (type-of inst) 'cl-cc/vm::vm-fill))
+
+(deftest fill-recognition-collapses-canonical-fill-loop
+  "opt-pass-fill-recognition replaces a private zero-based aset loop with vm-fill."
+  (let ((result (cl-cc/optimize::opt-pass-fill-recognition (make-fill-loop-instructions))))
+    (assert-= 1 (count-if #'fill-inst-p result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) result))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc/vm::vm-move)
+                              (eq (cl-cc/vm::vm-dst i) :ri)
+                              (eq (cl-cc/vm::vm-src i) :rlen)))
+                       result))))
+
+(deftest fill-recognition-skips-externally-targeted-exit
+  "opt-pass-fill-recognition leaves the loop unchanged when another jump targets the exit label."
+  (let ((result (cl-cc/optimize::opt-pass-fill-recognition
+                 (make-fill-loop-instructions :extra-exit-jump t))))
+    (assert-false (some #'fill-inst-p result))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))))

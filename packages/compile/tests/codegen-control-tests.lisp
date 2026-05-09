@@ -213,3 +213,41 @@
   (let* ((ctx (make-codegen-ctx)))
     (compile-ast (cl-cc:make-ast-the :type 'integer :value (make-ast-int :value 42)) ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
+
+(deftest codegen-the-with-local-defun-safety-zero-skips-typep
+  "A defun-local (optimize (safety 0)) suppresses runtime vm-typep assertions."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (cl-cc/ast:make-ast-defun :name 'safe-zero-defun
+                                 :params nil
+                                 :declarations '((optimize (safety 0)))
+                                 :body (list (make-ast-the :type 'integer
+                                                           :value (make-ast-int :value 42))))
+                 ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
+
+(deftest codegen-the-with-local-let-safety-zero-skips-typep
+  "A let-local (optimize (safety 0)) suppresses runtime vm-typep assertions inside the body."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-ast-let :bindings nil
+                               :declarations '((optimize (safety 0)))
+                               :body (list (make-ast-the :type 'integer
+                                                         :value (make-ast-int :value 42))))
+                 ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
+
+(deftest-each codegen-let-optimize-inline-policy-propagates-to-lambda-closure
+  "Let-local optimize qualities map onto existing closure inline policy metadata."
+  :cases (("speed-three" '((optimize (speed 3))) :inline)
+          ("debug-three" '((optimize (debug 3))) :notinline)
+          ("space-two" '((optimize (space 2))) :notinline))
+  (declarations expected-policy)
+  (let* ((ctx (make-codegen-ctx))
+         (ast (make-ast-let
+               :bindings (list (cons 'f (make-ast-lambda :params '(x)
+                                                         :body (list (make-ast-var :name 'x)))))
+               :declarations declarations
+               :body (list (make-ast-var :name 'f)))))
+    (compile-ast ast ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+      (assert-true inst)
+      (assert-eq expected-policy (cl-cc/vm:vm-closure-inline-policy inst)))))

@@ -18,6 +18,24 @@
 (defvar *defstruct-type-registry* (make-hash-table :test #'eq)
   "Maps struct name to its defstruct representation type: NIL, LIST, or VECTOR.")
 
+(defvar *declaim-inline-registry* (make-hash-table :test #'eq)
+  "Maps function names to global inline policy keywords (:INLINE or :NOTINLINE).
+Used by `(declaim (inline ...))` / `(declaim (notinline ...))` during source compilation.")
+
+(defvar *declaim-optimize-registry* (make-hash-table :test #'eq)
+  "Maps optimize qualities to global quality levels 0..3.
+Used by `(declaim (optimize ...))` during source compilation.")
+
+(defmacro with-fresh-defstruct-registries (&body body)
+  "Execute BODY with fresh, thread-local defstruct registry tables.
+Prevents concurrent tests from mutating shared global hash tables."
+  `(let ((*accessor-slot-map*        (make-hash-table :test #'eq))
+         (*defstruct-slot-registry*  (make-hash-table :test #'eq))
+         (*defstruct-type-registry*  (make-hash-table :test #'eq))
+         (*declaim-inline-registry*  (make-hash-table :test #'eq))
+         (*declaim-optimize-registry* (make-hash-table :test #'eq)))
+     ,@body))
+
 (defun %bootstrap-macro-eval (form)
   "Bootstrap macro evaluator.
 Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available." 

@@ -3,9 +3,9 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-codegen-unit-serial-suite)
 
-(defun make-test-slot (name &key initarg)
+(defun make-test-slot (name &key initarg initform)
   "Build a minimal ast-slot-def for use in codegen tests."
-  (cl-cc/ast:make-ast-slot-def :name name :initarg initarg))
+  (cl-cc/ast:make-ast-slot-def :name name :initarg initarg :initform initform))
 
 ;;; ─── compile-ast: ast-defclass ───────────────────────────────────────────────
 
@@ -22,6 +22,30 @@
     (assert-true inst)
     (assert-equal '(w h) (cl-cc/vm::vm-slot-names inst))
     (assert-true (gethash 'my-rect (cl-cc/compile:ctx-global-classes ctx)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-defclass-constant-slot-initform-compilation
+  "Defclass slot initforms are optimized before codegen so defconstant-backed expressions collapse to vm-const."
+  (cl-cc/expand::compiler-macroexpand-all '(defconstant +codegen-defclass-slot-constant+ 41))
+  (let* ((ctx (make-codegen-ctx))
+         (node (cl-cc/compile:optimize-ast
+                (cl-cc/ast:make-ast-defclass
+                 :name 'my-inline-box
+                 :superclasses nil
+                 :slots (list (make-test-slot 'value
+                                              :initarg :value
+                                              :initform (cl-cc/ast:make-ast-binop
+                                                         :op '+
+                                                         :lhs (make-ast-var :name '+codegen-defclass-slot-constant+)
+                                                         :rhs (make-ast-int :value 1)))))))
+         (reg (compile-ast node ctx))
+         (const-inst (codegen-find-inst ctx 'cl-cc/vm::vm-const))
+         (class-inst (codegen-find-inst ctx 'cl-cc/vm::vm-class-def)))
+    (assert-true const-inst)
+    (assert-equal 42 (cl-cc::vm-const-value const-inst))
+    (assert-true class-inst)
+    (assert-equal (list (cons 'value (cl-cc/vm::vm-dst const-inst)))
+                  (cl-cc/vm::vm-slot-initform-regs class-inst))
     (assert-true (keywordp reg))))
 
 ;;; ─── compile-ast: ast-defgeneric ─────────────────────────────────────────────

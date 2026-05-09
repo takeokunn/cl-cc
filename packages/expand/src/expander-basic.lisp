@@ -47,14 +47,27 @@
 (define-expander-for backquote (form)
   (compiler-macroexpand-all (%expand-quasiquote (second form))))
 
-;; funcall — (funcall 'name ...) with quoted symbol → direct call
+(defun %quoted-function-designator-symbol (designator)
+  "Return the symbol named by a quoted function DESIGNATOR, or NIL."
+  (and (consp designator)
+       (or (eq (car designator) 'quote)
+           (eq (car designator) 'function))
+       (symbolp (second designator))
+       (second designator)))
+
+;; funcall — (funcall 'name ...) / (funcall #'name ...) with known name → direct call
 (define-expander-for funcall (form)
-  (if (and (>= (length form) 2)
-           (consp (second form))
-           (eq (car (second form)) 'quote)
-           (symbolp (second (second form))))
-      (compiler-macroexpand-all (cons (second (second form)) (cddr form)))
-      (cons 'funcall (mapcar #'compiler-macroexpand-all (cdr form)))))
+  (let ((name (and (>= (length form) 2)
+                   (%quoted-function-designator-symbol (second form)))))
+    (if name
+        (let ((compiler-macro (lookup-compiler-macro name)))
+          (if compiler-macro
+              (let ((expanded (invoke-registered-expander compiler-macro form nil)))
+                (if (equal expanded form)
+                    (compiler-macroexpand-all (cons name (cddr form)))
+                    (compiler-macroexpand-all expanded)))
+              (compiler-macroexpand-all (cons name (cddr form)))))
+        (cons 'funcall (mapcar #'compiler-macroexpand-all (cdr form))))))
 
 ;; apply — spread-args normalisation + variadic builtin fold
 (define-expander-for apply (form)

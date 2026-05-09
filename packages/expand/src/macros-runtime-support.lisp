@@ -1,17 +1,89 @@
 (in-package :cl-cc/expand)
 
-;;; Declaration (silently ignored)
+;;; Declaration (preserved so the parser can see leading declarations)
 
 (register-macro 'declare
   (lambda (form env)
-    (declare (ignore form env))
-    nil))
+    (declare (ignore env))
+    form))
 
-;;; Global declaration (silently ignored — same semantics as declare)
+;;; Global declaration
+
+(defparameter +standard-optimize-qualities+
+  '(compilation-speed debug safety space speed)
+  "ANSI CL optimize qualities recognized by the macro runtime.")
+
+(defun %known-optimize-quality-p (quality)
+  (and (symbolp quality)
+       (member quality +standard-optimize-qualities+ :test #'eq)))
+
+(defun %normalize-optimize-quality-level (value)
+  (and (integerp value)
+       (<= 0 value 3)
+       value))
+
+(defun %parse-optimize-quality-spec (spec)
+  (cond
+    ((and (symbolp spec)
+          (%known-optimize-quality-p spec))
+     (values spec 3))
+    ((and (consp spec)
+          (null (cddr spec))
+          (symbolp (car spec))
+          (%known-optimize-quality-p (car spec)))
+     (let ((level (%normalize-optimize-quality-level (cadr spec))))
+       (when level
+         (values (car spec) level))))
+    (t
+     (values nil nil))))
+
+(defun declaration-optimize-quality (declarations quality &optional default)
+  "Return QUALITY's last valid local optimize level from DECLARATIONS.
+Unknown or malformed optimize specs are ignored conservatively."
+  (let ((result default))
+    (dolist (decl declarations result)
+      (when (and (consp decl)
+                 (eq (car decl) 'optimize))
+        (dolist (spec (cdr decl))
+          (multiple-value-bind (parsed-quality level)
+              (%parse-optimize-quality-spec spec)
+            (when (and parsed-quality (eq parsed-quality quality))
+              (setf result level))))))))
+
+(defun %merge-declaim-inline-policy (existing new-policy)
+  (if (or (eq existing :notinline) (eq new-policy :notinline))
+      :notinline
+      (if (eq new-policy :inline)
+          :inline
+          existing)))
+
+(defun %record-declaim-inline-clause (clause)
+  (when (and (consp clause)
+             (member (car clause) '(inline notinline)))
+    (let ((policy (if (eq (car clause) 'notinline) :notinline :inline))
+          (names (cdr clause)))
+      (dolist (name names)
+        (when (symbolp name)
+          (setf (gethash name *declaim-inline-registry*)
+                (%merge-declaim-inline-policy
+                 (gethash name *declaim-inline-registry*)
+                 policy)))))))
+
+(defun %record-declaim-optimize-clause (clause)
+  (when (and (consp clause)
+             (eq (car clause) 'optimize))
+    (dolist (spec (cdr clause))
+      (multiple-value-bind (quality level)
+          (%parse-optimize-quality-spec spec)
+        (when quality
+          (setf (gethash quality *declaim-optimize-registry*) level))))))
 
 (register-macro 'declaim
   (lambda (form env)
-    (declare (ignore form env))
+    (declare (ignore env))
+    (dolist (clause (cdr form))
+      (%record-declaim-inline-clause clause)
+      (%record-declaim-optimize-clause clause))
     nil))
 
 ;;; Scope with Declarations

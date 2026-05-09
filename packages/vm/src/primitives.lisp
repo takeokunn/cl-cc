@@ -87,6 +87,33 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 
 ;;; Instruction Execution - Arithmetic Extensions
 
+(defun %vm-fixnum-rational-p (value)
+  "Return T when VALUE is a rational with fixnum numerator and denominator."
+  (and (rationalp value)
+       (typep (numerator value) 'fixnum)
+       (typep (denominator value) 'fixnum)))
+
+(defun %vm-cl-div-fast-path (lhs rhs)
+  "Return LHS/RHS and the selected rational arithmetic path.
+The path value is diagnostic and keeps the runtime specialization testable."
+  (cond
+    ((and (typep lhs 'fixnum) (typep rhs 'fixnum))
+     (values (/ lhs rhs) :fixnum))
+    ((and (%vm-fixnum-rational-p lhs) (%vm-fixnum-rational-p rhs))
+     (values (/ (* (numerator lhs) (denominator rhs))
+                (* (denominator lhs) (numerator rhs)))
+             :fixnum-rational))
+    ((and (typep lhs 'fixnum) (%vm-fixnum-rational-p rhs))
+     (values (/ (* lhs (denominator rhs))
+                (numerator rhs))
+             :fixnum-rational))
+    ((and (%vm-fixnum-rational-p lhs) (typep rhs 'fixnum))
+     (values (/ (numerator lhs)
+                (* (denominator lhs) rhs))
+             :fixnum-rational))
+    (t
+     (values (/ lhs rhs) :generic))))
+
 (defmethod execute-instruction ((inst vm-div) state pc labels)
   (declare (ignore labels))
   (let ((divisor (vm-reg-get state (vm-rhs inst))))
@@ -101,7 +128,7 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
   (let ((divisor (vm-reg-get state (vm-rhs inst))))
     (if (zerop divisor)
         (error "Division by zero")
-        (let ((result (/ (vm-reg-get state (vm-lhs inst)) divisor)))
+        (let ((result (%vm-cl-div-fast-path (vm-reg-get state (vm-lhs inst)) divisor)))
           (vm-reg-set state (vm-dst inst) result)
           (values (1+ pc) nil nil)))))
 

@@ -52,6 +52,62 @@
     (assert-equal 3
                   (cl-cc/expand::invoke-registered-expander expander '(foo 2) nil))))
 
+(deftest compiler-macro-function-accesses-registered-expander
+  "compiler-macro-function reflects the compiler macro registry."
+  (let ((name (gensym "CMF-"))
+        (expander (lambda (form env)
+                    (declare (ignore form env))
+                    42)))
+    (setf (cl-cc/expand::compiler-macro-function name) expander)
+    (assert-eq expander (cl-cc/expand::compiler-macro-function name))
+    (setf (cl-cc/expand::compiler-macro-function name) nil)
+    (assert-null (cl-cc/expand::compiler-macro-function name))))
+
+(deftest define-compiler-macro-expands-funcall-function-designator
+  "Compiler macros apply to (funcall #'name ...) and see the original &whole form."
+  (let ((name (gensym "CM-FUNCALL-")))
+    (our-macroexpand-1
+     `(define-compiler-macro ,name (&whole form x)
+        (if (eq (car form) 'funcall)
+            (+ x 10)
+            form)))
+    (assert-equal 12
+                  (cl-cc/expand:compiler-macroexpand-all
+                   `(funcall #',name 2)))))
+
+(deftest define-compiler-macro-can-decline-with-whole-form
+  "Returning &whole declines expansion and leaves the call form unchanged."
+  (let ((name (gensym "CM-DECLINE-")))
+    (our-macroexpand-1
+     `(define-compiler-macro ,name (&whole form x)
+        (if (integerp x)
+            (+ x 1)
+            form)))
+    (assert-equal 4 (cl-cc/expand:compiler-macroexpand-all `(,name 3)))
+    (assert-equal `(,name a)
+                  (cl-cc/expand:compiler-macroexpand-all `(,name a)))))
+
+(deftest define-compiler-macro-binds-environment
+  "Compiler macro &environment is bound to the expansion environment argument."
+  (let ((name (gensym "CM-ENV-")))
+    (our-macroexpand-1
+     `(define-compiler-macro ,name (&environment env x)
+        (if (and (null env) (eql x 1)) :null-env :non-null-env)))
+    (assert-eq :null-env
+               (cl-cc/expand:compiler-macroexpand-all `(,name 1)))))
+
+(deftest define-compiler-macro-reregisters-after-repeat-expansion
+  "DEFINE-COMPILER-MACRO side effects are not hidden by macroexpansion caches."
+  (let ((form '(define-compiler-macro cached-cm (x) (+ x 2))))
+    (let ((cl-cc/expand:*compiler-macro-table* (make-hash-table :test #'eq)))
+      (assert-equal '(quote cached-cm) (our-macroexpand-1 form))
+      (assert-true (cl-cc/expand::compiler-macro-function 'cached-cm)))
+    (let ((cl-cc/expand:*compiler-macro-table* (make-hash-table :test #'eq)))
+      (assert-equal '(quote cached-cm) (our-macroexpand-1 form))
+      (assert-true (cl-cc/expand::compiler-macro-function 'cached-cm))
+      (assert-equal 5
+                    (cl-cc/expand:compiler-macroexpand-all '(cached-cm 3))))))
+
 ;;; ─── %contains-uninterned-symbol-p ──────────────────────────────────────
 
 (deftest-each contains-uninterned-symbol-p-cases

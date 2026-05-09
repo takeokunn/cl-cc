@@ -162,6 +162,18 @@ host CL closure."
         :lambda-list lambda-list
         :body (mapcar #'our-macroexpand-all body)))
 
+(defun make-host-macro-expander (lambda-list body)
+  "Build a host-evaluated macro expander for local MACROLET bindings."
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((form-var  (gensym "FORM"))
+           (eval-form `(let ((,form-var ',form))
+                         ,(%nest-let-bindings
+                           (generate-lambda-bindings lambda-list form-var)
+                           body))))
+      (handler-bind ((style-warning #'muffle-warning))
+        (eval eval-form)))))
+
 (defun make-compiler-macro-expander (lambda-list body)
   "Build a compiler-macro expander for a function LAMBDA-LIST and BODY."
   (list :kind :compiler-macro-expander
@@ -172,18 +184,19 @@ host CL closure."
   "Register local macro BINDINGS, expand BODY under them, then restore.
 Returns the expanded BODY wrapped in PROGN."
   (let ((saved nil))
-    (dolist (b bindings)
-      (let ((name        (first b))
-            (lambda-list (second b))
-            (macro-body  (cddr b)))
-        (push (cons name (lookup-macro name)) saved)
-        (register-macro name (make-macro-expander lambda-list macro-body))))
-    (let ((result (compiler-macroexpand-all (cons 'progn body))))
+    (unwind-protect
+         (progn
+           (dolist (b bindings)
+             (let ((name        (first b))
+                   (lambda-list (second b))
+                   (macro-body  (cddr b)))
+               (push (cons name (lookup-macro name)) saved)
+               (register-macro name (make-host-macro-expander lambda-list macro-body))))
+           (compiler-macroexpand-all (cons 'progn body)))
       (dolist (s saved)
         (if (cdr s)
             (register-macro (car s) (cdr s))
-            (remhash (car s) (macro-env-table *macro-environment*))))
-      result)))
+            (remhash (car s) (macro-env-table *macro-environment*)))))))
 
 (defun expand-symbol-macrolet-form (bindings body)
   "Register local symbol macro BINDINGS, expand BODY under them, then restore.

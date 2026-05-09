@@ -37,6 +37,16 @@
     (exec1 (cl-cc:make-vm-aref :dst 0 :array-reg 1 :index-reg 2) s)
     (assert-= 99 (cl-cc:vm-reg-get s 0))))
 
+(deftest vm-array-fill-writes-all-elements
+  "vm-fill fills every element of the vector with the value register."
+  (let ((s (make-test-vm))
+        (arr (make-array 4 :initial-element 0)))
+    (cl-cc:vm-reg-set s 1 arr)
+    (cl-cc:vm-reg-set s 2 7)
+    (exec1 (cl-cc:make-vm-fill :array-reg 1 :val-reg 2) s)
+    (loop for i below 4
+          do (assert-= 7 (aref arr i)))))
+
 (deftest vm-array-vector-push-extend-grows
   "vm-vector-push-extend pushes onto adjustable vector."
   (let ((s (make-test-vm))

@@ -24,6 +24,10 @@
     (dolist (l labels ht)
       (setf (gethash l ht) t))))
 
+(defun %count-inst-type (instructions type)
+  "Count TYPE instances in INSTRUCTIONS."
+  (count-if (lambda (inst) (typep inst type)) instructions))
+
 ;;; ─── opt-function-body-transitively-pure-p ───────────────────────────────────
 
 (deftest opt-body-pure-empty
@@ -168,3 +172,111 @@
     (let ((pure (cl-cc/optimize::opt-infer-transitive-function-purity insts)))
       (assert-null (gethash even-label pure))
       (assert-null (gethash odd-label  pure)))))
+
+;;; ─── opt-pass-pure-call-optimization ─────────────────────────────────────────
+
+(deftest opt-pass-pure-call-reuses-repeated-known-direct-call
+  "Repeated known-pure direct calls in one straight-line region reuse the first result."
+  (let* ((callee-label "pure-square")
+         (insts (list (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-label   :name callee-label)
+                      (make-vm-mul     :dst :r1 :lhs :r0 :rhs :r0)
+                      (make-vm-ret     :reg :r1)
+                      (make-vm-closure :dst :r2 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-const   :dst :r0 :value 7)
+                      (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                      (make-vm-call    :dst :r4 :func :r2 :args '(:r0))
+                      (make-vm-ret     :reg :r4)))
+         (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
+    (assert-= 1 (%count-inst-type optimized 'vm-call))
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'vm-move)
+                  (eq (vm-dst inst) :r4)
+                  (eq (vm-src inst) :r3)))
+           optimized))))
+
+(deftest opt-pass-pure-call-keeps-impure-direct-call
+  "Known direct calls are not reused when the callee body is impure."
+  (let* ((callee-label "impure-fn")
+         (insts (list (make-vm-closure    :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-label      :name callee-label)
+                      (make-vm-set-global :src :r0 :name 'sink)
+                      (make-vm-ret        :reg :r0)
+                      (make-vm-closure    :dst :r2 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-const      :dst :r0 :value 7)
+                      (make-vm-call       :dst :r3 :func :r2 :args '(:r0))
+                      (make-vm-call       :dst :r4 :func :r2 :args '(:r0))
+                      (make-vm-ret        :reg :r4)))
+         (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
+    (assert-= 2 (%count-inst-type optimized 'vm-call))
+    (assert-false
+     (some (lambda (inst)
+             (and (typep inst 'vm-move)
+                  (eq (vm-dst inst) :r4)
+                  (eq (vm-src inst) :r3)))
+           optimized))))
+
+(deftest opt-pass-pure-call-removes-dead-known-direct-call
+  "Known-pure direct calls with unused destinations are removed conservatively."
+  (let* ((callee-label "pure-inc")
+         (insts (list (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-label   :name callee-label)
+                      (make-vm-add     :dst :r1 :lhs :r0 :rhs :r0)
+                      (make-vm-ret     :reg :r1)
+                      (make-vm-closure :dst :r2 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-const   :dst :r0 :value 7)
+                      (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                      (make-vm-ret     :reg :r0)))
+         (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
+    (assert-= 0 (%count-inst-type optimized 'vm-call))
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'vm-ret)
+                  (eq (vm-reg inst) :r0)))
+           optimized))))
+
+(deftest opt-pass-pure-call-does-not-reuse-when-dst-overwrites-arg-register
+  "A pure direct call is not memoized when its destination overwrites one of its argument registers."
+  (let* ((callee-label "pure-self")
+         (insts (list (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-label   :name callee-label)
+                      (make-vm-add     :dst :r1 :lhs :r0 :rhs :r0)
+                      (make-vm-ret     :reg :r1)
+                      (make-vm-closure :dst :r2 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-const   :dst :r0 :value 7)
+                      (make-vm-call    :dst :r0 :func :r2 :args '(:r0))
+                      (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                      (make-vm-ret     :reg :r3)))
+         (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
+    (assert-= 2 (%count-inst-type optimized 'vm-call))
+    (assert-false
+     (some (lambda (inst)
+             (and (typep inst 'vm-move)
+                  (eq (vm-dst inst) :r3)
+                  (eq (vm-src inst) :r0)))
+           optimized))))
+
+(deftest optimize-instructions-pass-pipeline-runs-pure-call-optimization
+  "optimize-instructions can run the pure-call pass by keyword pipeline selection."
+  (let* ((callee-label "pure-double")
+         (insts (list (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-label   :name callee-label)
+                      (make-vm-add     :dst :r1 :lhs :r0 :rhs :r0)
+                      (make-vm-ret     :reg :r1)
+                      (make-vm-closure :dst :r2 :label callee-label :params '(:r0) :captured nil)
+                      (make-vm-const   :dst :r0 :value 7)
+                      (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                      (make-vm-call    :dst :r4 :func :r2 :args '(:r0))
+                      (make-vm-ret     :reg :r4)))
+         (optimized (cl-cc/optimize:optimize-instructions
+                     insts
+                     :max-iterations 1
+                     :pass-pipeline '(:pure-call-optimization))))
+    (assert-= 1 (%count-inst-type optimized 'vm-call))
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'vm-move)
+                  (eq (vm-dst inst) :r4)
+                  (eq (vm-src inst) :r3)))
+           optimized))))

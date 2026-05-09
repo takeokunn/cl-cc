@@ -115,27 +115,41 @@
 (deftest-each opt-inline-eligible-p-cases
   "opt-inline-eligible-p: eligible when cheap+no-captures; rejects captured vars or over-budget."
   :cases (("short-no-captures"
-           nil
+           nil nil
            (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1) (make-vm-ret :reg :r2))
            t)
           ("captured-vars-ineligible"
-           (list (cons :x :r5))
+           (list (cons :x :r5)) nil
            (list (make-vm-ret :reg :r1))
            nil)
           ("cheap-consts-eligible-over-threshold"
-           nil
+           nil nil
            (append (loop repeat 17 collect (make-vm-const :dst :r2 :value 0))
                    (list (make-vm-ret :reg :r1)))
            t)
           ("arith-instrs-over-budget-ineligible"
-           nil
+           nil nil
+            (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
+                    (list (make-vm-ret :reg :r2)))
+            nil)
+          ("forced-inline-bypasses-cost-threshold"
+           nil :inline
            (append (loop repeat 16 collect (make-vm-add :dst :r2 :lhs :r1 :rhs :r1))
                    (list (make-vm-ret :reg :r2)))
+           t)
+          ("forced-inline-still-rejects-captures"
+           (list (cons :x :r5)) :inline
+           (list (make-vm-ret :reg :r1))
+           nil)
+          ("notinline-blocks-cheap-function"
+           nil :notinline
+           (list (make-vm-add :dst :r2 :lhs :r1 :rhs :r1) (make-vm-ret :reg :r2))
            nil))
-  (captured body expected)
+  (captured inline-policy body expected)
   (let* ((ci  (make-vm-closure :dst :r0 :label "f"
-                                :params '(:r1) :captured captured
-                                :optional-params nil :rest-param nil :key-params nil))
+                                 :params '(:r1) :captured captured
+                                 :optional-params nil :rest-param nil :key-params nil
+                                 :inline-policy inline-policy))
          (def (list :closure ci :params '(:r1) :body body)))
     (assert-equal expected (not (null (cl-cc/optimize::opt-inline-eligible-p def 15))))))
 

@@ -33,52 +33,57 @@
 
 (deftest ds-basic-expansion-produces-defclass
   "Basic defstruct wraps a defclass with 2 slots, each with :initarg matching the slot name."
-  (let* ((exp         (ds-expand '(defstruct point x y)))
-         (defclass-form (second exp))
-         (slot-specs  (fourth defclass-form))
-         (first-slot  (first slot-specs)))
-    (assert-equal 'progn   (first exp))
-    (assert-equal 'defclass (first defclass-form))
-    (assert-equal 'point    (second defclass-form))
-    (assert-equal 2         (length slot-specs))
-    (assert-equal :x        (getf (rest first-slot) :initarg))
-    (assert-equal nil       (getf (rest first-slot) :initform))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp         (ds-expand '(defstruct point x y)))
+           (defclass-form (second exp))
+           (slot-specs  (fourth defclass-form))
+           (first-slot  (first slot-specs)))
+      (assert-equal 'progn   (first exp))
+      (assert-equal 'defclass (first defclass-form))
+      (assert-equal 'point    (second defclass-form))
+      (assert-equal 2         (length slot-specs))
+      (assert-equal :x        (getf (rest first-slot) :initarg))
+      (assert-equal nil       (getf (rest first-slot) :initform)))))
 
 (deftest ds-basic-expansion-generates-constructor
   "Basic defstruct generates a MAKE-POINT constructor that calls make-instance."
-  (let* ((exp   (ds-expand '(defstruct point x y)))
-         (forms (ds-progn-forms exp))
-         (ctor  (second forms))
-         (body  (fourth ctor)))
-    (assert-equal 'defun              (first ctor))
-    (assert-equal (intern "MAKE-POINT") (second ctor))
-    (assert-equal 'make-instance      (first body))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct point x y)))
+           (forms (ds-progn-forms exp))
+           (ctor  (second forms))
+           (body  (fourth ctor)))
+      (assert-equal 'defun              (first ctor))
+      (assert-equal (intern "MAKE-POINT") (second ctor))
+      (assert-equal 'make-instance      (first body)))))
 
 (deftest ds-basic-expansion-generates-predicate
   "Basic defstruct generates a POINT-P predicate function."
-  (let* ((exp   (ds-expand '(defstruct point x y)))
-         (forms (ds-progn-forms exp))
-         (pred  (third forms)))
-    (assert-equal 'defun (first pred))
-    (assert-equal (intern "POINT-P") (second pred))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct point x y)))
+           (forms (ds-progn-forms exp))
+           (pred  (third forms)))
+      (assert-equal 'defun (first pred))
+      (assert-equal (intern "POINT-P") (second pred)))))
 
 (deftest ds-basic-expansion-ends-with-quoted-name
   "Basic defstruct ends the PROGN with the quoted struct name for reflection."
-  (let* ((exp   (ds-expand '(defstruct point x y)))
-         (forms (ds-progn-forms exp))
-         (last-form (car (last forms))))
-    (assert-equal 'quote (first last-form))
-    (assert-equal 'point (second last-form))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct point x y)))
+           (forms (ds-progn-forms exp))
+           (last-form (car (last forms))))
+      (assert-equal 'quote (first last-form))
+      (assert-equal 'point (second last-form)))))
 
 ;;; ─── Slot defaults and filtering ─────────────────────────────────────────
 
 (deftest ds-slot-default-initform
   "Slot (name default) sets the :initform to the default value."
-  (let* ((exp (ds-expand '(defstruct config (timeout 30) (verbose nil))))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form))
-         (first-slot (first slot-specs)))
-    (assert-equal 30 (getf (rest first-slot) :initform))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp (ds-expand '(defstruct config (timeout 30) (verbose nil))))
+           (defclass-form (second exp))
+           (slot-specs (fourth defclass-form))
+           (first-slot (first slot-specs)))
+      (assert-equal 30 (getf (rest first-slot) :initform)))))
 
 ;;; ─── :conc-name option ────────────────────────────────────────────────────
 
@@ -87,43 +92,47 @@
   :cases (("custom"  '(defstruct (point (:conc-name pt-)) x y)  "PT-X")
           ("default" '(defstruct point x)                        "POINT-X"))
   (form expected-accessor-name)
-  (let* ((exp  (ds-expand form))
-         (slot (first (fourth (second exp)))))
-    (assert-equal (intern expected-accessor-name) (getf (rest slot) :accessor))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp  (ds-expand form))
+           (slot (first (fourth (second exp)))))
+      (assert-equal (intern expected-accessor-name) (getf (rest slot) :accessor)))))
 
 ;;; ─── :constructor option ──────────────────────────────────────────────────
 
 (deftest ds-constructor-renamed-by-option
   ":constructor option renames the generated constructor to the specified name."
-  (let* ((exp   (ds-expand '(defstruct (point (:constructor new-point)) x y)))
-         (forms (ds-progn-forms exp))
-         (ctor  (second forms)))
-    (assert-equal "NEW-POINT" (symbol-name (second ctor)))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (point (:constructor new-point)) x y)))
+           (forms (ds-progn-forms exp))
+           (ctor  (second forms)))
+      (assert-equal "NEW-POINT" (symbol-name (second ctor))))))
 
 (deftest ds-boa-constructor-uses-positional-params
   ":constructor with BOA lambda list generates positional params (no &key)."
-  (let* ((exp    (ds-expand '(defstruct (point (:constructor make-pt (x y))) x y)))
-         (forms  (ds-progn-forms exp))
-         (ctor   (second forms))
-         (params (third ctor)))
-    (assert-equal 2 (length params))
-    (assert-equal "X" (symbol-name (first params)))
-    (assert-equal "Y" (symbol-name (second params)))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp    (ds-expand '(defstruct (point (:constructor make-pt (x y))) x y)))
+           (forms  (ds-progn-forms exp))
+           (ctor   (second forms))
+           (params (third ctor)))
+      (assert-equal 2 (length params))
+      (assert-equal "X" (symbol-name (first params)))
+      (assert-equal "Y" (symbol-name (second params))))))
 
 ;;; ─── Docstring filtering ──────────────────────────────────────────────────
 
 (deftest ds-docstring-ignored
   "Docstring in slot list is filtered out."
-  (let* ((exp (ds-expand '(defstruct point "A 2D point." x y)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form)))
-    (assert-equal 2 (length slot-specs))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp (ds-expand '(defstruct point "A 2D point." x y)))
+           (defclass-form (second exp))
+           (slot-specs (fourth defclass-form)))
+      (assert-equal 2 (length slot-specs)))))
 
 ;;; ─── *accessor-slot-map* side effect ──────────────────────────────────────
 
 (deftest ds-accessor-slot-map-populated
   "*accessor-slot-map* is populated with (struct-name . slot-name) for each accessor."
-  (let ((cl-cc/expand:*accessor-slot-map* (make-hash-table :test #'eq)))
+  (cl-cc/expand:with-fresh-defstruct-registries
     (ds-expand '(defstruct widget width height))
     (let ((entry (gethash (intern "WIDGET-WIDTH") cl-cc/expand:*accessor-slot-map*)))
       (assert-true (not (null entry)))
@@ -132,10 +141,11 @@
 
 (deftest ds-empty-struct-has-zero-slots
   "Empty defstruct generates a defclass with zero slot specs."
-  (let* ((exp (ds-expand '(defstruct empty)))
-         (defclass-form (second exp))
-         (slot-specs (fourth defclass-form)))
-    (assert-equal 0 (length slot-specs))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp (ds-expand '(defstruct empty)))
+           (defclass-form (second exp))
+           (slot-specs (fourth defclass-form)))
+      (assert-equal 0 (length slot-specs)))))
 
 (deftest-each ds-deriving-registers-typeclass-instances
   "defstruct :deriving emits the registration hook and registers instances on eval."
@@ -195,21 +205,23 @@
   :cases (("list"   '(defstruct (point (:type list)) x y)   'list)
           ("vector" '(defstruct (seg (:type vector)) a b)   'vector))
   (form expected-ctor)
-  (let* ((ctor (first (ds-progn-forms (ds-expand form)))))
-    (assert-equal 'defun (first ctor))
-    (assert-true (%ds-tree-member expected-ctor (fourth ctor)))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((ctor (first (ds-progn-forms (ds-expand form)))))
+      (assert-equal 'defun (first ctor))
+      (assert-true (%ds-tree-member expected-ctor (fourth ctor))))))
 
 (deftest ds-type-list-predicate-checks-listp
   "(:type list) defstruct: predicate tests with LISTP."
-  (let* ((exp   (ds-expand '(defstruct (rect (:type list) (:predicate rect-list-p))
-                              width height)))
-         (forms (ds-progn-forms exp))
-         (pred  (find-if (lambda (f) (and (listp f)
-                                          (eq (first f) 'defun)
-                                          (eq (second f) 'rect-list-p)))
-                         forms)))
-    (assert-true (not (null pred)))
-    (assert-true (%ds-tree-member 'listp pred))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (rect (:type list) (:predicate rect-list-p))
+                                width height)))
+           (forms (ds-progn-forms exp))
+           (pred  (find-if (lambda (f) (and (listp f)
+                                            (eq (first f) 'defun)
+                                            (eq (second f) 'rect-list-p)))
+                           forms)))
+      (assert-true (not (null pred)))
+      (assert-true (%ds-tree-member 'listp pred)))))
 
 ;;; ─── %defstruct-resolve-slot-values ──────────────────────────────────────
 

@@ -158,8 +158,112 @@
    Recognizes the classic two-shift + OR tree that implements a 64-bit rotate
    and replaces it with a single vm-rotate plus the normalized count constant."
   (%opt-recognition-pass instructions
-                         #'opt-rotate-recognition-match-at
-                         (lambda (rewritten result)
-                           (loop for inst in rewritten
-                                 do (push inst result)
-                                 finally (return result)))))
+                          #'opt-rotate-recognition-match-at
+                          (lambda (rewritten result)
+                            (loop for inst in rewritten
+                                  do (push inst result)
+                                  finally (return result)))))
+
+(defun %opt-branch-target-counts (instructions)
+  (let ((counts (make-hash-table :test #'equal)))
+    (dolist (inst instructions counts)
+      (when (or (typep inst 'vm-jump)
+                (typep inst 'vm-jump-zero))
+        (incf (gethash (vm-label-name inst) counts 0))))))
+
+(defun %opt-distinct-registers-p (&rest regs)
+  (loop for tail on (remove nil regs)
+        always (not (member (car tail) (cdr tail) :test #'eq))))
+
+(defun %opt-fill-loop-replacement (array-reg val-reg len-reg idx-reg next-reg cond-reg one-reg)
+  (list (make-vm-fill :array-reg array-reg :val-reg val-reg)
+        (make-vm-move :dst next-reg :src len-reg)
+        (make-vm-move :dst idx-reg :src len-reg)
+        (make-vm-const :dst cond-reg :value 0)
+        (make-vm-const :dst one-reg :value 1)))
+
+(defun opt-fill-recognition-match-at (instructions pos)
+  "Recognize a canonical full-vector fill loop and replace it with vm-fill.
+
+   The recognized form is intentionally narrow: ARRAY-LENGTH immediately before
+   the induction initialization, zero-based index, `< length` guard, exactly one
+   ASET store, increment by one, and private loop/exit labels."
+  (let ((end (+ pos 10)))
+    (when (and (> pos 0)
+               (<= end (length instructions)))
+      (let* ((len-inst   (nth (1- pos) instructions))
+             (init       (nth (+ pos 0) instructions))
+             (header     (nth (+ pos 1) instructions))
+             (cmp        (nth (+ pos 2) instructions))
+             (exit-jump  (nth (+ pos 3) instructions))
+             (store      (nth (+ pos 4) instructions))
+             (one        (nth (+ pos 5) instructions))
+             (inc        (nth (+ pos 6) instructions))
+             (step       (nth (+ pos 7) instructions))
+             (back-jump  (nth (+ pos 8) instructions))
+             (exit-label (nth (+ pos 9) instructions)))
+        (when (and (typep len-inst 'vm-array-length)
+                   (typep init 'vm-const)
+                   (eql (vm-value init) 0)
+                   (typep header 'vm-label)
+                   (typep cmp 'vm-lt)
+                   (typep exit-jump 'vm-jump-zero)
+                   (typep store 'vm-aset)
+                   (typep one 'vm-const)
+                   (eql (vm-value one) 1)
+                   (typep inc 'vm-add)
+                   (typep step 'vm-move)
+                   (typep back-jump 'vm-jump)
+                   (typep exit-label 'vm-label))
+          (let* ((array-reg (vm-src len-inst))
+                 (len-reg   (vm-dst len-inst))
+                 (idx-reg   (vm-dst init))
+                 (cond-reg  (vm-dst cmp))
+                 (one-reg   (vm-dst one))
+                 (next-reg  (vm-dst inc))
+                 (val-reg   (vm-val-reg store))
+                 (header-name (vm-name header))
+                 (exit-name   (vm-name exit-label))
+                 (target-counts (%opt-branch-target-counts instructions)))
+            (when (and (eq (vm-lhs cmp) idx-reg)
+                       (eq (vm-rhs cmp) len-reg)
+                       (eq (vm-reg exit-jump) cond-reg)
+                       (equal (vm-label-name exit-jump) exit-name)
+                       (eq (vm-array-reg store) array-reg)
+                       (eq (vm-index-reg store) idx-reg)
+                       (or (and (eq (vm-lhs inc) idx-reg)
+                                (eq (vm-rhs inc) one-reg))
+                           (and (eq (vm-lhs inc) one-reg)
+                                (eq (vm-rhs inc) idx-reg)))
+                       (eq (vm-dst step) idx-reg)
+                       (eq (vm-src step) next-reg)
+                       (equal (vm-label-name back-jump) header-name)
+                       (= (gethash header-name target-counts 0) 1)
+                       (= (gethash exit-name target-counts 0) 1)
+                       (%opt-distinct-registers-p len-reg idx-reg cond-reg one-reg next-reg)
+                       (not (member array-reg (list idx-reg cond-reg one-reg next-reg) :test #'eq))
+                       (not (member val-reg (list idx-reg cond-reg one-reg next-reg) :test #'eq)))
+              (values (%opt-fill-loop-replacement array-reg val-reg len-reg idx-reg next-reg cond-reg one-reg)
+                      10))))))))
+
+(defun opt-pass-fill-recognition (instructions)
+  "Collapse a canonical zero-based array fill loop into a side-effecting vm-fill.
+
+   This is the conservative FR-055 slice for full-vector fill idioms.  The pass
+   preserves final loop temporaries after the bulk fill so later code observing
+   the induction or condition registers keeps the same values."
+  (loop with n      = (length instructions)
+        with result = nil
+        with i      = 0
+        while (< i n)
+        do (multiple-value-bind (rewritten consumed)
+               (opt-fill-recognition-match-at instructions i)
+             (if (and rewritten (integerp consumed) (plusp consumed))
+                 (progn
+                   (dolist (inst rewritten)
+                     (push inst result))
+                   (incf i consumed))
+                 (progn
+                   (push (nth i instructions) result)
+                   (incf i 1))))
+        finally (return (nreverse result))))

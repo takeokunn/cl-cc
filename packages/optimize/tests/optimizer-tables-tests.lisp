@@ -34,6 +34,8 @@
           ("vm-logior"     'vm-logior)
           ("vm-logxor"     'vm-logxor)
           ("vm-ash"        'vm-ash)
+          ("vm-div"        'vm-div)
+          ("vm-cl-div"     'cl-cc/vm::vm-cl-div)
           ("vm-gcd"        'vm-gcd)
           ("vm-lcm"        'vm-lcm))
   (type-sym)
@@ -43,7 +45,9 @@
   "Functions in *opt-binary-fold-table* correctly evaluate arithmetic operations."
   :cases (("add" 'vm-add 3 4  7)
           ("sub" 'vm-sub 9 4  5)
-          ("mul" 'vm-mul 6 7 42))
+          ("mul" 'vm-mul 6 7 42)
+          ("div-floor" 'vm-div 10 3 3)
+          ("div-rational" 'cl-cc/vm::vm-cl-div 3 4 3/4))
   (type-sym a b expected)
   (let ((fn (gethash type-sym cl-cc/optimize::*opt-binary-fold-table*)))
     (assert-= expected (funcall fn a b))))
@@ -76,8 +80,11 @@
           ("vm-dec"         'vm-dec)
           ("vm-lognot"      'vm-lognot)
           ("vm-rational"    'vm-rational)
+          ("vm-rationalize" 'vm-rationalize)
           ("vm-numerator"   'vm-numerator)
           ("vm-denominator" 'vm-denominator)
+          ("vm-car"         'vm-car)
+          ("vm-cdr"         'vm-cdr)
           ("vm-not"         'vm-not))
   (type-sym)
   (assert-true (gethash type-sym cl-cc/optimize::*opt-unary-fold-table*)))
@@ -85,7 +92,12 @@
 (deftest-each unary-fold-table-function-evaluation-cases
   "Functions in *opt-unary-fold-table* correctly evaluate unary operations."
   :cases (("neg" 'vm-neg  7  -7)
-          ("abs" 'vm-abs -5   5))
+          ("abs" 'vm-abs -5   5)
+          ("rational" 'vm-rational 0.5 1/2)
+          ("numerator" 'vm-numerator 9/12 3)
+          ("denominator" 'vm-denominator 9/12 4)
+          ("car" 'vm-car '(7 . 8) 7)
+          ("cdr" 'vm-cdr '(7 . 8) 8))
   (type-sym input expected)
   (let ((fn (gethash type-sym cl-cc/optimize::*opt-unary-fold-table*)))
     (assert-= expected (funcall fn input))))
@@ -132,6 +144,8 @@
 (deftest foldable-unary-types-contains-expected-types
   "*opt-foldable-unary-types* includes both arithmetic and predicate types."
   (assert-true (member 'vm-neg    cl-cc/optimize::*opt-foldable-unary-types*))
+  (assert-true (member 'vm-car    cl-cc/optimize::*opt-foldable-unary-types*))
+  (assert-true (member 'vm-cdr    cl-cc/optimize::*opt-foldable-unary-types*))
   (assert-true (member 'vm-null-p cl-cc/optimize::*opt-foldable-unary-types*))
   (assert-true (member 'vm-abs    cl-cc/optimize::*opt-foldable-unary-types*)))
 
@@ -175,7 +189,9 @@
   "opt-inst-read-regs returns nil for vm-const; (:r0) for vm-move and vm-neg."
   :cases (("vm-const" (make-vm-const :dst :r0 :value 42) nil)
           ("vm-move"  (make-vm-move  :dst :r1 :src :r0)  '(:r0))
-          ("vm-neg"   (make-vm-neg   :dst :r1 :src :r0)  '(:r0)))
+          ("vm-neg"   (make-vm-neg   :dst :r1 :src :r0)  '(:r0))
+          ("vm-car"   (make-vm-car   :dst :r1 :src :r0)  '(:r0))
+          ("vm-cdr"   (make-vm-cdr   :dst :r1 :src :r0)  '(:r0)))
   (inst expected)
   (assert-equal expected (cl-cc/optimize:opt-inst-read-regs inst)))
 

@@ -132,10 +132,12 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 (deftest-each prim-binary-arith
   "Binary arithmetic instructions compute correct results."
   :cases (("div-10/3"  #'cl-cc:make-vm-div  10 3  3)
-          ("div-neg"   #'cl-cc:make-vm-div  -7 2  -4)
-          ("mod-10/3"  #'cl-cc:make-vm-mod  10 3  1)
-          ("mod-neg"   #'cl-cc:make-vm-mod  -7 2  1)
-          ("min-lhs"   #'cl-cc:make-vm-min  3  5  3)
+           ("div-neg"   #'cl-cc:make-vm-div  -7 2  -4)
+           ("cl-div-rational" #'cl-cc:make-vm-cl-div 3 4 3/4)
+           ("cl-div-ratio-by-ratio" #'cl-cc:make-vm-cl-div 1/3 4/5 5/12)
+           ("mod-10/3"  #'cl-cc:make-vm-mod  10 3  1)
+           ("mod-neg"   #'cl-cc:make-vm-mod  -7 2  1)
+           ("min-lhs"   #'cl-cc:make-vm-min  3  5  3)
           ("min-rhs"   #'cl-cc:make-vm-min  5  3  3)
           ("max-lhs"   #'cl-cc:make-vm-max  5  3  5)
           ("max-rhs"   #'cl-cc:make-vm-max  3  5  5)
@@ -143,6 +145,18 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
           ("rem-neg"   #'cl-cc:make-vm-rem  -7 2  -1))
   (ctor lhs rhs expected)
   (assert-= expected (%run-binary-inst ctor lhs rhs)))
+
+(deftest-each prim-cl-div-fast-path-selection
+  "vm-cl-div runtime selects specialized paths for fixnum and fixnum-rational inputs."
+  :cases (("fixnum" 3 4 3/4 :fixnum)
+          ("ratio-ratio" 1/3 4/5 5/12 :fixnum-rational)
+          ("fixnum-ratio" 2 3/5 10/3 :fixnum-rational)
+          ("ratio-fixnum" 2/3 5 2/15 :fixnum-rational))
+  (lhs rhs expected expected-path)
+  (multiple-value-bind (result path)
+      (cl-cc/vm::%vm-cl-div-fast-path lhs rhs)
+    (assert-= expected result)
+    (assert-eq expected-path path)))
 
 ;;; Division by zero errors
 

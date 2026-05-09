@@ -18,6 +18,9 @@
 #    classic GC, SBCL allocates aggressively; raising the GC trigger
 #    keeps our test suite from thrashing collection during compile.
 {
+  # `apps.nix` always passes `--dynamic-space-size 8192`, so we don't add a
+  # default `--dynamic-space-size 3000` here (it would just be overridden and
+  # show up as a confusing duplicate flag in `ps` output).
   sbcl =
     if pkgs.stdenv.isDarwin then
       pkgs.wrapLisp {
@@ -25,10 +28,6 @@
           markRegionGC = false;
         });
         faslExt = "fasl";
-        flags = [
-          "--dynamic-space-size"
-          "3000"
-        ];
       }
     else
       pkgs.sbcl;

@@ -102,16 +102,22 @@
           ("format-multi"    "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)"))
   )
 
-(deftest-compile io-print-returns-value
-  "princ/prin1/print each return the value they printed."
+(deftest-each io-print-returns-value
+  "princ/prin1/print each return the value they printed (stdout discarded)."
   :cases (("princ" 42 "(princ 42)")
           ("prin1" 42 "(prin1 42)")
-          ("print" 42 "(print 42)")))
+          ("print" 42 "(print 42)"))
+  (expected form)
+  (let ((*standard-output* (make-broadcast-stream)))
+    (assert-equal expected (run-string form))))
 
-(deftest-compile io-returns-nil
-  "terpri and (format t ...) both return nil."
+(deftest-each io-returns-nil
+  "terpri and (format t ...) both return nil (stdout discarded)."
   :cases (("terpri"   nil "(terpri)")
-          ("format-t" nil "(format t \"hello\")")))
+          ("format-t" nil "(format t \"hello\")"))
+  (expected form)
+  (let ((*standard-output* (make-broadcast-stream)))
+    (assert-equal expected (run-string form))))
 
 (deftest-compile io-format-directives
   "format directives for iteration, conditionals, and character output."
@@ -121,8 +127,9 @@
   :stdlib t)
 
 (deftest io-write-char-basic
-  "write-char outputs a character and returns it"
-  (assert-true (equal #\A (run-string "(write-char #\\A)"))))
+  "write-char outputs a character and returns it (stdout discarded)."
+  (let ((*standard-output* (make-broadcast-stream)))
+    (assert-true (equal #\A (run-string "(write-char #\\A)")))))
 
 ;;; Higher-Order Function Tests (require stdlib)
 

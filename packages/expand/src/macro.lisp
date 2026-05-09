@@ -30,13 +30,12 @@
 
 (defvar *compiler-macro-table*)
 
-(defvar *macroexpansion-cache-lock*
-  #+(and sb-thread (not cl-cc-self-hosting)) (sb-thread:make-mutex :name "macroexpansion-cache")
-  #-(and sb-thread (not cl-cc-self-hosting)) nil)
-
+;; No global lock needed: %with-isolated-macro-environment gives each test worker
+;; its own fresh cache instances, so no two threads ever share the same hash table.
+;; A mutex here would cause GC-safepoint deadlocks: make-hash-table can trigger GC
+;; inside the lock while other threads are stuck in futex-wait (without-gcing).
 (defmacro %with-macroexpansion-cache-lock (&body body)
-  #+(and sb-thread (not cl-cc-self-hosting)) `(sb-thread:with-mutex (*macroexpansion-cache-lock*) ,@body)
-  #-(and sb-thread (not cl-cc-self-hosting)) `(progn ,@body))
+  `(progn ,@body))
 
 (defun %macroexpansion-cache-table (root env)
   (or (gethash env root)
@@ -66,9 +65,18 @@ Gensym-hygienic expansions are never cached."
                 (%contains-uninterned-symbol-p (cdr node))))
     (t nil)))
 
+(defun %side-effecting-macro-form-p (form)
+  "Return T when expanding FORM mutates macroexpansion-visible global state."
+  (and (consp form)
+       (symbolp (car form))
+       (member (symbol-name (car form))
+               '("DECLAIM" "DEFINE-COMPILER-MACRO")
+               :test #'string=)))
+
 (defun %cacheable-macroexpansion-p (form)
   "Return T when FORM is safe to reuse from the macroexpansion cache."
-  (not (%contains-uninterned-symbol-p form)))
+  (and (not (%contains-uninterned-symbol-p form))
+       (not (%side-effecting-macro-form-p form))))
 
 (defun register-macro (name expander)
   "Register NAME as a macro with EXPANDER in the global environment.
@@ -106,7 +114,7 @@ EXPANDER may be either a host function or a descriptor consumed by
 (defun %nest-let-bindings (bindings body)
   "Build nested LET forms from BINDINGS ending in BODY forms."
   (if (null bindings)
-      (cons 'progn body)
+      (cons 'locally body)
       (list 'let (list (first bindings))
             (%nest-let-bindings (rest bindings) body))))
 
@@ -123,14 +131,19 @@ EXPANDER may be either a host function or a descriptor consumed by
                                body))))
         (%maybe-postprocess-expansion (funcall *macro-eval-fn* eval-form) descriptor env)))
     (:compiler-macro-expander
-      (let* ((lambda-list (getf descriptor :lambda-list))
-             (body        (getf descriptor :body))
-             (form-var    (gensym "FORM"))
-             (eval-form   `(let ((,form-var ',form))
-                             ,(%nest-let-bindings
-                               (destructure-lambda-list lambda-list `(cdr ,form-var))
-                               body))))
-        (funcall *macro-eval-fn* eval-form)))
+      (multiple-value-bind (effective-lambda-list whole-var environment-var)
+          (%compiler-macro-lambda-list-parts (getf descriptor :lambda-list))
+        (let* ((body     (getf descriptor :body))
+               (form-var (gensym "FORM"))
+               (bindings (append
+                          (when whole-var (list (list whole-var form-var)))
+                          (when environment-var (list (list environment-var `',env)))
+                          (destructure-lambda-list
+                           effective-lambda-list
+                           `(%compiler-macro-argument-tail ,form-var))))
+               (eval-form `(let ((,form-var ',form))
+                             ,(%nest-let-bindings bindings body))))
+          (funcall *macro-eval-fn* eval-form))))
     (:register-macro-expander
      (let* ((parameters (getf descriptor :parameters))
             (body       (getf descriptor :body))
@@ -158,9 +171,58 @@ Supports both host functions and descriptor-backed expanders."
            (let ((local (intern (symbol-name name) :cl-cc/expand)))
              (gethash local (macro-env-table *macro-environment*))))))
 
+(defun %compiler-macro-argument-tail (form)
+  "Return the effective argument tail for a compiler macro FORM."
+  (if (and (consp form) (eq (car form) 'funcall))
+      (cddr form)
+      (cdr form)))
+
+(defun %compiler-macro-lambda-list-parts (lambda-list)
+  "Return LAMBDA-LIST without &whole/&environment plus their binding vars."
+  (let ((result nil)
+        (whole nil)
+        (environment nil)
+        (tail lambda-list))
+    (tagbody
+     scan
+       (when (null tail)
+         (return-from %compiler-macro-lambda-list-parts
+           (values (nreverse result) whole environment)))
+       (let ((item (car tail)))
+         (cond
+           ((eq item '&whole)
+            (unless (and (cdr tail) (symbolp (cadr tail)))
+              (error "Invalid &WHOLE in compiler macro lambda list: ~S" lambda-list))
+            (setf whole (cadr tail)
+                  tail (cddr tail))
+            (go scan))
+           ((eq item '&environment)
+            (unless (and (cdr tail) (symbolp (cadr tail)))
+              (error "Invalid &ENVIRONMENT in compiler macro lambda list: ~S" lambda-list))
+            (setf environment (cadr tail)
+                  tail (cddr tail))
+            (go scan))
+           (t
+            (setf result (cons item result)
+                  tail (cdr tail))
+            (go scan)))))))
+
 (defun lookup-compiler-macro (name)
   "Look up compiler macro NAME in the global compiler-macro environment."
   (gethash name *compiler-macro-table*))
+
+(defun compiler-macro-function (name &optional environment)
+  "Return the compiler macro function registered for NAME, or NIL."
+  (declare (ignore environment))
+  (lookup-compiler-macro name))
+
+(defun (setf compiler-macro-function) (new-function name &optional environment)
+  "Set NAME's compiler macro function in the global compiler macro table."
+  (declare (ignore environment))
+  (if new-function
+      (setf (gethash name *compiler-macro-table*) new-function)
+      (remhash name *compiler-macro-table*))
+  new-function)
 
 ;;; Macro Expansion
 

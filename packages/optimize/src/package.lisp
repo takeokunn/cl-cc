@@ -79,30 +79,109 @@
    ;; ─── cfg-layout.lisp — code layout ────────────────────────────────
    #:cfg-flatten-hot-cold
 
-   ;; ─── optimizer-tables.lisp — instruction introspection ──────────────
-   #:opt-inst-dst #:opt-inst-read-regs #:opt-falsep
+    ;; ─── optimizer-tables.lisp — instruction introspection ──────────────
+    #:opt-inst-dst #:opt-inst-read-regs #:opt-falsep
 
-   ;; ─── prolog-peephole.lisp — Prolog peephole rewriting ──────────────
-   #:apply-prolog-peephole
+    ;; ─── optimizer-dataflow.lisp — generic dataflow helpers ─────────────
+    #:opt-dataflow-result #:make-opt-dataflow-result #:opt-dataflow-result-p
+    #:opt-dataflow-result-cfg #:opt-dataflow-result-direction
+    #:opt-dataflow-result-in #:opt-dataflow-result-out
+    #:opt-run-dataflow #:define-dataflow-pass
+    #:opt-compute-available-expressions
+    #:opt-compute-reaching-definitions
 
-   ;; ─── optimizer-memory.lisp — alias analysis ────────────────────────
+    ;; ─── prolog-peephole.lisp — Prolog peephole rewriting ──────────────
+    #:apply-prolog-peephole
+
+    ;; ─── optimizer-memory.lisp — alias analysis ────────────────────────
     #:opt-compute-heap-aliases
-   #:opt-compute-simple-inductions
-   #:opt-induction-trip-count
-   #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
-   #:opt-compute-value-ranges
-   #:opt-array-bounds-check-eliminable-p
-   #:opt-interval-add  #:opt-interval-sub
+    #:opt-compute-points-to
+    #:opt-points-to-root
+    #:opt-compute-simple-inductions
+    #:opt-induction-trip-count
+    #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
+    #:opt-compute-cfg-value-ranges
+    #:opt-compute-value-ranges
+    #:opt-array-bounds-check-eliminable-p
+    #:opt-interval-add  #:opt-interval-sub
     #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
+    #:opt-pass-cons-slot-forward
 
-   ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
-   #:opt-known-callee-labels
+    ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
+    #:opt-known-callee-labels
+    #:opt-pass-call-site-splitting
+    #:opt-pass-devirtualize
 
-   ;; ─── optimizer-flow.lisp ───────────────────────────────────────────
-   #:opt-pass-dominated-type-check-elim
+    ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
+    #:opt-pass-fill-recognition
 
-   ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-   #:optimize-instructions
-   #:*skip-optimizer-passes*
-   #:*verify-optimizer-instructions*
-   #:opt-verify-instructions))
+    ;; ─── optimizer-flow.lisp ───────────────────────────────────────────
+    #:opt-pass-dominated-type-check-elim
+
+    ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
+    #:optimize-instructions
+    #:*skip-optimizer-passes*
+    #:*verify-optimizer-instructions*
+    #:optimize-roadmap-doc-features
+    #:optimize-roadmap-doc-fr-ids
+    #:optimize-roadmap-register-doc-evidence
+    #:lookup-opt-roadmap-evidence
+    #:optimize-backend-roadmap-doc-features
+    #:optimize-backend-roadmap-doc-fr-ids
+    #:optimize-backend-roadmap-register-doc-evidence
+    #:lookup-opt-backend-roadmap-evidence
+    #:optimize-roadmap-evidence-well-formed-p
+    #:optimize-roadmap-implementation-evidence-complete-p
+    #:optimize-backend-roadmap-implementation-evidence-complete-p
+    #:opt-roadmap-evidence-feature-id
+    #:opt-roadmap-evidence-status
+    #:opt-roadmap-evidence-modules
+    #:opt-roadmap-evidence-api-symbols
+    #:opt-roadmap-evidence-test-anchors
+    #:opt-roadmap-evidence-summary
+    #:make-opt-ic-site
+    #:opt-ic-site-state
+    #:opt-ic-site-misses
+    #:opt-ic-site-megamorphic-fallback
+    #:opt-ic-transition
+    #:make-opt-speculation-log
+    #:opt-record-speculation-failure
+    #:opt-speculation-failed-p
+    #:make-opt-profile-data
+    #:opt-profile-record-edge
+    #:opt-profile-record-value
+    #:opt-profile-record-call-chain
+    #:opt-profile-record-allocation
+    #:opt-lattice-bottom
+    #:opt-lattice-constant
+    #:opt-lattice-overdefined
+    #:opt-lattice-meet
+    #:opt-lattice-value-kind
+    #:opt-lattice-value-value
+    #:make-opt-function-summary
+    #:opt-function-summary-safe-to-inline-p
+    #:make-opt-slab-pool
+    #:opt-slab-allocate
+    #:opt-slab-free
+    #:make-opt-bump-region
+    #:opt-bump-region-cursor
+    #:opt-bump-allocate
+    #:opt-bump-mark
+    #:opt-bump-reset
+    #:make-opt-stack-map
+    #:opt-stack-map-live-root-p
+    #:make-opt-guard-state
+    #:opt-guard-record
+    #:opt-weaken-guard
+    #:make-opt-jit-cache-entry
+    #:opt-jit-cache-select-eviction
+    #:make-opt-module-summary
+    #:opt-merge-module-summaries
+    #:make-opt-sea-node
+    #:opt-sea-node-schedulable-p
+    #:make-opt-deopt-frame
+    #:opt-materialize-deopt-state
+    #:make-opt-shape-descriptor-for-slots
+    #:opt-shape-slot-offset
+    #:opt-adaptive-compilation-threshold
+    #:opt-verify-instructions))
