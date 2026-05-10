@@ -15,7 +15,7 @@
 
 (deftest solver-equality-trivial
   "Solving (v ~ int) extends subst with v→int."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (c (make-equal-constraint v type-int))
          (s (make-substitution)))
     (multiple-value-bind (new-subst residual)
@@ -26,8 +26,8 @@
 
 (deftest solver-equality-chain
   "Solving (v1 ~ v2) then (v2 ~ int) resolves both."
-  (let* ((v1 (fresh-type-var "a"))
-         (v2 (fresh-type-var "b"))
+  (let* ((v1 (fresh-type-var :name "a"))
+         (v2 (fresh-type-var :name "b"))
          (c1 (make-equal-constraint v1 v2))
          (c2 (make-equal-constraint v2 type-int))
          (s (make-substitution)))
@@ -40,10 +40,10 @@
 (deftest solver-bounded-type-var-equality
   "Bounded type variables accept bindings inside bounds and reject violations."
   (let* ((number-type (make-type-primitive :name 'number))
-         (upper-ok (fresh-type-var "a" :upper-bound number-type))
-         (upper-bad (fresh-type-var "b" :upper-bound number-type))
-         (lower-ok (fresh-type-var "c" :lower-bound type-int))
-         (lower-bad (fresh-type-var "d" :lower-bound type-int)))
+         (upper-ok (fresh-type-var :name "a" :upper-bound number-type))
+         (upper-bad (fresh-type-var :name "b" :upper-bound number-type))
+         (lower-ok (fresh-type-var :name "c" :lower-bound type-int))
+         (lower-bad (fresh-type-var :name "d" :lower-bound type-int)))
     (multiple-value-bind (_subst residual)
         (cl-cc/type:solve-constraints
          (list (make-equal-constraint upper-ok type-int))
@@ -73,8 +73,8 @@
 (deftest solver-bounded-type-var-propagates-through-var
   "Variable-to-variable unification preserves bounds on the surviving variable."
   (let* ((number-type (make-type-primitive :name 'number))
-         (bounded (fresh-type-var "a" :upper-bound number-type))
-         (survivor (fresh-type-var "b")))
+         (bounded (fresh-type-var :name "a" :upper-bound number-type))
+         (survivor (fresh-type-var :name "b")))
     (multiple-value-bind (subst ok)
         (cl-cc/type:type-unify bounded survivor (make-substitution))
       (assert-true ok)
@@ -91,7 +91,7 @@
 (deftest solver-instantiate-preserves-bounded-quantifier
   "Instantiating a type scheme copies upper/lower bounds onto fresh variables."
   (let* ((number-type (make-type-primitive :name 'number))
-         (qvar (fresh-type-var "a"
+         (qvar (fresh-type-var :name "a"
                                :upper-bound number-type
                                :lower-bound type-int))
          (scheme (make-type-scheme (list qvar) qvar))
@@ -105,7 +105,7 @@
 
 (deftest solver-conflicting-equalities-produce-residual
   "Conflicting equalities (v~int and v~string) leave a non-empty residual."
-  (let* ((v  (fresh-type-var "a"))
+  (let* ((v  (fresh-type-var :name "a"))
          (c1 (make-equal-constraint v type-int))
          (c2 (make-equal-constraint v type-string))
          (s  (make-substitution)))
@@ -130,7 +130,7 @@
   :cases (("subtype"       (make-subtype-constraint type-int type-any)
                            (make-subtype-constraint type-string type-int))
           ("typeclass"     (make-typeclass-constraint 'eq cl-cc/type:+type-unknown+)
-                           (make-typeclass-constraint 'eq (fresh-type-var "a")))
+                           (make-typeclass-constraint 'eq (fresh-type-var :name "a")))
           ("effect-subset" (make-effect-subset-constraint +pure-effect-row+ +io-effect-row+)
                            (make-effect-subset-constraint +io-effect-row+ +pure-effect-row+))
           ("mult-leq"      (make-mult-leq-constraint :zero :omega)
@@ -149,7 +149,7 @@
   "Row-lacks: open-var no residual; label absent no residual; label present → 1 residual."
   (flet ((residuals (c)
            (nth-value 1 (cl-cc/type:solve-constraints (list c) (make-substitution)))))
-    (assert-null (residuals (make-row-lacks-constraint (fresh-type-var "rho") 'x)))
+    (assert-null (residuals (make-row-lacks-constraint (fresh-type-var :name "rho") 'x)))
     (assert-null (residuals (make-row-lacks-constraint
                               (make-type-record :fields (list (cons 'y type-int)) :row-var nil) 'x)))
     (assert-equal 1 (length (residuals (make-row-lacks-constraint
@@ -159,7 +159,7 @@
 
 (deftest solver-implication-solvable
   "Solvable implication: ∀a. (a ~ int) ⊃ (a ~ int) — no residual."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (given (list (make-equal-constraint v type-int)))
          (wanted (list (make-equal-constraint v type-int)))
          (c (make-implication-constraint (list v) given wanted))
@@ -171,7 +171,7 @@
 
 (deftest solver-defaults-numeric-typeclass-vars
   "Unresolved numeric typeclass variables default to the configured numeric type."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (c (make-typeclass-constraint 'num v))
          (s (make-substitution)))
     (multiple-value-bind (new-subst residual)
@@ -196,7 +196,7 @@
 
 (deftest solver-mixed-constraints
   "Mixed constraint list: some solved, some residual."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (c1 (make-equal-constraint v type-int))            ; solvable
          (c2 (make-subtype-constraint type-string type-int)) ; violated → residual
          (c3 (make-mult-leq-constraint :zero :omega))       ; satisfied

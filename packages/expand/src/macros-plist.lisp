@@ -26,21 +26,17 @@
           (cur (gensym "CUR"))
           (found (gensym "FOUND")))
       `(let ((,ind ,indicator) (,prev nil) (,cur ,plist) (,found nil))
-         (tagbody
-          :loop
-          (when ,cur
-            (cond
-              ((eq (car ,cur) ,ind)
-               (setq ,found t)
-               (if ,prev
-                   (rplacd (cdr ,prev) (cddr ,cur))
-                   (setq ,plist (cddr ,cur)))
-               (go :done))
-              (t
-               (setq ,prev ,cur)
-               (setq ,cur (cddr ,cur))
-               (go :loop))))
-          :done)
+         (loop while ,cur
+               do (if (eq (car ,cur) ,ind)
+                      (progn
+                        (setq ,found t)
+                        (if ,prev
+                            (rplacd (cdr ,prev) (cddr ,cur))
+                            (setq ,plist (cddr ,cur)))
+                        (return))
+                      (progn
+                        (setq ,prev ,cur)
+                        (setq ,cur (cddr ,cur)))))
          ,found))))
 
 ;;; %plist-put — non-destructive plist update (used by setf getf expansion)

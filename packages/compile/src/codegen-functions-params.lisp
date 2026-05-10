@@ -124,17 +124,11 @@ This is a conservative heuristic used to mark &rest lists dynamic-extent."
 
 (defun dynamic-extent-declared-p (declarations name)
   "Return T when DECLARATIONS contain (dynamic-extent NAME)."
-  (let ((xs declarations))
-    (tagbody
-     scan-declarations
-       (if (null xs) (return-from dynamic-extent-declared-p nil))
-       (let ((decl (car xs)))
-         (if (and (consp decl)
-                  (eq (car decl) (quote dynamic-extent))
-                  (%member-eq-p name (cdr decl)))
-             (return-from dynamic-extent-declared-p t)))
-       (setq xs (cdr xs))
-       (go scan-declarations))))
+  (some (lambda (decl)
+          (and (consp decl)
+               (eq (car decl) 'dynamic-extent)
+               (%member-eq-p name (cdr decl))))
+        declarations))
 
 (defun emit-supplied-p-checks (ctx supplied-p-entries)
   "Emit code to set supplied-p registers based on sentinel comparison.
@@ -178,56 +172,20 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
 
 (defun build-all-param-bindings (params param-regs opt-bindings rest-binding key-bindings)
   "Build the combined alist of (name . register) for all lambda list parameters."
-  (let ((bindings nil)
-        (ps params)
-        (rs param-regs))
-    (tagbody
-     scan-required
-       (if (or (null ps) (null rs)) (go done-required))
-       (setq bindings (cons (cons (car ps) (car rs)) bindings))
-       (setq ps (cdr ps))
-       (setq rs (cdr rs))
-       (go scan-required)
-     done-required)
-    (let ((xs opt-bindings))
-      (tagbody
-       scan-opt
-         (if (null xs) (go done-opt))
-         (setq bindings (cons (car xs) bindings))
-         (setq xs (cdr xs))
-         (go scan-opt)
-       done-opt))
-    (if rest-binding
-        (setq bindings (cons rest-binding bindings)))
-    (let ((xs key-bindings))
-      (tagbody
-       scan-key
-         (if (null xs) (return-from build-all-param-bindings
-                        (nreverse bindings)))
-         (setq bindings (cons (car xs) bindings))
-         (setq xs (cdr xs))
-         (go scan-key)))))
+  (nconc
+   (loop for p in params for r in param-regs collect (cons p r))
+   opt-bindings
+   (when rest-binding (list rest-binding))
+   key-bindings))
 
 (defun function-param-type-bindings (name params)
   "Return an alist of (param . type-scheme) for NAMEs typed parameters."
   (multiple-value-bind (signature found-p)
       (gethash name *function-type-registry*)
-    (if found-p
-        (let ((param-types (car signature))
-              (result nil)
-              (ps params)
-              (ts nil))
-          (setq ts param-types)
-          (tagbody
-           scan-types
-             (if (or (null ps) (null ts))
-                 (return-from function-param-type-bindings
-                   (nreverse result)))
-             (setq result
-                   (cons (cons (car ps) (type-to-scheme (car ts))) result))
-             (setq ps (cdr ps))
-             (setq ts (cdr ts))
-             (go scan-types))))))
+    (when found-p
+      (loop for p in params
+            for tp in (car signature)
+            collect (cons p (type-to-scheme tp))))))
 
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
                               key-bindings non-constant-defaults body
@@ -263,18 +221,12 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
                (emit-supplied-p-checks ctx supplied-p-entries))
            (if non-constant-defaults
                (emit-non-constant-defaults ctx non-constant-defaults))
-           (let ((last-reg nil)
-                 (xs body))
-             (tagbody
-              scan-body
-                (if (null xs) (go done-body))
-                (let ((form (car xs)))
-                  (setf (ctx-tail-position ctx)
-                        (if (null (cdr xs)) t nil))
-                  (setq last-reg (compile-ast form ctx)))
-                (setq xs (cdr xs))
-                (go scan-body)
-              done-body)
+           (let ((last-reg (loop with r = nil
+                                  for rest on body
+                                  do (setf (ctx-tail-position ctx)
+                                           (if (null (cdr rest)) t nil))
+                                     (setf r (compile-ast (car rest) ctx))
+                                  finally (return r))))
              (setf (ctx-tail-position ctx) nil)
              (emit ctx (make-vm-ret :reg last-reg))))
       (setf (ctx-env ctx) old-env)

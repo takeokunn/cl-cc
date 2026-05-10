@@ -28,6 +28,9 @@
           assert-type-equal
           assert-unifies
           assert-not-unifies
+          assert-bool
+          assert-list-contains
+          assert-bitfield
           assert-snapshot
           assert-compiles-to
           assert-pbt

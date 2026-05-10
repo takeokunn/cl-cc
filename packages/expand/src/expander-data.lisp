@@ -167,35 +167,10 @@ These recurse into subforms but their head is not macro-expanded.")
 ;;; ── Query helpers for the data layer ─────────────────────────────────────
 
 (defun %symbol-list-member-p (name items)
-  (let ((tail items)
-        (found nil))
-    (tagbody
-     start
-       (if (null tail) (go end))
-       (if (eq name (car tail)) (setq found t))
-       (if found (go end))
-       (setq tail (cdr tail))
-       (go start)
-     end)
-    found))
+  (and (member name items :test #'eq) t))
 
 (defun %symbol-alist-cdr (name entries)
-  (let ((tail entries)
-        (entry nil)
-        (result nil)
-        (found nil))
-    (tagbody
-     start
-       (if (null tail) (go end))
-       (setq entry (car tail))
-       (if (consp entry)
-           (if (eq name (car entry)) (setq found t)))
-       (if found (setq result (cdr entry)))
-       (if found (go end))
-       (setq tail (cdr tail))
-       (go start)
-     end)
-    result))
+  (cdr (assoc name entries :test #'eq)))
 
 (defun compiler-special-form-p (name)
   "Return T when NAME is handled directly by the compiler/parser layer."

@@ -160,7 +160,7 @@
 (deftest row-open-closed
   "row-closed-p / row-open-p distinguish closed vs open rows."
   (let* ((closed (make-type-record :fields (list (cons 'x type-int)) :row-var nil))
-         (rv     (fresh-type-var 'rho))
+         (rv     (fresh-type-var :name 'rho))
          (open   (make-type-record :fields (list (cons 'x type-int)) :row-var rv)))
     (assert-true  (row-closed-p closed))
     (assert-false (row-open-p   closed))

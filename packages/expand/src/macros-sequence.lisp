@@ -15,62 +15,37 @@
 ;; FILL (FR-502): fill a sequence (list or vector) with item; supports :start/:end
 (our-defmacro fill (seq item &key start end)
   "Fill SEQ[start..end) with ITEM. Works for lists and vectors."
-  (let ((s (gensym "SEQ")) (it (gensym "ITEM")) (i (gensym "I"))
-        (lim (gensym "LIM")) (ptr (gensym "PTR")) (cnt (gensym "CNT")) (lbl (gensym "FILL")))
+  (let ((s   (gensym "SEQ")) (it  (gensym "ITEM"))
+        (i   (gensym "I"))   (lim (gensym "LIM"))
+        (ptr (gensym "PTR")))
     `(let* ((,s ,seq) (,it ,item)
-            (,i ,(or start 0))
             (,lim (or ,(or end nil) (length ,s))))
        (if (vectorp ,s)
-            ;; vector path: indexed fill with aref
-            (tagbody ,lbl
-              (when (< ,i ,lim)
-                (aset ,s ,i ,it)
-                (setq ,i (+ ,i 1))
-                (go ,lbl)))
-           ;; list path: advance to start, then fill (lim-i) elements
-           (let ((,ptr (nthcdr ,i ,s)) (,cnt 0) (,lim (- ,lim ,i)))
-              (tagbody ,lbl
-                (when (and ,ptr (< ,cnt ,lim))
-                  (rplaca ,ptr ,it)
-                  (setq ,ptr (cdr ,ptr))
-                  (setq ,cnt (+ ,cnt 1))
-                 (go ,lbl)))))
+           (loop for ,i from ,(or start 0) below ,lim
+                 do (aset ,s ,i ,it))
+           (loop for ,ptr on (nthcdr ,(or start 0) ,s)
+                 repeat (- ,lim ,(or start 0))
+                 do (rplaca ,ptr ,it)))
        ,s)))
 
 ;; REPLACE (FR-502): copy elements from source into dest; supports :start/:end keywords
 (our-defmacro replace (dest source &key start1 end1 start2 end2)
   "Copy elements from SOURCE[start2..end2) into DEST[start1..end1). Works for lists and vectors."
-  (let ((d (gensym "DEST")) (s (gensym "SRC"))
-        (di (gensym "DI")) (si (gensym "SI"))
+  (let ((d    (gensym "DEST")) (s    (gensym "SRC"))
         (dlim (gensym "DLIM")) (slim (gensym "SLIM"))
-        (dp (gensym "DP")) (sp (gensym "SP")) (dcnt (gensym "DC")) (scnt (gensym "SC"))
-        (lbl (gensym "REPLACE")))
-    `(let* ((,d ,dest) (,s ,source))
+        (di   (gensym "DI"))   (si   (gensym "SI"))
+        (dp   (gensym "DP"))   (sp   (gensym "SP")))
+    `(let* ((,d ,dest) (,s ,source)
+            (,dlim (or ,(or end1 nil) (length ,d)))
+            (,slim (or ,(or end2 nil) (length ,s))))
        (if (and (vectorp ,d) (vectorp ,s))
-           ;; vector path: indexed copy with aref
-            (let ((,di ,(or start1 0)) (,si ,(or start2 0))
-                  (,dlim (or ,(or end1 nil) (length ,d)))
-                  (,slim (or ,(or end2 nil) (length ,s))))
-              (tagbody ,lbl
-                (when (and (< ,di ,dlim) (< ,si ,slim))
-                  (aset ,d ,di (aref ,s ,si))
-                  (setq ,di (+ ,di 1))
-                  (setq ,si (+ ,si 1))
-                 (go ,lbl))))
-           ;; list path: pointer walk from start positions
-           (let ((,dp (nthcdr ,(or start1 0) ,d))
-                 (,sp (nthcdr ,(or start2 0) ,s))
-                 (,dcnt (- (or ,(or end1 nil) (length ,d)) ,(or start1 0)))
-                 (,scnt (- (or ,(or end2 nil) (length ,s)) ,(or start2 0)))
-                 (,di 0) (,si 0))
-              (tagbody ,lbl
-                (when (and ,dp ,sp (< ,di ,dcnt) (< ,si ,scnt))
-                  (rplaca ,dp (car ,sp))
-                  (setq ,dp (cdr ,dp))
-                  (setq ,sp (cdr ,sp))
-                 (setq ,di (+ ,di 1))
-                 (setq ,si (+ ,si 1))
-                 (go ,lbl)))))
+           (loop for ,di from ,(or start1 0) below ,dlim
+                 for ,si from ,(or start2 0) below ,slim
+                 do (aset ,d ,di (aref ,s ,si)))
+           (loop for ,dp on (nthcdr ,(or start1 0) ,d)
+                 for ,sp on (nthcdr ,(or start2 0) ,s)
+                 repeat (min (- ,dlim ,(or start1 0)) (- ,slim ,(or start2 0)))
+                 do (rplaca ,dp (car ,sp))))
        ,d)))
 
 ;; MISMATCH (FR-506): first position where sequences differ
@@ -82,7 +57,7 @@ Supports :test (default #'eql), :key, :from-end."
         (idx (gensym "IDX"))
         (tst-var (gensym "TST"))
         (kfn-var (gensym "KEY"))
-        (lbl (gensym "MISMATCH-LOOP")))
+        )
     (let* ((e1 (if key `(funcall ,kfn-var (car ,s1)) `(car ,s1)))
            (e2 (if key `(funcall ,kfn-var (car ,s2)) `(car ,s2)))
            (test-expr (if test `(funcall ,tst-var ,e1 ,e2) `(eql ,e1 ,e2)))
@@ -92,18 +67,16 @@ Supports :test (default #'eql), :key, :from-end."
                        (,s2 ,(if from-end `(reverse ,seq2) seq2))
                        (,idx 0)))
            (forward-loop
-             `(block nil
-                (let (,@bindings)
-                  (tagbody
-                    ,lbl
-                    (cond
-                      ((and (null ,s1) (null ,s2)) (return nil))
-                      ((or  (null ,s1) (null ,s2)) (return ,idx))
-                      ((not ,test-expr) (return ,idx))
-                      (t (setq ,s1 (cdr ,s1))
-                         (setq ,s2 (cdr ,s2))
-                         (setq ,idx (+ ,idx 1))
-                         (go ,lbl))))))))
+             `(let (,@bindings)
+                (loop
+                  (cond
+                    ((and (null ,s1) (null ,s2)) (return nil))
+                    ((or  (null ,s1) (null ,s2)) (return ,idx))
+                    ((not ,test-expr)             (return ,idx))
+                    (t
+                     (setq ,s1 (cdr ,s1))
+                     (setq ,s2 (cdr ,s2))
+                     (setq ,idx (+ ,idx 1))))))))
       (if from-end
           ;; from-end: run forward mismatch on reversed seqs, map index back
           (let ((len1 (gensym "LEN1")) (len2 (gensym "LEN2")) (mi (gensym "MI")))

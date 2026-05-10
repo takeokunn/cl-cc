@@ -18,44 +18,26 @@
       (eq symbol 'equalp)))
 
 (defun %hash-table-test-symbol-from-ast (ast)
-  (if (typep ast 'ast-quote)
-      (let ((name (ast-quote-value ast)))
-        (if (and (symbolp name) (%hash-table-test-symbol-p name))
-            name
-            nil))
-      (if (typep ast 'ast-var)
-          (let ((name (ast-var-name ast)))
-            (if (%hash-table-test-symbol-p name) name nil))
-          (if (typep ast 'ast-function)
-              (let ((name (ast-function-name ast)))
-                (if (and (symbolp name) (%hash-table-test-symbol-p name))
-                    name
-                    nil))
-              nil))))
+  (typecase ast
+    (ast-quote
+     (let ((name (ast-quote-value ast)))
+       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))
+    (ast-var
+     (let ((name (ast-var-name ast)))
+       (when (%hash-table-test-symbol-p name) name)))
+    (ast-function
+     (let ((name (ast-function-name ast)))
+       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))))
 
 (setf (gethash "MAKE-HASH-TABLE" *phase2-builtin-handlers*)
       (lambda (args result-reg ctx)
-        (let* ((test-sym nil)
-               (tail args)
+        (let* ((test-sym (loop for kv on args by #'cddr
+                               when (and (cdr kv) (%hash-table-keyword-ast-p (car kv) :test))
+                                 return (%hash-table-test-symbol-from-ast (cadr kv))))
                (test-reg (when test-sym
                            (let ((reg (make-register ctx)))
                              (emit ctx (make-vm-const :dst reg :value test-sym))
                              reg))))
-          (tagbody
-           scan-make-hash-table-options
-             (when (or (null tail) (null (cdr tail)))
-               (go scan-make-hash-table-options-done))
-             (let ((k (car tail))
-                   (v (cadr tail)))
-               (when (%hash-table-keyword-ast-p k :test)
-                 (setf test-sym (%hash-table-test-symbol-from-ast v))
-                 (go scan-make-hash-table-options-done)))
-             (setf tail (cddr tail))
-             (go scan-make-hash-table-options)
-           scan-make-hash-table-options-done)
-          (when test-sym
-            (setf test-reg (make-register ctx))
-            (emit ctx (make-vm-const :dst test-reg :value test-sym)))
           (emit ctx (make-vm-make-hash-table :dst result-reg :test test-reg))
           result-reg)))
 

@@ -33,28 +33,10 @@
     (>= :generic make-vm-ge     :fixnum make-vm-ge))
   "(operator keyword constructor ...) specs for generic/fixnum/float binop codegen.")
 
-(defun %plist-keyword-value-eq (plist key)
-  (let ((xs plist))
-    (tagbody
-     scan
-       (if (null xs) (return-from %plist-keyword-value-eq nil))
-       (if (eq (car xs) key)
-           (return-from %plist-keyword-value-eq (car (cdr xs))))
-       (setq xs (cdr (cdr xs)))
-       (go scan))))
-
 (defun %lookup-numeric-binop-ctor-symbol (op kind)
   "Return the constructor symbol for OP/KIND, or NIL when no specialization exists."
-  (let ((xs *numeric-binop-ctor-specs*))
-    (tagbody
-     scan
-       (if (null xs) (return-from %lookup-numeric-binop-ctor-symbol nil))
-       (let ((entry (car xs)))
-         (if (eq op (car entry))
-             (return-from %lookup-numeric-binop-ctor-symbol
-               (%plist-keyword-value-eq (cdr entry) kind))))
-       (setq xs (cdr xs))
-       (go scan))))
+  (let ((entry (assoc op *numeric-binop-ctor-specs* :test #'eq)))
+    (when entry (getf (cdr entry) kind))))
 
 (defun %numeric-binop-ctor-function (op kind)
   "Return the constructor function for OP/KIND or NIL when absent."
@@ -165,19 +147,12 @@ Falls back to the generic binop-ctor when no specialization applies."
     dst))
 
 (defmethod compile-ast ((node ast-progn) ctx)
-  (let ((forms (ast-progn-forms node))
-        (last nil)
-        (tail (ctx-tail-position ctx)))
-    (let ((xs forms))
-      (tagbody
-       scan
-         (if (null xs) (return-from compile-ast last))
-         (let ((form (car xs)))
-           (setf (ctx-tail-position ctx)
-                 (if (null (cdr xs)) tail nil))
-           (setf last (compile-ast form ctx)))
-         (setq xs (cdr xs))
-         (go scan)))))
+  (let ((tail (ctx-tail-position ctx))
+        (last nil))
+    (loop for rest on (ast-progn-forms node)
+          do (setf (ctx-tail-position ctx) (if (null (cdr rest)) tail nil))
+             (setf last (compile-ast (car rest) ctx)))
+    last))
 
 (defmethod compile-ast ((node ast-print) ctx)
   (setf (ctx-tail-position ctx) nil)

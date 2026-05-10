@@ -50,14 +50,9 @@ Handler lambda-list: (args result-reg ctx) → result-reg-or-nil.")
 
 (defun %phase2-find-keyword-arg (tail key)
   "Return the value AST following KEY in keyword argument TAIL."
-  (tagbody
-   scan
-     (if (or (null tail) (null (cdr tail)))
-         (return-from %phase2-find-keyword-arg nil))
-     (if (eq (%phase2-keyword-name (car tail)) key)
-         (return-from %phase2-find-keyword-arg (cadr tail)))
-     (setq tail (cddr tail))
-     (go scan)))
+  (loop for kv on tail by #'cddr
+        when (and (cdr kv) (eq (%phase2-keyword-name (car kv)) key))
+          return (cadr kv)))
 
 (defun %phase2-static-keyword-value (tail key default)
   "Return KEY's static value from TAIL and whether it is known.
@@ -71,22 +66,14 @@ unknown so callers can fall through instead of silently changing semantics."
 
 (defun %phase2-emit-initial-contents (ctx array-reg contents)
   "Emit ASET instructions that copy literal CONTENTS into ARRAY-REG."
-  (let ((index 0)
-        (tail contents))
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (let ((idx-reg (make-register ctx))
-             (val-reg (make-register ctx)))
-         (emit ctx (make-vm-const :dst idx-reg :value index))
-         (emit ctx (make-vm-const :dst val-reg :value (car tail)))
-         (emit ctx (make-vm-aset :array-reg array-reg
-                                 :index-reg idx-reg
-                                 :val-reg val-reg)))
-       (setq index (+ index 1))
-       (setq tail (cdr tail))
-       (go scan)
-     done))
+  (loop for item in contents
+        for index from 0
+        do (let ((idx-reg (make-register ctx))
+                 (val-reg (make-register ctx)))
+             (emit ctx (make-vm-const :dst idx-reg :value index))
+             (emit ctx (make-vm-const :dst val-reg :value item))
+             (emit ctx (make-vm-aset :array-reg array-reg
+                                     :index-reg idx-reg :val-reg val-reg))))
   array-reg)
 
 ;;; ── Handler registrations ──────────────────────────────────────────────────
@@ -179,19 +166,12 @@ unknown so callers can fall through instead of silently changing semantics."
   (let ((size-reg (compile-ast (first args) ctx))
         (init-char-ast nil)
         (tail (rest args)))
-    (tagbody
-     scan-keywords
-       (when (or (null tail) (null (cdr tail)))
-         (go scan-done))
-       (let ((k (car tail))
-             (v (cadr tail)))
-         (when (and (typep k 'ast-var)
-                    (eq (ast-var-name k) :initial-element))
-           (setf init-char-ast v)
-           (go scan-done)))
-       (setf tail (cddr tail))
-       (go scan-keywords)
-     scan-done)
+    (loop for kv on tail by #'cddr
+          when (cdr kv)
+            do (let ((k (car kv)) (v (cadr kv)))
+                 (when (and (typep k 'ast-var) (eq (ast-var-name k) :initial-element))
+                   (setf init-char-ast v)
+                   (return))))
     (if init-char-ast
         (let ((char-reg (compile-ast init-char-ast ctx)))
           (emit ctx (make-vm-make-string :dst result-reg :src size-reg :char char-reg)))

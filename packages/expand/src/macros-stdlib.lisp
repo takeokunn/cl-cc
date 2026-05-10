@@ -24,14 +24,10 @@
     `(let* ((,nvar ,n)
             (,g (floor (sqrt (float ,nvar))))
             (,prev nil))
-       ;; Newton correction loop: converges in 0-2 iterations
-       (block nil
-         (tagbody
-           :loop
-           (when (eql ,g ,prev) (return ,g))
-           (setq ,prev ,g)
-           (setq ,g (floor (+ ,g (floor ,nvar ,g)) 2))
-           (go :loop))))))
+       (loop
+         (when (eql ,g ,prev) (return ,g))
+         (setq ,prev ,g)
+         (setq ,g (floor (+ ,g (floor ,nvar ,g)) 2))))))
 
 ;; WITH-OPEN-STREAM: like with-open-file but for existing streams
 (our-defmacro with-open-stream (var-stream &body body)

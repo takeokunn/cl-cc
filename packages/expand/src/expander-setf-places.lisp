@@ -160,23 +160,13 @@
 (%register-setf-place-handler
  'values
    (lambda (place value)
-     (let* ((vars (cdr place))
-            (temp (gensym "MVS"))
-            (assignments nil)
-            (i 0)
-            (xs vars))
-       (tagbody
-        build
-          (if (null xs) (go done))
-          (setf assignments
-                (cons (list 'setq (car xs) (list 'nth i temp))
-                      assignments))
-          (setf xs (cdr xs))
-          (setf i (+ i 1))
-          (go build)
-        done)
+     (let* ((vars  (cdr place))
+            (temp  (gensym "MVS"))
+            (assignments (loop for x in vars
+                               for i from 0
+                               collect (list 'setq x (list 'nth i temp)))))
        (compiler-macroexpand-all
         (cons 'let
               (cons (list (list temp (list 'multiple-value-list value)))
-                    (append (nreverse assignments)
+                    (append assignments
                             (list (list 'car temp)))))))))

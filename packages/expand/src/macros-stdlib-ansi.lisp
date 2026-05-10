@@ -24,20 +24,13 @@
    (psetf p1 v1 p2 v2 ...) — all vi are evaluated, then all pi are set."
   (when (oddp (length pairs))
     (error "PSETF requires an even number of arguments"))
-  (let ((places nil)
-        (vals nil))
-    (do ((rest pairs (cddr rest)))
-        ((null rest))
-      (push (first rest) places)
-      (push (second rest) vals))
-    (let* ((ordered-places (nreverse places))
-           (ordered-vals (nreverse vals))
-           (temps (mapcar (lambda (val) (declare (ignore val)) (gensym "PSETF"))
-                           ordered-vals)))
-      (append (list 'let (mapcar #'list temps ordered-vals))
-              (mapcar (lambda (place temp) (list 'setf place temp))
-                      ordered-places temps)
-              (list nil)))))
+  (let* ((ordered-places (loop for rest on pairs by #'cddr collect (first rest)))
+         (ordered-vals   (loop for rest on pairs by #'cddr collect (second rest)))
+         (temps          (loop repeat (length ordered-vals) collect (gensym "PSETF"))))
+    (append (list 'let (mapcar #'list temps ordered-vals))
+            (mapcar (lambda (place temp) (list 'setf place temp))
+                    ordered-places temps)
+            (list nil))))
 
 ;; SHIFTF (FR-206) — shift values through a series of places
 (our-defmacro shiftf (&rest args)
@@ -48,7 +41,7 @@
     (error "SHIFTF requires at least 2 arguments (one place and one new value)"))
   (let* ((places (butlast args))
          (newval (car (last args)))
-         (temps  (mapcar (lambda (p) (declare (ignore p)) (gensym "SHIFT")) places)))
+         (temps  (loop repeat (length places) collect (gensym "SHIFT"))))
     (append (list 'let (mapcar #'list temps places))
             (mapcar (lambda (place val) (list 'setf place val))
                     places
@@ -79,26 +72,19 @@
 
 (defun %define-modify-macro-args-form (lambda-list)
   "Return a form that evaluates to the modifying function's extra arguments."
-  (let ((tail lambda-list)
-        (args nil)
+  (let ((args nil)
         (rest-var nil))
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (let ((entry (car tail)))
-         (cond
-            ((or (eq entry '&optional) (eq entry '&key) (eq entry '&allow-other-keys)) nil)
-            ((or (eq entry '&rest) (eq entry '&body))
-            (setq tail (cdr tail))
-            (setq rest-var (car tail))
-            (go done))
-           ((eq entry '&aux)
-            (go done))
-           (t
-            (setq args (cons (%define-modify-macro-param-name entry) args)))))
-       (setq tail (cdr tail))
-       (go scan)
-     done)
+    (loop for rest on lambda-list
+          for entry = (car rest) do
+      (cond
+        ((member entry '(&optional &key &allow-other-keys) :test #'eq))
+        ((member entry '(&rest &body) :test #'eq)
+         (setq rest-var (cadr rest))
+         (return))
+        ((eq entry '&aux)
+         (return))
+        (t
+         (push (%define-modify-macro-param-name entry) args))))
     (setq args (nreverse args))
     (if rest-var
         (if args
@@ -150,17 +136,15 @@
                                 for index from 0
                                 collect `(setf ,place (nth ,index ,values-var)))))))
           `(let ((,retry-p t))
-             (tagbody
-                ,retry-tag
-                (unless ,test
-                  (if ,retry-p
-                      (restart-case
-                          ,(failure-form)
-                        (store-value (,new-value)
-                          (setq ,retry-p nil)
-                          ,set-places-form
-                          (go ,retry-tag)))
-                      ,(failure-form)))))))))
+             (loop
+               (when ,test (return nil))
+               (if ,retry-p
+                   (restart-case
+                       ,(failure-form)
+                     (store-value (,new-value)
+                       (setq ,retry-p nil)
+                       ,set-places-form))
+                   ,(failure-form))))))))
 
 ;; DEFINE-CONDITION (FR-204) — define a condition type (expands to defclass)
 ;; FR-417: now handles :report option → defmethod print-object
@@ -189,15 +173,10 @@
         defclass-form)))
 
 (defun %ansi-plist-value (plist key)
-  "Return KEY's value in PLIST without relying on GETF during bootstrap."
-  (tagbody
-   scan
-     (if (or (null plist) (null (cdr plist)))
-         (return-from %ansi-plist-value nil))
-     (if (eq (car plist) key)
-         (return-from %ansi-plist-value (cadr plist)))
-     (setq plist (cddr plist))
-     (go scan)))
+  "Return KEY's value in PLIST."
+  (loop for tail on plist by #'cddr
+        when (eq (car tail) key)
+          do (return (cadr tail))))
 
 ;; WITH-INPUT-FROM-STRING (FR-209)
 (our-defmacro with-input-from-string (binding &body body)

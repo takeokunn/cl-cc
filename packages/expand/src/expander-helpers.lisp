@@ -25,41 +25,14 @@ or fall back to the runtime slot writer for unknown accessors."
 (defun %defstruct-parse-slot (slot-form)
   "Normalize SLOT-FORM into (slot-name default read-only-p)."
   (if (listp slot-form)
-      (let ((tail (cddr slot-form))
-            (read-only-p nil))
-        (tagbody
-         scan
-           (if (null tail) (go done))
-           (if (eq (car tail) :read-only)
-               (progn
-                 (setq read-only-p (cadr tail))
-                 (go done)))
-           (setq tail (cddr tail))
-           (go scan)
-         done)
-        (%expander-form (first slot-form)
-                        (second slot-form)
-                        read-only-p))
+      (%expander-form (first slot-form)
+                      (second slot-form)
+                      (getf (cddr slot-form) :read-only))
       (%expander-form slot-form nil nil)))
 
 (defun %defstruct-find-option (options key)
   "Return the option form in OPTIONS whose first element is KEY."
-  (let ((tail options)
-        (option nil)
-        (found nil))
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (setq option (car tail))
-       (if (listp option)
-           (if (eq (first option) key)
-               (progn
-                 (setq found option)
-                 (go done))))
-       (setq tail (cdr tail))
-       (go scan)
-     done)
-    found))
+  (find key options :test #'eq :key (lambda (opt) (and (listp opt) (first opt)))))
 
 (defun %defstruct-default-conc-name (name)
   "Return the default accessor prefix NAME-."
@@ -98,49 +71,18 @@ or fall back to the runtime slot writer for unknown accessors."
     (setq aux-bindings (cdr parts))
     (setq param-names (%defstruct-boa-param-names normal-params))
     (setq bound-names param-names)
-    (setq aux-tail aux-bindings)
-    (tagbody
-     scan
-       (if (null aux-tail) (go done))
-       (setq binding (car aux-tail))
-       (setq bound-names (cons (first binding) bound-names))
-       (setq aux-lets
-             (cons (%expander-form (first binding) (second binding)) aux-lets))
-       (setq aux-tail (cdr aux-tail))
-       (go scan)
-     done)
-    (setq aux-lets (nreverse aux-lets))
+    (dolist (b aux-bindings)
+      (setq bound-names (cons (first b) bound-names)))
+    (setq aux-lets (loop for b in aux-bindings
+                         collect (%expander-form (first b) (second b))))
     (%expander-form normal-params aux-bindings param-names bound-names aux-lets)))
 
 (defun %defstruct-resolve-slot-values (all-slots bound-names)
   "Map ALL-SLOTS to effective constructor values: slot-name if bound, else default."
-  (let ((slots-tail all-slots)
-        (names-tail nil)
-        (slot nil)
-        (matched nil)
-        (result nil))
-    (tagbody
-     scan-slots
-       (if (null slots-tail) (go done))
-       (setq slot (car slots-tail))
-       (setq names-tail bound-names)
-       (setq matched nil)
-     scan-names
-       (if (null names-tail) (go use-slot))
-       (if (eq (first slot) (car names-tail))
-           (progn
-             (setq matched t)
-             (go use-slot)))
-       (setq names-tail (cdr names-tail))
-       (go scan-names)
-     use-slot
-       (if matched
-           (setq result (cons (first slot) result))
-           (setq result (cons (second slot) result)))
-       (setq slots-tail (cdr slots-tail))
-       (go scan-slots)
-     done)
-    (nreverse result)))
+  (loop for slot in all-slots
+        collect (if (member (first slot) bound-names :test #'eq)
+                    (first slot)
+                    (second slot))))
 
 (defun %defstruct-build-model (form)
   "Parse FORM into a plist consumed by defstruct emitters."
@@ -166,9 +108,7 @@ or fall back to the runtime slot writer for unknown accessors."
         (all-slots nil)
         (pred-name nil)
         (print-fn nil)
-        (derived-classes nil)
-        (tail nil)
-        (item nil))
+        (derived-classes nil))
     (setq name-and-options (second form))
     (setq slots-raw (cddr form))
     (if (listp name-and-options)
@@ -208,36 +148,10 @@ or fall back to the runtime slot writer for unknown accessors."
     (if type-opt
         (setq struct-type (second type-opt)))
 
-    (setq tail slots-raw)
-    (tagbody
-     scan-own-slots
-       (if (null tail) (go own-slots-done))
-       (setq item (car tail))
-       (if (stringp item)
-           nil
-           (setq own-slots (cons (%defstruct-parse-slot item) own-slots)))
-       (setq tail (cdr tail))
-       (go scan-own-slots)
-     own-slots-done)
-    (setq own-slots (nreverse own-slots))
-
-    (setq tail parent-slots)
-    (tagbody
-     scan-parent-slots
-       (if (null tail) (go parent-slots-done))
-       (setq all-slots (cons (car tail) all-slots))
-       (setq tail (cdr tail))
-       (go scan-parent-slots)
-     parent-slots-done)
-    (setq tail own-slots)
-    (tagbody
-     scan-all-own-slots
-       (if (null tail) (go all-slots-done))
-       (setq all-slots (cons (car tail) all-slots))
-       (setq tail (cdr tail))
-       (go scan-all-own-slots)
-     all-slots-done)
-    (setq all-slots (nreverse all-slots))
+    (setq own-slots (loop for item in slots-raw
+                          unless (stringp item)
+                            collect (%defstruct-parse-slot item)))
+    (setq all-slots (append parent-slots own-slots))
 
     (if pred-opt
         (if (null (second pred-opt))

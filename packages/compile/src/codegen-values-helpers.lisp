@@ -4,10 +4,8 @@
 
 (defun %compile-forms/k (forms ctx continuation)
   "Compile FORMS left-to-right, then call CONTINUATION with result registers."
-  (let ((regs nil))
-    (dolist (form forms)
-      (push (compile-ast form ctx) regs))
-    (funcall continuation (nreverse regs))))
+  (funcall continuation
+           (loop for form in forms collect (compile-ast form ctx))))
 
 (defmacro %with-compiled-registers ((registers forms ctx) &body body)
   "Bind REGISTERS to compiled FORMS using the CPS helper %COMPILE-FORMS/K."
@@ -30,26 +28,18 @@
 
 (defun %registers-for-vars (vars source-regs ctx)
   "Return one register per VAR, padding missing SOURCE-REGS with NIL registers."
-  (let ((source-tail source-regs)
-        (result nil))
-    (dolist (var vars (nreverse result))
-      (declare (ignore var))
-      (push (if source-tail
-                (pop source-tail)
-                (%emit-nil-register ctx))
-            result))))
+  (loop for _ in vars
+        for src = source-regs then (cdr src)
+        collect (if src (car src) (%emit-nil-register ctx))))
 
 (defun %allocate-registers-for-vars (vars ctx)
   "Allocate one fresh destination register for each VAR."
-  (let ((regs nil))
-    (dolist (var vars (nreverse regs))
-      (declare (ignore var))
-      (push (make-register ctx) regs))))
+  (loop for _ in vars collect (make-register ctx)))
 
 (defun %install-register-bindings (vars regs ctx)
   "Extend CTX's lexical environment with VARS bound to REGS."
-  (dolist (binding (reverse (mapcar #'cons vars regs)))
-    (push binding (ctx-env ctx))))
+  (setf (ctx-env ctx)
+        (nconc (mapcar #'cons vars regs) (ctx-env ctx))))
 
 (defun %compile-mvb-value-registers (vars values-form ctx)
   "Compile a multiple-value source and return destination registers for VARS."
@@ -104,10 +94,7 @@
 
 (defun %flat-values-forms (args)
   "Flatten AST-VALUES argument forms left-to-right."
-  (let ((forms nil))
-    (dolist (arg args (nreverse forms))
-      (dolist (form (ast-values-forms arg))
-        (push form forms)))))
+  (loop for arg in args append (ast-values-forms arg)))
 
 (defun %compile-values-list-register (arg ctx)
   "Compile ARG and capture all produced values into a list register."
@@ -120,9 +107,7 @@
 
 (defun %compile-values-list-registers (args ctx)
   "Compile ARGS into registers that each contain a list of produced values."
-  (let ((regs nil))
-    (dolist (arg args (nreverse regs))
-      (push (%compile-values-list-register arg ctx) regs))))
+  (loop for arg in args collect (%compile-values-list-register arg ctx)))
 
 (defun %append-list-registers (regs ctx)
   "Append list-valued REGS left-to-right and return the combined register."

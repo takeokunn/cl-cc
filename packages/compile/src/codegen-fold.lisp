@@ -31,14 +31,10 @@
 
 (defun %ast-constant-number-value (node)
   "Return NODE's integer value when NODE is a constant AST integer."
-  (if (typep node 'ast-int)
-      (ast-int-value node)
-      (if (typep node 'ast-quote)
-          (let ((value (ast-quote-value node)))
-            (if (integerp value)
-                value
-                nil))
-          nil)))
+  (typecase node
+    (ast-int   (ast-int-value node))
+    (ast-quote (let ((v (ast-quote-value node)))
+                 (when (integerp v) v)))))
 
 (defun %clone-source (node &rest make-args)
   "Apply MAKE-ARGS to a constructor that accepts :source-file/:source-line/:source-column,
@@ -141,11 +137,9 @@ filling those fields from NODE."
       (typep node 'ast-quote)))
 
 (defun %ast->compile-time-value (node)
-  (if (typep node 'ast-int)
-      (ast-int-value node)
-      (if (typep node 'ast-quote)
-          (ast-quote-value node)
-          nil)))
+  (typecase node
+    (ast-int   (ast-int-value node))
+    (ast-quote (ast-quote-value node))))
 
 (defun %compile-time-value->ast (value node)
   (if (integerp value)
@@ -162,12 +156,6 @@ filling those fields from NODE."
                        (scan (cdr remaining))))
                  (values nil nil))))
     (scan env)))
-
-(defparameter *compile-time-simple-binops*
-  '((+ . +) (- . -) (* . *))
-  "Alist of binary operators foldable as (op lhs rhs) with no guards required.
-Does not include /  (needs zerop guard + integerp check)
-or 1+/1- (unary, require rhs = nil).")
 
 ;;; Evaluation engine (%compile-time-eval-binop, %compile-time-eval-call,
 ;;; %evaluate-ast-sequence, %evaluate-ast) → see codegen-fold-eval.lisp.

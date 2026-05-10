@@ -152,7 +152,7 @@ registration body per case."
 
 (deftest rankn-forall-creation-and-equality
   "make-type-forall creates well-formed forall types; foralls with distinct vars are not equal."
-  (let* ((a  (fresh-type-var 'a))
+  (let* ((a  (fresh-type-var :name 'a))
          (fn (make-type-arrow (list a) a))
          (fa (make-type-forall :var a :body fn)))
     (assert-true (type-forall-p fa))
@@ -161,8 +161,8 @@ registration body per case."
     (let ((s (type-to-string fa)))
       (assert-true (stringp s))
       (assert-true (search "A" (string-upcase s)))))
-  (let* ((a  (fresh-type-var 'a))
-         (b  (fresh-type-var 'b))
+  (let* ((a  (fresh-type-var :name 'a))
+         (b  (fresh-type-var :name 'b))
          (fa (make-type-forall :var a :body (make-type-arrow (list a) a)))
          (fb (make-type-forall :var b :body (make-type-arrow (list b) b))))
     (assert-false (type-equal-p fa fb))))

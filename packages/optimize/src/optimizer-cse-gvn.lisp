@@ -160,6 +160,15 @@
                       (list (type-of inst) b a)))
                 (cons (type-of inst) vals))))))))
 
+(defun %gvn-maybe-replace (inst dst key gen val-env memo acc)
+  "If KEY is already in MEMO, push a vm-move onto ACC instead of INST.
+   Records KEY → DST when key is non-nil. Returns updated ACC."
+  (let ((existing (and key (gethash key memo))))
+    (when key (%gvn-record dst key gen val-env memo))
+    (if existing
+        (cons (make-vm-move :dst dst :src existing) acc)
+        (cons inst acc))))
+
 ;;; ─── Conservative Global CSE via Available Expressions ────────────────────
 
 (defun %gcse-expression-key (inst)
@@ -218,9 +227,9 @@ unsafe join-point reuse when different predecessor registers hold the same
 value."
   (let ((env (make-hash-table :test #'equal))
         (available-in (gethash block (opt-dataflow-result-in available)))
-        (reaching-in (gethash block (opt-dataflow-result-in reaching))))
+        (reaching-in  (gethash block (opt-dataflow-result-in reaching))))
     (dolist (entry available-in env)
-      (let* ((key (%available-expression-entry-key entry))
+      (let* ((key  (%available-expression-entry-key entry))
              (regs (remove-duplicates
                     (loop for definition in reaching-in
                           for inst = (fourth definition)
@@ -233,27 +242,27 @@ value."
 
 (defun %gcse-process-block (block available reaching)
   "Rewrite redundant pure expressions in BLOCK using global entry facts."
-  (let ((env (%gcse-seed-env block available reaching))
+  (let ((env     (%gcse-seed-env block available reaching))
         (changed nil)
         (new-insts nil))
     (dolist (inst (bb-instructions block))
-      (let* ((dst (opt-inst-dst inst))
-             (key (%gcse-expression-key inst))
+      (let* ((dst      (opt-inst-dst inst))
+             (key      (%gcse-expression-key inst))
              (existing (and key (gethash key env))))
         (when dst
           (%gcse-kill-dst env dst))
         (cond
           ((and key existing (not (eq existing dst)))
-            (push (make-vm-move :dst dst :src existing) new-insts)
-            (%gcse-record-expression-if-safe env key dst)
-            (setf changed t))
+           (push (make-vm-move :dst dst :src existing) new-insts)
+           (%gcse-record-expression-if-safe env key dst)
+           (setf changed t))
           (t
-            (push inst new-insts)
-            (cond
-              ((and dst key)
-               (%gcse-record-expression-if-safe env key dst))
-              ((and dst (typep inst 'vm-move))
-               (%gcse-forward-copy env (vm-src inst) dst)))))))
+           (push inst new-insts)
+           (cond
+             ((and dst key)
+              (%gcse-record-expression-if-safe env key dst))
+             ((and dst (typep inst 'vm-move))
+              (%gcse-forward-copy env (vm-src inst) dst)))))))
     (setf (bb-instructions block) (nreverse new-insts))
     changed))
 
@@ -265,8 +274,8 @@ reuses pure expressions already available at block entry, and only when the
 reaching definitions prove that a single register name carries the value on all
 incoming paths."
   (let ((available (opt-compute-available-expressions cfg))
-        (reaching (opt-compute-reaching-definitions cfg))
-        (changed nil))
+        (reaching  (opt-compute-reaching-definitions cfg))
+        (changed   nil))
     (loop for block across (cfg-blocks cfg)
           when block
             do (when (%gcse-process-block block available reaching)
@@ -291,44 +300,28 @@ would require different source registers."
   (let ((local-gen     (%gvn-copy-env gen))
         (local-val-env (%gvn-copy-env val-env))
         (local-memo    (%gvn-copy-env memo :test #'equal))
-        (new-insts nil))
+        (new-insts     nil))
     (dolist (inst (bb-instructions block))
       (let ((dst (opt-inst-dst inst)))
         (when dst
           (%gvn-kill dst local-gen local-val-env local-memo)))
-      (typecase inst
-        (vm-const
-         (let* ((dst (vm-dst inst))
-                (key (%gvn-key inst local-gen local-val-env)))
-           (%gvn-record dst key local-gen local-val-env local-memo)
-           (push inst new-insts)))
-        (vm-move
-         (let* ((dst (vm-dst inst))
-                (key (%gvn-key inst local-gen local-val-env))
-                (existing (gethash key local-memo)))
-           (if existing
-               (progn
+      (setf new-insts
+            (typecase inst
+              (vm-const
+               (let ((dst (vm-dst inst))
+                     (key (%gvn-key inst local-gen local-val-env)))
                  (%gvn-record dst key local-gen local-val-env local-memo)
-                 (push (make-vm-move :dst dst :src existing) new-insts))
-               (progn
-                 (%gvn-record dst key local-gen local-val-env local-memo)
-                 (push inst new-insts)))))
-        (t
-         (cond
-           ((and (opt-inst-pure-p inst) (opt-inst-dst inst))
-            (let* ((dst (opt-inst-dst inst))
-                   (key (%gvn-key inst local-gen local-val-env))
-                   (existing (and key (gethash key local-memo))))
-              (if existing
-                  (progn
-                    (%gvn-record dst key local-gen local-val-env local-memo)
-                    (push (make-vm-move :dst dst :src existing) new-insts))
-                  (progn
-                    (when key
-                      (%gvn-record dst key local-gen local-val-env local-memo))
-                    (push inst new-insts)))))
-           (t
-            (push inst new-insts))))))
+                 (cons inst new-insts)))
+              (vm-move
+               (let* ((dst (vm-dst inst))
+                      (key (%gvn-key inst local-gen local-val-env)))
+                 (%gvn-maybe-replace inst dst key local-gen local-val-env local-memo new-insts)))
+              (t
+               (if (and (opt-inst-pure-p inst) (opt-inst-dst inst))
+                   (let* ((dst (opt-inst-dst inst))
+                          (key (%gvn-key inst local-gen local-val-env)))
+                     (%gvn-maybe-replace inst dst key local-gen local-val-env local-memo new-insts))
+                   (cons inst new-insts))))))
     (setf (bb-instructions block) (nreverse new-insts))
     (dolist (child (bb-dom-children block))
       (%gvn-process-block child local-gen local-val-env local-memo))))
@@ -354,16 +347,14 @@ would require different source registers."
 (defun opt-pass-dead-labels (instructions)
   "Remove labels that are not referenced by any jump or closure instruction."
   (let ((used (make-hash-table :test #'equal)))
-    ;; Collect all label references: jumps AND closure body labels
     (dolist (inst instructions)
       (let ((accessor (gethash (type-of inst) *opt-label-ref-table*)))
         (when accessor
           (setf (gethash (funcall accessor inst) used) t))))
-    ;; Filter out unreferenced labels
-      (remove-if (lambda (inst)
-                   (and (vm-label-p inst)
-                        (not (gethash (vm-name inst) used))))
-                instructions)))
+    (remove-if (lambda (inst)
+                 (and (vm-label-p inst)
+                      (not (gethash (vm-name inst) used))))
+               instructions)))
 
 ;;; ─── Leaf Function Detection ────────────────────────────────────────────
 
@@ -375,9 +366,7 @@ would require different source registers."
   "Return INSTRUCTIONS unchanged and a leaf-function flag.
 
    A program is a leaf function when it contains no call-like instructions."
-  (let ((leaf-p (not (some (lambda (inst)
-                             (some (lambda (call-type)
-                                     (typep inst call-type))
-                                   *opt-leaf-call-types*))
-                           instructions))))
-    (values instructions leaf-p)))
+  (values instructions
+          (not (find-if (lambda (inst)
+                          (find (type-of inst) *opt-leaf-call-types* :test #'eq))
+                        instructions))))

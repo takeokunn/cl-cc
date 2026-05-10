@@ -80,14 +80,13 @@
 (defun %case-collect-integer-pairs (cases)
   "Collect (key . body) pairs and default-form from raw CASES.
 Returns (values default-form pairs integer-only-p)."
-  (let ((default-form nil) (pairs nil) (integer-only-p t))
-    (dolist (clause cases)
-      (let ((normalized (%case-clause->pairs clause)))
-        (if (eq normalized :default)
-            (setf default-form `(progn ,@(cdr clause)))
-            (dolist (pair normalized)
-              (unless (integerp (car pair)) (setf integer-only-p nil))
-              (push pair pairs)))))
+  (let* ((classified   (loop for clause in cases
+                             collect (list (%case-clause->pairs clause) clause)))
+         (default-ent  (find :default classified :key #'first))
+         (default-form (when default-ent `(progn ,@(cdr (second default-ent)))))
+         (pairs        (loop for (norm) in classified
+                             unless (eq norm :default) append norm))
+         (integer-only-p (every (lambda (p) (integerp (car p))) pairs)))
     (when integer-only-p
       (setf pairs (sort pairs #'< :key #'car)))
     (values default-form pairs integer-only-p)))
@@ -126,13 +125,11 @@ subtype of any earlier clause, it can never be reached and can be dropped."
           ((or (eq type 'otherwise) (eq type 't))
            (push clause result)
            (return (nreverse result)))
-          ((some (lambda (prev)
-                   (multiple-value-bind (subp surep)
-                       (%typecase-subtypep type prev)
-                     (and surep subp)))
-                 seen)
-           nil)
-          (t
+          ((not (some (lambda (prev)
+                        (multiple-value-bind (subp surep)
+                            (%typecase-subtypep type prev)
+                          (and surep subp)))
+                      seen))
            (push type seen)
            (push clause result)))))))
 

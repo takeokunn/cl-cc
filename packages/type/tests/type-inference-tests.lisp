@@ -144,15 +144,15 @@
   "Generalization: nil env quantifies all free vars; non-nil env excludes env vars. Scheme: instantiate/monomorphic."
   :cases (("nil-env-quantifies-all"
            (lambda ()
-             (let* ((v  (fresh-type-var 'a))
+             (let* ((v  (fresh-type-var :name 'a))
                     (fn (make-type-arrow-raw :params (list v) :return v))
                     (s  (generalize nil fn)))
                (assert-type type-scheme s)
                (assert-= 1 (length (type-scheme-quantified-vars s))))))
           ("non-nil-env-excludes"
            (lambda ()
-              (let* ((v1   (fresh-type-var 'a))
-                     (v2   (fresh-type-var 'b))
+              (let* ((v1   (fresh-type-var :name 'a))
+                     (v2   (fresh-type-var :name 'b))
                      (fn   (make-type-arrow-raw :params (list v1) :return v2))
                      (env  (type-env-extend 'x (type-to-scheme v1) (type-env-empty)))
                      (s    (generalize env fn)))
@@ -160,7 +160,7 @@
                (assert-true (type-var-equal-p (first (type-scheme-quantified-vars s)) v2)))))
           ("instantiate-fresh-vars"
            (lambda ()
-             (let* ((v (fresh-type-var 'a))
+             (let* ((v (fresh-type-var :name 'a))
                     (fn-type (make-type-arrow-raw :params (list v) :return v))
                     (scheme (make-type-scheme (list v) fn-type))
                     (inst (instantiate scheme)))

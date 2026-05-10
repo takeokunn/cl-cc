@@ -6,6 +6,15 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
+(defparameter *lambda-list-keyword-transitions*
+  '((&optional . :optional)
+    (&rest . :rest)
+    (&body . :body)
+    (&key . :key)
+    (&aux . :aux)
+    (&environment . :environment))
+  "Maps each standard lambda list keyword to its parser state.")
+
 (defstruct lambda-list-info
   "Information about a parsed lambda list."
   required
@@ -33,17 +42,14 @@
         ((atom current)
          (when current
            (setf rest current)))
-      (let ((item (car current)))
-        (case item
-          (&optional (setf state :optional))
-          (&rest (setf state :rest))
-          (&body (setf state :body))
-          (&key (setf state :key))
-          (&allow-other-keys
+      (let* ((item (car current))
+             (transition (cdr (assoc item *lambda-list-keyword-transitions*))))
+        (cond
+          (transition
+           (setf state transition))
+          ((eq item '&allow-other-keys)
            (when (eq state :key)
              (setf allow-other-keys t)))
-          (&aux (setf state :aux))
-          (&environment (setf state :environment))
           (t
            (case state
              (:required

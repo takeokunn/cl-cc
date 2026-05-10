@@ -231,7 +231,7 @@
        (if (symbolp place)
            (let ((store (gensym \"STORE\")))
              (values nil nil (list store) (list 'setq place store) place))
-           (let* ((temps (mapcar (lambda (a) (declare (ignore a)) (gensym \"T\")) (cdr place)))
+           (let* ((temps (loop repeat (length (cdr place)) collect (gensym \"T\")))
                   (store (gensym \"STORE\"))
                   (access (cons (car place) temps))
                   (setter (list 'setf access store)))

@@ -77,8 +77,7 @@
   (let ((root (gensym "ULW-ROOT-"))
         (serial-suite (gensym "ULW-SERIAL-"))
         (test-name (gensym "ULW-TEST-"))
-        (original-warm-stdlib-cache (symbol-function 'cl-cc::warm-stdlib-cache))
-        (original-quit (symbol-function 'uiop:quit)))
+        (original-warm-stdlib-cache (symbol-function 'cl-cc::warm-stdlib-cache)))
     (unwind-protect
          (progn
            (setf *suite-registry*
@@ -100,14 +99,15 @@
                                       :timeout nil
                                       :tags nil)))
            (setf (symbol-function 'cl-cc::warm-stdlib-cache) (lambda () nil))
-           (setf (symbol-function 'uiop:quit) (lambda (&optional code) code))
-            (let ((output (with-output-to-string (s)
+           ;; Use quit-p nil so run-suite returns any-fail directly without calling
+           ;; uiop:quit — avoids the need to mock uiop:quit and is immune to the
+           ;; mocked-quit-returns-NIL ambiguity when the killer thread is active.
+           (let ((output (with-output-to-string (s)
                            (let ((*standard-output* s))
-                             (assert-equal 0
-                                           (run-suite root :parallel t :random nil :workers 4))))))
-              (assert-true (search "Workers: 1" output))))
+                             (assert-false
+                              (run-suite root :parallel t :random nil :workers 4 :quit-p nil))))))
+             (assert-true (search "Workers: 1" output))))
       (setf (symbol-function 'cl-cc::warm-stdlib-cache) original-warm-stdlib-cache)
-      (setf (symbol-function 'uiop:quit) original-quit)
       (setf *test-registry* (persist-remove *test-registry* test-name))
       (setf *suite-registry* (persist-remove *suite-registry* serial-suite))
       (setf *suite-registry* (persist-remove *suite-registry* root)))))
@@ -224,7 +224,7 @@
                      (when (sb-thread:with-mutex (lock) stop-flag) (return))
                      (sleep *heartbeat-interval-seconds*)))
                  :name "hb-mock")))
-        (sb-thread:join-thread th)
+        (assert-true (%thread-joined-p th 5))
         (assert-eql 1 started)))
     (assert-eql interval-original *heartbeat-interval-seconds*)))
 
@@ -259,6 +259,15 @@
            (lambda (&key code) (setf captured code))))
     (funcall *watchdog-exit-fn* :code 124)
     (assert-eql 124 captured)))
+
+(deftest suite-killer-exit-fn-default-is-callable
+  "*suite-killer-exit-fn* is bound to a callable; rebinding to a recorder captures the exit code."
+  (let ((captured nil))
+    (let ((*suite-killer-exit-fn*
+            (lambda (&key code &allow-other-keys)
+              (setf captured code))))
+      (funcall *suite-killer-exit-fn* :code 124)
+      (assert-eql 124 captured))))
 
 (deftest kill-grace-seconds-is-positive-integer
   "*kill-grace-seconds* defaults to a positive integer; absent value would degrade to 0."

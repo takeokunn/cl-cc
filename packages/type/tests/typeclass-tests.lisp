@@ -18,7 +18,7 @@
   "typeclass-def stores all fields; superclasses declared; functor/show creation and register/lookup."
   (let ((td (make-typeclass-def
              :name 'eq
-             :type-params (list (fresh-type-var "a"))
+             :type-params (list (fresh-type-var :name "a"))
              :superclasses nil
              :methods '((%equal . nil))
              :associated-types nil
@@ -29,11 +29,11 @@
     (assert-equal 1 (length (typeclass-def-methods td))))
   (let ((td (make-typeclass-def
              :name 'ord
-             :type-params (list (fresh-type-var "a"))
+             :type-params (list (fresh-type-var :name "a"))
              :superclasses '(eq)
              :methods '((%compare . nil)))))
     (assert-equal '(eq) (cl-cc/type:typeclass-def-superclasses td)))
-  (let* ((a  (fresh-type-var 'a))
+  (let* ((a  (fresh-type-var :name 'a))
          (tc (make-typeclass-def
               :name 'functor-test
               :type-params (list a)
@@ -45,7 +45,7 @@
     (assert-eq 'functor-test (typeclass-def-name tc))
     (assert-= 1 (length (typeclass-def-type-params tc)))
     (assert-= 1 (length (typeclass-def-methods tc))))
-  (let* ((a  (fresh-type-var 'a))
+  (let* ((a  (fresh-type-var :name 'a))
          (tc (make-typeclass-def
               :name 'show-test
               :type-params (list a)
@@ -116,7 +116,7 @@
 (deftest-each typeclass-instance-registry-rejection-cases
   "Instance registry rejects both duplicate (same type) and overlapping (type-var) registrations."
   :cases (("duplicate" type-int)
-          ("overlap"   (fresh-type-var "a")))
+          ("overlap"   (fresh-type-var :name "a")))
   (second-type)
   (let ((cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
     (register-typeclass-instance 'eq type-int nil)
@@ -130,7 +130,7 @@
     (register-typeclass 'collection-test
                        (make-typeclass-def
                         :name 'collection-test
-                        :type-params (list (fresh-type-var "c") (fresh-type-var "e"))
+                        :type-params (list (fresh-type-var :name "c") (fresh-type-var :name "e"))
                         :superclasses nil
                         :methods nil
                         :associated-types nil
@@ -190,7 +190,7 @@
     (register-typeclass-instance 'eq type-int nil)
     (cl-cc/type:check-typeclass-constraint 'eq type-int       (type-env-empty))
     (cl-cc/type:check-typeclass-constraint 'eq cl-cc/type:+type-unknown+ (type-env-empty))
-    (cl-cc/type:check-typeclass-constraint 'eq (fresh-type-var "a") (type-env-empty))
+    (cl-cc/type:check-typeclass-constraint 'eq (fresh-type-var :name "a") (type-env-empty))
     (assert-true t))
   (let ((cl-cc/type:*typeclass-registry* (make-hash-table :test #'eq))
         (cl-cc/type:*typeclass-instance-registry* (make-hash-table :test #'equal)))
@@ -212,7 +212,7 @@
 (deftest typeclass-instance-overlaps-p-var-overlaps-concrete
   "%typeclass-instance-overlaps-p: a type-var overlaps any concrete type."
   (assert-true (cl-cc/type::%typeclass-instance-overlaps-p
-                (fresh-type-var "a") type-int)))
+                (fresh-type-var :name "a") type-int)))
 
 (deftest typeclass-instance-overlaps-p-different-concretes-do-not-overlap
   "%typeclass-instance-overlaps-p: two different concrete types do not overlap."
@@ -248,7 +248,7 @@
           ("symbol"   'foo)
           ("string"   "bar"))
   (param-val)
-  (let ((param (or param-val (fresh-type-var "TestVar"))))
+  (let ((param (or param-val (fresh-type-var :name "TestVar"))))
     (assert-true (stringp (cl-cc/type::%typeclass-param-name param)))))
 
 

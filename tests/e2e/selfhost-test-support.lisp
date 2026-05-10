@@ -100,7 +100,7 @@ Computed at call time so the result is path-independent across compile/load cont
     "packages/type/src/kind.lisp"
     "packages/type/src/multiplicity.lisp"
     "packages/type/src/types-core.lisp"
-    "packages/type/src/types-extended.lisp"
+    "packages/type/src/types-extended-nodes.lisp"
     "packages/type/src/types-env.lisp"
     "packages/type/src/parser.lisp"
     "packages/type/src/typeclass.lisp"

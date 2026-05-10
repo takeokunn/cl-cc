@@ -34,15 +34,9 @@
            (setf (ctx-block-env ctx)
                  (cons (cons block-name (cons exit-label result-reg))
                        (ctx-block-env ctx)))
-           (let ((last nil)
-                 (xs (ast-block-body node)))
-             (tagbody
-              scan
-                (if (null xs) (go done))
-                (setf last (compile-ast (car xs) ctx))
-                (setq xs (cdr xs))
-                (go scan)
-              done)
+           (let ((last nil))
+             (dolist (form (ast-block-body node))
+               (setf last (compile-ast form ctx)))
              (emit ctx (make-vm-move :dst result-reg :src last))))
       (setf (ctx-block-env ctx) old-block-env))
     (emit ctx (make-vm-label :name exit-label))
@@ -74,44 +68,21 @@
          (result-reg (make-register ctx))
          (old-tagbody-env (ctx-tagbody-env ctx))
          (tag-labels nil))
-    (let ((xs tags))
-      (tagbody
-       build
-         (if (null xs) (go built))
-         (let ((tag-entry (car xs)))
-           (setq tag-labels
-                 (cons (cons (car tag-entry) (make-label ctx "tag")) tag-labels)))
-         (setq xs (cdr xs))
-         (go build)
-       built))
-    (setq tag-labels (nreverse tag-labels))
+    (setq tag-labels (loop for tag-entry in tags
+                           collect (cons (car tag-entry) (make-label ctx "tag"))))
     (unwind-protect
          (progn
            (setf (ctx-tagbody-env ctx) (append tag-labels (ctx-tagbody-env ctx)))
            (if tag-labels
                (emit ctx (make-vm-jump :label (cdr (car tag-labels))))
                (emit ctx (make-vm-const :dst result-reg :value nil)))
-           (let ((xs tags))
-             (tagbody
-              scan-tags
-                (if (null xs) (go done-tags))
-                (let* ((tag-entry (car xs))
-                       (tag (car tag-entry))
-                       (forms (cdr tag-entry))
-                       (label (cdr (%assoc-eq tag tag-labels))))
-                  (emit ctx (make-vm-label :name label))
-                  (let ((ys forms))
-                    (tagbody
-                     scan-forms
-                       (if (null ys) (go done-forms))
-                       (compile-ast (car ys) ctx)
-                       (setq ys (cdr ys))
-                       (go scan-forms)
-                     done-forms))
-                  (if forms (emit ctx (make-vm-jump :label end-label))))
-                (setq xs (cdr xs))
-                (go scan-tags)
-              done-tags)))
+           (loop for tag-entry in tags
+                 do (let* ((tag   (car tag-entry))
+                           (forms (cdr tag-entry))
+                           (label (cdr (%assoc-eq tag tag-labels))))
+                      (emit ctx (make-vm-label :name label))
+                      (dolist (form forms) (compile-ast form ctx))
+                      (when forms (emit ctx (make-vm-jump :label end-label))))))
       (setf (ctx-tagbody-env ctx) old-tagbody-env))
     (emit ctx (make-vm-label :name end-label))
     (emit ctx (make-vm-const :dst result-reg :value nil))

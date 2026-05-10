@@ -2,7 +2,7 @@
 lib.optionalAttrs pkgs.stdenv.isDarwin {
   dispatchSemFix = pkgs.stdenvNoCC.mkDerivation {
     pname = "dispatch-sem-fix";
-    version = "3";
+    version = "5";
     src = lib.fileset.toSource {
       root = ./dispatch-sem-fix;
       fileset = ./dispatch-sem-fix/dispatch_sem_fix.c;

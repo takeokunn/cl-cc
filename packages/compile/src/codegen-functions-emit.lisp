@@ -44,27 +44,11 @@
         (captured-vars nil)
         (param-regs nil)
         (rest-stack-alloc-p nil))
-    (let ((xs free-vars))
-      (tagbody
-       scan-free-vars
-         (if (null xs) (go done-free-vars))
-         (let ((v (car xs)))
-           (if (%assoc-eq v (ctx-env ctx))
-               (setq captured-vars
-                     (cons (cons v (lookup-var ctx v)) captured-vars))))
-         (setq xs (cdr xs))
-         (go scan-free-vars)
-       done-free-vars))
-    (setq captured-vars (nreverse captured-vars))
-    (let ((xs params))
-      (tagbody
-       scan-param-regs
-         (if (null xs) (go done-param-regs))
-         (setq param-regs (cons (make-register ctx) param-regs))
-         (setq xs (cdr xs))
-         (go scan-param-regs)
-       done-param-regs))
-    (setq param-regs (nreverse param-regs))
+    (setq captured-vars
+          (loop for v in free-vars
+                when (%assoc-eq v (ctx-env ctx))
+                  collect (cons v (lookup-var ctx v))))
+    (setq param-regs (loop for _ in params collect (make-register ctx)))
     (setq rest-stack-alloc-p
           (and (ast-lambda-rest-param node)
                (or (rest-param-stack-alloc-p body (ast-lambda-rest-param node))
@@ -113,27 +97,11 @@
          (captured-vars nil)
          (param-regs nil)
          (rest-stack-alloc-p nil))
-    (let ((xs free-vars))
-      (tagbody
-       scan-free-vars
-         (if (null xs) (go done-free-vars))
-         (let ((v (car xs)))
-           (if (%assoc-eq v (ctx-env ctx))
-               (setq captured-vars
-                     (cons (cons v (lookup-var ctx v)) captured-vars))))
-         (setq xs (cdr xs))
-         (go scan-free-vars)
-       done-free-vars))
-    (setq captured-vars (nreverse captured-vars))
-    (let ((xs params))
-      (tagbody
-       scan-param-regs
-         (if (null xs) (go done-param-regs))
-         (setq param-regs (cons (make-register ctx) param-regs))
-         (setq xs (cdr xs))
-         (go scan-param-regs)
-       done-param-regs))
-    (setq param-regs (nreverse param-regs))
+    (setq captured-vars
+          (loop for v in free-vars
+                when (%assoc-eq v (ctx-env ctx))
+                  collect (cons v (lookup-var ctx v))))
+    (setq param-regs (loop for _ in params collect (make-register ctx)))
     (setq rest-stack-alloc-p
           (and (ast-defun-rest-param node)
                (or (rest-param-stack-alloc-p body (ast-defun-rest-param node))

@@ -34,6 +34,14 @@
             sbclWithTests
             ;
           binaryModule = import ./nix/binary.nix { inherit pkgs lib sbclWithCLCC; };
+          testImage = import ./nix/sbcl-image.nix {
+            inherit
+              pkgs
+              lib
+              sbclWithTests
+              dispatchSemFix
+              ;
+          };
           appsModule = import ./nix/apps.nix {
             inherit
               pkgs
@@ -42,6 +50,7 @@
               sbclWithTests
               sbclBootstrap
               dispatchSemFix
+              testImage
               ;
           };
           checksModule = import ./nix/checks.nix {
@@ -57,6 +66,7 @@
             // testAsdfSystems
             // {
               inherit (binaryModule) default;
+              test-image = testImage;
             };
           inherit (appsModule) apps;
           inherit (checksModule) checks;

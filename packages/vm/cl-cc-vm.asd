@@ -26,6 +26,7 @@
    (:file "vm-dsl")
    (:file "vm-state-init")
    (:file "vm-bridge")
+   (:file "vm-bridge-io-docs")
    (:file "vm-instructions")
    (:file "vm-dispatch")
    (:file "vm-dispatch-gf")

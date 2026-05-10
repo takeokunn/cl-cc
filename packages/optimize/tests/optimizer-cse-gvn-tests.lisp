@@ -308,18 +308,64 @@
     (assert-equal '(:const 7) (gethash :r0 val-env))
     (assert-eq :r0 (gethash '(:const 7) memo))))
 
-(deftest gvn-key-returns-const-key-for-vm-const
-  "%gvn-key returns (:const value) for a vm-const instruction."
+(deftest-each gvn-key-result
+  "%gvn-key returns a canonical key for recognized instruction types and nil for impure ones."
+  :cases (("const-5"    (make-vm-const :dst :r0 :value 5) '(:const 5) t)
+          ("halt-impure" (make-vm-halt :reg :r0)           nil         nil))
+  (inst expected expect-non-nil)
   (let ((gen     (make-hash-table :test #'eq))
-        (val-env (make-hash-table :test #'eq)))
-    (let ((key (cl-cc/optimize::%gvn-key (make-vm-const :dst :r0 :value 5) gen val-env)))
-      (assert-equal '(:const 5) key))))
+        (val-env (make-hash-table :test #'eq))
+        (key     (cl-cc/optimize::%gvn-key inst gen val-env)))
+    (if expect-non-nil
+        (assert-equal expected key)
+        (assert-null  key))))
 
-(deftest gvn-key-returns-nil-for-impure-non-move
-  "%gvn-key returns nil for an impure instruction with no recognized key form."
+(deftest gvn-key-pure-binop-returns-list-headed-by-type
+  "%gvn-key returns a non-nil list headed by the instruction's type for a pure binop."
   (let ((gen     (make-hash-table :test #'eq))
         (val-env (make-hash-table :test #'eq)))
-    (assert-null (cl-cc/optimize::%gvn-key (make-vm-halt :reg :r0) gen val-env))))
+    (let ((key (cl-cc/optimize::%gvn-key (make-vm-add :dst :r2 :lhs :r0 :rhs :r1) gen val-env)))
+      (assert-true (consp key))
+      (assert-eq 'cl-cc/vm::vm-add (car key)))))
+
+;;; ─── %gvn-maybe-replace ──────────────────────────────────────────────────
+
+(deftest gvn-maybe-replace-nil-key-passthrough
+  "%gvn-maybe-replace with nil key pushes the original instruction and records nothing."
+  (let* ((gen     (make-hash-table :test #'eq))
+         (val-env (make-hash-table :test #'eq))
+         (memo    (make-hash-table :test #'equal))
+         (inst    (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+         (result  (cl-cc/optimize::%gvn-maybe-replace inst :r2 nil gen val-env memo nil)))
+    (assert-= 1 (length result))
+    (assert-true (typep (car result) 'cl-cc/vm::vm-add))
+    (assert-= 0 (hash-table-count memo))))
+
+(deftest gvn-maybe-replace-new-key-records-and-emits-inst
+  "%gvn-maybe-replace with a fresh key records key→dst in memo and emits original instruction."
+  (let* ((gen     (make-hash-table :test #'eq))
+         (val-env (make-hash-table :test #'eq))
+         (memo    (make-hash-table :test #'equal))
+         (inst    (make-vm-add :dst :r2 :lhs :r0 :rhs :r1))
+         (key     '(cl-cc/vm::vm-add (:r0 . 0) (:r1 . 0)))
+         (result  (cl-cc/optimize::%gvn-maybe-replace inst :r2 key gen val-env memo nil)))
+    (assert-= 1 (length result))
+    (assert-true (typep (car result) 'cl-cc/vm::vm-add))
+    (assert-eq :r2 (gethash key memo))))
+
+(deftest gvn-maybe-replace-existing-key-produces-vm-move
+  "%gvn-maybe-replace replaces a pre-memoized expression with vm-move :dst←existing."
+  (let* ((gen     (make-hash-table :test #'eq))
+         (val-env (make-hash-table :test #'eq))
+         (memo    (make-hash-table :test #'equal))
+         (inst    (make-vm-add :dst :r3 :lhs :r0 :rhs :r1))
+         (key     '(cl-cc/vm::vm-add (:r0 . 0) (:r1 . 0))))
+    (setf (gethash key memo) :r2)
+    (let ((result (cl-cc/optimize::%gvn-maybe-replace inst :r3 key gen val-env memo nil)))
+      (assert-= 1 (length result))
+      (assert-true (typep (car result) 'cl-cc/vm::vm-move))
+      (assert-eq :r3 (vm-dst (car result)))
+      (assert-eq :r2 (vm-src (car result))))))
 
 ;;; ─── %cse-emit-or-cse ────────────────────────────────────────────────────
 

@@ -23,20 +23,20 @@
 
 (deftest-each printer-var-contains-substring
   "type-to-string for named and rigid vars contains expected substring."
-  :cases (("named" (fresh-type-var  "alpha") "alpha")
+  :cases (("named" (fresh-type-var :name  "alpha") "alpha")
           ("rigid" (fresh-rigid-var "test")  "sk"))
   (type-node expected-sub)
   (assert-true (search expected-sub (type-to-string type-node))))
 
 (deftest printer-linked-type-var-shows-resolved-type
   "A type-var with a link set prints as the resolved type (FIXNUM for type-int)."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (setf (cl-cc/type:type-var-link v) type-int)
     (assert-string= "FIXNUM" (type-to-string v))))
 
 (deftest printer-type-scheme-produces-non-empty-string
   "type-scheme with a quantified variable produces a non-empty string."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (scheme (make-type-scheme (list v) v))
          (s (type-to-string scheme)))
     (assert-true (> (length s) 0))))
@@ -69,7 +69,7 @@
   :cases (("closed" nil "{" "x")
           ("open"   t   "|" nil))
   (open-p expected-bracket expected-field)
-  (let* ((rv (when open-p (fresh-type-var "rho")))
+  (let* ((rv (when open-p (fresh-type-var :name "rho")))
          (fields (if open-p
                      (list (cons 'x type-int))
                      (list (cons 'x type-int) (cons 'y type-string))))
@@ -87,14 +87,14 @@
 
 (deftest-each printer-quantified-types
   "Forall and exists types each produce non-empty strings."
-  :cases (("forall" (let ((v (fresh-type-var "a"))) (make-type-forall :var v :body type-int)))
-          ("exists" (let ((v (fresh-type-var "a"))) (make-type-exists :var v :body type-int))))
+  :cases (("forall" (let ((v (fresh-type-var :name "a"))) (make-type-forall :var v :body type-int)))
+          ("exists" (let ((v (fresh-type-var :name "a"))) (make-type-exists :var v :body type-int))))
   (ty)
   (assert-true (> (length (type-to-string ty)) 0)))
 
 (deftest printer-binder-types
   "Type-lambda and mu (recursive) types each produce non-empty strings."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (assert-true (> (length (type-to-string (cl-cc/type:make-type-lambda :var v :knd nil :body type-int))) 0))
     (assert-true (> (length (type-to-string (make-type-mu :var v :body v))) 0))))
 
@@ -127,14 +127,14 @@
   "Effect rows: pure={}, io row has IO, open row has |; op with args shows name; open IO row has both."
   (assert-string= "{}" (type-to-string +pure-effect-row+))
   (assert-true (search "IO" (type-to-string +io-effect-row+)))
-  (let* ((rv (fresh-type-var "e"))
+  (let* ((rv (fresh-type-var :name "e"))
          (er (make-type-effect-row :effects nil :row-var rv)))
     (assert-true (search "|" (type-to-string er))))
   (let* ((op (make-type-effect-op :name 'state :args (list type-int)))
          (s  (type-to-string op)))
     (assert-true (search "STATE"  s))
     (assert-true (search "FIXNUM" s)))
-  (let* ((rv  (fresh-type-var 'epsilon))
+  (let* ((rv  (fresh-type-var :name 'epsilon))
          (row (make-type-effect-row
                :effects (list (make-type-effect-op :name 'io))
                :row-var rv))
@@ -173,7 +173,7 @@
 
 (deftest-each printer-unnamed-var-format
   "Unnamed type-var has '?t' prefix; unnamed rigid var has 'sk' prefix with no bracket."
-  :cases (("type-var"    (fresh-type-var nil)   "?t" nil)
+  :cases (("type-var"    (fresh-type-var :name nil)   "?t" nil)
           ("rigid-var"   (fresh-rigid-var nil)   "sk" "["))
   (node expected-sub forbidden-sub)
   (let ((s (type-to-string node)))
@@ -228,7 +228,7 @@
       (assert-true (search "X" (string-upcase s)))
       (assert-true (search "Y" (string-upcase s)))))
   (let ((open (make-type-record :fields (list (cons 'x type-int))
-                                :row-var (fresh-type-var 'rho))))
+                                :row-var (fresh-type-var :name 'rho))))
     (assert-true (search "|" (type-to-string open))))
   (let ((lin (make-type-linear :base type-int :grade :one)))
     (let ((s (type-to-string lin)))
@@ -237,10 +237,10 @@
 
 (deftest-each printer-unicode-type-operators
   "type-to-string uses Unicode symbols ∀ and μ for quantifier and recursive types."
-  :cases (("forall" "∀" (let* ((a  (fresh-type-var 'a))
+  :cases (("forall" "∀" (let* ((a  (fresh-type-var :name 'a))
                                  (fn (make-type-arrow (list a) a)))
                             (make-type-forall :var a :body fn)))
-          ("mu"     "μ" (let* ((a (fresh-type-var 'a)))
+          ("mu"     "μ" (let* ((a (fresh-type-var :name 'a)))
                             (make-type-mu :var a :body (make-type-union (list type-null a))))))
   (glyph ty)
   (assert-true (search glyph (type-to-string ty))))

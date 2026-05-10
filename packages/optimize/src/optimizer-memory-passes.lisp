@@ -37,15 +37,15 @@
       (%mps-drop-pending state key))))
 
 (defun %mps-flush-all (state)
-  (dolist (key (nreverse (mps-pending-order state)))
+  (dolist (key (reverse (mps-pending-order state)))
     (%mps-flush-one state key)))
 
 (defun %mps-pending-uses-reg-p (pending reg)
   "Return T if PENDING store instruction reads REG."
   (typecase pending
-    (vm-set-global (eq (vm-src pending) reg))
-    (vm-slot-write (or (eq (vm-obj-reg pending) reg)
-                       (eq (vm-value-reg pending) reg)))))
+    (vm-set-global (eq (cl-cc/vm::vm-set-global-src pending) reg))
+    (vm-slot-write (or (eq (cl-cc/vm::vm-slot-write-obj-reg pending) reg)
+                       (eq (cl-cc/vm::vm-slot-write-value-reg pending) reg)))))
 
 (defun %mps-flush-if-src-overwritten (state dst)
   "Flush pending stores that read DST (i.e., their source register is DST)."
@@ -156,8 +156,6 @@ tracked cell register or slot source kill only the dependent facts."
   (let ((state       (make-mem-pass-state))
         (alias-roots (opt-compute-heap-aliases instructions)))
     (dolist (inst instructions)
-      (let ((dst (opt-inst-dst inst)))
-        (when dst (%mps-flush-if-src-overwritten state dst)))
       (typecase inst
         (vm-label
          (%mps-flush-all state)
@@ -166,21 +164,27 @@ tracked cell register or slot source kill only the dependent facts."
          (%mps-flush-all state)
          (%mps-emit state inst))
         (vm-get-global
-         (%mps-flush-one state (vm-global-name inst))
+         (let ((dst (cl-cc/vm::vm-get-global-dst inst)))
+           (when dst (%mps-flush-if-src-overwritten state dst)))
+         (%mps-flush-one state (cl-cc/vm::vm-get-global-name inst))
          (%mps-emit state inst))
         (vm-slot-read
-         (%mps-flush-one state (opt-slot-alias-key (vm-obj-reg inst)
-                                                    (vm-slot-name-sym inst)
+         (let ((dst (cl-cc/vm::vm-slot-read-dst inst)))
+           (when dst (%mps-flush-if-src-overwritten state dst)))
+         (%mps-flush-one state (opt-slot-alias-key (cl-cc/vm::vm-slot-read-obj-reg inst)
+                                                    (cl-cc/vm::vm-slot-read-slot-name inst)
                                                     alias-roots))
          (%mps-emit state inst))
         (vm-set-global
-         (%mps-remember-store state (vm-global-name inst) inst))
+         (%mps-remember-store state (cl-cc/vm::vm-set-global-name inst) inst))
         (vm-slot-write
-         (%mps-remember-store state (opt-slot-alias-key (vm-obj-reg inst)
-                                                         (vm-slot-name-sym inst)
+         (%mps-remember-store state (opt-slot-alias-key (cl-cc/vm::vm-slot-write-obj-reg inst)
+                                                         (cl-cc/vm::vm-slot-write-slot-name inst)
                                                          alias-roots)
                               inst))
         (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst (%mps-flush-if-src-overwritten state dst)))
          (unless (opt-inst-pure-p inst) (%mps-flush-all state))
          (%mps-emit state inst))))
     (%mps-flush-all state)
@@ -206,32 +210,36 @@ tracked cell register or slot source kill only the dependent facts."
          (%mps-flush-all state)
          (%mps-emit state inst))
         (vm-get-global
-         (let* ((key   (list :global (vm-global-name inst)))
-                (store (%mps-pending-store state key)))
+         (let* ((key   (list :global (cl-cc/vm::vm-get-global-name inst)))
+                (store (%mps-pending-store state key))
+                (dst   (cl-cc/vm::vm-get-global-dst inst)))
            (if store
-               (progn (%mps-emit state (make-vm-move :dst (vm-dst inst) :src (vm-src store)))
-                      (when (vm-dst inst)
-                        (%mps-flush-dependent-on-reg state (vm-dst inst) :exclude-key key)))
-               (progn (when (vm-dst inst)
-                        (%mps-flush-dependent-on-reg state (vm-dst inst)))
+               (progn (%mps-emit state (make-vm-move :dst dst :src (cl-cc/vm::vm-set-global-src store)))
+                      (when dst
+                        (%mps-flush-dependent-on-reg state dst :exclude-key key)))
+               (progn (when dst
+                        (%mps-flush-dependent-on-reg state dst))
                       (%mps-flush-one state key)
                       (%mps-emit state inst)))))
         (vm-slot-read
-         (let* ((key   (opt-slot-alias-key (vm-obj-reg inst) (vm-slot-name-sym inst) alias-roots))
-                (store (%mps-pending-store state key)))
+         (let* ((key   (opt-slot-alias-key (cl-cc/vm::vm-slot-read-obj-reg inst)
+                                           (cl-cc/vm::vm-slot-read-slot-name inst)
+                                           alias-roots))
+                (store (%mps-pending-store state key))
+                (dst   (cl-cc/vm::vm-slot-read-dst inst)))
            (if store
-               (progn (%mps-emit state (make-vm-move :dst (vm-dst inst) :src (vm-value-reg store)))
-                      (when (vm-dst inst)
-                        (%mps-flush-dependent-on-reg state (vm-dst inst) :exclude-key key)))
-               (progn (when (vm-dst inst)
-                        (%mps-flush-dependent-on-reg state (vm-dst inst)))
+               (progn (%mps-emit state (make-vm-move :dst dst :src (cl-cc/vm::vm-slot-write-value-reg store)))
+                      (when dst
+                        (%mps-flush-dependent-on-reg state dst :exclude-key key)))
+               (progn (when dst
+                        (%mps-flush-dependent-on-reg state dst))
                       (%mps-flush-one state key)
                       (%mps-emit state inst)))))
         (vm-set-global
-         (%mps-remember-store state (list :global (vm-global-name inst)) inst))
+         (%mps-remember-store state (list :global (cl-cc/vm::vm-set-global-name inst)) inst))
         (vm-slot-write
-         (%mps-remember-store state (opt-slot-alias-key (vm-obj-reg inst)
-                                                         (vm-slot-name-sym inst)
+         (%mps-remember-store state (opt-slot-alias-key (cl-cc/vm::vm-slot-write-obj-reg inst)
+                                                         (cl-cc/vm::vm-slot-write-slot-name inst)
                                                          alias-roots)
                               inst))
         (t

@@ -16,7 +16,8 @@
     (assert-true (search "CLCC_TEST_TIMEOUT" text))
     (assert-true (search "CLCC_SUITE_TIMEOUT" text))
     (assert-true (search "run-tests" text))
-    (assert-true (search "starting fast test plan" text))))
+    (assert-true (search "starting fast test plan" text))
+    (assert-true (search "--kill-after=30" text))))
 
 (deftest flake-coverage-app-runs-instrumented-suite
   "The coverage app enables sb-cover before force-loading local test systems."

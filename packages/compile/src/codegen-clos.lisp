@@ -25,50 +25,25 @@
         (default-initarg-regs nil)
         (class-slot-names nil)
         (metaclass-reg nil))
-    (let ((xs slots))
-      (tagbody
-       scan-slots
-         (if (null xs) (go done-slots))
-         (let ((slot (car xs)))
-           (setq slot-names (cons (ast-slot-name slot) slot-names))
-           (if (ast-slot-initarg slot)
-               (setq initarg-map
-                     (cons (cons (ast-slot-initarg slot)
-                                 (ast-slot-name slot))
-                           initarg-map)))
-            (if (ast-slot-initform slot)
-                (setq initform-regs
-                      (cons (cons (ast-slot-name slot)
-                                  (compile-ast (ast-slot-initform slot) ctx))
-                            initform-regs)))
-            (if (ast-slot-type slot)
-                (setq slot-types
-                      (cons (cons (ast-slot-name slot)
-                                  (ast-slot-type slot))
-                            slot-types)))
-            (if (eq :class (ast-slot-allocation slot))
-                (setq class-slot-names
-                      (cons (ast-slot-name slot) class-slot-names))))
-         (setq xs (cdr xs))
-         (go scan-slots)
-       done-slots))
-    (let ((xs (ast-defclass-default-initargs node)))
-      (tagbody
-       scan-defaults
-         (if (null xs) (go done-defaults))
-         (let ((entry (car xs)))
-           (setq default-initarg-regs
-                 (cons (cons (car entry) (compile-ast (cdr entry) ctx))
-                       default-initarg-regs)))
-         (setq xs (cdr xs))
-         (go scan-defaults)
-       done-defaults))
-    (setq slot-names (nreverse slot-names))
-    (setq initarg-map (nreverse initarg-map))
-    (setq initform-regs (nreverse initform-regs))
-    (setq slot-types (nreverse slot-types))
-    (setq default-initarg-regs (nreverse default-initarg-regs))
-    (setq class-slot-names (nreverse class-slot-names))
+    (loop for slot in slots
+          collect (ast-slot-name slot)                                          into s-names
+          when (ast-slot-initarg slot)
+            collect (cons (ast-slot-initarg slot) (ast-slot-name slot))         into i-map
+          when (ast-slot-initform slot)
+            collect (cons (ast-slot-name slot)
+                          (compile-ast (ast-slot-initform slot) ctx))           into i-regs
+          when (ast-slot-type slot)
+            collect (cons (ast-slot-name slot) (ast-slot-type slot))            into s-types
+          when (eq :class (ast-slot-allocation slot))
+            collect (ast-slot-name slot)                                        into c-slots
+          finally (setq slot-names      s-names
+                        initarg-map     i-map
+                        initform-regs   i-regs
+                        slot-types      s-types
+                        class-slot-names c-slots))
+    (setq default-initarg-regs
+          (loop for entry in (ast-defclass-default-initargs node)
+                collect (cons (car entry) (compile-ast (cdr entry) ctx))))
     (when (ast-defclass-metaclass node)
       (setq metaclass-reg (compile-ast (ast-defclass-metaclass node) ctx)))
     (emit ctx (make-vm-class-def
@@ -86,27 +61,19 @@
     (setf (ctx-env ctx) (cons (cons name dst) (ctx-env ctx)))
     (emit ctx (make-vm-set-global :name name :src dst))
     (setf (gethash name (ctx-global-variables ctx)) dst)
-    (let ((xs slots))
-      (tagbody
-       scan-accessors
-         (if (null xs) (go done-accessors))
-         (let* ((slot (car xs))
-                (slot-name (ast-slot-name slot)))
-           (if (ast-slot-reader slot)
+    (loop for slot in slots
+          for slot-name = (ast-slot-name slot)
+          do (when (ast-slot-reader slot)
                (compile-slot-accessor ctx dst name slot-name
                                       (ast-slot-reader slot) :reader))
-           (if (ast-slot-writer slot)
+             (when (ast-slot-writer slot)
                (compile-slot-accessor ctx dst name slot-name
                                       (ast-slot-writer slot) :writer))
-           (if (ast-slot-accessor slot)
-               (progn
-                 (compile-slot-accessor ctx dst name slot-name
-                                        (ast-slot-accessor slot) :reader)
-                 (setf (gethash (ast-slot-accessor slot) *accessor-slot-map*)
-                       (cons name slot-name)))))
-         (setq xs (cdr xs))
-         (go scan-accessors)
-       done-accessors))
+             (when (ast-slot-accessor slot)
+               (compile-slot-accessor ctx dst name slot-name
+                                      (ast-slot-accessor slot) :reader)
+               (setf (gethash (ast-slot-accessor slot) *accessor-slot-map*)
+                     (cons name slot-name))))
     dst))
 
 (defun compile-slot-accessor (ctx class-reg class-name slot-name accessor-name kind)

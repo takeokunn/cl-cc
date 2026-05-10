@@ -11,33 +11,11 @@ Uses gensyms for intermediate values to avoid double evaluation.
             t
             (if (= len 2)
                 (list op (first args) (second args))
-                (let* ((count len)
-                       (temps nil)
-                       (bindings nil)
-                       (pairs nil))
-                  (dotimes (i count)
-                    (push (gensym (format nil "CMP~D-" i)) temps))
-                  (setf temps (nreverse temps))
-                  (let ((ts temps)
-                        (as args))
-                    (tagbody
-                     build-bindings
-                       (if (or (null ts) (null as)) (go done-bindings))
-                       (push (list (car ts) (car as)) bindings)
-                       (setq ts (cdr ts))
-                       (setq as (cdr as))
-                       (go build-bindings)
-                     done-bindings))
-                  (setf bindings (nreverse bindings))
-                  (let ((ts temps))
-                    (tagbody
-                     build-pairs
-                       (if (or (null ts) (null (cdr ts))) (go done-pairs))
-                       (push (list op (car ts) (cadr ts)) pairs)
-                       (setq ts (cdr ts))
-                       (go build-pairs)
-                     done-pairs))
-                  (setf pairs (nreverse pairs))
+                (let* ((temps (loop for i from 0 below len
+                                    collect (gensym (format nil "CMP~D-" i))))
+                       (bindings (mapcar #'list temps args))
+                       (pairs (loop for (a b) on temps while b
+                                    collect (list op a b))))
                   (list 'let bindings (cons 'and pairs))))))))
 
 (defun reduce-variadic-op (op args identity)
@@ -50,16 +28,10 @@ Uses gensyms for intermediate values to avoid double evaluation.
             (first args)
             (if (= len 2)
                 (%expander-form op (first args) (second args))
-                (let ((acc (%expander-form op (first args) (second args)))
-                      (tail (cddr args)))
-                  (tagbody
-                   scan
-                     (if (null tail) (go done))
-                     (setq acc (%expander-form op acc (car tail)))
-                     (setq tail (cdr tail))
-                     (go scan)
-                   done)
-                  acc))))))
+                (reduce (lambda (acc x) (%expander-form op acc x))
+                        (cddr args)
+                        :initial-value (%expander-form op (first args) (second args))))))))
+
 
 (defun register-defclass-accessors (class-name slot-specs)
   "Register ACCESSOR → (CLASS-NAME . SLOT-NAME) in *accessor-slot-map*.
@@ -78,22 +50,12 @@ to (setf (slot-value ...)) without runtime lookup."
 keys (:accessor, :initarg, :reader, :writer, :type) untouched."
   (if (listp spec)
       (list* (first spec)
-             (let ((opts (rest spec))
-                   (expanded-options nil))
-               (tagbody
-                scan
-                  (if (null opts) (go done))
-                  (let ((k (car opts))
-                        (v (cadr opts)))
-                    (setq expanded-options
-                          (cons (if (eq k :initform)
-                                    (compiler-macroexpand-all v)
-                                    v)
-                                (cons k expanded-options))))
-                  (setq opts (cddr opts))
-                  (go scan)
-                done)
-               (nreverse expanded-options)))
+             (loop for kv on (rest spec) by #'cddr
+                   when (cdr kv)
+                     append (let ((k (car kv)) (v (cadr kv)))
+                              (list k (if (eq k :initform)
+                                          (compiler-macroexpand-all v)
+                                          v)))))
       spec))
 
 (defun expand-typed-defun-or-lambda (head name params rest-forms)
@@ -144,13 +106,7 @@ specifier symbol, it is treated as the declared return type and wrapped in
 
 (defun %list-contains-eq (item lst)
   "Return T when ITEM is EQ to any element of LST."
-  (let ((xs lst))
-    (tagbody
-     scan
-       (if (null xs) (return-from %list-contains-eq nil))
-       (if (eq item (car xs)) (return-from %list-contains-eq t))
-       (setq xs (cdr xs))
-       (go scan))))
+  (and (member item lst :test #'eq) t))
 
 (defun make-macro-expander (lambda-list body)
   "Build a macro expander function for a LAMBDA-LIST and BODY.
@@ -217,22 +173,20 @@ Each binding is (symbol expansion). Returns the expanded BODY wrapped in PROGN."
 (defun expand-progn-with-eager-defmacro (subforms)
   "Expand each form in SUBFORMS, eagerly registering DEFMACRO forms so
 later siblings can immediately use the new macro."
-  (let ((out nil))
-    (dolist (sub subforms)
-      (when (and (consp sub)
-                 (symbolp (car sub))
-                 (string= (symbol-name (car sub)) "OUR-DEFMACRO"))
-        ;; Register OUR-DEFMACRO eagerly using the same host macro environment as
-        ;; DEFMACRO, but via MAKE-MACRO-EXPANDER so bootstrap quasiquote forms in
-        ;; the body are normalized before the expander is stored.
-        (register-macro (second sub)
-                        (make-macro-expander (third sub) (cdddr sub))))
-      (let ((exp (compiler-macroexpand-all sub)))
-        (when (and (consp exp) (eq (car exp) 'defmacro))
-          (register-macro (second exp)
-                          (make-macro-expander (third exp) (cdddr exp))))
-        (push exp out)))
-    (cons 'progn (nreverse out))))
+  ;; OUR-DEFMACRO is registered before expansion so later siblings can use it.
+  ;; DEFMACRO in the expanded output is registered afterward for the same reason.
+  (cons 'progn
+        (loop for sub in subforms
+              do (when (and (consp sub)
+                            (symbolp (car sub))
+                            (string= (symbol-name (car sub)) "OUR-DEFMACRO"))
+                   (register-macro (second sub)
+                                   (make-macro-expander (third sub) (cdddr sub))))
+              collect (let ((exp (compiler-macroexpand-all sub)))
+                        (when (and (consp exp) (eq (car exp) 'defmacro))
+                          (register-macro (second exp)
+                                         (make-macro-expander (third exp) (cdddr exp))))
+                        exp))))
 
 (defun expand-eval-when-form (situations body)
   "Handle EVAL-WHEN phase control.

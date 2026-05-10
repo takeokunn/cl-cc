@@ -22,11 +22,11 @@
          (inner  (caddr result)))
     (assert-eq (car inner) 'let)))
 
-(deftest reduce-with-initial-value-has-tagbody-loop
-  "REDUCE with :initial-value expands to a TAGBODY accumulation loop."
+(deftest reduce-with-initial-value-has-loop
+  "REDUCE with :initial-value expands to a LOOP accumulation form."
   (let* ((result (our-macroexpand-1 '(reduce #'+ lst :initial-value 0)))
          (body   (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'tagbody))) body))))
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'loop))) body))))
 
 (deftest substitute-expansion
   "SUBSTITUTE: outer LET containing a DOLIST loop."

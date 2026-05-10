@@ -101,21 +101,16 @@
 (defun %declaration-inline-policy (declarations name)
   "Return the effective local inline policy for NAME from DECLARATIONS.
 When both INLINE and NOTINLINE appear, NOTINLINE wins conservatively."
-  (let ((xs declarations)
-        (result nil))
-    (tagbody
-     scan
-       (if (null xs) (return-from %declaration-inline-policy result))
-       (let ((decl (car xs)))
-         (when (and (consp decl)
+  (when (symbolp name)
+    (loop with result = nil
+          for decl in declarations
+          when (and (consp decl)
                     (member (car decl) '(inline notinline))
-                    (symbolp name)
-                    (%member-eq-p name (cdr decl)))
-           (setf result (%merge-inline-policies
-                         result
-                         (if (eq (car decl) 'notinline) :notinline :inline)))))
-       (setq xs (cdr xs))
-       (go scan))))
+                    (member name (cdr decl) :test #'eq))
+            do (setf result (%merge-inline-policies
+                              result
+                              (if (eq (car decl) 'notinline) :notinline :inline)))
+          finally (return result))))
 
 (defun %global-inline-policy (name)
   (and (symbolp name)
@@ -188,19 +183,9 @@ Returns NIL when the runtime package layer is unavailable."
 
 (defun %resolve-package-symbol-specs (specs)
   "Resolve (PACKAGE . NAME) pairs to live symbols, skipping missing packages/symbols."
-  (let ((xs specs)
-        (result nil))
-    (tagbody
-     scan
-       (if (null xs) (return-from %resolve-package-symbol-specs (nreverse result)))
-       (let* ((entry (car xs))
-              (pkg-name (car entry))
-              (sym-name (cdr entry))
-              (pkg (find-package pkg-name))
-              (sym (if pkg (intern sym-name pkg-name) nil)))
-         (if sym (setq result (cons sym result))))
-       (setq xs (cdr xs))
-       (go scan))))
+  (loop for (pkg-name . sym-name) in specs
+        when (find-package pkg-name)
+          collect (intern sym-name pkg-name)))
 
 (defparameter *builtin-special-variables*
   (append '(*features* *modules* *active-restarts*
@@ -270,58 +255,22 @@ Used by run-string-repl to persist the label counter across calls.")
   instruction)
 
 (defun %assoc-eq (key alist)
-  (let ((xs alist))
-    (tagbody
-     scan
-       (if (null xs) (return-from %assoc-eq nil))
-       (let ((entry (car xs)))
-         (if (eq key (car entry))
-             (return-from %assoc-eq entry)))
-       (setq xs (cdr xs))
-       (go scan))))
+  (assoc key alist :test #'eq))
 
 (defun %member-eq-p (item list)
-  (let ((xs list))
-    (tagbody
-     scan
-       (if (null xs) (return-from %member-eq-p nil))
-       (if (eq item (car xs))
-           (return-from %member-eq-p t))
-       (setq xs (cdr xs))
-       (go scan))))
+  (and (member item list :test #'eq) t))
 
 (defun %list-union-eq (left right)
-  (let ((result right)
-        (xs left))
-    (tagbody
-     scan
-       (if (null xs) (return-from %list-union-eq result))
-       (if (not (%member-eq-p (car xs) result))
-           (setq result (cons (car xs) result)))
-       (setq xs (cdr xs))
-       (go scan))))
+  (union left right :test #'eq))
 
 (defun %list-intersection-eq (left right)
-  (let ((result nil)
-        (xs left))
-    (tagbody
-     scan
-       (if (null xs) (return-from %list-intersection-eq (nreverse result)))
-       (if (%member-eq-p (car xs) right)
-           (setq result (cons (car xs) result)))
-       (setq xs (cdr xs))
-       (go scan))))
+  (intersection left right :test #'eq))
 
 (defun lookup-var (ctx sym)
-  (let ((xs (ctx-env ctx)))
-    (tagbody
-     scan
-       (if (null xs) (return-from lookup-var (error "Unbound variable")))
-       (let ((entry (car xs)))
-         (if (eq sym (car entry))
-             (return-from lookup-var (cdr entry))))
-       (setq xs (cdr xs))
-       (go scan))))
+  (let ((entry (assoc sym (ctx-env ctx) :test #'eq)))
+    (if entry
+        (cdr entry)
+        (error "Unbound variable"))))
 
 ;;; ─── CPS Safety Guards ───────────────────────────────────────────────────────
 

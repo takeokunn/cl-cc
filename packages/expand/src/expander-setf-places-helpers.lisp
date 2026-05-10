@@ -9,31 +9,18 @@
                (char-equal (char name 0) #\C)
                (char-equal (char name (1- (length name))) #\R))
       (let ((letters (subseq name 1 (1- (length name)))))
-        (let ((i 0)
-              (n (length letters)))
-          (tagbody
-           scan
-             (if (>= i n) (return-from %setf-cxr-letters letters))
-             (let ((ch (char letters i)))
-               (unless (or (char-equal ch #\A)
-                           (char-equal ch #\D))
-                 (return-from %setf-cxr-letters nil)))
-             (setf i (+ i 1))
-             (go scan)))))))
+        (when (every (lambda (ch) (or (char-equal ch #\A) (char-equal ch #\D)))
+                     letters)
+          letters)))))
 
 (defun %expand-cxr-letters (letters arg)
   "Expand LETTERS as CXR a/d operations applied to ARG."
-  (let ((i (1- (length letters)))
-        (acc arg))
-    (tagbody
-     scan
-       (if (< i 0) (return-from %expand-cxr-letters acc))
-       (let ((letter (char letters i)))
-         (setf acc (if (char-equal letter #\A)
-                       (list 'car acc)
-                       (list 'cdr acc))))
-       (setf i (- i 1))
-       (go scan))))
+  (let ((acc arg))
+    (loop for i from (1- (length letters)) downto 0
+          do (setf acc (if (char-equal (char letters i) #\A)
+                           (list 'car acc)
+                           (list 'cdr acc))))
+    acc))
 
 (defun %expand-setf-cxr-place (place value letters)
   "Expand a CXR setf PLACE using LETTERS to select rplaca or rplacd."

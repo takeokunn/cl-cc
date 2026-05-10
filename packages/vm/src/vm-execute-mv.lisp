@@ -44,62 +44,41 @@
 
 (defun %vm-values-type-parts (type-spec)
   "Split a VALUES type specifier into required, optional, and rest parts."
-  (let ((required nil)
-        (optional nil)
-        (rest-type nil)
-        (state :required)
-        (xs (cdr type-spec)))
-    (tagbody
-     scan
-       (if (null xs) (go done))
-       (let ((entry (car xs)))
-         (cond
-           ((eq entry '&optional) (setf state :optional))
-           ((eq entry '&rest)
-            (setf state :rest)
-            (when (cdr xs)
-              (setf rest-type (cadr xs))
-              (setf xs (cdr xs))))
-           ((eq entry '&allow-other-keys) nil)
-           ((eq state :optional) (push entry optional))
-           ((eq state :rest) nil)
-           (t (push entry required))))
-       (setf xs (cdr xs))
-       (go scan)
-     done)
+  (let ((required nil) (optional nil) (rest-type nil) (state :required) (tail (cdr type-spec)))
+    (loop while tail do
+      (let ((entry (car tail)))
+        (setf tail (cdr tail))
+        (cond
+          ((eq entry '&optional) (setf state :optional))
+          ((eq entry '&rest)
+           (setf state :rest)
+           (when tail (setf rest-type (car tail) tail (cdr tail))))
+          ((eq entry '&allow-other-keys))
+          ((eq state :required) (push entry required))
+          ((eq state :optional) (push entry optional)))))
     (values (nreverse required) (nreverse optional) rest-type)))
 
 (defun vm-values-typep-check (values-list type-spec)
   "Return T when VALUES-LIST satisfies a VALUES type specifier."
-  (if (and (consp type-spec) (eq (car type-spec) 'values))
-      (multiple-value-bind (required optional rest-type)
-          (%vm-values-type-parts type-spec)
-        (let ((vals values-list))
-          (tagbody
-           required
-             (if (null required) (go optional))
-             (if (null vals) (return-from vm-values-typep-check nil))
-             (if (not (vm-typep-check (car vals) (car required)))
-                 (return-from vm-values-typep-check nil))
-             (setf required (cdr required))
-             (setf vals (cdr vals))
-             (go required)
-           optional
-             (if (or (null optional) (null vals)) (go rest))
-             (if (not (vm-typep-check (car vals) (car optional)))
-                 (return-from vm-values-typep-check nil))
-             (setf optional (cdr optional))
-             (setf vals (cdr vals))
-             (go optional)
-           rest
-             (if rest-type
-                 (progn
-                   (dolist (value vals)
-                     (unless (vm-typep-check value rest-type)
-                       (return-from vm-values-typep-check nil)))
-                   (return-from vm-values-typep-check t))
-                 (return-from vm-values-typep-check (null vals))))))
-      t))
+  (unless (and (consp type-spec) (eq (car type-spec) 'values))
+    (return-from vm-values-typep-check t))
+  (multiple-value-bind (required optional rest-type)
+      (%vm-values-type-parts type-spec)
+    (let ((vals values-list))
+      ;; Required: must have at least this many values, each type-matching
+      (loop for type in required
+            do (unless vals (return-from vm-values-typep-check nil))
+               (unless (vm-typep-check (pop vals) type)
+                 (return-from vm-values-typep-check nil)))
+      ;; Optional: consume matching values while available
+      (loop for type in optional
+            while vals
+            do (unless (vm-typep-check (pop vals) type)
+                 (return-from vm-values-typep-check nil)))
+      ;; Rest: check remaining values against rest type, or require none remain
+      (if rest-type
+          (every (lambda (v) (vm-typep-check v rest-type)) vals)
+          (null vals)))))
 
 (defmethod execute-instruction ((inst vm-values-typep) state pc labels)
   (declare (ignore labels))

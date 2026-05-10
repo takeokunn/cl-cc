@@ -5,6 +5,7 @@
   sbclWithTests,
   sbclBootstrap,
   dispatchSemFix ? null,
+  testImage,
 }:
 let
   sbclFlags = "--dynamic-space-size 8192";
@@ -80,8 +81,10 @@ let
         ${extraEnv}
         export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-10}"
         export CLCC_SUITE_TIMEOUT="''${CLCC_SUITE_TIMEOUT:-1500}"
+        if ! printf '%s' "$CLCC_TEST_TIMEOUT"  | grep -Eq '^[0-9]+$'; then CLCC_TEST_TIMEOUT=10;   fi
+        if ! printf '%s' "$CLCC_SUITE_TIMEOUT" | grep -Eq '^[0-9]+$'; then CLCC_SUITE_TIMEOUT=1500; fi
         shell_timeout=$((CLCC_SUITE_TIMEOUT + ${toString extraTimeoutSeconds}))
-        ${pkgs.coreutils}/bin/timeout "$shell_timeout" ${rlwrapPrefix}${sbclBin} ${sbclFlags} ${lib.concatStringsSep " " extraSbclFlags} \
+        ${pkgs.coreutils}/bin/timeout --kill-after=30 "$shell_timeout" ${rlwrapPrefix}${sbclBin} ${sbclFlags} ${lib.concatStringsSep " " extraSbclFlags} \
           --non-interactive \
           ${joinEvals lispPreLoadEvalForms} \
           ${lib.removeSuffix "\n" sbclBootstrap} \
@@ -113,9 +116,55 @@ let
       enableDispatchSemFix = true;
       enablePbtSanitize = true;
       enableFaslCacheCleaner = false;
+      # Load the pre-compiled core image (save-lisp-and-die snapshot).
+      # The core has :cl-cc, :cl-cc-cli, :cl-cc-testing-framework pre-loaded and
+      # warm-stdlib-cache pre-initialized, so the heavy ASDF loading is skipped.
+      # :cl-cc-test is NOT in the core (test-file top-level forms must not bake
+      # Nix sandbox paths into globals), so it is loaded fresh after CWD reset.
+      # Cap worker count to 4: ≥8 workers trigger GC safepoint contention on macOS 26 ARM64
+      # (SBCL 2.6.1). Concurrent SBCL compiler calls (from compiler-macro eval) are now
+      # serialised via *macro-eval-fn* mutex, so 4 workers are safe. Users may override
+      # upward via CL_CC_TEST_WORKERS=N nix run .#test.
+      extraSbclFlags = [
+        "--core"
+        "${testImage}/cl-cc-test.core"
+      ];
+      extraEnv = ''export CL_CC_TEST_WORKERS="''${CL_CC_TEST_WORKERS:-4}"'';
       lispPostLoadEvalForms = [
+        # *default-pathname-defaults* and uiop:*temporary-directory* are baked
+        # into the core at build-sandbox time; reset both to real runtime values.
+        # uiop:*temporary-directory* must be set via (uiop:temporary-directory) — NOT nil.
+        # Setting it to nil and then passing it as :defaults to make-pathname hangs SBCL
+        # 2.6.1 on macOS ARM64; (uiop:temporary-directory) reads TMPDIR from the runtime
+        # environment and caches the result in *temporary-directory*.
+        ''(setf *default-pathname-defaults* (uiop:getcwd))''
+        ''(setf uiop:*temporary-directory* (uiop:temporary-directory))''
+        # Load :cl-cc-test FASLs (pre-compiled via sbclWithTests) after CWD reset
+        # so any top-level path computations in test files see the correct CWD.
         ''(format t "# loading :cl-cc-test~%")''
         ''(handler-case (asdf:load-system :cl-cc-test) (error (e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
+        # Reset *macro-eval-fn* to a mutex-wrapped #'eval so test bodies run under host CL,
+        # not the cl-cc VM.  pipeline-selfhost.lisp sets it to #'our-eval at
+        # load time; leaving it as our-eval causes sb-ext:with-timeout interrupts
+        # to be swallowed inside the VM loop, hanging test workers indefinitely.
+        # The mutex serialises concurrent SBCL compiler invocations: on macOS 26 ARM64
+        # SBCL 2.6.1, four or more parallel workers calling eval simultaneously
+        # (via compiler-macro expansion in invoke-registered-expander) deadlock on
+        # GC safepoints while the SBCL compiler holds internal locks.  The lock is
+        # captured by the closure; %with-isolated-macro-environment identity-rebinds
+        # *macro-eval-fn* so all threads share the same mutex.
+        ''(let ((lock (sb-thread:make-mutex :name "macro-eval-lock"))) (setf cl-cc/expand:*macro-eval-fn* (lambda (form) (sb-thread:with-mutex (lock) (eval form)))))''
+        # Pre-warm BOTH stdlib caches in the main thread (single-threaded, safe).
+        # The core bakes *stdlib-expanded-cache-eval-fn* = #'our-eval and a
+        # *stdlib-vm-snapshot* compiled under our-eval.  After the *macro-eval-fn*
+        # reset above, both caches are stale.  Without pre-warming, all 4 parallel
+        # workers simultaneously see cache misses and race to rebuild unprotected
+        # globals (*stdlib-expanded-cache*, *stdlib-vm-snapshot*, etc.).  On macOS
+        # ARM64 SBCL, concurrent large allocations (857-line stdlib) during GC
+        # safepoint windows can deadlock threads waiting on watchdog-lock.
+        # warm-stdlib-cache rebuilds both caches under *macro-eval-fn* = #'eval
+        # so workers see cache HITs and bypass both rebuild paths entirely.
+        ''(handler-case (progn (format t "# warming stdlib cache~%") (cl-cc:warm-stdlib-cache) (format t "# stdlib cache ready~%")) (error (e) (format *error-output* "~&FATAL: stdlib cache warm failed: ~A~%" e) (uiop:quit 1)))''
         ''(format t "# starting fast test plan (unit)~%")''
         ''(handler-case (uiop:symbol-call :cl-cc/test (quote run-tests)) (error (e) (format t "~&not ok - run-tests fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
       ];

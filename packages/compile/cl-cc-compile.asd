@@ -33,6 +33,7 @@
    (:file "codegen-core-let")
    (:file "codegen-core-let-walkers")
    (:file "codegen-core-let-emit")
+   (:file "codegen-core-let-emit-pass")
    (:file "codegen-clos")
    (:file "codegen-gf")
    (:file "codegen-functions")

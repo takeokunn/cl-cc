@@ -163,7 +163,7 @@
 (deftest phase-e-check-lambda-against-forall
   "Checking (lambda (x) x) against a forall type succeeds or returns nil without signaling."
   (reset-type-vars!)
-  (let* ((a      (fresh-type-var 'a))
+  (let* ((a      (fresh-type-var :name 'a))
          (fa     (make-type-forall :var a :body (make-type-arrow (list a) a)))
          (id-ast (lower-sexp-to-ast '(lambda (x) x)))
          (env    (type-env-empty)))

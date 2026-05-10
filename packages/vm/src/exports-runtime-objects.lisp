@@ -53,6 +53,7 @@
    vm-make-sequence-like
    vm-hash-cons
    vm-clear-hash-cons-table
+   *vm-hash-cons-table*
    vm-arg-slot-name
    vm-bind-arg-slots
    vm-bind-closure-args

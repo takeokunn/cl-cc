@@ -43,7 +43,7 @@ ENV may be a type-env struct or nil (empty env)."
          (body  (type-scheme-type scheme))
          (subst (make-substitution)))
     (dolist (v qvars)
-      (subst-extend! v (fresh-type-var (type-var-name v)) subst))
+      (subst-extend! v (fresh-type-var :name (type-var-name v)) subst))
     (dolist (v qvars)
       (let ((fresh (zonk v subst)))
         (when (type-var-p fresh)
@@ -59,7 +59,7 @@ ENV may be a type-env struct or nil (empty env)."
   "Return or create the canonical renamed type variable for V."
   (or (gethash (type-var-id v) mapping)
       (let* ((name (aref "abcdefghijklmnopqrstuvwxyz" (mod (car counter-cell) 26)))
-             (nv   (fresh-type-var name)))
+             (nv   (fresh-type-var :name name)))
         (incf (car counter-cell))
         (setf (gethash (type-var-id v) mapping) nv)
         nv)))

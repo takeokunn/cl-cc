@@ -8,46 +8,17 @@
 
 (defun %make-indexed-gensyms (count prefix)
   "Return COUNT gensyms named from PREFIX and the zero-based index."
-  (let ((i 0)
-        (result nil))
-    (tagbody
-     scan
-       (if (>= i count) (return-from %make-indexed-gensyms (nreverse result)))
-       (setq result (cons (gensym (format nil "~A~D-" prefix i)) result))
-       (setq i (+ i 1))
-       (go scan))))
+  (loop for i from 0 below count
+        collect (gensym (format nil "~A~D-" prefix i))))
 
 (defun %pair-list-bindings (vars values)
   "Pair VARS and VALUES into LET bindings."
-  (let ((vs vars)
-        (xs values)
-        (bindings nil))
-    (tagbody
-     scan
-       (if (or (null vs) (null xs)) (return-from %pair-list-bindings (nreverse bindings)))
-       (setq bindings (cons (list (car vs) (car xs)) bindings))
-       (setq vs (cdr vs))
-       (setq xs (cdr xs))
-       (go scan))))
+  (loop for v in vars for x in values collect (list v x)))
 
 (defun %all-not-equal-pairs (temps)
   "Return pairwise (not (= A B)) forms for TEMPS."
-  (let ((outer temps)
-        (pairs nil))
-    (tagbody
-     outer-loop
-       (if (null outer) (return-from %all-not-equal-pairs (nreverse pairs)))
-       (let ((a (car outer))
-             (inner (cdr outer)))
-         (tagbody
-          inner-loop
-            (if (null inner) (go inner-done))
-            (setq pairs (cons (list 'not (list '= a (car inner))) pairs))
-            (setq inner (cdr inner))
-            (go inner-loop)
-          inner-done))
-       (setq outer (cdr outer))
-       (go outer-loop))))
+  (loop for (a . rest) on temps
+        nconc (loop for b in rest collect (list 'not (list '= a b)))))
 
 ;; + (FR-661): 0-arg → 0, 1-arg → identity, N-arg → left fold
 (define-expander-for + (form)

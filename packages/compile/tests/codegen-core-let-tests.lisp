@@ -19,9 +19,7 @@
           ("wrong-name" nil 'x '((ignore y)))
           ("empty"      nil 'x nil))
   (expected name decls)
-  (if expected
-      (assert-true  (cl-cc/compile::%ast-let-binding-ignored-p name decls))
-      (assert-false (cl-cc/compile::%ast-let-binding-ignored-p name decls))))
+  (assert-bool expected (cl-cc/compile::%ast-let-binding-ignored-p name decls)))
 
 ;;; ─── %ast-cons-call-p ─────────────────────────────────────────────────────
 
@@ -42,9 +40,7 @@
           ("non-call"     (cl-cc/ast:make-ast-int :value 5)
                           nil))
   (node expected)
-  (if expected
-      (assert-true  (cl-cc/compile::%ast-cons-call-p node))
-      (assert-false (cl-cc/compile::%ast-cons-call-p node))))
+  (assert-bool expected (cl-cc/compile::%ast-cons-call-p node)))
 
 ;;; ─── %ast-make-array-call-p / %ast-make-array-int-call-p ─────────────────
 
@@ -58,9 +54,7 @@
                                         (cl-cc/ast:make-ast-int :value 5)))
                           nil))
   (node expected)
-  (if expected
-      (assert-true  (cl-cc/compile::%ast-make-array-call-p node))
-      (assert-false (cl-cc/compile::%ast-make-array-call-p node))))
+  (assert-bool expected (cl-cc/compile::%ast-make-array-call-p node)))
 
 (deftest-each ast-make-array-int-call-p
   "%ast-make-array-int-call-p: true when size is ast-int; false when size is a variable."
@@ -71,9 +65,7 @@
                              :args (list (cl-cc/ast:make-ast-var :name 'n)))
                            nil))
   (node expected)
-  (if expected
-      (assert-true  (cl-cc/compile::%ast-make-array-int-call-p node))
-      (assert-false (cl-cc/compile::%ast-make-array-int-call-p node))))
+  (assert-bool expected (cl-cc/compile::%ast-make-array-int-call-p node)))
 
 ;;; ─── %binding-mentioned-in-body-p ─────────────────────────────────────────
 
@@ -83,9 +75,7 @@
           ("empty-body"     nil                                     'x  nil)
           ("different-var"  (list (cl-cc/ast:make-ast-var :name 'y))  'x  nil))
   (body name expected)
-  (if expected
-      (assert-true  (cl-cc/compile::%binding-mentioned-in-body-p body name))
-      (assert-false (cl-cc/compile::%binding-mentioned-in-body-p body name))))
+  (assert-bool expected (cl-cc/compile::%binding-mentioned-in-body-p body name)))
 
 ;;; ─── %ast-lambda-bound-names ──────────────────────────────────────────────
 
@@ -192,6 +182,4 @@ integer bindings aren't candidates."
   (let ((ctx (make-instance 'cl-cc/compile:compiler-context)))
     (when register-sym
       (setf (gethash register-sym (cl-cc/compile:ctx-global-variables ctx)) t))
-    (if expected
-        (assert-true  (cl-cc/compile::%let-binding-special-p sym ctx))
-        (assert-false (cl-cc/compile::%let-binding-special-p sym ctx)))))
+    (assert-bool expected (cl-cc/compile::%let-binding-special-p sym ctx))))

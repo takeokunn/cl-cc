@@ -36,7 +36,7 @@ constraint language tests")
 
 (deftest constraint-implication-creation
   "make-implication-constraint stores quantified vars, given, and wanted."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (given (list (make-equal-constraint v type-int)))
          (wanted (list (make-subtype-constraint v type-any)))
          (c (make-implication-constraint (list v) given wanted)))
@@ -56,7 +56,7 @@ constraint language tests")
     (assert-eq :mult-leq (constraint-kind c))
     (assert-eq :zero  (first  (constraint-args c)))
     (assert-eq :omega (second (constraint-args c))))
-  (let* ((rv (fresh-type-var "rho"))
+  (let* ((rv (fresh-type-var :name "rho"))
          (c  (make-row-lacks-constraint rv 'x)))
     (assert-eq :row-lacks (constraint-kind c))
     (assert-eq 'x (second (constraint-args c)))))
@@ -65,20 +65,20 @@ constraint language tests")
 
 (deftest-each constraint-free-vars-binary-constraints
   "Binary constraints (:equal and :subtype) each have 2 free vars when both args are distinct vars."
-  :cases (("equal"   (let* ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b"))) (make-equal-constraint v1 v2)))
-          ("subtype" (let* ((v1 (fresh-type-var "x")) (v2 (fresh-type-var "y"))) (make-subtype-constraint v1 v2))))
+  :cases (("equal"   (let* ((v1 (fresh-type-var :name "a")) (v2 (fresh-type-var :name "b"))) (make-equal-constraint v1 v2)))
+          ("subtype" (let* ((v1 (fresh-type-var :name "x")) (v2 (fresh-type-var :name "y"))) (make-subtype-constraint v1 v2))))
   (c)
   (assert-equal 2 (length (cl-cc/type:constraint-free-vars c))))
 
 (deftest constraint-free-vars-dedup-and-binding
   "(:equal v v) deduplicates to 1 var; (:typeclass C v) yields 1; implication quantifies away its vars."
-  (let* ((v  (fresh-type-var "a"))
+  (let* ((v  (fresh-type-var :name "a"))
          (c1 (make-equal-constraint v v)))
     (assert-equal 1 (length (cl-cc/type:constraint-free-vars c1))))
-  (let* ((v  (fresh-type-var "a"))
+  (let* ((v  (fresh-type-var :name "a"))
          (c2 (make-typeclass-constraint 'eq v)))
     (assert-equal 1 (length (cl-cc/type:constraint-free-vars c2))))
-  (let* ((v  (fresh-type-var "a"))
+  (let* ((v  (fresh-type-var :name "a"))
          (c3 (make-implication-constraint
               (list v)
               (list (make-equal-constraint v type-int))
@@ -92,7 +92,7 @@ constraint language tests")
 
 (deftest-each constraint-free-vars-row-lacks
   "(:row-lacks rho x) has rho free; non-type-node has no free vars."
-  :cases (("with-var"    (fresh-type-var "rho") 1)
+  :cases (("with-var"    (fresh-type-var :name "rho") 1)
           ("without-var" 'not-a-type             0))
   (rho-val expected-count)
   (let* ((c (make-row-lacks-constraint rho-val 'x))
@@ -103,7 +103,7 @@ constraint language tests")
 
 (deftest constraint-substitute-equal-applies-binding
   "constraint-substitute on :equal replaces bound var with its binding."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (c (make-equal-constraint v type-int))
          (s (make-substitution)))
     (subst-extend! v type-string s)
@@ -114,8 +114,8 @@ constraint language tests")
 
 (deftest constraint-substitute-subtype-applies-bindings
   "constraint-substitute on :subtype replaces both bound vars."
-  (let* ((v1 (fresh-type-var "a"))
-         (v2 (fresh-type-var "b"))
+  (let* ((v1 (fresh-type-var :name "a"))
+         (v2 (fresh-type-var :name "b"))
          (c  (make-subtype-constraint v1 v2))
          (s  (make-substitution)))
     (subst-extend! v1 type-int s)
@@ -126,7 +126,7 @@ constraint language tests")
 
 (deftest constraint-substitute-typeclass-applies-binding
   "constraint-substitute on :typeclass replaces the type arg; class name is unchanged."
-  (let* ((v  (fresh-type-var "a"))
+  (let* ((v  (fresh-type-var :name "a"))
          (c  (make-typeclass-constraint 'show v))
          (s  (make-substitution)))
     (subst-extend! v type-string s)
@@ -141,7 +141,7 @@ constraint language tests")
       (assert-eq c (cl-cc/type:constraint-substitute c s)))
     (let ((c (make-kind-equal-constraint +kind-type+ +kind-type+)))
       (assert-eq c (cl-cc/type:constraint-substitute c s))))
-  (let* ((v  (fresh-type-var "ε"))
+  (let* ((v  (fresh-type-var :name "ε"))
          (c  (make-effect-subset-constraint v +pure-effect-row+))
          (s  (make-substitution)))
     (subst-extend! v +io-effect-row+ s)

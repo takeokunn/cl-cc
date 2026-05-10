@@ -152,6 +152,26 @@
           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
           (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
 
+(deftest suite-timeout-result-returns-true-when-quit-p-nil
+  "%suite-timeout-result returns t and emits an error log when quit-p is nil."
+  (let* ((err-out (make-string-output-stream))
+         (*error-output* err-out)
+         (result (%suite-timeout-result 'demo-suite 42 nil)))
+    (assert-true result)
+    (let ((log (get-output-stream-string err-out)))
+      (assert-true (search "DEMO-SUITE" (string-upcase log)))
+      (assert-true (search "42" log)))))
+
+(deftest suite-timeout-result-calls-quit-124-when-quit-p-true
+  "%suite-timeout-result calls (uiop:quit 124) when quit-p is true."
+  (let ((captured nil)
+        (err-out (make-string-output-stream)))
+    (with-replaced-function (uiop:quit (lambda (&optional code) (setf captured code)))
+      (let ((*error-output* err-out))
+        (%suite-timeout-result 'other-suite 10 t)))
+    (assert-eql 124 captured)
+    (assert-true (search "OTHER-SUITE" (string-upcase (get-output-stream-string err-out))))))
+
   (let* ((test-plist (list :name 'skip-demo
                            :fn (lambda () (error 'skip-condition :reason "not today"))
                            :suite 'cl-cc-unit-suite
@@ -189,7 +209,11 @@
 
 (deftest run-single-test-times-out-sequentially
   "Sequential runner reports timeout failures when a test exceeds its budget."
-  (let* ((test-plist (list :name 'slow-demo
+  ;; Bind *test-runner-mode* to :sequential so sb-ext:with-timeout is applied.
+  ;; The global mode is :parallel (set in apps.nix to suppress SIGALRM delivery
+  ;; issues), but this test specifically exercises the sequential timeout path.
+  (let* ((*test-runner-mode* :sequential)
+         (test-plist (list :name 'slow-demo
                            :fn (lambda () (sleep 2))
                            :suite 'cl-cc-unit-suite
                            :timeout 1

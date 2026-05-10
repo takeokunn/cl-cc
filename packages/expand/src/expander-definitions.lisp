@@ -15,14 +15,9 @@
 
 (defun %build-setf-progn-forms (args)
   "Build one SETF form per place/value pair in ARGS."
-  (let ((xs args)
-        (forms nil))
-    (tagbody
-     scan
-       (if (null xs) (return-from %build-setf-progn-forms (nreverse forms)))
-       (setq forms (cons (list 'setf (car xs) (cadr xs)) forms))
-       (setq xs (cddr xs))
-       (go scan))))
+  (loop for kv on args by #'cddr
+        when (cdr kv)
+          collect (list 'setf (car kv) (cadr kv))))
 
 ;; defsetf — register a setf expander for an accessor (FR-355)
 ;; Short form: (defsetf accessor updater) → (updater args... value)

@@ -48,7 +48,8 @@
            (%copy-hash-table-shallow cl-cc/expand:*compiler-macro-table*))
          (cl-cc/expand:*macroexpand-step-cache*  (make-hash-table :test #'eq))
          (cl-cc/expand:*macroexpand-all-cache*   (make-hash-table :test #'eq))
-         (cl-cc/expand:*macro-eval-fn*            cl-cc/expand:*macro-eval-fn*))
+         (cl-cc/expand:*macro-eval-fn*            cl-cc/expand:*macro-eval-fn*)
+         (cl-cc/vm:*vm-hash-cons-table*           (make-hash-table :test #'equal)))
      ,@body))
 
 (defvar *test-runner-mode* :sequential

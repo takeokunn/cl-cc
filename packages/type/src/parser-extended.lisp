@@ -47,7 +47,7 @@
 Supported bound operators are <:/extends/subtype-of and >:/supertype-of."
   (cond
     ((symbolp spec)
-     (fresh-type-var spec))
+     (fresh-type-var :name spec))
     ((and (consp spec) (symbolp (first spec)))
      (let ((name (first spec))
            (upper nil)
@@ -61,7 +61,7 @@ Supported bound operators are <:/extends/subtype-of and >:/supertype-of."
                     (:upper (setf upper (parse-type-specifier (second bounds))))
                     (:lower (setf lower (parse-type-specifier (second bounds)))))
                   (setf bounds (cddr bounds))))
-       (fresh-type-var name :upper-bound upper :lower-bound lower)))
+       (fresh-type-var :name name :upper-bound upper :lower-bound lower)))
     (t
      (type-parse-error "Quantifier variable must be a symbol or bounded spec: ~S" spec))))
 

@@ -19,7 +19,7 @@
   :cases (("int"    type-int)
           ("string" type-string)
           ("bool"   type-bool)
-          ("var"    (fresh-type-var "a"))
+          ("var"    (fresh-type-var :name "a"))
           ("rigid"  (fresh-rigid-var "r"))
           ("error"  (make-type-error :message "test"))
           ("nil"    nil))
@@ -63,7 +63,7 @@
   :cases (("closed" nil 2 type-string)
           ("open"   t   2 nil))
   (open-p expected-count second-type-or-nil)
-  (let* ((rv (when open-p (fresh-type-var "rho")))
+  (let* ((rv (when open-p (fresh-type-var :name "rho")))
          (fields (if open-p
                      (list (cons :x type-int))
                      (list (cons :x type-int) (cons :y type-string))))
@@ -80,7 +80,7 @@
   :cases (("closed" nil)
           ("open"   t))
   (open-p)
-  (let* ((rv (when open-p (fresh-type-var "rho")))
+  (let* ((rv (when open-p (fresh-type-var :name "rho")))
          (cases (if open-p
                     (list (cons :ok type-int))
                     (list (cons :some type-int) (cons :none type-null))))
@@ -91,8 +91,8 @@
 
 (deftest-each type-children-quantifier-return-body
   "Forall and exists return only the body (1 child)."
-  :cases (("forall" (make-type-forall :var (fresh-type-var "a") :body type-int)  type-int)
-          ("exists" (make-type-exists :var (fresh-type-var "a") :body type-string) type-string))
+  :cases (("forall" (make-type-forall :var (fresh-type-var :name "a") :body type-int)  type-int)
+          ("exists" (make-type-exists :var (fresh-type-var :name "a") :body type-string) type-string))
   (ty expected-body)
   (let ((ch (cl-cc/type:type-children ty)))
     (assert-equal 1 (length ch))
@@ -108,7 +108,7 @@
 
 (deftest type-children-lambda-and-mu
   "Type lambda and mu return only the body (1 child)."
-  (let ((a (fresh-type-var "a")))
+  (let ((a (fresh-type-var :name "a")))
     (let ((ch (cl-cc/type:type-children (cl-cc/type:make-type-lambda :var a :body type-int))))
       (assert-equal 1 (length ch))
       (assert-true (type-equal-p type-int (first ch))))
@@ -130,7 +130,7 @@
   :cases (("closed" nil 1)
           ("open"   t   2))
   (open-p expected-count)
-  (let* ((rv  (when open-p (fresh-type-var "rho")))
+  (let* ((rv  (when open-p (fresh-type-var :name "rho")))
          (eff (make-type-effect-op :name 'io :args nil))
          (row (make-type-effect-row :effects (list eff) :row-var rv))
          (ch  (cl-cc/type:type-children row)))
@@ -176,17 +176,17 @@
 
 (deftest-each type-bound-var-binding-types
   "Forall, exists, type-lambda, and mu all bind a type variable."
-  :cases (("forall" (let ((a (fresh-type-var "a"))) (make-type-forall :var a :body type-int)))
-          ("exists" (let ((a (fresh-type-var "a"))) (make-type-exists :var a :body type-int)))
-          ("lambda" (let ((a (fresh-type-var "a"))) (cl-cc/type:make-type-lambda :var a :body type-int)))
-          ("mu"     (let ((a (fresh-type-var "a"))) (make-type-mu :var a :body type-int))))
+  :cases (("forall" (let ((a (fresh-type-var :name "a"))) (make-type-forall :var a :body type-int)))
+          ("exists" (let ((a (fresh-type-var :name "a"))) (make-type-exists :var a :body type-int)))
+          ("lambda" (let ((a (fresh-type-var :name "a"))) (cl-cc/type:make-type-lambda :var a :body type-int)))
+          ("mu"     (let ((a (fresh-type-var :name "a"))) (make-type-mu :var a :body type-int))))
   (ty)
   (assert-true (type-var-p (cl-cc/type:type-bound-var ty))))
 
 (deftest-each type-bound-var-non-binding-cases
   "Non-binding types (primitive, var, arrow, product, union) return nil for type-bound-var."
   :cases (("primitive" type-int)
-          ("var"       (fresh-type-var "a"))
+          ("var"       (fresh-type-var :name "a"))
           ("arrow"     (make-type-arrow (list type-int) type-bool))
           ("product"   (make-type-product :elems (list type-int)))
           ("union"     (make-type-union (list type-int type-string))))
@@ -197,44 +197,44 @@
 
 (deftest type-free-vars-via-children-simple
   "type-free-vars finds var in arrow type."
-  (let* ((a   (fresh-type-var "a"))
+  (let* ((a   (fresh-type-var :name "a"))
          (arr (make-type-arrow (list a) type-int)))
     (assert-equal 1 (length (type-free-vars arr)))
     (assert-true (type-var-equal-p a (first (type-free-vars arr))))))
 
 (deftest type-free-vars-forall-bound-var-excluded
   "type-free-vars on (forall a a) returns nil — the bound var is excluded."
-  (let* ((a (fresh-type-var "a"))
+  (let* ((a (fresh-type-var :name "a"))
          (f (make-type-forall :var a :body a)))
     (assert-null (type-free-vars f))))
 
 (deftest type-free-vars-forall-only-unbound-vars-are-free
   "type-free-vars on (forall a (a→b)) returns only b."
-  (let* ((a (fresh-type-var "a"))
-         (b (fresh-type-var "b"))
+  (let* ((a (fresh-type-var :name "a"))
+         (b (fresh-type-var :name "b"))
          (f (make-type-forall :var a :body (make-type-arrow (list a) b))))
     (assert-equal 1 (length (type-free-vars f)))
     (assert-true (type-var-equal-p b (first (type-free-vars f))))))
 
 (deftest type-free-vars-via-children-record
   "type-free-vars finds vars in record fields and row-var."
-  (let* ((a  (fresh-type-var "a"))
-         (rv (fresh-type-var "rho"))
+  (let* ((a  (fresh-type-var :name "a"))
+         (rv (fresh-type-var :name "rho"))
          (r  (make-type-record :fields (list (cons :x a)) :row-var rv)))
     (assert-equal 2 (length (type-free-vars r)))))
 
 (deftest type-free-vars-via-children-mu
   "type-free-vars excludes mu-bound var."
-  (let* ((a (fresh-type-var "a"))
-         (b (fresh-type-var "b"))
+  (let* ((a (fresh-type-var :name "a"))
+         (b (fresh-type-var :name "b"))
          (m (make-type-mu :var a :body (make-type-product :elems (list a b)))))
     (assert-equal 1 (length (type-free-vars m)))
     (assert-true (type-var-equal-p b (first (type-free-vars m))))))
 
 (deftest type-free-vars-via-children-nested
   "type-free-vars finds vars in deeply nested type."
-  (let* ((a (fresh-type-var "a"))
-         (b (fresh-type-var "b"))
+  (let* ((a (fresh-type-var :name "a"))
+         (b (fresh-type-var :name "b"))
          (ty (make-type-union
               (list (make-type-arrow (list a) type-int)
                     (make-type-product :elems (list b type-string))))))
@@ -244,8 +244,8 @@
 
 (deftest type-occurs-p-direct-arrow-and-absent
   "type-occurs-p: true for direct match and match in arrow; false for absent var."
-  (let ((a (fresh-type-var "a"))
-        (b (fresh-type-var "b"))
+  (let ((a (fresh-type-var :name "a"))
+        (b (fresh-type-var :name "b"))
         (s (make-substitution)))
     (assert-true  (type-occurs-p a a s))
     (assert-true  (type-occurs-p a (make-type-arrow (list a) type-int) s))
@@ -253,15 +253,15 @@
 
 (deftest type-occurs-p-follows-subst-chain
   "type-occurs-p follows substitution chains: a occurs in b when b→a."
-  (let* ((a (fresh-type-var "a"))
-         (b (fresh-type-var "b"))
+  (let* ((a (fresh-type-var :name "a"))
+         (b (fresh-type-var :name "b"))
          (subst (make-substitution)))
     (subst-extend! b a subst)
     (assert-true (type-occurs-p a b subst))))
 
 (deftest type-occurs-p-finds-var-in-nested-union
   "type-occurs-p finds var nested inside union→product→arrow."
-  (let* ((a (fresh-type-var "a"))
+  (let* ((a (fresh-type-var :name "a"))
          (ty (make-type-union
               (list type-int
                     (make-type-product :elems

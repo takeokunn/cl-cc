@@ -5,7 +5,7 @@
 (defun %compound-place-binding (place)
   "Return PLACE and temporary bindings that evaluate its subforms once."
   (let* ((args     (rest place))
-         (arg-syms (mapcar (lambda (arg) (declare (ignore arg)) (gensym "PA")) args))
+         (arg-syms (loop repeat (length args) collect (gensym "PA")))
          (bindings (mapcar (lambda (sym arg) `(,sym ,arg)) arg-syms args))
          (saved    (cons (first place) arg-syms)))
     (values saved bindings)))

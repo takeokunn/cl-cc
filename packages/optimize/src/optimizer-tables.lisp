@@ -29,11 +29,53 @@ both NIL and numeric zero are false."
               (char= (char name 0) #\R)
               (every #'digit-char-p (subseq name 1))))))
 
+(defun %build-vm-dst-table ()
+  "Build a struct-type-name → dst-accessor-fn table from vm-dst CLOS methods.
+Must be called in the main thread (at load time) before workers are spawned.
+Maps each instruction struct type (including inherited subclasses) to its
+struct accessor, eliminating PCL dispatch-cache updates in worker threads.
+
+Handles defstruct inheritance: when vm-add inherits dst from vm-binop,
+vm-binop-dst works on vm-add instances, so all vm-binop subclasses are
+registered with vm-binop-dst unless they define a more-specific accessor."
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (method (sb-mop:generic-function-methods #'vm-dst))
+      (handler-case
+          (let* ((spec  (car (sb-mop:method-specializers method)))
+                 (cname (class-name spec))
+                 (acc   (find-symbol
+                         (concatenate 'string (symbol-name cname) "-DST")
+                         :cl-cc/vm)))
+            (when (and acc (fboundp acc))
+              (let ((fn (symbol-function acc)))
+                ;; Register this class.  Avoid overriding a more-specific entry
+                ;; that may have been registered by an earlier (more specific) method.
+                (unless (gethash cname ht)
+                  (setf (gethash cname ht) fn))
+                ;; Walk subclasses transitively: they inherit the same dst slot,
+                ;; so the parent accessor works correctly on them too.
+                (labels ((visit (class)
+                           (dolist (sub (sb-mop:class-direct-subclasses class))
+                             (let ((sub-name (class-name sub)))
+                               (unless (gethash sub-name ht)
+                                 (setf (gethash sub-name ht) fn))
+                               (visit sub)))))
+                  (visit spec)))))
+        (error nil)))
+    ht))
+
+(defvar *vm-dst-table*
+  (ignore-errors (%build-vm-dst-table))
+  "Pre-built struct-type → dst-accessor mapping built at load time in the main
+thread.  opt-inst-dst uses this table for thread-safe O(1) dispatch without
+acquiring any PCL mutex, avoiding GC-safepoint deadlocks in worker threads.")
+
 (defun opt-inst-dst (inst)
   "Return the single destination register written by INST, or NIL.
-   Uses the shared vm-dst generic function; returns NIL for instructions that
-   do not write a destination (jump, halt, ret, print, etc.) or for unknown types."
-  (ignore-errors (vm-dst inst)))
+Returns NIL for instructions that do not write a destination (jump, halt,
+ret, set-global, slot-write, etc.) or for unrecognised types."
+  (let ((fn (and *vm-dst-table* (gethash (type-of inst) *vm-dst-table*))))
+    (when fn (funcall fn inst))))
 
 ;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
 ;;; It replaces the former 2-type whitelist with a 100+-type data-driven table.

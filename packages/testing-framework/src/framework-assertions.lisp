@@ -158,3 +158,55 @@
                      :actual   "unification success"
                      :form '(type-unify ,t1 ,t2)))
        t)))
+
+;;; ------------------------------------------------------------
+;;; Composite assertion macros — reduce boilerplate
+;;; ------------------------------------------------------------
+
+(defmacro assert-bool (expected form)
+  "Assert FORM is truthy when EXPECTED is truthy, falsy when EXPECTED is falsy.
+Eliminates the (if pred (assert-true ...) (assert-false ...)) pattern."
+  (let ((v (gensym "V")) (e (gensym "E")))
+    `(let ((,v ,form) (,e ,expected))
+       (if ,e
+           (unless ,v
+             (%fail-test "assert-bool: expected truthy value"
+                         :expected t :actual ,v :form ',form))
+           (when ,v
+             (%fail-test "assert-bool: expected falsy value"
+                         :expected nil :actual ,v :form ',form)))
+       t)))
+
+(defmacro assert-list-contains (list-form members-form &key length)
+  "Assert LIST-FORM contains every element of MEMBERS-FORM (evaluated at runtime, equal test).
+MEMBERS-FORM must evaluate to a list. Optionally assert LIST-FORM has exactly LENGTH elements."
+  (let ((ls (gensym "LIST"))
+        (ms (gensym "MEMBERS")))
+    `(let ((,ls ,list-form)
+           (,ms ,members-form))
+       (dolist (m ,ms)
+         (unless (member m ,ls :test #'equal)
+           (%fail-test "assert-list-contains: missing member"
+                       :expected m :actual ,ls :form ',list-form)))
+       ,@(when length
+           `((let ((actual-len (length ,ls)))
+               (unless (= ,length actual-len)
+                 (%fail-test "assert-list-contains: wrong length"
+                             :expected ,length :actual actual-len
+                             :form '(length ,list-form))))))
+       t)))
+
+(defmacro assert-bitfield (word-form &rest field-specs)
+  "Assert each byte field of WORD-FORM equals its expected value.
+Each field-spec is (byte-position byte-width expected-value)."
+  (let ((w (gensym "WORD")))
+    `(let ((,w ,word-form))
+       ,@(mapcar (lambda (spec)
+                   (destructuring-bind (pos width expected) spec
+                     `(let ((actual (ldb (byte ,width ,pos) ,w)))
+                        (unless (= ,expected actual)
+                          (%fail-test "assert-bitfield: field mismatch"
+                                      :expected ,expected :actual actual
+                                      :at ,(format nil "byte(~A,~A)" width pos))))))
+                 field-specs)
+       t)))

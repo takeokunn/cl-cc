@@ -6,13 +6,7 @@
 
 (defun %list-contains-equal (needle haystack)
   "Return T when NEEDLE is EQUAL to an element of HAYSTACK."
-  (let ((xs haystack))
-    (tagbody
-     scan
-       (if (null xs) (return-from %list-contains-equal nil))
-       (if (equal needle (car xs)) (return-from %list-contains-equal t))
-       (setq xs (cdr xs))
-       (go scan))))
+  (and (member needle haystack :test #'equal) t))
 
 (defun %expansion-cycle-key (form)
   "Build a stable key for expansion-cycle detection.
@@ -73,15 +67,8 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
 
 (defun %any-destructuring-let-binding-p (bindings)
   "Return T when BINDINGS contains a destructuring LET binding."
-  (let ((xs bindings))
-    (tagbody
-     scan
-       (if (null xs) (return-from %any-destructuring-let-binding-p nil))
-       (let ((b (car xs)))
-         (if (and (consp b) (>= (length b) 2) (consp (first b)))
-             (return-from %any-destructuring-let-binding-p t)))
-       (setq xs (cdr xs))
-       (go scan))))
+  (some (lambda (b) (and (consp b) (>= (length b) 2) (consp (first b))))
+        bindings))
 
 (defun %expand-let-form (form)
   "Expand LET forms, preserving destructuring semantics and body expansion."
@@ -90,14 +77,13 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
      (cons 'progn (mapcar #'%expand-let-body-form (cddr form))))
     ((and (>= (length form) 2) (listp (second form))
           (%any-destructuring-let-binding-p (second form)))
-     (let ((simple nil)
-           (destructuring nil))
-       (dolist (b (second form))
-         (if (and (consp b) (>= (length b) 2) (consp (first b)))
-             (push b destructuring)
-             (push b simple)))
-       (setf simple (nreverse simple)
-             destructuring (nreverse destructuring))
+     (loop for b in (second form)
+           if (and (consp b) (>= (length b) 2) (consp (first b)))
+             collect b into destructuring
+           else
+             collect b into simple
+           finally
+           (return
        (let ((inner (if simple
                         (list* 'let
                                (mapcar #'expand-let-binding simple)
@@ -105,7 +91,7 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
                         (cons 'progn (cddr form)))))
          (dolist (d (reverse destructuring))
            (setf inner (list 'destructuring-bind (first d) (second d) inner)))
-         inner)))
+         inner))))
     ((and (>= (length form) 2) (listp (second form)))
      (list* 'let
              (mapcar #'expand-let-binding (second form))
@@ -127,13 +113,8 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
   "Expand HANDLER-CASE, including the :NO-ERROR clause lowering."
   (let* ((protected (second form))
          (all-clauses (cddr form))
-         (no-error-clause nil)
-         (error-clauses nil))
-    (dolist (cl all-clauses)
-      (if (and (consp cl) (eq (car cl) :no-error))
-          (setf no-error-clause cl)
-          (push cl error-clauses)))
-    (setf error-clauses (nreverse error-clauses))
+         (no-error-clause (find :no-error all-clauses :key #'car))
+         (error-clauses (remove :no-error all-clauses :key #'car)))
     (if no-error-clause
         (let ((tag (gensym "NO-ERROR-"))
               (ne-vars (second no-error-clause))

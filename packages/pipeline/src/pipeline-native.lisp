@@ -53,35 +53,18 @@ without hanging forever on platform utility calls like chmod."
                   :type (pathname-type output-file))
    *compile-cache-root*))
 
-(defun %copy-file-bytes-loop (in out)
-  (let ((byte (read-byte in nil nil)))
-    (if byte
-        (progn
-          (write-byte byte out)
-          (%copy-file-bytes-loop in out))
-        nil)))
-
 (defun %copy-file-bytes (from to)
   (with-open-file (in from :direction :input :element-type '(unsigned-byte 8))
     (with-open-file (out to :direction :output :if-exists :supersede
                             :if-does-not-exist :create
                             :element-type '(unsigned-byte 8))
-      (%copy-file-bytes-loop in out)))
+      (loop for byte = (read-byte in nil nil)
+            while byte do (write-byte byte out))))
   to)
-
-(defun %top-level-in-package-form-p (form)
-  "Return T when FORM is an in-package declaration ignored by top-level compilation."
-  (if (consp form)
-      (eq (car form) 'in-package)
-      nil))
 
 (defun %non-package-top-level-forms (forms)
   "Return FORMS with in-package declarations removed, mirroring compile-toplevel-forms."
-  (if (consp forms)
-      (if (%top-level-in-package-form-p (car forms))
-          (%non-package-top-level-forms (cdr forms))
-          (cons (car forms) (%non-package-top-level-forms (cdr forms))))
-      nil))
+  (remove-if (lambda (f) (and (consp f) (eq (car f) 'in-package))) forms))
 
 ;;; Native compilation options — bundle 9 recurring keyword params into a plist.
 ;;; Internal functions accept (target opts) and apply opts directly as &key args.

@@ -9,14 +9,7 @@
 
 (defun %plist-value-or-default (plist indicator default)
   "Return plist value for INDICATOR, or DEFAULT when absent."
-  (let ((xs plist))
-    (tagbody
-     scan
-       (if (null xs) (return-from %plist-value-or-default default))
-       (if (eq (car xs) indicator)
-           (return-from %plist-value-or-default (cadr xs)))
-       (setf xs (cddr xs))
-       (go scan))))
+  (getf plist indicator default))
 
 (defun %apply-args-to-cons-chain (args)
   "Build nested CONS forms from APPLY argument tail ARGS."
@@ -25,20 +18,12 @@
       (list 'cons (car args) (%apply-args-to-cons-chain (cdr args)))))
 
 (defun %build-multiple-value-let-bindings (vars values-form tmp direct-values-p)
-  "Build LET* bindings for MULTIPLE-VALUE-BIND without LOOP/MAPCAR."
-  (let ((xs vars)
-        (i 0)
-        (bindings nil))
-    (tagbody
-     scan
-       (if (null xs) (return-from %build-multiple-value-let-bindings (nreverse bindings)))
-       (let ((value (if direct-values-p
-                        (or (nth (+ i 1) values-form) nil)
-                        (list 'nth i tmp))))
-         (setf bindings (cons (list (car xs) value) bindings)))
-       (setf xs (cdr xs))
-       (setf i (+ i 1))
-       (go scan))))
+  "Build LET* bindings for MULTIPLE-VALUE-BIND."
+  (loop for x in vars
+        for i from 0
+        collect (list x (if direct-values-p
+                            (nth (+ i 1) values-form)
+                            (list 'nth i tmp)))))
 
 ;; quote — never recurse into quoted forms
 (define-expander-for quote (form) form)

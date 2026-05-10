@@ -49,7 +49,7 @@
 
    #:capability #:capability-p #:capability-permissions #:make-capability
    #:capability-allows-p #:capability-implies-p #:restrict-capability
-   #:delegate-capability #:capability-effects
+   #:capability-effects
 
    #:unit-mismatch-error #:unit-definition #:unit-definition-p #:unit-definition-name
    #:unit-definition-dimension #:unit-definition-scale #:*unit-registry*
@@ -84,7 +84,7 @@
    #:finite-semiring-multiply #:finite-semiring-preorder #:make-finite-semiring
    #:grade-designator-p #:finite-semiring-valid-p #:graded-value #:graded-value-p
    #:graded-value-grade #:graded-value-payload #:graded-value-semiring
-   #:make-graded-value #:grade<= #:graded-add #:graded-compose #:make-qtt-semiring
+   #:make-graded-value #:graded-add #:graded-compose #:make-qtt-semiring
 
    #:universe-sort #:universe-sort-p #:universe-sort-kind #:universe-sort-level
    #:make-universe-sort #:valid-universe-sort-p #:universe<= #:max-universe
@@ -93,7 +93,7 @@
    #:cic-proof #:cic-proof-p #:cic-proof-proposition #:cic-proof-witness
    #:cic-proof-premises #:make-cic-proof #:cic-proof-valid-p #:proof-erasable-p
    #:cic-inductive #:cic-inductive-p #:cic-inductive-name #:cic-inductive-universe
-   #:cic-inductive-constructors #:make-cic-inductive #:cic-inductive-valid-p
+   #:cic-inductive-constructors #:make-cic-inductive
    #:cic-large-elimination-allowed-p
 
    #:termination-evidence #:termination-evidence-p #:termination-evidence-strategy
@@ -236,7 +236,7 @@
      #:type-advanced-properties #:type-advanced-evidence
      #:type-advanced-property #:type-advanced-property-present-p
       #:type-advanced-security-label<= #:type-advanced-route-p
-      #:type-advanced-semantic-domain #:type-advanced-semantics-implemented-p
+      #:type-advanced-semantics-implemented-p
       #:validate-type-advanced #:type-advanced-valid-p
       #:make-type-dynamic #:make-type-type-rep
        #:advanced-call-policy #:advanced-call-policy-p

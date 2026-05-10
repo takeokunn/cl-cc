@@ -22,19 +22,11 @@
   (when args
     (let ((obj-reg (compile-ast (first args) ctx)))
       ;; Evaluate keyword values for side effects, but ignore them.
-      (let ((tail (cdr args)))
-        (tagbody
-         compile-write-to-string-options
-           (when (or (null tail) (null (cdr tail)))
-             (go compile-write-to-string-options-done))
-           (let ((key (car tail))
-                 (val (cadr tail)))
-             (when (and (typep key 'ast-var)
-                        (keywordp (ast-var-name key)))
-               (compile-ast val ctx)))
-           (setf tail (cddr tail))
-           (go compile-write-to-string-options)
-         compile-write-to-string-options-done))
+      (loop for kv on (cdr args) by #'cddr
+            when (and (cdr kv)
+                      (typep (car kv) 'ast-var)
+                      (keywordp (ast-var-name (car kv))))
+              do (compile-ast (cadr kv) ctx))
       (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
       result-reg)))
 
@@ -82,25 +74,8 @@ Emits instructions and returns RESULT-REG."
            (fmt-arg         (second args))
            (format-arg-regs nil)
            (dest-sym        :stream))
-      (let ((tail (cddr args))
-            (regs-rev nil))
-        (tagbody
-         compile-format-args
-           (when (null tail)
-             (go compile-format-args-done))
-           (setf regs-rev (cons (compile-ast (car tail) ctx) regs-rev))
-           (setf tail (cdr tail))
-           (go compile-format-args)
-         compile-format-args-done)
-        (let ((reverse-tail regs-rev))
-          (tagbody
-           reverse-format-args
-             (when (null reverse-tail)
-               (go reverse-format-args-done))
-             (setf format-arg-regs (cons (car reverse-tail) format-arg-regs))
-             (setf reverse-tail (cdr reverse-tail))
-             (go reverse-format-args)
-           reverse-format-args-done)))
+      (setf format-arg-regs
+            (mapcar (lambda (arg) (compile-ast arg ctx)) (cddr args)))
       (if (typep dest-arg 'ast-var)
           (let ((name (ast-var-name dest-arg)))
             (when (or (null name) (eq name t))
@@ -143,27 +118,18 @@ Emits instructions and returns RESULT-REG."
            (direction :input)
            (if-exists :supersede)
            (if-not-exists nil))
-      (let ((tail (cdr args)))
-        (tagbody
-         scan-open-options
-           (when (or (null tail) (null (cdr tail)))
-             (go scan-open-options-done))
-           (let* ((key (car tail))
-                  (val (cadr tail))
-                  (k (keyword-ast-value key)))
-             (when k
-               (let ((v (keyword-ast-value val)))
-                 (if (eq k :direction)
-                     (setf direction (or v :input))
-                     (if (eq k :if-exists)
-                         (setf if-exists (or v :supersede))
-                         (if (eq k :if-does-not-exist)
-                             (setf if-not-exists v)
-                             ;; Compile but discard :element-type, :external-format args
-                             (compile-ast val ctx)))))))
-           (setf tail (cddr tail))
-           (go scan-open-options)
-         scan-open-options-done))
+      (loop for kv on (cdr args) by #'cddr
+            when (cdr kv)
+              do (let* ((key (car kv))
+                        (val (cadr kv))
+                        (k   (keyword-ast-value key)))
+                   (when k
+                     (let ((v (keyword-ast-value val)))
+                       (cond
+                         ((eq k :direction)         (setf direction    (or v :input)))
+                         ((eq k :if-exists)         (setf if-exists    (or v :supersede)))
+                         ((eq k :if-does-not-exist) (setf if-not-exists v))
+                         (t (compile-ast val ctx)))))))
     ;; if-not-exists default: :create for output, :error for input (computed in execute-instruction)
       (emit ctx (make-vm-open-file :dst result-reg :path path-reg :direction direction
                                    :if-exists if-exists :if-not-exists if-not-exists))
@@ -174,18 +140,11 @@ Emits instructions and returns RESULT-REG."
   (when args
     (let ((handle-reg (compile-ast (first args) ctx)))
       ;; Compile and discard :abort keyword arg value
-      (let ((tail (cdr args)))
-        (tagbody
-         compile-close-options
-           (when (or (null tail) (null (cdr tail)))
-             (go compile-close-options-done))
-           (let ((key (car tail))
-                 (val (cadr tail)))
-             (when (and (typep key 'ast-var) (keywordp (ast-var-name key)))
-               (compile-ast val ctx)))
-           (setf tail (cddr tail))
-           (go compile-close-options)
-         compile-close-options-done))
+      (loop for kv on (cdr args) by #'cddr
+            when (and (cdr kv)
+                      (typep (car kv) 'ast-var)
+                      (keywordp (ast-var-name (car kv))))
+              do (compile-ast (cadr kv) ctx))
       (emit ctx (make-vm-close-file :handle handle-reg))
       ;; close returns t per ANSI CL
       (emit ctx (make-vm-const :dst result-reg :value t))
@@ -219,19 +178,11 @@ Emits instructions and returns RESULT-REG."
               (emit ctx (make-vm-const :dst result-reg
                                         :value (%concatenate-quoted-string-asts string-args "")))
               result-reg)
-            (let ((current-reg (compile-ast (second args) ctx))
-                  (tail (cddr args)))
-              (tagbody
-               emit-concatenate-chain
-                 (when (null tail)
-                   (go emit-concatenate-done))
-                 (let* ((next-reg (compile-ast (car tail) ctx))
-                        (more (cdr tail))
-                        (dst-reg (if more (make-register ctx) result-reg)))
-                   (emit ctx (make-vm-concatenate :dst dst-reg :str1 current-reg :str2 next-reg))
-                   (setf current-reg dst-reg)
-                   (setf tail more))
-                 (go emit-concatenate-chain)
-               emit-concatenate-done)
+            (let ((current-reg (compile-ast (second args) ctx)))
+              (loop for rest on (cddr args)
+                    do (let* ((next-reg (compile-ast (car rest) ctx))
+                              (dst-reg  (if (cdr rest) (make-register ctx) result-reg)))
+                         (emit ctx (make-vm-concatenate :dst dst-reg :str1 current-reg :str2 next-reg))
+                         (setf current-reg dst-reg)))
               result-reg)))
       nil))

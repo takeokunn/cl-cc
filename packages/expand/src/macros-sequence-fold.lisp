@@ -15,7 +15,6 @@
 (in-package :cl-cc/expand)
 
 ;;; REDUCE (FR-500 adjacent): fold a sequence using a binary function
-;;; Uses the proven dolist-style tagbody pattern with (go end-tag) inside.
 (register-macro 'reduce
   (lambda (form env)
     (declare (ignore env))
@@ -25,8 +24,6 @@
            (fn-var (gensym "FN"))
            (cur-var (gensym "CUR"))
            (acc-var (gensym "ACC"))
-           (start-lbl (gensym "REDUCE-START"))
-           (end-lbl (gensym "REDUCE-END"))
            (has-iv (not (null (member :initial-value keys))))
            (iv-expr (getf keys :initial-value nil))
            (fe-expr (getf keys :from-end nil))
@@ -39,13 +36,10 @@
           (list 'let (list (list fn-var fn)
                            (list acc-var iv-expr)
                            (list cur-var seq-init))
-                (list 'tagbody
-                      start-lbl
-                      (list 'if (list 'null cur-var) (list 'go end-lbl))
+                (list 'loop 'while cur-var
+                      'do
                       (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
-                      (list 'setq cur-var (list 'cdr cur-var))
-                      (list 'go start-lbl)
-                      end-lbl)
+                      (list 'setq cur-var (list 'cdr cur-var)))
                 acc-var)
           (list 'let (list (list fn-var fn)
                            (list cur-var seq-init))
@@ -53,13 +47,10 @@
                                                    (list 'funcall key-fn (list 'car cur-var))
                                                    (list 'car cur-var))))
                       (list 'setq cur-var (list 'cdr cur-var))
-                      (list 'tagbody
-                            start-lbl
-                            (list 'if (list 'null cur-var) (list 'go end-lbl))
+                      (list 'loop 'while cur-var
+                            'do
                             (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
-                            (list 'setq cur-var (list 'cdr cur-var))
-                            (list 'go start-lbl)
-                            end-lbl)
+                            (list 'setq cur-var (list 'cdr cur-var)))
                       acc-var))))))
 
 ;;; NSUBSTITUTE / NSUBSTITUTE-IF / NSUBSTITUTE-IF-NOT (FR-505): destructive delegates

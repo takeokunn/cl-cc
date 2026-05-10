@@ -30,21 +30,21 @@
 
 (deftest type-equal-forall-same-body-is-true
   "type-equal-p: two forall types with the same var and body are equal."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (assert-true (type-equal-p
                   (make-type-forall :var v :body (make-type-arrow (list v) type-int))
                   (make-type-forall :var v :body (make-type-arrow (list v) type-int))))))
 
 (deftest type-equal-forall-different-body-is-false
   "type-equal-p: forall types with different bodies are not equal."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (assert-false (type-equal-p
                    (make-type-forall :var v :body type-int)
                    (make-type-forall :var v :body type-string)))))
 
 (deftest type-equal-exists-and-mu-same-is-true
   "type-equal-p: exists and mu types with same var and body are equal."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (assert-true (type-equal-p (make-type-exists :var v :body type-int)
                                 (make-type-exists :var v :body type-int)))
     (assert-true (type-equal-p (make-type-mu :var v :body type-int)
@@ -133,14 +133,14 @@
 
 (deftest free-vars-type-var-is-its-own-free-var
   "type-free-vars: a type-var is its own free variable (singleton list)."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (fvs (type-free-vars v)))
     (assert-equal 1 (length fvs))
     (assert-true (type-var-equal-p v (first fvs)))))
 
 (deftest free-vars-binding-forms-remove-bound-var
   "type-free-vars: forall, exists, and mu each remove their bound variable from free vars."
-  (let ((v (fresh-type-var "a")))
+  (let ((v (fresh-type-var :name "a")))
     (assert-null (type-free-vars (make-type-forall :var v :body v)))
     (assert-null (type-free-vars (make-type-exists :var v :body v)))
     (assert-null (type-free-vars (make-type-mu :var v :body v)))))
@@ -148,35 +148,35 @@
 (deftest-each free-vars-count-cases
   "type-free-vars returns the correct count of free variables for each type form."
   :cases (("arrow"      (lambda ()
-                          (let ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b")))
+                          (let ((v1 (fresh-type-var :name "a")) (v2 (fresh-type-var :name "b")))
                             (make-type-arrow (list v1) v2)))
            2)
           ("product"    (lambda ()
-                          (let ((v1 (fresh-type-var "a")) (v2 (fresh-type-var "b")))
+                          (let ((v1 (fresh-type-var :name "a")) (v2 (fresh-type-var :name "b")))
                             (make-type-product :elems (list v1 type-int v2))))
            2)
           ("record"     (lambda ()
-                          (let ((v (fresh-type-var "a")) (rv (fresh-type-var "rho")))
+                          (let ((v (fresh-type-var :name "a")) (rv (fresh-type-var :name "rho")))
                             (make-type-record :fields (list (cons 'x v)) :row-var rv)))
            2)
           ("variant"    (lambda ()
-                          (let ((v (fresh-type-var "a")))
+                          (let ((v (fresh-type-var :name "a")))
                             (make-type-variant :cases (list (cons 'x v)) :row-var nil)))
            1)
           ("linear"     (lambda ()
-                          (let ((v (fresh-type-var "a")))
+                          (let ((v (fresh-type-var :name "a")))
                             (make-type-linear :base v :grade :one)))
            1)
           ("type-app"   (lambda ()
-                          (let ((v1 (fresh-type-var "f")) (v2 (fresh-type-var "a")))
+                          (let ((v1 (fresh-type-var :name "f")) (v2 (fresh-type-var :name "a")))
                             (make-type-app :fun v1 :arg v2)))
            2)
           ("effect-row" (lambda ()
-                          (let ((rv (fresh-type-var "ε")))
+                          (let ((rv (fresh-type-var :name "ε")))
                             (make-type-effect-row :effects nil :row-var rv)))
            1)
           ("qualified"  (lambda ()
-                          (let* ((v (fresh-type-var "a"))
+                          (let* ((v (fresh-type-var :name "a"))
                                  (tc (cl-cc/type:make-type-constraint :class-name 'eq :type-arg v)))
                             (make-type-qualified :constraints (list tc) :body v)))
            1))
@@ -213,7 +213,7 @@
 
 (deftest type-env-free-vars-collects-from-bindings
   "type-env-free-vars returns the free vars from all bound schemes."
-  (let* ((v (fresh-type-var "a"))
+  (let* ((v (fresh-type-var :name "a"))
          (env (cl-cc/type:type-env-extend 'x (type-to-scheme v) (type-env-empty)))
          (fvs (cl-cc/type:type-env-free-vars env)))
     (assert-equal 1 (length fvs))))

@@ -63,3 +63,23 @@
           ("no-duplicate"  3 "(let ((lst (list 1 2 3))) (pushnew 2 lst) (length lst))"))
   (expected code)
   (assert-= expected (run-string code)))
+
+;;; ─── compound place: %compound-place-binding ──────────────────────────────
+
+(deftest-each compound-place-expansion-uses-let*
+  "PUSH/POP/INCF/DECF with a compound place (non-symbol) wrap in LET* to evaluate subforms once."
+  :cases (("push-aref" '(push v (aref arr i)))
+          ("pop-aref"  '(pop (aref arr i)))
+          ("incf-aref" '(incf (aref arr i)))
+          ("decf-aref" '(decf (aref arr i))))
+  (form)
+  (assert-eq 'let* (car (our-macroexpand-1 form))))
+
+(deftest compound-place-subform-evaluated-once
+  "PUSH compound expansion binds index subform to a gensym so it's evaluated only once."
+  (let* ((result   (our-macroexpand-1 '(push v (aref arr i))))
+         (bindings (second result))
+         (names    (mapcar #'first bindings)))
+    (assert-eq 'let* (car result))
+    (assert-true (> (length bindings) 1))
+    (assert-false (member 'i names))))

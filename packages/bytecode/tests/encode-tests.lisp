@@ -47,27 +47,17 @@
           ("max-registers"  cl-cc/bytecode:+op-add+ 255 255 255)
           ("zero-registers" cl-cc/bytecode:+op-mul+ 0   0   0))
   (op dst src1 src2)
-  (let ((w (cl-cc/bytecode:encode-3op op dst src1 src2)))
-    (assert-= op   (ldb (byte 8 24) w))
-    (assert-= dst  (ldb (byte 8 16) w))
-    (assert-= src1 (ldb (byte 8  8) w))
-    (assert-= src2 (ldb (byte 8  0) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-3op op dst src1 src2)
+    (24 8 op) (16 8 dst) (8 8 src1) (0 8 src2)))
 
 ;;; ------------------------------------------------------------
 ;;; encode-2op
 ;;; ------------------------------------------------------------
 
 (deftest bytecode-encode-2op-packs-bit-fields-correctly
-  "encode-2op places opcode in bits[31:24], dst in [23:16], src in [15:8]."
-  (let ((w (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-neg+ 4 5 0)))
-    (assert-= cl-cc/bytecode:+op-neg+ (ldb (byte 8 24) w))
-    (assert-= 4 (ldb (byte 8 16) w))
-    (assert-= 5 (ldb (byte 8  8) w))))
-
-(deftest bytecode-encode-2op-low-byte-is-zero
-  "encode-2op leaves bits[7:0] as zero."
-  (let ((w (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-move+ 10 20 0)))
-    (assert-= 0 (ldb (byte 8 0) w))))
+  "encode-2op places opcode in bits[31:24], dst in [23:16], src in [15:8], low byte zero."
+  (assert-bitfield (cl-cc/bytecode:encode-2op cl-cc/bytecode:+op-neg+ 4 5 0)
+    (24 8 cl-cc/bytecode:+op-neg+) (16 8 4) (8 8 5) (0 8 0)))
 
 ;;; ------------------------------------------------------------
 ;;; encode-imm
@@ -80,10 +70,8 @@
           ("negative" 1 -1      #xFFFF)
           ("min"      0 -32768 #x8000))
   (reg imm expected-low16)
-  (let ((w (cl-cc/bytecode:encode-imm cl-cc/bytecode:+op-load-fixnum+ reg imm)))
-    (assert-= cl-cc/bytecode:+op-load-fixnum+ (ldb (byte 8 24) w))
-    (assert-= reg (ldb (byte 8 16) w))
-    (assert-= expected-low16 (ldb (byte 16 0) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-imm cl-cc/bytecode:+op-load-fixnum+ reg imm)
+    (24 8 cl-cc/bytecode:+op-load-fixnum+) (16 8 reg) (0 16 expected-low16)))
 
 ;;; ------------------------------------------------------------
 ;;; encode-branch
@@ -95,9 +83,8 @@
           ("positive" 50 50)
           ("negative" -1 #xFFFFFF))
   (offset expected-low24)
-  (let ((w (cl-cc/bytecode:encode-branch cl-cc/bytecode:+op-jump+ offset)))
-    (assert-= cl-cc/bytecode:+op-jump+ (ldb (byte 8 24) w))
-    (assert-= expected-low24 (ldb (byte 24 0) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-branch cl-cc/bytecode:+op-jump+ offset)
+    (24 8 cl-cc/bytecode:+op-jump+) (0 24 expected-low24)))
 
 ;;; ------------------------------------------------------------
 ;;; bytecode-builder: emit and build
@@ -156,11 +143,8 @@
 
 (deftest bytecode-encode-add
   "encode-add produces correct opcode and registers."
-  (let ((w (cl-cc/bytecode:encode-add 1 2 3)))
-    (assert-= cl-cc/bytecode:+op-add+ (ldb (byte 8 24) w))
-    (assert-= 1 (ldb (byte 8 16) w))
-    (assert-= 2 (ldb (byte 8  8) w))
-    (assert-= 3 (ldb (byte 8  0) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-add 1 2 3)
+    (24 8 cl-cc/bytecode:+op-add+) (16 8 1) (8 8 2) (0 8 3)))
 
 (deftest bytecode-encode-move
   "encode-move produces correct opcode."
@@ -169,21 +153,15 @@
 
 (deftest bytecode-encode-jump
   "encode-jump produces correct opcode and offset."
-  (let ((w (cl-cc/bytecode:encode-jump 10)))
-    (assert-= cl-cc/bytecode:+op-jump+ (ldb (byte 8 24) w))
-    (assert-= 10 (ldb (byte 24 0) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-jump 10)
+    (24 8 cl-cc/bytecode:+op-jump+) (0 24 10)))
 
 (deftest bytecode-encode-return
   "encode-return produces correct opcode with src register."
-  (let ((w (cl-cc/bytecode:encode-return 3)))
-    (assert-= cl-cc/bytecode:+op-return+ (ldb (byte 8 24) w))
-    (assert-= 3 (ldb (byte 8 16) w))))
+  (assert-bitfield (cl-cc/bytecode:encode-return 3)
+    (24 8 cl-cc/bytecode:+op-return+) (16 8 3)))
 
 (deftest bytecode-encode-tail-call-is-3op
   "encode-tail-call uses 3-operand format: dst=0(pad), src1=func, src2=nargs."
-  ;; encode-tail-call (func nargs) → encode-3op op-tail-call 0 func nargs
-  (let ((w (cl-cc/bytecode:encode-tail-call 5 3)))
-    (assert-= cl-cc/bytecode:+op-tail-call+ (ldb (byte 8 24) w))
-    (assert-= 0 (ldb (byte 8 16) w))   ; dst pad
-    (assert-= 5 (ldb (byte 8  8) w))   ; func reg
-    (assert-= 3 (ldb (byte 8  0) w)))) ; nargs
+  (assert-bitfield (cl-cc/bytecode:encode-tail-call 5 3)
+    (24 8 cl-cc/bytecode:+op-tail-call+) (16 8 0) (8 8 5) (0 8 3)))

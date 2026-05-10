@@ -58,3 +58,134 @@
     (assert-true (assoc 'lim bindings))
     (assert-true (assoc 'lim-p bindings))
     (assert-true (assoc 'done bindings))))
+
+;;; ── %push-required-bindings ──────────────────────────────────────────────
+
+(deftest push-required-bindings-single
+  "%push-required-bindings emits one (temp (car arg)) + (name temp) pair per required param."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result-arg nil))
+    (multiple-value-setq (result-arg bindings)
+      (cl-cc/expand::%push-required-bindings '(x) 'args bindings gsl))
+    (assert-= 2 (length bindings))
+    (assert-true (assoc 'x bindings))))
+
+(deftest push-required-bindings-advances-cursor
+  "%push-required-bindings advances the current-arg cursor with (cdr arg) after each param."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result-arg nil))
+    (multiple-value-setq (result-arg bindings)
+      (cl-cc/expand::%push-required-bindings '(x y) 'args bindings gsl))
+    (assert-equal '(cdr (cdr args)) result-arg)))
+
+;;; ── %push-optional-bindings ──────────────────────────────────────────────
+
+(deftest push-optional-bindings-with-supplied-p
+  "%push-optional-bindings emits temp + name + supplied-p binding triples."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result-arg nil))
+    (multiple-value-setq (result-arg bindings)
+      (cl-cc/expand::%push-optional-bindings
+       '((b 10 b-p)) 'remaining bindings gsl))
+    (assert-true (assoc 'b bindings))
+    (assert-true (assoc 'b-p bindings))))
+
+(deftest push-optional-bindings-without-supplied-p
+  "%push-optional-bindings omits supplied-p binding when slot is nil."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result-arg nil))
+    (multiple-value-setq (result-arg bindings)
+      (cl-cc/expand::%push-optional-bindings
+       '((b 10 nil)) 'remaining bindings gsl))
+    (assert-true (assoc 'b bindings))
+    (assert-= 2 (length bindings))))
+
+;;; ── %push-key-bindings ───────────────────────────────────────────────────
+
+(deftest push-key-bindings-basic
+  "%push-key-bindings emits (getf ...) val binding and name binding."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result (cl-cc/expand::%push-key-bindings
+                  '(((:size n) 3 nil)) 'kwargs bindings gsl)))
+    (assert-true (assoc 'n result))))
+
+(deftest push-key-bindings-with-supplied-p
+  "%push-key-bindings emits supplied-p binding when supplied-p name is given."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (bindings nil)
+         (result (cl-cc/expand::%push-key-bindings
+                  '(((:size n) 3 n-p)) 'kwargs bindings gsl)))
+    (assert-true (assoc 'n result))
+    (assert-true (assoc 'n-p result))))
+
+;;; ── %push-aux-bindings ───────────────────────────────────────────────────
+
+(deftest push-aux-bindings-single
+  "%push-aux-bindings emits one (name init) binding per aux spec."
+  (let* ((bindings nil)
+         (result (cl-cc/expand::%push-aux-bindings '((count 0)) bindings)))
+    (assert-= 1 (length result))
+    (assert-equal '(count 0) (first result))))
+
+(deftest push-aux-bindings-multiple
+  "%push-aux-bindings accumulates multiple aux specs in order."
+  (let* ((bindings nil)
+         (result (cl-cc/expand::%push-aux-bindings '((x 1) (y 2)) bindings)))
+    (assert-= 2 (length result))
+    (assert-true (assoc 'x result))
+    (assert-true (assoc 'y result))))
+
+;;; ── %push-destructured-required-bindings ─────────────────────────────────
+
+(deftest push-destructured-required-simple-name
+  "%push-destructured-required-bindings binds plain symbols directly."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (result (cl-cc/expand::%push-destructured-required-bindings '(x) 'args nil gsl)))
+    (assert-true (assoc 'x result))))
+
+(deftest push-destructured-required-nested-list
+  "%push-destructured-required-bindings recurses into sub-patterns."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (result (cl-cc/expand::%push-destructured-required-bindings '((a b)) 'args nil gsl)))
+    (assert-true (assoc 'a result))
+    (assert-true (assoc 'b result))))
+
+;;; ── %push-destructured-key-bindings ──────────────────────────────────────
+
+(deftest push-destructured-key-bindings-emits-getf
+  "%push-destructured-key-bindings emits a (getf ...) binding per key param."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (result (cl-cc/expand::%push-destructured-key-bindings
+                  '(((:count n) 0 nil)) 'kw-args nil gsl)))
+    (assert-true (assoc 'n result))))
+
+(deftest push-destructured-key-bindings-with-supplied-p
+  "%push-destructured-key-bindings emits a supplied-p binding when given."
+  (let* ((gsl (cl-cc/expand::%make-gensym-local))
+         (result (cl-cc/expand::%push-destructured-key-bindings
+                  '(((:count n) 0 n-p)) 'kw-args nil gsl)))
+    (assert-true (assoc 'n result))
+    (assert-true (assoc 'n-p result))))
+
+;;; ── *lambda-list-keyword-transitions* data table ─────────────────────────
+
+(deftest-each lambda-list-keyword-transitions-completeness
+  "*lambda-list-keyword-transitions* maps every standard lambda list keyword to a state."
+  :cases (("&optional"    '&optional    :optional)
+          ("&rest"        '&rest        :rest)
+          ("&body"        '&body        :body)
+          ("&key"         '&key         :key)
+          ("&aux"         '&aux         :aux)
+          ("&environment" '&environment :environment))
+  (keyword expected-state)
+  (assert-eq expected-state
+             (cdr (assoc keyword cl-cc/expand::*lambda-list-keyword-transitions*))))
+
+(deftest lambda-list-keyword-transitions-excludes-allow-other-keys
+  "*lambda-list-keyword-transitions* does NOT contain &allow-other-keys (handled separately)."
+  (assert-null (assoc '&allow-other-keys cl-cc/expand::*lambda-list-keyword-transitions*)))

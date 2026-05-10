@@ -106,28 +106,17 @@ existing generic function in the same compilation unit."
     (or (gethash name (ctx-global-generics ctx))
         (cdr (%assoc-eq name (ctx-env ctx)))
         (%ensure-generic-function ctx name))
-    (let ((keys nil)
-          (xs specializers))
-      (tagbody
-       scan-specializers
-         (if (null xs) (go done-specializers))
-         (let* ((spec (car xs))
-                (key (if (and spec (consp spec))
-                         (let ((raw (cdr spec)))
-                           (if (and (consp raw) (eq (car raw) (quote eql)))
-                               (let ((val (second raw)))
-                                 (list (quote eql)
-                                       (if (and (consp val)
-                                                (eq (car val) (quote quote)))
-                                           (second val)
-                                           val)))
-                               raw))
-                         (or spec t))))
-           (setq keys (cons key keys)))
-         (setq xs (cdr xs))
-         (go scan-specializers)
-       done-specializers)
-      (setq keys (nreverse keys))
+    (let ((keys (loop for spec in specializers
+                      collect (if (and spec (consp spec))
+                                  (let ((raw (cdr spec)))
+                                    (if (and (consp raw) (eq (car raw) 'eql))
+                                        (let ((val (second raw)))
+                                          (list 'eql
+                                                (if (and (consp val) (eq (car val) 'quote))
+                                                    (second val)
+                                                    val)))
+                                        raw))
+                                  (or spec t)))))
       (setq dispatch-key (if (= (length keys) 1) (first keys) keys)))
     (setq qual-str (if qualifier (format nil "_~A" qualifier) ""))
     (setq label-suffix
@@ -141,15 +130,7 @@ existing generic function in the same compilation unit."
           (make-label ctx
                       (format nil "METHOD_~A~A_~A_END" name qual-str
                               label-suffix)))
-    (let ((xs params))
-      (tagbody
-       scan-param-regs
-         (if (null xs) (go done-param-regs))
-         (setq param-regs (cons (make-register ctx) param-regs))
-         (setq xs (cdr xs))
-         (go scan-param-regs)
-       done-param-regs))
-    (setq param-regs (nreverse param-regs))
+    (setq param-regs (loop for _ in params collect (make-register ctx)))
     (emit ctx (make-vm-get-global :dst gf-reg :name name))
     (emit ctx (make-vm-closure
                :dst closure-reg :label func-label
@@ -162,31 +143,14 @@ existing generic function in the same compilation unit."
     (let ((old-env (ctx-env ctx)))
       (unwind-protect
            (progn
-             (let ((pairs nil)
-                   (ps params)
-                   (rs param-regs))
-               (tagbody
-                scan-env
-                  (if (or (null ps) (null rs)) (go done-env))
-                  (setq pairs (cons (cons (car ps) (car rs)) pairs))
-                  (setq ps (cdr ps))
-                  (setq rs (cdr rs))
-                  (go scan-env)
-                done-env)
-               (setf (ctx-env ctx)
-                     (append (nreverse pairs) (ctx-env ctx))))
-             (let ((last-reg nil)
-                   (xs body))
-               (tagbody
-                scan-body
-                  (if (null xs) (go done-body))
-                  (let ((form (car xs)))
-                    (setf (ctx-tail-position ctx)
-                          (if (null (cdr xs)) t nil))
-                    (setq last-reg (compile-ast form ctx)))
-                  (setq xs (cdr xs))
-                  (go scan-body)
-                done-body)
+             (setf (ctx-env ctx)
+                   (append (loop for p in params for r in param-regs collect (cons p r))
+                           (ctx-env ctx)))
+             (let ((last-reg (loop with r = nil
+                                   for rest on body
+                                   do (setf (ctx-tail-position ctx) (if (null (cdr rest)) t nil))
+                                      (setf r (compile-ast (car rest) ctx))
+                                   finally (return r))))
                (setf (ctx-tail-position ctx) nil)
                (emit ctx (make-vm-ret :reg last-reg))))
         (setf (ctx-env ctx) old-env)))
@@ -202,18 +166,9 @@ existing generic function in the same compilation unit."
         (initargs (ast-make-instance-initargs node))
         (dst (make-register ctx))
         (initarg-regs nil))
-    (let ((xs initargs))
-      (tagbody
-       scan-initargs
-         (if (null xs) (go done-initargs))
-         (let ((entry (car xs)))
-           (setq initarg-regs
-                 (cons (cons (car entry) (compile-ast (cdr entry) ctx))
-                       initarg-regs)))
-         (setq xs (cdr xs))
-         (go scan-initargs)
-       done-initargs))
-    (setq initarg-regs (nreverse initarg-regs))
+    (setq initarg-regs
+          (loop for entry in initargs
+                collect (cons (car entry) (compile-ast (cdr entry) ctx))))
     (if (typep class-ast (quote ast-var))
         (let ((class-reg (compile-ast class-ast ctx)))
           (emit ctx (make-vm-make-obj :dst dst :class-reg class-reg
@@ -241,22 +196,13 @@ existing generic function in the same compilation unit."
         (let* ((entry (%assoc-eq (ast-var-name obj-ast)
                                  (ctx-noescape-instance-bindings ctx)))
                (slot-entry nil))
-          (if entry
-              (let ((xs (cdr entry)))
-                (tagbody
-                 scan-slots
-                   (if (null xs) (go done-slots))
-                   (if (equal (symbol-name slot-name) (car (car xs)))
-                       (progn
-                         (setq slot-entry (car xs))
-                         (go done-slots)))
-                   (setq xs (cdr xs))
-                   (go scan-slots)
-                 done-slots)))
-          (if slot-entry
-              (progn
-                (emit ctx (make-vm-move :dst dst :src (cdr slot-entry)))
-                (return-from compile-ast dst)))))
+          (when entry
+            (setq slot-entry
+                  (find-if (lambda (s) (equal (symbol-name slot-name) (car s)))
+                           (cdr entry))))
+          (when slot-entry
+            (emit ctx (make-vm-move :dst dst :src (cdr slot-entry)))
+            (return-from compile-ast dst))))
     (let ((obj-reg (compile-ast obj-ast ctx)))
       (emit ctx (make-vm-slot-read
                  :dst dst :obj-reg obj-reg :slot-name slot-name))
@@ -272,22 +218,13 @@ existing generic function in the same compilation unit."
         (let* ((entry (%assoc-eq (ast-var-name obj-ast)
                                  (ctx-noescape-instance-bindings ctx)))
                (slot-entry nil))
-          (if entry
-              (let ((xs (cdr entry)))
-                (tagbody
-                 scan-slots
-                   (if (null xs) (go done-slots))
-                   (if (equal (symbol-name slot-name) (car (car xs)))
-                       (progn
-                         (setq slot-entry (car xs))
-                         (go done-slots)))
-                   (setq xs (cdr xs))
-                   (go scan-slots)
-                 done-slots)))
-          (if slot-entry
-              (progn
-                (setf (cdr slot-entry) val-reg)
-                (return-from compile-ast val-reg)))))
+          (when entry
+            (setq slot-entry
+                  (find-if (lambda (s) (equal (symbol-name slot-name) (car s)))
+                           (cdr entry))))
+          (when slot-entry
+            (setf (cdr slot-entry) val-reg)
+            (return-from compile-ast val-reg))))
     (let ((obj-reg (compile-ast obj-ast ctx)))
       (emit ctx (make-vm-slot-write
                  :obj-reg obj-reg

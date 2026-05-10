@@ -37,8 +37,8 @@
 (deftest type-repr-variable-and-function-creation
   "Type variables have unique IDs and names; function types expose params/return."
   ;; Variables: distinct IDs, correct names
-  (let ((v1 (fresh-type-var 'a))
-        (v2 (fresh-type-var 'b)))
+  (let ((v1 (fresh-type-var :name 'a))
+        (v2 (fresh-type-var :name 'b)))
     (assert-type type-var v1)
     (assert-type type-var v2)
     (assert-false (= (type-var-id v1) (type-var-id v2)))

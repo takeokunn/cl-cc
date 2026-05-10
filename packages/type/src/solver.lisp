@@ -88,7 +88,7 @@ Returns (values new-subst residual-constraints).
              (let ((local-subst (make-substitution)))
                 (dolist (v qvars)
                   (subst-extend! v
-                                 (fresh-type-var (type-var-name v)
+                                 (fresh-type-var :name (type-var-name v)
                                                  :upper-bound (type-var-upper-bound v)
                                                  :lower-bound (type-var-lower-bound v))
                                  local-subst))

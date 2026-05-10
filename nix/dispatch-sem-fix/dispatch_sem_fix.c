@@ -1,5 +1,6 @@
 #include <mach/mach.h>
 #include <mach/semaphore.h>
+#include <mach/mach_time.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <dlfcn.h>
@@ -47,10 +48,30 @@ long dispatch_semaphore_wait(dispatch_semaphore_t d, dispatch_time_t timeout) {
   kern_return_t kr;
   if (timeout == DISPATCH_TIME_FOREVER) {
     do { kr = semaphore_wait(s->mach_sem); } while (kr == KERN_ABORTED);
+  } else if (timeout == 0) {
+    /* DISPATCH_TIME_NOW: non-blocking try.  A single attempt is correct here:
+       retrying on KERN_ABORTED would spin if signals arrive continuously, which
+       defeats the non-blocking contract.  A spurious KERN_ABORTED is treated as
+       "not acquired" — acceptable for a try-acquire. */
+    mach_timespec_t ts = { .tv_sec = 0, .tv_nsec = 0 };
+    kr = semaphore_timedwait(s->mach_sem, ts);
+    return (kr == KERN_SUCCESS) ? 0 : 1;
   } else {
+    /* timeout is an absolute mach-tick value matching mach_absolute_time().
+       Convert the remaining ticks to nanoseconds via mach_timebase_info so that
+       the relative duration passed to semaphore_timedwait is correct regardless
+       of the hardware tick rate (do not assume 1 tick == 1 ns). */
+    uint64_t now_ticks = mach_absolute_time();
+    if (now_ticks >= timeout) return 1;
+    mach_timebase_info_data_t tb;
+    if (mach_timebase_info(&tb) != KERN_SUCCESS || tb.denom == 0) return 1;
+    uint64_t delta = timeout - now_ticks;
+    uint64_t rel_ns = (tb.numer == 0 || delta > UINT64_MAX / tb.numer)
+                      ? UINT64_MAX
+                      : delta * tb.numer / tb.denom;
     mach_timespec_t ts = {
-      .tv_sec  = (unsigned int)((uint64_t)timeout / 1000000000ULL),
-      .tv_nsec = (clock_res_t)((uint64_t)timeout % 1000000000ULL)
+      .tv_sec  = (unsigned int)(rel_ns / 1000000000ULL),
+      .tv_nsec = (clock_res_t)(rel_ns % 1000000000ULL)
     };
     do { kr = semaphore_timedwait(s->mach_sem, ts); } while (kr == KERN_ABORTED);
   }

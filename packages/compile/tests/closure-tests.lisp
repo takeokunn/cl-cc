@@ -33,9 +33,7 @@
                   :op '+
                   :lhs (cl-cc/ast:make-ast-var :name 'x)
                   :rhs (cl-cc/ast:make-ast-var :name 'y)))))
-    (assert-true (member 'x result))
-    (assert-true (member 'y result))
-    (assert-equal 2 (length result))))
+    (assert-list-contains result '(x y) :length 2)))
 
 (deftest free-vars-same-var-deduplicated
   "Same var in both operands of a binop appears only once in the result."
@@ -175,8 +173,7 @@
                  (cl-cc/ast:make-ast-setq
                   :var 'x
                   :value (cl-cc/ast:make-ast-var :name 'y)))))
-    (assert-true (and (member 'x result) (member 'y result)))
-    (assert-equal 2 (length result))))
+    (assert-list-contains result '(x y) :length 2)))
 
 ;;; ─── Call ─────────────────────────────────────────────────────────────────
 
@@ -194,9 +191,7 @@
                  (cl-cc/ast:make-ast-call
                   :func (cl-cc/ast:make-ast-var :name 'f)
                   :args (list (cl-cc/ast:make-ast-var :name 'x))))))
-    (assert-true (member 'f result))
-    (assert-true (member 'x result))
-    (assert-equal 2 (length result))))
+    (assert-list-contains result '(f x) :length 2)))
 
 ;;; ─── Flet / Labels ───────────────────────────────────────────────────────
 
@@ -229,10 +224,7 @@
                   :cond (cl-cc/ast:make-ast-var :name 'p)
                   :then (cl-cc/ast:make-ast-var :name 'x)
                   :else (cl-cc/ast:make-ast-var :name 'y)))))
-    (assert-true (member 'p result))
-    (assert-true (member 'x result))
-    (assert-true (member 'y result))
-    (assert-equal 3 (length result))))
+    (assert-list-contains result '(p x y) :length 3)))
 
 (deftest free-vars-progn-collects-all-forms
   "Progn collects free vars from every sub-form."
@@ -240,9 +232,7 @@
                  (cl-cc/ast:make-ast-progn
                   :forms (list (cl-cc/ast:make-ast-var :name 'a)
                                (cl-cc/ast:make-ast-var :name 'b))))))
-    (assert-true (member 'a result))
-    (assert-true (member 'b result))
-    (assert-equal 2 (length result))))
+    (assert-list-contains result '(a b) :length 2)))
 
 ;;; ─── %escape-add-kind / %escape-merge-kinds (extracted pure helpers) ─────
 
@@ -258,9 +248,7 @@
   "%escape-merge-kinds deduplicates across multiple kind lists."
   (assert-equal nil (cl-cc/ast::%escape-merge-kinds nil nil))
   (let ((result (cl-cc/ast::%escape-merge-kinds '(:return) '(:return :capture))))
-    (assert-= 2 (length result))
-    (assert-true (member :return  result))
-    (assert-true (member :capture result))))
+    (assert-list-contains result '(:return :capture) :length 2)))
 
 ;;; ─── %count-ast-calls (extracted recursive helper) ───────────────────────
 

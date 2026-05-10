@@ -85,10 +85,8 @@
 (defun useful-typecase-arms (arm-types)
   "Return the subset of ARM-TYPES that are useful (not subsumed by earlier arms).
    Arms are useful if they handle at least one case not already covered."
-  (let ((covered nil)
-        (useful nil))
-    (dolist (arm arm-types)
-      (unless (typecase-arm-subsumed-p arm covered)
-        (push arm useful)
-        (push arm covered)))
-    (nreverse useful)))
+  (let ((covered nil))
+    (loop for arm in arm-types
+          unless (typecase-arm-subsumed-p arm covered)
+            do (push arm covered)
+            and collect arm)))

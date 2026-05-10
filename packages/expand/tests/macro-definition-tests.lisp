@@ -152,3 +152,37 @@
   (if expected
       (assert-true  (cl-cc/expand::%expander-descriptor-p object))
       (assert-false (cl-cc/expand::%expander-descriptor-p object))))
+
+;;; ─── %compiler-macro-lambda-list-parts ──────────────────────────────────
+
+(deftest compiler-macro-lambda-list-plain
+  "%compiler-macro-lambda-list-parts passes through a plain lambda list unchanged."
+  (multiple-value-bind (ll whole env)
+      (cl-cc/expand::%compiler-macro-lambda-list-parts '(x y z))
+    (assert-equal '(x y z) ll)
+    (assert-null whole)
+    (assert-null env)))
+
+(deftest compiler-macro-lambda-list-whole
+  "%compiler-macro-lambda-list-parts extracts &whole binding and removes it from the list."
+  (multiple-value-bind (ll whole env)
+      (cl-cc/expand::%compiler-macro-lambda-list-parts '(&whole w x y))
+    (assert-equal '(x y) ll)
+    (assert-eq 'w whole)
+    (assert-null env)))
+
+(deftest compiler-macro-lambda-list-environment
+  "%compiler-macro-lambda-list-parts extracts &environment binding."
+  (multiple-value-bind (ll whole env)
+      (cl-cc/expand::%compiler-macro-lambda-list-parts '(x &environment e))
+    (assert-equal '(x) ll)
+    (assert-null whole)
+    (assert-eq 'e env)))
+
+(deftest compiler-macro-lambda-list-whole-and-environment
+  "%compiler-macro-lambda-list-parts handles both &whole and &environment together."
+  (multiple-value-bind (ll whole env)
+      (cl-cc/expand::%compiler-macro-lambda-list-parts '(&whole w x &environment e y))
+    (assert-equal '(x y) ll)
+    (assert-eq 'w whole)
+    (assert-eq 'e env)))

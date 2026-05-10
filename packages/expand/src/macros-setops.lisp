@@ -90,28 +90,22 @@
 ;; MEMBER: find first tail where (test item element), or nil (with optional :test/:key/:test-not)
 ;; Shadows the binary builtin to add keyword arg support.
 (our-defmacro member (item list &key test key test-not)
-  (let ((item-var (gensym "ITEM")) (lst-var (gensym "LST")) (tag (gensym "MLOOP")))
+  (let ((item-var (gensym "ITEM")) (lst-var (gensym "LST")))
     (if (or test key test-not)
         (let ((tst-var (gensym "TST")) (kfn-var (gensym "KEY")))
           `(let ((,item-var ,item) (,lst-var ,list)
                  (,tst-var ,(%test-predicate-form test test-not))
                  (,kfn-var ,(or key '#'identity)))
-             (block nil
-               (tagbody
-                ,tag
-                  (when (null ,lst-var) (return nil))
-                  (when (funcall ,tst-var ,item-var (funcall ,kfn-var (car ,lst-var)))
-                    (return ,lst-var))
-                  (setq ,lst-var (cdr ,lst-var))
-                  (go ,tag)))))
+             (loop
+               (when (null ,lst-var) (return nil))
+               (when (funcall ,tst-var ,item-var (funcall ,kfn-var (car ,lst-var)))
+                 (return ,lst-var))
+               (setq ,lst-var (cdr ,lst-var)))))
         `(let ((,item-var ,item) (,lst-var ,list))
-           (block nil
-             (tagbody
-              ,tag
-                (when (null ,lst-var) (return nil))
-                (when (eql ,item-var (car ,lst-var)) (return ,lst-var))
-                (setq ,lst-var (cdr ,lst-var))
-                (go ,tag)))))))
+           (loop
+             (when (null ,lst-var) (return nil))
+             (when (eql ,item-var (car ,lst-var)) (return ,lst-var))
+             (setq ,lst-var (cdr ,lst-var)))))))
 
 ;; UNION: all elements present in either list, no duplicates (with optional :test/:key)
 (our-defmacro union (list1 list2 &key test key test-not)
@@ -200,11 +194,8 @@
     `(let ((,ks ,keys)
            (,ds ,data)
            (,acc ,alist))
-       (tagbody
-        pairlis-loop
-          (when (and ,ks ,ds)
-            (setq ,acc (cons (cons (car ,ks) (car ,ds)) ,acc))
-            (setq ,ks (cdr ,ks))
-            (setq ,ds (cdr ,ds))
-            (go pairlis-loop)))
+       (loop while (and ,ks ,ds)
+             do (setq ,acc (cons (cons (car ,ks) (car ,ds)) ,acc))
+                (setq ,ks (cdr ,ks))
+                (setq ,ds (cdr ,ds)))
        ,acc)))

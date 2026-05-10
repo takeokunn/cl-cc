@@ -140,8 +140,9 @@
   "Alist of (opcode-byte . mnemonic-string) for all known opcodes.")
 
 (defvar *opcode-names*
-  (let ((ht (make-hash-table :test #'eql)))
-    (dolist (pair *opcode-name-data* ht)
-      (setf (gethash (car pair) ht) (cdr pair))))
+  (loop with ht = (make-hash-table :test #'eql)
+        for (code . name) in *opcode-name-data*
+        do (setf (gethash code ht) name)
+        finally (return ht))
   "Hash table mapping opcode byte value to its mnemonic string.")
 

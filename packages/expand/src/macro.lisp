@@ -113,10 +113,10 @@ EXPANDER may be either a host function or a descriptor consumed by
 
 (defun %nest-let-bindings (bindings body)
   "Build nested LET forms from BINDINGS ending in BODY forms."
-  (if (null bindings)
-      (cons 'locally body)
-      (list 'let (list (first bindings))
-            (%nest-let-bindings (rest bindings) body))))
+  (reduce (lambda (inner binding) (list 'let (list binding) inner))
+          bindings
+          :from-end t
+          :initial-value (cons 'locally body)))
 
 (defun %invoke-expander-descriptor (descriptor form env)
   "Evaluate DESCRIPTOR against FORM and ENV through `*macro-eval-fn*'."
@@ -179,33 +179,24 @@ Supports both host functions and descriptor-backed expanders."
 
 (defun %compiler-macro-lambda-list-parts (lambda-list)
   "Return LAMBDA-LIST without &whole/&environment plus their binding vars."
-  (let ((result nil)
-        (whole nil)
-        (environment nil)
-        (tail lambda-list))
-    (tagbody
-     scan
-       (when (null tail)
-         (return-from %compiler-macro-lambda-list-parts
-           (values (nreverse result) whole environment)))
-       (let ((item (car tail)))
-         (cond
-           ((eq item '&whole)
-            (unless (and (cdr tail) (symbolp (cadr tail)))
-              (error "Invalid &WHOLE in compiler macro lambda list: ~S" lambda-list))
-            (setf whole (cadr tail)
-                  tail (cddr tail))
-            (go scan))
-           ((eq item '&environment)
-            (unless (and (cdr tail) (symbolp (cadr tail)))
-              (error "Invalid &ENVIRONMENT in compiler macro lambda list: ~S" lambda-list))
-            (setf environment (cadr tail)
-                  tail (cddr tail))
-            (go scan))
-           (t
-            (setf result (cons item result)
-                  tail (cdr tail))
-            (go scan)))))))
+  (loop with result = nil
+        with whole = nil
+        with environment = nil
+        with tail = lambda-list
+        while tail
+        for item = (car tail)
+        if (eq item '&whole)
+          do (unless (and (cdr tail) (symbolp (cadr tail)))
+               (error "Invalid &WHOLE in compiler macro lambda list: ~S" lambda-list))
+             (setf whole (cadr tail)  tail (cddr tail))
+        else if (eq item '&environment)
+          do (unless (and (cdr tail) (symbolp (cadr tail)))
+               (error "Invalid &ENVIRONMENT in compiler macro lambda list: ~S" lambda-list))
+             (setf environment (cadr tail)  tail (cddr tail))
+        else
+          do (push item result)
+             (setf tail (cdr tail))
+        finally (return (values (nreverse result) whole environment))))
 
 (defun lookup-compiler-macro (name)
   "Look up compiler macro NAME in the global compiler-macro environment."

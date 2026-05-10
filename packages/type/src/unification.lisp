@@ -41,25 +41,49 @@ with ROW-VAR as the tail."
     (t
      (values nil nil))))
 
+(defun %unify-payload-pairs (pairs subst)
+  "Unify each (left . right) payload pair sequentially, threading SUBST through.
+Returns (values final-subst t) or (values nil nil) on first failure."
+  (if (null pairs)
+      (values subst t)
+      (multiple-value-bind (s ok)
+          (%type-advanced-payload-unify (caar pairs) (cdar pairs) subst)
+        (if ok
+            (%unify-payload-pairs (cdr pairs) s)
+            (values nil nil)))))
+
+(defun %unify-property-alist (left-props right-props subst)
+  "Unify two property alists key-order-insensitively.
+Each property is (key . value). Looks up each left key in right by assoc, then
+unifies the values. Returns (values final-subst t) or (values nil nil)."
+  (unless (= (length left-props) (length right-props))
+    (return-from %unify-property-alist (values nil nil)))
+  (loop with s = subst
+        for (key . val-left) in left-props
+        for pair = (assoc key right-props)
+        unless pair return (values nil nil)
+        do (multiple-value-bind (s2 ok)
+               (if (typep val-left 'type-node)
+                   (type-unify val-left (cdr pair) s)
+                   (if (equal val-left (cdr pair))
+                       (values s t)
+                       (values nil nil)))
+             (unless ok (return (values nil nil)))
+             (setf s s2))
+        finally (return (values s t))))
+
 (defun %type-advanced-unify (left right subst)
   "Unify two advanced feature nodes when they share the same FR id and shape."
-  (if (string/= (type-advanced-feature-id left) (type-advanced-feature-id right))
-      (values nil nil)
-      (multiple-value-bind (subst1 ok1)
-          (%type-advanced-payload-unify (type-advanced-args left)
-                                        (type-advanced-args right)
-                                        subst)
-        (if ok1
-            (multiple-value-bind (subst2 ok2)
-                (%type-advanced-payload-unify (type-advanced-properties left)
-                                              (type-advanced-properties right)
-                                              subst1)
-              (if ok2
-                  (%type-advanced-payload-unify (type-advanced-evidence left)
-                                                (type-advanced-evidence right)
-                                                subst2)
-                  (values nil nil)))
-            (values nil nil)))))
+  (when (string= (type-advanced-feature-id left) (type-advanced-feature-id right))
+    (multiple-value-bind (s1 ok1)
+        (%unify-payload-pairs
+         (list (cons (type-advanced-args left)     (type-advanced-args right))
+               (cons (type-advanced-evidence left) (type-advanced-evidence right)))
+         subst)
+      (when ok1
+        (%unify-property-alist (type-advanced-properties left)
+                               (type-advanced-properties right)
+                               s1)))))
 
 ;;; ─── Type Unification ─────────────────────────────────────────────────────
 
@@ -127,7 +151,18 @@ with ROW-VAR as the tail."
       ((type-var-p resolved)
        subst)
       ((%type-var-concrete-bound-satisfied-p var resolved subst)
-       (subst-extend var resolved subst))))) 
+       (subst-extend var resolved subst)))))
+
+(defun %unify-free-var (var other subst)
+  "Bind free type variable VAR to OTHER under SUBST after occurs check.
+Handles the same-variable identity case and the occurs check before binding."
+  (macrolet ((succeed (s) `(values ,s t))
+             (fail () `(values nil nil)))
+    (cond
+      ((and (type-var-p other) (type-var-equal-p var other)) (succeed subst))
+      ((type-occurs-p var other subst) (fail))
+      (t (let ((s (%bind-type-var-with-bounds var other subst)))
+           (if s (succeed s) (fail)))))))
 
 (defun type-unify (t1 t2 &optional (subst (make-substitution)))
   "Unify two type-nodes, returning (values substitution success-p).
@@ -157,21 +192,14 @@ Examples:
        (multiple-value-bind (binding found-p) (subst-lookup t1 subst)
          (if found-p
              (type-unify binding t2 subst)
-             (if (and (type-var-p t2) (type-var-equal-p t1 t2))
-                 (succeed subst)
-                 (if (typep t2 'type-forall)
-                     (error 'type-inference-error
-                            :message (format nil
-                                             "Impredicative type: cannot unify ~A with ~A. ~
-                                              Rank-N types must appear in argument positions."
-                                             (type-to-string t1)
-                                             (type-to-string t2)))
-                          (if (type-occurs-p t1 t2 subst)
-                              (fail)
-                              (let ((bound-subst (%bind-type-var-with-bounds t1 t2 subst)))
-                                (if bound-subst
-                                    (succeed bound-subst)
-                                    (fail)))))))))
+             (if (typep t2 'type-forall)
+                 (error 'type-inference-error
+                        :message (format nil
+                                         "Impredicative type: cannot unify ~A with ~A. ~
+                                          Rank-N types must appear in argument positions."
+                                         (type-to-string t1)
+                                         (type-to-string t2)))
+                 (%unify-free-var t1 t2 subst)))))
 
       ;; T2 is type variable
       ((type-var-p t2)
@@ -184,12 +212,7 @@ Examples:
                                          "Impredicative type: cannot unify ~A with ~A."
                                          (type-to-string t1)
                                          (type-to-string t2)))
-                   (if (type-occurs-p t2 t1 subst)
-                       (fail)
-                       (let ((bound-subst (%bind-type-var-with-bounds t2 t1 subst)))
-                         (if bound-subst
-                             (succeed bound-subst)
-                             (fail))))))))
+                 (%unify-free-var t2 t1 subst)))))
 
       ;; Arrow types
       ((and (type-arrow-p t1) (type-arrow-p t2))
@@ -324,7 +347,7 @@ Examples:
         ;; Both have unique effects — need both row vars
         (t
          (if (and rv1 rv2)
-             (let* ((fresh-var (fresh-type-var 'r))
+             (let* ((fresh-var (fresh-type-var :name 'r))
                     (ext1 (%effects-from-names only-in-2 fresh-var))
                     (ext2 (%effects-from-names only-in-1 fresh-var)))
                (multiple-value-bind (s1 ok1) (type-unify rv1 ext1 subst)

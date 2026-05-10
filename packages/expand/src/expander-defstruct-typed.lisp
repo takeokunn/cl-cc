@@ -18,126 +18,56 @@
 
 (defun %defstruct-typed-accessors (struct-type conc-name all-slots)
   "Generate accessor functions for :type list or :type vector defstruct."
-  (let ((tail all-slots)
-        (slot nil)
-        (slot-name nil)
-        (idx 1)
-        (acc-name nil)
-        (forms nil))
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (setq slot (car tail))
-       (setq slot-name (first slot))
-       (setq acc-name (%defstruct-accessor-name conc-name slot-name))
-       (if (eq struct-type 'list)
-           (setq forms
-                 (cons (%expander-form 'defun acc-name
-                                       (%expander-form 'obj)
-                                       (%expander-form 'nth idx 'obj))
-                       forms))
-           (setq forms
-                 (cons (%expander-form 'defun acc-name
-                                       (%expander-form 'obj)
-                                       (%expander-form 'aref 'obj idx))
-                       forms)))
-       (setq idx (+ idx 1))
-       (setq tail (cdr tail))
-       (go scan)
-     done)
-    (nreverse forms)))
+  (loop for slot in all-slots
+        for idx from 1
+        collect (let ((acc-name (%defstruct-accessor-name conc-name (first slot))))
+                  (if (eq struct-type 'list)
+                      (%expander-form 'defun acc-name
+                                      (%expander-form 'obj)
+                                      (%expander-form 'nth idx 'obj))
+                      (%expander-form 'defun acc-name
+                                      (%expander-form 'obj)
+                                      (%expander-form 'aref 'obj idx))))))
 
 (defun %defstruct-typed-predicate (pred-name struct-name struct-type slot-count)
   "Generate a predicate for :type list or :type vector defstruct."
-  (let ((total-len nil)
-        (quoted-name nil)
-        (list-pred nil)
-        (vector-pred nil)
-        (pred-body nil))
-    (if pred-name
-        (progn
-          (setq total-len (+ slot-count 1))
-          (setq quoted-name (%expander-form 'quote struct-name))
-          (setq list-pred
-                (%expander-form 'and
-                                (%expander-form 'listp 'obj)
-                                (%expander-form 'eq (%expander-form 'car 'obj) quoted-name)
-                                (%expander-form '= (%expander-form 'length 'obj) total-len)))
-          (setq vector-pred
-                (%expander-form 'and
-                                (%expander-form 'vectorp 'obj)
-                                (%expander-form '> (%expander-form 'length 'obj) 0)
-                                (%expander-form 'eq (%expander-form 'aref 'obj 0) quoted-name)
-                                (%expander-form '= (%expander-form 'length 'obj) total-len)))
-          (if (eq struct-type 'list)
-              (setq pred-body list-pred)
-              (setq pred-body vector-pred))
-          (%expander-form 'defun pred-name
-                          (%expander-form 'obj)
-                          pred-body))
-        nil)))
+  (when pred-name
+    (let* ((total-len   (+ slot-count 1))
+           (quoted-name (%expander-form 'quote struct-name))
+           (list-pred   (%expander-form 'and
+                                        (%expander-form 'listp 'obj)
+                                        (%expander-form 'eq (%expander-form 'car 'obj) quoted-name)
+                                        (%expander-form '= (%expander-form 'length 'obj) total-len)))
+           (vector-pred (%expander-form 'and
+                                        (%expander-form 'vectorp 'obj)
+                                        (%expander-form '> (%expander-form 'length 'obj) 0)
+                                        (%expander-form 'eq (%expander-form 'aref 'obj 0) quoted-name)
+                                        (%expander-form '= (%expander-form 'length 'obj) total-len)))
+           (pred-body   (if (eq struct-type 'list) list-pred vector-pred)))
+      (%expander-form 'defun pred-name (%expander-form 'obj) pred-body))))
 
 (defun %defstruct-typed-expansion-parts (model)
   "Build ctor/accessor/predicate parts for typed defstruct expansion."
-  (let ((tail model)
-        (key nil)
-        (value nil)
-        (name nil)
-        (struct-type nil)
-        (ctor-name nil)
-        (boa-args nil)
-        (all-slots nil)
-        (conc-name nil)
-        (pred-name nil)
-        (ctor-form nil)
-        (accessor-forms nil)
-        (pred-form nil))
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (setq key (car tail))
-       (setq value (cadr tail))
-       (if (eq key :name) (setq name value))
-       (if (eq key :struct-type) (setq struct-type value))
-       (if (eq key :ctor-name) (setq ctor-name value))
-       (if (eq key :boa-args) (setq boa-args value))
-       (if (eq key :all-slots) (setq all-slots value))
-       (if (eq key :conc-name) (setq conc-name value))
-       (if (eq key :pred-name) (setq pred-name value))
-       (setq tail (cddr tail))
-       (go scan)
-     done)
-    (if ctor-name
-        (setq ctor-form
-              (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots))
-        (setq ctor-form nil))
-    (setq accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
-    (if pred-name
-        (setq pred-form
-              (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))
-        (setq pred-form nil))
-    (%expander-form name ctor-form accessor-forms pred-form)))
+  (let ((name        (getf model :name))
+        (struct-type (getf model :struct-type))
+        (ctor-name   (getf model :ctor-name))
+        (boa-args    (getf model :boa-args))
+        (all-slots   (getf model :all-slots))
+        (conc-name   (getf model :conc-name))
+        (pred-name   (getf model :pred-name)))
+    (let ((ctor-form      (when ctor-name
+                            (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
+          (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
+          (pred-form      (when pred-name
+                            (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
+      (%expander-form name ctor-form accessor-forms pred-form))))
 
 (defun %defstruct-typed-expansion-forms (name ctor-form accessor-forms pred-form)
   "Build the ordered PROGN tail forms for typed expansion."
-  (let ((tail nil)
-        (forms nil))
-    (if ctor-form
-        (setq forms (cons ctor-form forms))
-        (setq forms forms))
-    (setq tail accessor-forms)
-    (tagbody
-     scan
-       (if (null tail) (go done))
-       (setq forms (cons (car tail) forms))
-       (setq tail (cdr tail))
-       (go scan)
-     done)
-    (if pred-form
-        (setq forms (cons pred-form forms))
-        (setq forms forms))
-    (setq forms (cons (%expander-form 'quote name) forms))
-    (nreverse forms)))
+  (append (when ctor-form  (list ctor-form))
+          accessor-forms
+          (when pred-form  (list pred-form))
+          (list (%expander-form 'quote name))))
 
 (defun %defstruct-typed-expansion (model)
   "Emit the full expansion for a :type list/vector defstruct MODEL."

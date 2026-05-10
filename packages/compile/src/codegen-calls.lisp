@@ -22,12 +22,7 @@
 
 
 (defun %codegen-call-assoc (key alist)
-  (if (consp alist)
-      (let ((entry (car alist)))
-        (if (eq (car entry) key)
-            entry
-            (%codegen-call-assoc key (cdr alist))))
-      nil))
+  (assoc key alist :test #'eq))
 
 (defun %resolve-func-sym-reg (sym ctx)
   "Return the register holding the callable value for function symbol SYM.
@@ -60,27 +55,7 @@ first-class function values here."
 
 (defun %compile-call-arg-registers (args ctx)
   "Compile ARGS left-to-right and return their result registers."
-  (let ((tail args)
-        (regs-rev nil)
-        (arg-regs nil))
-    (tagbody
-     compile-call-args
-       (when (null tail)
-         (go compile-call-args-done))
-       (setf regs-rev (cons (compile-ast (car tail) ctx) regs-rev))
-       (setf tail (cdr tail))
-       (go compile-call-args)
-     compile-call-args-done)
-    (let ((reverse-tail regs-rev))
-      (tagbody
-       reverse-call-args
-         (when (null reverse-tail)
-           (go reverse-call-args-done))
-         (setf arg-regs (cons (car reverse-tail) arg-regs))
-         (setf reverse-tail (cdr reverse-tail))
-         (go reverse-call-args)
-       reverse-call-args-done))
-    arg-regs))
+  (mapcar (lambda (arg) (compile-ast arg ctx)) args))
 
 (defun %emit-call-like-instruction (tail result-reg func-reg arg-regs ctx)
   "Emit either a normal call or a tail call and return RESULT-REG."
@@ -237,40 +212,13 @@ first-class function values here."
              (symbolp func-expr)
              (eq func-sym (ctx-current-function-name ctx))
              (= (length args) (length (ctx-current-function-params ctx))))
-        (let ((regs-tail arg-regs)
-              (temps-rev nil)
-              (temps nil))
-          (tagbody
-           copy-tail-arg-regs
-             (when (null regs-tail)
-               (go copy-tail-arg-regs-done))
-             (let ((t-reg (make-register ctx)))
-               (emit ctx (make-vm-move :dst t-reg :src (car regs-tail)))
-               (setf temps-rev (cons t-reg temps-rev)))
-             (setf regs-tail (cdr regs-tail))
-             (go copy-tail-arg-regs)
-           copy-tail-arg-regs-done)
-          (let ((reverse-tail temps-rev))
-            (tagbody
-             reverse-tail-temps
-               (when (null reverse-tail)
-                 (go reverse-tail-temps-done))
-               (setf temps (cons (car reverse-tail) temps))
-               (setf reverse-tail (cdr reverse-tail))
-               (go reverse-tail-temps)
-             reverse-tail-temps-done))
-          (let ((params-tail (ctx-current-function-params ctx))
-                (temps-tail temps))
-            (tagbody
-             install-tail-temps
-               (when (null params-tail)
-                 (go install-tail-temps-done))
-               (emit ctx (make-vm-move :dst (lookup-var ctx (car params-tail))
-                                       :src (car temps-tail)))
-               (setf params-tail (cdr params-tail))
-               (setf temps-tail (cdr temps-tail))
-               (go install-tail-temps)
-             install-tail-temps-done)))
+        (let ((temps (loop for reg in arg-regs
+                           collect (let ((t-reg (make-register ctx)))
+                                     (emit ctx (make-vm-move :dst t-reg :src reg))
+                                     t-reg))))
+          (loop for param in (ctx-current-function-params ctx)
+                for temp  in temps
+                do (emit ctx (make-vm-move :dst (lookup-var ctx param) :src temp))))
         (emit ctx (make-vm-jump :label (ctx-current-function-label ctx))))
       ;; Generic function dispatch
       ((and func-sym (gethash func-sym (ctx-global-generics ctx)))

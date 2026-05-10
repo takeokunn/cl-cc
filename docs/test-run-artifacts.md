@@ -37,14 +37,27 @@ Runner-observed environment variables:
 - `CLCC_TIMINGS_FILE` — TSV output path for per-test timings.
   Default `./test-timings.tsv`. Validated: `..` segments and paths outside
   `(uiop:getcwd)` are rejected with a warning and the default is used.
-  Source: `packages/testing-framework/src/framework-runner.lisp` (`%timings-output-path`).
+  Source: `packages/testing-framework/src/framework-tap.lisp` (`%timings-output-path`).
 - `CLCC_TEST_TRACE=1` — When set, every test prints
   `# [trace] running <name>` to `*error-output*` before dispatch (hang diagnosis).
-  Source: `packages/testing-framework/src/framework-runner.lisp:22-25`.
+  Source: `packages/testing-framework/src/framework-runner.lisp:116-118`.
 - `CLCC_TEST_TIMEOUT` — Overrides the default per-test wall-clock timeout in seconds.
   Framework default is `10` (`packages/testing-framework/src/framework-timeouts.lisp` `%default-test-timeout`),
   and the canonical Nix entrypoints (`nix run .#test`, `checks.tests`) export `CLCC_TEST_TIMEOUT=10`
   via `nix/apps.nix` so hung unit tests fail fast. Long-running integration and E2E tests run explicitly by suite taxonomy.
+- `CLCC_SUITE_TIMEOUT` — Whole-suite wall-clock deadline in seconds. When exceeded the suite
+  runner signals `sb-ext:timeout` (orderly path) or fires a daemon thread that calls
+  `sb-ext:exit :abort t` (GC-safepoint-immune last resort). Framework default is `600`;
+  canonical Nix entrypoints export `CLCC_SUITE_TIMEOUT=1500` via `nix/apps.nix`. The shell
+  wrapper adds `--kill-after=30` to the outer `timeout` command for a final SIGKILL backstop.
+  Source: `packages/testing-framework/src/framework-parallel-runner.lisp` (`%default-suite-timeout`, `*suite-killer-exit-fn*`).
+- `DYLD_INSERT_LIBRARIES` — Set automatically by `nix run .#test` on macOS to inject
+  `libdispatch_sem_fix.dylib`, which replaces `dispatch_semaphore_*` with Mach semaphores.
+  Required on macOS 26 ARM64 where `dispatch_semaphore_signal` fails to wake
+  `dispatch_semaphore_wait`, causing SBCL's GC safepoint stop-world to hang indefinitely.
+  The `# env: ... DYLD=dispatch-sem-fix:active` line in runner output confirms injection.
+  Source: `nix/apps.nix` (where `DYLD_INSERT_LIBRARIES` is exported at runtime),
+  `nix/dispatch-sem-fix/dispatch_sem_fix.c` (shim implementation), `nix/sbcl.nix` (build wiring).
 
 ## `test-timings.tsv`
 
@@ -65,7 +78,7 @@ Example row:
 CL-CC-UNIT-SUITE	TIMING-PASS-CASE	123456	passed	3
 ```
 
-Source: `packages/testing-framework/src/framework-runner.lisp` (`%write-timings-tsv`).
+Source: `packages/testing-framework/src/framework-tap.lisp` (`%write-timings-tsv`).
 
 ## TAP Extensions
 

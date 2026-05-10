@@ -77,7 +77,8 @@ before nreversing everything at assembly time.  All other fields are nreversed h
           ;; Wrap all DO forms together under the active filter.
           (push (list* (%loop-filter-sym filter) (cadr filter) forms)
                 (lps-body-forms state))
-          (dolist (f forms) (push f (lps-body-forms state)))))
+          (setf (lps-body-forms state)
+                (nconc (nreverse forms) (lps-body-forms state)))))
     (values state rest)))
 
 (defun %clause-filter (state remaining filter-type)
@@ -90,12 +91,12 @@ before nreversing everything at assembly time.  All other fields are nreversed h
 
 (defun %clause-initially (state remaining)
   (multiple-value-bind (forms rest) (%loop-collect-body remaining)
-    (dolist (f forms) (push f (lps-initially state)))
+    (setf (lps-initially state) (nconc (nreverse forms) (lps-initially state)))
     (values state rest)))
 
 (defun %clause-finally (state remaining)
   (multiple-value-bind (forms rest) (%loop-collect-body remaining)
-    (dolist (f forms) (push f (lps-finally state)))
+    (setf (lps-finally state) (nconc (nreverse forms) (lps-finally state)))
     (values state rest)))
 
 ;; FR-638: NAMED clause — (loop named foo ...)

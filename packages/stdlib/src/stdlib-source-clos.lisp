@@ -59,29 +59,18 @@
 
     "(defun update-instance-for-redefined-class (instance added-slots discarded-slots plist &rest initargs)
        (declare (ignore discarded-slots plist))
-       (let ((class (gethash :__class__ instance))
-             (pairs initargs)
-             (key nil)
-             (value nil)
-             (binding nil)
-             (slot nil))
-         (tagbody
-          start
-            (if (null pairs) (go done))
-            (if (null (cdr pairs)) (go done))
-            (setq key (car pairs))
-            (setq value (cadr pairs))
-            (setq binding (assoc key (gethash :__initargs__ class)))
-            (if (null binding) (go next))
-            (setq slot (cdr binding))
-            (if (or (null added-slots)
-                    (eq added-slots t)
-                    (member slot added-slots))
-                (setf (gethash slot instance) value))
-          next
-            (setq pairs (cddr pairs))
-            (go start)
-          done)
+       (let ((class (gethash :__class__ instance)))
+         (loop for rest on initargs by #'cddr
+               while (cdr rest)
+               do (let* ((key (car rest))
+                         (value (cadr rest))
+                         (binding (assoc key (gethash :__initargs__ class))))
+                    (when binding
+                      (let ((slot (cdr binding)))
+                        (when (or (null added-slots)
+                                  (eq added-slots t)
+                                  (member slot added-slots))
+                          (setf (gethash slot instance) value))))))
          instance))"
 
      "(defgeneric compute-applicable-methods (gf args))"
@@ -201,21 +190,18 @@
          ((null (cdddr args)) (format *query-io* format-string (car args) (cadr args) (caddr args)))
          (t (write-string format-string *query-io*))))"
     "(defun %query-answer-loop (yes-answers no-answers invalid-help format-string args)
-       (block done
-         (tagbody
-          retry
-             (when format-string
-               (%query-write-prompt format-string args)
-               (finish-output *query-io*))
-            (let ((answer (%query-answer-normalize (read-line *query-io* nil nil))))
-              (cond
-                ((null answer) (return-from done nil))
-                ((%query-answer-in-list-p answer yes-answers) (return-from done t))
-                ((%query-answer-in-list-p answer no-answers) (return-from done nil))
-                (t
-                 (format *query-io* \"~&Please answer ~A.~%\" invalid-help)
-                 (finish-output *query-io*)
-                 (go retry)))))))"
+       (loop
+         (when format-string
+           (%query-write-prompt format-string args)
+           (finish-output *query-io*))
+         (let ((answer (%query-answer-normalize (read-line *query-io* nil nil))))
+           (cond
+             ((null answer) (return nil))
+             ((%query-answer-in-list-p answer yes-answers) (return t))
+             ((%query-answer-in-list-p answer no-answers) (return nil))
+             (t
+              (format *query-io* \"~&Please answer ~A.~%\" invalid-help)
+              (finish-output *query-io*))))))"
     "(defun y-or-n-p (&optional format-string &rest args)
        (%query-answer-loop '(\"y\" \"yes\") '(\"n\" \"no\") \"y or n\" format-string args))"
     "(defun yes-or-no-p (&optional format-string &rest args)

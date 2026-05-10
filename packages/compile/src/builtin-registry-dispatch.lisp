@@ -60,15 +60,7 @@
   "Alist of (convention min-args . max-args) for argument count validation.")
 
 (defun %lookup-convention-arity (conv)
-  (let ((xs *convention-arity*))
-    (tagbody
-     scan
-       (if (null xs) (return-from %lookup-convention-arity nil))
-       (let ((entry (car xs)))
-         (if (eq conv (car entry))
-             (return-from %lookup-convention-arity (cdr entry))))
-       (setq xs (cdr xs))
-       (go scan))))
+  (cdr (assoc conv *convention-arity* :test #'eq)))
 
 (defun emit-registered-builtin (entry args result-reg ctx)
   "Dispatch to the correct emitter for ENTRY's calling convention.

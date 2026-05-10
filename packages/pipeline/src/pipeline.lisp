@@ -20,70 +20,51 @@
             (progn (warn "Type check warning: ~A" e) nil))))))
 
 
-(defun %pipeline-string-member-p (item strings)
-  (if (consp strings)
-      (if (string= item (car strings))
-          t
-          (%pipeline-string-member-p item (cdr strings)))
-      nil))
 (defun %definition-form-p (form)
   "Return T when FORM is a definition or declaration form (not CPS-batchable)."
-  (if (consp form)
-      (if (symbolp (car form))
-          (%pipeline-string-member-p
-           (string-upcase (symbol-name (car form)))
-           *definition-and-declaration-form-heads*)
-          nil)
-      nil))
+  (and (consp form)
+       (symbolp (car form))
+       (member (string-upcase (symbol-name (car form)))
+               *definition-and-declaration-form-heads*
+               :test #'string=)
+       t))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS rewriting for top-level form batches
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(defun %pipeline-in-package-form-p (form)
-  (if (consp form)
-      (eq (car form) 'in-package)
-      nil))
-
 (defun %pipeline-cps-safe-ast-p (target ast)
-  (if (eq target :vm)
-      (%cps-vm-compile-safe-ast-p ast)
-      (if (eq target :wasm)
-          nil
-          (%cps-native-compile-safe-ast-p ast))))
+  (cond
+    ((eq target :vm)   (%cps-vm-compile-safe-ast-p ast))
+    ((eq target :wasm) nil)
+    (t                 (%cps-native-compile-safe-ast-p ast))))
 
 (defun %maybe-cps-toplevel-form (form opts)
-  (if (%pipeline-in-package-form-p form)
+  (if (and (consp form) (eq (car form) 'in-package))
       form
-      (let* ((ast (optimize-ast (%prepare-ast form)))
-             (cps-safe-p (%pipeline-cps-safe-ast-p (pipeline-opts-target opts) ast)))
-        (if cps-safe-p
+      (let* ((ast      (optimize-ast (%prepare-ast form)))
+             (safe-p   (%pipeline-cps-safe-ast-p (pipeline-opts-target opts) ast)))
+        (if safe-p
             (%cps-identity-entry-form (cps-transform-ast* ast))
             form))))
 
 (defun %maybe-cps-toplevel-forms (forms opts)
   "Rewrite safe top-level expression FORMS into CPS entry forms when possible.
 Definition and control-effect forms stay on the direct path."
-  (if (consp forms)
-      (cons (%maybe-cps-toplevel-form (car forms) opts)
-            (%maybe-cps-toplevel-forms (cdr forms) opts))
-      nil))
+  (mapcar (lambda (f) (%maybe-cps-toplevel-form f opts)) forms))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Internal compilation stages — all accept pipeline-opts
 ;;; ─────────────────────────────────────────────────────────────────────────
 
 (defun %pipeline-expression-cps-safe-p (ast opts)
-  (if *compile-expression-cps-recursion-guard*
-      nil
-      (let ((target (pipeline-opts-target opts)))
-        (if (eq target :vm)
-            (if *enable-cps-vm-primary-path*
-                (%cps-vm-compile-safe-ast-p ast)
-                nil)
-            (if (eq target :wasm)
-                nil
-                (%cps-native-compile-safe-ast-p ast))))))
+  (and (not *compile-expression-cps-recursion-guard*)
+       (let ((target (pipeline-opts-target opts)))
+         (cond
+           ((eq target :vm)   (and *enable-cps-vm-primary-path*
+                                   (%cps-vm-compile-safe-ast-p ast)))
+           ((eq target :wasm) nil)
+           (t                 (%cps-native-compile-safe-ast-p ast))))))
 
 (defun %maybe-compile-expression-via-cps (ast opts)
   "Return (values cps cps-result) when the CPS fast path is safe, else (values nil nil)."
@@ -96,27 +77,15 @@ Definition and control-effect forms stay on the direct path."
                            (%opts->compile-kwargs opts)))))
         (values nil nil))))
 
-(defun %pipeline-reverse-into (items acc)
-  (if (consp items)
-      (%pipeline-reverse-into (cdr items) (cons (car items) acc))
-      acc))
-
-(defun %pipeline-append-one (items last-item)
-  (if (consp items)
-      (cons (car items) (%pipeline-append-one (cdr items) last-item))
-      (cons last-item nil)))
-
 (defun %pipeline-runtime-instructions (target full-instrs optimized-instrs)
-  (if (eq target :vm)
+  (if (or (eq target :vm) (eq target :wasm))
       full-instrs
-      (if (eq target :wasm)
-          full-instrs
-          (if optimized-instrs optimized-instrs full-instrs))))
+      (or optimized-instrs full-instrs)))
 
 (defun %make-direct-compilation-result (ctx result-reg inferred-type cps ast opts)
   "Build the normal direct-path compilation result from CTX and RESULT-REG."
-  (let* ((instructions (%pipeline-reverse-into (ctx-instructions ctx) nil))
-         (full-instrs (%pipeline-append-one instructions (make-vm-halt :reg result-reg))))
+  (let* ((instructions (nreverse (ctx-instructions ctx)))
+         (full-instrs  (append instructions (list (make-vm-halt :reg result-reg)))))
     (multiple-value-bind (optimized-instrs leaf-p)
         (apply #'optimize-instructions full-instrs (%opts->optimize-kwargs opts))
       (if *repl-capture-label-counter*
@@ -156,11 +125,10 @@ Definition and control-effect forms stay on the direct path."
   "Parse SOURCE according to LANGUAGE, returning a list of AST nodes or s-expressions.
 :LISP returns s-expressions (compile-toplevel-forms handles lowering).
 :PHP calls parse-php-source which returns AST nodes directly."
-  (if (eq language :lisp)
-      (parse-all-forms source)
-      (if (eq language :php)
-          (parse-php-source source)
-          (error "Unknown language: ~S" language))))
+  (cond
+    ((eq language :lisp) (parse-all-forms source))
+    ((eq language :php)  (parse-php-source source))
+    (t (error "Unknown language: ~S" language))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Public compilation API

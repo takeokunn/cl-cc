@@ -38,3 +38,10 @@
   (let ((result (our-macroexpand-1 form)))
     (assert-eq 'cl-cc:our-defmacro (car result))
     (assert-eq expected-name (cadr result))))
+
+(deftest define-modify-macro-rest-lambda-list
+  "DEFINE-MODIFY-MACRO with &rest param includes rest var in generated args form."
+  (let* ((result (our-macroexpand-1 '(define-modify-macro my-append (&rest items) append)))
+         (params (caddr result)))
+    (assert-eq 'cl-cc:our-defmacro (car result))
+    (assert-true (member '&rest params))))

@@ -53,7 +53,7 @@ The actual solving is done by solve-constraints."
              (cl-cc/ast:ast-if
               (let* ((then-ty (gen (cl-cc/ast:ast-if-then node) env))
                      (else-ty (gen (cl-cc/ast:ast-if-else node) env))
-                     (result  (fresh-type-var "if")))
+                     (result  (fresh-type-var :name "if")))
                 (gen (cl-cc/ast:ast-if-cond node) env)
                 (emit= result then-ty)
                 (emit= result else-ty)
@@ -76,7 +76,7 @@ The actual solving is done by solve-constraints."
               (let* ((params (cl-cc/ast:ast-lambda-params node))
                      (p-types (mapcar (lambda (p)
                                         (declare (ignore p))
-                                        (fresh-type-var "p"))
+                                        (fresh-type-var :name "p"))
                                       params))
                      (body-env (type-env-extend*
                                 (mapcar (lambda (name ty)
@@ -96,7 +96,7 @@ The actual solving is done by solve-constraints."
               (let* ((fn-ty  (gen (cl-cc/ast:ast-call-func node) env))
                      (arg-tys (mapcar (lambda (a) (gen a env))
                                       (cl-cc/ast:ast-call-args node)))
-                     (ret-ty (fresh-type-var "r")))
+                     (ret-ty (fresh-type-var :name "r")))
                 (emit= fn-ty (make-type-arrow arg-tys ret-ty))
                 ret-ty))
 
@@ -113,7 +113,7 @@ The actual solving is done by solve-constraints."
               (let* ((params (cl-cc/ast:ast-defun-params node))
                      (p-types (mapcar (lambda (p)
                                         (declare (ignore p))
-                                        (fresh-type-var "p"))
+                                        (fresh-type-var :name "p"))
                                       params))
                      (body-env (type-env-extend*
                                 (mapcar (lambda (name ty)
@@ -138,7 +138,7 @@ The actual solving is done by solve-constraints."
                     (emit= val-ty (instantiate scheme))))
                 val-ty))
 
-             (t (fresh-type-var "?")))))
+             (t (fresh-type-var :name "?")))))
 
       (let ((ty (gen ast env)))
         (values ty (nreverse constraints))))))

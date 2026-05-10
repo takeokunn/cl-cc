@@ -29,11 +29,11 @@
 ;;; ── REMF ─────────────────────────────────────────────────────────────────────
 
 (deftest remf-expansion
-  "REMF: outer LET containing a TAGBODY loop."
+  "REMF: outer LET containing a LOOP."
   (let* ((result (our-macroexpand-1 '(remf plist :key)))
          (body   (cddr result)))
     (assert-eq 'let (car result))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'tagbody))) body))))
+    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'loop))) body))))
 
 ;;; ── %PLIST-PUT ───────────────────────────────────────────────────────────────
 

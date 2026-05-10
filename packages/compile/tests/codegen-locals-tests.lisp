@@ -73,6 +73,29 @@
       (declare (ignore tail-values))
       (assert-true (keywordp reg)))))
 
+;;; ─── emit-assembly ───────────────────────────────────────────────────────────
+
+(deftest emit-assembly-vm-target-returns-empty-string
+  ":vm target bypasses code generation and returns the empty string."
+  (let ((program (cl-cc:make-vm-program :instructions nil :result-register :R0)))
+    (assert-string= "" (cl-cc/compile:emit-assembly program :target :vm))))
+
+(deftest emit-assembly-x86-64-produces-bootstrap-header
+  "x86-64 assembly output begins with the CL-CC bootstrap header."
+  (let* ((program (cl-cc:make-vm-program :instructions nil :result-register :R0))
+         (asm     (cl-cc/compile:emit-assembly program :target :x86_64)))
+    (assert-true (stringp asm))
+    (assert-true (search "; CL-CC bootstrap assembly" asm))
+    (assert-true (search "clcc_entry:" asm))))
+
+(deftest emit-assembly-aarch64-produces-bootstrap-header
+  "aarch64 assembly output begins with the CL-CC bootstrap header."
+  (let* ((program (cl-cc:make-vm-program :instructions nil :result-register :R0))
+         (asm     (cl-cc/compile:emit-assembly program :target :aarch64)))
+    (assert-true (stringp asm))
+    (assert-true (search "; CL-CC bootstrap assembly" asm))
+    (assert-true (search "clcc_entry:" asm))))
+
 ;;; ─── type-check-ast ──────────────────────────────────────────────────────────
 
 (deftest type-check-ast-integer-literal-returns-integer-type

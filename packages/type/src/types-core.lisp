@@ -39,7 +39,7 @@ variable itself: LOWER-BOUND <: this-var <: UPPER-BOUND."
   (upper-bound nil)
   (lower-bound nil))
 
-(defun fresh-type-var (&optional name &key upper-bound lower-bound)
+(defun fresh-type-var (&key (name nil) upper-bound lower-bound)
   "Return a fresh unification variable with a unique ID.
 UPPER-BOUND and LOWER-BOUND are optional type-node bounds used by bounded
 polymorphism."
