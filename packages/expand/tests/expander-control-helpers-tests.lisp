@@ -30,12 +30,12 @@
 
 (deftest handler-case-without-no-error-passes-through
   "HANDLER-CASE without :NO-ERROR expands to HANDLER-CASE with expanded sub-forms."
-  (let ((result (our-macroexpand-1 '(handler-case expr (error (e) e)))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(handler-case expr (error (e) e)))))
     (assert-eq 'handler-case (car result))))
 
 (deftest handler-case-no-error-wraps-in-block
   "HANDLER-CASE with :NO-ERROR lowers to a BLOCK/LET structure."
-  (let* ((result (our-macroexpand-1
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all
                   '(handler-case (ok-fn)
                      (error (e) :bad)
                      (:no-error (v) v))))
@@ -44,12 +44,12 @@
 
 (deftest handler-case-no-error-error-clauses-return-from-block
   "HANDLER-CASE :NO-ERROR lowering rewrites error clauses to RETURN-FROM."
-  (let* ((result (our-macroexpand-1
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all
                   '(handler-case (ok-fn)
                      (error (e) :bad)
                      (:no-error (v) v))))
          (inner-let   (third result))
-         (handler-form (car (second (second inner-let))))
+         (handler-form (second (first (second inner-let))))
          (error-clause (third handler-form)))
     (assert-eq 'handler-case (car handler-form))
     (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'return-from)))
@@ -59,7 +59,7 @@
 
 (deftest let-form-with-destructuring-binding-wraps-in-destructuring-bind
   "LET with a destructuring binding (cons name) expands using DESTRUCTURING-BIND."
-  (let* ((result (our-macroexpand-1 '(let (((a b) some-pair) (x 1)) body)))
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all '(let (((a b) some-pair) (x 1)) body)))
          (has-db (labels ((scan (form)
                             (and (consp form)
                                  (or (eq (car form) 'destructuring-bind)
@@ -69,5 +69,5 @@
 
 (deftest let-form-with-empty-bindings-becomes-progn
   "LET with empty binding list expands to PROGN wrapping the body."
-  (let ((result (our-macroexpand-1 '(let () body1 body2))))
+  (let ((result (cl-cc/expand:compiler-macroexpand-all '(let () body1 body2))))
     (assert-eq 'progn (car result))))

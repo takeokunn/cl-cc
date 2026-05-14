@@ -140,20 +140,90 @@
         `(funcall ,func))
        ((null (cdr value-forms))
         `(apply ,func (multiple-value-list ,(first value-forms))))
-       (t
-        `(apply ,func
-                (append ,@(mapcar (lambda (vf) `(multiple-value-list ,vf))
-                                  value-forms))))))))
+        (t
+         `(apply ,func
+                 (append ,@(mapcar (lambda (vf) `(multiple-value-list ,vf))
+                                   value-forms))))))))
+
+(defun %format-directive-expansion (directive args)
+  "Return expansion for one supported FORMAT DIRECTIVE."
+  (case (char-upcase directive)
+    (#\A
+     (if args
+         (values `(princ-to-string ,(car args)) (cdr args) t)
+         (values nil args nil)))
+    (#\D
+     (if args
+         (values `(let ((*print-base* 10)
+                        (*print-radix* nil))
+                    (write-to-string ,(car args)))
+                 (cdr args) t)
+         (values nil args nil)))
+    (#\%
+     (values (string #\Newline) args t))
+    (#\~
+     (values "~" args t))
+    (t
+     (values nil args nil))))
+
+(defun %parse-format-literal (control args)
+  "Parse a small compile-time FORMAT subset into string-producing forms.
+Supported directives are ~A, ~D, ~%, and ~~.  Unsupported controls return NIL
+so callers can preserve full ANSI FORMAT behavior through the runtime path."
+  (block parse
+    (let ((pieces nil)
+          (remaining args)
+          (literal-start 0)
+          (index 0)
+          (length (length control)))
+      (labels ((emit-literal (end)
+                 (when (< literal-start end)
+                   (push (subseq control literal-start end) pieces))))
+        (loop while (< index length)
+              do (if (char= (char control index) #\~)
+                     (progn
+                       (emit-literal index)
+                       (incf index)
+                       (when (>= index length)
+                         (return-from parse (values nil args nil)))
+                       (multiple-value-bind (piece new-remaining supported-p)
+                           (%format-directive-expansion (char control index) remaining)
+                         (unless supported-p
+                           (return-from parse (values nil args nil)))
+                         (push piece pieces)
+                         (setf remaining new-remaining))
+                       (incf index)
+                       (setf literal-start index))
+                     (incf index)))
+        (emit-literal length)
+        (if remaining
+            (values nil args nil)
+            (values (nreverse pieces) remaining t))))))
+
+(defun %format-literal-expansion (control args)
+  "Build a specialized string expression for literal FORMAT CONTROL, or NIL."
+  (multiple-value-bind (pieces _remaining supported-p)
+      (%parse-format-literal control args)
+    (declare (ignore _remaining))
+    (when supported-p
+      (cond
+        ((null pieces) "")
+        ((null (cdr pieces)) (car pieces))
+        (t `(concatenate 'string ,@pieces))))))
 
 ;; format nil — stabilize string-returning format via explicit string stream.
 (define-expander-for format (form)
   (let ((dest (second form)))
     (cond
       ((null dest)
-       (compiler-macroexpand-all
-        `(let ((s (make-string-output-stream)))
-           (format s ,(third form) ,@(cdddr form))
-           (get-output-stream-string s))))
+       (let ((literal-expansion (and (stringp (third form))
+                                     (%format-literal-expansion (third form) (cdddr form)))))
+         (if literal-expansion
+             (compiler-macroexpand-all literal-expansion)
+             (compiler-macroexpand-all
+              `(let ((s (make-string-output-stream)))
+                 (format s ,(third form) ,@(cdddr form))
+                 (get-output-stream-string s))))))
       ((eq dest t)
        (compiler-macroexpand-all
         `(progn

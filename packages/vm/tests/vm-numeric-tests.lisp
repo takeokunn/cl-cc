@@ -68,6 +68,41 @@
     (exec1 (funcall ctor :dst 0 :src 1) s)
     (assert-= 3 (length (cl-cc:vm-values-list s)))))
 
+(deftest vm-bignum-digit-vector-splits-little-endian-digits
+  "vm-bignum-digit-vector exposes a host-independent little-endian digit representation."
+  (let ((base cl-cc/vm::+vm-bignum-digit-base+))
+    (multiple-value-bind (digits sign)
+        (cl-cc/vm::vm-bignum-digit-vector (+ base 42))
+      (assert-= 1 sign)
+      (assert-= 2 (length digits))
+      (assert-= 42 (aref digits 0))
+      (assert-= 1 (aref digits 1)))))
+
+(deftest vm-bignum-schoolbook-multiply-digits-computes-product-digits
+  "vm-bignum-schoolbook-multiply-digits multiplies little-endian digit vectors."
+  (let ((digits (cl-cc/vm::vm-bignum-schoolbook-multiply-digits
+                 #(3 2 1) #(6 5 4) 10)))
+    (assert-equal '(8 8 0 6 5) (coerce digits 'list))))
+
+(deftest-each vm-bignum-multiplication-strategy-selects-thresholded-plan
+  "vm-bignum-multiplication-strategy distinguishes fixnum, schoolbook, and Karatsuba plans."
+  :cases (("fixnum" 21 2 4 :fixnum)
+          ("schoolbook" most-positive-fixnum 2 64 :schoolbook)
+          ("karatsuba" (expt cl-cc/vm::+vm-bignum-digit-base+ 5)
+           (expt cl-cc/vm::+vm-bignum-digit-base+ 5) 4 :karatsuba))
+  (lhs rhs threshold expected)
+  (assert-eq expected
+             (cl-cc/vm::vm-bignum-multiplication-strategy
+              lhs rhs :threshold threshold)))
+
+(deftest vm-bignum-multiply-plan-records-digits-sign-and-strategy
+  "vm-bignum-multiply-plan records operand digit vectors, sign, and selected strategy."
+  (let ((plan (cl-cc/vm::vm-bignum-multiply-plan (- most-positive-fixnum) 2 :threshold 64)))
+    (assert-eq :schoolbook (getf plan :strategy))
+    (assert-= -1 (getf plan :sign))
+    (assert-true (vectorp (getf plan :lhs-digits)))
+    (assert-true (vectorp (getf plan :rhs-digits)))))
+
 (deftest-each vm-float-rounding
   "Float rounding operations store quotient and set values-list."
   :cases (("ffloor"     #'cl-cc:make-vm-ffloor)
@@ -114,3 +149,23 @@
 (deftest vm-conjugate
   "vm-conjugate of #C(3 4) is #C(3 -4)."
   (assert-equal #C(3 -4) (%vm-num-unary #'cl-cc:make-vm-conjugate #C(3 4))))
+
+(deftest vm-complex-unbox-plan-splits-local-complex
+  "vm-complex-unbox-plan exposes a split real/imag representation for local complex values."
+  (let ((plan (cl-cc/vm::vm-complex-unbox-plan #C(3 4) :local-p t)))
+    (assert-eq :split-registers (getf plan :representation))
+    (assert-= 3 (getf plan :real))
+    (assert-= 4 (getf plan :imag))))
+
+(deftest vm-complex-unbox-plan-keeps-escaping-complex-boxed
+  "vm-complex-unbox-plan falls back to boxed representation when the value escapes."
+  (let ((plan (cl-cc/vm::vm-complex-unbox-plan #C(3 4) :local-p nil)))
+    (assert-eq :boxed (getf plan :representation))
+    (assert-equal #C(3 4) (getf plan :value))))
+
+(deftest vm-complex-unboxed-add-plan-adds-components
+  "vm-complex-unboxed-add-plan rewrites local complex addition into component addition."
+  (let ((plan (cl-cc/vm::vm-complex-unboxed-add-plan #C(1 2) #C(3 4) :local-p t)))
+    (assert-eq :split-registers (getf plan :representation))
+    (assert-= 4 (getf plan :real))
+    (assert-= 6 (getf plan :imag))))

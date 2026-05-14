@@ -25,9 +25,9 @@
 
 ;;; ─── *phys-reg-to-asm-string* table ─────────────────────────────────────────
 
-(deftest x86-phys-reg-table-has-14-entries
-  "Physical register table maps all 14 x86-64 GP registers."
-  (assert-equal 14 (length cl-cc/codegen::*phys-reg-to-asm-string*)))
+(deftest x86-phys-reg-table-has-15-entries
+  "Physical register table maps all 15 allocatable x86-64 GP registers including RBP."
+  (assert-equal 15 (length cl-cc/codegen::*phys-reg-to-asm-string*)))
 
 (deftest-each x86-phys-reg-table-entries
   "Physical register table contains correct mappings."
@@ -35,6 +35,7 @@
           ("rcx" :rcx "rcx")
           ("rdx" :rdx "rdx")
           ("rbx" :rbx "rbx")
+          ("rbp" :rbp "rbp")
           ("rsi" :rsi "rsi")
           ("rdi" :rdi "rdi")
           ("r8"  :r8  "r8")

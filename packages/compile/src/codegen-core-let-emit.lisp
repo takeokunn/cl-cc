@@ -241,15 +241,18 @@ captured lambdas/local forms."
 (defun %let-noescape-array-size (name expr declarations mutated captured body-forms)
   "Return the array size integer when the binding can skip heap allocation, else NIL."
   (let ((dynamic-extent-p (%let-dynamic-extent-declared-p name declarations)))
-    (and (%ast-make-array-int-call-p expr)
+    (and (or (%ast-make-array-noescape-call-p expr)
+             (and (typep expr 'ast-the)
+                  (%ast-make-array-noescape-call-p (ast-the-value expr))))
          (not (%member-eq-p name mutated))
          (or dynamic-extent-p
              (not (%member-eq-p name captured)))
-         (let ((size (ast-int-value (first (ast-call-args expr)))))
-            (and (if dynamic-extent-p
-                    (%let-dynamic-extent-array-direct-access-p body-forms name)
-                    (%array-binding-static-access-p body-forms name size))
-                size)))))
+         (let* ((call-node (if (typep expr 'ast-the) (ast-the-value expr) expr))
+                (size (ast-int-value (first (ast-call-args call-node)))))
+             (and (if dynamic-extent-p
+                     (%let-dynamic-extent-array-direct-access-p body-forms name)
+                     (%array-binding-static-access-p body-forms name size))
+                 size)))))
 
 (defun %let-noescape-cons-p (name expr declarations mutated captured body-forms)
   "T when the cons binding never escapes (only CAR/CDR consumers)."

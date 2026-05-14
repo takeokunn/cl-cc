@@ -113,7 +113,7 @@ EXPANDER may be either a host function or a descriptor consumed by
 
 (defun %nest-let-bindings (bindings body)
   "Build nested LET forms from BINDINGS ending in BODY forms."
-  (reduce (lambda (inner binding) (list 'let (list binding) inner))
+  (reduce (lambda (binding inner) (list 'let (list binding) inner))
           bindings
           :from-end t
           :initial-value (cons 'locally body)))

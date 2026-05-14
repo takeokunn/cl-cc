@@ -61,6 +61,96 @@
           do (setf (gethash (vm-name inst) map) i))
     map))
 
+(defun regalloc-collect-linear-functions (instructions)
+  "Collect linear function bodies from INSTRUCTIONS.
+
+Returns an EQUAL hash-table label -> list-of-instructions (excluding vm-label).
+Collection starts at each vm-label and ends before the next vm-label."
+  (let ((table (make-hash-table :test #'equal))
+        (current-label nil)
+        (current-body nil))
+    (labels ((flush-current ()
+               (when current-label
+                 (setf (gethash current-label table) (nreverse current-body)))))
+      (dolist (inst instructions)
+        (if (typep inst 'vm-label)
+            (progn
+              (flush-current)
+              (setf current-label (vm-name inst)
+                    current-body nil))
+            (when current-label
+              (push inst current-body))))
+      (flush-current))
+    table))
+
+(defun regalloc-function-leaf-p (body)
+  "Return T when BODY has no direct or tail calls."
+  (not (some (lambda (inst) (typep inst '(or vm-call vm-tail-call vm-apply))) body)))
+
+(defun regalloc-build-direct-call-graph (instructions)
+  "Build conservative label->callees graph from linearized instructions.
+
+Tracks vm-func-ref into registers and resolves vm-call/vm-tail-call targets when
+the callee register has a known direct label in the same body."
+  (let* ((bodies (regalloc-collect-linear-functions instructions))
+         (graph (make-hash-table :test #'equal)))
+    (maphash
+     (lambda (label body)
+       (let ((reg->label (make-hash-table :test #'eq))
+             (callees nil))
+         (dolist (inst body)
+           (typecase inst
+             (vm-func-ref
+              (setf (gethash (vm-dst inst) reg->label) (vm-label-name inst)))
+             (vm-move
+              (multiple-value-bind (target found-p)
+                  (gethash (vm-src inst) reg->label)
+                (if found-p
+                    (setf (gethash (vm-dst inst) reg->label) target)
+                    (remhash (vm-dst inst) reg->label))))
+             ((or vm-call vm-tail-call)
+              (multiple-value-bind (target found-p)
+                  (gethash (vm-func-reg inst) reg->label)
+                (when (and found-p target)
+                  (pushnew target callees :test #'equal)))
+              (let ((dst (opt-inst-dst inst)))
+                (when dst (remhash dst reg->label))))
+             (t
+              (let ((dst (opt-inst-dst inst)))
+                (when dst (remhash dst reg->label))))))
+         (setf (gethash label graph) (nreverse callees))))
+     bodies)
+    graph))
+
+(defun regalloc-compute-interprocedural-hints (instructions)
+  "Compute conservative per-function interprocedural register-allocation hints.
+
+Returns EQUAL hash-table label -> plist with:
+  :leaf-p              function has no direct calls
+  :leaf-callee-chain-p all direct callees are leaf functions
+
+This is a planning oracle for FR-252 and does not mutate allocation policy yet."
+  (let* ((bodies (regalloc-collect-linear-functions instructions))
+         (graph (regalloc-build-direct-call-graph instructions))
+         (hints (make-hash-table :test #'equal))
+         (leafs (make-hash-table :test #'equal)))
+    (maphash (lambda (label body)
+               (setf (gethash label leafs) (regalloc-function-leaf-p body)))
+             bodies)
+    (maphash
+     (lambda (label callees)
+       (let ((leaf-p (gethash label leafs))
+             (leaf-callee-chain-p t))
+         (dolist (callee callees)
+           (unless (gethash callee leafs)
+             (setf leaf-callee-chain-p nil)
+             (return)))
+         (setf (gethash label hints)
+               (list :leaf-p leaf-p
+                     :leaf-callee-chain-p leaf-callee-chain-p))))
+     graph)
+    hints))
+
 (defun compute-live-intervals (instructions &optional float-vregs)
   "Compute live intervals for all virtual registers.
    Returns a list of live-interval objects sorted by start point."
@@ -145,4 +235,3 @@
                   (push interval result))
                 intervals)
       (sort result #'< :key #'interval-start))))
-

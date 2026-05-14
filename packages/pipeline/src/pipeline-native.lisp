@@ -40,11 +40,18 @@ without hanging forever on platform utility calls like chmod."
   #P".cache/cl-cc/native/"
   "Directory for cached native build outputs.")
 
-(defun %compile-cache-key (source arch language)
-  (format nil "~A-~A-~A"
+(defun %native-cache-relevant-opts (opts)
+  "Return the native compile options that can change cached artifact bytes."
+  (list :pass-pipeline (getf opts :pass-pipeline)
+        :inline-threshold-scale (getf opts :inline-threshold-scale)
+        :speed (getf opts :speed)))
+
+(defun %compile-cache-key (source arch language &optional opts)
+  (format nil "~A-~A-~A-~A"
           (sxhash source)
           arch
-          language))
+          language
+          (sxhash (%native-cache-relevant-opts opts))))
 
 (defun %compile-cache-path (key output-file)
   (merge-pathnames
@@ -66,22 +73,25 @@ without hanging forever on platform utility calls like chmod."
   "Return FORMS with in-package declarations removed, mirroring compile-toplevel-forms."
   (remove-if (lambda (f) (and (consp f) (eq (car f) 'in-package))) forms))
 
-;;; Native compilation options — bundle 9 recurring keyword params into a plist.
+;;; Native compilation options — bundle 10 recurring keyword params into a plist.
 ;;; Internal functions accept (target opts) and apply opts directly as &key args.
 
-(defun %make-native-opts (&key pass-pipeline print-pass-timings timing-stream
-                               print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                               print-pass-stats stats-stream trace-json-stream)
+(defun %make-native-opts (&key pass-pipeline speed (inline-threshold-scale 1)
+                                print-pass-timings timing-stream
+                                print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                print-pass-stats stats-stream trace-json-stream)
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
-  (list :pass-pipeline       pass-pipeline
-        :print-pass-timings  print-pass-timings
-        :timing-stream       timing-stream
-        :print-opt-remarks   print-opt-remarks
-        :opt-remarks-stream  opt-remarks-stream
-        :opt-remarks-mode    opt-remarks-mode
-        :print-pass-stats    print-pass-stats
-        :stats-stream        stats-stream
-        :trace-json-stream   trace-json-stream))
+  (append (list :pass-pipeline pass-pipeline)
+          (if speed (list :speed speed) nil)
+          (list :inline-threshold-scale inline-threshold-scale
+                :print-pass-timings  print-pass-timings
+                :timing-stream       timing-stream
+                :print-opt-remarks   print-opt-remarks
+                :opt-remarks-stream  opt-remarks-stream
+                :opt-remarks-mode    opt-remarks-mode
+                :print-pass-stats    print-pass-stats
+                :stats-stream        stats-stream
+                :trace-json-stream   trace-json-stream)))
 
 (defun %maybe-compile-native-via-cps (form target opts &key type-check (safety 1))
   "Try compiling FORM through a narrow CPS-backed native path.
@@ -148,7 +158,8 @@ Returns two values: the compilation result and whether the CPS-native path was u
           (error "Unknown native architecture: ~S" arch))))
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp)
-                                  pass-pipeline print-pass-timings timing-stream
+                                  pass-pipeline speed (inline-threshold-scale 1)
+                                  print-pass-timings timing-stream
                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                   print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE to a native Mach-O executable.
@@ -159,9 +170,11 @@ LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
   (let* ((native-target (%native-target-for-arch arch))
-         (opts (%make-native-opts :pass-pipeline pass-pipeline
-                                  :print-pass-timings print-pass-timings
-                                  :timing-stream timing-stream
+          (opts (%make-native-opts :pass-pipeline pass-pipeline
+                                   :speed speed
+                                   :inline-threshold-scale inline-threshold-scale
+                                   :print-pass-timings print-pass-timings
+                                   :timing-stream timing-stream
                                   :print-opt-remarks print-opt-remarks
                                   :opt-remarks-stream opt-remarks-stream
                                   :opt-remarks-mode opt-remarks-mode
@@ -235,7 +248,8 @@ Returns the output file path on success."
       (%compile-native-lisp-forms source target opts)))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil)
-                                          pass-pipeline print-pass-timings timing-stream
+                                          pass-pipeline speed (inline-threshold-scale 1)
+                                          print-pass-timings timing-stream
                                           print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                           print-pass-stats stats-stream trace-json-stream)
   "Compile a CL-CC source file to a native Mach-O executable.
@@ -245,22 +259,19 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
   (let* ((effective-language (%native-file-language input-file language))
          (output (%native-output-file input-file output-file))
          (source (%native-read-file-source input-file effective-language))
-         (opts (%make-native-opts :pass-pipeline pass-pipeline
-                                  :print-pass-timings print-pass-timings
-                                  :timing-stream timing-stream
-                                  :print-opt-remarks print-opt-remarks
-                                  :opt-remarks-stream opt-remarks-stream
-                                  :opt-remarks-mode opt-remarks-mode
-                                  :print-pass-stats print-pass-stats
-                                  :stats-stream stats-stream
-                                  :trace-json-stream trace-json-stream))
-         (cache-key (%compile-cache-key source arch effective-language))
-         (cache-path (%compile-cache-path cache-key output))
-         (native-target (%native-target-for-arch arch))
-         (result (%compile-native-file-source source native-target effective-language opts))
-         (program (compilation-result-program result))
-         (code-bytes (%native-code-bytes-for-arch arch program))
-         (builder (cl-cc/binary:make-mach-o-builder arch)))
+          (opts (%make-native-opts :pass-pipeline pass-pipeline
+                                   :speed speed
+                                   :inline-threshold-scale inline-threshold-scale
+                                   :print-pass-timings print-pass-timings
+                                   :timing-stream timing-stream
+                                   :print-opt-remarks print-opt-remarks
+                                   :opt-remarks-stream opt-remarks-stream
+                                   :opt-remarks-mode opt-remarks-mode
+                                   :print-pass-stats print-pass-stats
+                                   :stats-stream stats-stream
+                                   :trace-json-stream trace-json-stream))
+          (cache-key (%compile-cache-key source arch effective-language opts))
+         (cache-path (%compile-cache-path cache-key output)))
     (ensure-directories-exist cache-path)
     (if (probe-file cache-path)
         (progn
@@ -268,7 +279,11 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
           (%copy-file-bytes cache-path output)
           (%run-short-native-command (list "chmod" "+x" (namestring output)))
           output)
-        (progn
+        (let* ((native-target (%native-target-for-arch arch))
+               (result (%compile-native-file-source source native-target effective-language opts))
+               (program (compilation-result-program result))
+               (code-bytes (%native-code-bytes-for-arch arch program))
+               (builder (cl-cc/binary:make-mach-o-builder arch)))
           (%write-native-binary builder code-bytes output)
           (%copy-file-bytes output cache-path)
           output))))

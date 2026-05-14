@@ -47,17 +47,18 @@
   (let* ((min-key (caar pairs))
          (max-key (car (car (last pairs))))
          (span    (1+ (- max-key min-key))))
-    `(let* ((idx (- ,key-var ',min-key))
-            (dispatch (vector
-                       ,@(loop for key from min-key to max-key
-                               for pair = (assoc key pairs)
-                               collect (if pair
-                                           `(lambda () (progn ,@(cdr pair)))
-                                           `(lambda () ,default-form))))))
-       (if (and (integerp ,key-var)
-                (<= 0 idx)
-                (< idx ,span))
-           (funcall (svref dispatch idx))
+    `(let ((dispatch (vector
+                      ,@(loop for key from min-key to max-key
+                              for pair = (assoc key pairs)
+                              collect (if pair
+                                          `(lambda () (progn ,@(cdr pair)))
+                                          `(lambda () ,default-form))))))
+       (if (integerp ,key-var)
+           (let ((idx (- ,key-var ',min-key)))
+             (if (and (<= 0 idx)
+                      (< idx ,span))
+                 (funcall (svref dispatch idx))
+                 ,default-form))
            ,default-form))))
 
 (defun %case-build-eql-chain (cases key-var default-form)
@@ -146,15 +147,126 @@ subtype of any earlier clause, it can never be reached and can be dropped."
       (destructuring-bind ((type . body) &rest rest) cases
         (if (or (eq type 'otherwise) (eq type 't))
             `(progn ,@body)
+             `(if (typep ,key-var ',type)
+                  (progn ,@body)
+                  ,(%typecase-build-typep-chain rest key-var))))))
+
+(defun %typecase-types-disjoint-p (type1 type2)
+  "Return T when TYPE1 and TYPE2 are known-disjoint.
+
+We consider two types disjoint when both subtype checks are provably false.
+Unknown relationships are treated as non-disjoint for safety."
+  (multiple-value-bind (s12 sure12) (%typecase-subtypep type1 type2)
+    (multiple-value-bind (s21 sure21) (%typecase-subtypep type2 type1)
+      (and sure12 sure21 (not s12) (not s21)))))
+
+(defun %typecase-all-disjoint-p (cases)
+  "Return T when all non-default CASES are pairwise disjoint."
+  (let* ((typed (loop for (type . body) in cases
+                      unless (or (eq type 'otherwise) (eq type 't))
+                        collect (cons type body)))
+         (n (length typed)))
+    (loop for i from 0 below n
+          always (loop for j from (1+ i) below n
+                       always (%typecase-types-disjoint-p
+                               (car (nth i typed))
+                               (car (nth j typed)))))))
+
+(defun %typecase-build-left-guard (cases key-var)
+  "Build an OR guard that checks whether KEY-VAR matches any CASE type."
+  (if (null cases)
+      nil
+      `(or ,@(mapcar (lambda (cl)
+                       `(typep ,key-var ',(car cl)))
+                     cases))))
+
+(defun %typecase-should-use-decision-tree-p (typed-clauses)
+  "Return T when TYPECASE dispatch should use a balanced decision tree.
+
+The tree is semantics-preserving even for overlapping type sets because each
+internal guard routes to the earliest half first. We enable the tree for
+larger arm counts where linear TYPEP chains become expensive."
+  (>= (length typed-clauses) 3))
+
+(defun %typecase-related-types-p (type1 type2)
+  "Return T when TYPE1/TYPE2 have a known subtype relationship."
+  (multiple-value-bind (s12 sure12) (%typecase-subtypep type1 type2)
+    (multiple-value-bind (s21 sure21) (%typecase-subtypep type2 type1)
+      (or (and sure12 s12)
+          (and sure21 s21)))))
+
+(defun %typecase-split-cross-score (cases split-index)
+  "Compute overlap score across a candidate split boundary.
+
+Lower is better: we prefer boundaries where left/right halves have fewer
+subtype/supertype relations, because those tend to reduce redundant TYPEP
+checks in upper tree levels."
+  (let ((left (subseq cases 0 split-index))
+        (right (subseq cases split-index))
+        (score 0))
+    (dolist (l left score)
+      (dolist (r right)
+        (when (%typecase-related-types-p (car l) (car r))
+          (incf score))))))
+
+(defun %typecase-choose-split-index (cases)
+  "Choose a hierarchy-aware split index while preserving arm order."
+  (let* ((n (length cases))
+         (best-index 1)
+         (best-score most-positive-fixnum)
+         (best-balance most-positive-fixnum))
+    (loop for idx from 1 below n do
+      (let* ((score (%typecase-split-cross-score cases idx))
+             (left-size idx)
+             (right-size (- n idx))
+             (balance (abs (- left-size right-size))))
+        (when (or (< score best-score)
+                  (and (= score best-score) (< balance best-balance)))
+          (setf best-score score
+                best-balance balance
+                best-index idx))))
+    best-index))
+
+(defun %typecase-build-decision-tree (cases key-var default-form)
+  "Build a balanced decision tree for ordered TYPECASE clauses.
+
+The generated tree preserves left-to-right TYPECASE semantics: each internal
+node guards the left half and only falls through to the right half when no
+left-half type matches."
+  (if (null cases)
+      default-form
+      (if (null (cdr cases))
+          (destructuring-bind (type . body) (car cases)
             `(if (typep ,key-var ',type)
                  (progn ,@body)
-                 ,(%typecase-build-typep-chain rest key-var))))))
+                 ,default-form))
+          (let* ((mid (%typecase-choose-split-index cases))
+                 (left (subseq cases 0 mid))
+                 (right (subseq cases mid))
+                 (left-guard (%typecase-build-left-guard left key-var)))
+             `(if ,left-guard
+                  ,(%typecase-build-decision-tree left key-var default-form)
+                  ,(%typecase-build-decision-tree right key-var default-form))))))
 
 (our-defmacro typecase (keyform &body cases)
   "Match KEYFORM against TYPE-CASES.
    Each case is (type body...) or (otherwise body...) or (t body...).
    Types are checked with TYPEP."
   (let* ((key-var (gensym "KEY"))
-         (pruned-cases (%prune-typecase-clauses cases)))
+         (pruned-cases (%prune-typecase-clauses cases))
+         (default-clause (find-if (lambda (cl)
+                                    (let ((type (car cl)))
+                                      (or (eq type 'otherwise) (eq type 't))))
+                                  pruned-cases))
+         (typed-clauses (remove-if (lambda (cl)
+                                     (let ((type (car cl)))
+                                       (or (eq type 'otherwise) (eq type 't))))
+                                   pruned-cases))
+         (default-form (if default-clause
+                           `(progn ,@(cdr default-clause))
+                           nil))
+         (dispatch-form (if (%typecase-should-use-decision-tree-p typed-clauses)
+                             (%typecase-build-decision-tree typed-clauses key-var default-form)
+                             (%typecase-build-typep-chain pruned-cases key-var))))
     `(let ((,key-var ,keyform))
-       ,(%typecase-build-typep-chain pruned-cases key-var))))
+       ,dispatch-form)))

@@ -2,6 +2,7 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
 ;;; Contains: emit-idiv-r11, emit-cqo, emit-idiv-sequence (IDIV with
+;;; RAX/RDX save-restore), emit-mul-high-sequence (MUL/IMUL high-half with
 ;;; RAX/RDX save-restore), emit-sal-r64-cl, emit-sar-r64-cl, emit-ror-r64-cl,
 ;;; emit-add-ri8, emit-sub-ri8, emit-and-ri8, emit-jge-short,
 ;;; emit-cmovl-rr64, emit-cmovg-rr64, emit-cmovne-rr64,
@@ -67,6 +68,40 @@
     (emit-pop-r64 +rdx+ stream)                             ; [16 +1] POP RDX
     (emit-pop-r64 +rax+ stream)))                           ; [17 +1] POP RAX
     ;; Caller moves R11 to dst afterward
+
+;;; Multiply-High via MUL / IMUL
+;;;
+;;; x86-64 one-operand MUL/IMUL use RAX and produce a full 128-bit result in
+;;; RDX:RAX. For vm-integer-mul-high-{u,s} we preserve caller-visible RAX/RDX,
+;;; route the explicit RHS through R11 scratch, and capture the high half from
+;;; RDX into R11 before restoring the saved registers. Fixed 16-byte sequence:
+;;;
+;;;   [0  +3] MOV  R11, rhs
+;;;   [3  +1] PUSH RAX
+;;;   [4  +1] PUSH RDX
+;;;   [5  +3] MOV  RAX, lhs
+;;;   [8  +3] MUL/IMUL R11       -- high half now in RDX
+;;;   [11 +3] MOV  R11, RDX
+;;;   [14 +1] POP  RDX
+;;;   [15 +1] POP  RAX
+;;;   (caller moves R11 to dst afterward, +3 bytes)
+;;;   Total: 19 bytes including the final MOV dst,R11.
+
+(defun emit-mul-high-sequence (lhs rhs signedp stream)
+  "Emit the fixed-register sequence for vm-integer-mul-high-{u,s}.
+   When SIGNEDP is non-nil, use one-operand IMUL; otherwise use MUL.
+   Caller must move R11 into the destination register afterward."
+  (let ((r11 +r11+))
+    (emit-mov-rr64 r11 rhs stream)
+    (emit-push-r64 +rax+ stream)
+    (emit-push-r64 +rdx+ stream)
+    (emit-mov-rr64 +rax+ lhs stream)
+    (if signedp
+        (emit-imul-rm64 r11 stream)
+        (emit-mul-rm64 r11 stream))
+    (emit-mov-rr64 r11 +rdx+ stream)
+    (emit-pop-r64 +rdx+ stream)
+    (emit-pop-r64 +rax+ stream)))
 
 ;;; Shift Operations
 ;;;

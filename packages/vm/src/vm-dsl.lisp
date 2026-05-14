@@ -80,7 +80,7 @@ SHAPE is one of:
   (leaf-p nil :type boolean))
 
 (defclass vm-state ()
-  ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
+   ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
    (output-stream :initarg :output-stream :reader vm-output-stream)
    (call-stack :initform nil :accessor vm-call-stack
                :documentation "Stack of (return-pc . saved-env) for function calls")
@@ -103,11 +103,22 @@ Used for resolving (funcall 'name ...) and (apply 'name ...).")
    (global-vars :initform (make-hash-table :test #'eq) :reader vm-global-vars
                 :documentation "Global variable store for defvar/defparameter.
 Values here persist across function calls (not subject to register save/restore).")
-   (symbol-plists :initform (make-hash-table :test #'eq) :reader vm-symbol-plists
-                  :documentation "Property lists for symbols: sym -> plist.
-Used for get/setf-get/remprop/symbol-plist operations.")
-   (method-call-stack :initform nil :accessor vm-method-call-stack
-                       :documentation "Parallel stack to call-stack tracking CLOS method context.
+    (symbol-plists :initform (make-hash-table :test #'eq) :reader vm-symbol-plists
+                   :documentation "User-visible symbol property storage keyed by symbol.
+Entries stay as short linear plists until they exceed the promotion threshold,
+after which they are stored in an internal hashed representation.")
+    (system-symbol-plists :initform (make-hash-table :test #'eq)
+                          :reader vm-system-symbol-plists
+                          :documentation "Dedicated VM-only system property storage keyed by symbol.
+Used for runtime/compiler metadata such as :function and :type without exposing
+those properties through user-visible symbol-plist operations.")
+    (symbol-plist-lock :initform (sb-thread:make-mutex :name "cl-cc/vm symbol plist lock")
+                       :reader vm-symbol-plist-lock
+                       :documentation "Mutex protecting atomic access to VM symbol plist tables.")
+    (symbol-plist-read-barrier :initform 0 :accessor vm-symbol-plist-read-barrier
+                               :documentation "Monotonic barrier incremented on VM symbol property writes.")
+    (method-call-stack :initform nil :accessor vm-method-call-stack
+                        :documentation "Parallel stack to call-stack tracking CLOS method context.
 Each frame is either NIL (regular call) or (gf-ht methods-list all-args) for generic dispatch.
 Used by call-next-method and next-method-p.")
    (profile-enabled-p :initform nil :accessor vm-profile-enabled-p
@@ -115,7 +126,11 @@ Used by call-next-method and next-method-p.")
    (profile-call-stack :initform nil :accessor vm-profile-call-stack
                        :documentation "Current sampled call stack as a list of function labels, leaf first.")
    (profile-samples :initform (make-hash-table :test #'equal) :accessor vm-profile-samples
-                    :documentation "Collapsed stack string -> sample count for lightweight flamegraphs."))
+                    :documentation "Collapsed stack string -> sample count for lightweight flamegraphs.")
+   (profile-bb-counts :initform (make-hash-table :test #'eql) :accessor vm-profile-bb-counts
+                      :documentation "Program-counter/basic-block hit counts collected during execution.")
+   (profile-branch-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-branch-counts
+                          :documentation "Branch edge counters keyed by (kind from-pc to-pc)."))
   (:documentation "VM execution state with registers, call stack, and heap."))
 
 ;;; VM state initialization, profiling, heap ops, and execute-instruction generic

@@ -9,8 +9,52 @@
 
 (defclass vm-hash-table-object ()
   ((table :initarg :table :reader vm-hash-table-internal
-          :documentation "The underlying Common Lisp hash table"))
+          :documentation "The underlying Common Lisp hash table")
+   (lock :initarg :lock :reader vm-hash-table-lock
+         :documentation "Per-table lock used by fallback critical section path.")
+   (htm-abort-count :initform 0 :accessor vm-hash-table-htm-abort-count
+                    :documentation "Observed HTM transaction abort count for this table."))
   (:documentation "Represents a hash table in the VM heap."))
+
+(defparameter *vm-hash-enable-lock-elision-p* t
+  "Enable lock-elision attempt for hash-table operations.")
+
+(defparameter *vm-hash-htm-supported-p* nil
+  "Whether host/runtime is considered HTM-capable for VM hash operations.")
+
+(defparameter *vm-hash-low-contention-p* t
+  "Heuristic contention flag used to gate HTM lock elision attempts.")
+
+(defparameter *vm-hash-htm-abort-threshold* 8
+  "When abort count reaches this value, HTM lock elision is disabled for that table.")
+
+(defun vm-hash-htm-eligible-p (&optional table-obj)
+  "Return T when VM hash operation should attempt HTM lock elision first."
+  (and *vm-hash-enable-lock-elision-p*
+       *vm-hash-htm-supported-p*
+       *vm-hash-low-contention-p*
+       (or (null table-obj)
+           (< (vm-hash-table-htm-abort-count table-obj)
+              *vm-hash-htm-abort-threshold*))))
+
+(defun vm-hash-with-lock-fallback (table-obj thunk)
+  "Run THUNK under lock-fallback semantics.
+
+If HTM is eligible, execute optimistically first. On any condition, increment
+abort count and retry under table lock fallback path."
+  (labels ((fallback ()
+             #+sb-thread
+             (sb-thread:with-mutex ((vm-hash-table-lock table-obj))
+               (funcall thunk))
+             #-sb-thread
+             (funcall thunk)))
+    (if (vm-hash-htm-eligible-p table-obj)
+        (handler-case
+            (funcall thunk)
+          (condition ()
+            (incf (vm-hash-table-htm-abort-count table-obj))
+            (fallback)))
+        (fallback))))
 
 ;;; Hash Table Instruction Classes
 

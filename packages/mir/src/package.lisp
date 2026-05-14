@@ -24,11 +24,15 @@
    #:mir-function #:make-mir-function #:mir-function-p
    #:mirf-name #:mirf-params #:mirf-blocks #:mirf-entry
    #:mirf-current-defs #:mirf-value-counter #:mirf-block-counter
-   #:mir-module #:make-mir-module #:mir-module-p
-   #:mirm-functions #:mirm-globals #:mirm-string-table
-   #:*mir-generic-ops*
-   ;; mir-builder.lisp
-   #:mir-new-value #:mir-new-block #:mir-make-function
+    #:mir-module #:make-mir-module #:mir-module-p
+    #:mirm-functions #:mirm-globals #:mirm-string-table
+    #:*mir-generic-ops*
+    #:*mir-effect-kind-table* #:mir-op-effect-kind #:mir-inst-effect-kind
+    #:mir-inst-pure-p #:mir-inst-dce-eligible-p
+    #:mir-operand-type #:mir-join-types #:mir-infer-inst-type
+    #:mir-propagate-inst-type #:mir-propagate-types
+    ;; mir-builder.lisp
+    #:mir-new-value #:mir-new-block #:mir-make-function
    #:mir-emit #:mir-add-pred #:mir-add-succ
    #:mir-write-var #:mir-read-var #:mir-seal-block
    ;; mir-analysis.lisp

@@ -144,6 +144,7 @@
   "*builtin-binary-custom-entries* holds 4-element list entries for custom-slot builtins."
   :cases (("nth"    'nth    'cl-cc::make-vm-nth    :index  :list)
           ("cons"   'cons   'cl-cc::make-vm-cons   :car-src :cdr-src)
+          ("hash-cons" 'cl-cc/compile::hash-cons 'cl-cc::make-vm-hash-cons :car-src :cdr-src)
           ("append" 'append 'cl-cc::make-vm-append :src1   :src2)
           ("aref"   'aref   'cl-cc::make-vm-aref   :array-reg :index-reg))
   (sym expected-ctor slot1 slot2)

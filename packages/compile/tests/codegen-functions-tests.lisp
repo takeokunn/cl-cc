@@ -48,6 +48,17 @@ test, which isn't worth the test-quality tradeoff."
     (compile-ast ast ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))
 
+(deftest codegen-labels-gensym-binding-name-compiles
+  "Labels binding lookup handles compiler-generated function names such as stdlib MAPCAR helpers."
+  (let* ((name (gensym "MAP"))
+         (ctx (make-codegen-ctx))
+         (ast (cl-cc/ast:make-ast-labels
+               :bindings (list (list name '(x) (make-ast-var :name 'x)))
+               :body (list (make-ast-call :func name
+                                           :args (list (make-ast-int :value 2)))))))
+    (compile-ast ast ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))
+
 (deftest codegen-defun-registers-global
   "Compiling defun registers the function name in global-functions."
   (let ((ctx (make-codegen-ctx)))

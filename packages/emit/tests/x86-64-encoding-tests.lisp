@@ -3,6 +3,7 @@
 ;;;; Tests for src/emit/x86-64-codegen.lisp encoding helpers:
 ;;;; rex-prefix, modrm, emit-byte, emit-dword, emit-qword,
 ;;;; emit-mov-rr64, emit-add-rr64, emit-sub-rr64, emit-imul-rr64,
+;;;; emit-mul-rm64, emit-imul-rm64,
 ;;;; emit-push-r64, emit-pop-r64, emit-ret, emit-jmp-rel32, emit-je-rel32.
 ;;;; VM emitter byte sizes → x86-64-vm-emitter-tests.lisp.
 
@@ -78,6 +79,21 @@
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
 
+(deftest x86-mov-memory-displacement-widths
+  "MOV memory operands use disp8 for small offsets and disp32 for larger RSP-relative FPE slots."
+  (let ((small-store (%x86-encoding-collect-bytes
+                      (lambda (s)
+                        (cl-cc/codegen::emit-mov-mr64 cl-cc/codegen::+rsp+ 120 cl-cc/codegen::+rax+ s))))
+        (large-store (%x86-encoding-collect-bytes
+                      (lambda (s)
+                        (cl-cc/codegen::emit-mov-mr64 cl-cc/codegen::+rsp+ 248 cl-cc/codegen::+rax+ s))))
+        (zero-rbp-load (%x86-encoding-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-mov-rm64 cl-cc/codegen::+rax+ cl-cc/codegen::+rbp+ 0 s)))))
+    (assert-equal '(#x48 #x89 #x44 #x24 #x78) small-store)
+    (assert-equal '(#x48 #x89 #x84 #x24 #xF8 #x00 #x00 #x00) large-store)
+    (assert-equal '(#x48 #x8B #x45 #x00) zero-rbp-load)))
+
 ;;; ─── emit-imul-rr64 / two-byte opcodes ──────────────────────────────────
 
 (deftest-each x86-two-byte-opcode-instructions
@@ -90,14 +106,27 @@
     (assert-equal #x0F (second bytes))
     (assert-equal opcode2 (third bytes))))
 
+(deftest x86-mul-rm64-high-encodings
+  "One-operand MUL/IMUL for multiply-high use F7 /4 and F7 /5 with R11 as the source register."
+  (let ((mul-bytes (%x86-encoding-collect-bytes
+                    (lambda (s)
+                      (cl-cc/codegen::emit-mul-rm64 cl-cc/codegen::+r11+ s))))
+        (imul-bytes (%x86-encoding-collect-bytes
+                     (lambda (s)
+                       (cl-cc/codegen::emit-imul-rm64 cl-cc/codegen::+r11+ s)))))
+    (assert-equal '(#x49 #xF7 #xE3) mul-bytes)
+    (assert-equal '(#x49 #xF7 #xEB) imul-bytes)))
+
 (deftest-each x86-xmm-instruction-encoding
   "XMM/SSE instruction encodings produce exact byte sequences."
   :cases (("movq-xmm0-r11" (lambda (s) (cl-cc/codegen::emit-movq-xmm-r64 cl-cc/codegen::+xmm0+ cl-cc/codegen::+r11+ s))
            '(#x66 #x49 #x0F #x6E #xC3))
           ("addsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-addsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
            '(#xF2 #x0F #x58 #xC1))
-          ("movsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-movsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
-           '(#xF2 #x0F #x10 #xC1)))
+           ("movsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-movsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+            '(#xF2 #x0F #x10 #xC1))
+           ("sqrtsd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-sqrtsd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+            '(#xF2 #x0F #x51 #xC1)))
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
 

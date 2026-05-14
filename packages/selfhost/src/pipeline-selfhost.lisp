@@ -69,7 +69,7 @@ When *repl-vm-state* is available, reuses it so the compiled code has
 access to all previously registered functions (essential for macro
 expansion during self-host loading)."
   (let* ((result (compile-expression form :target :vm))
-         (program (compilation-result-program result)))
+          (program (compilation-result-program result)))
     (run-compiled program :state cl-cc/compile:*repl-vm-state*)))
 
 ;;; ─── Self-Hosting Bootstrap ──────────────────────────────────────────────

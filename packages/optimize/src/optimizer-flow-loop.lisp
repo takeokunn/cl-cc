@@ -104,30 +104,39 @@ known at compile time before Lh. Only applies when 0 < trip <=
 ;;; ─── Conservative code sinking (FR-163 subset) ──────────────────────────
 
 (defun %opt-reg-read-count (instructions reg)
-  "Count reads of REG in INSTRUCTIONS." 
+  "Count reads of REG in INSTRUCTIONS."
   (let ((count 0))
     (dolist (inst instructions count)
       (dolist (r (opt-inst-read-regs inst))
         (when (eq r reg)
           (incf count))))))
 
+(defun %opt-code-sinking-candidate-p (inst)
+  "Return T when INST is safe for the conservative code-sinking subset.
+
+Current candidates:
+- vm-const (existing behavior)
+- vm-cons  (allocation sinking for immediate consumers)"
+  (or (typep inst 'vm-const)
+      (typep inst 'vm-cons)))
+
 (defun %opt-first-inst-after-label-index (vec label-index)
-  "Return first index after LABEL-INDEX that is not a vm-label, or NIL." 
+  "Return first index after LABEL-INDEX that is not a vm-label, or NIL."
   (loop for i from (1+ label-index) below (length vec)
         for inst = (aref vec i)
         unless (vm-label-p inst)
         do (return i)))
 
 (defun opt-pass-code-sinking (instructions)
-  "Sink selected constants into the unique use block.
+  "Sink selected pure values into the unique use block.
 
 Conservative subset:
-- source shape: (vm-const dst v) followed by (vm-jump label)
+- source shape: (vm-const|vm-cons producing dst) followed by (vm-jump label)
 - dst has exactly one read in whole function
 - target label exists and target block reads dst
 
-Transform moves vm-const from source block to target block entry.
-No duplication, no control-dependent sinking, no side-effect motion." 
+Transform moves the selected producer from source block to target block entry.
+No duplication, no control-dependent sinking, no side-effect motion."
   (let* ((vec (coerce instructions 'vector))
          (n (length vec))
          (remove-at (make-hash-table :test #'eql))
@@ -135,8 +144,8 @@ No duplication, no control-dependent sinking, no side-effect motion."
     (loop for i from 0 below (- n 1)
           for inst = (aref vec i)
           for nxt = (aref vec (1+ i))
-          do (when (and (typep inst 'vm-const)
-                        (typep nxt 'vm-jump))
+          do (when (and (%opt-code-sinking-candidate-p inst)
+                         (typep nxt 'vm-jump))
                (let* ((dst (vm-dst inst))
                       (reads (%opt-reg-read-count instructions dst))
                       (label-name (vm-label-name nxt))

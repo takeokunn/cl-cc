@@ -280,4 +280,42 @@
     (dolist (pred (cl-cc:bb-predecessors join))
       (assert-true (some (lambda (definition)
                            (= (cl-cc:bb-id pred) (second definition)))
-                         r1-defs)))))
+                          r1-defs)))))
+
+;;; ─── Abstract interpretation framework (FR-251 partial) ──────────────────
+
+(deftest abstract-domain-struct-retains-operators
+  "opt-abstract-domain stores join/transfer callbacks and lattice sentinels."
+  (let* ((domain (cl-cc/optimize::make-opt-abstract-domain
+                  :name :test
+                  :top :top
+                  :bottom nil
+                  :join (lambda (a b) (append a b))
+                  :leq (lambda (a b) (equal a b))
+                  :transfer (lambda (_block in) in))))
+    (assert-eq :test (cl-cc/optimize::opt-domain-name domain))
+    (assert-eq :top (cl-cc/optimize::opt-domain-top domain))
+    (assert-true (functionp (cl-cc/optimize::opt-domain-join domain)))
+    (assert-true (functionp (cl-cc/optimize::opt-domain-transfer domain)))))
+
+(deftest abstract-interpretation-runs-over-cfg-and-produces-result
+  "opt-run-abstract-interpretation returns opt-dataflow-result and propagates state."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-const :dst :r0 :value 1)
+                     (make-vm-ret :reg :r0))))
+         (entry (cl-cc/optimize:cfg-entry cfg))
+         (domain (cl-cc/optimize::make-opt-abstract-domain
+                  :name :ids
+                  :top nil
+                  :bottom nil
+                  :join (lambda (a b)
+                          (remove-duplicates (append a b) :test #'eql))
+                  :leq (lambda (a b)
+                         (and (subsetp a b :test #'eql)
+                              (subsetp b a :test #'eql)))
+                  :transfer (lambda (block in)
+                              (adjoin (cl-cc:bb-id block) in :test #'eql))))
+         (result (cl-cc/optimize::opt-run-abstract-interpretation cfg domain))
+         (out (gethash entry (cl-cc/optimize:opt-dataflow-result-out result))))
+    (assert-true (typep result 'cl-cc/optimize::opt-dataflow-result))
+    (assert-true (member (cl-cc:bb-id entry) out :test #'eql))))

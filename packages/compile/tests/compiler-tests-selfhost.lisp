@@ -101,11 +101,25 @@
 (deftest-each apply-spread-args-numeric
   "apply with spread arguments computes the correct numeric result."
   :cases (("plus-spread"  10 "(apply #'+ 1 2 (list 3 4))")
+          ("plus-quoted-nil" 3 "(apply #'+ 1 2 nil)")
           ("minus-list"    5 "(apply #'- (list 10 3 2))")
           ("multiply-list" 24 "(apply #'* (list 2 3 4))")
           ("plus-five"    15 "(apply #'+ (list 1 2 3 4 5))"))
   (expected form)
   (assert-= expected (run-string form)))
+
+(deftest apply-spread-quoted-nil-preserves-evaluation-order
+  "Quoted NIL spread keeps APPLY equivalent to a direct call, including argument evaluation order."
+  (assert-true
+   (equal '(3 2)
+          (run-string
+           "(let ((n 0))
+                (flet ((next () (setq n (+ n 1)) n))
+                  (list (apply #'+ (next) (next) nil) n)))"))))
+
+(deftest apply-improper-quoted-list-signals-error
+  "Improper quoted spread lists still signal at runtime instead of being direct-call lowered."
+  (assert-signals error (run-string "(apply #'+ '(1 . 2))")))
 
 (deftest apply-spread-args-append
   "apply #'append with list of lists"

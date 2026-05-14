@@ -46,6 +46,10 @@ or fall back to the runtime slot writer for unknown accessors."
   "Return the default predicate name NAME-P."
   (intern (format nil "~A-P" (symbol-name name))))
 
+(defun %defstruct-default-copier-name (name)
+  "Return the default copier name COPY-NAME."
+  (intern (format nil "COPY-~A" (symbol-name name))))
+
 (defun %defstruct-accessor-name (conc-name slot-name)
   "Return the effective accessor symbol for SLOT-NAME under CONC-NAME."
   (if conc-name
@@ -95,6 +99,7 @@ or fall back to the runtime slot writer for unknown accessors."
         (incl-opt nil)
         (type-opt nil)
         (pred-opt nil)
+        (copier-opt nil)
         (print-fn-opt nil)
         (print-obj-opt nil)
         (deriving-opt nil)
@@ -107,6 +112,7 @@ or fall back to the runtime slot writer for unknown accessors."
         (own-slots nil)
         (all-slots nil)
         (pred-name nil)
+        (copier-name nil)
         (print-fn nil)
         (derived-classes nil))
     (setq name-and-options (second form))
@@ -124,6 +130,7 @@ or fall back to the runtime slot writer for unknown accessors."
     (setq incl-opt (%defstruct-find-option options :include))
     (setq type-opt (%defstruct-find-option options :type))
     (setq pred-opt (%defstruct-find-option options :predicate))
+    (setq copier-opt (%defstruct-find-option options :copier))
     (setq print-fn-opt (%defstruct-find-option options :print-function))
     (setq print-obj-opt (%defstruct-find-option options :print-object))
     (setq deriving-opt (%defstruct-find-option options :deriving))
@@ -159,6 +166,12 @@ or fall back to the runtime slot writer for unknown accessors."
             (setq pred-name (second pred-opt)))
         (setq pred-name (%defstruct-default-predicate-name name)))
 
+    (if copier-opt
+        (if (null (second copier-opt))
+            (setq copier-name nil)
+            (setq copier-name (second copier-opt)))
+        (setq copier-name (%defstruct-default-copier-name name)))
+
     (if print-fn-opt
         (setq print-fn (second print-fn-opt))
         (if print-obj-opt
@@ -175,6 +188,7 @@ or fall back to the runtime slot writer for unknown accessors."
                     :own-slots own-slots
                     :all-slots all-slots
                     :pred-name pred-name
+                    :copier-name copier-name
                     :print-fn print-fn
                     :print-fn-opt print-fn-opt
                     :derived-classes derived-classes)))

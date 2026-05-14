@@ -11,6 +11,56 @@
 ;;; Load order: after gc.lisp.
 (in-package :cl-cc/runtime)
 
+(defparameter *rt-concurrent-gc-enabled-p* nil
+  "When true, major collection enters :major-gc-concurrent state.")
+
+(defparameter *rt-concurrent-gc-write-barrier-mode* :satb
+  "Concurrent-GC barrier mode (:satb or :incremental-update).")
+
+(defparameter *rt-concurrent-gc-stw-phases* '(:initial-mark :final-remark)
+  "STW phase model used when concurrent GC mode is enabled.")
+
+(defparameter *rt-concurrent-gc-mutator-assist-p* t
+  "When true, mutators are expected to assist concurrent marking progress.")
+
+(defun rt-gc-configure-concurrent-mode (&key enabled-p write-barrier stw-phases mutator-assist-p)
+  "Configure concurrent-GC runtime mode and return current settings plist."
+  (when (not (null enabled-p))
+    (setf *rt-concurrent-gc-enabled-p* enabled-p))
+  (when write-barrier
+    (setf *rt-concurrent-gc-write-barrier-mode* write-barrier))
+  (when stw-phases
+    (setf *rt-concurrent-gc-stw-phases* (copy-list stw-phases)))
+  (when (not (null mutator-assist-p))
+    (setf *rt-concurrent-gc-mutator-assist-p* mutator-assist-p))
+  (list :enabled-p *rt-concurrent-gc-enabled-p*
+        :write-barrier *rt-concurrent-gc-write-barrier-mode*
+        :stw-phases (copy-list *rt-concurrent-gc-stw-phases*)
+        :mutator-assist-p *rt-concurrent-gc-mutator-assist-p*))
+
+(defun rt-gc-concurrent-assist (heap &key (budget 16))
+  "Perform a bounded mutator-assist step during concurrent major GC.
+
+Marks up to BUDGET old-space addresses currently queued in SATB and returns
+the number of addresses processed."
+  (if (or (not *rt-concurrent-gc-enabled-p*)
+          (not *rt-concurrent-gc-mutator-assist-p*)
+          (not (eq (rt-heap-gc-state heap) :major-gc-concurrent)))
+      0
+      (let ((processed 0)
+            (remaining nil))
+        (dolist (ptr (rt-heap-satb-queue heap))
+          (if (and (< processed budget)
+                   (integerp ptr)
+                   (rt-old-addr-p heap ptr))
+              (let ((h (rt-heap-object-header heap ptr)))
+                (when (and (integerp h) (not (header-marked-p h)))
+                  (rt-heap-set-header heap ptr (header-set-mark h)))
+                (incf processed))
+              (push ptr remaining)))
+        (setf (rt-heap-satb-queue heap) (nreverse remaining))
+        processed)))
+
 ;;; Section 5: Major GC — Tri-color Mark-Sweep
 
 (defun %gc-sweep-old-space (heap)
@@ -56,7 +106,10 @@
    5. Sweep: scan old space linearly, reclaiming unmarked objects to free-list
       and clearing mark bits on survivors.
    6. Reset gc-state to :normal and increment major-gc-count."
-  (setf (rt-heap-gc-state heap) :major-gc)
+  (setf (rt-heap-gc-state heap)
+        (if *rt-concurrent-gc-enabled-p*
+            :major-gc-concurrent
+            :major-gc))
   (unwind-protect
       (let ((gray-queue nil))
         (flet ((maybe-gray (addr)
@@ -131,4 +184,8 @@
         :old-used        (- (rt-heap-old-free heap)
                             (rt-heap-old-base heap))
         :old-total       (rt-heap-old-size heap)
-        :free-list-count (length (rt-heap-free-list heap))))
+        :free-list-count (length (rt-heap-free-list heap))
+        :concurrent-gc-enabled-p *rt-concurrent-gc-enabled-p*
+        :concurrent-gc-write-barrier *rt-concurrent-gc-write-barrier-mode*
+        :concurrent-gc-stw-phases (copy-list *rt-concurrent-gc-stw-phases*)
+        :concurrent-gc-mutator-assist-p *rt-concurrent-gc-mutator-assist-p*))

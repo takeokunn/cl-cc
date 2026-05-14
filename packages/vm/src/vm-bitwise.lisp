@@ -2,8 +2,9 @@
 
 ;;; VM — Bitwise Integer Operations (FR-303)
 ;;;
-;;; Contains: ash, rotate, logand, logior, logxor, logeqv, lognot, bswap, logtest,
-;;;           logbitp, logcount, integer-length.
+;;; Contains: ash, rotate, integer-mul-high-{u,s}, logand, logior, logxor,
+;;;           logeqv, lognot, bswap, logtest, logbitp, logcount,
+;;;           integer-length.
 ;;;
 ;;; Load order: after primitives.lisp, before vm-transcendental.lisp.
 
@@ -18,6 +19,51 @@
 (define-vm-binary-instruction vm-logeqv :logeqv "Bitwise equivalence (XNOR).")
 
 (define-simple-instruction vm-ash    :binary ash)
+
+(defconstant +vm-word64-mask+ #xFFFFFFFFFFFFFFFF
+  "Mask for the low 64 bits of a machine word.")
+
+(defun %vm-word64 (value)
+  "Return VALUE truncated to an unsigned 64-bit machine word."
+  (logand value +vm-word64-mask+))
+
+(defun %vm-signed-word64 (value)
+  "Return VALUE truncated to a signed 64-bit two's-complement integer."
+  (let ((word (%vm-word64 value)))
+    (if (logbitp 63 word)
+        (- word (ash 1 64))
+        word)))
+
+(defun %vm-integer-mul-high-u (lhs rhs)
+  "Return the unsigned high 64 bits of the 128-bit product of LHS and RHS."
+  (%vm-word64
+   (ash (* (%vm-word64 lhs)
+           (%vm-word64 rhs))
+        -64)))
+
+(defun %vm-integer-mul-high-s (lhs rhs)
+  "Return the signed high 64 bits of the 128-bit product of LHS and RHS."
+  (%vm-signed-word64
+   (ash (* (%vm-signed-word64 lhs)
+           (%vm-signed-word64 rhs))
+        -64)))
+
+(defmethod execute-instruction ((inst vm-integer-mul-high-u) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-integer-mul-high-u
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-integer-mul-high-s) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-integer-mul-high-s
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
 (defun rotate-right (x count &optional (width 64))
   "Rotate X right by COUNT within WIDTH bits."
   (let* ((width (max 1 width))

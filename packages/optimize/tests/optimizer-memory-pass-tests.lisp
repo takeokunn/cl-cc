@@ -129,6 +129,62 @@
                         (make-vm-ret :reg :r0)))))
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
 
+(deftest store-to-load-forward-prior-slot-write-replaces-slot-read
+  "opt-pass-store-to-load-forward replaces a matching vm-slot-read with a move from the pending slot write value."
+  (let* ((result (cl-cc/optimize::opt-pass-store-to-load-forward
+                  (list (cl-cc:make-vm-slot-write :obj-reg :obj :slot-name 'slot :value-reg :value)
+                        (cl-cc:make-vm-slot-read  :dst :out :obj-reg :obj :slot-name 'slot)
+                        (make-vm-ret :reg :out)))))
+    (assert-true
+     (some (lambda (i)
+              (and (typep i 'cl-cc/vm::vm-move)
+                   (eq :out (cl-cc/vm::vm-dst i))
+                   (eq :value (cl-cc/vm::vm-src i))))
+           result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-slot-read)) result))))
+
+(deftest store-to-load-forward-cross-block-dominating-store-replaces-get-global
+  "A dominating store remains forwardable across a branch/join when every incoming path agrees on the same fact."
+  (let* ((result (cl-cc/optimize::opt-pass-store-to-load-forward
+                  (list (make-vm-const :dst :r0 :value 10)
+                        (make-vm-set-global :src :r0 :name 'x)
+                        (make-vm-jump-zero :reg :r9 :label "else")
+                        (make-vm-const :dst :r7 :value 1)
+                        (make-vm-jump :label "join")
+                        (make-vm-label :name "else")
+                        (make-vm-const :dst :r8 :value 2)
+                        (make-vm-label :name "join")
+                        (make-vm-get-global :dst :r1 :name 'x)
+                        (make-vm-ret :reg :r1)))))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r1 (cl-cc/vm::vm-dst i))
+                  (eq :r0 (cl-cc/vm::vm-src i))))
+           result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
+
+(deftest store-to-load-forward-join-disagree-preserves-get-global
+  "A join does not forward when predecessor paths disagree on the last store for the same location."
+  (let* ((load (make-vm-get-global :dst :r2 :name 'x))
+         (result (cl-cc/optimize::opt-pass-store-to-load-forward
+                  (list (make-vm-jump-zero :reg :r9 :label "else")
+                        (make-vm-const :dst :r0 :value 1)
+                        (make-vm-set-global :src :r0 :name 'x)
+                        (make-vm-jump :label "join")
+                        (make-vm-label :name "else")
+                        (make-vm-const :dst :r1 :value 2)
+                        (make-vm-set-global :src :r1 :name 'x)
+                        (make-vm-label :name "join")
+                        load
+                        (make-vm-ret :reg :r2)))))
+    (assert-true (member load result :test #'eq))
+    (assert-false
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r2 (cl-cc/vm::vm-dst i))))
+           result))))
+
 ;;; ─── opt-pass-cons-slot-forward ──────────────────────────────────────────
 
 (deftest cons-slot-forward-replaces-car-with-original-car-register
@@ -235,11 +291,14 @@
 ;;; ─── *opt-interval-binop-table* / %opt-update-interval-binop ────────────
 
 (deftest interval-binop-table-coverage
-  "*opt-interval-binop-table* has 3 entries for add, sub, mul."
-  (assert-= 3 (length cl-cc/optimize::*opt-interval-binop-table*))
+  "*opt-interval-binop-table* covers generic and fixnum add/sub/mul variants."
+  (assert-= 6 (length cl-cc/optimize::*opt-interval-binop-table*))
   (assert-true (assoc 'vm-add cl-cc/optimize::*opt-interval-binop-table*))
+  (assert-true (assoc 'vm-integer-add cl-cc/optimize::*opt-interval-binop-table*))
   (assert-true (assoc 'vm-sub cl-cc/optimize::*opt-interval-binop-table*))
-  (assert-true (assoc 'vm-mul cl-cc/optimize::*opt-interval-binop-table*)))
+  (assert-true (assoc 'vm-integer-sub cl-cc/optimize::*opt-interval-binop-table*))
+  (assert-true (assoc 'vm-mul cl-cc/optimize::*opt-interval-binop-table*))
+  (assert-true (assoc 'vm-integer-mul cl-cc/optimize::*opt-interval-binop-table*)))
 
 (deftest-each update-interval-binop-cases
   "%opt-update-interval-binop: known operands → updates dst; unknown operand → kills dst."
@@ -255,10 +314,47 @@
       (setf (gethash :r1 intervals) (cl-cc/optimize::opt-make-interval rhs-val rhs-val)))
     (cl-cc/optimize::%opt-update-interval-binop
      inst intervals (symbol-function fn-sym))
-    (if expected-found
-        (assert-= expected-lo
-                  (cl-cc/optimize::opt-interval-lo (gethash :r2 intervals)))
-        (assert-false (nth-value 1 (gethash :r2 intervals))))))
+     (if expected-found
+         (assert-= expected-lo
+                   (cl-cc/optimize::opt-interval-lo (gethash :r2 intervals)))
+         (assert-false (nth-value 1 (gethash :r2 intervals))))))
+
+(deftest optimize-instructions-rewrites-logand-one-eq-zero-to-evenp
+  "The fold pipeline recognizes low-bit equality tests and rewrites them to vm-evenp."
+  (let* ((result (cl-cc/optimize:optimize-instructions
+                  (list (make-vm-get-global :dst :x :name 'x)
+                        (make-vm-const :dst :one :value 1)
+                        (make-vm-logand :dst :bit :lhs :x :rhs :one)
+                        (make-vm-const :dst :zero :value 0)
+                        (make-vm-num-eq :dst :pred :lhs :bit :rhs :zero)
+                        (make-vm-ret :reg :pred))
+                  :max-iterations 1
+                  :pass-pipeline '(:fold :dce)))
+         (even-inst (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-evenp)) result)))
+    (assert-true even-inst)
+    (assert-eq :pred (cl-cc/vm::vm-dst even-inst))
+    (assert-eq :x (cl-cc/vm::vm-src even-inst))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-logand)) result))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-num-eq)) result))))
+
+(deftest overflow-check-elim-rewrites-proven-8-bit-add-to-unchecked-integer-add
+  "Bit-width range facts let the optimizer remove a checked add when overflow is impossible."
+  (let* ((result (cl-cc/optimize:optimize-instructions
+                  (list (make-vm-get-global :dst :x :name 'x)
+                        (make-vm-get-global :dst :y :name 'y)
+                        (make-vm-const :dst :mask :value #xFF)
+                        (make-vm-logand :dst :x8 :lhs :x :rhs :mask)
+                        (make-vm-logand :dst :y8 :lhs :y :rhs :mask)
+                        (cl-cc:make-vm-add-checked :dst :sum :lhs :x8 :rhs :y8)
+                        (make-vm-ret :reg :sum))
+                  :max-iterations 1
+                  :pass-pipeline '(:overflow-check-elim)))
+         (unchecked (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-integer-add)) result)))
+    (assert-true unchecked)
+    (assert-eq :sum (cl-cc/vm::vm-dst unchecked))
+    (assert-eq :x8 (cl-cc/vm::vm-lhs unchecked))
+    (assert-eq :y8 (cl-cc/vm::vm-rhs unchecked))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-add-checked)) result))))
 
 ;;; ─── %mps-pending-uses-reg-p ─────────────────────────────────────────────
 

@@ -93,6 +93,36 @@
          (points-to (cl-cc/optimize:opt-compute-points-to insts)))
     (assert-false (nth-value 1 (cl-cc/optimize:opt-points-to-root :r0 points-to)))))
 
+;;; ─── Memory SSA snapshot (FR-217 partial) ───────────────────────────────
+
+(deftest memory-ssa-snapshot-assigns-monotonic-versions-for-def-use-chain
+  "Memory-SSA snapshot assigns monotonic versions and threads uses to latest version."
+  (let* ((set1 (make-vm-set-global :src :r0 :name 'g))
+         (get1 (make-vm-get-global :dst :r1 :name 'g))
+         (set2 (make-vm-set-global :src :r2 :name 'g))
+         (get2 (make-vm-get-global :dst :r3 :name 'g))
+         (ann  (cl-cc/optimize::opt-compute-memory-ssa-snapshot
+                (list set1 get1 set2 get2))))
+    (assert-= 0 (cl-cc/optimize::opt-memory-ssa-version-at set1 ann :point :in))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at set1 ann :point :out))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :out))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at set2 ann :point :in))
+    (assert-= 2 (cl-cc/optimize::opt-memory-ssa-version-at set2 ann :point :out))
+    (assert-= 2 (cl-cc/optimize::opt-memory-ssa-version-at get2 ann :point :in))))
+
+(deftest memory-ssa-snapshot-slot-location-uses-alias-root
+  "Slot read/write on moved aliases share canonical location key in snapshot."
+  (let* ((mk   (make-vm-cons :dst :obj :car-src :a :cdr-src :b))
+         (mv   (make-vm-move :dst :alias :src :obj))
+         (wr   (cl-cc:make-vm-slot-write :obj-reg :obj :slot-name 'slot :value-reg :v))
+         (rd   (cl-cc:make-vm-slot-read :dst :out :obj-reg :alias :slot-name 'slot))
+         (ann  (cl-cc/optimize::opt-compute-memory-ssa-snapshot (list mk mv wr rd)))
+         (wr-loc (getf (gethash wr ann) :location))
+         (rd-loc (getf (gethash rd ann) :location)))
+    (assert-equal wr-loc rd-loc)
+    (assert-= 2 (cl-cc/optimize::opt-memory-ssa-version-at rd ann :point :in))))
+
 ;;; ─── opt-interval-* arithmetic ───────────────────────────────────────────
 
 (deftest interval-make-and-read-lo-hi
@@ -149,9 +179,93 @@
                       (make-vm-add   :dst :r3 :lhs :r1 :rhs :r2)))
          (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
          (iv (gethash :r3 ivals)))
+     (assert-true iv)
+     (assert-= 10 (cl-cc/optimize::opt-interval-lo iv))
+     (assert-= 10 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest value-ranges-logand-mask-with-unknown-input-narrows-to-8-bit
+  "A non-negative LOGAND mask bounds the result even when the other operand is unknown."
+  (let* ((insts (list (make-vm-get-global :dst :x :name 'x)
+                      (make-vm-const :dst :mask :value #xFF)
+                      (make-vm-logand :dst :masked :lhs :x :rhs :mask)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :masked ivals)))
     (assert-true iv)
-    (assert-= 10 (cl-cc/optimize::opt-interval-lo iv))
-    (assert-= 10 (cl-cc/optimize::opt-interval-hi iv))))
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= #xFF (cl-cc/optimize::opt-interval-hi iv))
+    (assert-= 8 (cl-cc/optimize::opt-interval-bit-width iv))
+    (assert-= #xFF (cl-cc/optimize::opt-interval-known-bits-mask iv))))
+
+(deftest value-ranges-add-of-masked-8-bit-values-is-9-bit-wide
+  "Two independently masked 8-bit values add to a conservative 9-bit interval."
+  (let* ((insts (list (make-vm-get-global :dst :x :name 'x)
+                      (make-vm-get-global :dst :y :name 'y)
+                      (make-vm-const :dst :mask :value #xFF)
+                      (make-vm-logand :dst :x8 :lhs :x :rhs :mask)
+                      (make-vm-logand :dst :y8 :lhs :y :rhs :mask)
+                      (make-vm-add :dst :sum :lhs :x8 :rhs :y8)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :sum ivals)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= #x1FE (cl-cc/optimize::opt-interval-hi iv))
+    (assert-= 9 (cl-cc/optimize::opt-interval-bit-width iv))
+     (assert-= #x1FF (cl-cc/optimize::opt-interval-known-bits-mask iv))
+     (assert-true (cl-cc/optimize::opt-interval-fits-fixnum-width-p iv))))
+
+(deftest value-ranges-logior-of-masked-8-bit-values-stays-8-bit
+  "LOGIOR of two masked 8-bit values remains within [0,255]."
+  (let* ((insts (list (make-vm-get-global :dst :x :name 'x)
+                      (make-vm-get-global :dst :y :name 'y)
+                      (make-vm-const :dst :mask :value #xFF)
+                      (make-vm-logand :dst :x8 :lhs :x :rhs :mask)
+                      (make-vm-logand :dst :y8 :lhs :y :rhs :mask)
+                      (make-vm-logior :dst :out :lhs :x8 :rhs :y8)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :out ivals)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= #xFF (cl-cc/optimize::opt-interval-hi iv))
+    (assert-= 8 (cl-cc/optimize::opt-interval-bit-width iv))))
+
+(deftest value-ranges-logxor-of-masked-8-bit-values-stays-8-bit
+  "LOGXOR of two masked 8-bit values remains within [0,255]."
+  (let* ((insts (list (make-vm-get-global :dst :x :name 'x)
+                      (make-vm-get-global :dst :y :name 'y)
+                      (make-vm-const :dst :mask :value #xFF)
+                      (make-vm-logand :dst :x8 :lhs :x :rhs :mask)
+                      (make-vm-logand :dst :y8 :lhs :y :rhs :mask)
+                      (make-vm-logxor :dst :out :lhs :x8 :rhs :y8)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :out ivals)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= #xFF (cl-cc/optimize::opt-interval-hi iv))
+    (assert-= 8 (cl-cc/optimize::opt-interval-bit-width iv))))
+
+(deftest value-ranges-ash-left-shift-scales-interval
+  "ASH with a known positive shift scales interval bounds by 2^k."
+  (let* ((insts (list (make-vm-const :dst :x :value 5)
+                      (make-vm-const :dst :k :value 3)
+                      (make-vm-ash :dst :y :lhs :x :rhs :k)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :y ivals)))
+    (assert-true iv)
+    (assert-= 40 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 40 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest value-ranges-ash-right-shift-shrinks-interval
+  "ASH with a known negative shift shrinks integer interval bounds."
+  (let* ((insts (list (make-vm-const :dst :x0 :value 8)
+                      (make-vm-const :dst :x1 :value 12)
+                      (make-vm-add :dst :x :lhs :x0 :rhs :x1)
+                      (make-vm-const :dst :k :value -2)
+                      (make-vm-ash :dst :y :lhs :x :rhs :k)))
+         (ivals (cl-cc/optimize::opt-compute-value-ranges insts))
+         (iv (gethash :y ivals)))
+    (assert-true iv)
+    (assert-= 5 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 5 (cl-cc/optimize::opt-interval-hi iv))))
 
 (deftest value-ranges-prove-array-index-in-bounds
   "opt-array-bounds-check-eliminable-p proves simple non-negative index ranges."

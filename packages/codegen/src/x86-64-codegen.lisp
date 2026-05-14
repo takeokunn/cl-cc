@@ -27,6 +27,10 @@
     ((vm-add vm-integer-add)            6)  ; mov + add (3+3)
     ((vm-sub vm-integer-sub)            6)  ; mov + sub
     ((vm-mul vm-integer-mul)            7)  ; mov + imul (3+4, 0F AF)
+    ;; Checked arithmetic (FR-303): MOV + ALU + JO(rel32) + UD2
+    ((vm-add-checked vm-sub-checked)   14)  ; mov + add/sub + jo + ud2 (3+3+6+2)
+    (vm-mul-checked                    15)  ; mov + imul + jo + ud2 (3+4+6+2)
+    ((vm-integer-mul-high-u vm-integer-mul-high-s) 19) ; mul-high sequence + mov
     ;; Control flow
     (vm-halt                            3)  ; mov result to RAX
     (vm-label                           0)  ; Labels emit no code
@@ -67,7 +71,10 @@
     ;; Binary logical: MOV + op = 6
     ((vm-logand vm-logior vm-logxor)    6)
     ;; Scalar float ops: MOVSD + op = 8
-    ((vm-float-add vm-float-sub vm-float-mul vm-float-div) 8)
+    ((vm-float-add vm-float-sub vm-float-mul vm-float-div vm-sqrt) 8)
+    ;; Libm-call transcendental ops (FR-286): MOVSD + MOV+addr + CALL + MOVSD = 21
+    ((vm-sin-inst vm-cos-inst vm-exp-inst vm-log-inst
+      vm-tan-inst vm-asin-inst vm-acos-inst vm-atan-inst) 21)
     ;; Misc bitwise
     (vm-logeqv                          9)
     (vm-logtest                        14)
@@ -113,8 +120,26 @@
            (if (= result-reg +xmm0+) 0 4))
          (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
            (if (= result-reg +rax+) 0 3))))
+    ((or vm-spill-store vm-spill-load)
+     (let* ((offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
+            (mod (cond
+                   ((and (zerop offset)
+                         (/= (logand *current-spill-base-reg* #x7) 5))
+                    0)
+                   ((typep offset '(signed-byte 8))
+                    1)
+                   (t
+                    2)))
+            (sib-p (= (logand *current-spill-base-reg* #x7) 4))
+            (addr-size (+ 1
+                          (if sib-p 1 0)
+                          (ecase mod
+                            (0 0)
+                            (1 1)
+                            (2 4)))))
+       (+ 2 addr-size)))
     (t
-     (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))))
+      (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))))
 
 (defun build-label-offsets (instructions prologue-size)
   "Build a hash table mapping label names to byte offsets.
@@ -127,6 +152,54 @@
       (incf pos (instruction-size inst)))
     offsets))
 
+(defconstant +stack-probe-page-size+ 4096
+  "Page stride used by native backend stack probing.")
+
+(defconstant +x86-64-stack-probe-size+ 9
+  "Byte size of one x86-64 OR [RSP-disp32], imm8 stack probe.")
+
+(defun stack-probe-count (frame-size)
+  "Return how many guard-page probes are needed for FRAME-SIZE bytes."
+  (if (>= frame-size +stack-probe-page-size+)
+      (floor frame-size +stack-probe-page-size+)
+      0))
+
+(defun x86-64-stack-frame-size (save-regs spill-frame-size)
+  "Return conservative stack-frame bytes represented by saves plus allocated spill space."
+  (+ (* 8 (length save-regs))
+     spill-frame-size))
+
+(defun emit-x86-64-stack-probes (stream probe-count)
+  "Emit one non-mutating page touch per PROBE-COUNT below RSP."
+  (loop for page from 1 to probe-count
+        do (emit-or-mem-rsp-disp32-imm8 (- (* page +stack-probe-page-size+)) 0 stream)))
+
+(defun x86-64-tls-base-register ()
+  "Return the selected x86-64 TLS base register from optimizer planning."
+  (let ((plan (opt-build-tls-plan :target :x86-64 :hot-access-p t)))
+    (opt-tls-plan-base-register plan)))
+
+(defun x86-64-atomic-lowering-plan (operation memory-order)
+  "Return x86-64 atomic lowering metadata for OPERATION and MEMORY-ORDER.
+
+Result plist keys:
+- :opcode          selected representative opcode keyword
+- :pre-fence       list of fence opcodes before atomic op
+- :post-fence      list of fence opcodes after atomic op"
+  (let* ((plan (opt-build-atomic-plan
+                :target :x86-64
+                :operation operation
+                :memory-order memory-order))
+         (pre-fence (case memory-order
+                      (:seq-cst '(:mfence))
+                      (otherwise nil)))
+         (post-fence (case memory-order
+                       (:seq-cst '(:mfence))
+                       (otherwise nil))))
+    (list :opcode (opt-atomic-plan-opcode plan)
+          :pre-fence pre-fence
+          :post-fence post-fence)))
+
 ;; Per-instruction emitters (emit-vm-halt-inst through emit-vm-spill-load-inst),
 ;; *x86-64-emitter-entries*, *x86-64-emitter-table*, and
 ;; emit-vm-instruction-with-labels are in x86-64-codegen-dispatch.lisp (loaded next).
@@ -138,35 +211,59 @@
   (let* ((instructions (vm-program-instructions program))
          (cfg (cfg-build instructions))
          (leaf-p (vm-program-leaf-p program))
-         (spill-count (regalloc-spill-count *current-regalloc*))
-         (red-zone-spill-p (x86-64-red-zone-spill-p leaf-p spill-count))
-         (callee-saved (x86-64-used-callee-saved-regs *current-regalloc*
-                                                         *x86-64-target*))
-         (save-regs (if (or (and leaf-p (zerop spill-count))
-                            red-zone-spill-p)
-                        callee-saved
-                         (cons +rbp+ callee-saved)))
-         (*current-spill-base-reg* (if red-zone-spill-p +rsp+ +rbp+))
-         ;; Each push/pop is 1 byte in the current encoder.
-         (prologue-size (length save-regs))
-           (ordered-instructions (if (cfg-entry cfg)
-                                     (progn
-                                      (cfg-compute-dominators cfg)
-                                      (cfg-compute-loop-depths cfg)
+          (spill-count (regalloc-spill-count *current-regalloc*))
+          (red-zone-spill-p (x86-64-red-zone-spill-p leaf-p spill-count))
+          (frame-pointer-p (and (not *x86-64-omit-frame-pointer*)
+                                (not red-zone-spill-p)
+                                (or (not leaf-p)
+                                    (plusp spill-count))))
+          (callee-saved (x86-64-used-callee-saved-regs *current-regalloc*
+                                                        (x86-64-codegen-target)))
+          (save-regs (if frame-pointer-p
+                         (cons +rbp+ callee-saved)
+                         callee-saved))
+          (spill-frame-size (if (and (not frame-pointer-p)
+                                     (not red-zone-spill-p)
+                                     (plusp spill-count))
+                                (* 8 spill-count)
+                                0))
+          (*current-spill-base-reg* (if frame-pointer-p +rbp+ +rsp+))
+          (*current-spill-offset-bias* (if frame-pointer-p 0 spill-frame-size))
+          (probe-count (stack-probe-count
+                         (x86-64-stack-frame-size save-regs spill-frame-size)))
+          (probe-size (* probe-count +x86-64-stack-probe-size+))
+          (spill-frame-adjust-size (if (plusp spill-frame-size) 7 0))
+          ;; Each push/pop is 1 byte in the current encoder.
+          (prologue-size (+ probe-size
+                            (length save-regs)
+                            spill-frame-adjust-size))
+             (ordered-instructions (if (cfg-entry cfg)
+                                       (progn
+                                        (cfg-compute-dominators cfg)
+                                       (cfg-compute-loop-depths cfg)
                                       (cfg-flatten-hot-cold cfg))
                                     instructions))
-          ;; First pass: build label offset table
-          (label-offsets (build-label-offsets ordered-instructions prologue-size)))
+           ;; First pass: build label offset table
+           (label-offsets (build-label-offsets ordered-instructions prologue-size)))
+
+    ;; Stack probing: touch each guard page before the large frame is used.
+    (emit-x86-64-stack-probes stream probe-count)
 
     ;; Prologue: save only the callee-saved registers actually used
     (dolist (reg save-regs)
       (emit-push-r64 reg stream))
+
+    (when (plusp spill-frame-size)
+      (emit-sub-ri32 +rsp+ spill-frame-size stream))
 
     ;; Second pass: emit instructions with resolved jumps
     (let ((pos prologue-size))
       (dolist (inst ordered-instructions)
         (emit-vm-instruction-with-labels inst stream pos label-offsets)
         (incf pos (instruction-size inst))))
+
+    (when (plusp spill-frame-size)
+      (emit-add-ri32 +rsp+ spill-frame-size stream))
 
     ;; Epilogue: restore callee-saved registers in reverse order
     (dolist (reg (reverse save-regs))
@@ -184,7 +281,8 @@
   ;; Run register allocation before emitting machine code
   (let* ((instructions (vm-program-instructions program))
          (float-vregs (x86-64-compute-float-vregs instructions))
-         (ra (allocate-registers instructions *x86-64-target* float-vregs))
+         (target (x86-64-codegen-target))
+         (ra (allocate-registers instructions target float-vregs))
          (allocated-program (make-vm-program
                                :instructions (regalloc-instructions ra)
                                :result-register (vm-program-result-register program)

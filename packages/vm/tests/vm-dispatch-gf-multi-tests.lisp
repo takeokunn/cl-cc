@@ -27,6 +27,16 @@ METHODS-PLIST is a list of (class-name . method-fn) pairs."
     (setf (gethash :__eql-methods__ gf-ht) nil)
     gf-ht))
 
+(defun make-indexed-single-dispatch-gf-ht (methods-plist eql-plist)
+  "Build a single-dispatch GF with an authoritative EQL dispatch index.
+EQL-PLIST is a list of (eql-value . method-fn) pairs."
+  (let ((gf-ht (make-single-dispatch-gf-ht methods-plist))
+        (eql-index (make-hash-table :test #'equal)))
+    (dolist (pair eql-plist)
+      (setf (gethash (car pair) eql-index) (list (cdr pair))))
+    (setf (gethash :__eql-index__ gf-ht) eql-index)
+    gf-ht))
+
 (defun make-composite-dispatch-gf-ht (methods-plist)
   "Build a generic-function hash-table with list keys for composite dispatch."
   (let ((gf-ht (make-hash-table :test #'equal))
@@ -96,6 +106,29 @@ METHODS-PLIST is a list of (class-name . method-fn) pairs."
          (gf-ht (make-single-dispatch-gf-ht (list (cons 'string #'identity))))
          (methods-ht (gethash :__methods__ gf-ht)))
     (assert-null (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42))))
+
+(deftest gf-multi-single-dispatch-eql-index-hit-precedes-class
+  "%vm-resolve-single-dispatch uses the EQL index before class fallback."
+  (let* ((s (make-test-vm))
+         (class-fn #'identity)
+         (eql-fn #'not)
+         (gf-ht (make-indexed-single-dispatch-gf-ht
+                 (list (cons 'symbol class-fn))
+                 (list (cons :read eql-fn))))
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (assert-eq eql-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s :read))))
+
+(deftest gf-multi-single-dispatch-eql-index-avoids-linear-scan
+  "When an EQL index exists, stale unindexed EQL table entries are not scanned."
+  (let* ((s (make-test-vm))
+         (fallback-fn #'identity)
+         (stale-eql-fn #'not)
+         (gf-ht (make-indexed-single-dispatch-gf-ht
+                 (list (cons 'symbol fallback-fn))
+                 nil))
+         (methods-ht (gethash :__methods__ gf-ht)))
+    (setf (gethash '(eql :read) methods-ht) stale-eql-fn)
+    (assert-eq fallback-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s :read))))
 
 ;;; ─── vm-try-dispatch-combinations ────────────────────────────────────────
 

@@ -87,19 +87,22 @@ unknown so callers can fall through instead of silently changing semantics."
         (%phase2-static-keyword-value tail :fill-pointer nil)
       (multiple-value-bind (adjustable adjustable-known-p)
           (%phase2-static-keyword-value tail :adjustable nil)
-        (when (and fill-pointer-known-p adjustable-known-p
-                   (or (null contents-ast) (typep contents-ast 'ast-quote)))
-          (let ((contents (and contents-ast (ast-quote-value contents-ast))))
-            (when (or (null contents-ast) (listp contents))
-              (let ((size-reg (compile-ast (first args) ctx))
-                    (init-reg (and init-ast (compile-ast init-ast ctx))))
-                (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
-                                              :initial-element init-reg
-                                              :fill-pointer fill-pointer
-                                              :adjustable adjustable))
-                (when contents-ast
-                  (%phase2-emit-initial-contents ctx result-reg contents))
-                result-reg))))))))
+        (multiple-value-bind (element-type element-type-known-p)
+            (%phase2-static-keyword-value tail :element-type nil)
+          (when (and fill-pointer-known-p adjustable-known-p element-type-known-p
+                     (or (null contents-ast) (typep contents-ast 'ast-quote)))
+            (let ((contents (and contents-ast (ast-quote-value contents-ast))))
+              (when (or (null contents-ast) (listp contents))
+                (let ((size-reg (compile-ast (first args) ctx))
+                      (init-reg (and init-ast (compile-ast init-ast ctx))))
+                  (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
+                                                :initial-element init-reg
+                                                :fill-pointer fill-pointer
+                                                :adjustable adjustable
+                                                :element-type element-type))
+                  (when contents-ast
+                    (%phase2-emit-initial-contents ctx result-reg contents))
+                  result-reg)))))))))
 
 ;; make-adjustable-vector: array with fill-pointer
 (define-phase2-handler "MAKE-ADJUSTABLE-VECTOR" (args result-reg ctx)

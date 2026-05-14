@@ -11,6 +11,10 @@
 
 (in-package :cl-cc/optimize)
 
+(defparameter *opt-inline-threshold-scale* 1
+  "PGO-guided multiplier for adaptive inline thresholds.
+1 means no change; values >1 make inlining more aggressive for hot profiles.")
+
 (defun opt-inline-inst-cost (inst)
   "Return the inline cost of INST using the shared e-graph opcode table.
 This keeps inlining policy aligned with the optimizer's existing cost model
@@ -34,15 +38,19 @@ call-heavy bodies are kept near the base threshold."
                                (typep inst '(or vm-call vm-generic-call vm-apply)))
                              body))
          (cheap-ratio (if (zerop inst-count) 1.0 (/ cheap-count inst-count))))
-    (min max-threshold
-         (max 8
-              (+ base-threshold
-                 (if call-heavy-p -5 0)
-                 (cond
-                   ((>= cheap-ratio 0.90) 35)
-                   ((>= cheap-ratio 0.75) 20)
-                   ((>= cheap-ratio 0.50) 8)
-                   (t 0)))))))
+    (let* ((raw (max 8
+                     (+ base-threshold
+                        (if call-heavy-p -5 0)
+                        (cond
+                          ((>= cheap-ratio 0.90) 35)
+                          ((>= cheap-ratio 0.75) 20)
+                          ((>= cheap-ratio 0.50) 8)
+                          (t 0)))))
+           (scaled (if (and (integerp *opt-inline-threshold-scale*)
+                            (> *opt-inline-threshold-scale* 1))
+                       (* raw *opt-inline-threshold-scale*)
+                       raw)))
+      (min max-threshold scaled))))
 
 (defun opt-inline-eligible-p (def threshold)
   "Return T if DEF satisfies all inlining preconditions:

@@ -31,6 +31,32 @@
     (vm2-state (vm2-state-profile-samples state))
     (t (vm-profile-samples state))))
 
+(defun vm-get-profile-bb-counts (state)
+  "Return basic-block/program-counter hit counters for STATE."
+  (typecase state
+    ;; vm2 currently does not expose dedicated bb counters.
+    (vm2-state (make-hash-table :test #'eql))
+    (t (vm-profile-bb-counts state))))
+
+(defun vm-get-profile-branch-counts (state)
+  "Return branch edge counters for STATE."
+  (typecase state
+    ;; vm2 currently does not expose dedicated branch counters.
+    (vm2-state (make-hash-table :test #'equal))
+    (t (vm-profile-branch-counts state))))
+
+(defun vm-profile-bb-hit (state pc)
+  "Increment basic-block/program-counter hit counter for PC."
+  (when (%vm-profile-enabled-p state)
+    (incf (gethash pc (vm-get-profile-bb-counts state) 0))))
+
+(defun vm-profile-branch-edge (state kind from-pc to-pc)
+  "Increment branch edge counter keyed by (KIND FROM-PC TO-PC)."
+  (when (%vm-profile-enabled-p state)
+    (incf (gethash (list kind from-pc to-pc)
+                   (vm-get-profile-branch-counts state)
+                   0))))
+
 (defun vm-profile-enter-call (state label &key tail-p)
   "Record entry into LABEL for lightweight sampling.
 

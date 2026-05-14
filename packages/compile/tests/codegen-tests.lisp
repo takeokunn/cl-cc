@@ -144,6 +144,48 @@ stable, isolated context."
          (l2 (cl-cc/compile:make-label ctx "TEST")))
     (assert-false (string= l1 l2))))
 
+(deftest codegen-make-compile-opts-uses-global-speed-policy-by-default
+  "%make-compile-opts falls back to global declaim optimize speed when :speed is omitted."
+  (let* ((old (gethash 'speed cl-cc/expand:*declaim-optimize-registry*))
+         (_ignored old))
+    (unwind-protect
+         (progn
+           (setf (gethash 'speed cl-cc/expand:*declaim-optimize-registry*) 3)
+           (let* ((opts (cl-cc/compile::%make-compile-opts))
+                  (speed (getf opts :speed)))
+             (assert-= 3 speed)))
+      (setf (gethash 'speed cl-cc/expand:*declaim-optimize-registry*) old))))
+
+(deftest codegen-maybe-bump-opts-speed-from-ast-defun-declaration
+  "%maybe-bump-opts-speed-from-ast picks up local defun optimize speed declaration."
+  (let* ((opts (list :speed nil))
+         (ast (cl-cc/ast:make-ast-defun
+               :name 'f
+               :params '(x)
+               :optional-params nil
+               :rest-param nil
+               :key-params nil
+               :declarations '((optimize (speed 3)))
+               :documentation nil
+               :body (list (make-ast-var :name 'x)))))
+    (cl-cc/compile::%maybe-bump-opts-speed-from-ast opts ast)
+    (assert-= 3 (getf opts :speed))))
+
+(deftest codegen-maybe-bump-opts-speed-from-ast-does-not-lower-existing-speed
+  "%maybe-bump-opts-speed-from-ast keeps existing higher speed when local speed is lower."
+  (let* ((opts (list :speed 3))
+         (ast (cl-cc/ast:make-ast-defun
+               :name 'f
+               :params '(x)
+               :optional-params nil
+               :rest-param nil
+               :key-params nil
+               :declarations '((optimize (speed 1)))
+               :documentation nil
+               :body (list (make-ast-var :name 'x)))))
+    (cl-cc/compile::%maybe-bump-opts-speed-from-ast opts ast)
+    (assert-= 3 (getf opts :speed))))
+
 ;;; ─── compile-ast: ast-call fast paths ────────────────────────────────────
 
 (deftest-each codegen-call-higher-order-fast-path

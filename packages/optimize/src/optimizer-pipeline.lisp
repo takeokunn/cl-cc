@@ -10,11 +10,24 @@
 (defun %maybe-apply-prolog-rewrite (instructions)
   "Apply the Prolog rewrite stage when enabled, preserving INSTRUCTIONS otherwise.
 The stage first applies the instruction-level Prolog peephole rules and then runs
-the e-graph rewrite engine whose builtin rule set is also sourced from Prolog facts." 
+the e-graph rewrite engine whose builtin rule set is also sourced from Prolog facts."
   (if *enable-prolog-peephole*
       (optimize-with-egraph
        (mapcar #'sexp->instruction
                (apply-prolog-peephole (mapcar #'instruction->sexp instructions))))
+      instructions))
+
+(defvar *opt-enable-pure-call-optimization* t
+  "When NIL, disable pure-call optimization regardless of selected pass pipeline.
+
+This hook is used as an optimization-policy gate so frontends can couple the
+pass to `(optimize (speed 3))`-style policy decisions without changing the
+optimizer's pass table wiring.")
+
+(defun %maybe-run-pure-call-optimization (instructions)
+  "Run pure-call optimization only when policy gate permits it."
+  (if *opt-enable-pure-call-optimization*
+      (opt-pass-pure-call-optimization instructions)
       instructions))
 
 ;;; Single source of truth: ordered keyword → function pairs.
@@ -24,9 +37,10 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
     (:egraph                    . ,#'optimize-with-egraph)
     (:call-site-splitting       . ,#'opt-pass-call-site-splitting)
     (:devirtualize              . ,#'opt-pass-devirtualize)
-     (:inline                    . ,#'opt-pass-inline-iterative)
-     (:fold                      . ,#'opt-pass-fold)
-     (:sccp                      . ,#'opt-pass-sccp)
+      (:inline                    . ,#'opt-pass-inline-iterative)
+      (:fold                      . ,#'opt-pass-fold)
+      (:overflow-check-elim       . ,#'opt-pass-elide-proven-overflow-checks)
+      (:sccp                      . ,#'opt-pass-sccp)
      (:cons-slot-forward         . ,#'opt-pass-cons-slot-forward)
       (:strength-reduce           . ,#'opt-pass-strength-reduce)
      (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
@@ -34,7 +48,7 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
      (:fill-recognition          . ,#'opt-pass-fill-recognition)
      (:reassociate               . ,#'opt-pass-reassociate)
      (:copy-prop                 . ,#'opt-pass-copy-prop)
-     (:pure-call-optimization    . ,#'opt-pass-pure-call-optimization)
+     (:pure-call-optimization    . ,#'%maybe-run-pure-call-optimization)
      (:gvn                       . ,#'opt-pass-gvn)
      (:batch-concatenate         . ,#'opt-pass-batch-concatenate)
     (:cse                       . ,#'opt-pass-cse)
@@ -71,9 +85,10 @@ the e-graph rewrite engine whose builtin rule set is also sourced from Prolog fa
   '(:prolog-rewrite
     :call-site-splitting
      :devirtualize
-     :inline
-      :sccp
-      :cons-slot-forward
+      :inline
+       :overflow-check-elim
+       :sccp
+       :cons-slot-forward
       :bswap-recognition
      :rotate-recognition
      :fill-recognition
@@ -271,18 +286,35 @@ short-circuits before the expensive sexp comparison."
   "When non-NIL, run opt-verify-instructions after every convergence pass to
 catch ill-formed sequences (duplicate labels, unknown jump targets, use-before-define).")
 
+(defun opt-configure-optimization-policy (&key speed)
+  "Configure optimizer feature gates from a coarse optimization SPEED level.
+
+Current policy:
+- SPEED >= 3: enable pure-call optimization gate
+- SPEED <= 2: disable pure-call optimization gate
+
+Returns the resulting gate value for convenience."
+  (when speed
+    (setf *opt-enable-pure-call-optimization* (>= speed 3)))
+  *opt-enable-pure-call-optimization*)
+
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline
-                                                 print-pass-timings timing-stream
-                                                 print-pass-stats   stats-stream
-                                                 print-opt-remarks  opt-remarks-stream
-                                                 (opt-remarks-mode :all)
-                                                trace-json-stream)
+                                                  print-pass-timings timing-stream
+                                                  print-pass-stats   stats-stream
+                                                  print-opt-remarks  opt-remarks-stream
+                                                  (opt-remarks-mode :all)
+                                                  speed
+                                                  (inline-threshold-scale 1)
+                                                  trace-json-stream)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
 Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
 When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
-  (let* ((reporting (make-opt-reporting-options
+  (when speed
+    (opt-configure-optimization-policy :speed speed))
+  (let* ((*opt-inline-threshold-scale* inline-threshold-scale)
+         (reporting (make-opt-reporting-options
                      :print-pass-timings print-pass-timings
                      :timing-stream      (or timing-stream *standard-output*)
                      :print-pass-stats   print-pass-stats
@@ -308,4 +340,3 @@ When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
     (when trace-json-stream
       (%opt-write-trace-json trace-json-stream (nreverse (opt-trace-events trace))))
     (opt-pass-leaf-detect prog)))
-

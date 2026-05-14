@@ -68,6 +68,44 @@
     (assert-true (> (length raw-instrs) 0))
     (assert-true (listp optimized-instrs))))
 
+(deftest pipeline-compile-string-accepts-pgo-speed-kwargs
+  "compile-string accepts PGO-derived :speed plus inline threshold kwargs used by CLI compile paths."
+  (let ((result (compile-string "(+ 1 2)"
+                                :target :vm
+                                :speed 3
+                                :inline-threshold-scale 2)))
+    (assert-true (typep result 'cl-cc/compile:compilation-result))))
+
+(deftest pipeline-maybe-bump-opts-speed-from-ast-defun-declaration
+  "%pipeline-maybe-bump-opts-speed-from-ast picks up local defun optimize speed declaration."
+  (let* ((opts (cl-cc::%make-pipeline-opts :target :vm :speed nil))
+         (ast (cl-cc/ast:make-ast-defun
+               :name 'f
+               :params '(x)
+               :optional-params nil
+               :rest-param nil
+               :key-params nil
+               :declarations '((optimize (speed 3)))
+               :documentation nil
+               :body (list (make-ast-var :name 'x)))))
+    (cl-cc::%pipeline-maybe-bump-opts-speed-from-ast opts ast)
+    (assert-= 3 (cl-cc::pipeline-opts-speed opts))))
+
+(deftest pipeline-maybe-bump-opts-speed-from-ast-does-not-lower-existing-speed
+  "%pipeline-maybe-bump-opts-speed-from-ast keeps higher existing speed when local speed is lower."
+  (let* ((opts (cl-cc::%make-pipeline-opts :target :vm :speed 3))
+         (ast (cl-cc/ast:make-ast-defun
+               :name 'f
+               :params '(x)
+               :optional-params nil
+               :rest-param nil
+               :key-params nil
+               :declarations '((optimize (speed 1)))
+               :documentation nil
+               :body (list (make-ast-var :name 'x)))))
+    (cl-cc::%pipeline-maybe-bump-opts-speed-from-ast opts ast)
+    (assert-= 3 (cl-cc::pipeline-opts-speed opts))))
+
 (deftest-each pipeline-compile-toplevel-forms-defvar-type-env
   "compile-toplevel-forms infers fixnum type for defvar regardless of type-check flag."
   :cases (("with-type-check"

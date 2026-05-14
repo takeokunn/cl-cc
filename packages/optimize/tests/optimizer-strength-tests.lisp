@@ -70,6 +70,147 @@
             (when const-inst
               (assert-true (minusp (cl-cc/vm::vm-value const-inst))))))))))
 
+;;; ─── FR-282: Division by constant — targeted tests ─────────────────────────
+
+(deftest fr-282-div-by-2-emits-ash-neg-1
+  "FR-282 partial: (/ x 2) → (ash x -1). Power-of-2 divisor."
+  (let* ((const-2 (make-vm-const :dst :r0 :value 2))
+         (div     (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce (list const-2 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))
+    ;; Shift count must be -1
+    (let ((ash-inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result)))
+      (when ash-inst
+        (let* ((shift-dst (cl-cc/vm::vm-rhs ash-inst))
+               (const-inst (find-if (lambda (i)
+                                      (and (typep i 'cl-cc/vm::vm-const)
+                                           (eq (cl-cc/vm::vm-dst i) shift-dst)))
+                                    result)))
+          (when const-inst
+            (assert-= -1 (cl-cc/vm::vm-value const-inst))))))))
+
+(deftest fr-282-div-by-256-emits-ash-neg-8
+  "FR-282 partial: (/ x 256) → (ash x -8). Larger power-of-2 divisor."
+  (let* ((const-256 (make-vm-const :dst :r0 :value 256))
+         (div       (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result    (cl-cc/optimize::opt-pass-strength-reduce (list const-256 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))
+    (let ((ash-inst (find-if (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result)))
+      (when ash-inst
+        (let* ((shift-dst (cl-cc/vm::vm-rhs ash-inst))
+               (const-inst (find-if (lambda (i)
+                                      (and (typep i 'cl-cc/vm::vm-const)
+                                           (eq (cl-cc/vm::vm-dst i) shift-dst)))
+                                    result)))
+          (when const-inst
+            (assert-= -8 (cl-cc/vm::vm-value const-inst))))))))
+
+(deftest fr-282-div-by-3-bounded-nonnegative-dividend-emits-reciprocal-seq
+  "FR-282: (/ x 3) becomes mul+ash when x is proved non-negative and bounded."
+  (let* ((const-4 (make-vm-const :dst :r0 :value 4))
+         (const-8 (make-vm-const :dst :r1 :value 8))
+         (sum     (make-vm-add   :dst :x :lhs :r0 :rhs :r1))
+         (const-3 (make-vm-const :dst :r2 :value 3))
+         (div     (make-vm-div   :dst :r3 :lhs :x :rhs :r2))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce
+                   (list const-4 const-8 sum const-3 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-7-bounded-nonnegative-dividend-emits-reciprocal-seq
+  "FR-282: (/ x 7) becomes mul+ash when x is proved non-negative and bounded."
+  (let* ((const-8 (make-vm-const :dst :r0 :value 8))
+         (const-6 (make-vm-const :dst :r1 :value 6))
+         (sum     (make-vm-add   :dst :x :lhs :r0 :rhs :r1))
+         (const-7 (make-vm-const :dst :r2 :value 7))
+         (div     (make-vm-div   :dst :r3 :lhs :x :rhs :r2))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce
+                   (list const-8 const-6 sum const-7 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-3-unknown-dividend-not-transformed
+  "FR-282: (/ x 3) stays as vm-div when x has no proved non-negative bounded range."
+  (let* ((const-3 (make-vm-const :dst :r0 :value 3))
+         (div     (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce (list const-3 div))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-7-unknown-dividend-not-transformed
+  "FR-282: (/ x 7) stays as vm-div when x has no proved non-negative bounded range."
+  (let* ((const-7 (make-vm-const :dst :r0 :value 7))
+         (div     (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce (list const-7 div))))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-3-negative-dividend-transformed-when-bounded
+  "FR-282 extension: (/ x 3) can be lowered on bounded negative intervals via affine reciprocal."
+  (let* ((const-neg (make-vm-const :dst :x :value -9))
+          (const-3   (make-vm-const :dst :r0 :value 3))
+          (div       (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+          (result    (cl-cc/optimize::opt-pass-strength-reduce
+                      (list const-neg const-3 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-3-bounded-negative-dividend-emits-reciprocal-seq
+  "FR-282 extension: bounded negative dividend can be lowered via reciprocal+ bias sequence."
+  (let* ((const-neg9 (make-vm-const :dst :r0 :value -9))
+         (const-neg3 (make-vm-const :dst :r1 :value -3))
+         (add        (make-vm-add   :dst :x :lhs :r0 :rhs :r1)) ; x=-12
+         (const-3    (make-vm-const :dst :r2 :value 3))
+         (div        (make-vm-div   :dst :r3 :lhs :x :rhs :r2))
+         (result     (cl-cc/optimize::opt-pass-strength-reduce
+                      (list const-neg9 const-neg3 add const-3 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-add)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-7-bounded-mixed-sign-dividend-emits-reciprocal-seq
+  "FR-282 extension: bounded mixed-sign interval can use verified affine reciprocal."
+  (let* ((cneg4  (make-vm-const :dst :r0 :value -4))
+         (cpos9  (make-vm-const :dst :r1 :value 9))
+         (add    (make-vm-add   :dst :x :lhs :r0 :rhs :r1)) ; x=5 (bounded mixed-source)
+         (c7     (make-vm-const :dst :r2 :value 7))
+         (div    (make-vm-div   :dst :r3 :lhs :x :rhs :r2))
+         (result (cl-cc/optimize::opt-pass-strength-reduce
+                  (list cneg4 cpos9 add c7 div))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
+
+(deftest fr-282-div-by-0-not-transformed
+  "FR-282 partial: (/ x 0) stays as vm-div. Zero is not a power of 2."
+  (let* ((const-0 (make-vm-const :dst :r0 :value 0))
+         (div     (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce (list const-0 div))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))))
+
+(deftest fr-282-div-by-negative-not-transformed
+  "FR-282 partial: (/ x -4) stays as vm-div. Negative divisors are not transformed."
+  (let* ((const-neg (make-vm-const :dst :r0 :value -4))
+         (div       (make-vm-div   :dst :r1 :lhs :x :rhs :r0))
+         (result    (cl-cc/optimize::opt-pass-strength-reduce (list const-neg div))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))))
+
+(deftest fr-282-div-non-constant-rhs-not-transformed
+  "FR-282 partial: (/ x y) stays as vm-div when y is not a known constant."
+  (let* ((div    (make-vm-div :dst :r1 :lhs :x :rhs :y))
+         (result (cl-cc/optimize::opt-pass-strength-reduce (list div))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-div)) result))))
+
+;;; ─── mod by power of 2 (existing FR-302 coverage) ─────────────────────────
+
 (deftest strength-reduce-mod-by-power-of-2-emits-logand
   "opt-pass-strength-reduce replaces (mod x 8) with (logand x 7) via vm-logand."
   (let* ((const-8 (make-vm-const :dst :r0 :value 8))
@@ -137,6 +278,18 @@
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-rotate)) result))
     ;; vm-logior should not appear in the output
     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-logior)) result))))
+
+(deftest rotate-recognition-skips-out-of-range-shift-constants
+  "Rotate recognition must not fire when shift constants are outside 64-bit canonical range."
+  ;; k0=64 is invalid for canonical rotate idiom; keep logior tree unchanged.
+  (let* ((k0  (make-vm-const :dst :rc0 :value 64))
+         (a0  (make-vm-ash   :dst :ra0 :lhs :x :rhs :rc0))
+         (k1  (make-vm-const :dst :rc1 :value 0))
+         (a1  (make-vm-ash   :dst :ra1 :lhs :x :rhs :rc1))
+         (or0 (make-vm-logior :dst :rout :lhs :ra0 :rhs :ra1))
+         (result (cl-cc/optimize::opt-pass-rotate-recognition (list k0 a0 k1 a1 or0))))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-rotate)) result))
+    (assert-true  (some (lambda (i) (typep i 'cl-cc/vm::vm-logior)) result))))
 
 ;;; ─── opt-pass-fill-recognition ───────────────────────────────────────────
 

@@ -64,7 +64,7 @@
          (labels-body (first (second (third form))))
          (rec-body    (third labels-body)))
     (assert-eq 'let (first form))
-    (assert-eq 'nconc (first (third (third rec-body))))))
+    (assert-eq 'nconc (first (fourth rec-body)))))
 
 ;;; ── %sequence-build-multi-map-form ───────────────────────────────────────
 
@@ -87,7 +87,7 @@
   "%sequence-build-single-quantifier-form :every wraps dolist with unless/return nil."
   (let* ((form (cl-cc/expand::%sequence-build-single-quantifier-form :every '#'evenp 'xs))
          (block-form (third form))
-         (dolist-form (second block-form)))
+         (dolist-form (third block-form)))
     (assert-eq 'let (first form))
     (assert-eq 'block (first block-form))
     (assert-eq 'dolist (first dolist-form))))
@@ -96,7 +96,7 @@
   "%sequence-build-single-quantifier-form :some wraps dolist with when/return."
   (let* ((form (cl-cc/expand::%sequence-build-single-quantifier-form :some '#'oddp 'xs))
          (block-form (third form))
-         (dolist-form (second block-form)))
+         (dolist-form (third block-form)))
     (assert-eq 'let (first form))
     (assert-eq 'block (first block-form))
     (assert-eq 'dolist (first dolist-form))))

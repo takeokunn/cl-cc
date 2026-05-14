@@ -50,11 +50,76 @@
 (deftest-each x86-emit-binary-alu-emits-bytes
   "All define-binary-alu-emitter functions emit at least 6 bytes (MOV+op)."
   :cases (("add" #'cl-cc/codegen::emit-vm-add (make-vm-add :dst :r0 :lhs :r1 :rhs :r2))
-          ("sub" #'cl-cc/codegen::emit-vm-sub (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2))
-          ("mul" #'cl-cc/codegen::emit-vm-mul (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2)))
+           ("sub" #'cl-cc/codegen::emit-vm-sub (make-vm-sub :dst :r0 :lhs :r1 :rhs :r2))
+           ("mul" #'cl-cc/codegen::emit-vm-mul (make-vm-mul :dst :r0 :lhs :r1 :rhs :r2)))
   (emit-fn inst)
   (let ((bytes (%collect-emit-ops-bytes emit-fn inst)))
     (assert-true (>= (length bytes) 6))))
+
+;;; ─── Checked arithmetic emitters (FR-303) ─────────────────────────────────
+
+(deftest x86-emit-add-checked-emits-14-bytes
+  "emit-vm-add-checked emits exactly 14 bytes: MOV(3)+ADD(3)+JO(6)+UD2(2)."
+  (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-checked inst)))
+    (assert-= 14 (length bytes))))
+
+(deftest x86-emit-sub-checked-emits-14-bytes
+  "emit-vm-sub-checked emits exactly 14 bytes: MOV(3)+SUB(3)+JO(6)+UD2(2)."
+  (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-checked inst)))
+    (assert-= 14 (length bytes))))
+
+(deftest x86-emit-mul-checked-emits-15-bytes
+  "emit-vm-mul-checked emits exactly 15 bytes: MOV(3)+IMUL(4)+JO(6)+UD2(2)."
+  (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-checked inst)))
+    (assert-= 15 (length bytes))))
+
+(deftest x86-emit-mul-high-emits-19-bytes
+  "vm-integer-mul-high-{u,s} emit the documented 19-byte save/MUL-high/restore sequence."
+  (assert-equal '(#x49 #x89 #xD3 #x50 #x52 #x48 #x89 #xC8 #x49 #xF7 #xE3 #x49 #x89 #xD3 #x5A #x58 #x4C #x89 #xD8)
+                (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-integer-mul-high-u
+                                         (cl-cc:make-vm-integer-mul-high-u :dst :r0 :lhs :r1 :rhs :r2)))
+  (assert-equal '(#x49 #x89 #xD3 #x50 #x52 #x48 #x89 #xC8 #x49 #xF7 #xEB #x49 #x89 #xD3 #x5A #x58 #x4C #x89 #xD8)
+                (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-integer-mul-high-s
+                                          (cl-cc:make-vm-integer-mul-high-s :dst :r0 :lhs :r1 :rhs :r2))))
+
+(deftest x86-emit-sqrt-emits-sqrtsd-sequence
+  "vm-sqrt emits MOVSD dst,src followed by SQRTSD dst,dst."
+  (assert-equal '(#xF2 #x0F #x10 #xC1 #xF2 #x0F #x51 #xC0)
+                (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sqrt
+                                         (cl-cc:make-vm-sqrt :dst :r0 :src :r1))))
+
+;;; ─── Libm call emitters (sin/cos/exp/log/tan/asin/acos/atan) ───────────────
+
+(deftest-each x86-emit-libm-unary-emits-21-bytes
+  "Each libm unary emitter (sin/cos/exp/log/tan/asin/acos/atan) emits exactly 21 bytes."
+  :cases (("sin" #'cl-cc/codegen::emit-vm-sin
+           (cl-cc/vm::make-vm-sin-inst :dst :r0 :src :r1))
+          ("cos" #'cl-cc/codegen::emit-vm-cos
+           (cl-cc/vm::make-vm-cos-inst :dst :r0 :src :r1))
+          ("exp" #'cl-cc/codegen::emit-vm-exp
+           (cl-cc/vm::make-vm-exp-inst :dst :r0 :src :r1))
+          ("log" #'cl-cc/codegen::emit-vm-log
+           (cl-cc/vm::make-vm-log-inst :dst :r0 :src :r1))
+          ("tan" #'cl-cc/codegen::emit-vm-tan
+           (cl-cc/vm::make-vm-tan-inst :dst :r0 :src :r1))
+          ("asin" #'cl-cc/codegen::emit-vm-asin
+           (cl-cc/vm::make-vm-asin-inst :dst :r0 :src :r1))
+          ("acos" #'cl-cc/codegen::emit-vm-acos
+           (cl-cc/vm::make-vm-acos-inst :dst :r0 :src :r1))
+          ("atan" #'cl-cc/codegen::emit-vm-atan
+           (cl-cc/vm::make-vm-atan-inst :dst :r0 :src :r1)))
+  (emit-fn inst)
+  (assert-= 21 (length (%collect-emit-ops-bytes emit-fn inst))))
+
+(deftest x86-emit-libm-sin-starts-with-movsd
+  "vm-sin libm call begins with MOVSD XMM0,src (F2 0F 10 C1 for src=XMM1)."
+  (let ((bytes (%collect-emit-ops-bytes
+                #'cl-cc/codegen::emit-vm-sin
+                (cl-cc/vm::make-vm-sin-inst :dst :r0 :src :r1))))
+    (assert-equal '(#xF2 #x0F #x10 #xC1) (subseq bytes 0 4))))
 
 ;;; ─── Truncate / Rem ──────────────────────────────────────────────────────
 

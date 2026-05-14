@@ -73,11 +73,11 @@
                   inst))))
          ;; Unary arithmetic — data-driven
          ((gethash tp *opt-unary-fold-table*)
-          (multiple-value-bind (sval found) (gethash (vm-src inst) env)
-            (if (and found (numberp sval))
-                (make-vm-const :dst (vm-dst inst)
-                               :value (funcall (gethash tp *opt-unary-fold-table*) sval))
-                inst)))
+           (multiple-value-bind (sval found) (gethash (vm-src inst) env)
+             (if (and found (%fold-unary-constant-eligible-p inst sval))
+                 (make-vm-const :dst (vm-dst inst)
+                                :value (funcall (gethash tp *opt-unary-fold-table*) sval))
+                 inst)))
          ;; Type predicates — data-driven
          ((gethash tp *opt-type-pred-fold-table*)
           (multiple-value-bind (sval found) (gethash (vm-src inst) env)

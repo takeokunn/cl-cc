@@ -216,9 +216,20 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
        (loop with pc = 0
              while (< pc (length flat))
              do (progn
+                  (vm-profile-bb-hit state pc)
                   (vm-profile-sample state)
                   (multiple-value-bind (next-pc halted result)
                      (execute-instruction (aref flat pc) state pc labels)
+                    (when (and next-pc
+                               (or (typep (aref flat pc) 'vm-jump)
+                                   (typep (aref flat pc) 'vm-jump-zero)
+                                   (typep (aref flat pc) 'vm-call)
+                                   (typep (aref flat pc) 'vm-tail-call)
+                                   (typep (aref flat pc) 'vm-ret)))
+                      (vm-profile-branch-edge state
+                                              (type-of (aref flat pc))
+                                              pc
+                                              next-pc))
                     (when halted
                       (return result))
                     (when (null next-pc)

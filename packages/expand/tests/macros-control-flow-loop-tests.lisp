@@ -88,6 +88,7 @@
     (let ((printed (string-downcase (format nil "~S" result))))
       (assert-true (search "svref" printed))
       (assert-true (search "vector" printed))
+      (assert-true (search "(if (integerp" printed))
       (assert-true (search "default-body" printed)))))
 
 (deftest-each typecase-expansion-is-let
@@ -117,6 +118,32 @@
     (assert-true (search "body-number" printed))
     (assert-false (search "body-fixnum" printed))
     (assert-true (search "default-body" printed))))
+
+(deftest typecase-expands-disjoint-arms-into-decision-tree
+  "TYPECASE with pairwise-disjoint arms uses a guarded decision tree."
+  (let* ((result (our-macroexpand-1
+                  '(typecase v
+                     (string body-string)
+                     (symbol body-symbol)
+                     (integer body-int)
+                     (otherwise body-default))))
+         (printed (string-downcase (format nil "~S" result))))
+    (assert-true (search "(or (typep" printed))
+    (assert-true (search "body-default" printed))))
+
+(deftest typecase-overlapping-arms-use-ordered-decision-tree
+  "TYPECASE with overlapping arms still uses ordered decision-tree dispatch."
+  (let* ((result (our-macroexpand-1
+                  '(typecase v
+                      (number body-number)
+                      (integer body-int)
+                      (string body-string)
+                      (symbol body-symbol)
+                      (otherwise body-default))))
+         (printed (string-downcase (format nil "~S" result))))
+    (assert-true (search "(or (typep" printed))
+    (assert-true (search "body-number" printed))
+    (assert-true (search "body-default" printed))))
 
 ;;; ─── Direct helper unit tests ──────────────────────────────────────────────
 
@@ -171,3 +198,18 @@
   (assert-equal '(progn fallback)
                 (cl-cc/expand::%typecase-build-typep-chain
                  '((otherwise fallback)) 'val)))
+
+(deftest typecase-related-types-p-detects-subtype-links
+  "%typecase-related-types-p returns true for known subtype/supertype pairs."
+  (assert-true (cl-cc/expand::%typecase-related-types-p 'integer 'number))
+  (assert-true (cl-cc/expand::%typecase-related-types-p 'number 'integer))
+  (assert-false (cl-cc/expand::%typecase-related-types-p 'string 'symbol)))
+
+(deftest typecase-choose-split-index-prefers-low-cross-overlap
+  "%typecase-choose-split-index picks boundary minimizing hierarchy cross-links."
+  (let* ((cases '((integer body-int)
+                  (number body-num)
+                  (string body-str)
+                  (symbol body-sym)))
+         (idx (cl-cc/expand::%typecase-choose-split-index cases)))
+    (assert-= 2 idx)))

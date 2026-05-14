@@ -115,10 +115,12 @@
    vm-output-stream
    vm-global-vars
    vm-profile-enabled-p
-   vm-profile-call-stack
-   vm-profile-samples
-   vm-get-profile-samples
-   *instruction-constructors*
+    vm-profile-call-stack
+    vm-profile-samples
+    vm-get-profile-samples
+    vm-get-profile-bb-counts
+    vm-get-profile-branch-counts
+    *instruction-constructors*
    vm-falsep
    vm-program-leaf-p
    vm-error-type-matches-p

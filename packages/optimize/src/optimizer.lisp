@@ -44,6 +44,31 @@
   "Return T if V is a known concrete constant (not the :unknown sentinel)."
   (and (not (eq v :unknown)) (numberp v)))
 
+(defun %opt-copy-derived-fact (src dst table)
+  "Propagate SRC's derived fact to DST within TABLE, or clear DST."
+  (multiple-value-bind (fact found-p) (gethash src table)
+    (if found-p
+        (setf (gethash dst table) fact)
+        (remhash dst table))))
+
+(defun %opt-logand-low-bit-source (lhs rhs lval lfound rval rfound)
+  "Return the original source when LOGAND is known to mask with literal 1."
+  (cond
+    ((and rfound (eql rval 1)) lhs)
+    ((and lfound (eql lval 1)) rhs)
+    (t nil)))
+
+(defun %opt-rewrite-logand-low-bit-test (inst lhs rhs lval lfound rval rfound low-bit-facts)
+  "Rewrite (= (logand x 1) 0/1) style tests into vm-evenp/vm-oddp when known."
+  (labels ((rewrite-from (reg constant)
+             (multiple-value-bind (source found-p) (gethash reg low-bit-facts)
+               (when found-p
+                 (case constant
+                   (0 (make-vm-evenp :dst (vm-dst inst) :src source))
+                   (1 (make-vm-oddp  :dst (vm-dst inst) :src source)))))))
+    (or (and lfound (integerp lval) (rewrite-from rhs lval))
+        (and rfound (integerp rval) (rewrite-from lhs rval)))))
+
 (defun %opt-apply-algebraic-action (action dst lhs-reg rhs-reg)
   "Produce an instruction from an algebraic simplification ACTION.
    Returns NIL if ACTION is unrecognized."
@@ -81,29 +106,36 @@
         ((or vm-jump vm-jump-zero)
          (setf (gethash (vm-label-name inst) targets) t))))))
 
-(defun %fold-vm-label (inst env emit target-labels)
+(defun %fold-vm-label (inst env low-bit-facts emit target-labels)
   "Flush constant knowledge only at labels that are explicit branch targets."
   (when (gethash (vm-name inst) target-labels)
-    (clrhash env))
+    (clrhash env)
+    (clrhash low-bit-facts))
   (funcall emit inst))
 
-(defun %fold-vm-const (inst env emit)
+(defun %fold-vm-const (inst env low-bit-facts emit)
   "Record the constant value of INST's destination in ENV, then emit."
+  (remhash (vm-dst inst) low-bit-facts)
   (setf (gethash (vm-dst inst) env) (vm-value inst))
   (funcall emit inst))
 
-(defun %fold-vm-move (inst env emit emit-const clear)
+(defun %fold-vm-move (inst env low-bit-facts emit emit-const clear)
   "Propagate constant if src is known in ENV; eliminate self-moves silently."
   (let ((src (vm-src inst)) (dst (vm-dst inst)))
     (cond
       ((eq src dst)) ; self-move: drop silently
       (t
        (multiple-value-bind (sval found) (gethash src env)
-         (if found
-             (funcall emit-const dst sval)
-             (progn (funcall clear dst) (funcall emit inst))))))))
+          (if found
+              (progn
+                (remhash dst low-bit-facts)
+                (funcall emit-const dst sval))
+              (progn
+                (funcall clear dst)
+                (%opt-copy-derived-fact src dst low-bit-facts)
+                (funcall emit inst))))))))
 
-(defun %fold-binary-inst (inst env emit emit-const clear)
+(defun %fold-binary-inst (inst env low-bit-facts emit emit-const clear)
   "Binary arithmetic/comparison: full fold or algebraic simplification.
    Dispatch derived from opt-binary-lhs-rhs-p (covers *opt-binary-lhs-rhs-types*).
    vm-floor-inst/vm-ceiling-inst/vm-truncate are excluded (values-list side-channel)."
@@ -117,21 +149,48 @@
           ((and lfound rfound (numberp lval) (numberp rval))
            (multiple-value-bind (folded ok)
                (opt-fold-binop-value inst lval rval)
-             (if ok
-                 (funcall emit-const dst folded)
-                 (progn (funcall clear dst) (funcall emit inst)))))
+              (if ok
+                  (progn
+                    (remhash dst low-bit-facts)
+                    (funcall emit-const dst folded))
+                  (progn
+                    (remhash dst low-bit-facts)
+                    (funcall clear dst)
+                    (funcall emit inst)))))
           ;; Try algebraic identity simplification
           (t
-           (let ((simp (opt-simplify-binop inst dst lhs rhs
+           (let ((parity-rewrite
+                   (and (typep inst '(or vm-num-eq vm-eq))
+                        (%opt-rewrite-logand-low-bit-test
+                         inst lhs rhs lval lfound rval rfound low-bit-facts)))
+                 (simp (opt-simplify-binop inst dst lhs rhs
                                            (if lfound lval :unknown)
                                            (if rfound rval :unknown))))
              (cond
+               (parity-rewrite
+                (remhash dst low-bit-facts)
+                (funcall clear dst)
+                (funcall emit parity-rewrite))
                (simp
                 (when (vm-const-p simp)
                   (setf (gethash dst env) (vm-const-value simp)))
-                (unless (vm-const-p simp) (funcall clear dst))
+                (cond
+                  ((vm-const-p simp)
+                   (remhash dst low-bit-facts))
+                  ((typep simp 'vm-move)
+                   (funcall clear dst)
+                   (%opt-copy-derived-fact (vm-src simp) dst low-bit-facts))
+                  (t
+                   (funcall clear dst)
+                   (remhash dst low-bit-facts)))
                 (funcall emit simp))
-                (t (funcall clear dst) (funcall emit inst))))))))))
+               (t
+                (funcall clear dst)
+                (let ((source (%opt-logand-low-bit-source lhs rhs lval lfound rval rfound)))
+                  (if (and (typep inst 'vm-logand) source)
+                      (setf (gethash dst low-bit-facts) source)
+                      (remhash dst low-bit-facts)))
+                (funcall emit inst))))))))))
 
 (defun %fold-unary-constant-eligible-p (inst value)
   "Return T when unary INST can be safely folded for constant VALUE."
@@ -140,24 +199,34 @@
       (and (member (type-of inst) '(vm-car vm-cdr) :test #'eq)
            (or (consp value) (null value)))))
 
-(defun %fold-unary-inst (inst env emit emit-const clear)
+(defun %fold-unary-inst (inst env low-bit-facts emit emit-const clear)
   "Unary arithmetic: data-driven via opt-foldable-unary-arith-p → *opt-unary-fold-table*."
   (let* ((dst (vm-dst inst)) (src (vm-src inst))
          (fold-fn (gethash (type-of inst) *opt-unary-fold-table*)))
     (multiple-value-bind (sval found) (gethash src env)
       (if (and found fold-fn
-               (%fold-unary-constant-eligible-p inst sval))
-          (funcall emit-const dst (funcall fold-fn sval))
-          (progn (funcall clear dst) (funcall emit inst))))))
+                (%fold-unary-constant-eligible-p inst sval))
+          (progn
+            (remhash dst low-bit-facts)
+            (funcall emit-const dst (funcall fold-fn sval)))
+          (progn
+            (funcall clear dst)
+            (remhash dst low-bit-facts)
+            (funcall emit inst))))))
 
-(defun %fold-type-pred-inst (inst env emit emit-const clear)
+(defun %fold-type-pred-inst (inst env low-bit-facts emit emit-const clear)
   "Type predicates: data-driven via opt-foldable-type-pred-p → *opt-type-pred-fold-table*."
   (let* ((dst (vm-dst inst)) (src (vm-src inst))
          (pred-fn (gethash (type-of inst) *opt-type-pred-fold-table*)))
     (multiple-value-bind (sval found) (gethash src env)
       (if (and found pred-fn)
-          (funcall emit-const dst (if (funcall pred-fn sval) 1 0))
-          (progn (funcall clear dst) (funcall emit inst))))))
+          (progn
+            (remhash dst low-bit-facts)
+            (funcall emit-const dst (if (funcall pred-fn sval) 1 0)))
+          (progn
+            (funcall clear dst)
+            (remhash dst low-bit-facts)
+            (funcall emit inst))))))
 
 (defun %fold-vm-jump-zero (inst env emit)
   "Constant branch folding: known-false → unconditional jump; known-true → drop."
@@ -168,35 +237,38 @@
             nil) ; condition is always true → branch never taken → drop
         (funcall emit inst))))
 
-(defun %fold-default-inst (inst env emit clear)
+(defun %fold-default-inst (inst env low-bit-facts emit clear)
   "Default: invalidate any written destination register, then emit."
   (declare (ignore env))
   (let ((dst (opt-inst-dst inst)))
-    (when dst (funcall clear dst)))
+    (when dst
+      (funcall clear dst)
+      (remhash dst low-bit-facts)))
   (funcall emit inst))
 
 (defun opt-pass-fold (instructions)
   "Forward pass: constant folding, algebraic simplification, constant branch elimination."
   (let ((env (make-hash-table :test #'eq)) ; reg → known constant value
+        (low-bit-facts (make-hash-table :test #'eq)) ; reg → original src for (logand src 1)
         (target-labels (%opt-branch-target-labels instructions))
         (result nil))
     (flet ((emit (inst) (push inst result))
            (emit-const (dst val)
              (setf (gethash dst env) val)
              (push (make-vm-const :dst dst :value val) result))
-           (clear (reg) (remhash reg env)))
+            (clear (reg) (remhash reg env)))
       (dolist (inst instructions)
         (typecase inst
-          (vm-label    (%fold-vm-label      inst env #'emit target-labels))
-          (vm-const    (%fold-vm-const      inst env #'emit))
-          (vm-move     (%fold-vm-move       inst env #'emit #'emit-const #'clear))
+          (vm-label    (%fold-vm-label      inst env low-bit-facts #'emit target-labels))
+          (vm-const    (%fold-vm-const      inst env low-bit-facts #'emit))
+          (vm-move     (%fold-vm-move       inst env low-bit-facts #'emit #'emit-const #'clear))
           (vm-jump-zero (%fold-vm-jump-zero inst env #'emit))
           (t
            (cond
-             ((opt-binary-lhs-rhs-p inst)      (%fold-binary-inst    inst env #'emit #'emit-const #'clear))
-             ((opt-foldable-unary-arith-p inst) (%fold-unary-inst     inst env #'emit #'emit-const #'clear))
-             ((opt-foldable-type-pred-p inst)   (%fold-type-pred-inst inst env #'emit #'emit-const #'clear))
-             (t                                 (%fold-default-inst   inst env #'emit #'clear))))))
+              ((opt-binary-lhs-rhs-p inst)      (%fold-binary-inst    inst env low-bit-facts #'emit #'emit-const #'clear))
+              ((opt-foldable-unary-arith-p inst) (%fold-unary-inst     inst env low-bit-facts #'emit #'emit-const #'clear))
+              ((opt-foldable-type-pred-p inst)   (%fold-type-pred-inst inst env low-bit-facts #'emit #'emit-const #'clear))
+              (t                                 (%fold-default-inst   inst env low-bit-facts #'emit #'clear))))))
     (nreverse result))))
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────

@@ -190,15 +190,11 @@ tracked cell register or slot source kill only the dependent facts."
     (%mps-flush-all state)
     (nreverse (mps-result state))))
 
-(defun opt-pass-store-to-load-forward (instructions)
+(defun %opt-pass-store-to-load-forward-linear (instructions)
   "Forward pending vm-set-global values into matching vm-get-global loads.
 
-   Conservative rules:
-   - only straight-line code is considered
-   - a vm-get-global/vm-slot-read is replaced with vm-move from the latest
-     pending store for the same location
-   - labels and non-pure instructions flush all pending stores
-   - the store itself is still emitted later, preserving side effects"
+This is the original straight-line implementation. It remains the fast path for
+single-block instruction streams so existing behavior stays intact."
   (let ((state       (make-mem-pass-state))
         (alias-roots (opt-compute-heap-aliases instructions)))
     (dolist (inst instructions)
@@ -246,6 +242,247 @@ tracked cell register or slot source kill only the dependent facts."
          (let ((dst (opt-inst-dst inst)))
            (when dst (%mps-flush-dependent-on-reg state dst)))
          (unless (opt-inst-pure-p inst) (%mps-flush-all state))
-         (%mps-emit state inst))))
+          (%mps-emit state inst))))
     (%mps-flush-all state)
     (nreverse (mps-result state))))
+
+(defun %available-store-copy-state (state)
+  "Return a deep-enough copy of available-store STATE."
+  (let ((copy (make-hash-table :test #'equal)))
+    (when state
+      (maphash (lambda (key value)
+                 (setf (gethash key copy) value))
+               state))
+    copy))
+
+(defun %available-store-state-equal (a b)
+  "Return T when available-store states A and B map the same keys to the same stores."
+  (and (= (hash-table-count a) (hash-table-count b))
+       (let ((same t))
+         (maphash (lambda (key value)
+                    (multiple-value-bind (other found-p)
+                        (gethash key b)
+                      (unless (and found-p (eq value other))
+                        (setf same nil))))
+                  a)
+         same)))
+
+(defun %available-store-merge-states (states)
+  "Keep only store facts that every predecessor agrees on."
+  (cond
+    ((null states)
+     (make-hash-table :test #'equal))
+    ((null (cdr states))
+     (%available-store-copy-state (car states)))
+    (t
+     (let* ((first  (car states))
+            (merged (%available-store-copy-state first))
+            (dead   nil))
+       (maphash (lambda (key value)
+                  (unless (every (lambda (state)
+                                   (multiple-value-bind (other found-p)
+                                       (gethash key state)
+                                     (and found-p (eq value other))))
+                                 (cdr states))
+                    (push key dead)))
+                first)
+       (dolist (key dead)
+         (remhash key merged))
+       merged))))
+
+(defun %available-store-location-key (inst alias-roots)
+  "Return the modeled memory key for store/load INST, or NIL when unsupported.
+
+CFG-aware forwarding currently models only globals for safety. SLOT-based
+forwarding remains on the straight-line path until flow-sensitive aliasing is added."
+  (declare (ignore alias-roots))
+  (typecase inst
+    ((or vm-set-global vm-get-global)
+     (list :global (typecase inst
+                     (vm-set-global (cl-cc/vm::vm-set-global-name inst))
+                     (vm-get-global (cl-cc/vm::vm-get-global-name inst)))))
+    (t nil)))
+
+(defun %available-store-remember-store (state inst alias-roots)
+  "Record INST as the latest available store in STATE when modeled."
+  (let ((key (%available-store-location-key inst alias-roots)))
+    (when key
+      (setf (gethash key state) inst))
+    key))
+
+(defun %available-store-kill-dependent-on-reg (state reg &key exclude-key)
+  "Drop store facts whose saved source register is overwritten by REG."
+  (when reg
+    (let ((dead nil))
+      (maphash (lambda (key store)
+                 (when (and store
+                            (not (equal key exclude-key))
+                            (%mps-pending-uses-reg-p store reg))
+                   (push key dead)))
+               state)
+      (dolist (key dead)
+        (remhash key state)))))
+
+(defun %available-store-control-inst-p (inst)
+  "Return T when INST is a CFG terminator handled by explicit graph edges."
+  (typep inst '(or vm-jump vm-jump-zero vm-ret vm-halt)))
+
+(defun %available-store-clobber-inst-p (inst)
+  "Return T when INST conservatively invalidates all available-store facts."
+  (and (not (typep inst '(or vm-set-global)))
+       (not (%available-store-control-inst-p inst))
+       (not (opt-inst-pure-p inst))))
+
+(defun %available-store-transfer (block in-state alias-roots)
+  "Transfer available-store facts through BLOCK."
+  (let ((state (%available-store-copy-state in-state)))
+    (dolist (inst (bb-instructions block) state)
+      (typecase inst
+        (vm-get-global
+         (let* ((key   (%available-store-location-key inst alias-roots))
+                (store (and key (gethash key state)))
+                (dst   (cl-cc/vm::vm-get-global-dst inst)))
+           (if store
+               (%available-store-kill-dependent-on-reg state dst :exclude-key key)
+               (%available-store-kill-dependent-on-reg state dst))))
+        (vm-slot-read
+         (let* ((key   (%available-store-location-key inst alias-roots))
+                (store (and key (gethash key state)))
+                (dst   (cl-cc/vm::vm-slot-read-dst inst)))
+           (if store
+               (%available-store-kill-dependent-on-reg state dst :exclude-key key)
+               (%available-store-kill-dependent-on-reg state dst))))
+        (vm-set-global
+          (%available-store-remember-store state inst alias-roots))
+        (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (%available-store-kill-dependent-on-reg state dst)))
+         (when (%available-store-clobber-inst-p inst)
+           (clrhash state)))))))
+
+(defun %available-store-forwarded-load (inst store)
+  "Return a vm-move replacement for INST using STORE, or NIL when unsupported."
+  (typecase inst
+    (vm-get-global
+     (when (typep store 'vm-set-global)
+       (make-vm-move :dst (cl-cc/vm::vm-get-global-dst inst)
+                     :src (cl-cc/vm::vm-set-global-src store))))
+    (vm-slot-read
+     (when (typep store 'vm-slot-write)
+       (make-vm-move :dst (cl-cc/vm::vm-slot-read-dst inst)
+                     :src (cl-cc/vm::vm-slot-write-value-reg store))))))
+
+(defun %available-store-build-rewrite-map (block entry-state alias-roots)
+  "Return hash-table mapping original instructions to rewritten instructions for BLOCK.
+
+The mapping preserves instruction count and order by replacing only supported
+loads in-place."
+  (let ((state (%available-store-copy-state entry-state))
+        (rewrites (make-hash-table :test #'eq)))
+    (dolist (inst (bb-instructions block) rewrites)
+      (typecase inst
+        (vm-get-global
+         (let* ((key         (%available-store-location-key inst alias-roots))
+                (store       (and key (gethash key state)))
+                (replacement (and store (%available-store-forwarded-load inst store)))
+                (dst         (cl-cc/vm::vm-get-global-dst inst)))
+           (if replacement
+               (progn
+                 (setf (gethash inst rewrites) replacement)
+                 (%available-store-kill-dependent-on-reg state dst :exclude-key key))
+               (%available-store-kill-dependent-on-reg state dst))))
+        (vm-slot-read
+         (let ((dst (cl-cc/vm::vm-slot-read-dst inst)))
+           (%available-store-kill-dependent-on-reg state dst)))
+        (vm-set-global
+          (%available-store-remember-store state inst alias-roots))
+        (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (%available-store-kill-dependent-on-reg state dst)))
+         (when (%available-store-clobber-inst-p inst)
+           (clrhash state)))))))
+
+(defun %available-store-rewrite-block (block entry-state alias-roots)
+  "Rewrite store-to-load pairs inside BLOCK using ENTRY-STATE as the incoming facts."
+  (let ((state  (%available-store-copy-state entry-state))
+        (result nil))
+    (labels ((emit (inst)
+               (push inst result)))
+      (dolist (inst (bb-instructions block) (nreverse result))
+        (typecase inst
+          (vm-get-global
+           (let* ((key         (%available-store-location-key inst alias-roots))
+                  (store       (and key (gethash key state)))
+                  (replacement (and store (%available-store-forwarded-load inst store)))
+                  (dst         (cl-cc/vm::vm-get-global-dst inst)))
+             (if replacement
+                 (progn
+                   (emit replacement)
+                   (%available-store-kill-dependent-on-reg state dst :exclude-key key))
+                 (progn
+                   (%available-store-kill-dependent-on-reg state dst)
+                   (emit inst)))))
+          (vm-slot-read
+           (let* ((key         (%available-store-location-key inst alias-roots))
+                  (store       (and key (gethash key state)))
+                  (replacement (and store (%available-store-forwarded-load inst store)))
+                  (dst         (cl-cc/vm::vm-slot-read-dst inst)))
+             (if replacement
+                 (progn
+                   (emit replacement)
+                   (%available-store-kill-dependent-on-reg state dst :exclude-key key))
+                 (progn
+                   (%available-store-kill-dependent-on-reg state dst)
+                   (emit inst)))))
+          (vm-set-global
+            (%available-store-remember-store state inst alias-roots)
+            (emit inst))
+          (t
+           (let ((dst (opt-inst-dst inst)))
+             (when dst
+               (%available-store-kill-dependent-on-reg state dst)))
+           (when (%available-store-clobber-inst-p inst)
+             (clrhash state))
+           (emit inst)))))))
+
+(defun %opt-pass-store-to-load-forward-cfg (instructions)
+  "Forward stores to loads across basic blocks when the CFG proves the store available."
+  (let* ((cfg         (cfg-build instructions))
+         (alias-roots (opt-compute-heap-aliases instructions))
+         (initial     (make-hash-table :test #'equal))
+         (flow        (opt-run-dataflow cfg
+                                        :direction :forward
+                                        :meet #'%available-store-merge-states
+                                        :transfer (lambda (block in-state)
+                                                    (%available-store-transfer block in-state alias-roots))
+                                        :state-equal #'%available-store-state-equal
+                                        :initial-state initial
+                                        :boundary-state initial
+                                        :copy-state #'%available-store-copy-state)))
+    (let ((rewrites (make-hash-table :test #'eq)))
+      (loop for block across (cfg-blocks cfg)
+            when block
+            do (let ((per-block
+                      (%available-store-build-rewrite-map
+                       block
+                       (gethash block (opt-dataflow-result-in flow))
+                       alias-roots)))
+                 (maphash (lambda (old new)
+                            (setf (gethash old rewrites) new))
+                          per-block)))
+      (mapcar (lambda (inst)
+                (or (gethash inst rewrites) inst))
+              instructions))))
+
+(defun opt-pass-store-to-load-forward (instructions)
+  "Forward available store values into matching loads.
+
+Single-block streams keep the original straight-line implementation. Multi-block
+streams use CFG/dataflow facts and only forward stores proven available on every
+incoming path to the load's basic block."
+  (let ((cfg (cfg-build instructions)))
+    (if (= (length (cfg-blocks cfg)) 1)
+        (%opt-pass-store-to-load-forward-linear instructions)
+        (%opt-pass-store-to-load-forward-cfg instructions))))

@@ -75,7 +75,8 @@
 
 (defun x86-64-used-callee-saved-regs (ra cc)
   "Return the callee-saved physical registers used by RA, in ABI order.
-   RBP is always preserved separately as the frame pointer."
+    When FPE exposes RBP as a general register, used RBP is preserved here like
+    any other callee-saved register."
   (let ((callee-saved (target-callee-saved cc))
         (used nil))
     (loop for phys being the hash-values of (regalloc-assignment ra)
@@ -83,15 +84,17 @@
           do (pushnew phys used :test #'eq))
     (loop for reg in callee-saved
           when (member reg used :test #'eq)
-          collect reg)))
+          collect (let ((entry (assoc reg *phys-reg-to-x86-code*)))
+                    (or (cdr entry)
+                        (error "Unknown x86-64 callee-saved register: ~A" reg))))))
 
 (defun emit-vm-spill-store-inst (inst stream)
   "Emit code for VM SPILL-STORE instruction using the active spill base register."
   (let* ((src-reg (vm-spill-src inst))
          (src-code (let ((entry (assoc src-reg *phys-reg-to-x86-code*)))
                      (if entry (cdr entry)
-                          (error "Unknown physical register for spill store: ~A" src-reg))))
-          (offset (- (* (vm-spill-slot inst) 8))))
+                           (error "Unknown physical register for spill store: ~A" src-reg))))
+          (offset (x86-64-spill-slot-offset (vm-spill-slot inst))))
     (emit-mov-mr64 *current-spill-base-reg* offset src-code stream)))
 
 (defun emit-vm-spill-load-inst (inst stream)
@@ -99,8 +102,8 @@
   (let* ((dst-reg (vm-spill-dst inst))
          (dst-code (let ((entry (assoc dst-reg *phys-reg-to-x86-code*)))
                      (if entry (cdr entry)
-                          (error "Unknown physical register for spill load: ~A" dst-reg))))
-          (offset (- (* (vm-spill-slot inst) 8))))
+                           (error "Unknown physical register for spill load: ~A" dst-reg))))
+          (offset (x86-64-spill-slot-offset (vm-spill-slot inst))))
     (emit-mov-rm64 dst-code *current-spill-base-reg* offset stream)))
 
 (defparameter *x86-64-emitter-entries*
@@ -115,8 +118,23 @@
     (vm-float-sub    . emit-vm-float-sub)
     (vm-mul          . emit-vm-mul)
     (vm-integer-mul  . emit-vm-mul)
+    (vm-integer-mul-high-u . emit-vm-integer-mul-high-u)
+    (vm-integer-mul-high-s . emit-vm-integer-mul-high-s)
+    ;; Checked arithmetic (FR-303 overflow detection)
+    (vm-add-checked  . emit-vm-add-checked)
+    (vm-sub-checked  . emit-vm-sub-checked)
+    (vm-mul-checked  . emit-vm-mul-checked)
     (vm-float-mul    . emit-vm-float-mul)
     (vm-float-div    . emit-vm-float-div)
+    (vm-sqrt         . emit-vm-sqrt)
+    (vm-sin-inst     . emit-vm-sin)
+    (vm-cos-inst     . emit-vm-cos)
+    (vm-exp-inst     . emit-vm-exp)
+    (vm-log-inst     . emit-vm-log)
+    (vm-tan-inst     . emit-vm-tan)
+    (vm-asin-inst    . emit-vm-asin)
+    (vm-acos-inst    . emit-vm-acos)
+    (vm-atan-inst    . emit-vm-atan)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)

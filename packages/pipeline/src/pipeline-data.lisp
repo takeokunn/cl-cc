@@ -21,6 +21,8 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (target             :x86_64 :type keyword)
   (type-check         nil)
   (safety             1)
+  (speed              nil)
+  (inline-threshold-scale 1)
   (pass-pipeline      nil)
   (print-pass-timings nil)
   (timing-stream      nil)
@@ -35,6 +37,8 @@ pipeline functions instead of threading 12 separate keyword arguments."
   "Extract the pass/stats/remarks subset of OPTS as a keyword plist for
 optimize-instructions."
   (list :pass-pipeline      (pipeline-opts-pass-pipeline opts)
+        :speed              (pipeline-opts-speed opts)
+        :inline-threshold-scale (pipeline-opts-inline-threshold-scale opts)
         :print-pass-timings (pipeline-opts-print-pass-timings opts)
         :timing-stream      (pipeline-opts-timing-stream opts)
         :print-pass-stats   (pipeline-opts-print-pass-stats opts)
@@ -73,5 +77,3 @@ compile-toplevel-forms."
   "AST node types whose side effects require the full compile→VM pipeline.
 Definition forms, non-local exits, and condition handling must not short-circuit
 through the host CPS fast path.")
-
-

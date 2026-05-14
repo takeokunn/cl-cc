@@ -115,6 +115,18 @@
   (or (cdr (assoc scale *sib-scale-table*))
       (error "Unsupported x86-64 scale factor ~A" scale)))
 
+(defun x86-64-memory-mod (base offset)
+  "Return the ModR/M MOD field for [BASE + OFFSET].
+
+   MOD=00 cannot encode RBP/R13 as a plain base register, so those bases use
+   disp8 even for offset zero. Non-zero offsets use disp8 when they fit in a
+   signed byte and disp32 otherwise."
+  (let ((base-rm (logand base #x7)))
+    (cond
+      ((and (zerop offset) (not (= base-rm 5))) 0)
+      ((typep offset '(signed-byte 8)) 1)
+      (t 2))))
+
 (defun %emit-modrm-address (mod reg base offset stream)
   "Emit ModR/M (+ SIB if needed) for [BASE + OFFSET].
 
@@ -124,8 +136,9 @@
     (when (= rm 4)
       ;; scale=1, no index, base=RSP/R12
       (emit-byte (sib 0 4 4) stream))
-    (unless (zerop offset)
-      (emit-byte (logand offset #xFF) stream))))
+    (case mod
+      (1 (emit-byte (logand offset #xFF) stream))
+      (2 (emit-dword offset stream)))))
 
 (defun %emit-modrm-indexed-address (mod reg base index scale offset stream)
   "Emit ModR/M+SIB for [BASE + INDEX*SCALE + OFFSET]."
@@ -135,9 +148,9 @@
       (error "RSP/R12 cannot be used as SIB index register"))
     (emit-byte (modrm mod reg 4) stream)
     (emit-byte (sib (scale->sib-bits scale) index-rm base-rm) stream)
-    (unless (zerop offset)
-      (emit-byte (logand offset #xFF) stream))))
+    (case mod
+      (1 (emit-byte (logand offset #xFF) stream))
+      (2 (emit-dword offset stream)))))
 
 ;;; Instruction emitters (emit-mov-*, emit-add-*, emit-cmp-*, etc.) are in
 ;;; x86-64-encoding-instrs.lisp (loaded immediately after this file).
-

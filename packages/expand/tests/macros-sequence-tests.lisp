@@ -132,4 +132,3 @@
   (let ((result (our-macroexpand-1 '(stable-sort lst pred :key #'car))))
     (assert-eq (car result) 'sort)
     (assert-equal (cddr result) '(pred :key #'car))))
-

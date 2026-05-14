@@ -170,6 +170,18 @@
     (assert-true (> (cl-cc/optimize::opt-adaptive-inline-threshold cheap-def) 15))
     (assert-true (< (cl-cc/optimize::opt-adaptive-inline-threshold call-def) 15))))
 
+(deftest opt-adaptive-inline-threshold-respects-pgo-scale
+  "Adaptive inline threshold expands when *opt-inline-threshold-scale* is raised."
+  (let* ((ci (make-vm-closure :dst :r0 :label "cheap"
+                              :params '(:r1) :captured nil
+                              :optional-params nil :rest-param nil :key-params nil))
+         (body (append (loop repeat 8 collect (make-vm-const :dst :r2 :value 0))
+                       (list (make-vm-ret :reg :r1))))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (let ((base (cl-cc/optimize::opt-adaptive-inline-threshold def)))
+      (let ((cl-cc/optimize::*opt-inline-threshold-scale* 2))
+        (assert-true (>= (cl-cc/optimize::opt-adaptive-inline-threshold def) base))))))
+
 (deftest opt-pass-inline-iterative-uses-adaptive-threshold
   "The iterative inline wrapper runs with adaptive thresholds without error."
   (let* ((ci   (make-vm-closure :dst :r0 :label "f"

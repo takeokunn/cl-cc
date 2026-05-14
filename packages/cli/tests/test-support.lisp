@@ -2,7 +2,7 @@
 
 (in-package :cl-cc/test)
 
-(define-condition fake-quit (error)
+(define-condition fake-quit (condition)
   ((code :initarg :code :reader fake-quit-code)))
 
 (defmacro with-fake-quit (&body body)

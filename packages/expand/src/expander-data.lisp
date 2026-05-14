@@ -38,7 +38,7 @@ Prevents concurrent tests from mutating shared global hash tables."
 
 (defun %bootstrap-macro-eval (form)
   "Bootstrap macro evaluator.
-Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available." 
+Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available."
   (if (fboundp 'our-eval)
       (our-eval form)
       (error "OUR-EVAL is unavailable during macro bootstrap for ~S" form)))
@@ -90,7 +90,7 @@ These recurse into subforms but their head is not macro-expanded.")
   "Builtins that fold over args with an identity: (OP a b c) = (OP (OP a b) c).")
 
 (defparameter *binary-builtins*
-  '(cons = < > <= >= mod rem eq eql equal
+  '(cons hash-cons = < > <= >= mod rem eq eql equal
     nth nthcdr member assoc acons
     string= string< string> string<= string>= string-equal
     string-lessp string-greaterp string/=
@@ -177,7 +177,7 @@ These recurse into subforms but their head is not macro-expanded.")
   (%symbol-list-member-p name *compiler-special-forms*))
 
 (defun builtin-name-p (name)
-  "Return T when NAME appears in the consolidated builtin registry." 
+  "Return T when NAME appears in the consolidated builtin registry."
   (%symbol-list-member-p name *all-builtin-names*))
 
 (defun variadic-fold-identity (name)

@@ -66,6 +66,28 @@
     (assert-= 0 (interval-start r0-int))
     (assert-= 4 (interval-end r0-int))))
 
+(deftest regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain
+  "Interprocedural hint oracle marks leaf functions and leaf-callee chains conservatively."
+  (let* ((insts (list
+                 ;; leaf callee
+                 (make-vm-label :name "leaf")
+                 (make-vm-const :dst :r0 :value 1)
+                 (make-vm-ret :reg :r0)
+                 ;; non-leaf caller that calls leaf via func-ref
+                 (make-vm-label :name "caller")
+                 (make-vm-func-ref :dst :f :label "leaf")
+                 (make-vm-call :dst :r1 :func :f :args nil)
+                 (make-vm-ret :reg :r1)
+                 ;; root calls caller (callee not leaf)
+                 (make-vm-label :name "root")
+                 (make-vm-func-ref :dst :g :label "caller")
+                 (make-vm-call :dst :r2 :func :g :args nil)
+                 (make-vm-ret :reg :r2)))
+         (hints (cl-cc/regalloc::regalloc-compute-interprocedural-hints insts)))
+    (assert-true (getf (gethash "leaf" hints) :leaf-p))
+    (assert-true (getf (gethash "caller" hints) :leaf-callee-chain-p))
+    (assert-false (getf (gethash "root" hints) :leaf-callee-chain-p))))
+
 ;;; Linear Scan Allocation Tests
 
 (deftest regalloc-allocate-fits-in-physical-regs-with-distinct-assignments
@@ -220,6 +242,24 @@
            (rewritten (find-if #'cl-cc:vm-add-p out)))
       (assert-equal 2 (length loads))
       (assert-false (eq (cl-cc/regalloc::vm-spill-dst (first loads)) (cl-cc/regalloc::vm-spill-dst (second loads))))
+      (assert-false (eq (vm-lhs rewritten) (vm-rhs rewritten))))))
+
+(deftest regalloc-spill-rewrite-mul-high-avoids-internal-r11-scratch
+  "Spilled vm-integer-mul-high-u operands never rewrite to the emitter's internal R11 scratch."
+  (let* ((assignment (make-hash-table :test #'eq))
+         (spill-map (make-hash-table :test #'eq))
+         (inst (cl-cc:make-vm-integer-mul-high-u :dst :r3 :lhs :r1 :rhs :r2)))
+    (setf (gethash :r1 spill-map) 1)
+    (setf (gethash :r2 spill-map) 2)
+    (setf (gethash :r3 spill-map) 3)
+    (let* ((out (cl-cc/regalloc::insert-spill-code (list inst) assignment spill-map *x86-64-target*))
+           (rewritten (find-if (lambda (item)
+                                 (typep item 'cl-cc/vm::vm-integer-mul-high-u))
+                               out)))
+      (assert-false (null rewritten))
+      (assert-false (eq (vm-lhs rewritten) :r11))
+      (assert-false (eq (vm-rhs rewritten) :r11))
+      (assert-false (eq (vm-dst rewritten) :r11))
       (assert-false (eq (vm-lhs rewritten) (vm-rhs rewritten))))))
 
 (deftest regalloc-spill-rewrite-spilled-src-and-dst-use-separate-scratch

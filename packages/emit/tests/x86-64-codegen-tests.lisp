@@ -15,9 +15,19 @@
 ;;; ─── *vm-reg-map* ───────────────────────────────────────────────────────────
 
 (deftest x86-64-reg-map-lengths
-  "*vm-reg-map* has 8 entries; *phys-reg-to-x86-code* has 14 entries."
+  "*vm-reg-map* has 8 entries; *phys-reg-to-x86-code* has 15 entries including RBP."
   (assert-= 8  (length cl-cc/codegen::*vm-reg-map*))
-  (assert-= 14 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
+  (assert-= 15 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
+
+(deftest x86-64-fpe-codegen-target-frees-rbp
+  "Default x86-64 FPE exposes RBP to regalloc; debug opt-out reserves it again."
+  (let ((fpe-target (let ((cl-cc/codegen::*x86-64-omit-frame-pointer* t))
+                      (cl-cc/codegen::x86-64-codegen-target)))
+        (debug-target (let ((cl-cc/codegen::*x86-64-omit-frame-pointer* nil))
+                        (cl-cc/codegen::x86-64-codegen-target))))
+    (assert-true (member :rbp (cl-cc/target:target-allocatable-regs fpe-target)))
+    (assert-true (member :rbp (cl-cc/target:target-callee-saved fpe-target)))
+    (assert-false (member :rbp (cl-cc/target:target-allocatable-regs debug-target)))))
 
 (deftest-each x86-64-vm-reg-map-entries
   "*vm-reg-map* maps each VM register to the correct x86-64 code."
@@ -39,9 +49,10 @@
   "*phys-reg-to-x86-code* maps each physical register to the correct code."
   :cases (("rax"  :rax  cl-cc/codegen::+rax+)
           ("rcx"  :rcx  cl-cc/codegen::+rcx+)
-          ("rdx"  :rdx  cl-cc/codegen::+rdx+)
-          ("rbx"  :rbx  cl-cc/codegen::+rbx+)
-          ("rsi"  :rsi  cl-cc/codegen::+rsi+)
+           ("rdx"  :rdx  cl-cc/codegen::+rdx+)
+           ("rbx"  :rbx  cl-cc/codegen::+rbx+)
+          ("rbp"  :rbp  cl-cc/codegen::+rbp+)
+           ("rsi"  :rsi  cl-cc/codegen::+rsi+)
           ("rdi"  :rdi  cl-cc/codegen::+rdi+)
           ("r8"   :r8   cl-cc/codegen::+r8+)
           ("r9"   :r9   cl-cc/codegen::+r9+)
@@ -100,6 +111,17 @@
            ("vm-integer-sub" 'cl-cc/vm::vm-integer-sub 6)
            ("vm-mul"       'cl-cc/vm::vm-mul       7)
            ("vm-integer-mul" 'cl-cc/vm::vm-integer-mul 7)
+           ("vm-integer-mul-high-u" 'cl-cc/vm::vm-integer-mul-high-u 19)
+           ("vm-integer-mul-high-s" 'cl-cc/vm::vm-integer-mul-high-s 19)
+           ("vm-sqrt"      'cl-cc/vm::vm-sqrt      8)
+            ("vm-sin-inst"  'cl-cc/vm::vm-sin-inst  21)
+            ("vm-cos-inst"  'cl-cc/vm::vm-cos-inst  21)
+            ("vm-exp-inst"  'cl-cc/vm::vm-exp-inst  21)
+            ("vm-log-inst"  'cl-cc/vm::vm-log-inst  21)
+            ("vm-tan-inst"  'cl-cc/vm::vm-tan-inst  21)
+            ("vm-asin-inst" 'cl-cc/vm::vm-asin-inst 21)
+            ("vm-acos-inst" 'cl-cc/vm::vm-acos-inst 21)
+            ("vm-atan-inst" 'cl-cc/vm::vm-atan-inst 21)
            ("vm-bswap"     'cl-cc/vm::vm-bswap     6)
           ("vm-halt"      'cl-cc/vm::vm-halt      3)
           ("vm-call"      'cl-cc/vm::vm-call      6)
@@ -132,19 +154,26 @@
 ;;; ─── *x86-64-emitter-entries* / *x86-64-emitter-table* ─────────────────────
 
 (deftest x86-64-emitter-table-integrity
-  "*x86-64-emitter-entries* has 56 entries; each entry appears in *x86-64-emitter-table*."
-  (assert-= 56 (length cl-cc/codegen::*x86-64-emitter-entries*))
+  "*x86-64-emitter-entries* has 70 entries; each entry appears in *x86-64-emitter-table*."
+  (assert-= 70 (length cl-cc/codegen::*x86-64-emitter-entries*))
   (dolist (entry cl-cc/codegen::*x86-64-emitter-entries*)
     (assert-true (gethash (car entry) cl-cc/codegen::*x86-64-emitter-table*))))
 
-(deftest x86-64-empty-program-minimal-bytes
-  "Empty program emits exactly 3 bytes (minimal frame)."
+(deftest x86-mul-high-size-and-dispatch-registered
+  "vm-integer-mul-high-{u,s} are present in the x86-64 size table and emitter dispatch table."
+  (dolist (tp '(cl-cc/vm::vm-integer-mul-high-u cl-cc/vm::vm-integer-mul-high-s))
+    (assert-= 19 (gethash tp cl-cc/codegen::*x86-64-instruction-sizes*))
+    (assert-true (functionp (gethash tp cl-cc/codegen::*x86-64-emitter-table*)))))
+
+(deftest x86-64-empty-program-minimal-return-byte
+  "Default FPE empty program emits only RET when no spill frame is needed."
   (let* ((prog (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
          (bytes (cl-cc/codegen::compile-to-x86-64-bytes prog)))
-    (assert-= 3 (length bytes))))
+    (assert-= 1 (length bytes))
+    (assert-= #xC3 (aref bytes 0))))
 
-(deftest x86-64-leaf-program-smaller-than-nonleaf
-  "Leaf program emits fewer bytes than the same program with leaf-p=nil."
+(deftest x86-64-leaf-and-nonleaf-without-spills-share-fpe-layout
+  "Default FPE does not add an RBP frame for leaf or non-leaf programs when no spill frame is needed."
   (let* ((result (compile-string "(+ 1 2)" :target :x86_64))
          (prog (compilation-result-program result))
          (base (cl-cc/vm::make-vm-program
@@ -154,15 +183,27 @@
          (leaf-bytes    (cl-cc/codegen::compile-to-x86-64-bytes prog))
          (nonleaf-bytes (cl-cc/codegen::compile-to-x86-64-bytes base)))
     (assert-true (cl-cc/vm::vm-program-leaf-p prog))
-    (assert-true (< (length leaf-bytes) (length nonleaf-bytes)))))
+    (assert-= (length leaf-bytes) (length nonleaf-bytes))
+    (assert-true (equalp leaf-bytes nonleaf-bytes))))
 
 (deftest-each x86-64-emitter-table-spot-checks
   "Key instructions are present in *x86-64-emitter-table* and are functions."
   :cases (("vm-const"   'cl-cc/vm::vm-const)
            ("vm-add"     'cl-cc/vm::vm-add)
            ("vm-integer-add" 'cl-cc/vm::vm-integer-add)
-           ("vm-float-add" 'cl-cc/vm::vm-float-add)
-           ("vm-float-div" 'cl-cc/vm::vm-float-div)
+            ("vm-float-add" 'cl-cc/vm::vm-float-add)
+            ("vm-float-div" 'cl-cc/vm::vm-float-div)
+             ("vm-sqrt" 'cl-cc/vm::vm-sqrt)
+             ("vm-sin-inst" 'cl-cc/vm::vm-sin-inst)
+             ("vm-cos-inst" 'cl-cc/vm::vm-cos-inst)
+             ("vm-exp-inst" 'cl-cc/vm::vm-exp-inst)
+             ("vm-log-inst" 'cl-cc/vm::vm-log-inst)
+             ("vm-tan-inst" 'cl-cc/vm::vm-tan-inst)
+             ("vm-asin-inst" 'cl-cc/vm::vm-asin-inst)
+             ("vm-acos-inst" 'cl-cc/vm::vm-acos-inst)
+             ("vm-atan-inst" 'cl-cc/vm::vm-atan-inst)
+             ("vm-integer-mul-high-u" 'cl-cc/vm::vm-integer-mul-high-u)
+           ("vm-integer-mul-high-s" 'cl-cc/vm::vm-integer-mul-high-s)
            ("vm-call"    'cl-cc/vm::vm-call)
            ("vm-tail-call" 'cl-cc/vm::vm-tail-call)
            ("vm-lt"      'cl-cc/vm::vm-lt)
@@ -186,6 +227,17 @@
     (assert-true (search '(#x66 #x49 #x0F #x6E) bytes :test #'eql))
     (assert-true (search '(#xF2 #x0F #x10) bytes :test #'eql))
     (assert-true (search '(#xF2 #x0F #x58) bytes :test #'eql))))
+
+(deftest x86-64-tls-base-register-uses-fsbase-plan
+  "x86-64 TLS base register is selected via optimizer TLS planning."
+  (assert-eq :fs (cl-cc/codegen::x86-64-tls-base-register)))
+
+(deftest x86-64-atomic-lowering-plan-adds-seq-cst-fences
+  "x86-64 seq-cst atomic lowering adds mfence around selected opcode."
+  (let ((plan (cl-cc/codegen::x86-64-atomic-lowering-plan :incf :seq-cst)))
+    (assert-eq :lock-xadd (getf plan :opcode))
+    (assert-equal '(:mfence) (getf plan :pre-fence))
+    (assert-equal '(:mfence) (getf plan :post-fence))))
 
 ;;; ─── Byte-collection helper ─────────────────────────────────────────────────
 ;;; Used by x86-64-codegen-emitter-tests and x86-64-codegen-insn-tests,

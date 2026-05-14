@@ -62,6 +62,61 @@ propagates them, and later non-heap writes kill stale facts. Branch joins and
 field-sensitive object graphs remain out of scope for this helper."
   (opt-compute-heap-aliases instructions))
 
+(defun opt-memory-def-inst-p (inst)
+  "Return T when INST defines memory state for the conservative Memory-SSA model."
+  (typep inst '(or vm-set-global vm-slot-write vm-cons)))
+
+(defun opt-memory-use-inst-p (inst)
+  "Return T when INST reads memory state for the conservative Memory-SSA model."
+  (typep inst '(or vm-get-global vm-slot-read)))
+
+(defun %opt-memory-location-key (inst alias-roots)
+  "Return a canonical memory location key for INST, or NIL when not modeled."
+  (typecase inst
+    (vm-set-global (list :global (cl-cc/vm::vm-set-global-name inst)))
+    (vm-get-global (list :global (cl-cc/vm::vm-get-global-name inst)))
+    (vm-slot-write (opt-slot-alias-key (cl-cc/vm::vm-slot-write-obj-reg inst)
+                                       (cl-cc/vm::vm-slot-write-slot-name inst)
+                                       alias-roots))
+    (vm-slot-read (opt-slot-alias-key (cl-cc/vm::vm-slot-read-obj-reg inst)
+                                      (cl-cc/vm::vm-slot-read-slot-name inst)
+                                      alias-roots))
+    (vm-cons (list :alloc (vm-dst inst)))
+    (t nil)))
+
+(defun opt-compute-memory-ssa-snapshot (instructions)
+  "Compute a straight-line Memory-SSA snapshot table for INSTRUCTIONS.
+
+Returns an EQ hash-table mapping each modeled instruction to a plist:
+  :kind     one of :def or :use
+  :location canonical location key
+  :in       incoming memory version
+  :out      outgoing memory version
+
+This intentionally models only straight-line versioning (no MemoryPhi)."
+  (let ((annotations (make-hash-table :test #'eq))
+        (version 0)
+        (alias-roots (opt-compute-heap-aliases instructions)))
+    (dolist (inst instructions annotations)
+      (let ((loc (%opt-memory-location-key inst alias-roots)))
+        (cond
+          ((and loc (opt-memory-def-inst-p inst))
+           (let ((vin version))
+             (incf version)
+             (setf (gethash inst annotations)
+                   (list :kind :def :location loc :in vin :out version))))
+          ((and loc (opt-memory-use-inst-p inst))
+           (setf (gethash inst annotations)
+                 (list :kind :use :location loc :in version :out version))))))))
+
+(defun opt-memory-ssa-version-at (inst annotations &key (point :in))
+  "Return memory version for INST in ANNOTATIONS at POINT (:in or :out)."
+  (let ((entry (gethash inst annotations)))
+    (when entry
+      (ecase point
+        (:in (getf entry :in))
+        (:out (getf entry :out))))))
+
 (defun opt-points-to-root (reg points-to)
   "Return REG's canonical root under POINTS-TO as two values: root and found-p."
   (gethash reg points-to))
@@ -76,6 +131,17 @@ field-sensitive object graphs remain out of scope for this helper."
 
 (defun opt-interval-hi (interval)
   (cdr interval))
+
+(defun opt-interval-singleton-p (interval)
+  "Return T when INTERVAL is a singleton [N, N]."
+  (and interval
+       (= (opt-interval-lo interval)
+          (opt-interval-hi interval))))
+
+(defun opt-interval-singleton-value (interval)
+  "Return INTERVAL's single value, or NIL when it is not a singleton."
+  (when (opt-interval-singleton-p interval)
+    (opt-interval-lo interval)))
 
 (defun opt-interval-add (a b)
   "Add two intervals conservatively."
@@ -109,6 +175,100 @@ field-sensitive object graphs remain out of scope for this helper."
     (t (opt-make-interval 0 (max (abs (opt-interval-lo a))
                                  (abs (opt-interval-hi a)))))))
 
+(defun opt-interval-bit-width (interval)
+  "Return a conservative unsigned bit-width upper bound for INTERVAL.
+
+Only non-negative intervals are assigned a width. Mixed-sign or fully-negative
+intervals return NIL rather than pretending the result is narrower than proven."
+  (when (opt-interval-nonnegative-p interval)
+    (integer-length (max 0 (opt-interval-hi interval)))))
+
+(defun opt-interval-known-bits-mask (interval)
+  "Return a conservative bit mask covering every bit that may be set.
+
+For a non-negative interval with width W, the result is 2^W-1. Bits outside
+that mask are therefore known zero for every value in INTERVAL. Returns NIL
+when INTERVAL has no proven non-negative width bound."
+  (let ((width (opt-interval-bit-width interval)))
+    (when width
+      (1- (ash 1 width)))))
+
+(defun opt-interval-fits-fixnum-width-p (interval &optional (limit-width (integer-length most-positive-fixnum)))
+  "Return T when INTERVAL's unsigned width is strictly below LIMIT-WIDTH."
+  (let ((width (opt-interval-bit-width interval)))
+    (and width (< width limit-width))))
+
+(defun opt-interval-fits-fixnum-p (interval)
+  "Return T when INTERVAL is proven to stay within the host fixnum range."
+  (and interval
+       (<= most-negative-fixnum (opt-interval-lo interval))
+       (<= (opt-interval-hi interval) most-positive-fixnum)))
+
+(defun %opt-nonnegative-mask-value (interval)
+  "Return INTERVAL's non-negative singleton value, or NIL."
+  (let ((value (opt-interval-singleton-value interval)))
+    (when (and (integerp value) (not (minusp value)))
+      value)))
+
+(defun opt-interval-logand (a b)
+  "Return a conservative interval for LOGAND over A and B.
+
+If either operand is a known non-negative singleton mask, the result is bounded
+to [0, mask] even when the other operand is unknown. When both operands are
+proven non-negative, the result is also bounded above by the smaller upper
+bound. Returns NIL when no safe bound is known."
+  (let ((mask-a (%opt-nonnegative-mask-value a))
+        (mask-b (%opt-nonnegative-mask-value b)))
+    (cond
+      (mask-a
+       (opt-make-interval 0 (if (opt-interval-nonnegative-p b)
+                                (min mask-a (opt-interval-hi b))
+                                mask-a)))
+      (mask-b
+       (opt-make-interval 0 (if (opt-interval-nonnegative-p a)
+                                (min mask-b (opt-interval-hi a))
+                                mask-b)))
+      ((and (opt-interval-nonnegative-p a)
+            (opt-interval-nonnegative-p b))
+       (opt-make-interval 0 (min (opt-interval-hi a)
+                                 (opt-interval-hi b))))
+       (t nil))))
+
+(defun opt-interval-logior (a b)
+  "Return a conservative interval for LOGIOR over A and B.
+
+When both operands are proven non-negative, the result is non-negative and
+bounded above by OR-ing their known-bits masks."
+  (when (and (opt-interval-nonnegative-p a)
+             (opt-interval-nonnegative-p b))
+    (let ((mask-a (opt-interval-known-bits-mask a))
+          (mask-b (opt-interval-known-bits-mask b)))
+      (when (and mask-a mask-b)
+        (opt-make-interval 0 (logior mask-a mask-b))))))
+
+(defun opt-interval-logxor (a b)
+  "Return a conservative interval for LOGXOR over A and B.
+
+For proven non-negative operands, every set bit in the result must come from a
+set bit in either operand, so the same known-bits upper mask as LOGIOR applies."
+  (when (and (opt-interval-nonnegative-p a)
+             (opt-interval-nonnegative-p b))
+    (let ((mask-a (opt-interval-known-bits-mask a))
+          (mask-b (opt-interval-known-bits-mask b)))
+      (when (and mask-a mask-b)
+        (opt-make-interval 0 (logior mask-a mask-b))))))
+
+(defun opt-interval-ash (value-interval shift-interval)
+  "Return a conservative interval for ASH over VALUE-INTERVAL by SHIFT-INTERVAL.
+
+Only singleton integer shifts are handled. Unknown shifts return NIL.
+For a fixed integer shift K, ASH is monotone over integers, so bounds can be
+shifted directly."
+  (let ((k (opt-interval-singleton-value shift-interval)))
+    (when (integerp k)
+      (opt-make-interval (ash (opt-interval-lo value-interval) k)
+                         (ash (opt-interval-hi value-interval) k)))))
+
 (defun opt-interval-contains-p (interval value)
   "Return T when VALUE is proven to be inside INTERVAL."
   (and interval
@@ -138,8 +298,11 @@ strictly below the minimum possible array length."
 
 (defparameter *opt-interval-binop-table*
   '((vm-add . opt-interval-add)
+    (vm-integer-add . opt-interval-add)
     (vm-sub . opt-interval-sub)
-    (vm-mul . opt-interval-mul))
+    (vm-integer-sub . opt-interval-sub)
+    (vm-mul . opt-interval-mul)
+    (vm-integer-mul . opt-interval-mul))
   "Maps binary arithmetic instruction types to their interval combinator functions.")
 
 (defparameter *opt-interval-unary-table*
@@ -216,6 +379,44 @@ If either operand has no known interval, conservatively kills the destination."
         (setf (gethash (vm-dst inst) intervals) (funcall fn src))
         (remhash (vm-dst inst) intervals))))
 
+(defun %opt-update-interval-logand (inst intervals)
+  "Update INTERVALS for LOGAND, preserving non-negative mask bounds when known."
+  (let* ((lhs (gethash (vm-lhs inst) intervals))
+         (rhs (gethash (vm-rhs inst) intervals))
+         (interval (opt-interval-logand lhs rhs)))
+    (if interval
+        (setf (gethash (vm-dst inst) intervals) interval)
+        (remhash (vm-dst inst) intervals))))
+
+(defun %opt-update-interval-logior (inst intervals)
+  "Update INTERVALS for LOGIOR with non-negative known-bits bounds when provable."
+  (let* ((lhs (gethash (vm-lhs inst) intervals))
+         (rhs (gethash (vm-rhs inst) intervals))
+         (interval (opt-interval-logior lhs rhs)))
+    (if interval
+        (setf (gethash (vm-dst inst) intervals) interval)
+        (remhash (vm-dst inst) intervals))))
+
+(defun %opt-update-interval-logxor (inst intervals)
+  "Update INTERVALS for LOGXOR with non-negative known-bits bounds when provable."
+  (let* ((lhs (gethash (vm-lhs inst) intervals))
+         (rhs (gethash (vm-rhs inst) intervals))
+         (interval (opt-interval-logxor lhs rhs)))
+    (if interval
+        (setf (gethash (vm-dst inst) intervals) interval)
+        (remhash (vm-dst inst) intervals))))
+
+(defun %opt-update-interval-ash (inst intervals)
+  "Update INTERVALS for ASH when both source and shift ranges are known.
+
+The shift range must be a singleton integer interval."
+  (let* ((value (gethash (vm-lhs inst) intervals))
+         (shift (gethash (vm-rhs inst) intervals))
+         (interval (and value shift (opt-interval-ash value shift))))
+    (if interval
+        (setf (gethash (vm-dst inst) intervals) interval)
+        (remhash (vm-dst inst) intervals))))
+
 (defun %opt-interval-binop-entry (inst)
   "Return the interval binary transformer symbol for INST, or NIL."
   (loop for (type . fn-sym) in *opt-interval-binop-table*
@@ -264,10 +465,18 @@ fact instead of expanding ranges indefinitely across loop backedges."
     (t
      (let ((binop-entry (%opt-interval-binop-entry inst))
            (unary-entry (%opt-interval-unary-entry inst)))
-       (cond
-         (binop-entry
-          (%opt-update-interval-binop inst intervals
-                                      (%opt-interval-function binop-entry)))
+         (cond
+           ((typep inst 'vm-logand)
+            (%opt-update-interval-logand inst intervals))
+           ((typep inst 'vm-logior)
+            (%opt-update-interval-logior inst intervals))
+           ((typep inst 'vm-logxor)
+            (%opt-update-interval-logxor inst intervals))
+           ((typep inst 'vm-ash)
+            (%opt-update-interval-ash inst intervals))
+           (binop-entry
+            (%opt-update-interval-binop inst intervals
+                                        (%opt-interval-function binop-entry)))
          (unary-entry
           (%opt-update-interval-unary inst intervals
                                       (%opt-interval-function unary-entry)))
@@ -276,3 +485,39 @@ fact instead of expanding ranges indefinitely across loop backedges."
             (when dst
               (remhash dst intervals))))))))
   intervals)
+
+(defparameter *opt-checked-arithmetic-elision-table*
+  '((vm-add-checked . (opt-interval-add . make-vm-integer-add))
+    (vm-sub-checked . (opt-interval-sub . make-vm-integer-sub))
+    (vm-mul-checked . (opt-interval-mul . make-vm-integer-mul)))
+  "Maps checked arithmetic instruction types to interval proof and unchecked constructors.")
+
+(defun %opt-checked-arithmetic-elision-entry (inst)
+  "Return the checked-arithmetic elision entry for INST, or NIL."
+  (loop for (type . entry) in *opt-checked-arithmetic-elision-table*
+        when (typep inst type)
+        return entry))
+
+(defun %opt-rewrite-checked-arithmetic-if-safe (inst intervals)
+  "Rewrite checked arithmetic INST to unchecked integer arithmetic if ranges prove safety."
+  (let ((entry (%opt-checked-arithmetic-elision-entry inst)))
+    (when entry
+      (destructuring-bind (interval-fn . constructor) entry
+        (let ((lhs (gethash (vm-lhs inst) intervals))
+              (rhs (gethash (vm-rhs inst) intervals)))
+          (when (and lhs rhs)
+            (let ((result (funcall (symbol-function interval-fn) lhs rhs)))
+              (when (opt-interval-fits-fixnum-p result)
+                (funcall (symbol-function constructor)
+                         :dst (vm-dst inst)
+                         :lhs (vm-lhs inst)
+                         :rhs (vm-rhs inst))))))))))
+
+(defun opt-pass-elide-proven-overflow-checks (instructions)
+  "Elide FR-303 checked arithmetic when interval analysis proves fixnum safety."
+  (let ((intervals (make-hash-table :test #'eq))
+        (result nil))
+    (dolist (inst instructions (nreverse result))
+      (let ((replacement (%opt-rewrite-checked-arithmetic-if-safe inst intervals)))
+        (push (or replacement inst) result))
+      (%opt-transfer-interval-inst inst intervals))))

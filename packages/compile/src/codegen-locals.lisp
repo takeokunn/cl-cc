@@ -62,7 +62,13 @@ Falls through to an oob error when no index matches."
 
 (defun %emit-noescape-array-read (entry index-ast result-reg ctx)
   (let* ((size      (cadr entry))
-         (elements  (cddr entry))
+         (payload   (cddr entry))
+         (elements  (if (and payload
+                             (member (car payload)
+                                     '(fixnum single-float double-float character bit nil)
+                                     :test #'eq))
+                        (cdr payload)
+                        payload))
          (index-reg (compile-ast index-ast ctx))
          (end-label (make-label ctx "noescape_array_read_end")))
     (%emit-noescape-dispatch-loop
@@ -74,7 +80,13 @@ Falls through to an oob error when no index matches."
 
 (defun %emit-noescape-array-write (entry index-ast value-ast result-reg ctx)
   (let* ((size      (cadr entry))
-         (elements  (cddr entry))
+         (payload   (cddr entry))
+         (elements  (if (and payload
+                             (member (car payload)
+                                     '(fixnum single-float double-float character bit nil)
+                                     :test #'eq))
+                        (cdr payload)
+                        payload))
          (index-reg (compile-ast index-ast ctx))
          (val-reg   (compile-ast value-ast ctx))
          (end-label (make-label ctx "noescape_array_write_end")))
@@ -185,7 +197,7 @@ Returns (func-infos forward-env) where each info is (name label closure-reg box-
          (closure-reg (third info))
          (box-reg     (fourth info))
          (params      (fifth info))
-         (binding-data (assoc name bindings :key #'first :test #'eq))
+          (binding-data (assoc name bindings :test #'eq))
          (body-forms  (cddr binding-data))
          (free-vars   (remove-if (lambda (v) (member v params :test #'eq))
                                  (free-vars-of-list body-forms)))

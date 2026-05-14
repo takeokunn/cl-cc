@@ -18,6 +18,12 @@
     (cl-cc/codegen::emit-instruction target inst s)
     (get-output-stream-string s)))
 
+(defun %collect-a64-bytes (emit-fn inst)
+  "Collect bytes emitted by EMIT-FN for INST into a list."
+  (let ((bytes nil))
+    (funcall emit-fn inst (lambda (b) (push b bytes)))
+    (nreverse bytes)))
+
 (defun %make-aarch64-target ()
   (make-instance 'cl-cc/codegen::aarch64-target))
 
@@ -133,3 +139,23 @@
       (assert-true (search "x20" asm))
       (assert-true (search "x29" asm))
       (assert-true (search "24" asm)))))
+
+;;; ─── Checked arithmetic emitters (FR-303) ────────────────────────────────────
+
+(deftest aarch64-emit-add-checked-emits-12-bytes
+  "emit-a64-vm-add-checked emits exactly 12 bytes: ADDS(4)+B.cond(4)+BRK(4)."
+  (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-a64-bytes #'cl-cc/codegen::emit-a64-vm-add-checked inst)))
+    (assert-= 12 (length bytes))))
+
+(deftest aarch64-emit-sub-checked-emits-12-bytes
+  "emit-a64-vm-sub-checked emits exactly 12 bytes: SUBS(4)+B.cond(4)+BRK(4)."
+  (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-a64-bytes #'cl-cc/codegen::emit-a64-vm-sub-checked inst)))
+    (assert-= 12 (length bytes))))
+
+(deftest aarch64-emit-mul-checked-emits-24-bytes
+  "emit-a64-vm-mul-checked emits exactly 24 bytes: MUL(4)+SMULH(4)+ASR(4)+CMP(4)+B.cond(4)+BRK(4)."
+  (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-a64-bytes #'cl-cc/codegen::emit-a64-vm-mul-checked inst)))
+    (assert-= 24 (length bytes))))

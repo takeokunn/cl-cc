@@ -26,6 +26,13 @@
     (vm-reg-set state (vm-dst inst) (cons car-val cdr-val))
     (values (1+ pc) nil nil)))
 
+(defmethod execute-instruction ((inst vm-hash-cons) state pc labels)
+  (declare (ignore labels))
+  (let ((car-val (vm-reg-get state (vm-car-reg inst)))
+        (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
+    (vm-reg-set state (vm-dst inst) (vm-hash-cons car-val cdr-val))
+    (values (1+ pc) nil nil)))
+
 (define-simple-instruction vm-car :unary car)
 (define-simple-instruction vm-cdr :unary cdr)
 
@@ -238,4 +245,3 @@
 
 (define-simple-instruction vm-listp :pred1 listp)
 (define-simple-instruction vm-atom :pred1 atom)
-

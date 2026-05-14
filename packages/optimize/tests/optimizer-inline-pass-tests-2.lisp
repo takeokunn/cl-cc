@@ -155,3 +155,20 @@
          (result (cl-cc/optimize::opt-pass-inline insts :threshold 50)))
     ;; Captured vars → not eligible → vm-call must remain in output
     (assert-true (find-if #'cl-cc:vm-call-p result))))
+
+(deftest opt-pass-inline-propagates-constant-argument-into-inlined-body
+  "Known constant call arguments are materialized at inlined parameter bindings."
+  (let* ((cl   (make-vm-closure :dst :r0 :label "id" :params '(:r1) :captured nil))
+         (lbl  (make-vm-label :name "id"))
+         (ret  (make-vm-ret :reg :r1))
+         (argc (make-vm-const :dst :r5 :value 0))
+         (call (make-vm-call :dst :r6 :func :r0 :args (list :r5)))
+         (insts (list cl lbl ret argc call))
+         (result (cl-cc/optimize::opt-pass-inline insts :threshold 50)))
+    (assert-null (find-if #'cl-cc:vm-call-p result))
+    (assert-true
+     (>= (count-if (lambda (i)
+                     (and (cl-cc:vm-const-p i)
+                          (eql (cl-cc:vm-const-value i) 0)))
+                   result)
+         2))))

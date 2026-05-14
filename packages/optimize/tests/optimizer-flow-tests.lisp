@@ -338,6 +338,46 @@
     (assert-true jump-pos)
     (assert-true (< r1-const-pos jump-pos))))
 
+(deftest code-sinking-moves-cons-into-target-block
+  "opt-pass-code-sinking moves a uniquely-used vm-cons into its jump target block entry."
+  (let* ((insts (list (make-vm-cons :dst :pair :car-src :r0 :cdr-src :r1)
+                      (make-vm-jump :label "Luse")
+                      (make-vm-label :name "Ldead")
+                      (make-vm-ret :reg :r0)
+                      (make-vm-label :name "Luse")
+                      (make-vm-car :dst :r2 :src :pair)
+                      (make-vm-ret :reg :r2)))
+         (out (cl-cc/optimize::opt-pass-code-sinking insts))
+         (pair-cons-pos (position-if (lambda (x)
+                                       (and (typep x 'cl-cc/vm::vm-cons)
+                                            (eq (cl-cc/vm::vm-dst x) :pair)))
+                                     out))
+         (luse-pos (position-if (lambda (x)
+                                  (and (typep x 'cl-cc/vm::vm-label)
+                                       (equal (cl-cc/vm::vm-name x) "Luse")))
+                                out)))
+    (assert-true pair-cons-pos)
+    (assert-true luse-pos)
+    (assert-true (> pair-cons-pos luse-pos))))
+
+(deftest code-sinking-noop-for-cons-read-multiple-times
+  "opt-pass-code-sinking does not move vm-cons when its result is read multiple times."
+  (let* ((insts (list (make-vm-cons :dst :pair :car-src :r0 :cdr-src :r1)
+                      (make-vm-jump :label "Luse")
+                      (make-vm-label :name "Luse")
+                      (make-vm-car :dst :r2 :src :pair)
+                      (make-vm-cdr :dst :r3 :src :pair)
+                      (make-vm-ret :reg :r3)))
+         (out (cl-cc/optimize::opt-pass-code-sinking insts))
+         (pair-cons-pos (position-if (lambda (x)
+                                       (and (typep x 'cl-cc/vm::vm-cons)
+                                            (eq (cl-cc/vm::vm-dst x) :pair)))
+                                     out))
+         (jump-pos (position-if (lambda (x) (typep x 'cl-cc/vm::vm-jump)) out)))
+    (assert-true pair-cons-pos)
+    (assert-true jump-pos)
+    (assert-true (< pair-cons-pos jump-pos))))
+
 (deftest-each unreachable-removes-dead-code-cases
   "opt-pass-unreachable drops instructions between vm-ret/vm-jump and next label."
   :cases (("after-ret"  (list (make-vm-const :dst :r0 :value 1)

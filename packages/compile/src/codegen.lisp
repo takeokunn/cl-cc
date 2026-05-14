@@ -70,11 +70,14 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
-(defun %make-compile-opts (&key pass-pipeline print-pass-timings timing-stream
-                               print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                               print-pass-stats stats-stream trace-json-stream)
+(defun %make-compile-opts (&key pass-pipeline speed (inline-threshold-scale 1) print-pass-timings timing-stream
+                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                  print-pass-stats stats-stream trace-json-stream)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
+  (let ((resolved-speed (or speed (%global-optimize-quality 'speed))))
   (list :pass-pipeline       pass-pipeline
+        :speed               resolved-speed
+        :inline-threshold-scale inline-threshold-scale
         :print-pass-timings  print-pass-timings
         :timing-stream       timing-stream
         :print-opt-remarks   print-opt-remarks
@@ -82,7 +85,29 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
         :opt-remarks-mode    opt-remarks-mode
         :print-pass-stats    print-pass-stats
         :stats-stream        stats-stream
-        :trace-json-stream   trace-json-stream))
+        :trace-json-stream   trace-json-stream)))
+
+(defun %ast-declarations-for-optimize-policy (ast)
+  "Return declaration list associated with AST when available."
+  (cond
+    ((typep ast 'ast-defun) (ast-defun-declarations ast))
+    ((typep ast 'ast-lambda) (ast-lambda-declarations ast))
+    ((typep ast 'ast-let) (ast-let-declarations ast))
+    (t nil)))
+
+(defun %maybe-bump-opts-speed-from-ast (opts ast)
+  "Merge local `(declare (optimize (speed ...)))` into OPTS conservatively.
+
+Uses max(current-speed, local-speed) when local speed is an integer."
+  (let* ((decls (%ast-declarations-for-optimize-policy ast))
+         (local-speed (and decls (%local-optimize-quality decls 'speed)))
+         (current-speed (getf opts :speed)))
+    (when (integerp local-speed)
+      (setf (getf opts :speed)
+            (if (integerp current-speed)
+                (max current-speed local-speed)
+                local-speed)))
+    opts))
 
 (defun %maybe-compile-toplevel-form-via-cps (ast type-check safety opts)
   "Compile AST through the CPS entry path when the VM-safe subset allows it.
@@ -164,10 +189,11 @@ Returns two values: result register and CPS form used for the AST."
 
 (defun %process-toplevel-form (form ctx target type-env type-check safety opts compiled-asts)
   "Compile one top-level FORM and return updated compilation state.
-Values: last-reg, last-type, last-cps, updated-type-env."
+Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
   (let* ((ast (%lower-toplevel-form-to-ast form))
-         (last-reg nil) (last-type nil) (last-cps nil))
-    (setf (ctx-safety ctx) (or (%global-optimize-quality 'safety) safety))
+          (last-reg nil) (last-type nil) (last-cps nil))
+     (setf (ctx-safety ctx) (or (%global-optimize-quality 'safety) safety))
+     (%maybe-bump-opts-speed-from-ast opts ast)
     (when (typep ast 'ast-defvar)
       (setf (gethash (ast-defvar-name ast) (ctx-global-variables ctx)) t))
     (%record-toplevel-defun-for-ct-env ast)
@@ -175,10 +201,10 @@ Values: last-reg, last-type, last-cps, updated-type-env."
     (multiple-value-setq (last-type type-env)
       (%update-toplevel-type-state ast type-env type-check #'%best-effort-type-check))
     (setf (ctx-type-env ctx) type-env)
-    (%maybe-extend-ct-value-env ast)
-    (multiple-value-setq (last-reg last-cps)
-      (%compile-toplevel-ast-into-context ast ctx target type-check opts))
-    (values last-reg last-type last-cps type-env)))
+     (%maybe-extend-ct-value-env ast)
+     (multiple-value-setq (last-reg last-cps)
+       (%compile-toplevel-ast-into-context ast ctx target type-check opts))
+     (values last-reg last-type last-cps type-env compiled-asts)))
 
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts)
   "Finalize CTX after all top-level forms have been compiled."
@@ -209,9 +235,10 @@ Values: last-reg, last-type, last-cps, updated-type-env."
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
-                                    pass-pipeline print-pass-timings timing-stream
-                                    print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                    print-pass-stats stats-stream trace-json-stream)
+                                      speed (inline-threshold-scale 1)
+                                      pass-pipeline print-pass-timings timing-stream
+                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                     print-pass-stats stats-stream trace-json-stream)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
@@ -221,8 +248,10 @@ Returns a compilation-result struct with program, assembly, and globals."
         (last-cps      nil)
         (compiled-asts nil)
         (type-env      (type-env-empty))
-        (opts          (%make-compile-opts :pass-pipeline pass-pipeline
-                                          :print-pass-timings print-pass-timings
+         (opts          (%make-compile-opts :pass-pipeline pass-pipeline
+                                            :speed speed
+                                            :inline-threshold-scale inline-threshold-scale
+                                            :print-pass-timings print-pass-timings
                                           :timing-stream timing-stream
                                           :print-opt-remarks print-opt-remarks
                                           :opt-remarks-stream opt-remarks-stream
@@ -232,12 +261,12 @@ Returns a compilation-result struct with program, assembly, and globals."
                                           :trace-json-stream trace-json-stream)))
     (let ((*compile-time-value-env*    nil)
           (*compile-time-function-env* nil))
-      (dolist (form forms)
-        (unless (%top-level-in-package-form-p form)
-          (multiple-value-setq (last-reg last-type last-cps type-env)
-            (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))))
-      (setf (ctx-type-env ctx) type-env)
-      (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts))))
+       (dolist (form forms)
+         (unless (%top-level-in-package-form-p form)
+           (multiple-value-setq (last-reg last-type last-cps type-env compiled-asts)
+             (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))))
+       (setf (ctx-type-env ctx) type-env)
+       (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

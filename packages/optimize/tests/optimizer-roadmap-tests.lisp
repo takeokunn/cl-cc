@@ -275,6 +275,18 @@ resets the current block (used by the backend doc which has ### section separato
     (assert-true (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
                   evidence))))
 
+(deftest optimize-roadmap-pipeline-includes-modern-optimization-passes
+  "The default optimizer pipeline exposes the modern backend passes used by roadmap evidence."
+  (dolist (key '(:sccp
+                 :reassociate
+                 :copy-prop
+                 :gvn
+                 :store-to-load-forward
+                 :dead-store-elim
+                 :tail-duplication))
+    (assert-true (member key cl-cc/optimize::*opt-default-convergence-pass-keys*))
+    (assert-true (gethash key cl-cc/optimize::*opt-pass-registry*))))
+
 (deftest optimizer-roadmap-code-motion-evidence
   "Code-motion FRs distinguish conservative partial passes from implemented ones."
   (let ((partial-evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-167"))

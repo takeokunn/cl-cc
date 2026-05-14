@@ -134,6 +134,6 @@ so R4→rsi=6 and R5→rdi=7 in the naive mapping."
   "*vm-reg-map* covers exactly 8 virtual registers."
   (assert-= 8 (length cl-cc/codegen::*vm-reg-map*)))
 
-(deftest x86-64-regs-phys-reg-to-x86-code-covers-fourteen-registers
-  "*phys-reg-to-x86-code* covers exactly 14 physical registers."
-  (assert-= 14 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
+(deftest x86-64-regs-phys-reg-to-x86-code-covers-fifteen-registers
+  "*phys-reg-to-x86-code* covers exactly 15 physical registers including RBP."
+  (assert-= 15 (length cl-cc/codegen::*phys-reg-to-x86-code*)))

@@ -2,37 +2,69 @@
 
 ;;; VM List Operations
 
-(defparameter *vm-hash-cons-table* (make-hash-table :test #'equal)
+(defparameter *vm-hash-cons-table*
+  #+sbcl (make-hash-table :test #'equal :weakness :value)
+  #-sbcl (make-hash-table :test #'equal)
   "Runtime hash-cons table keyed by (car cdr).
 
-This is a conservative partial FR-255 implementation. It intentionally uses a
-normal hash table for now; weak-table GC integration remains future work.")
+On SBCL, values are weak so unreferenced interned cons cells can be reclaimed
+by GC. Other implementations fall back to a regular hash table.")
 
 (defun vm-clear-hash-cons-table ()
   "Clear the runtime hash-cons table and return it."
   (clrhash *vm-hash-cons-table*)
   *vm-hash-cons-table*)
 
-(defun %vm-hash-cons-shareable-p (car-value cdr-value)
-  "Return T when it is safe to intern the cons cell globally.
+(defun %vm-hash-cons-intern-pair (car-value cdr-value)
+  "Intern one cons pair in the runtime hash-cons table."
+  (let* ((key (list car-value cdr-value))
+         (existing (gethash key *vm-hash-cons-table*)))
+    (or existing
+        (setf (gethash key *vm-hash-cons-table*)
+              (cons car-value cdr-value)))))
 
-We only intern flat atomic pairs. Reusing cons cells whose CAR or CDR already
-contains cons structure creates observable aliasing for ordinary Lisp list
-construction, which breaks destructive operators (for example NREVERSE/NUNION)
-and can accidentally form cyclic syntax trees during self-hosted list building.
-Fresh cons cells are therefore required for any nested/list-shaped pair."
-  (and (not (consp car-value))
-       (not (consp cdr-value))))
+(defun %vm-hash-cons-canonicalize (value seen)
+  "Recursively canonicalize VALUE by hash-consing nested cons trees.
+
+SEEN tracks already-visited cons cells to avoid infinite recursion on cyclic
+inputs and to preserve graph sharing while canonicalizing."
+  (if (consp value)
+      (multiple-value-bind (cached present-p) (gethash value seen)
+        (cond
+          ;; Active recursion marker => cycle detected on this branch.
+          ((and present-p (eq cached :visiting))
+           (values value t))
+          (present-p
+           (values cached nil))
+          (t
+           (setf (gethash value seen) :visiting)
+           (multiple-value-bind (canon-car car-cyclic-p)
+               (%vm-hash-cons-canonicalize (car value) seen)
+             (multiple-value-bind (canon-cdr cdr-cyclic-p)
+                 (%vm-hash-cons-canonicalize (cdr value) seen)
+               (if (or car-cyclic-p cdr-cyclic-p)
+                   (progn
+                     ;; Avoid interning cyclic structures in equal-hash tables.
+                     (setf (gethash value seen) value)
+                     (values value t))
+                   (let ((canon (%vm-hash-cons-intern-pair canon-car canon-cdr)))
+                     (setf (gethash value seen) canon)
+                     (values canon nil))))))))
+      (values value nil)))
 
 (defun vm-hash-cons (car-value cdr-value)
-  "Return a shared cons cell for CAR-VALUE/CDR-VALUE."
-  (if (%vm-hash-cons-shareable-p car-value cdr-value)
-      (let* ((key (list car-value cdr-value))
-             (existing (gethash key *vm-hash-cons-table*)))
-        (or existing
-            (setf (gethash key *vm-hash-cons-table*)
-                  (cons car-value cdr-value))))
-      (cons car-value cdr-value)))
+  "Return a shared cons cell for CAR-VALUE/CDR-VALUE.
+
+Nested cons values are recursively canonicalized so structurally equivalent
+list/tree shapes can share storage under explicit hash-cons opt-in."
+  (let ((seen (make-hash-table :test #'eq)))
+    (multiple-value-bind (canon-car car-cyclic-p)
+        (%vm-hash-cons-canonicalize car-value seen)
+      (multiple-value-bind (canon-cdr cdr-cyclic-p)
+          (%vm-hash-cons-canonicalize cdr-value seen)
+        (if (or car-cyclic-p cdr-cyclic-p)
+            (cons canon-car canon-cdr)
+            (%vm-hash-cons-intern-pair canon-car canon-cdr))))))
 
 ;;; ─── Extensible Sequence Protocol (FR-274 partial) ───────────────────────
 
@@ -91,6 +123,14 @@ Fresh cons cells are therefore required for any nested/list-shaped pair."
   (cdr-src nil :reader vm-cdr-reg)
   (dst nil :reader vm-dst)
   (:sexp-tag :cons)
+  (:sexp-slots dst car-src cdr-src))
+
+(define-vm-instruction vm-hash-cons (vm-instruction)
+  "Create or reuse a hash-consed cell from CAR-SRC and CDR-SRC, store in DST."
+  (car-src nil :reader vm-car-reg)
+  (cdr-src nil :reader vm-cdr-reg)
+  (dst nil :reader vm-dst)
+  (:sexp-tag :hash-cons)
   (:sexp-slots dst car-src cdr-src))
 
 (define-vm-unary-instruction vm-car :car "Extract the car of the cons cell in SRC, store in DST.")

@@ -78,14 +78,14 @@
          (body (fourth form)))
     (assert-eq 'defun (first form))
     (assert-eq 'pt-p (second form))
-    (assert-true (member 'listp body))))
+    (assert-eq 'listp (first (second body)))))
 
 (deftest typed-predicate-vector-uses-vectorp
   "%defstruct-typed-predicate for :type vector body uses VECTORP."
   (let* ((form (cl-cc/expand::%defstruct-typed-predicate 'seg-p 'seg 'vector 2))
          (body (fourth form)))
     (assert-eq 'defun (first form))
-    (assert-true (member 'vectorp body))))
+    (assert-eq 'vectorp (first (second body)))))
 
 (deftest typed-predicate-nil-name-returns-nil
   "%defstruct-typed-predicate returns NIL when pred-name is NIL."
@@ -96,20 +96,20 @@
 (deftest typed-expansion-forms-includes-quote-name
   "%defstruct-typed-expansion-forms always ends with (quote name)."
   (let ((forms (cl-cc/expand::%defstruct-typed-expansion-forms
-                'pt nil '() nil)))
+                'pt nil '() nil nil)))
     (assert-equal '(quote pt) (car (last forms)))))
 
 (deftest typed-expansion-forms-ctor-is-first-when-present
   "%defstruct-typed-expansion-forms places ctor-form first when non-nil."
   (let* ((ctor  '(defun make-pt (&key x y) (list 'pt x y)))
-         (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt ctor '() nil)))
+         (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt ctor '() nil nil)))
     (assert-equal ctor (first forms))))
 
 (deftest typed-expansion-forms-pred-precedes-quote
   "%defstruct-typed-expansion-forms places predicate before the trailing quote."
   (let* ((pred  '(defun pt-p (obj) (listp obj)))
-         (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt nil '() pred)))
-    (assert-equal pred (second (last forms 2)))))
+         (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt nil '() pred nil)))
+    (assert-equal pred (first (last forms 2)))))
 
 ;;; ── %defstruct-typed-expansion (integration) ────────────────────────────
 

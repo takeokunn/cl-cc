@@ -27,6 +27,77 @@
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-num-eq))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump-zero))))
 
+(deftest codegen-let-noescape-typed-array-the-wrapper-still-sinks
+  "Typed (the (simple-array ...)) make-array bindings still use noescape array sink path."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'arr (make-ast-the
+                                           :type '(simple-array fixnum (*))
+                                           :value (make-ast-call
+                                                   :func 'make-array
+                                                   :args (list (make-ast-int :value 2))))))
+                :body (list (make-ast-call :func 'aset
+                                           :args (list (make-ast-var :name 'arr)
+                                                       (make-ast-int :value 1)
+                                                       (make-ast-int :value 42)))
+                            (make-ast-call :func 'aref
+                                           :args (list (make-ast-var :name 'arr)
+                                                       (make-ast-int :value 1))))
+                :declarations nil)
+               ctx)))
+    (assert-true (keywordp reg))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aset))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aref))))
+
+(deftest codegen-let-noescape-typed-array-character-default-init
+  "Typed character noescape arrays initialize slot registers with #\\Nul by default."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast
+     (make-ast-let
+      :bindings (list (cons 'arr (make-ast-the
+                                 :type '(simple-array character (*))
+                                 :value (make-ast-call
+                                         :func 'make-array
+                                         :args (list (make-ast-int :value 2))))))
+      :body (list (make-ast-call :func 'aref
+                                 :args (list (make-ast-var :name 'arr)
+                                             (make-ast-int :value 0))))
+      :declarations nil)
+     ctx)
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'cl-cc/vm::vm-const)
+                  (characterp (cl-cc/vm::vm-value inst))
+                  (char= #\Nul (cl-cc/vm::vm-value inst))))
+           (codegen-instructions ctx)))))
+
+(deftest codegen-let-noescape-array-element-type-keyword-still-sinks
+  "(make-array n :element-type 'character) still takes the noescape sink path in let binding."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast
+               (make-ast-let
+                :bindings (list (cons 'arr (make-ast-call
+                                           :func 'make-array
+                                           :args (list (make-ast-int :value 2)
+                                                       (make-ast-var :name :element-type)
+                                                       (make-ast-quote :value 'character)))))
+                :body (list (make-ast-call :func 'aref
+                                           :args (list (make-ast-var :name 'arr)
+                                                       (make-ast-int :value 0))))
+                :declarations nil)
+               ctx)))
+    (assert-true (keywordp reg))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-make-array))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-aref))
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'cl-cc/vm::vm-const)
+                  (characterp (cl-cc/vm::vm-value inst))
+                  (char= #\Nul (cl-cc/vm::vm-value inst))))
+           (codegen-instructions ctx)))))
+
 (deftest codegen-let-branch-local-array-use-elides-allocation
   "A fixed-size local array used only in one branch is elided entirely on the optimized path."
   (let* ((ctx (make-codegen-ctx))

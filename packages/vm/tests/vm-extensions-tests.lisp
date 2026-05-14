@@ -23,23 +23,36 @@
 
 (deftest vm-symbol-get-default
   "vm-symbol-get returns default when property absent."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'prim-test-sym)
+  (let ((s (make-test-vm))
+        (sym (gensym "VM-SYMBOL-GET-DEFAULT-")))
+    (cl-cc:vm-reg-set s 1 sym)
     (cl-cc:vm-reg-set s 2 :color)
     (cl-cc:vm-reg-set s 3 :none)
     (exec1 (cl-cc:make-vm-symbol-get :dst 0 :sym 1 :indicator 2 :default 3) s)
     (assert-equal :none (cl-cc:vm-reg-get s 0))))
 
-(deftest vm-symbol-set-and-get
-  "vm-symbol-set then vm-symbol-get round-trips."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'prim-test-sym)
+(deftest vm-symbol-set-and-get-roundtrip-with-host-sync
+  "vm-symbol-set keeps multi-property roundtrips on the short plist path and syncs the host plist."
+  (let ((s (make-test-vm))
+        (sym (gensym "VM-SYMBOL-ROUNDTRIP-")))
+    (cl-cc:vm-reg-set s 1 sym)
     (cl-cc:vm-reg-set s 2 :color)
     (cl-cc:vm-reg-set s 3 'red)
-    (cl-cc:vm-reg-set s 4 nil)
+    (cl-cc:vm-reg-set s 4 :shape)
+    (cl-cc:vm-reg-set s 5 'circle)
+    (cl-cc:vm-reg-set s 6 nil)
     (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 2 :value 3) s)
-    (exec1 (cl-cc:make-vm-symbol-get :dst 5 :sym 1 :indicator 2 :default 4) s)
-    (assert-equal 'red (cl-cc:vm-reg-get s 5))))
+    (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 4 :value 5) s)
+    (exec1 (cl-cc:make-vm-symbol-get :dst 7 :sym 1 :indicator 2 :default 6) s)
+    (exec1 (cl-cc:make-vm-symbol-get :dst 8 :sym 1 :indicator 4 :default 6) s)
+    (exec1 (cl-cc:make-vm-symbol-plist :dst 9 :src 1) s)
+    (assert-equal 'red (cl-cc:vm-reg-get s 7))
+    (assert-equal 'circle (cl-cc:vm-reg-get s 8))
+    (assert-equal 'red (getf (cl-cc:vm-reg-get s 9) :color))
+    (assert-equal 'circle (getf (cl-cc:vm-reg-get s 9) :shape))
+    (assert-true (consp (cl-cc:vm-reg-get s 9)))
+    (assert-equal 'red (getf (symbol-plist sym) :color))
+    (assert-equal 'circle (getf (symbol-plist sym) :shape))))
 
 (deftest vm-set-symbol-value
   "vm-set-symbol-value updates the symbol value cell and returns the assigned value."
@@ -53,20 +66,82 @@
 
 (deftest vm-remprop
   "vm-remprop removes a property and returns t."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'prim-test-sym)
+  (let ((s (make-test-vm))
+        (sym (gensym "VM-REMPROP-")))
+    (cl-cc:vm-reg-set s 1 sym)
     (cl-cc:vm-reg-set s 2 :color)
     (cl-cc:vm-reg-set s 3 'red)
     (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 2 :value 3) s)
     (exec1 (cl-cc:make-vm-remprop :dst 0 :sym 1 :indicator 2) s)
-    (assert-equal t (cl-cc:vm-reg-get s 0))))
+    (assert-equal t (cl-cc:vm-reg-get s 0))
+    (assert-null (getf (symbol-plist sym) :color))))
 
 (deftest vm-symbol-plist-empty
   "vm-symbol-plist returns nil for symbol with no properties."
-  (let ((s (make-test-vm)))
-    (cl-cc:vm-reg-set s 1 'prim-test-fresh-sym)
+  (let ((s (make-test-vm))
+        (sym (gensym "VM-SYMBOL-EMPTY-")))
+    (cl-cc:vm-reg-set s 1 sym)
     (exec1 (cl-cc:make-vm-symbol-plist :dst 0 :src 1) s)
     (assert-null (cl-cc:vm-reg-get s 0))))
+
+(deftest vm-set-symbol-plist-overwrites-and-promotes-long-plist
+  "vm-set-symbol-plist overwrites stale properties and promotes long plists to the hash path."
+  (let* ((s (make-test-vm))
+         (sym (gensym "VM-LONG-PLIST-"))
+         (long-plist '(:a 1 :b 2 :c 3 :d 4 :e 5)))
+    (cl-cc:vm-reg-set s 1 sym)
+    (cl-cc:vm-reg-set s 2 :stale)
+    (cl-cc:vm-reg-set s 3 :old)
+    (cl-cc:vm-reg-set s 4 long-plist)
+    (cl-cc:vm-reg-set s 5 nil)
+    (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 2 :value 3) s)
+    (exec1 (cl-cc:make-vm-set-symbol-plist :dst 6 :sym 1 :plist-reg 4) s)
+    (exec1 (cl-cc:make-vm-symbol-get :dst 7 :sym 1 :indicator 2 :default 5) s)
+    (exec1 (cl-cc:make-vm-symbol-plist :dst 9 :src 1) s)
+    (assert-null (cl-cc:vm-reg-get s 7))
+    (assert-equal 1 (getf (cl-cc:vm-reg-get s 9) :a))
+    (assert-equal 5 (getf (cl-cc:vm-reg-get s 9) :e))
+    (assert-equal 5 (getf (symbol-plist sym) :e))
+    (assert-true
+     (cl-cc/vm::%vm-symbol-property-entry-p
+      (gethash sym (cl-cc/vm::vm-symbol-plists s))))))
+
+(deftest vm-system-property-storage-is-separate
+  "VM system properties live outside the user-visible symbol plist."
+  (let* ((s (make-test-vm))
+         (sym (gensym "VM-SYSTEM-PROPS-")))
+    (cl-cc:vm-reg-set s 1 sym)
+    (cl-cc:vm-reg-set s 2 :user)
+    (cl-cc:vm-reg-set s 3 :value)
+    (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 2 :value 3) s)
+    (cl-cc/vm::vm-system-property-set s sym :function 'compiled-fn)
+    (cl-cc/vm::vm-system-property-set s sym :type 'function)
+    (exec1 (cl-cc:make-vm-symbol-plist :dst 4 :src 1) s)
+    (assert-equal :value (getf (cl-cc:vm-reg-get s 4) :user))
+    (assert-null (getf (cl-cc:vm-reg-get s 4) :function))
+    (assert-equal 'compiled-fn
+                  (cl-cc/vm::vm-system-property-get s sym :function))
+    (assert-equal 'function
+                  (getf (cl-cc/vm::vm-system-property-plist s sym) :type))
+    (assert-null (getf (symbol-plist sym) :function))))
+
+(deftest vm-symbol-plist-lock-and-read-barrier-are-usable
+  "FR-379 lock/barrier state exists and read snapshots observe atomic updates."
+  (let* ((s (make-test-vm))
+         (sym (gensym "VM-BARRIER-"))
+         (lock (cl-cc/vm::vm-symbol-plist-lock s))
+         (barrier-before (cl-cc/vm::vm-symbol-plist-read-barrier s)))
+    (assert-true lock)
+    (sb-thread:with-mutex (lock)
+      (assert-equal barrier-before (cl-cc/vm::vm-symbol-plist-read-barrier s)))
+    (cl-cc:vm-reg-set s 1 sym)
+    (cl-cc:vm-reg-set s 2 :flag)
+    (cl-cc:vm-reg-set s 3 t)
+    (exec1 (cl-cc:make-vm-symbol-set :dst 0 :sym 1 :indicator 2 :value 3) s)
+    (multiple-value-bind (plist barrier-after)
+        (cl-cc/vm::vm-symbol-plist-read-snapshot s sym)
+      (assert-true (> barrier-after barrier-before))
+      (assert-equal t (getf plist :flag)))))
 
 (deftest vm-progv-enter-exit
   "vm-progv-enter binds globals and vm-progv-exit restores them."

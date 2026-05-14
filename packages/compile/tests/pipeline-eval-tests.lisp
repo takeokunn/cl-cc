@@ -78,6 +78,14 @@
   (expected expr)
   (assert-true (equal expected (run-string expr))))
 
+(deftest pipeline-run-string-hash-cons-reuses-flat-pairs
+  "hash-cons is an explicit VM primitive; cons keeps fresh-cell semantics."
+  (cl-cc/vm:vm-clear-hash-cons-table)
+  (assert-true
+   (eq t (run-string "(let ((a (hash-cons 'x 'y)) (b (hash-cons 'x 'y))) (eq a b))")))
+  (assert-true
+   (eq nil (run-string "(let ((a (hash-cons 'x 'y)) (b (cons 'x 'y))) (eq a b))"))))
+
 (deftest-each pipeline-run-string-stdlib-regressions
   "run-string with stdlib handles the recovered HOF and set/list paths."
   :cases (("mapcar"        '(2 4 6)   "(mapcar (lambda (x) (+ x x)) (list 1 2 3))")

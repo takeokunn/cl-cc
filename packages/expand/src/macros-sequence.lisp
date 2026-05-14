@@ -66,17 +66,18 @@ Supports :test (default #'eql), :key, :from-end."
                        (,s1 ,(if from-end `(reverse ,seq1) seq1))
                        (,s2 ,(if from-end `(reverse ,seq2) seq2))
                        (,idx 0)))
-           (forward-loop
-             `(let (,@bindings)
-                (loop
-                  (cond
-                    ((and (null ,s1) (null ,s2)) (return nil))
-                    ((or  (null ,s1) (null ,s2)) (return ,idx))
-                    ((not ,test-expr)             (return ,idx))
-                    (t
-                     (setq ,s1 (cdr ,s1))
-                     (setq ,s2 (cdr ,s2))
-                     (setq ,idx (+ ,idx 1))))))))
+            (forward-loop
+              `(block mismatch
+                 (let (,@bindings)
+                   (loop
+                     (cond
+                       ((and (null ,s1) (null ,s2)) (return nil))
+                       ((or  (null ,s1) (null ,s2)) (return ,idx))
+                       ((not ,test-expr)             (return ,idx))
+                       (t
+                        (setq ,s1 (cdr ,s1))
+                        (setq ,s2 (cdr ,s2))
+                        (setq ,idx (+ ,idx 1)))))))))
       (if from-end
           ;; from-end: run forward mismatch on reversed seqs, map index back
           (let ((len1 (gensym "LEN1")) (len2 (gensym "LEN2")) (mi (gensym "MI")))

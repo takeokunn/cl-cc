@@ -313,9 +313,9 @@
   :cases (("const-5"    (make-vm-const :dst :r0 :value 5) '(:const 5) t)
           ("halt-impure" (make-vm-halt :reg :r0)           nil         nil))
   (inst expected expect-non-nil)
-  (let ((gen     (make-hash-table :test #'eq))
-        (val-env (make-hash-table :test #'eq))
-        (key     (cl-cc/optimize::%gvn-key inst gen val-env)))
+  (let* ((gen     (make-hash-table :test #'eq))
+         (val-env (make-hash-table :test #'eq))
+         (key     (cl-cc/optimize::%gvn-key inst gen val-env)))
     (if expect-non-nil
         (assert-equal expected key)
         (assert-null  key))))

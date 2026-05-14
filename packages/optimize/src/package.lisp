@@ -104,6 +104,12 @@
     #:opt-compute-value-ranges
     #:opt-array-bounds-check-eliminable-p
     #:opt-interval-add  #:opt-interval-sub
+    #:opt-interval-bit-width
+    #:opt-interval-known-bits-mask
+    #:opt-interval-fits-fixnum-width-p
+    #:opt-interval-fits-fixnum-p
+    #:opt-interval-logand
+    #:opt-pass-elide-proven-overflow-checks
     #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
     #:opt-pass-cons-slot-forward
 
@@ -122,6 +128,8 @@
     #:optimize-instructions
     #:*skip-optimizer-passes*
     #:*verify-optimizer-instructions*
+    #:*opt-enable-pure-call-optimization*
+    #:opt-configure-optimization-policy
     #:optimize-roadmap-doc-features
     #:optimize-roadmap-doc-fr-ids
     #:optimize-roadmap-register-doc-evidence
@@ -144,22 +152,40 @@
     #:opt-ic-site-misses
     #:opt-ic-site-megamorphic-fallback
     #:opt-ic-transition
+    #:make-opt-megamorphic-cache
+    #:opt-mega-cache-put
+    #:opt-mega-cache-get
+    #:opt-ic-resolve-target
+    #:make-opt-ic-patch-plan
+    #:opt-ic-make-patch-plan
+    #:opt-build-inline-polymorphic-dispatch
     #:make-opt-speculation-log
+    #:*opt-speculation-log*
     #:opt-record-speculation-failure
     #:opt-speculation-failed-p
+    #:opt-speculation-allowed-p
+    #:opt-clear-speculation-log
+    #:opt-save-speculation-log
+    #:opt-load-speculation-log
     #:make-opt-profile-data
     #:opt-profile-record-edge
     #:opt-profile-record-value
-    #:opt-profile-record-call-chain
-    #:opt-profile-record-allocation
-    #:opt-lattice-bottom
-    #:opt-lattice-constant
-    #:opt-lattice-overdefined
-    #:opt-lattice-meet
-    #:opt-lattice-value-kind
-    #:opt-lattice-value-value
-    #:make-opt-function-summary
-    #:opt-function-summary-safe-to-inline-p
+    #:opt-profile-top-values
+     #:opt-profile-value-range
+     #:opt-profile-record-call-chain
+     #:opt-profile-record-allocation
+     #:opt-pgo-best-successor
+     #:opt-pgo-build-hot-chain
+     #:opt-pgo-rotate-loop
+     #:opt-lattice-bottom
+     #:opt-lattice-constant
+     #:opt-lattice-overdefined
+     #:opt-lattice-meet
+     #:opt-lattice-value-kind
+     #:opt-lattice-value-value
+     #:make-opt-function-summary
+     #:opt-function-summary-safe-to-inline-p
+     #:opt-thinlto-should-import-p
     #:make-opt-slab-pool
     #:opt-slab-allocate
     #:opt-slab-free
@@ -181,7 +207,95 @@
     #:opt-sea-node-schedulable-p
     #:make-opt-deopt-frame
     #:opt-materialize-deopt-state
+    #:make-opt-osr-point
+    #:opt-osr-trigger-p
+    #:opt-osr-materialize-entry
     #:make-opt-shape-descriptor-for-slots
     #:opt-shape-slot-offset
-    #:opt-adaptive-compilation-threshold
+    #:make-opt-shape-transition-cache
+     #:opt-shape-transition-put
+     #:opt-shape-transition-get
+     #:opt-adaptive-compilation-threshold
+     #:opt-tier-transition
+     #:make-opt-async-state-machine
+    #:opt-build-async-state-machine
+    #:opt-choose-coroutine-lowering-strategy
+    #:make-opt-channel-site
+    #:opt-channel-select-path
+    #:opt-channel-should-jump-table-select-p
+    #:make-opt-stm-plan
+    #:opt-stm-build-plan
+    #:opt-stm-needs-log-p
+    #:make-opt-lockfree-plan
+    #:opt-lockfree-select-reclamation
+    #:opt-lockfree-build-plan
+     #:make-opt-cfi-plan
+     #:opt-build-cfi-plan
+     #:opt-cfi-entry-opcode
+     #:opt-should-use-retpoline-p
+      #:opt-retpoline-thunk-name
+      #:opt-needs-stack-canary-p
+      #:opt-stack-canary-emit-plan
+      #:opt-stack-canary-prologue-seq
+      #:opt-stack-canary-epilogue-seq
+      #:make-opt-shadow-stack-plan
+      #:opt-shadow-stack-plan-enabled-p
+      #:opt-shadow-stack-plan-target
+      #:opt-shadow-stack-plan-needs-incsssp-p
+      #:opt-shadow-stack-plan-needs-save-restore-p
+      #:opt-build-shadow-stack-plan
+     #:make-opt-wasm-tailcall-plan
+    #:opt-wasm-select-tailcall-opcode
+    #:opt-build-wasm-tailcall-plan
+    #:make-opt-wasm-gc-layout
+    #:opt-build-wasm-gc-layout
+    #:make-opt-debug-loc
+    #:opt-build-dwarf-line-row
+    #:opt-build-wasm-source-map-entry
+    #:opt-format-diagnostic-reason
+    #:make-opt-tls-plan
+    #:opt-tls-plan-target
+    #:opt-tls-plan-base-register
+    #:opt-tls-plan-model
+    #:opt-tls-plan-notes
+    #:opt-build-tls-plan
+    #:make-opt-atomic-plan
+    #:opt-atomic-plan-target
+    #:opt-atomic-plan-operation
+    #:opt-atomic-plan-memory-order
+    #:opt-atomic-plan-opcode
+    #:opt-select-atomic-opcode
+    #:opt-build-atomic-plan
+    #:make-opt-htm-plan
+    #:opt-build-htm-plan
+    #:make-opt-concurrent-gc-plan
+     #:opt-build-concurrent-gc-plan
+     #:make-opt-partial-specialization
+     #:opt-partial-spec-original-name
+     #:opt-partial-spec-specialized-name
+     #:opt-partial-spec-signature
+     #:opt-partial-spec-static-args
+     #:opt-partial-spec-dynamic-args
+     #:opt-partial-spec-residual-body
+     #:opt-specialize-constant-args
+     #:make-opt-binding-time
+     #:opt-binding-time-parameter
+     #:opt-binding-time-kind
+     #:opt-binding-time-value
+     #:opt-binding-time-lattice
+     #:opt-sccp-analyze-binding-times
+     #:make-opt-specialization-plan
+     #:opt-specialization-plan-callee-label
+     #:opt-specialization-plan-specialized-name
+     #:opt-specialization-plan-signature
+     #:opt-specialization-plan-static-args
+     #:opt-specialization-plan-dynamic-args
+     #:opt-specialization-plan-clone-needed-p
+     #:opt-specialization-plan-cache-hit-p
+     #:opt-build-specialization-plan
+     #:make-opt-cow-object
+     #:opt-cow-object-payload
+     #:opt-cow-object-refcount
+    #:opt-cow-copy
+    #:opt-cow-write
     #:opt-verify-instructions))

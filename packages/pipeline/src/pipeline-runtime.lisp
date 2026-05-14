@@ -6,7 +6,7 @@
     (maphash (lambda (k v) (setf (gethash k dst) v)) src)
     dst))
 
-(defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
+(defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream (inline-threshold-scale 1))
   "Compile and run SOURCE. When STDLIB is true, include standard library."
   (let ((*package*          (or (find-package :cl-cc) *package*))
         (*labels-boxed-fns* nil)
@@ -16,10 +16,11 @@
                               :timing-stream       timing-stream
                               :print-pass-stats    print-pass-stats
                               :stats-stream        stats-stream
-                              :trace-json-stream   trace-json-stream
-                              :print-opt-remarks   print-opt-remarks
-                              :opt-remarks-stream  opt-remarks-stream
-                              :opt-remarks-mode    opt-remarks-mode)))
+                               :trace-json-stream   trace-json-stream
+                               :print-opt-remarks   print-opt-remarks
+                               :opt-remarks-stream  opt-remarks-stream
+                               :opt-remarks-mode    opt-remarks-mode
+                               :inline-threshold-scale inline-threshold-scale)))
     (progn
       (when (and stdlib (null *stdlib-vm-snapshot*))
         (warm-stdlib-cache))

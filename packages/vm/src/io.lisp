@@ -42,11 +42,19 @@
   (clrhash dst)
   (maphash (lambda (k v) (setf (gethash k dst) v)) src))
 
+(defun %copy-vm-symbol-property-table-into (src dst)
+  "Replace DST's contents with a copy of SRC that preserves plist isolation."
+  (clrhash dst)
+  (maphash (lambda (symbol entry)
+             (setf (gethash symbol dst)
+                   (cl-cc/vm::%vm-copy-symbol-property-entry entry)))
+           src))
+
 (defun clone-vm-state (source &key (output-stream *standard-output*))
   "Create a new vm-io-state seeded with the runtime state from SOURCE.
-Copies function-registry, class-registry, global-vars, heap, heap-counter,
-and symbol-plists so user code can call stdlib functions and access stdlib
-globals without recompiling the stdlib.
+ Copies function-registry, class-registry, global-vars, heap, heap-counter,
+ user/system symbol property state, and related metadata so user code can call
+ stdlib functions and access stdlib globals without recompiling the stdlib.
 Registers, call-stack, handler-stack, method-call-stack start fresh so
 each test begins with a clean execution context."
   (let ((clone (make-vm-state :output-stream output-stream)))
@@ -54,8 +62,13 @@ each test begins with a clean execution context."
     (%copy-ht-into (vm-class-registry    source) (vm-class-registry    clone))
     (%copy-ht-into (vm-global-vars       source) (vm-global-vars       clone))
     (%copy-ht-into (vm-state-heap        source) (vm-state-heap        clone))
-    (%copy-ht-into (vm-symbol-plists     source) (vm-symbol-plists     clone))
+    (%copy-vm-symbol-property-table-into (vm-symbol-plists source)
+                                         (vm-symbol-plists clone))
+    (%copy-vm-symbol-property-table-into (vm-system-symbol-plists source)
+                                         (vm-system-symbol-plists clone))
     (setf (vm-heap-counter clone) (vm-heap-counter source))
+    (setf (vm-symbol-plist-read-barrier clone)
+          (vm-symbol-plist-read-barrier source))
     (setf (vm-standard-output clone) output-stream)
     clone))
 

@@ -133,14 +133,14 @@
 ;;; ─── Binary-Custom Convention Tests ─────────────────────────────────────────
 
 (deftest binary-custom-entry-count
-  "There are exactly 17 binary-custom entries in the registry."
+  "There are exactly 18 binary-custom entries in the registry."
   (let ((count 0))
     (maphash (lambda (_key entry)
                (declare (ignore _key))
                (when (eq (cl-cc/compile::be-convention entry) :binary-custom)
                  (incf count)))
              cl-cc/compile::*builtin-registry*)
-    (assert-equal 17 count)))
+    (assert-equal 18 count)))
 
 (deftest binary-custom-entry-validation
   "Every binary-custom entry has a 2-element slots list with keyword slot names."

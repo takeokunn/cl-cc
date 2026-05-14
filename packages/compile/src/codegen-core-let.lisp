@@ -44,6 +44,29 @@ FN-NAME is compared case-insensitively via SYMBOL-NAME so both symbol and ast-va
   (and (%ast-make-array-call-p node)
        (typep (first (ast-call-args node)) 'ast-int)))
 
+(defun %ast-make-array-noescape-call-p (node)
+  "T when NODE is a fixed-size MAKE-ARRAY call suitable for noescape sinking.
+Currently accepts either:
+- (make-array <int>)
+- (make-array <int> :element-type '<symbol>)
+and rejects other keyword shapes conservatively."
+  (and (typep node 'ast-call)
+       (let ((func (ast-call-func node))
+             (args (ast-call-args node)))
+         (and (or (and (symbolp func) (string= (symbol-name func) "MAKE-ARRAY"))
+                  (and (typep func 'ast-var)
+                       (string= (symbol-name (ast-var-name func)) "MAKE-ARRAY")))
+              (consp args)
+              (typep (first args) 'ast-int)
+              (let ((tail (rest args)))
+                (or (null tail)
+                    (and (= (length tail) 2)
+                         (typep (first tail) 'ast-var)
+                         (eq (ast-var-name (first tail)) :element-type)
+                         (or (typep (second tail) 'ast-quote)
+                             (and (typep (second tail) 'ast-var)
+                                  (keywordp (ast-var-name (second tail))))))))))))
+
 (defun %binding-mentioned-in-body-p (body-forms binding-name)
   (and (listp body-forms)
        (member binding-name

@@ -147,8 +147,60 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   (let* ((opts (cl-cc/cli::make-compile-opts :flamegraph-path "/tmp/cl-cc-test.svg"))
          (vm-state (cl-cc/cli::%maybe-make-profiled-vm-state opts)))
     (assert-true vm-state)
-    (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
-    (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
+     (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
+     (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
+
+(deftest cli-parse-compile-opts-includes-pgo-flags
+  "%parse-compile-opts captures --pgo-generate/--pgo-use values."
+  (let* ((parsed (cl-cc/cli:parse-args '("run" "foo.lisp"
+                                         "--pgo-generate" "out/profile.sexp"
+                                         "--pgo-use" "in/profile.sexp")))
+         (opts (cl-cc/cli::%parse-compile-opts parsed)))
+    (assert-string= "out/profile.sexp" (cl-cc/cli::compile-opts-pgo-generate-path opts))
+    (assert-string= "in/profile.sexp" (cl-cc/cli::compile-opts-pgo-use-path opts))))
+
+(deftest cli-write-pgo-profile-emits-file
+  "%maybe-write-pgo-profile writes a profile file with opcode frequencies."
+  (let* ((tmp (uiop:native-namestring
+               (make-pathname :name (format nil "cl-cc-pgo-~A-~A"
+                                            (get-universal-time) (random 999999))
+                              :type "sexp"
+                              :defaults uiop:*temporary-directory*)))
+         (opts (cl-cc/cli::make-compile-opts :pgo-generate-path tmp))
+         (result (cl-cc:compile-string "(+ 1 2)" :target :vm)))
+    (unwind-protect
+         (progn
+           (cl-cc/cli::%maybe-write-pgo-profile opts result)
+           (assert-true (probe-file tmp))
+           (let ((content (cl-cc/cli::%read-file tmp)))
+             (assert-true (search ":CL-CC-PGO-V1" (string-upcase content)))
+             (assert-true (search ":TOTAL-INSTRUCTIONS" (string-upcase content)))))
+      (ignore-errors (delete-file tmp)))))
+
+(deftest cli-compile-opts-kwargs-uses-pgo-use-profile-to-set-speed
+  "%compile-opts-kwargs derives :speed from --pgo-use profile when available."
+  (let* ((profile-path (uiop:native-namestring
+                        (make-pathname :name (format nil "cl-cc-pgo-use-~A-~A"
+                                                     (get-universal-time) (random 999999))
+                                       :type "sexp"
+                                       :defaults uiop:*temporary-directory*)))
+         (opts (cl-cc/cli::make-compile-opts :pgo-use-path profile-path)))
+    (unwind-protect
+         (progn
+           (with-open-file (out profile-path
+                                :direction :output
+                                :if-exists :supersede
+                                :if-does-not-exist :create)
+             (format out "(:format :cl-cc-pgo-v1 :total-instructions 180 :op-counts ((\"VM-CALL\" . 20)))~%"))
+           (let ((kwargs (cl-cc/cli::%compile-opts-kwargs opts nil)))
+             (assert-= 3 (getf kwargs :speed))))
+      (ignore-errors (delete-file profile-path)))))
+
+(deftest cli-compile-opts-kwargs-omits-speed-without-usable-pgo-profile
+  "%compile-opts-kwargs does not inject :speed when --pgo-use is missing or unreadable."
+  (let* ((opts (cl-cc/cli::make-compile-opts :pgo-use-path "/tmp/does-not-exist-profile.sexp"))
+         (kwargs (cl-cc/cli::%compile-opts-kwargs opts nil)))
+    (assert-null (getf kwargs :speed))))
 
 (deftest cli-read-command-source-roundtrip
   "%read-command-source reuses the CLI read path for ordinary source files."
@@ -161,6 +213,22 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
       (progn (funcall thunk) nil)
     (fake-quit (e) (fake-quit-code e))))
 
+(defun %run-do-compile-dump-ir-annotate-source-output (path)
+  "Run %do-compile for PATH as dump-ir vm + annotate-source and return stdout."
+  (with-output-to-string (out)
+    (let ((*standard-output* out)
+          (*error-output* out))
+      (with-fake-quit
+        (assert-= 0
+                  (%capture-fake-quit-code
+                   (lambda ()
+                     (cl-cc/cli::%do-compile
+                      (make-cli-parsed
+                       :command "compile"
+                       :positional (list path)
+                       :flags '(("--dump-ir" . "vm")
+                                ("--annotate-source" . t)))))))))))
+
 (deftest cli-run-compiled-result-executes-program
   "%run-compiled-result compiles a simple expression and runs it without error."
   (let* ((result (cl-cc::compile-string "(+ 1 1)" :target :vm))
@@ -168,6 +236,78 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
          (opts (cl-cc/cli::make-compile-opts))
          (val (cl-cc/cli::%run-compiled-result result vm-state opts)))
     (assert-= 2 val)))
+
+(deftest cli-do-compile-debug-binds-backend-frame-pointer-switches
+  "%do-compile binds backend omit-frame-pointer controls to NIL for both trace and native compile paths."
+  (let (trace-bindings native-bindings)
+    (flet ((run-command ()
+             (catch 'cl-cc-cli-test-quit
+               (with-replaced-function (uiop:quit
+                                        (lambda (&optional code)
+                                          (throw 'cl-cc-cli-test-quit code)))
+                 (with-replaced-function (cl-cc/cli::%read-command-source
+                                          (lambda (_file)
+                                            (declare (ignore _file))
+                                            "(+ 1 2)"))
+                   (with-replaced-function (cl-cc/cli::%trace-emit-stages
+                                            (lambda (&rest _args)
+                                              (declare (ignore _args))
+                                              nil))
+                     (with-replaced-function (cl-cc:compile-string
+                                              (lambda (&rest _args)
+                                                (declare (ignore _args))
+                                                (push (list cl-cc/codegen::*x86-64-omit-frame-pointer*
+                                                            cl-cc/codegen::*a64-omit-frame-pointer*)
+                                                      trace-bindings)
+                                                :trace-result))
+                       (with-replaced-function (cl-cc:compile-file-to-native
+                                                (lambda (&rest _args)
+                                                  (declare (ignore _args))
+                                                  (push (list cl-cc/codegen::*x86-64-omit-frame-pointer*
+                                                              cl-cc/codegen::*a64-omit-frame-pointer*)
+                                                        native-bindings)
+                                                  "out.bin"))
+                         (cl-cc/cli::%do-compile
+                          (make-cli-parsed :command "compile"
+                                           :positional '("dummy.lisp")
+                                           :flags '(("--debug" . t)
+                                                    ("--trace-emit" . t))))))))))))
+      (with-output-to-string (*standard-output*)
+        (with-output-to-string (*error-output*)
+          (assert-= 0 (run-command)))))
+    (assert-equal '((nil nil)) trace-bindings)
+    (assert-equal '((nil nil)) native-bindings)))
+
+(deftest cli-real-file-dump-ir-annotation-preserves-source-location
+  "The real CLI file-read path preserves source metadata well enough for dump annotations."
+  (%with-temp-file (path (format nil "(+ 1 2)~%"))
+    (let* ((source (cl-cc/cli::%read-command-source path))
+           (result (cl-cc:compile-string source
+                                         :target :vm
+                                         :language :lisp
+                                         :source-file path))
+           (stream (make-string-output-stream)))
+      (cl-cc/cli::%dump-ir-phase :vm result stream t)
+      (let ((output (get-output-stream-string stream)))
+        (assert-true (search "; source:" output))
+        (assert-true (search path output))))))
+
+(deftest cli-do-compile-dump-ir-annotate-source-preserves-real-file-location
+  "%do-compile preserves real file source metadata for dump-ir annotate-source output."
+  (%with-temp-file (path (format nil "(+ 1 2)~%"))
+    (let ((output (%run-do-compile-dump-ir-annotate-source-output path)))
+      (assert-true (search "; source:" output))
+      (assert-true (search path output)))))
+
+(deftest-each cli-do-compile-dump-ir-annotate-source-macro-forms-preserve-real-file-location
+  "%do-compile keeps normal macro expansion semantics for real source-file paths."
+  :cases (("when macro" "(when t (+ 1 2))~%")
+          ("user macro" "(defmacro m () 1)~%(m)~%"))
+  (content-template)
+  (%with-temp-file (path (format nil content-template))
+    (let ((output (%run-do-compile-dump-ir-annotate-source-output path)))
+      (assert-true (search "; source:" output))
+      (assert-true (search path output)))))
 
 (deftest-each cli-do-command-missing-arg-exits-2
   "Each command handler exits 2 and prints command-specific help when the required arg is absent."

@@ -8,8 +8,38 @@
 (defvar *current-regalloc* nil
   "When non-nil, the current regalloc-result used during code generation.")
 
+(defparameter *x86-64-omit-frame-pointer* t
+  "When true, prefer RSP-relative spill slots over reserving RBP as a frame pointer.")
+
+(defun x86-64-codegen-target ()
+  "Return the x86-64 target descriptor for the active frame-pointer policy."
+  (if *x86-64-omit-frame-pointer*
+      (make-target-desc
+       :name (target-name *x86-64-target*)
+       :word-size (target-word-size *x86-64-target*)
+       :endianness (target-endianness *x86-64-target*)
+       :gpr-count (target-gpr-count *x86-64-target*)
+       :gpr-names (target-gpr-names *x86-64-target*)
+       :arg-regs (target-arg-regs *x86-64-target*)
+       :ret-reg (target-ret-reg *x86-64-target*)
+       :fp-arg-regs (target-fp-arg-regs *x86-64-target*)
+       :fp-ret-reg (target-fp-ret-reg *x86-64-target*)
+       :callee-saved '(:rbx :rbp :r12 :r13 :r14 :r15)
+       :scratch-regs (remove :rbp (target-scratch-regs *x86-64-target*) :test #'eq)
+       :stack-alignment (target-stack-alignment *x86-64-target*)
+       :legal-ops (target-legal-ops *x86-64-target*)
+       :features (target-features *x86-64-target*))
+      *x86-64-target*))
+
 (defparameter *current-spill-base-reg* +rbp+
   "Base register used for spill load/store emission in the current function.")
+
+(defparameter *current-spill-offset-bias* 0
+  "Additional byte bias applied before translating spill slots to stack offsets.")
+
+(defun x86-64-spill-slot-offset (slot)
+  "Return the byte offset for spill SLOT relative to *CURRENT-SPILL-BASE-REG*."
+  (- *current-spill-offset-bias* (* slot 8)))
 
 (defvar *current-float-vregs* nil
   "When non-nil, hash table of virtual registers currently known to hold unboxed floats.")
@@ -101,9 +131,16 @@ assigned dedicated FP registers yet."
            (when (floatp (vm-value inst))
              (mark (vm-dst inst))))
           ((or vm-float-add vm-float-sub vm-float-mul vm-float-div)
+            (mark (vm-dst inst))
+            (mark (vm-lhs inst))
+            (mark (vm-rhs inst)))
+          (vm-sqrt
            (mark (vm-dst inst))
-           (mark (vm-lhs inst))
-           (mark (vm-rhs inst)))))
+           (mark (vm-src inst)))
+          ((or vm-sin-inst vm-cos-inst vm-exp-inst vm-log-inst
+               vm-tan-inst vm-asin-inst vm-acos-inst vm-atan-inst)
+           (mark (vm-dst inst))
+           (mark (vm-src inst)))))
       (loop with changed = t
             while changed
             do (setf changed nil)
@@ -124,6 +161,7 @@ assigned dedicated FP registers yet."
 
 (defparameter *phys-reg-to-x86-code*
   `((:rax . ,+rax+) (:rcx . ,+rcx+) (:rdx . ,+rdx+) (:rbx . ,+rbx+)
+    (:rbp . ,+rbp+)
     (:rsi . ,+rsi+) (:rdi . ,+rdi+) (:r8 . ,+r8+) (:r9 . ,+r9+)
     (:r10 . ,+r10+) (:r11 . ,+r11+) (:r12 . ,+r12+) (:r13 . ,+r13+)
     (:r14 . ,+r14+) (:r15 . ,+r15+))

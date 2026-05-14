@@ -26,6 +26,21 @@
     (setf (gethash 'vm-integer-sub ht) #'emit-a64-vm-sub)
     (setf (gethash 'vm-mul ht) #'emit-a64-vm-mul)
     (setf (gethash 'vm-integer-mul ht) #'emit-a64-vm-mul)
+    (setf (gethash 'vm-integer-mul-high-u ht) #'emit-a64-vm-integer-mul-high-u)
+    (setf (gethash 'vm-integer-mul-high-s ht) #'emit-a64-vm-integer-mul-high-s)
+    ;; Checked arithmetic (FR-303 overflow detection)
+    (setf (gethash 'vm-add-checked ht) #'emit-a64-vm-add-checked)
+    (setf (gethash 'vm-sub-checked ht) #'emit-a64-vm-sub-checked)
+    (setf (gethash 'vm-mul-checked ht) #'emit-a64-vm-mul-checked)
+    (setf (gethash 'vm-sqrt ht) #'emit-a64-vm-sqrt)
+    (setf (gethash 'vm-sin-inst ht) #'emit-a64-vm-sin)
+    (setf (gethash 'vm-cos-inst ht) #'emit-a64-vm-cos)
+    (setf (gethash 'vm-exp-inst ht) #'emit-a64-vm-exp)
+    (setf (gethash 'vm-log-inst ht) #'emit-a64-vm-log)
+    (setf (gethash 'vm-tan-inst ht) #'emit-a64-vm-tan)
+    (setf (gethash 'vm-asin-inst ht) #'emit-a64-vm-asin)
+    (setf (gethash 'vm-acos-inst ht) #'emit-a64-vm-acos)
+    (setf (gethash 'vm-atan-inst ht) #'emit-a64-vm-atan)
     (setf (gethash 'vm-min ht) #'emit-a64-vm-min)
     (setf (gethash 'vm-max ht) #'emit-a64-vm-max)
     (setf (gethash 'vm-select ht) #'emit-a64-vm-select)
@@ -71,12 +86,14 @@
    When FRAME-POINTER-P is true, include the FP/LR pair first.
    Each pair is emitted as one STP/LDP."
   (let ((phys-regs (loop for phys being the hash-values of (regalloc-assignment ra)
-                         collect phys)))
-    (append (when frame-pointer-p '((29 30)))
+                          for entry = (assoc phys *aarch64-reg-number*)
+                          when entry
+                            collect (cdr entry))))
+    (append (when (or frame-pointer-p (member +a64-fp+ phys-regs)) '((29 30)))
             (remove-if-not (lambda (pair)
-                             (or (member (first pair) phys-regs :test #'eq)
-                                 (member (second pair) phys-regs :test #'eq)))
-                           '((19 20) (21 22) (23 24) (25 26) (27 28))))))
+                              (or (member (first pair) phys-regs)
+                                  (member (second pair) phys-regs)))
+                            '((19 20) (21 22) (23 24) (25 26) (27 28))))))
 
 (defun emit-a64-prologue (stream save-pairs)
   "Emit AArch64 function prologue: save FP/LR and the callee-saved pairs in SAVE-PAIRS."
@@ -104,34 +121,81 @@
   ;; RET
   (emit-a64-instr +a64-ret+ stream))
 
+(defun a64-stack-frame-size (save-pairs spill-count)
+  "Return conservative stack-frame bytes represented by pair saves plus spill slots."
+  (+ (* 16 (length save-pairs))
+     (* 8 spill-count)))
+
+(defun emit-a64-stack-probes (stream probe-count)
+  "Emit one non-mutating page touch per PROBE-COUNT below SP."
+  (loop for page from 1 to probe-count
+        do (progn
+             (emit-a64-instr (encode-sub-imm +a64-stack-probe-scratch+ +a64-sp+ page 1) stream)
+             (emit-a64-instr (encode-ldur +a64-zr+ +a64-stack-probe-scratch+ 0) stream))))
+
+(defun emit-a64-stack-allocate (stream spill-frame-size)
+  "Reserve SP-relative spill space. Supports immediate adjustments up to 4095 bytes."
+  (unless (<= spill-frame-size 4095)
+    (error "AArch64 spill frame ~D exceeds ADD/SUB immediate range for minimal FPE support"
+           spill-frame-size))
+  (emit-a64-instr (encode-sub-imm +a64-sp+ +a64-sp+ spill-frame-size 0) stream))
+
+(defun emit-a64-stack-deallocate (stream spill-frame-size)
+  "Release SP-relative spill space reserved by EMIT-A64-STACK-ALLOCATE."
+  (unless (<= spill-frame-size 4095)
+    (error "AArch64 spill frame ~D exceeds ADD/SUB immediate range for minimal FPE support"
+           spill-frame-size))
+  (emit-a64-instr (encode-add-imm +a64-sp+ +a64-sp+ spill-frame-size 0) stream))
+
 (defun emit-a64-program (program stream)
   "Emit AArch64 machine code for the entire VM program.
    Uses two-pass approach for label resolution."
   (let* ((instructions (vm-program-instructions program))
          (cfg (cfg-build instructions))
           (leaf-p (vm-program-leaf-p program))
-          (frame-pointer-p (or (not leaf-p)
-                               (plusp (regalloc-spill-count *current-a64-regalloc*))))
-          (save-pairs (a64-used-callee-saved-pairs *current-a64-regalloc*
-                                                   :frame-pointer-p frame-pointer-p))
-          ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
-          (prologue-size (* 4 (1+ (length save-pairs))))
-          (ordered-instructions (if (cfg-entry cfg)
-                                    (progn
-                                      (cfg-compute-dominators cfg)
-                                      (cfg-compute-loop-depths cfg)
+          (spill-count (regalloc-spill-count *current-a64-regalloc*))
+          (frame-pointer-p (and (not *a64-omit-frame-pointer*)
+                                (or (not leaf-p)
+                                    (plusp spill-count))))
+          (spill-frame-size (if (and (not frame-pointer-p)
+                                     (plusp spill-count))
+                                (* 8 spill-count)
+                                0))
+          (*current-a64-spill-base-reg* (if frame-pointer-p +a64-fp+ +a64-sp+))
+          (*current-a64-spill-offset-bias* (if frame-pointer-p 0 spill-frame-size))
+           (save-pairs (a64-used-callee-saved-pairs *current-a64-regalloc*
+                                                     :frame-pointer-p frame-pointer-p))
+           (probe-count (stack-probe-count
+                         (a64-stack-frame-size save-pairs
+                                               spill-count)))
+           ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
+           ;; Each stack probe is SUB-immediate + STUR, two 4-byte instructions.
+           (spill-frame-adjust-size (if (plusp spill-frame-size) 4 0))
+           (prologue-size (+ (* 8 probe-count)
+                             (* 4 (1+ (length save-pairs)))
+                             spill-frame-adjust-size))
+           (ordered-instructions (if (cfg-entry cfg)
+                                      (progn
+                                        (cfg-compute-dominators cfg)
+                                       (cfg-compute-loop-depths cfg)
                                       (cfg-flatten-hot-cold cfg))
-                                    instructions))
+                                     instructions))
           (label-offsets (build-a64-label-offsets ordered-instructions prologue-size)))
-    ;; Prologue
-    (emit-a64-prologue stream save-pairs)
-    ;; Second pass: emit instructions
-    (let ((pos prologue-size))
-      (dolist (inst ordered-instructions)
-        (emit-a64-instruction inst stream pos label-offsets)
-        (incf pos (a64-instruction-size inst))))
-    ;; Epilogue
-    (emit-a64-epilogue stream save-pairs)))
+     ;; Stack probing: touch each guard page before the large frame is used.
+     (emit-a64-stack-probes stream probe-count)
+     ;; Prologue
+     (emit-a64-prologue stream save-pairs)
+     (when (plusp spill-frame-size)
+       (emit-a64-stack-allocate stream spill-frame-size))
+     ;; Second pass: emit instructions
+     (let ((pos prologue-size))
+       (dolist (inst ordered-instructions)
+         (emit-a64-instruction inst stream pos label-offsets)
+         (incf pos (a64-instruction-size inst))))
+     (when (plusp spill-frame-size)
+       (emit-a64-stack-deallocate stream spill-frame-size))
+     ;; Epilogue
+     (emit-a64-epilogue stream save-pairs)))
 
 ;;; Public API
 
@@ -139,7 +203,7 @@
   "Compile VM program to AArch64 machine code bytes.
    Returns: (simple-array (unsigned-byte 8) (*))"
   (let* ((instructions (vm-program-instructions program))
-          (ra (allocate-registers instructions *aarch64-target*))
+          (ra (allocate-registers instructions (a64-codegen-target)))
           (allocated-program (make-vm-program
                               :instructions (regalloc-instructions ra)
                               :result-register (vm-program-result-register program)

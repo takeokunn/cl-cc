@@ -4,15 +4,58 @@
 
 ;;; ── Binding emitters ─────────────────────────────────────────────────────
 
-(defun %emit-let-noescape-array (ctx name size)
-  "Emit element registers for a noescape array of SIZE and register the binding."
+(defun %extract-noescape-array-element-type (expr)
+  "Return specialized element type symbol from typed make-array expression, or NIL.
+
+Recognizes `(the (simple-array <elt> (*)) (make-array ...))` and
+`(the (array <elt> (*)) (make-array ...))` forms conservatively.
+Also recognizes `(make-array ... :element-type '<elt>)` keyword literals."
+  (labels ((recognized-elt-p (x)
+             (member x '(fixnum single-float double-float character bit) :test #'eq))
+           (from-the (node)
+             (when (typep node 'ast-the)
+               (let ((decl (ast-the-type node)))
+                 (when (and (consp decl)
+                            (member (car decl) '(simple-array array) :test #'eq)
+                            (consp (cdr decl)))
+                   (let ((elt (cadr decl)))
+                     (when (recognized-elt-p elt) elt))))))
+           (from-make-array-keyword (node)
+             (when (typep node 'ast-call)
+               (let ((args (ast-call-args node)))
+                 (when (and (>= (length args) 3)
+                            (typep (second args) 'ast-var)
+                            (eq (ast-var-name (second args)) :element-type)
+                            (typep (third args) 'ast-quote))
+                   (let ((elt (ast-quote-value (third args))))
+                     (when (recognized-elt-p elt) elt)))))))
+    (or (from-the expr)
+        (from-make-array-keyword expr)
+        (when (typep expr 'ast-the)
+          (from-make-array-keyword (ast-the-value expr))))))
+
+(defun %noescape-array-initial-value-for-element-type (element-type)
+  "Return the default element value used for typed noescape array slots."
+  (case element-type
+    (single-float 0.0f0)
+    (double-float 0.0d0)
+    (character #\Nul)
+    ((bit fixnum) 0)
+    (otherwise 0)))
+
+(defun %emit-let-noescape-array (ctx name size &optional element-type)
+  "Emit element registers for a noescape array of SIZE and register the binding.
+
+Binding payload is `(size element-type . element-regs)` where ELEMENT-TYPE may be
+NIL for untyped arrays."
   (let* ((zero-reg (make-register ctx))
-         (element-regs nil))
-    (emit ctx (make-vm-const :dst zero-reg :value 0))
+         (init-value (%noescape-array-initial-value-for-element-type element-type))
+          (element-regs nil))
+    (emit ctx (make-vm-const :dst zero-reg :value init-value))
     (dotimes (index size)
       (declare (ignore index))
       (push zero-reg element-regs))
-    (push (cons name (cons size (nreverse element-regs)))
+    (push (cons name (cons size (cons element-type (nreverse element-regs))))
           (ctx-noescape-array-bindings ctx))))
 
 (defun %emit-let-noescape-cons (ctx name expr)
@@ -125,11 +168,15 @@
                          (%let-noescape-instance-slots name expr mutated
                                                        captured body-forms
                                                        ctx)))
-                    (noescape-array-size
-                     (if (or noescape-closure noescape-instance-slots)
-                         nil
-                         (%let-noescape-array-size name expr declarations mutated
-                                                   captured body-forms)))
+                  (noescape-array-size
+                      (if (or noescape-closure noescape-instance-slots)
+                          nil
+                          (%let-noescape-array-size name expr declarations mutated
+                                                    captured body-forms)))
+                     (noescape-array-element-type
+                      (if noescape-array-size
+                          (%extract-noescape-array-element-type expr)
+                          nil))
                     (noescape-cons-p
                      (if (or noescape-closure noescape-instance-slots
                              noescape-array-size)
@@ -145,8 +192,9 @@
                   (setf (ctx-noescape-instance-bindings ctx)
                         (cons (cons name noescape-instance-slots)
                               (ctx-noescape-instance-bindings ctx))))
-                 (noescape-array-size
-                  (%emit-let-noescape-array ctx name noescape-array-size))
+                  (noescape-array-size
+                   (%emit-let-noescape-array ctx name noescape-array-size
+                                             noescape-array-element-type))
                  (noescape-cons-p
                   (%emit-let-noescape-cons ctx name expr))
                  ((%let-binding-special-p name ctx)

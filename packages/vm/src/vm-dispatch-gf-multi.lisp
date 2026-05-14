@@ -113,14 +113,16 @@ still use the single-dispatch path."
 
 (defun %vm-resolve-single-dispatch (gf-ht methods-ht state first-arg)
   "Resolve a method by single dispatch on FIRST-ARG class + eql specializers."
-  (let ((class-name (vm-classify-arg first-arg state)))
+  (let ((class-name (vm-classify-arg first-arg state))
+        (eql-index (and (hash-table-p gf-ht) (gethash :__eql-index__ gf-ht))))
     (or (car (%vm-gf-eql-methods gf-ht first-arg))
-        (block eql-single
-          (maphash (lambda (key method)
-                     (when (%eql-specializer-matches-p key first-arg)
-                       (return-from eql-single method)))
-                   methods-ht)
-          nil)
+        (unless eql-index
+          (block eql-single
+            (maphash (lambda (key method)
+                       (when (%eql-specializer-matches-p key first-arg)
+                         (return-from eql-single method)))
+                     methods-ht)
+            nil))
         (gethash class-name methods-ht)
         (let ((class-ht (gethash class-name (vm-class-registry state))))
           (when class-ht
@@ -131,20 +133,22 @@ still use the single-dispatch path."
 
 (defun %vm-resolve-composite-dispatch (gf-ht methods-ht state first-arg all-args)
   "Resolve a method by multi-dispatch on the full arg class tuple."
-  (let ((arg-classes (mapcar (lambda (arg) (vm-classify-arg arg state)) all-args)))
+  (let ((arg-classes (mapcar (lambda (arg) (vm-classify-arg arg state)) all-args))
+        (eql-index (and (hash-table-p gf-ht) (gethash :__eql-index__ gf-ht))))
     (or (gethash arg-classes methods-ht)
         (car (%vm-gf-eql-methods gf-ht first-arg))
-        (block eql-scan
-          (maphash (lambda (key method)
-                     (when (and (listp key) (= (length key) (length all-args))
-                                (every (lambda (spec arg)
-                                         (or (eq spec t)
-                                             (eq spec (vm-classify-arg arg state))
-                                             (%eql-specializer-matches-p spec arg)))
-                                       key all-args))
-                       (return-from eql-scan method)))
-                   methods-ht)
-          nil)
+        (unless eql-index
+          (block eql-scan
+            (maphash (lambda (key method)
+                       (when (and (listp key) (= (length key) (length all-args))
+                                  (every (lambda (spec arg)
+                                           (or (eq spec t)
+                                               (eq spec (vm-classify-arg arg state))
+                                               (%eql-specializer-matches-p spec arg)))
+                                         key all-args))
+                         (return-from eql-scan method)))
+                     methods-ht)
+            nil))
         (vm-resolve-multi-dispatch methods-ht state arg-classes)
         (gethash (make-list (length arg-classes) :initial-element t) methods-ht))))
 

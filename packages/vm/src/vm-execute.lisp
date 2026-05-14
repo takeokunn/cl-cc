@@ -30,6 +30,13 @@
 (define-simple-instruction vm-sub :binary -)
 (define-simple-instruction vm-mul :binary *)
 
+;;; Checked arithmetic (FR-303): in the VM interpreter, these behave identically
+;;; to the unchecked versions since CL arithmetic auto-promotes to bignum.
+;;; The overflow detection only matters in the native codegen backends.
+(define-simple-instruction vm-add-checked :binary +)
+(define-simple-instruction vm-sub-checked :binary -)
+(define-simple-instruction vm-mul-checked :binary *)
+
 (defmethod execute-instruction ((inst vm-label) state pc labels)
   (declare (ignore state labels))
   (values (1+ pc) nil nil))

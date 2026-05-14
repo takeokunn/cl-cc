@@ -60,3 +60,26 @@
           ("logbitp-clear"   #'cl-cc:make-vm-logbitp   1    1      0))
   (ctor lhs rhs expected)
   (assert-= expected (%make-pred2 ctor lhs rhs)))
+
+(deftest vm-mul-high-64-semantics
+  "Multiply-high instructions truncate inputs to 64 bits and return the high 64-bit word with unsigned/signed semantics."
+  (assert-equal 1
+                (%make-binary #'cl-cc:make-vm-integer-mul-high-u
+                              #xFFFFFFFFFFFFFFFF
+                              2))
+  (assert-equal 0
+                (%make-binary #'cl-cc:make-vm-integer-mul-high-u
+                              (ash 1 64)
+                              5))
+  (assert-equal -1
+                (%make-binary #'cl-cc:make-vm-integer-mul-high-s
+                              -1
+                              2))
+  (assert-equal -1
+                (%make-binary #'cl-cc:make-vm-integer-mul-high-s
+                              #xFFFFFFFFFFFFFFFF
+                              2))
+  (assert-equal -1
+                (%make-binary #'cl-cc:make-vm-integer-mul-high-s
+                              (- (ash 1 63))
+                              2)))

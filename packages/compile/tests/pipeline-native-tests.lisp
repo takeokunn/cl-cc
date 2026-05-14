@@ -20,6 +20,7 @@
   (let ((opts (cl-cc::%make-native-opts)))
     (assert-true (listp opts))
     (assert-null (getf opts :pass-pipeline))
+    (assert-= 1 (getf opts :inline-threshold-scale))
     (assert-null (getf opts :print-pass-timings))
     (assert-null (getf opts :timing-stream))
     (assert-eq :all (getf opts :opt-remarks-mode))
@@ -28,9 +29,11 @@
 (deftest pipeline-native-make-opts-explicit-values
   "%make-native-opts captures explicit keyword values into the plist."
   (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold :dce)
+                                        :inline-threshold-scale 2
                                         :print-pass-timings t
                                         :opt-remarks-mode :pass)))
     (assert-equal '(:fold :dce) (getf opts :pass-pipeline))
+    (assert-= 2 (getf opts :inline-threshold-scale))
     (assert-true (getf opts :print-pass-timings))
     (assert-eq :pass (getf opts :opt-remarks-mode))))
 
@@ -42,9 +45,11 @@
                                (declare (ignore form))
                                (setf captured-args args)
                                (cl-cc/compile:make-compilation-result :program nil)))
-      (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold))))
+      (let ((opts (cl-cc::%make-native-opts :pass-pipeline '(:fold)
+                                            :inline-threshold-scale 2)))
         (apply #'cl-cc:compile-expression '(+ 1 2) :target :x86_64 opts)
-        (assert-equal '(:fold) (getf captured-args :pass-pipeline))))))
+        (assert-equal '(:fold) (getf captured-args :pass-pipeline))
+        (assert-= 2 (getf captured-args :inline-threshold-scale))))))
 
 ;;; ─── *compile-cache-root* ───────────────────────────────────────────────────
 
@@ -81,13 +86,39 @@
     (assert-true (>= (length parts) 3))))
 
 (deftest-each pipeline-native-cache-key-differs-by-dimension
-  "%compile-cache-key: varying arch, language, or source content each produces a distinct key."
+  "%compile-cache-key: varying arch, language, source content, or native options each produces a distinct key."
   :cases (("arch"     (lambda () (cl-cc::%compile-cache-key "source" :arm64  :lisp)))
-          ("language" (lambda () (cl-cc::%compile-cache-key "source" :x86-64 :php)))
-          ("content"  (lambda () (cl-cc::%compile-cache-key "bbb"    :x86-64 :lisp))))
+           ("language" (lambda () (cl-cc::%compile-cache-key "source" :x86-64 :php)))
+           ("content"  (lambda () (cl-cc::%compile-cache-key "bbb"    :x86-64 :lisp)))
+           ("options"  (lambda () (cl-cc::%compile-cache-key
+                                     "source" :x86-64 :lisp
+                                     (cl-cc::%make-native-opts :speed 3))))
+           ("inline-threshold" (lambda () (cl-cc::%compile-cache-key
+                                            "source" :x86-64 :lisp
+                                            (cl-cc::%make-native-opts
+                                             :inline-threshold-scale 2)))))
   (make-variant)
   (let ((baseline (cl-cc::%compile-cache-key "source" :x86-64 :lisp)))
     (assert-false (equal baseline (funcall make-variant)))))
+
+(deftest pipeline-native-cache-key-ignores-observability-options
+  "%compile-cache-key does not vary for reporting-only native options that cannot affect artifact bytes."
+  (let ((baseline (cl-cc::%compile-cache-key
+                   "source" :x86-64 :lisp
+                   (cl-cc::%make-native-opts :speed 3
+                                             :inline-threshold-scale 2)))
+        (reporting (cl-cc::%compile-cache-key
+                    "source" :x86-64 :lisp
+                    (cl-cc::%make-native-opts :speed 3
+                                              :inline-threshold-scale 2
+                                              :print-pass-timings t
+                                              :timing-stream *standard-output*
+                                              :print-opt-remarks t
+                                              :opt-remarks-stream *error-output*
+                                              :print-pass-stats t
+                                              :stats-stream *standard-output*
+                                              :trace-json-stream *standard-output*))))
+    (assert-equal baseline reporting)))
 
 ;;; ─── %compile-cache-path ────────────────────────────────────────────────────
 

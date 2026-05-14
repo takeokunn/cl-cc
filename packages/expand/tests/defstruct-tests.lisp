@@ -236,6 +236,39 @@
 
 ;;; ─── %defstruct-build-constructor ────────────────────────────────────────
 
+(deftest ds-basic-expansion-generates-copier
+  "Basic defstruct generates a COPY-POINT copier function."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct point x y)))
+           (forms (ds-progn-forms exp))
+           (copier (find-if (lambda (f) (and (listp f)
+                                              (eq (first f) 'defun)
+                                              (eq (second f) (intern "COPY-POINT"))))
+                            forms)))
+      (assert-true (not (null copier))))))
+
+(deftest ds-copier-nil-suppresses-copier
+  "(:copier nil) suppresses copier generation."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (point (:copier nil)) x y)))
+           (forms (ds-progn-forms exp))
+           (copier (find-if (lambda (f) (and (listp f)
+                                              (eq (first f) 'defun)
+                                              (string= (symbol-name (second f)) "COPY-POINT")))
+                            forms)))
+      (assert-true (null copier)))))
+
+(deftest ds-copier-custom-name
+  "(:copier custom-name) uses the custom name instead of COPY-NAME."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (point (:copier clone-point)) x y)))
+           (forms (ds-progn-forms exp))
+           (copier (find-if (lambda (f) (and (listp f)
+                                              (eq (first f) 'defun)
+                                              (eq (second f) 'clone-point)))
+                            forms)))
+      (assert-true (not (null copier))))))
+
 (deftest ds-build-constructor-keyword-form
   "%defstruct-build-constructor with no BOA args builds (defun ctor (&key ...) body)."
   (let* ((slots '((x 0) (y 1)))

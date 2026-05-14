@@ -1,6 +1,6 @@
 ;;;; tests/unit/emit/x86-64-sequences-tests.lisp
 ;;;; Coverage for src/emit/x86-64-sequences.lisp:
-;;;;   emit-idiv-r11, emit-cqo, emit-idiv-sequence,
+;;;;   emit-idiv-r11, emit-cqo, emit-idiv-sequence, emit-mul-high-sequence,
 ;;;;   emit-sal-r64-cl, emit-sar-r64-cl, emit-ror-r64-cl,
 ;;;;   emit-add-ri8, emit-sub-ri8, emit-and-ri8, emit-jge-short,
 ;;;;   emit-cmovl-rr64, emit-cmovg-rr64, emit-cmovne-rr64,
@@ -66,6 +66,27 @@
                                    (= (nth (1+ i) bs) #x99))
                            return i)))
       (assert-true cqo-pos))))
+
+(deftest x86-seq-mul-high-sequence-encodings
+  "emit-mul-high-sequence preserves RAX/RDX around MUL/IMUL and captures the high half from RDX into R11."
+  (let ((umulh-bytes (%collect-seq-bytes
+                      (lambda (s)
+                        (cl-cc/codegen::emit-mul-high-sequence
+                         cl-cc/codegen::+rax+
+                         cl-cc/codegen::+rcx+
+                         nil
+                         s))))
+        (smulh-bytes (%collect-seq-bytes
+                      (lambda (s)
+                        (cl-cc/codegen::emit-mul-high-sequence
+                         cl-cc/codegen::+rax+
+                         cl-cc/codegen::+rcx+
+                         t
+                         s)))))
+    (assert-equal '(#x49 #x89 #xCB #x50 #x52 #x48 #x89 #xC0 #x49 #xF7 #xE3 #x49 #x89 #xD3 #x5A #x58)
+                  umulh-bytes)
+    (assert-equal '(#x49 #x89 #xCB #x50 #x52 #x48 #x89 #xC0 #x49 #xF7 #xEB #x49 #x89 #xD3 #x5A #x58)
+                  smulh-bytes)))
 
 ;;; ─── emit-sal-r64-cl / emit-sar-r64-cl / emit-ror-r64-cl ────────────────
 

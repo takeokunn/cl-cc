@@ -144,6 +144,24 @@
       (assert-true (gethash "even" rec))
       (assert-true (gethash "odd"  rec)))))
 
+;;; ─── opt-pass-inline ─────────────────────────────────────────────────────────
+
+(deftest opt-pass-inline-skips-recursive-callee
+  "opt-pass-inline leaves recursive callees as vm-call sites instead of inlining them."
+  (let* ((insts (list (make-vm-closure :dst :r0 :label "loop"
+                                       :params '(:r1) :captured nil)
+                      (make-vm-label :name "loop")
+                      (make-vm-func-ref :dst :r2 :label "loop")
+                      (make-vm-call :dst :r3 :func :r2 :args '(:r1))
+                      (make-vm-ret :reg :r3)
+                      (make-vm-func-ref :dst :r4 :label "loop")
+                      (make-vm-call :dst :r5 :func :r4 :args '(:r6))
+                      (make-vm-ret :reg :r5)))
+         (out (cl-cc/optimize::opt-pass-inline insts :threshold 100)))
+    (assert-equal (mapcar #'instruction->sexp insts)
+                  (mapcar #'instruction->sexp out))
+    (assert-= 2 (count-if #'cl-cc:vm-call-p out))))
+
 ;;; ─── opt-known-callee-labels ─────────────────────────────────────────────────
 
 (deftest-each opt-known-callee-labels-cases

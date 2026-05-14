@@ -67,7 +67,17 @@
     (let ((gf (make-hash-table :test #'equal)))
       (setf (gethash :__name__ gf) 'rt-eql-test-gf)
       (cl-cc/runtime:rt-register-method gf '(eql 99) (lambda (x) (* x 2)))
+      (assert-= 1 (hash-table-count (gethash :__eql-index__ gf)))
       (assert-= 198 (cl-cc/runtime:rt-call-generic gf 99)))))
+
+(deftest rt-call-generic-eql-index-precedes-class-fallback
+  "rt-call-generic uses the EQL index before class fallback methods."
+  (let ((gf (make-hash-table :test #'equal)))
+    (setf (gethash :__name__ gf) 'rt-eql-fallback-test-gf)
+    (cl-cc/runtime:rt-register-method gf 'symbol (lambda (x) (declare (ignore x)) :class))
+    (cl-cc/runtime:rt-register-method gf '(eql :read) (lambda (x) (declare (ignore x)) :eql))
+    (assert-eq :eql (cl-cc/runtime:rt-call-generic gf :read))
+    (assert-eq :class (cl-cc/runtime:rt-call-generic gf :write))))
 
 ;;; ─── Argument Classification ────────────────────────────────────────────────
 

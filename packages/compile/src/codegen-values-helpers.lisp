@@ -76,13 +76,28 @@
         (walk args nil)
         (list :leading nil :spread nil))))
 
+(defun %proper-list-p (value)
+  "Return T when VALUE is a finite proper list.
+Reject dotted and circular lists so APPLY literal lowering stays conservative."
+  (labels ((walk (slow fast)
+             (cond
+               ((null fast) t)
+               ((atom fast) nil)
+               ((null (cdr fast)) t)
+               ((atom (cdr fast)) nil)
+               ((eq slow fast) nil)
+               (t (walk (cdr slow) (cddr fast))))))
+    (or (null value)
+        (and (consp value)
+             (walk value (cdr value))))))
+
 (defun %literal-apply-spread-values (spread-arg)
-  "Return (values T VALUES) when SPREAD-ARG is a quoted proper list."
+  "Return (values T VALUES) when SPREAD-ARG is a quoted finite proper list."
   (if (and spread-arg
-           (typep spread-arg 'ast-quote)
-           (listp (ast-quote-value spread-arg)))
-      (values t (ast-quote-value spread-arg))
-      (values nil nil)))
+            (typep spread-arg 'ast-quote)
+            (%proper-list-p (ast-quote-value spread-arg)))
+       (values t (ast-quote-value spread-arg))
+       (values nil nil)))
 
 (defun %quoted-value-forms (values)
   "Convert literal VALUES into AST quote forms."

@@ -51,6 +51,7 @@
 (deftest-each cli-args-bool-flags
   "Boolean flags are stored as T when present"
   :cases (("stdlib"  '("run" "f.lisp" "--stdlib")  "--stdlib")
+          ("debug"   '("compile" "f.lisp" "--debug") "--debug")
           ("verbose" '("run" "f.lisp" "--verbose") "--verbose")
           ("pass timings" '("eval" "(+ 1 2)" "--print-pass-timings") "--print-pass-timings")
           ("time-passes alias" '("eval" "(+ 1 2)" "--time-passes") "--time-passes")

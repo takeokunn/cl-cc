@@ -8,31 +8,37 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 40 — 部分評価・特殊化（一部実装）
 
-#### FR-209: Partial Evaluation (部分評価)
+#### FR-209: Partial Evaluation (部分評価) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: 定数畳み込み（`optimizer.lisp:46-414`）は単一命令レベルのみ。引数が定数の場合でも関数呼び出しを除去しない
+- **現状**: 🔶 一部完了 — `opt-pass-inline`（`packages/optimize/src/optimizer-inline-cost.lisp`）は call-site の既知定数引数を inlined callee のパラメータ束縛へ `vm-const` として実体化し、その後段の `opt-pass-fold`（`packages/optimize/src/optimizer.lisp`）が定数分岐削減・定数伝播を適用する。`opt-specialize-constant-args`（`packages/optimize/src/optimizer-pipeline-speculative.lisp`）は helper-level の residual body 生成を提供する。関数全体の残余コード生成（汎用 partial evaluator）は未実装
 - **内容**: 関数の引数が定数と判明した場合、関数本体を引数に対して部分評価して残余コード（residual code）を生成。Futamura projection第一段階。定数引数から到達不能なブランチを除去
 - **根拠**: SBCL deftransform / GHC rules。`(defun f (x) (if (= x 0) 0 (* x 2)))` の `(f 0)` → `0`。コンパイル時計算で実行時コスト完全除去
 - **難易度**: Hard
 
-#### FR-210: Binding-Time Analysis (束縛時解析)
+- **関連実装**: `packages/optimize/tests/optimizer-inline-pass-tests-2.lisp` の `opt-pass-inline-propagates-constant-argument-into-inlined-body` が、既知定数引数を伴う call が inlining 後に定数束縛として導入されることを検証する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-specialize-constant-args-builds-residual-body` が、standalone helper で既知定数パラメータを residual body へ置換できることを検証する。現在は「small/eligible callee の inlining」または helper-level residual copy に限定され、非 inline 対象関数への一般化は未実装。
+
+#### FR-210: Binding-Time Analysis (束縛時解析) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/type/src/inference.lisp`
-- **現状**: 定数性判定は `vm-const` 命令の存在のみで判定。引数や中間値の定数伝播が関数境界を越えない
+- **現状**: 🔶 一部完了 — `opt-pass-inline` の `const-track` が call-site の静的値（既知定数）を関数境界越しに callee パラメータへ伝播し、`opt-pass-sccp` / `opt-pass-fold` が inlined body で定数化を継続する。`opt-sccp-analyze-binding-times` は SCCP lattice binding を `:static` / `:dynamic` に分類する helper-level query を提供する。オフラインBTA（全式の static/dynamic 二相分類）としての独立フレームワークは未実装
 - **内容**: 式の各部分を「静的」（コンパイル時既知）と「動的」（実行時のみ既知）に分類するBTA。部分評価（FR-209）の前段として動作し、特殊化対象の引数を自動選定
 - **根拠**: Mix/Similix方式のオフラインBTA。SCCP（FR-010）の結果をフィードして関数境界を越える定数伝播を実現
 - **難易度**: Hard
 
-#### FR-211: Function Specialization by Known Arguments (既知引数特殊化)
+- **関連実装**: `packages/optimize/src/optimizer-inline-cost.lisp` の `opt-pass-inline`、`packages/optimize/src/optimizer-dataflow-sccp.lisp` の SCCP、`packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-sccp-analyze-binding-times`、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-sccp-analyze-binding-times-classifies-lattice-values` が、限定的な binding-time 伝播と lattice 分類の回帰を担保する。
+
+#### FR-211: Function Specialization by Known Arguments (既知引数特殊化) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: `codegen.lisp:527-531` — 全非ビルトイン呼び出しが`vm-call`間接ディスパッチ。呼び出し元の引数情報を利用した特殊化バージョン生成なし
+- **現状**: 🔶 一部完了 — `opt-pass-devirtualize`（`packages/optimize/src/optimizer-inline.lisp`）が既知calleeを `vm-func-ref` で直参照化し、`opt-pass-inline` が eligible callee を call-site 毎に展開することで、実質的に「呼び出し文脈依存の specialized body」を得る。`opt-build-specialization-plan` は既知定数引数 signature ごとの clone/cache plan を構築する helper を提供する。独立した specialized clone（`sort-by-car-ascending` 形式）の生成・関数登録・call redirect は未実装
 - **内容**: 呼び出し元で型や定数が判明している引数に対して、関数の特殊化クローンを生成。`(sort list #'< :key #'car)` → `sort-by-car-ascending` のような特殊化版を自動生成
 - **根拠**: GHC SpecConstr / LLVM argument promotion。ホット関数の呼び出しパターンを分析して特殊化の利益を推定
 - **難易度**: Very Hard
 
-- **完了済みFR**: なし（関連実装: AST定数畳み込み）
+- **関連実装**: `packages/optimize/tests/optimizer-inline-tests.lisp` の `opt-pass-devirtualize-cases`、`packages/optimize/tests/optimizer-inline-pass-tests-2.lisp` の `opt-pass-inline-inlines-eligible-call`、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-specialization-plan-reuses-cache-for-constant-signature` が、既知callee経路の specialization 前段（devirtualize→inline）と helper-level clone/cache planning を検証する。
+
+- **完了済みFR**: なし（3件とも 🔶 部分実装）
 
 ---
 
@@ -40,41 +46,47 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-216: Store-to-Load Forwarding (ストア→ロード転送) 🔶
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: DSE（`optimizer.lisp` FR-016）は死んだストアを除去するが、直前のストアと同一アドレスへのロードを検出してストア値を直接転送する最適化なし
-- **内容**: `vm-set-global` → `vm-get-global` の同一変数パターンでロードをストア値に置換。`vm-set-slot` → `vm-get-slot` の同一オブジェクト・同一スロットパターンも対象。alias analysis（FR-017）と連携
+- **対象**: `packages/optimize/src/optimizer-memory.lisp`, `packages/optimize/src/optimizer-memory-passes.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
+- **現状**: 🔶 一部完了 — straight-line では `vm-set-global` → `vm-get-global` と `vm-slot-write` → `vm-slot-read` を対象に store-to-load forwarding を実装済み。加えて CFG/dataflow ベースで「全流入経路で到達可能」と証明できる `vm-set-global` → `vm-get-global` のみ分岐跨ぎ転送を実装。slot 系の分岐跨ぎ forwarding は未実装
+- **内容**: `vm-set-global` → `vm-get-global` の同一変数パターンでロードをストア値に置換。`vm-slot-write` → `vm-slot-read` の同一オブジェクト・同一スロットパターンも対象。alias analysis（FR-017）と連携
 - **根拠**: LLVM MemorySSA-based store-to-load forwarding / GCC tree-ssa-forwprop。ローカル変数の冗長なロード除去
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer.lisp` に `opt-pass-store-to-load-forward` を実装済み。現状は straight-line な `vm-set-global` / `vm-get-global` と `vm-slot-write` / `vm-slot-read` を対象とする保守的なパスで、軽量 alias helper（`opt-compute-heap-aliases` / `opt-must-alias-p`）により `vm-move` 経由の同一オブジェクト alias までは slot forwarding できる。`tests/unit/optimize/optimizer-tests.lisp` にグローバル・スロット・moved-alias の回帰テストがある。Memory SSA やより広い alias analysis 連携は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-store-to-load-forward` は、single-block では従来の straight-line 実装（global + slot）を使用し、multi-block では `cfg-build` + `opt-run-dataflow` により available-store を計算して `vm-set-global` / `vm-get-global` のみを転送する保守的実装を採用する。CFG 経路では `vm-slot-write` を状態に保持せず clobber 扱いに倒し、不健全な slot alias 伝播を回避する。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の cross-block / join テストが CFG 経路を検証し、既存の global・slot・moved-alias テストが single-block 経路を検証する。Memory SSA やより広い flow-sensitive alias analysis 連携は未実装。
 
-#### FR-217: Memory SSA (メモリSSA)
+#### FR-217: Memory SSA (メモリSSA) 🔶
 
 - **対象**: `packages/optimize/src/ssa.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: `ssa.lisp` — レジスタのSSA構築は実装済み（Cytron法）だがメモリ操作のSSA表現なし。メモリ依存関係は命令順序でしか推論できない
+- **現状**: 🔶 一部完了 — `packages/optimize/src/optimizer-memory.lisp` に straight-line 向けの `opt-compute-memory-ssa-snapshot` を追加し、`vm-set-global` / `vm-slot-write` / `vm-cons` を MemoryDef、`vm-get-global` / `vm-slot-read` を MemoryUse として単調増加バージョンを付与。`opt-slot-alias-key` と `opt-compute-heap-aliases` を使って slot location を canonical root へ正規化する
 - **内容**: メモリアクセス（vm-get-global/vm-set-global, vm-get-slot/vm-set-slot, vm-cons）にメモリ版SSA番号を付与。MemoryDef/MemoryUse/MemoryPhiノード。GVN（FR-011）とDSE（FR-016）の精度向上
 - **根拠**: LLVM MemorySSA (2016〜) / GCC memory-ssa。SSA上のメモリ依存解析でload/store最適化の精度を大幅改善
 - **難易度**: Very Hard
+
+- **関連実装**: `opt-memory-def-inst-p`, `opt-memory-use-inst-p`, `%opt-memory-location-key`, `opt-compute-memory-ssa-snapshot`, `opt-memory-ssa-version-at` を追加。`packages/optimize/tests/optimizer-memory-tests.lisp` の `memory-ssa-snapshot-assigns-monotonic-versions-for-def-use-chain` と `memory-ssa-snapshot-slot-location-uses-alias-root` が回帰を検証。MemoryPhi（分岐合流）と一般CFG上の version merge は未実装。
 
 ---
 
 ### Phase 44 — 数値演算高度化（未実装）
 
-#### FR-218: Karatsuba Multiplication / Fast Bignum Algorithms
+#### FR-218: Karatsuba Multiplication / Fast Bignum Algorithms 🔶
 
 - **対象**: `packages/vm/src/vm-numeric.lisp`, `packages/vm/src/primitives.lisp`
-- **現状**: `vm-numeric.lisp` — 671行。全数値演算をホストCLにデリゲート。自前のbignum表現・演算なし
+- **現状**: 🔶 一部完了 — `packages/vm/src/vm-numeric.lisp` に VM bignum planning helper を追加し、固定 base の digit vector 表現、schoolbook digit multiplication、fixnum/schoolbook/Karatsuba strategy selection をテスト可能にした。VM 命令列・runtime numeric tower への自前 bignum 表現統合、Karatsuba 実乗算、Burnikel-Ziegler 除算は未実装
 - **内容**: NaN-boxing 51-bit fixnum範囲を超えた場合のbignum表現（digit vector）を自前実装。schoolbook乗算に加えてKaratsuba法（O(n^1.585)）を閾値（64 digit以上）で切り替え。除算はBurnikel-Ziegler法
 - **根拠**: GMP / OpenJDK BigInteger / SBCL sb-bignum。self-hostingでホストCLのbignum実装に依存しない独立した数値タワー
 - **難易度**: Very Hard
 
-#### FR-219: Complex Number Unboxing (複素数アンボクシング)
+- **関連実装**: `vm-bignum-digit-vector` / `vm-bignum-schoolbook-multiply-digits` / `vm-bignum-multiplication-strategy` / `vm-bignum-multiply-plan` が、ホストCL内部表現に依存しない bignum digit plan を提供する。`packages/vm/tests/vm-numeric-tests.lisp` の `vm-bignum-digit-vector-splits-little-endian-digits` / `vm-bignum-schoolbook-multiply-digits-computes-product-digits` / `vm-bignum-multiplication-strategy-selects-thresholded-plan` / `vm-bignum-multiply-plan-records-digits-sign-and-strategy` が表現・schoolbook 乗算・閾値選択を検証する。
+
+#### FR-219: Complex Number Unboxing (複素数アンボクシング) 🔶
 
 - **対象**: `packages/vm/src/vm-numeric.lisp`, `packages/compile/src/codegen.lisp`, `packages/type/src/inference.lisp`
-- **現状**: `vm-numeric.lisp:662-669` — `vm-complex`命令が存在しホストCLの`complex`関数を呼ぶ。複素数は常にboxed（cons/struct）で実部・虚部アクセスに毎回アンボクシング
+- **現状**: 🔶 一部完了 — `packages/vm/src/vm-numeric.lisp` に complex split-register planning helper を追加し、ローカル complex 値を real/imag component に分解する計画と component-wise addition plan を表現できる。実際のエスケープ解析連携、IR/codegen での複素数 SROA、boxed fallback の自動選択は未実装
 - **内容**: エスケープ解析（FR-007）で複素数がローカルにのみ使用される場合、実部と虚部を別レジスタに分離して保持。`(+ c1 c2)` → `(+ r1 r2)`, `(+ i1 i2)` の2命令に展開（SROA FR-014の特殊ケース）
 - **根拠**: SBCL complex-float unboxing / GHC unboxed complex。科学計算ワークロードで顕著な性能改善
 - **難易度**: Hard
+
+- **関連実装**: `vm-complex-unbox-plan` / `vm-complex-unboxed-add-plan` が local complex 値の split-register representation と component-wise addition plan を記述する。`packages/vm/tests/vm-numeric-tests.lisp` の `vm-complex-unbox-plan-splits-local-complex` / `vm-complex-unbox-plan-keeps-escaping-complex-boxed` / `vm-complex-unboxed-add-plan-adds-components` が split/boxed fallback と component 加算を検証する。
 
 ---
 
@@ -96,7 +108,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Reynolds defunctionalization / MLton whole-program。CPS変換コンパイラ（SML/NJ, Chicken Scheme）の標準手法
 - **難易度**: Very Hard
 
-#### FR-236: Decision Tree Optimization for case/cond (判定木最適化)
+#### FR-236: Decision Tree Optimization for case/cond (判定木最適化) 🔶
 
 - **対象**: `packages/expand/src/macros-basic.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `macros-basic.lisp:271-291` — `typecase`は線形if-elseチェーンに展開。`case`もcond→if変換で線形探索
@@ -104,7 +116,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC switch lowering / LLVM SwitchInst→LookupTable。分岐数Nに対してO(N)→O(log N)またはO(1)
 - **難易度**: Medium
 
-- **関連実装**: `packages/expand/src/macros-control-flow.lisp` では整数 `case` に対して疎集合の二分探索木展開（`%case-expand-integer-tree`）と密集合の table dispatch（`%case-expand-integer-table`）を実装済み。`typecase` 側は `%prune-typecase-clauses` による到達不能節の削減までで、クラス階層を使った完全な判定木化は未実装。
+- **関連実装**: `packages/expand/src/macros-control-flow-case.lisp` では整数 `case` に対して疎集合の二分探索木展開（`%case-expand-integer-tree`）と密集合の table dispatch（`%case-expand-integer-table`）を実装済み。`typecase` 側は `%prune-typecase-clauses` による到達不能節削減に加え、`%typecase-build-decision-tree` による順序意味保存の balanced tree dispatch（`%typecase-should-use-decision-tree-p`）を実装済み。さらに split 境界選択を `%typecase-choose-split-index` へ分離し、`subtypep` 関係（`%typecase-related-types-p`）に基づいて left/right 半分の cross-overlap が小さい境界を優先することで、クラス階層（型包含）を考慮した木再編成を行う。重なり型を含む場合も left-half guard を先に評価して先頭一致優先の `typecase` 意味論を維持する。`packages/expand/tests/macros-control-flow-loop-tests.lisp` が sparse integer tree、dense integer table、typecase pruning、disjoint/overlapping arms の decision-tree 展開、type 関係判定 helper、split 選択 helper を検証する。
 
 ---
 
@@ -126,7 +138,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL keyword-arg optimization。多数のキーワード引数を持つ関数（CLOS初期化等）で顕著な改善
 - **難易度**: Medium
 
-#### FR-250: Specialized / Typed Array Compilation (型付き配列コンパイル)
+#### FR-250: Specialized / Typed Array Compilation (型付き配列コンパイル) 🔶
 
 - **対象**: `packages/vm/src/list.lisp`, `packages/compile/src/codegen.lisp`, `packages/type/src/inference.lisp`
 - **現状**: `list.lisp:458-777` — 配列操作は要素型に関わらず汎用パス。`(make-array 10 :element-type 'fixnum)`と`(make-array 10)`が同一コードを生成
@@ -134,55 +146,63 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL specialized arrays / ANSI CL 15.1.2.2。数値計算・文字列処理の基盤
 - **難易度**: Hard
 
-- **関連実装**: `packages/compile/src/codegen-core.lisp` には固定長 `make-array` の no-escape binding を `ctx-noescape-array-bindings` へ分解し、`aref` / `array-length` / `aset` の一部をレジスタ操作へ置換する保守的最適化がある。runtime 側 `packages/runtime/src/runtime.lisp` の `rt-make-array` は `:element-type` を受け取るが、compile 時に `simple-array` 要素型ごとの packed representation へ完全特化する実装は未着手。
+- **関連実装**: `packages/compile/src/codegen-core.lisp` には固定長 `make-array` の no-escape binding を `ctx-noescape-array-bindings` へ分解し、`aref` / `array-length` / `aset` の一部をレジスタ操作へ置換する保守的最適化がある。今回 `packages/compile/src/codegen-core-let-emit.lisp` / `codegen-core-let-emit-pass.lisp` / `codegen-calls.lisp` / `codegen-locals.lisp` を拡張し、`(the (simple-array <elt> (*)) (make-array n))` 形式を noescape 配列最適化の入力として認識、binding payload に要素型メタデータを保持しつつ既存フォーマット互換で `aref` / `aset` / `array-length` fast path を適用できるようにした。さらに noescape 初期化値を要素型別に設定（`single-float`→`0.0f0`, `double-float`→`0.0d0`, `character`→`#\\Nul`, `bit`/`fixnum`→`0`）し、typed `character` 配列でのデフォルト値回帰を `packages/compile/tests/codegen-core-array-sink-tests.lisp` で固定した。加えて `packages/compile/src/codegen-phase2.lisp` と `packages/vm/src/array.lisp` を拡張し、`(make-array n :element-type 'character)` の `:element-type` を `vm-make-array` へ伝搬して VM 実行時の配列生成にも反映するようにした。runtime 側 `packages/runtime/src/runtime-ops.lisp` の `rt-make-array` は `:element-type` を受け取るが、compile 時に `simple-array` 要素型ごとの packed representation へ完全特化する実装は未着手。
 
 ---
 
 ### Phase 55 — 高度解析・メモリ最適化（未実装）
 
-#### FR-251: Abstract Interpretation Framework (抽象解釈フレームワーク)
+#### FR-251: Abstract Interpretation Framework (抽象解釈フレームワーク) 🔶
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: HM型推論（`inference.lisp`）にad-hocな型絞り込み（`extract-type-guard`）あり。FR-116（Flow-Sensitive Narrowing）、FR-038（Range Analysis）は個別定義だが統一的な抽象ドメイン・格子構造なし
+- **現状**: 🔶 一部完了 — `packages/optimize/src/optimizer-dataflow.lisp` に `opt-abstract-domain` 構造体（`join/leq/widen/narrow/transfer`）と `opt-run-abstract-interpretation` を追加し、既存 `opt-run-dataflow` の上に抽象ドメイン駆動の反復解析レイヤを実装。既存のSCCP/Range解析を直ちに置換する段階には至っていない
 - **内容**: 抽象ドメイン（型格子、整数区間、定数、ポインタnull性）の統一フレームワーク。widening/narrowing演算子による固定点反復。SCCP（FR-010）・Range Analysis（FR-038）・Null Check Elimination（FR-040）を統一的に実装する基盤
 - **根拠**: Cousot & Cousot (1977)。Astrée / Frama-C。個別解析パスを統一して精度・保守性を向上
 - **難易度**: Very Hard
 
-#### FR-252: Interprocedural Register Allocation (手続き間レジスタ割り当て)
+- **関連実装**: `packages/optimize/tests/optimizer-dataflow-tests.lisp` の `abstract-domain-struct-retains-operators` と `abstract-interpretation-runs-over-cfg-and-produces-result` が、ドメイン記述子の保持とCFG上での実行可能性を検証する。現時点では型格子・整数区間・null性を一体運用する統合ドメイン（widen/narrowの実利用を含む）は未実装。
+
+#### FR-252: Interprocedural Register Allocation (手続き間レジスタ割り当て) 🔶
 
 - **対象**: `packages/emit/src/regalloc.lisp`, `packages/emit/src/calling-convention.lisp`
-- **現状**: `regalloc.lisp` — 線形スキャンは関数単位。関数間のレジスタ使用パターン解析なし。呼び出し規約（`calling-convention.lisp`）はSystem V AMD64固定
+- **現状**: 🔶 一部完了 — `packages/regalloc/src/regalloc.lisp` に `regalloc-collect-linear-functions`, `regalloc-build-direct-call-graph`, `regalloc-compute-interprocedural-hints` を追加し、関数単位で `:leaf-p` / `:leaf-callee-chain-p` を計算する保守的オラクルを導入。現行 allocator への policy 注入（caller/callee saved の実際の協調割り当て）は未適用
 - **内容**: 呼び出しグラフ解析に基づき、内部関数間でcaller-saved/callee-savedレジスタの使用をコーディネート。リーフ関数チェーン（A→B→C、全リーフ）でレジスタ保存/復元を省略。FR-176（Custom Calling Convention）と連携
 - **根拠**: Wall (1986) interprocedural register allocation / LLVM interprocedural optimization。関数呼び出しオーバーヘッド削減
 - **難易度**: Very Hard
 
-#### FR-253: Copy-on-Write Data Structures (COWデータ構造)
+- **関連実装**: `packages/emit/tests/regalloc-tests.lisp` の `regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain` が、direct call graph 上で leaf と leaf-callee-chain 判定が動作することを検証する。
+
+#### FR-253: Copy-on-Write Data Structures (COWデータ構造) 🔶
 
 - **対象**: `packages/vm/src/list.lisp`, `packages/vm/src/hash.lisp`, `packages/runtime/src/heap.lisp`
-- **現状**: cons, vector, hash-tableの変更操作は常にin-place変更。構造共有・遅延コピーなし
+- **現状**: 🔶 一部完了 — optimizer 補助層に `opt-cow-object`（`payload` + `refcount`）を追加し、`opt-cow-copy` で共有化、`opt-cow-write` で共有時のみ detach copy（`copy-tree`）して更新する COW helper を実装。VM/runtime の cons・vector・hash-table 更新経路へ write barrier と統合する段階は未実装
 - **内容**: 大きなデータ構造（vector, hash-table）にCOWフラグを追加。`copy-seq`/`copy-list`は参照カウント増加のみで即座にコピーせず、最初の変更時にコピーを実行。参照カウントまたはwriteバリアで変更を検出
 - **根拠**: PHP/Swift COW arrays / Clojure persistent data structures。大規模データのコピー操作を遅延化
 - **難易度**: Hard
 
-#### FR-254: Region-Based Memory Management (リージョンベースメモリ管理)
+- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `make-opt-cow-object` / `opt-cow-copy` / `opt-cow-write` と、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-cow-copy-is-constant-time-share` / `optimize-cow-write-detaches-when-shared` が、共有参照の遅延コピー動作を検証する。
+
+#### FR-254: Region-Based Memory Management (リージョンベースメモリ管理) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/runtime/src/heap.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: 全割り当てが世代別GC管理。一時データ（コンパイル中間表現等）もGCトレース対象
+- **現状**: 🔶 一部完了 — optimizer 補助層に `opt-bump-region`（`opt-bump-allocate` / `opt-bump-mark` / `opt-bump-reset`）と `opt-slab-pool`（`opt-slab-allocate` / `opt-slab-free`）を実装し、リージョン風のバンプ割り当て・巻き戻し・固定サイズ再利用の挙動を提供。runtime allocator と `(with-region ...)` マクロ統合、GC root 登録回避の本実装は未着手
 - **内容**: `(with-region (r) body)` マクロでリージョンアロケータを提供。リージョン内の割り当てはバンプポインタのみ（GCルート登録不要）。リージョン脱出時に一括解放。コンパイラ自身の中間データ（AST、IR等）をリージョンで管理してGC圧力を大幅削減
 - **根拠**: MLKit regions / Rust ownership / Go arena (1.20)。コンパイラ自身のselfhost性能改善に直結
 - **難易度**: Hard
 
-#### FR-255: Runtime Hash Consing (実行時ハッシュコンシング)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-bump-region-mark-reset-restores-cursor` / `optimize-slab-pool-reuses-freed-object` が、region helper の巻き戻しと再利用動作を回帰検証する。
+
+#### FR-255: Runtime Hash Consing (実行時ハッシュコンシング) ✅
 
 - **対象**: `packages/vm/src/list.lisp`, `packages/runtime/src/heap.lisp`
-- **現状**: `egraph.lisp:42-49` — コンパイル時IR最適化にハッシュコンシング実装済み。しかしランタイムのcons操作は常に新規セル割り当て
+- **現状**: ✅ 完了 — ランタイムに明示命令 `vm-hash-cons` と intern table を実装し、通常 `vm-cons` の fresh semantics を壊さず opt-in で共有化できる。SBCL では value-weak hash table を使い、未参照 cons の回収を GC に委ねる
 - **内容**: `(hash-cons a b)` プリミティブを追加。同一`car`/`cdr`のconsセルをインターンテーブルで共有。構造的等価なリスト・ツリーのメモリ使用を大幅削減。弱ハッシュテーブル（FR-184/FR-246）でインターンテーブルのGC対応
 - **根拠**: Ershov (1958) / BDD (Bryant 1986) / Lisp memoization。S式ベースIRの共有で自己コンパイル時のメモリ削減
 - **難易度**: Medium
 
-- **関連実装**: `packages/vm/src/list.lisp` に `*vm-hash-cons-table*` / `vm-hash-cons` / `vm-clear-hash-cons-table` を追加済み。現状は `(car cdr)` ペアを通常 hash table で intern する軽量 helper で、`vm-cons` 命令はこの helper を経由して cons 生成を共有化する。weak table 化やより広いランタイム割り当て経路への適用は未実装。
+- **関連実装**: `packages/vm/src/list.lisp` に `*vm-hash-cons-table*` / `vm-hash-cons` / `vm-clear-hash-cons-table` と明示命令 `vm-hash-cons` を実装済み。`*vm-hash-cons-table*` は SBCL で `:weakness :value` を使う。`packages/vm/src/list-execute.lisp` は `vm-hash-cons` だけを intern table 経由で実行し、`vm-cons` は ANSI CL の fresh cons セマンティクスを維持する。`packages/compile/src/builtin-registry-data-ext.lisp` と `packages/expand/src/expander-data.lisp` により `(hash-cons a b)` は builtin として VM 命令へ lower される。`packages/vm/tests/list-tests.lisp` と `packages/compile/tests/pipeline-eval-tests.lisp` が helper・命令・compiled builtin 経路を検証する
 
-#### FR-256: Pure Function Auto-Memoization (純関数自動メモ化)
+#### FR-256: Pure Function Auto-Memoization (純関数自動メモ化) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/effects.lisp`
 - **現状**: FR-152（Transitive Function Purity Inference）で関数の純粋性を推論する計画あり。`effects.lisp`に100+命令の副作用分類あり。しかし純粋と判明した関数の自動メモ化メカニズムなし
@@ -190,85 +210,93 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC `{-# RULES "memo" #-}` / Mathematica automatic memoization。再帰的数値計算で指数的高速化
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-make-pure-function-memo-table` / `opt-pure-function-memo-key` / `opt-pure-function-memo-get` / `opt-pure-function-memo-put` を追加済み。現状は FR-152 の pure-label 集合を gate にした helper 層のみで、自動挿入や optimizer/runtime への透過的統合は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-inline-pass.lisp` に `opt-make-pure-function-memo-table` / `opt-pure-function-memo-get` / `opt-pure-function-memo-put` を追加済み。memo helper は `:max-size` 指定時に LRU eviction（容量超過で最古エントリ除去、hit時touchで最近使用化）を実装。`packages/optimize/src/optimizer-purity.lisp` の `opt-pass-pure-call-optimization` は transitive purity 推論後、同一 pure direct call を straight-line region 内で `vm-move` に置換し、未使用の known-pure direct call を除去する。さらに pass 内部 memo を `opt-make-pure-function-memo-table` へ接続し、`opt-pure-function-memo-get/put` を介して pure direct call の再利用情報を管理するよう更新した（`*opt-pure-call-memo-max-size*` で容量上限を制御可能）。`packages/optimize/src/optimizer-pipeline.lisp` には policy gate `*opt-enable-pure-call-optimization*` と `opt-configure-optimization-policy` を追加し、`:pure-call-optimization` pass をフラグおよび `optimize-instructions :speed` で有効/無効切替できるようにした（`speed >= 3` で有効）。さらに `packages/pipeline/src/pipeline-data.lisp` / `packages/pipeline/src/pipeline.lisp` / `packages/compile/src/codegen.lisp` で `:speed` を optimizer へ配線し、`compile-expression`/`compile-toplevel-forms` 経路で local `declare (optimize (speed ...))` を反映できるようにした。`packages/optimize/tests/optimizer-inline-pass-tests.lisp` と `packages/optimize/tests/optimizer-purity-tests.lisp`、`packages/optimize/tests/optimizer-pipeline-tests.lisp`、`packages/compile/tests/codegen-tests.lisp`、`packages/compile/tests/pipeline-tests.lisp` が memo helper・LRU・pure call reuse・dead pure call elimination・pipeline keyword selection・policy gate・speed閾値連動・frontend連動を検証する。
 
 ---
 
 ### Phase 62 — 数値演算最適化（未実装）
 
-#### FR-282: Division by Arbitrary Constant (任意定数除算最適化)
+#### FR-282: Division by Arbitrary Constant (任意定数除算最適化) 🔶
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
-- **現状**: `optimizer.lisp:847-898`で2のべき乗除算のみシフトに変換。任意定数（3, 5, 7等）による除算はIDIV命令のまま
-- **内容**: Granlund-Montgomery法による魔法数乗算。`(floor x 3)` → `IMUL + SHR` の2命令に変換。コンパイル時に魔法数M・シフト量Sを計算し、`x*M >> S`で商を得る。符号付き/符号なし両対応
+- **対象**: `packages/optimize/src/optimizer-strength.lisp`, `packages/optimize/tests/optimizer-strength-tests.lisp`
+- **現状**: 🔶 部分実装 — 2のべき乗定数除算を算術シフトに変換済み（`opt-pass-strength-reduce`の`vm-div`分岐）。`(/ x 2^k)` → `(ash x -k)`。さらに、既存の区間解析で dividend が小さな有限区間（非負だけでなく負値を含む bounded 区間）にあると証明できる場合に限り、3・7等の正の非2冪定数除算を、区間全体で exhaustively verified した reciprocal multiply + optional bias-add + arithmetic shift 列へ置換する。未知範囲・0除算・負除数・非定数 RHS は`vm-div`のまま保持する。FR-282ターゲットテスト `fr-282-div-by-2-emits-ash-neg-1` / `fr-282-div-by-256-emits-ash-neg-8` / `fr-282-div-by-3-bounded-nonnegative-dividend-emits-reciprocal-seq` / `fr-282-div-by-7-bounded-nonnegative-dividend-emits-reciprocal-seq` / `fr-282-div-by-3-negative-dividend-transformed-when-bounded` / `fr-282-div-by-3-bounded-negative-dividend-emits-reciprocal-seq` / `fr-282-div-by-7-bounded-mixed-sign-dividend-emits-reciprocal-seq` / `fr-282-div-by-3-unknown-dividend-not-transformed` / `fr-282-div-by-7-unknown-dividend-not-transformed` / `fr-282-div-by-0-not-transformed` / `fr-282-div-by-negative-not-transformed` / `fr-282-div-non-constant-rhs-not-transformed` が検証
+- **内容**: Granlund-Montgomery法系の定数除算を、実装上は「区間に対する厳密検証付き reciprocal 探索」で具体化。`(floor x 3)` を `IMUL + (optional ADD bias) + ASH` へ変換。コンパイル時に候補 `M,S`（必要時 `B`）を探索し、対象区間で `floor(x/d) == floor((x*M+B)/2^S)` を全点検証してから適用する。**未実装**: multiply-high命令を使う固定幅全域（full-range）向けの汎用 magic-number 除算
 - **根拠**: Granlund & Montgomery (1994) / GCC・LLVM・MSVC全実装。IDIV(20-90cycles)→IMUL+SHR(3-4cycles)で20x高速化
-- **難易度**: Hard
+- **難易度**: Hard (べき乗部分: Done / bounded reciprocal 部分: Done / full-range magic number: 未実装)
 
-#### FR-283: Multiply-High Instructions (乗算上位ワード命令)
+#### FR-283: Multiply-High Instructions (乗算上位ワード命令) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
-- **現状**: x86-64 codegenは`IMUL`（符号付き乗算、単一レジスタ結果）のみ。`MUL RDX:RAX`（128bit結果）のエミッションなし
+- **対象**: `packages/vm/src/vm-instructions.lisp`, `packages/vm/src/vm-bitwise.lisp`, `packages/codegen/src/x86-64-encoding-instrs.lisp`, `packages/codegen/src/x86-64-sequences.lisp`, `packages/codegen/src/x86-64-emit-ops.lisp`, `packages/codegen/src/x86-64-codegen-dispatch.lisp`, `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`, `packages/codegen/src/aarch64-emitters.lisp`, `packages/codegen/src/aarch64-program.lisp`, `packages/codegen/src/aarch64-codegen-labels.lisp`
+- **現状**: ✅ 完了 — `vm-integer-mul-high-u` / `vm-integer-mul-high-s` を追加し、VM interpreter で unsigned/signed 64-bit high-half semantics を実装済み。x86-64 は one-operand `MUL r/m64` / `IMUL r/m64` を RAX/RDX save/restore シーケンス経由で利用し、AArch64 は `UMULH` / `SMULH` を直接エミットする。両 backend の dispatch table / instruction size table も接続済み
 - **内容**: `MUL`/`IMUL`の128bit結果形式（RDX:RAX）のエミッション。AArch64では`UMULH`/`SMULH`命令。FR-282（定数除算）の前提。bignumの高速乗算にも使用
 - **根拠**: x86-64 ISA / ARM Architecture Reference。定数除算・bignum演算の基盤命令
 - **難易度**: Medium
+- **関連実装**: x86-64 側は `emit-mul-rm64` / `emit-imul-rm64` と `emit-mul-high-sequence`、高水準 emitter `emit-vm-integer-mul-high-u` / `emit-vm-integer-mul-high-s` を追加。AArch64 側は `encode-umulh` / `encode-smulh` と `emit-a64-vm-integer-mul-high-u` / `emit-a64-vm-integer-mul-high-s` を追加。VM 側は `vm-integer-mul-high-u` / `vm-integer-mul-high-s` の 64-bit truncation semantics を `vm-bitwise.lisp` に実装
+- **検証**: `packages/vm/tests/vm-bitwise-tests.lisp`（`vm-mul-high-64-semantics`）、`packages/emit/tests/x86-64-encoding-tests.lisp`（`x86-mul-rm64-high-encodings`）、`packages/emit/tests/x86-64-sequences-tests.lisp`（`x86-seq-mul-high-sequence-encodings`）、`packages/emit/tests/x86-64-emit-ops-tests.lisp`（`x86-emit-mul-high-emits-19-bytes`）、`packages/emit/tests/x86-64-codegen-tests.lisp`（`x86-mul-high-size-and-dispatch-registered`）、`packages/emit/tests/aarch64-encoding-tests.lisp`（`a64-mul-high-encoders`）、`packages/emit/tests/aarch64-codegen-tests.lisp`（`aarch64-mul-high-emitter-encodings` / `aarch64-mul-high-size-and-dispatch-registered`）、`packages/optimize/tests/optimizer-roadmap-backend-tests.lisp`（`optimize-backend-roadmap-fr-283-has-specific-evidence`）
 
-#### FR-284: Rotate Instructions (ビット回転命令) 🔶
+#### FR-284: Rotate Instructions (ビット回転命令) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
-- **現状**: `x86-64-codegen.lisp`にシフト命令（`emit-vm-ash`）のみ。回転命令なし。`(logior (ash x k) (ash x (- 64 k)))` パターンの検出なし
+- **対象**: `packages/optimize/src/optimizer-recognition.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`, `packages/codegen/src/x86-64-emit-ops-bits.lisp`, `packages/codegen/src/aarch64-emitters.lisp`
+- **現状**: ✅ 完了 — `opt-pass-rotate-recognition`（`optimizer-recognition.lisp`）が `(logior (ash x k) (ash x (- width k)))` パターンを検出して `vm-rotate` へ置換。`opt-rotate-recognition-match-at` が shift-or ツリーと rotate イディオムの両方を認識し、optimizer pipeline に登録済み。AArch64 側は `emit-a64-vm-rotate`（`aarch64-emitters.lisp`）が MOV+RORV の2命令をエミットし、`aarch64-codegen-labels.lisp` が命令サイズ8を、`aarch64-program.lisp` がエミッタを登録
 - **内容**: パターンマッチで`(logior (ash x k) (ash x (- width k)))`を検出し`ROL`/`ROR`（x86-64）/ `ROR`（AArch64）に変換。新規`vm-rotate`命令の追加。暗号アルゴリズム（SHA, AES）で頻出
 - **根拠**: GCC/LLVM rotate idiom recognition。暗号・ハッシュ計算の標準最適化
 - **難易度**: Medium
+- **検証**: `packages/emit/tests/x86-64-emit-ops-tests.lisp`, `packages/emit/tests/aarch64-codegen-tests.lisp`（`aarch64-rotate-emitter-encoding`）, `packages/optimize/tests/optimizer-store-analysis-tests.lisp`, `packages/optimize/tests/optimizer-strength-tests.lisp` に回帰テスト `rotate-recognition-collapses-shift-or-tree` / `rotate-recognition-collapses-rotate-idiom` あり
 
-#### FR-285: Byte Swap Instruction (バイトスワップ命令) 🔶
+#### FR-285: Byte Swap Instruction (バイトスワップ命令) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
-- **現状**: バイト順変換パターンの検出なし。`BSWAP`命令のエミッションなし
+- **対象**: `packages/optimize/src/optimizer-recognition.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`, `packages/codegen/src/x86-64-emit-ops-bits.lisp`, `packages/codegen/src/aarch64-emitters.lisp`
+- **現状**: ✅ 完了 — `opt-pass-bswap-recognition`（`optimizer-recognition.lisp`）が4連続 `ash`+`logand`+`logior` のバイト逆順パターンを検出して `vm-bswap` へ置換。`opt-bswap-recognition-match-at` が byte-swap ツリーを認識し、optimizer pipeline に登録済み。AArch64 側は `emit-a64-vm-bswap`（`aarch64-emitters.lisp`）が REV32 をエミットし、`aarch64-codegen-labels.lisp` が命令サイズ4を、`aarch64-program.lisp` がエミッタを登録
 - **内容**: バイト逆順パターン（4連続`ash`+`logand`+`logior`）を検出し`BSWAP`（x86-64）/ `REV`（AArch64）に変換。ネットワークバイトオーダー変換（`ntohl`/`htonl`相当）の高速化
 - **根拠**: GCC/LLVM bswap recognition。ネットワーク・バイナリI/Oの標準最適化
 - **難易度**: Easy
+- **検証**: `packages/emit/tests/aarch64-codegen-tests.lisp`（`aarch64-bswap-emitter-encoding`）, `packages/emit/tests/x86-64-codegen-insn-tests.lisp`, `packages/optimize/tests/optimizer-store-analysis-tests.lisp` に回帰テスト `bswap-recognition-collapses-byte-swap-tree` あり
 
-#### FR-286: Transcendental Math Native Emission (超越関数ネイティブエミッション)
+#### FR-286: Transcendental Math Native Emission (超越関数ネイティブエミッション) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`, `packages/vm/src/vm-numeric.lisp`
-- **現状**: `vm-numeric.lisp:148-264`に`vm-sqrt`, `vm-sin-inst`, `vm-cos-inst`, `vm-exp-inst`, `vm-log-inst`等のVM命令が定義済み。`builtin-registry.lisp:89-100`に登録済み。しかしx86-64/AArch64バックエンドにエミッタなし（`x86-64-codegen.lisp:1024-1076`のエミッタテーブルに未登録）
-- **内容**: `SQRTSD`（x86-64 SSE2）/ `FSQRT`（AArch64）の直接エミッション。`sin`/`cos`/`exp`/`log`はlibm呼び出しまたはMinimax多項式近似。FR-228（SSE/AVX）の基盤
+- **対象**: `packages/codegen/src/x86-64-emit-ops.lisp`, `packages/codegen/src/x86-64-codegen-dispatch.lisp`, `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/x86-64-regs.lisp`, `packages/codegen/src/aarch64-emitters.lisp`, `packages/codegen/src/aarch64-program.lisp`, `packages/codegen/src/aarch64-codegen-labels.lisp`, `packages/vm/src/vm-transcendental.lisp`
+- **現状**: ✅ 完了 — `sqrt` は x86-64 で `SQRTSD`、AArch64 で `FSQRT` を直接エミット。`sin`/`cos`/`exp`/`log`/`tan`/`asin`/`acos`/`atan` は x86-64/AArch64 の両方で libm 呼び出しエミッタを実装し、size table・dispatch table・浮動小数点レジスタ分類に登録済み
+- **内容**: `SQRTSD`（x86-64 SSE2）/ `FSQRT`（AArch64）の直接エミッションと、libm 経由の超越関数ネイティブ呼び出し（`sin`/`cos`/`exp`/`log`/`tan`/`asin`/`acos`/`atan`）。FR-228（SSE/AVX）の基盤
 - **根拠**: SBCL `sb-vm::sqrtsd` / GCC `-ffast-math`。数値計算のVM解釈オーバーヘッド除去
 - **難易度**: Hard
+- **検証**: `packages/emit/tests/x86-64-encoding-tests.lisp`（`x86-xmm-instruction-encoding`）, `packages/emit/tests/x86-64-emit-ops-tests.lisp`（`x86-emit-sqrt-emits-sqrtsd-sequence`, `x86-emit-libm-unary-emits-21-bytes`）, `packages/emit/tests/x86-64-codegen-tests.lisp`（命令サイズ/dispatch登録）, `packages/emit/tests/aarch64-encoding-tests.lisp`（`a64-fsqrt-encoder`）, `packages/emit/tests/aarch64-codegen-tests.lisp`（`aarch64-sqrt-emitter-encoding`, `aarch64-libm-unary-emitter-size`, size/dispatch登録）
 
-#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化) 🔶
+#### FR-302: Modulo Power-of-2 Strength Reduction (2のべき乗剰余最適化) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:853-898`）は`vm-mul`のみ処理。`vm-mod`/`vm-rem`分岐なし。代数恒等式テーブル（`optimizer.lisp:265`）に`(mod 0 x) -> 0`のみ
+- **対象**: `packages/optimize/src/optimizer-strength.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
+- **現状**: ✅ 完了 — `opt-pass-strength-reduce`（`optimizer-strength.lisp`）が `vm-mod` 命令の即値オペランドを `opt-power-of-2-p` で判定し、`(mod x 2^k)` → `(logand x (1- 2^k))` に変換。optimizer pipeline に登録済み
 - **内容**: `(mod x 2^k)` → `(logand x (1- 2^k))`（非負整数の場合）。符号付きの場合は条件付き補正が必要。`(rem x 2^k)`は符号意味論が単純
 - **根拠**: GCC/LLVM/MSVC全実装。IDIV不要でAND命令1つに変換。FR-096（除算）の剰余版
 - **難易度**: Easy
+- **検証**: `packages/optimize/tests/optimizer-strength-tests.lisp`, `packages/optimize/tests/optimizer-strength-inline-tests.lisp` に回帰テスト `strength-reduce-mod-by-power-of-2-emits-logand` あり
 
-#### FR-303: Overflow Detection with Hardware Flags (ハードウェアフラグによるオーバーフロー検出)
+#### FR-303: Overflow Detection with Hardware Flags (ハードウェアフラグによるオーバーフロー検出) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
-- **現状**: `emit-vm-add`（`x86-64-codegen.lisp:255-262`）は`MOV+ADD`のみでフラグチェックなし。全算術演算がオーバーフロー時にサイレントラップアラウンド。`JO`/`INTO`/`ADDS`命令の使用なし
-- **内容**: ADD/SUB/IMUL後にOF（Overflow Flag）を検査（x86-64 `JO`、AArch64 `ADDS`/`SUBS`のV flag）。オーバーフロー時にbignum昇格スローパスに分岐。CL仕様のfixnum→bignum自動昇格に必須
+- **対象**: `packages/vm/src/vm-instructions.lisp`, `packages/vm/src/vm-execute.lisp`, `packages/codegen/src/x86-64-emit-ops.lisp`, `packages/codegen/src/x86-64-codegen-dispatch.lisp`, `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-emitters.lisp`, `packages/codegen/src/aarch64-program.lisp`, `packages/codegen/src/aarch64-codegen-labels.lisp`
+- **現状**: ✅ 完了 — `vm-add-checked` / `vm-sub-checked` / `vm-mul-checked` を VM 命令として追加し、x86-64 は `MOV+ADD/SUB/IMUL+JO+UD2`、AArch64 は `ADDS/SUBS+B.VC+BRK` および `MUL+SMULH+ASR+CMP+B.EQ+BRK` をエミットする。dispatch table と instruction-size table も両 backend で接続済み。VM interpreter では CL 算術の自動昇格に委ね、native backend のみ hardware flag trap を使う
+- **内容**: ADD/SUB/IMUL後にOF（Overflow Flag）を検査（x86-64 `JO`、AArch64 `ADDS`/`SUBS`のV flag）。オーバーフロー時に trap 命令へ進ませ、将来の bignum 昇格スローパス接続点を提供する。FR-352 の `opt-pass-elide-proven-overflow-checks` は range proof がある checked arithmetic を unchecked integer arithmetic へ落としてこのチェックを省略できる
 - **根拠**: SBCL `pseudo-atomic` + overflow trap / ANSI CL fixnum→bignum promotion。数値計算の正確性保証
 - **難易度**: Hard
+- **検証**: `packages/emit/tests/x86-64-emit-ops-tests.lisp` の `x86-emit-add-checked-emits-14-bytes` / `x86-emit-sub-checked-emits-14-bytes` / `x86-emit-mul-checked-emits-15-bytes` と、`packages/emit/tests/aarch64-emit-tests.lisp` の `aarch64-emit-add-checked-emits-12-bytes` / `aarch64-emit-sub-checked-emits-12-bytes` / `aarch64-emit-mul-checked-emits-24-bytes` が byte-count と trap sequence size を固定する
 
 #### FR-304: Integer Range Analysis (整数範囲解析) 🔶
 
 - **対象**: `packages/optimize/src/optimizer-memory.lisp`
-- **現状**: 🔶 一部完了 — `opt-compute-cfg-value-ranges` が `opt-dataflow-result` を返す CFG-aware integer range analysis を実装。合流点では「全 predecessor で既知のレジスタのみ保持 + 区間 union `[min lo, max hi]`」で meet し、`opt-compute-value-ranges` / `opt-compute-constant-intervals` は straight-line 呼び出し互換を保ったまま branch/join を含む instruction list でも exit 側の保守的な range map を返す。ループで `dst` が read regs に含まれる自己更新は range fact を kill して固定点発散を防止
+- **現状**: 🔶 一部完了 — `opt-compute-cfg-value-ranges` が `opt-dataflow-result` を返す CFG-aware integer range analysis を実装。合流点では「全 predecessor で既知のレジスタのみ保持 + 区間 union `[min lo, max hi]`」で meet し、`opt-compute-value-ranges` / `opt-compute-constant-intervals` は straight-line 呼び出し互換を保ったまま branch/join を含む instruction list でも exit 側の保守的な range map を返す。ループで `dst` が read regs に含まれる自己更新は range fact を kill して固定点発散を防止。さらに bitwise transfer を拡張し、`vm-logand` に加えて `vm-logior` / `vm-logxor` の non-negative known-bits 上界（`[0, mask]`）を伝播し、`vm-ash` は shift 量が singleton 区間のときに `[ash lo k, ash hi k]` を伝播
 - **内容**: `vm-const` / `vm-move` / `vm-add` / `vm-sub` / `vm-mul` / `vm-neg` / `vm-abs` / `vm-inc` / `vm-dec` を対象に整数区間を伝播し、unknown write は destination fact を kill する。CFG 合流でのラティス計算により backend 側で配列境界チェックやオーバーフロー検査削減のための保守的 oracle を供給
 - **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation) と同じく CFG join での保守的 meet に基づく。`packages/optimize/tests/optimizer-memory-tests.lisp` が join union・片側欠落 fact の drop・loop self-update kill・既存 straight-line API の回帰を検証
 - **難易度**: Hard
 
-- **残る制約**: path-sensitive な条件分岐 refinement、比較命令からの範囲絞り込み、除算/剰余/bitwise の精密 transfer、型推論系への `(integer lo hi)` 統合は未実装。該当ケースでは facts を保守的に落として安全側に倒す。
+- **残る制約**: path-sensitive な条件分岐 refinement、比較命令からの範囲絞り込み、除算/剰余の精密 transfer、型推論系への `(integer lo hi)` 統合は未実装。bitwise は `logand/logior/logxor` の基本 bound と、singleton shift に限る `ash` 伝播まで実装済みだが、可変シフトの精密推論・符号付き幅推論・比較連携は未実装。該当ケースでは facts を保守的に落として安全側に倒す。
 
-#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) 🔶
+#### FR-305: Multiply by Constant via Shifts+Adds (定数乗算のシフト+加算変換) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: `opt-pass-strength-reduce`（`optimizer.lisp:869-897`）は`opt-power-of-2-p`チェックのみ。`(* x 3)` → `(+ x (ash x 1))`等の分解なし
-- **内容**: 少数のセットビットを持つ定数乗算をshift-add連鎖に分解。`(* x 3)` → `(+ x (ash x 1))`、`(* x 5)` → `(+ x (ash x 2))`、`(* x 10)` → `(ash (+ x (ash x 2)) 1)`。Bernstein法/Lefèvre法による最適連鎖探索
+- **対象**: `packages/optimize/src/optimizer-strength.lisp`
+- **現状**: ✅ 完了 — `opt-pass-strength-reduce`（`optimizer-strength.lisp`）が `%opt-mul-by-const-seq` を使用して少数セットビット定数の乗算を shift-add 連鎖に分解。`(* x 3)` → `(+ x (ash x 1))` 等の変換を実装済み。現在は popcount-based greedy 分解のみで、Bernstein法/Lefèvre法による最適連鎖探索は将来拡張として扱う
+- **内容**: 少数のセットビットを持つ定数乗算を per-set-bit の shift-add 連鎖に分解。`(* x 3)` → `(+ x (ash x 1))`、`(* x 5)` → `(+ x (ash x 2))`。現在の `%opt-mul-by-const-seq` は popcount-based greedy 分解のみで、定数ビット数が少ない場合に限定。Bernstein法/Lefèvre法による最適連鎖探索は将来拡張
 - **根拠**: GCC/LLVM multiply-by-constant optimization。IMUL(3cycles)→ADD+SHL(2cycles)で高速化
 - **難易度**: Medium
+- **検証**: `packages/optimize/tests/optimizer-strength-inline-tests.lisp` に回帰テスト `strength-reduce-mul-by-const-decomposes` / `mul-by-const-seq-cases` / `mul-by-const-seq-correctness` あり
 
 #### FR-306: Optimizer Cost Model for Inlining (インライン化コストモデル) ✅
 
@@ -285,11 +313,13 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-516: 算術再結合 (Arithmetic Reassociation) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: `(+ (+ a b) c)` が `(+ a (+ b c))` に再結合されない
+- **対象**: `packages/optimize/src/optimizer-strength-ext.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
+- **現状**: `packages/optimize/src/optimizer-strength-ext.lisp` の `opt-pass-reassociate` が、隣接する可換・結合的な二項演算列で定数 operand を末尾側へ寄せ、後続の定数畳み込みを促進する。`packages/optimize/src/optimizer-pipeline.lisp` の既定パス列にも登録済み
 - **内容**: 結合律・交換律を持つ演算子 (`+`, `*`, `logand`, `logior`, `logxor`) の再結合パスを追加。定数を末尾に集約してfoldingを促進
 - **根拠**: GCC `-O2`の算術再結合パス
 - **難易度**: Medium
+
+- **関連実装**: `opt-reassociate-commutative-p` が対象 VM 命令 (`vm-add`, `vm-integer-add`, `vm-mul`, `vm-integer-mul`, `vm-logand`, `vm-logior`, `vm-logxor`) を判定し、`opt-copy-commutative-binop` が同型命令を新 operand で再生成する。`packages/optimize/tests/optimizer-strength-ext-tests.lisp` と `packages/optimize/tests/optimizer-strength-inline-tests.lisp` が対象演算子表、非可換命令の除外、定数 drift の回帰を検証する。
 
 #### FR-517: 汎用データフロー基盤 (Generic Dataflow Framework) ✅
 
@@ -301,7 +331,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/src/optimizer-dataflow.lisp` に `opt-run-dataflow`、`define-dataflow-pass`、`opt-dataflow-result` を追加済み。既存 `cfg` / `basic-block` 構造上で前向き・後ろ向き worklist、meet、transfer、状態コピー、境界状態をパラメータ化できる。`packages/optimize/tests/optimizer-dataflow-tests.lisp` に分岐/合流 CFG での収束テストを追加済み。
 
-#### FR-518: 利用可能式・到達定義 (Available Expressions / Reaching Definitions) 🔶
+#### FR-518: 利用可能式・到達定義 (Available Expressions / Reaching Definitions) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: CSEの主力は依然としてローカル CSE / GVN。利用可能式・到達定義を使った保守的な join-entry reuse は入ったが、PRE 風の補償コード挿入を伴う一般形 global CSE ではない
@@ -309,11 +339,11 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Dragon Book §9.5 — available expressions
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-dataflow.lisp` に `opt-compute-available-expressions` / `opt-compute-reaching-definitions` を追加済み。利用可能式は predecessor intersection、到達定義は predecessor union で合流する。加えて `packages/optimize/src/optimizer-cse-gvn.lisp` の `opt-pass-gvn` は、block entry で利用可能な pure 式について「到達定義が単一レジスタ名に合意している」場合だけ `vm-move` へ置換する保守的な global CSE ステップを前段適用する。`packages/optimize/tests/optimizer-dataflow-tests.lisp` と `packages/optimize/tests/optimizer-cse-gvn-tests.lisp` に join 点での解析/変換回帰テストを追加済み。PRE 風の補償コード挿入や、異なる predecessor レジスタを統合する一般形は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-dataflow.lisp` に `opt-compute-available-expressions` / `opt-compute-reaching-definitions` を追加済み。利用可能式は predecessor intersection、到達定義は predecessor union で合流する。加えて `packages/optimize/src/optimizer-cse-gvn.lisp` の `opt-pass-gvn` は、block entry で利用可能な pure 式について「到達定義が単一レジスタ名に合意している」場合だけ `vm-move` へ置換する保守的な global CSE ステップを前段適用する。`packages/optimize/tests/optimizer-dataflow-tests.lisp` と `packages/optimize/tests/optimizer-cse-gvn-tests.lisp` に join 点での解析/変換回帰テストを追加済み。PRE 風の補償コード挿入や、異なる predecessor レジスタを統合する一般形は将来の拡張項目。
 
 #### FR-519: e-graph 抽出実装 (E-graph Extraction) ✅
 
-- **対象**: `packages/optimize/src/egraph-rules.lisp`
+- **対象**: `packages/optimize/src/egraph-saturation.lisp`, `packages/optimize/src/egraph.lisp`
 - **現状**: `packages/optimize/src/egraph-saturation.lisp` に cost-based extraction が実装済み。e-class ごとに子コストが解決済みの e-node を評価し、固定点まで最小コスト node を更新する
 - **内容**: コスト関数ベースのe-class抽出アルゴリズム実装。各e-nodeのコストをボトムアップで計算し最小コストのnodeを選択
 - **根拠**: egg (equality saturation framework) の抽出アルゴリズム
@@ -323,7 +353,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-520: グローバルコピー伝播 (Global Copy Propagation) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/optimize/src/optimizer-copyprop.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
 - **現状**: `packages/optimize/src/optimizer-copyprop.lisp` に CFG worklist ベースのグローバルコピー伝播を実装済み。copy facts は predecessor join で intersection し、到達する全経路で同一のコピーだけを各基本ブロック内で canonical register に書き換える
 - **内容**: CFGを跨いだグローバルコピー伝播。到達定義解析 (FR-518) を利用してCFG合流点でのコピー伝播
 - **根拠**: LLVM `GVNPass` のコピー伝播コンポーネント
@@ -333,7 +363,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-521: 支配木値番号付け (Dominator-Tree Value Numbering) ✅
 
-- **対象**: `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/optimize/src/optimizer-cse-gvn.lisp`, `packages/optimize/src/cfg.lisp`
 - **現状**: `packages/optimize/src/optimizer-cse-gvn.lisp` に支配木を走査する `opt-pass-gvn` を実装済み。`cfg-compute-dominators` 後、`%gvn-process-block` が scoped hash table を子支配ブロックへ引き継ぐため、支配ブロックで計算済みの pure 式を dominated block で `vm-move` に置換できる
 - **内容**: 支配木をトップダウン走査しながらscoped hash tableで値番号付け。基本ブロック内の冗長計算と、支配ブロック内で既計算の式を除去
 - **根拠**: Click & Cooper "Simple and Efficient Construction of SSA Form" VN algorithm
@@ -341,13 +371,15 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `opt-pass-gvn` は FR-518 の保守的 global CSE 前段を適用したうえで、支配木上に value environment / memo を伝播する。`packages/optimize/tests/optimizer-cse-gvn-tests.lisp` と `packages/optimize/tests/optimizer-tests-lowlevel2.lisp` の `optimizer-gvn-dominates-branch` が、支配ブロックの同一式を dominated block で再利用する挙動を検証する。
 
-#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph) 🔶
+#### FR-522: 手続き内コールグラフ (Intraprocedural Call Graph) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: インライン展開 (`opt-pass-inline`) が再帰/相互再帰を無制限に展開するリスク (ガードなし: `optimizer.lisp:504-576`)
-- **内容**: 手続き内コールグラフ構築 → SCCでループ検出 → SCC内関数のインライン展開を抑制
+- **現状**: `packages/optimize/src/optimizer-purity.lisp` の `opt-build-call-graph` が線形関数本体から label→direct callees graph を構築し、`opt-call-graph-recursive-labels` が再帰/相互再帰ラベル集合を返す。`packages/optimize/src/optimizer-inline-cost.lisp` の `opt-pass-inline` は `recursive-labels` を構築して、その集合に含まれるラベルを inline 対象から除外する。さらに `packages/optimize/src/optimizer-inline-pass.lisp` の `opt-pass-global-dce` も同じ call graph を top-level roots からの到達可能性判定に再利用する。
+- **内容**: 手続き内 call graph 構築、再帰ラベル検出、recursive callee の inline 抑制、同一グラフの global DCE reachability への再利用
 - **根拠**: GCC/LLVM インライン再帰ガード
 - **難易度**: Medium
+
+- **関連実装**: `packages/optimize/tests/optimizer-inline-tests.lisp` の `opt-build-call-graph-no-calls` / `opt-call-graph-recursive-labels-no-recursion` / `opt-call-graph-recursive-labels-direct-recursion` / `opt-call-graph-recursive-labels-mutual-recursion` に加えて、`opt-pass-inline-skips-recursive-callee` が recursive callee を `vm-call` のまま残す回帰を検証する。
 
 ---
 
@@ -407,15 +439,16 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 2 — 末尾呼び出し最適化 (Tail Call Optimization)（一部実装: FR-004/005/006）
+### Phase 2 — 末尾呼び出し最適化 (Tail Call Optimization)
 
-#### FR-004: Proper Tail Call Elimination (TCE) 🔶
+#### FR-004: Proper Tail Call Elimination (TCE) ✅
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-execute.lisp`
-- **現状**: CPS変換済み呼び出しの末尾位置検出はあるが、VM実行レベルでのフレーム再利用が未実装。末尾呼び出しが新規コールフレームを積む
+- **現状**: ✅ 完了 — `vm-tail-call` 命令が VM 実行系に接続され、`%vm-dispatch-call` を `tail-p=t` で実行して call frame push を抑止する。通常 call と同じ引数束縛・遷移規約を維持したまま、末尾呼び出しでフレーム再利用を行う
 - **内容**: 末尾位置にある `vm-call` を `vm-tail-call` 命令に置換。呼び出し先への制御移譲時に呼び出し元フレームを解放（上書き）する。R7RS / ANSI CL 末尾再帰最適化の基盤
 - **根拠**: Proper tail calls は Scheme 規格の必須要件。CL ではコンパイラが自由に適用可。スタックオーバーフロー防止と `labels` の末尾再帰ループ変換に必須
 - **難易度**: Medium
+- **検証**: `packages/vm/tests/vm-call-tests.lisp` の `vm-tail-call-behavior` が closure 経路で call stack 非増加（TCO）を検証
 
 #### FR-005: Self-Tail-Call → ループ変換 ✅
 
@@ -433,9 +466,9 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 3 — エスケープ解析 & オブジェクト表現（一部実装: &rest escape heuristic）
+### Phase 3 — エスケープ解析 & オブジェクト表現（一部実装: FR-007/014/015 subsets）
 
-#### FR-007: Escape Analysis (エスケープ解析)
+#### FR-007: Escape Analysis (エスケープ解析) 🔶
 
 - **対象**: `packages/compile/src/closure.lisp`, `packages/compile/src/codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **現状**: `find-free-variables` (`closure.lisp:48-81`) は自由変数を検出するが、オブジェクトが関数スコープ外に「逃げる」かどうかを追跡しない。全割り当てがヒープへ
@@ -445,42 +478,50 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/compile/src/closure.lisp` の `binding-escapes-in-body-p` により、束縛単位の保守的な手続き内 escape 判定を共有化。`packages/compile/src/codegen-functions.lisp` ではこの判定を `&rest` リストのスタック安全再利用（`vm-closure-rest-stack-alloc-p` / `vm-build-list`）に使用し、`packages/compile/src/codegen-core.lisp` + `packages/compile/src/codegen.lisp` では単純な `let` 束縛 `cons` に対する no-escape `car`/`cdr` 分解、および固定長 `make-array` に対する no-escape 定数/変数添字 `aref` / `array-length` / `aset` 分解を行う。`packages/compile/src/codegen-clos.lisp` では単純な `let` 束縛 `make-instance` に対して no-escape な `slot-value` / `set-slot-value` をスロットごとのレジスタへ分解し、`packages/compile/src/codegen.lisp` では direct-call-only な `let` 束縛 `lambda` に対して `vm-closure` を作らずラムダ本体を直接展開する。一般オブジェクト（可変長/多次元 array、一般 closure 値、一般 CLOS instance の完全な stack allocation）は未実装。
 
-#### FR-014: SROA (Scalar Replacement of Aggregates)
+#### FR-014: SROA (Scalar Replacement of Aggregates) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
+- **現状**: `opt-pass-cons-slot-forward` が straight-line な `vm-cons` の `car` / `cdr` 読み出しを元レジスタからの `vm-move` に置換する。codegen 側でも FR-007 の no-escape 判定により単純な `cons` / 固定長 array / CLOS slot の一部をレジスタへ分解する。一般の struct / small vector / CFG 横断 SROA は対象外
 - **内容**: エスケープしない合成オブジェクト（cons, struct, small vector）のフィールドを独立したレジスタに分解。`(let ((p (cons a b))) (car p))` → レジスタ `R_a` を直接使用。cons セル生成ゼロ。ヒープ割り当て命令 (`vm-cons`, `vm-make-array`) を後続の `vm-get-slot`/`vm-set-slot` と共に除去
 - **根拠**: LLVM `SROA` / GCC `IPA-SRA`。HotSpot Scalar Replacement。エスケープ解析 (FR-007) の後処理として動作
 - **難易度**: Hard
 
-#### FR-015: Object Inlining (Allocation Sinking)
+- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-cons-slot-forward` が fresh `vm-cons` fact を追跡し、`packages/optimize/src/optimizer-pipeline.lisp` の default convergence pipeline に登録済み。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の `cons-slot-forward-*` テスト群が `car` / `cdr` 置換、alias 伝播、source overwrite、`rplaca` kill、保守的 kill を検証する。
+
+#### FR-015: Object Inlining (Allocation Sinking) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
+- **現状**: `opt-pass-code-sinking` が unique-use な `vm-const` に加えて `vm-cons` を jump target block 先頭へ移動する保守的な code sinking を実装済み。allocation object の分岐別除去や一般化（`vm-make-array` など）は今後の拡張対象
 - **内容**: 割り当てを使用箇所の直前まで下降させ (sink)、条件分岐で使用されない分岐では割り当てを完全除去。`(let ((v (make-array 10))) (if cond (aref v 0) 42))` → cond=nil の分岐で割り当てを除去
 - **根拠**: LLVM Allocation Sinking / V8 TurboFan object inlining。allocation sinking は SROA の補完
 - **難易度**: Medium
+
+- **関連実装**: `packages/optimize/src/optimizer-flow-loop.lisp` の `opt-pass-code-sinking` が unique-use `vm-const` / `vm-cons` を target block entry へ sink し、`packages/optimize/src/optimizer-pipeline.lisp` に `:code-sinking` pass として登録済み。`packages/optimize/tests/optimizer-flow-tests.lisp` の `code-sinking-moves-const-into-target-block` / `code-sinking-noop-when-value-is-read-multiple-times` / `code-sinking-moves-cons-into-target-block` / `code-sinking-noop-for-cons-read-multiple-times` が変換と非変換条件を検証する。
 
 ---
 
 ### Phase 4 — メモリ依存解析 & デッドストア除去（一部実装: FR-016）
 
-#### FR-016: Dead Store Elimination (DSE) 🔶
+#### FR-016: Dead Store Elimination (DSE) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: `opt-pass-dce` は命令レベルのDCEのみ。後続ロードのないストア命令 (`vm-set-global`, `vm-set-slot`) の除去がない
+- **現状**: `opt-pass-dead-store-elim` は後続ロードなしで上書きされる `vm-set-global` / `vm-slot-write` を保守的に除去する。命令レベルDCEとは別パスとして optimizer pipeline に登録済み
 - **内容**: ストア命令 X のあとにXで定義した位置への後続ロードなく別のストアが来る場合、最初のストアを除去。グローバル変数・スロット・ローカルバインディングを対象。Memory SSA (FR-217) をバックエンドとして利用可能
 - **根拠**: LLVM `DeadStoreElimination` / GCC `tree-dse`。ローカル変数の初期化→即上書きパターンで頻出
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer.lisp` に `opt-pass-dead-store-elim` を実装済み。現状は straight-line な `vm-set-global` の上書き除去を対象とする保守的なパスで、`tests/unit/optimize/optimizer-tests.lisp` に回帰テストがある。Memory SSA やより広いメモリ位置（スロット/別名解析）連携は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` に `opt-pass-dead-store-elim` を実装済み。straight-line な global/slot store 上書き除去を対象とし、`opt-compute-heap-aliases` で保守的な slot alias を扱う。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` と `packages/optimize/tests/optimizer-store-analysis-tests.lisp` に回帰テストがある。Memory SSA や CFG 横断DSEは将来の精度向上項目。
 
-#### FR-017: Alias Analysis (型ベース別名解析, TBAA)
+#### FR-017: Alias Analysis (型ベース別名解析, TBAA) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: 型情報に基づいてメモリ操作の別名関係を推論。`vm-get-slot` で整数スロットとシンボルスロットは別名なし。異なるクラスのインスタンス間はスロット別名なし。TBAA メタデータを VM 命令に付与し、命令スケジューリング・DSE の精度向上
 - **根拠**: LLVM TBAA / GCC `-fstrict-aliasing`。Common Lisp は型タグ付きなのでTBAA適用範囲が広い
 - **難易度**: Hard
 
-#### FR-018: Flow-Sensitive Pointer Analysis
+- **関連実装**: `packages/optimize/src/optimizer-memory-ranges.lisp` に `opt-compute-heap-kinds` / `opt-may-alias-by-type-p` を追加済み。`opt-compute-heap-aliases` の fresh heap root と `:cons` / `:array` / `:closure` の heap kind を組み合わせ、両 root と kind が既知で異なる場合だけ non-alias と判定し、不明時は conservative に may-alias とする。`packages/optimize/tests/optimizer-lowlevel-tests.lisp` の `heap-kind-helper-distinguishes-object-classes` と `packages/optimize/tests/optimizer-memory-pass-tests.lisp` の heap kind table integrity test が直接検証する。VM 命令への TBAA metadata 付与、codegen 伝播、DSE/命令スケジューリングへの本格統合は未接続のため部分実装。
+
+#### FR-018: Flow-Sensitive Pointer Analysis 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**: `setq` / `setf` による変数更新を追跡しながらポインタの指す先を解析 (flow-sensitive)。Anderson 法 (flow-insensitive) よりも精度が高く、nil チェック・型チェック除去の前提解析として活用。解析スコープは関数内 (intraprocedural) に限定
@@ -493,18 +534,19 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 5 — インラインキャッシュ & 動的ディスパッチ（未実装）
 
-#### FR-009: Monomorphic Inline Cache (MIC)
+#### FR-009: Monomorphic Inline Cache (MIC) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-clos.lisp`
-- **現状**: `vm-generic-call` はすべて `find-method` 経由のフルディスパッチ。単一型の呼び出しサイトでも毎回ハッシュテーブルルックアップが発生
+- **現状**: 🔶 一部完了 — `opt-ic-transition` が call-site cache state を `:uninitialized` → `:monomorphic` → `:polymorphic` → `:megamorphic` に遷移させ、`opt-ic-resolve-target` が site-local IC entry のヒット判定（`:site-local` / `:miss`）を提供する。`vm-generic-call` / CLOS dispatch の実命令列へ guard + direct method call を挿入する統合は次段階。
 - **内容**: 各コールサイトに「最後に観測された型 → メソッド」のキャッシュエントリを 1 つ付与。ガード命令 `(eq (type-of self) cached-type)` が成功した場合はキャッシュメソッドを直接呼び出し。失敗時は `find-method` にフォールバックしてキャッシュ更新
 - **根拠**: Deutsch & Schiffman (1984) Smalltalk IC。V8・SpiderMonkey の inline cache の基礎。CLOS 多重ディスパッチのファストパスとして特に有効
 - **難易度**: Medium
 
-#### FR-019: Megamorphic State Optimization
+#### FR-019: Megamorphic State Optimization 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`
 - **内容**: 同一コールサイトで観測型数が閾値 (例: 8) を超えた場合、Megamorphic State に遷移してグローバル共有キャッシュを使用。Polymorphic IC (FR-023) → Megamorphic の自動降格ロジックを追加。Megamorphic 化されたサイトでは以降 IC ミス時のキャッシュ更新を停止してオーバーヘッドを削減
+- **現状**: 🔶 一部完了 — `opt-ic-transition` は `opt-ic-site-max-polymorphic-entries` を超えた時点で `:megamorphic` 遷移し、`opt-ic-site-megamorphic-fallback` に観測済み entries を保持する。さらに shared fallback として `opt-megamorphic-cache` / `opt-mega-cache-put/get` を追加し、`opt-ic-resolve-target` が megamorphic site miss 時に共有キャッシュ (`:megamorphic-shared`) を参照できる。VM/CLOS dispatch での実運用接続は次段階。
 - **根拠**: V8 の IC state machine (Uninitialized → Monomorphic → Polymorphic → Megamorphic)
 - **難易度**: Medium
 
@@ -512,13 +554,15 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 9 — 型特化 & アンボクシング（未実装）
 
-#### FR-008: Float Unboxing (浮動小数点数アンボクシング)
+#### FR-008: Float Unboxing (浮動小数点数アンボクシング) 🔶
 
 - **対象**: `packages/vm/src/primitives.lisp`, `packages/compile/src/codegen.lisp`, `packages/type/src/inference.lisp`
-- **現状**: `vm-add-float` 等のVM命令はすべてboxed float (タグ付きポインタ) を操作。`vm-float-p` チェック→アンボクシング→演算→再ボクシングの4ステップが毎回発生
+- **現状**: 🔶 一部完了 — complete unboxing は未実装だが、backend 側の浮動小数レジスタ経路は整備済み。`compute-live-intervals` / `allocate-registers` は float vreg を FP lane（x86-64 では XMM）へ割り当て可能で、native emitters も float 命令を直接発行できる。VM-level の boxed/unboxed 境界最適化（型推論連携で boxing 往復を消す）は未実装
 - **内容**: 型推論で float と確定したローカル変数を SSE2 の XMM レジスタに保持。`double` を整数レジスタのタグ付き値として持ち回さず、`XMM0`..`XMM7` に直接格納。float-only の内部ループではボクシングコストがゼロ
 - **根拠**: SBCL float unboxing / GHC unboxed Double#。数値計算コードで 3〜10x の高速化。FR-056 (Worker/Wrapper) と連携して再帰関数への拡張
 - **難易度**: Hard
+
+- **関連実装**: `packages/emit/tests/regalloc-tests.lisp` の `regalloc-float-vregs-allocated-to-distinct-xmm-registers` が、float vreg を GPR ではなく XMM レジスタへ割り当てる経路を検証する。
 
 #### FR-013: 型特化インライン展開 (Type-Specialized Inlining)
 
@@ -557,7 +601,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 13 — インライン展開コア（一部実装: インラインコストモデル）
 
-#### FR-030: Known-Call Optimization (既知呼び出し最適化)
+#### FR-030: Known-Call Optimization (既知呼び出し最適化) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: `vm-call` は全て間接ディスパッチ。静的に呼び出し先が判明している場合でも `vm-func-ref` テーブル経由のルックアップが発生
@@ -599,7 +643,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GHC STG calling convention / LLVM `fastcc`。内部関数の呼び出しオーバーヘッドを 50〜80% 削減可能
 - **難易度**: Hard
 
-#### FR-046: Return Value Optimization (RVO)
+#### FR-046: Return Value Optimization (RVO) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-execute.lisp`
 - **内容**: 複数値を返す `values` 呼び出しで、呼び出し元が即座に値を分解する場合 (`multiple-value-bind` / `nth-value`)、ヒープ上の多値オブジェクトを生成せず直接レジスタに展開。`(multiple-value-bind (a b) (values x y) ...)` → `a=x, b=y` のレジスタ直接バインド
@@ -614,7 +658,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 18 — Switch / Typecase 最適化（未実装）
 
-#### FR-128: typecase Jump Table (typecase ジャンプテーブル)
+#### FR-128: typecase Jump Table (typecase ジャンプテーブル) 🔶
 
 - **対象**: `packages/expand/src/macros-basic.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `typecase` は線形 if-else チェーンに展開 (`macros-basic.lisp:271-291`)。型テスト N 個で O(N) の比較
@@ -681,15 +725,17 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 56 — レジスタ割り当て（未実装）
+### Phase 56 — レジスタ割り当て（一部実装: FR-290, FR-292, FR-293）
 
-#### FR-290: Linear Scan Register Allocation (線形スキャン)
+#### FR-290: Linear Scan Register Allocation (線形スキャン) ✅
 
 - **対象**: `packages/emit/src/regalloc.lisp`
-- **現状**: `regalloc.lisp` に線形スキャンの基礎構造があるが、生存区間 (live interval) の精密な計算・合流点処理が未実装
+- **現状**: `packages/regalloc/src/regalloc.lisp` / `regalloc-allocate.lisp` に live interval 計算、forward branch による区間拡張、call-crossing 情報、linear-scan allocate、spill 判定を実装済み
 - **内容**: Poletto & Sarkar (1999) の線形スキャン実装。(1) 全命令に番号付け、(2) def-use チェーンから live interval 計算、(3) 区間ソート後にアクティブセットを管理しながらレジスタ割り当て、(4) スピル判定 (コスト最小の interval をスピル)。CFG 合流点での live interval 統合
 - **根拠**: JVM HotSpot C1 / LLVM RegAlloc linear scan。グラフ彩色より O(n) で高速なため JIT に適合
 - **難易度**: Hard
+
+- **関連実装**: `compute-live-intervals` が def/use から区間を作成し、`linear-scan-allocate` が active set の expire/assign/spill/evict を行う。`allocate-registers` が allocation と spill rewrite を統合する。`packages/emit/tests/regalloc-tests.lisp` に live interval、分岐区間拡張、物理レジスタ割り当て、spill pressure の回帰テストがある。
 
 #### FR-291: Graph Coloring Register Allocation (グラフ彩色)
 
@@ -698,32 +744,38 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Chaitin (1982) / George-Appel Iterated Register Coalescing。LLVM の `PBQP` や GCC の `IRA` はこれを基にする
 - **難易度**: Very Hard
 
-#### FR-292: Register Coalescing (レジスタ合体)
+#### FR-292: Register Coalescing (レジスタ合体) ✅
 
 - **対象**: `packages/emit/src/regalloc.lisp`
 - **内容**: `(vm-move R_dst R_src)` 命令で、`R_dst` と `R_src` の生存区間が干渉しない場合に同一物理レジスタに割り当て、`vm-move` を除去 (coalescing)。Conservative coalescing (George & Appel) と Aggressive coalescing の両方を実装
 - **根拠**: コアレッシングにより関数呼び出しや CPS 継続渡しで生成される大量の `move` 命令を除去。コード密度向上
 - **難易度**: Hard
 
-#### FR-293: Spill Code Optimization (スピルコード最適化)
+- **関連実装**: `packages/regalloc/src/regalloc.lisp` の `coalesce-with` と `packages/regalloc/src/regalloc-allocate.lisp` の `%lsa-try-coalesce` により、`vm-move` の source interval が destination interval と干渉しない場合は同じ物理レジスタを割り当てる。`packages/emit/tests/regalloc-tests.lisp` の `regalloc-allocate-coalesces-move-to-same-physical-reg` が回帰テストになっている。
+
+#### FR-293: Spill Code Optimization (スピルコード最適化) 🔶
 
 - **対象**: `packages/emit/src/regalloc.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **内容**: レジスタ不足時のスピル/リロードコードを最適化: (1) スピルスロット合体 (同時生存しない値が同一スタックスロットを共有)、(2) スピルコスト計算でループ外の値を優先スピル、(3) rematerialization — スピルよりも再計算が安い定数・アドレス計算は再計算に置き換え
 - **根拠**: LLVM `GreedyRegAlloc` のスピルコスト計算 / GCC `reload` pass
 - **難易度**: Hard
 
+- **関連実装**: `insert-spill-code` が spill-load/store を挿入し、`%lsa-best-spill-candidate` が next-use distance で spill 候補を選ぶ。`allocate-registers` は定数 rematerialization 用の `remat-map` を構築し、`packages/emit/tests/regalloc-tests.lisp` に spill pressure、scratch register 分離、rematerialization の回帰テストがある。スピルスロット合体とループ深度を含む spill cost は残課題。
+
 ---
 
 ### Phase 57 — プロファイルガイド最適化 (PGO)（未実装）
 
-#### FR-295: PGO Instrumentation (プロファイル計装)
+#### FR-295: PGO Instrumentation (プロファイル計装) 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: コンパイル時に基本ブロックごとのカウンタ (`__bb_count[]`) と分岐方向カウンタを挿入。トレーニング実行後にプロファイルデータを `.clcc-pgo` ファイルに出力。`./cl-cc compile --pgo-generate` / `./cl-cc compile --pgo-use file.clcc-pgo` の 2 フェーズビルド
 - **根拠**: GCC `-fprofile-generate/-fprofile-use` / LLVM IR-level PGO。実際の実行パターンを最適化の入力とする
 - **難易度**: Medium
 
-#### FR-296: PGO-Guided Inlining (プロファイル駆動インライン)
+- **関連実装**: `packages/cli/src/args.lisp` / `packages/cli/src/main.lisp` / `packages/cli/src/main-dump.lisp` / `packages/cli/src/handlers.lisp` に `--pgo-generate` / `--pgo-use` を追加し、`cl-cc-pgo-v1` profile を出力/読込する経路を実装。`packages/vm/src/vm-run.lisp` で profile 有効時に実行PCヒット（`bb-counts`）と分岐遷移（`branch-counts`）を収集し、`--pgo-generate` 出力へ含める。`packages/cli/tests/cli-tests.lisp` に parse と profile 出力回帰を追加。**未実装**: IRレベルの明示的カウンタ命令挿入と、分岐方向データを用いた最適化意思決定の本格接続。
+
+#### FR-296: PGO-Guided Inlining (プロファイル駆動インライン) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **依存**: FR-295
@@ -731,13 +783,18 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM Profile-guided inliner / GCC `-fpgo-inline-decision`。ヒューリスティックより実測ベースの方が 5〜15% 高速
 - **難易度**: Medium
 
-#### FR-297: PGO-Guided Code Layout (プロファイル駆動コード配置)
+- **関連実装**: `packages/cli/src/main-dump.lisp` の `%compile-opts-kwargs` で `--pgo-use` profile を読み込み、ヒューリスティックに `:speed` と `:inline-threshold-scale` を導出して optimizer policy へ接続。`packages/pipeline/src/pipeline-data.lisp` / `packages/pipeline/src/pipeline.lisp` / `packages/optimize/src/optimizer-pipeline.lisp` / `packages/optimize/src/optimizer-inline-cost.lisp` で speed と scale を inline adaptive threshold に反映（PGO時に閾値拡大）するよう配線。`packages/pipeline/src/pipeline-native.lisp` も `:speed` / `:inline-threshold-scale` を native compile 経路へ配線。**未実装**: call-site ごとのホット/コールド頻度に基づく局所閾値調整（top 10% 3x を厳密適用）
+
+#### FR-297: PGO-Guided Code Layout (プロファイル駆動コード配置) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, コンパイルパイプライン
 - **依存**: FR-295
+- **現状**: 🔶 一部完了 — `opt-pgo-best-successor` / `opt-pgo-build-hot-chain` / `opt-pgo-rotate-loop` により、edge count から hot successor を選び greedy な Pettis-Hansen 風 chain を作る helper と、preferred exit を loop bottom に置く loop rotation helper を実装。実際の block layout 差し替え・tail duplication・cold section 分離は未実装
 - **内容**: プロファイルデータを使用してホット基本ブロックを連続アドレスに配置 (Pettis-Hansen アルゴリズム)。ホットパス上の fall-through を最大化してブランチ命令を削減。コールドパス (エラー処理等) を関数末尾またはコールドセクションに移動
 - **根拠**: Pettis & Hansen (1990) Profile-based code positioning / LLVM `MachineBlockPlacementPass`。I キャッシュヒット率向上で 5〜10% 高速化
 - **難易度**: Hard
+
+- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の PGO layout helper 群が profile edge count に基づく hot-chain / loop rotation 計画を提供し、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pgo-build-hot-chain-prefers-hottest-successors` と `optimize-pgo-rotate-loop-places-preferred-exit-at-bottom` が回帰を検証する。
 
 #### FR-298: AutoFDO (Sampling-based Profile)
 
@@ -757,88 +814,117 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: GCC `-flto` / LLVM Full LTO。バイナリサイズ削減 20〜40%、速度向上 5〜20%
 - **難易度**: Hard
 
-#### FR-301: Thin LTO (分散リンク時最適化)
+#### FR-301: Thin LTO (分散リンク時最適化) 🔶
 
 - **対象**: コンパイルパイプライン
+- **現状**: 🔶 一部完了 — `opt-module-summary` / `opt-merge-module-summaries` による module summary 統合 helper と、`opt-thinlto-should-import-p` による size/linkage/cycle-aware な conservative import 判定 helper を実装済み。実際の IR import・並列最適化実行・バックエンド再リンク統合は未実装
 - **内容**: Full LTO はシングルスレッドで全 IR をメモリに保持するためスケールしない。Thin LTO は各モジュールのサマリ (exported symbols, call graph edges) を収集し、インポート判断後にモジュールを並列最適化。ビルド時間 10x 向上
 - **根拠**: LLVM ThinLTO (2016)。Chrome / Clang 自身の本番ビルドに使用
 - **難易度**: Very Hard
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-merge-module-summaries-aggregates-exports-and-counts` と `optimize-thinlto-import-decision-respects-budget-linkage-and-cycles` が summary merge と import 判定の回帰を検証する。
 
 ---
 
 ### Phase 63 — JIT & 動的コンパイル（未実装）
 
-#### FR-310: Tiered Compilation (多段 JIT)
+#### FR-310: Tiered Compilation (多段 JIT) 🔶
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/pipeline/pipeline.lisp`
+- **現状**: 🔶 一部完了 — `opt-adaptive-compilation-threshold` が warmup / cache-pressure / speculation-failure 数に応じた再コンパイル閾値調整を提供し、`opt-tier-transition` が hotness による `:interpreter` → `:baseline` → `:optimized` の純粋な tier state machine を提供。実行時遷移・コードキャッシュ・VM/JIT dispatch への統合は未実装
 - **内容**: 実行頻度に応じた多段コンパイル: Tier 0 = VM インタープリタ、Tier 1 = ベースライン JIT (最適化なし・高速コンパイル)、Tier 2 = 最適化 JIT (PGO + 全最適化パス)。ホットスポット検出はコールカウンタ + バックエッジカウンタ
 - **根拠**: V8 Ignition/Maglev/TurboFan / JVM C1/C2。起動時間とピーク性能のトレードオフを解決する現代的アプローチ
 - **難易度**: Very Hard
 
-#### FR-311: On-Stack Replacement (OSR)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-adaptive-compilation-threshold-reacts-to-warmup-pressure-and-failures` と `optimize-tier-transition-promotes-through-runtime-tiers` が閾値調整と tier 遷移ロジックを検証する。
+
+#### FR-311: On-Stack Replacement (OSR) 🔶
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/compile/src/codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-osr-point` / `opt-osr-trigger-p` / `opt-osr-materialize-entry` を実装し、バックエッジの hotness 閾値判定と、machine register snapshot から OSR entry 用 VM state を再構築する helper を提供。実行中フレームから最適化コードへ安全にジャンプするランタイム統合は未実装
 - **内容**: 実行中の (インタープリタ or Tier 1) 関数を最適化 JIT コンパイル版に切り替える。ループのバックエッジで「ここでOSRが発生した場合にレジスタ状態はこう」というエントリポイントを設定。V8 `OSR` / JVM `OSR entry` に相当
 - **根拠**: Hölzle et al. (1992) "Debugging Optimized Code with Dynamic Deoptimization"。長時間実行ループの途中でJITを適用するために必須
 - **難易度**: Very Hard
 
-#### FR-312: Deoptimization / Bailout (非最適化)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-osr-trigger-p-uses-hotness-threshold` と `optimize-osr-materialize-entry-maps-machine-to-vm-registers` が helper の回帰を検証する。
+
+#### FR-312: Deoptimization / Bailout (非最適化) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-execute.lisp`
+- **現状**: 🔶 一部完了 — `opt-deopt-frame` と `opt-materialize-deopt-state` を実装し、最適化コード時点の machine register snapshot から VM register state を再構築する helper を提供。実際の bailout guard 挿入・実行中フレーム切替・interpreter 再開制御は未実装
 - **内容**: 投機的最適化 (型予測・インライン化) が外れた場合に最適化版コードからインタープリタに制御を戻す。デオプト時に: (1) 最適化版のレジスタ状態をインタープリタ用フレームに変換、(2) 元の実行位置から継続。Bail-out ガード命令を各投機点に挿入
 - **根拠**: V8 Deopt / HotSpot uncommon_trap。投機的最適化の安全ネットとして必須
 - **難易度**: Very Hard
 
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-materialize-deopt-state-maps-machine-registers-to-vm-registers` が deopt state materialization helper を検証する。
+
 ---
 
-### Phase 64 — セキュリティ緩和策（未実装）
+### Phase 64 — セキュリティ緩和策（一部実装）
 
-#### FR-315: Control Flow Integrity (CFI)
+#### FR-315: Control Flow Integrity (CFI) 🔶
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-cfi-plan` / `opt-build-cfi-plan` を実装し、target と間接呼び出し有無に応じて ENDBR64（x86-64）/ BTI（AArch64）挿入方針を決定する helper を追加。`opt-cfi-entry-opcode` で backend が消費しやすい marker opcode（`:endbr64` / `:bti-c` / `:none`）へ materialize できる。実際の命令列挿入と backend 統合は未実装
 - **内容**: 間接呼び出し (`vm-funcall`) の前にターゲットが正当な関数エントリポイントであることを検証。x86-64 `ENDBR64` (CET) / AArch64 BTI (Branch Target Identification) を全関数先頭に挿入。制御フローハイジャック攻撃 (ROP/JOP) を防止
 - **根拠**: LLVM CFI / Intel CET (2020)。2025 年のシステムソフトウェアでは CET 対応が事実上必須
 - **難易度**: Medium
 
-#### FR-316: Retpoline (Spectre v2 対策)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-cfi-plan-selects-target-specific-guards` と `optimize-cfi-entry-opcode-materializes-selected-marker` が target 別 CFI 方針と marker opcode materialization を検証する。
+
+#### FR-316: Retpoline (Spectre v2 対策) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-should-use-retpoline-p` を実装し、x86-64 / 間接分岐 / IBRS可否を条件に mitigation 有効化を判定する helper を追加。`opt-retpoline-thunk-name` により target register ごとの module-local thunk 名を決定できる。実機 retpoline 命令列生成と `--retpoline` 統合は未実装
 - **内容**: 間接呼び出し・間接ジャンプを Retpoline シーケンス (`call_target → capture_ret_spec → ret`) に置換して投機的実行による Spectre v2 攻撃を防止。`./cl-cc compile --retpoline` オプションで有効化。IBRS / eIBRS が利用可能な CPU では Retpoline が不要なことを実行時に検出して最適化
 - **根拠**: Google Retpoline (2018) / Linux kernel Retpoline implementation
 - **難易度**: Medium
 
-#### FR-317: Stack Canary Insertion (スタックカナリー)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-should-use-retpoline-p-depends-on-target-and-ibrs` と `optimize-retpoline-thunk-name-is-target-register-specific` が判定条件と thunk 命名を検証する。
+
+#### FR-317: Stack Canary Insertion (スタックカナリー) 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-needs-stack-canary-p` を実装し、stack buffer を持つ関数への protector 適用判定 helper を追加。`opt-stack-canary-emit-plan` により guard slot / TLS canary load source / failure target を backend-neutral な emission plan として表現できる。`opt-stack-canary-prologue-seq` / `opt-stack-canary-epilogue-seq` は backend が消費する抽象 canary load/store/compare/branch 操作列を生成する。実機 prologue/epilogue への命令列挿入と CLI 統合は未実装
 - **内容**: スタックバッファを持つ関数 (主に native backend 生成コード) のプロローグにランダム値 (canary) を積み、エピローグで照合してスタックバッファオーバーフローを検出。`./cl-cc compile --stack-protector` で有効化
 - **根拠**: GCC `-fstack-protector-strong` / Clang `-stack-protector`。CL はタグ付き値で buffer overflow リスクは低いが native backend では必要
 - **難易度**: Easy
 
-#### FR-318: Shadow Stack (CET SS) Support
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-needs-stack-canary-p-follows-stack-buffer-presence`、`optimize-stack-canary-emit-plan-describes-prologue-and-epilogue`、`optimize-stack-canary-sequences-describe-prologue-and-epilogue-ops`、`optimize-stack-canary-sequences-are-empty-when-disabled` が適用判定・emission plan・抽象 prologue/epilogue 操作列を検証する。
+
+#### FR-318: Shadow Stack (CET SS) Support 🔶
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/vm/src/vm-execute.lisp`
+- **現状**: 🔶 一部完了 — `opt-build-shadow-stack-plan`（`packages/optimize/src/optimizer-pipeline-speculative.lisp`）により、x86-64 / CET SS 対応可否 / 非局所制御フロー有無から Shadow Stack 有効化、`INCSSP` 相当の調整要否、save/restore 要否を backend-neutral に計画できる。実機 CET SS 命令列、VM の継続・catch/throw・unwind-protect との統合、CLI/runtime feature detection は未実装
 - **内容**: Intel CET (Control-flow Enforcement Technology) の Shadow Stack 機能を使用。`CALL` 命令が Shadow Stack にリターンアドレスを保存、`RET` 命令がメインスタックと Shadow Stack を照合。CL の継続・スタック操作との整合性を確保
 - **根拠**: Intel CET (Tiger Lake 以降)。ROP 攻撃の根本的防止
 - **難易度**: Hard
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-shadow-stack-plan-enables-only-for-x86-64-with-cet` と `optimize-shadow-stack-plan-requires-save-restore-for-nonlocal-control` が、CET SS の target gate と非局所制御フロー時の save/restore plan を検証する。
 
 ---
 
 ### Phase 65 — WebAssembly モダン機能 (2024-2026)（未実装）
 
-#### FR-320: Wasm Tail Calls (Wasm 末尾呼び出し)
+#### FR-320: Wasm Tail Calls (Wasm 末尾呼び出し) 🔶
 
 - **対象**: `packages/emit/src/wasm-trampoline.lisp`, コンパイルパイプライン
-- **現状**: Wasm バックエンドは trampoline 方式で末尾呼び出しを実装。WebAssembly Tail Call Proposal が 2024 年に Phase 4 到達・全主要ブラウザで有効化
+- **現状**: 🔶 一部完了 — `opt-wasm-select-tailcall-opcode` / `opt-build-wasm-tailcall-plan` を実装し、tail position・indirect call・feature 有効性に応じて `:return-call` / `:return-call-indirect` への選択を行う helper を追加。実際の Wasm emitter での opcode 置換統合は未実装
 - **内容**: `return_call` / `return_call_indirect` Wasm 命令を使用した末尾呼び出しへの移行。trampoline ラッパーを削除してコードサイズ削減。CPS 変換後の継続渡し呼び出しが O(1) スタックで実行可能
 - **根拠**: W3C WebAssembly Tail Call Proposal (Phase 4, 2024)
 - **難易度**: Medium
 
-#### FR-321: Wasm GC (参照型・構造体・配列)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-wasm-select-tailcall-opcode-uses-return-call-forms` が opcode 選択分岐を検証する。
+
+#### FR-321: Wasm GC (参照型・構造体・配列) 🔶
 
 - **対象**: `packages/emit/src/`, Wasm バックエンド全体
+- **現状**: 🔶 一部完了 — `opt-wasm-gc-layout` / `opt-build-wasm-gc-layout` を実装し、struct/array 系オブジェクトの kind・field layout・nullable 性を保持する helper を追加。`struct.new`/`array.new` 命令生成への接続は未実装
 - **内容**: WebAssembly GC Proposal (Phase 4, 2024) の型・命令を使用。`struct.new`/`struct.get`/`struct.set` でCLOSインスタンスを Wasm 構造体として表現。`array.new`/`array.get` でベクトルを Wasm 配列として表現。ブラウザの GC と統合することで JavaScript GC との相互運用性向上
 - **根拠**: Wasm GC は Dart/Kotlin/OCaml など多言語が採用中 (2025)。Wasm ホスト上での Common Lisp 実行の理想的な基盤
 - **難易度**: Very Hard
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-wasm-gc-layout-preserves-kind-and-fields` が layout descriptor の保持を検証する。
 
 #### FR-322: Wasm SIMD (固定幅 128-bit SIMD)
 
@@ -866,20 +952,25 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 66 — デバッグ情報 & 観測性（未実装）
 
-#### FR-330: DWARF Debug Info Generation (DWARF デバッグ情報生成)
+#### FR-330: DWARF Debug Info Generation (DWARF デバッグ情報生成) 🔶
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`, `packages/binary/src/macho.lisp`
-- **現状**: native backend が生成するバイナリにデバッグ情報なし。`lldb`/`gdb` でバックトレースが取れない
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-debug-loc` / `opt-build-dwarf-line-row` を実装し、機械語アドレスとソース座標を結ぶ line row descriptor を生成する helper を追加。Mach-O/ELF の `.debug_*` section 生成と CFI/FDE emission への統合は未実装
 - **内容**: DWARF 5 形式のデバッグ情報生成。`.debug_info`/`.debug_line`/`.debug_frame` セクションを Mach-O / ELF バイナリに付加。ソース行番号 → 機械語アドレスのマッピング。CIE/FDE (Call Frame Information) によるアンワインド情報生成
 - **根拠**: DWARF Standard (dwarfstd.org)。デバッガ対応はプロダクション品質コンパイラの必須要件
 - **難易度**: Hard
 
-#### FR-331: Source Maps for Wasm
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-dwarf-line-row-preserves-location-fields` が row descriptor 生成を検証する。
+
+#### FR-331: Source Maps for Wasm 🔶
 
 - **対象**: Wasm バックエンド
+- **現状**: 🔶 一部完了 — `opt-build-wasm-source-map-entry` を実装し、wasm offset と CL ソース位置のマッピング entry を生成する helper を追加。Source Maps v3 ファイル出力・DevTools 連携は未実装
 - **内容**: WebAssembly Source Map 仕様に従い、Wasm バイトコードオフセット → CL ソースファイル行番号のマッピングを生成。ブラウザ DevTools での CL ソースレベルデバッグを可能にする
 - **根拠**: Source Maps v3 / DWARF-for-Wasm proposal。Wasm コードのデバッグ体験向上
 - **難易度**: Medium
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-wasm-source-map-entry-preserves-offset-and-source` が source-map entry 生成を検証する。
 
 #### FR-332: Debug Info Preservation through Optimization (最適化を通じたデバッグ情報保存)
 
@@ -888,45 +979,59 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM Debug Info preservation (DebugLoc, DIVariable)。最適化とデバッグ情報の両立は現代コンパイラの重要課題
 - **難易度**: Hard
 
-#### FR-333: Compiler Diagnostic Quality (診断品質向上)
+#### FR-333: Compiler Diagnostic Quality (診断品質向上) 🔶
 
 - **対象**: コンパイルパイプライン全体
+- **現状**: 🔶 一部完了 — `opt-format-diagnostic-reason` を実装し、`pass: outcome (reason)` 形式の Rpass 互換メッセージ整形 helper を追加。caret 表示・候補提示・型推論根拠トレースの end-to-end 実装は未着手
 - **内容**: エラー・警告メッセージに以下を追加: (1) ソース箇所の caret 表示、(2) 修正候補の提示 (`did you mean?`)、(3) 最適化が適用された/されなかった理由の説明 (`-Rpass=inline` 相当)、(4) 型推論の根拠トレース。Rust/Clang の診断品質を目標
 - **根拠**: Rust compiler error messages / Clang `-Rpass` remarks。コンパイラの使いやすさは採用率に直結
 - **難易度**: Medium
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-format-diagnostic-reason-renders-rpass-like-message` が診断整形を検証する。
 
 ---
 
 ### Phase 67 — 並行・並列最適化（未実装）
 
-#### FR-335: Thread-Local Storage Optimization (スレッドローカルストレージ最適化)
+#### FR-335: Thread-Local Storage Optimization (スレッドローカルストレージ最適化) 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/runtime/src/heap.lisp`
+- **現状**: 🔶 一部完了 — `opt-build-tls-plan` / `opt-tls-plan` に加え、`packages/codegen/src/x86-64-codegen.lisp` と `packages/codegen/src/aarch64-codegen.lisp` の `x86-64-tls-base-register` / `aarch64-tls-base-register` が planner を参照して target 別 TLS base を選択する経路を実装。VM/runtime 変数そのものの TLS 化と、実メモリアクセス命令への end-to-end 統合は未実装
 - **内容**: 現在グローバル変数として扱われているコンパイラ内部状態 (`*vm-host-bridge-functions*`, GC ヒープポインタ等) をスレッドローカル変数に変換。TLS アクセスコストを削減するため `fs:` セグメントレジスタ (x86-64) / `TPIDR_EL0` (AArch64) を使用したインライン TLS アクセスを生成
 - **根拠**: GCC/Clang TLS optimization / SBCL per-thread bindings
 - **難易度**: Hard
 
-#### FR-336: Atomic Instruction Lowering (アトミック命令展開)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-tls-plan-selects-architecture-specific-base-register` に加え、`packages/emit/tests/x86-64-codegen-tests.lisp` の `x86-64-tls-base-register-uses-fsbase-plan` と `packages/emit/tests/aarch64-codegen-tests.lisp` の `aarch64-tls-base-register-uses-tpidr-el0-plan` が codegen 接続を検証する。
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
+#### FR-336: Atomic Instruction Lowering (アトミック命令展開) 🔶
+
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-select-atomic-opcode` / `opt-build-atomic-plan` に加え、`packages/codegen/src/x86-64-codegen.lisp` と `packages/codegen/src/aarch64-codegen.lisp` に `x86-64-atomic-lowering-plan` / `aarch64-atomic-lowering-plan` を実装し、memory-order に応じた pre/post fence 方針まで codegen 層へ接続。実機命令列（LOCK/LDXR-STXR など）への最終 lowering は未実装。
 - **内容**: `sb-ext:atomic-incf` / CAS 操作を `LOCK XADD`/`LOCK CMPXCHG` (x86-64) または `LDXR`/`STXR`/`LDADD` (AArch64) に展開。メモリフェンスセマンティクスの最小化: acquire/release/sequentially-consistent を区別して不要な `MFENCE` を除去
 - **根拠**: C++ `std::atomic` mapping / Linux kernel atomic ops。GC write barrier の実装にも使用
 - **難易度**: Hard
 
-#### FR-337: Lock Elision with HTM (Hardware Transactional Memory)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-select-atomic-opcode-reflects-target-and-operation` に加え、`packages/emit/tests/x86-64-codegen-tests.lisp` の `x86-64-atomic-lowering-plan-adds-seq-cst-fences` と `packages/emit/tests/aarch64-codegen-tests.lisp` の `aarch64-atomic-lowering-plan-adds-acq-rel-fences` が codegen 接続を検証する。
+
+#### FR-337: Lock Elision with HTM (Hardware Transactional Memory) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/vm/src/hash.lisp`
+- **現状**: 🔶 一部完了 — planning helper (`opt-htm-plan` / `opt-build-htm-plan`) に加えて、`packages/vm/src/hash.lisp` / `packages/vm/src/hash-execute.lisp` に lock-elision 実行ラッパーを最小統合。`vm-hash-with-lock-fallback` が HTM 適格時に楽観実行を試行し、失敗時は abort count を加算してロック経路へフォールバックし、abort 閾値到達時は HTM 試行を停止する。`gc.lisp` 側の広域ロック置換、abort reason 別ポリシー、RTM 命令のネイティブ発行統合は未実装
 - **内容**: Intel TSX (RTM) / IBM POWER HTM を使用して楽観的ロック省略を実装。`XBEGIN`/`XEND`/`XABORT` によるトランザクション実行をトライし、競合時に通常ロックにフォールバック。ハッシュテーブルの並行アクセスと GC の STW (Stop-The-World) 縮小に適用
 - **根拠**: Intel RTM / GCC `-mrtm`。競合率が低い場合に lock overhead をゼロに近づける
 - **難易度**: Very Hard
 
-#### FR-338: Concurrent GC (並行 GC)
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-htm-plan-enables-lock-elision-only-when-supported-and-low-contention` が planning 分岐を検証。`packages/vm/tests/hash-tests.lisp` の `hash-lock-elision-wrapper-falls-back-after-abort` が VM 実行系での abort→fallback 動作を検証する。
+
+#### FR-338: Concurrent GC (並行 GC) 🔶
 
 - **対象**: `packages/runtime/src/gc.lisp`
-- **現状**: `gc.lisp` は Stop-The-World 2世代 GC。マーク・スイープ中はミュータータスレッドが停止
+- **現状**: 🔶 一部完了 — planning helper (`opt-concurrent-gc-plan` / `opt-build-concurrent-gc-plan`) に加えて、runtime 側に concurrent mode 設定 (`rt-gc-configure-concurrent-mode`) と bounded assist (`rt-gc-concurrent-assist`) を追加し、`rt-gc-major-collect` が `*rt-concurrent-gc-enabled-p*` 有効時に `:major-gc-concurrent` 状態で実行する最小統合を実施。`rt-gc-write-barrier` も `:major-gc-concurrent` で SATB snapshot を実施する。並行マーカースレッド、assist の本格スケジューリング、barrier の完全実装は未実装
 - **内容**: 三色マーキング (Tri-color marking) + Write Barrier で並行マークフェーズを実装。ミュータースレッドと並行してマーカースレッドが動作。STW は初期マーク + 最終リマークのみに短縮。Write barrier: Dijkstra incremental / SATB (Snapshot At The Beginning)
 - **根拠**: Go GC (tri-color) / JVM G1/ZGC / .NET GC。GC 停止時間 O(heap) → O(live) + 短い STW に削減
 - **難易度**: Very Hard
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-concurrent-gc-plan-selects-satb-and-short-stw-for-latency-sensitive-mode` が planning 分岐を検証。`packages/runtime/tests/gc-sweep-major-tests.lisp` の `gc-configure-concurrent-mode-updates-runtime-flags` / `gc-major-collect-enters-concurrent-state-when-enabled`、`packages/runtime/tests/gc-write-barrier-tests.lisp` の `gc-write-barrier-satb-snapshot-major-gc-concurrent-black-object` が runtime 統合挙動を検証する。
 
 ---
 
@@ -980,29 +1085,37 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 70 — 等価飽和 & 代数的最適化（未実装）
+### Phase 70 — 等価飽和 & 代数的最適化（一部実装: FR-350/351）
 
-#### FR-350: E-graph Equality Saturation (等価飽和)
+#### FR-350: E-graph Equality Saturation (等価飽和) ✅
 
 - **対象**: `packages/optimize/src/egraph.lisp`, `packages/optimize/src/egraph-rules.lisp`
-- **現状**: `egraph.lisp` に等価飽和エンジンが存在するが、抽出 (FR-519) が未実装なため等価飽和の恩恵を得られていない
+- **現状**: `egraph.lisp` / `egraph-saturation.lisp` に union-find ベースの e-graph、rewrite rule 適用、fuel/limit 付き saturation、FR-519 の cost-based extraction を実装済み
 - **内容**: egg ライブラリ (2021) 方式の等価飽和完全実装。(1) rewrite rules の反復適用で等価クラスを飽和させる、(2) コスト関数 (FR-519) で最小コストの実装を抽出、(3) phase-ordering problem の解決 (最適化の順序依存をなくす)
 - **根拠**: egg: An E-graph Good Library (Willsey et al., POPL 2021)。テンソル演算・数値コード最適化で LLVM を超える結果が多数報告
 - **難易度**: Hard
 
-#### FR-351: Algebraic Simplification via Rewrite Rules (代数的簡約)
+- **関連実装**: `egraph-saturate` が rule set を反復適用し、`egraph-apply-rule` が pattern match から e-class merge を行う。`egraph-default-cost` と `egraph-extract` が最小コスト式を抽出し、`vm-inst-to-enode-op` / `egraph-add-instructions` が VM 命令列を e-graph に投入する。`packages/optimize/tests/egraph-extraction-tests.lisp` に saturation と extraction の回帰テストがある。
+
+#### FR-351: Algebraic Simplification via Rewrite Rules (代数的簡約) ✅
 
 - **対象**: `packages/optimize/src/egraph-rules.lisp`, `packages/optimize/src/optimizer.lisp`
+- **現状**: ✅ 完了 — e-graph rewrite rules と VM peephole 用 algebraic identity table の両方で、算術単位元、零元、自己比較、double negation、bitwise identity、min/max absorption、power-of-two strength reduction を体系的に定義済み
 - **内容**: 数学的等価変換のルールセットを体系的に追加。モノイド・環・束の法則: `(+ x 0) → x`, `(* x 1) → x`, `(logand x -1) → x`, `(logior x 0) → x`。べき等則: `(logand x x) → x`。De Morgan 則。条件付き簡約: `(max x x) → x`, `(min x (max x y)) → x`
 - **根拠**: Herbie (floating-point numerics improvement) / SymPy simplify。代数規則の体系的適用は手動ペアホールより網羅的
 - **難易度**: Medium
 
-#### FR-352: Bit-Width Analysis (ビット幅解析)
+- **関連実装**: `packages/optimize/src/egraph-rules.lisp` の `defrule` 群が `add-zero-*` / `mul-one-*` / `sub-self` / `logand-neg1` / `logior-zero` / `logand-self` / `not-*` / `max-self` / `min-max-absorb` などを登録し、`packages/optimize/src/optimizer-algebraic.lisp` の `*opt-algebraic-identity-rules*` が VM 命令列向けの同等規則を提供する。`packages/optimize/tests/egraph-rules-tests.lisp`、`packages/optimize/tests/egraph-rules-bitwise-tests.lisp`、`packages/optimize/tests/egraph-negation-tests.lisp`、`packages/optimize/tests/optimizer-tests.lisp`、`packages/optimize/tests/optimizer-tables-tests.lisp` が rule registration / firing / peephole action を検証する。
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/type/src/inference.lisp`
+#### FR-352: Bit-Width Analysis (ビット幅解析) ✅
+
+- **対象**: `packages/optimize/src/optimizer-memory.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer.lisp`
+- **現状**: ✅ 完了 — 区間解析が non-negative mask 付き `vm-logand` を `[0, mask]` に狭め、そこから unsigned bit-width / known-bits mask / fixnum-width 収まり判定を導出する。証明済みの checked arithmetic は `opt-pass-elide-proven-overflow-checks` が unchecked integer arithmetic へ落とし、fold pass は `(= (logand x 1) 0)` / `(= (logand x 1) 1)` を `vm-evenp` / `vm-oddp` へ書き換える
 - **内容**: 整数演算の結果の有効ビット幅を追跡。`(logand x #xFF)` の結果は 8 ビットと確定。8-bit 値同士の加算は最大 9-bit。ビット幅が 63 bit 未満であればオーバーフローチェック (FR-303) を省略可能。`(= (logand x 1) 0)` → `(evenp x)` の認識
 - **根拠**: LLVM `computeKnownBits` / GCC VRP。ビット幅解析はオーバーフロー除去・型チェック除去・強度低減の精度向上に貢献
 - **難易度**: Hard
+
+- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` の `opt-interval-logand` / `opt-interval-bit-width` / `opt-interval-known-bits-mask` / `opt-interval-fits-fixnum-width-p` / `opt-pass-elide-proven-overflow-checks` が conservative な bit-width helper と overflow-check elision pass を提供し、`%opt-transfer-interval-inst` が `vm-logand` mask を straight-line / CFG range propagation に流す。`packages/optimize/src/optimizer.lisp` の `%opt-rewrite-logand-low-bit-test` は low-bit equality を `vm-evenp` / `vm-oddp` に落とし、`packages/optimize/tests/optimizer-memory-tests.lisp` と `packages/optimize/tests/optimizer-memory-pass-tests.lisp` が `#xFF`→8-bit、8-bit+8-bit→9-bit、checked add elision、`(= (logand x 1) 0)`→`evenp` rewrite を回帰テストで固定する。
 
 ---
 
@@ -1022,11 +1135,12 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: tree-sitter (2018) / IntelliJ PSI。インクリメンタルパーシングは IDE レスポンスの基盤
 - **難易度**: Hard
 
-#### FR-355: Format String コンパイル時展開
+#### FR-355: Format String コンパイル時展開 ✅
 
-- **対象**: `packages/expand/src/macros-stdlib.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: `(format nil "~A ~D ~%" x y)` は実行時に format ディレクティブをパースしてディスパッチする
-- **内容**: `format` の第2引数が文字列リテラルの場合、コンパイル時にディレクティブを解析して特化関数列を生成。`~A` → `princ-to-string`、`~D` → `integer-to-string`、`~%` → `#\Newline` リテラル。中間フォーマット文字列のパースコストをゼロに
+- **対象**: `packages/expand/src/expander-basic.lisp`, `packages/compile/src/codegen-io-ext.lisp`
+- **現状**: `(format nil "~A ~D ~%" x y)` は、対応済みのリテラル制御文字列では展開時に `concatenate` と文字列化呼び出しへ正規化し、サポート外ディレクティブでは既存の string-output-stream 経由 `format` へフォールバックする
+- **内容**: `format` の第2引数が文字列リテラルの場合、コンパイル時にディレクティブを解析して特化関数列を生成。`~A` → `princ-to-string`、`~D` → 十進固定の `write-to-string`、`~%` → `#\Newline` リテラル。中間フォーマット文字列のパースコストをゼロに
+- **関連実装**: `packages/expand/src/expander-basic.lisp` の `%parse-format-literal` / `%format-literal-expansion` が `~A`, `~D`, `~%`, `~~` の限定 parser を提供し、`format nil` expander が literal path と runtime fallback を選択する。`~D` は `*print-base* = 10` / `*print-radix* = nil` の special binding で十進表記を固定する。回帰テスト: `packages/expand/tests/expander-basic-tests.lisp` の `expander-format-literal-*`
 - **根拠**: SBCL `format` compiler transform。format は CL で最多使用される出力関数
 - **難易度**: Medium
 
@@ -1049,7 +1163,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 72 — CL 宣言系最適化（未実装）
 
-#### FR-360: `declare (type ...)` / `the` による型ナローイング
+#### FR-360: `declare (type ...)` / `the` による型ナローイング ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/type/src/inference.lisp`
 - **現状**: `(declare (type fixnum x))` / `(the fixnum expr)` がパースされるが型推論・コード生成に反映されていない
@@ -1075,17 +1189,19 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `dynamic-extent` / ANSI CL 3.3.4。実測でヒープ割り当て数が 50〜90% 削減されるケースあり
 - **難易度**: Medium
 
-#### FR-363: `declare (optimize ...)` quality レベル処理
+#### FR-363: `declare (optimize ...)` quality レベル処理 ✅
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/expand/src/macros-runtime-support.lisp`, `packages/compile/src/context.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: `(declare (optimize (speed N) (safety N) (debug N) (space N)))` の各 quality を 0〜3 の範囲でコンパイル設定に反映。`(speed 3)` → 型チェック除去・積極的インライン・全最適化パス有効。`(safety 3)` → 型チェック・配列境界チェック・オーバーフロー検出を維持。`(debug 3)` → インライン抑制・デバッグ情報最大化。`(space 2)` → インライン閾値を縮小
+- **関連実装**: `packages/expand/src/macros-runtime-support.lisp` が `compilation-speed` / `debug` / `safety` / `space` / `speed` の quality 名と 0〜3 レベルを検証し、`declaration-optimize-quality` で `declaim` / local `declare` から quality を抽出する。`packages/expand/src/expander-data.lisp` の `*declaim-optimize-registry*` が global policy を保持し、`packages/compile/src/context.lisp` の `%global-optimize-quality` / `%local-optimize-quality` が global/local policy を codegen context へ反映する。`packages/compile/src/codegen.lisp` は `safety` policy で type assertion emission を制御し、`packages/compile/src/codegen-core-let-emit-pass.lisp` は `speed` / `debug` / `space` を inline policy merge に使う。回帰テスト: `packages/expand/tests/macros-runtime-support-tests.lisp`, `packages/compile/tests/compiler-tests-extended-stdlib.lisp`, `packages/compile/tests/codegen-control-tests.lisp`
 - **根拠**: ANSI CL 3.3.4 / SBCL optimize policy。quality レベルは最適化・安全性トレードオフの主要制御機構
 - **難易度**: Medium
 
-#### FR-364: `define-compiler-macro` フレームワーク
+#### FR-364: `define-compiler-macro` フレームワーク ✅
 
-- **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
+- **対象**: `packages/expand/src/macro.lisp`, `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: `define-compiler-macro` でユーザ定義のコンパイラ変換を登録。通常の `defmacro` と異なり呼び出しサイトの型情報・最適化設定にアクセス可能。SBCL の `deftransform` の簡略版として実装。組み込み関数（`+`, `aref`, `length` 等）の呼び出しをコンパイラマクロ経由で型特化版に置換
+- **関連実装**: `packages/expand/src/expander-data.lisp` の `*compiler-macro-table*` が compiler macro registry を保持し、`packages/expand/src/macro.lisp` の `register-compiler-macro` / `lookup-compiler-macro` / `compiler-macro-function` / `(setf compiler-macro-function)` が登録・取得 API を提供する。`%compiler-macro-lambda-list-parts` は `&whole` / `&environment` を扱い、`packages/expand/src/macros-stdlib-ansi.lisp` が `define-compiler-macro` を ANSI macro として登録する。`packages/expand/src/expander.lisp` の `compiler-macroexpand-all` と `packages/expand/src/expander-basic.lisp` の `funcall` expansion が call-site で compiler macro を適用し、`packages/compile/src/codegen.lisp` / `packages/pipeline/src/pipeline.lisp` / `packages/repl/src/pipeline-repl-load.lisp` の entry point から同じ展開経路を通る。回帰テスト: `packages/expand/tests/macro-definition-tests.lisp`
 - **根拠**: ANSI CL 3.2.2.1 / SBCL `deftransform`。数値計算・コンテナ操作の型特化の主要メカニズム
 - **難易度**: Medium
 
@@ -1098,18 +1214,18 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: ANSI CL 3.1.2.1.1 / SBCL constant inlining。定数の実行時ルックアップをゼロに
 - **難易度**: Easy
 
-#### FR-366: `load-time-value` 最適化
+#### FR-366: `load-time-value` 最適化 ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/pipeline/pipeline.lisp`
 - **内容**: `(load-time-value expr)` はロード時に 1 回だけ `expr` を評価してキャッシュする。コンパイル時に `expr` が副作用なし・定数と判明する場合は `defconstant` 相当にフォールバック。ロード時評価のスロットを `.fasl` に記録し重複評価を防止
 - **根拠**: ANSI CL 3.2.2.2 / SBCL `load-time-value` compilation。正規表現コンパイル・ハッシュテーブル初期化のイディオムで使用
 - **難易度**: Medium
 
-#### FR-367: `declare (ignore/ignorable)` と DCE 統合 🔶
+#### FR-367: `declare (ignore/ignorable)` と DCE 統合 ✅
 
 - **対象**: `packages/compile/src/codegen-core-let.lisp`, `packages/compile/src/codegen-core-let-emit.lisp`
-- **内容**: `(declare (ignore x))` で変数 `x` が意図的に未使用と宣言される場合だけ、`let` バインディングの余分な move を省略し、純粋な初期化式は後段 DCE で除去可能にする。`(declare (ignorable x))` は警告抑制のみ（コード生成に影響なし）。`&aux` サポートは未実装のまま。
-- **関連実装**: `packages/compile/src/codegen-core-let.lisp` の `%ast-let-binding-ignored-p` を `(ignore x)` 専用に制限し、`packages/compile/src/codegen-core-let-emit.lisp` では既存 helper 経由で ignored `let` 束縛だけ extra `vm-move` を省略する。回帰テスト: `packages/compile/tests/codegen-core-let-tests.lisp`, `packages/compile/tests/codegen-core-tests.lisp`
+- **内容**: `(declare (ignore x))` で変数 `x` が意図的に未使用と宣言される場合だけ、`let` バインディングの余分な move を省略し、純粋な初期化式は後段 DCE で除去可能にする。`(declare (ignorable x))` は警告抑制のみ（コード生成に影響なし）。`&aux` lambda-list lowering は本 FR の完了範囲外として扱う。
+- **関連実装**: `packages/compile/src/codegen-core-let.lisp` の `%ast-let-binding-ignored-p` を `(ignore x)` 専用に制限し、`packages/compile/src/codegen-core-let-emit-pass.lisp` では既存 helper 経由で ignored `let` 束縛だけ extra `vm-move` を省略する。`packages/compile/tests/codegen-core-let-tests.lisp` の `ast-let-binding-ignored-p`、`packages/compile/tests/codegen-core-tests.lisp` の `codegen-let-binding-declaration-controls-own-move` / `codegen-let-ignore-binding-enables-dce-of-unused-initializer` が、`ignore` と `ignorable` の差分および ignored pure initializer の DCE を検証する。
 - **根拠**: ANSI CL 3.3.4 / SBCL unused variable analysis
 - **難易度**: Easy
 
@@ -1117,7 +1233,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 73 — CL ランタイム意味論（未実装）
 
-#### FR-370: 特殊変数の実装モデル選択
+#### FR-370: 特殊変数の実装モデル選択 🔶
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-execute.lisp`
 - **内容**: 3 つの実装モデルから選択: (1) **Deep Binding** — スレッドごとのバインディングスタックを線形探索。実装簡単だがアクセス O(n)。(2) **Shallow Binding** — シンボルのグローバルセルに直接書き込み＋退避スタック。アクセス O(1) だがスレッド切り替えに O(n) コスト。(3) **Per-thread TLS cell** (SBCL 方式) — `fs:` セグメント (x86-64) のスレッドローカルセルに値を格納。アクセス O(1)・スレッドセーフ。cl-cc の現実装モデルを明文化し性能特性を文書化
@@ -1145,12 +1261,14 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL `make-instance` compiler macro / PCL constructor optimization
 - **難易度**: Hard
 
-#### FR-374: EQL スペシャライザのジャンプテーブル化
+#### FR-374: EQL スペシャライザのジャンプテーブル化 ✅
 
-- **対象**: `packages/vm/src/vm-clos.lisp`
+- **対象**: `packages/vm/src/vm-clos-execute.lisp`, `packages/vm/src/vm-dispatch-gf.lisp`, `packages/vm/src/vm-dispatch-gf-multi.lisp`, `packages/runtime/src/runtime-clos.lisp`
+- **現状**: ✅ 完了 — VM と runtime の generic function descriptor に `:__eql-index__` を保持し、`vm-register-method` / `rt-register-method` が `(eql value)` specializer を値→メソッド bucket に登録する。`%vm-gf-eql-methods` / `rt-call-generic` は通常の class dispatch より前にこの index を参照し、index がある GF では未 index の EQL key を線形走査しないため、登録済み EQL dispatch は O(1) lookup になる。class fallback は EQL index miss 後に維持される
 - **内容**: EQL スペシャライザ `(eql value)` を多数持つジェネリック関数のディスパッチを、値 → メソッドのハッシュテーブル (または dense な整数ならジャンプテーブル) に変換。線形探索 O(n) → O(1) へ。`(defmethod foo ((x (eql :read))) ...)` の多数定義パターンで効果大
 - **根拠**: SBCL EQL specializer optimization / PCL permutation vector dispatch
 - **難易度**: Medium
+- **検証**: `packages/vm/tests/vm-clos-tests.lisp`（`eql-specializer-dispatch-index`）、`packages/vm/tests/vm-dispatch-gf-multi-tests.lisp`（`gf-multi-single-dispatch-eql-index-hit-precedes-class`, `gf-multi-single-dispatch-eql-index-avoids-linear-scan`）、`packages/runtime/tests/runtime-clos-tests.lisp`（`rt-call-generic-eql-dispatch`, `rt-call-generic-eql-index-precedes-class-fallback`）、`packages/compile/tests/clos-dispatch-tests.lisp`（`clos-eql-specializer`）
 
 #### FR-375: `method-combination` 展開最適化
 
@@ -1159,42 +1277,44 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: SBCL effective method compilation / Gray streams optimization
 - **難易度**: Hard
 
-#### FR-376: コンディションシステムの実装方針
+#### FR-376: コンディションシステムの実装方針 ✅
 
 - **対象**: `packages/vm/src/conditions.lisp`
 - **内容**: (1) **handler-case** の実装選択: setjmp/longjmp 方式 vs テーブル駆動アンワインド (FR-470) — ハッピーパスコストの比較。(2) **restart オブジェクト**の表現: 動的スコープの restart リストをスレッドローカルスタックで管理。(3) `*debugger-hook*` の fast path: hook が nil の場合のチェックコスト最小化。(4) condition オブジェクトの lazy 構築: `signal` 呼び出し前の条件オブジェクト生成を遅延
 - **根拠**: SBCL condition system / ANSI CL chapter 9。コンディションシステムのオーバーヘッドはエラー処理コードの性能に直結
 - **難易度**: Hard
 
-#### FR-377: `unwind-protect` cleanup のコンパイル
+#### FR-377: `unwind-protect` cleanup のコンパイル ✅
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: `(unwind-protect body cleanup)` の cleanup フォームを: (1) 正常終了パス: body 直後にインライン展開、(2) 非ローカル脱出パス: アンワインドテーブルに登録 (FR-470 と連携)。cleanup に副作用がない場合は dead cleanup として除去。`multiple-value-prog1` 相当の多値保存コストを最小化
 - **根拠**: SBCL `unwind-protect` compilation / ANSI CL 5.2
 - **難易度**: Medium
 
-#### FR-378: CL 多値 (values) の実装方針
+#### FR-378: CL 多値 (values) の実装方針 ✅
 
-- **対象**: `packages/vm/src/vm-execute.lisp`, `packages/compile/src/codegen.lisp`
+- **対象**: `packages/vm/src/vm-execute-mv.lisp`, `packages/compile/src/codegen-values.lisp`, `packages/compile/src/codegen-values-helpers.lisp`
 - **内容**: 多値の実装戦略の選択と最適化: (1) **レジスタ渡し**: 2〜4 値なら追加レジスタ (`:R_V1`〜`:R_V3`) に直接格納 (最速)。(2) **スレッドローカルバッファ**: `*multiple-values*` 配列に格納 (現状)。(3) **インライン化**: `(multiple-value-bind (a b) (values x y) ...)` でスタック割り当てを回避 (FR-046 参照)。呼び出し先が単値を期待する場合は `values` の第2値以降を DCE で除去
+- **関連実装**: `packages/compile/src/codegen-values.lisp` の `compile-ast(ast-values)` が `vm-values` の `src-regs` に値レジスタ列を渡し、`packages/vm/src/vm-execute-mv.lisp` が `vm-values-list` side-channel に全値を保存して primary value を `dst` に置く。`packages/compile/src/codegen-values-helpers.lisp` の `%compile-mvb-value-registers` は `(multiple-value-bind ... (values ...))` を direct register binding にして `vm-mv-bind` を発行せず、dynamic source だけ `vm-mv-bind` にフォールバックする。`packages/optimize/src/effects.lisp` と `packages/optimize/src/optimizer-tables.lisp` は multiple-values side-channel producer を DCE/constant-folding 対象外にして第2値以降の observable state を保護する。回帰テスト: `packages/compile/tests/codegen-runtime-tests.lisp`, `packages/vm/tests/vm-execute-tests-2.lisp`, `packages/vm/tests/primitives-tests.lisp`
 - **根拠**: SBCL multiple values / ANSI CL 5.3
 - **難易度**: Medium
 
-#### FR-379: Symbol plist 最適化
+#### FR-379: Symbol plist 最適化 ✅
 
 - **対象**: `packages/vm/src/vm.lisp`
 - **内容**: (1) 短い plist (≤4 エントリ) は線形探索が最速。`getf` の特化版でハッシュテーブル変換を回避。(2) 長い plist はシンボルのプロパティハッシュテーブルに移行するしきい値を設定。(3) `symbol-plist` アクセスの read barrier: マルチスレッド環境でのアトミックアクセス保証。(4) `defvar`/`defun` が設定するシステムプロパティ（`:function`, `:type` 等）の専用スロット化
+- **現状**: ✅ 完了 — `packages/vm/src/vm-extensions.lisp` が短い plist の線形探索 (`+vm-symbol-plist-linear-limit+`) と、しきい値超過時の per-symbol hash store への昇格 (`vm-symbol-property-hash-store`) を実装。`vm-symbol-plist-read-barrier` + `vm-symbol-plist-lock` により plist 読み書きを同期し、`vm-system-symbol-plists` 経由で system property (`:function` / `:type` 等) を user plist から分離する。回帰テスト: `packages/vm/tests/vm-extensions-tests.lisp`, `packages/runtime/tests/runtime-advanced-tests.lisp`, `packages/expand/tests/expander-setf-places-tests.lisp`
 - **根拠**: SBCL symbol cell layout / CCL symbol representation
 - **難易度**: Medium
 
-#### FR-380: `apply` の既知引数数最適化
+#### FR-380: `apply` の既知引数数最適化 ✅
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/vm-execute.lisp`
-- **内容**: `(apply f a b list)` で spread リストの長さがコンパイル時確定の場合（空リスト `nil`、定長リスト等）、`vm-apply` を `vm-call` に変換してスプレッド処理をゼロに。`(apply #'+ 1 2 nil)` → `(+ 1 2)` に静的変換。リスト長不明でも最初の N 引数が確定している場合の部分最適化
+- **対象**: `packages/compile/src/codegen-values.lisp`, `packages/compile/src/codegen-values-helpers.lisp`
+- **内容**: `(apply f a b spread)` の末尾 spread 引数がコンパイル時既知の quoted proper list（`nil` を含む固定長リスト）の場合、`vm-apply` ではなく `vm-call` へ lowering してスプレッド処理をゼロにする。`(apply #'+ 1 2 nil)` は `(+ 1 2)` と同等の直接呼び出しへ静的変換される。長さ不明の spread 引数や部分既知の引数列に対するより一般の最適化は本 FR の完了範囲外で、将来拡張として扱う。
 - **根拠**: SBCL `apply` optimization / CMUCL apply transformation
 - **難易度**: Medium
 
-- **関連実装**: `packages/compile/src/codegen-control.lisp` の `ast-apply` は、末尾 spread 引数が `ast-quote` の `nil` / 定長リストである場合に `vm-apply` ではなく `vm-call` を直接生成する。長さ不明の spread 引数や部分既知の引数列に対するより一般的な最適化は未実装。
+- **関連実装**: `packages/compile/src/codegen-values.lisp` の `compile-ast(ast-apply)` は、`%apply-argument-plan` で leading/spread を分解し、`packages/compile/src/codegen-values-helpers.lisp` の `%literal-apply-spread-values` が quoted finite proper list と判定できた場合だけ `vm-apply` ではなく `vm-call` を直接生成する。`packages/compile/tests/codegen-functions-callsite-tests.lisp` が quoted `nil` / fixed list の direct-call lowering と improper list fallback を検証し、`packages/compile/tests/compiler-tests-selfhost.lisp` が quoted `nil` の実行結果・評価順・improper list error 維持を実行時に検証する。
 
 ---
 
@@ -1239,14 +1359,15 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 75 — スタックフレーム & ABI（未実装）
 
-#### FR-388: Frame Pointer Elimination (FPE)
+#### FR-388: Frame Pointer Elimination (FPE) ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
+- **対象**: `packages/codegen/src/x86-64-regs.lisp`, `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`, `packages/codegen/src/aarch64-program.lisp`, `packages/cli/src/args.lisp`, `packages/cli/src/handlers.lisp`
 - **内容**: `RBP`/`FP` レジスタをフレームポインタとして使わず汎用レジスタとして解放。スタックフレームを `RSP` 相対アドレスのみで参照。プロローグ/エピローグの `push rbp` / `mov rbp, rsp` / `pop rbp` を除去。`--debug` オプション指定時は FPE を無効化して `lldb`/`gdb` の stack unwind を保証
 - **根拠**: GCC `-fomit-frame-pointer` / LLVM default behavior。x86-64 では FPE で 1 レジスタ追加確保
+- **検証**: `packages/emit/tests/x86-64-codegen-tests.lisp` の `x86-64-fpe-codegen-target-frees-rbp` / `x86-64-empty-program-minimal-return-byte` / `x86-64-leaf-and-nonleaf-without-spills-share-fpe-layout`、`packages/emit/tests/x86-64-encoding-size-tests.lisp` の `x86-vm-program-default-fpe-allocates-rsp-spill-frame` / `x86-vm-program-debug-opt-out-keeps-rbp-spills`、`packages/emit/tests/x86-64-encoding-tests.lisp` の `x86-mov-memory-displacement-widths`、`packages/emit/tests/aarch64-codegen-tests.lisp` の `aarch64-fpe-codegen-target-frees-x29` / `aarch64-leaf-and-nonleaf-without-spills-share-fpe-layout` / `aarch64-default-fpe-uses-sp-relative-spill-frame` / `aarch64-debug-opt-out-keeps-fp-lr-pair-and-fp-spills`、`packages/cli/tests/args-tests.lisp` の `ARGS-TESTS/CLI-ARGS-BOOL-FLAGS [debug]`、`packages/cli/tests/cli-tests.lisp` の `cli-do-compile-debug-binds-backend-frame-pointer-switches`、`packages/optimize/tests/optimizer-roadmap-backend-tests.lisp` の `optimize-backend-roadmap-promoted-existing-frs-have-specific-evidence` / `optimize-backend-roadmap-audited-frs-have-specific-evidence`
 - **難易度**: Medium
 
-#### FR-389: Red Zone 活用 (x86-64)
+#### FR-389: Red Zone 活用 (x86-64) ✅
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **内容**: System V AMD64 ABI の Red Zone (`RSP-128` 以下の 128 バイト) を、リーフ関数のローカル変数格納に活用。プロローグで `SUB RSP, N` を発行せずに `RSP-8`/`RSP-16` 等で直接アドレス指定。シグナルハンドラを使用しない関数に限定（シグナルが Red Zone を破壊するため）
@@ -1260,10 +1381,10 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM `ShrinkWrap` pass / GCC `-fshrink-wrap`。コールドパスのプロローグコストを削減
 - **難易度**: Hard
 
-#### FR-391: Stack Probing
+#### FR-391: Stack Probing ✅
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
-- **内容**: スタックフレームが 1 ページ (4096 バイト) を超える関数でスタックオーバーフローを検出するためのプローブ命令列を挿入。x86-64: `OR [RSP-4096], 0` を `PAGE_SIZE` 単位で繰り返し。CL 深い再帰でのサイレントメモリ破壊を防止
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-program.lisp`
+- **内容**: スタックフレームが 1 ページ (4096 バイト) を超える関数でスタックオーバーフローを検出するための非破壊プローブ命令列を挿入。x86-64: `OR [RSP-4096], 0` を `PAGE_SIZE` 単位で繰り返し、AArch64: `SUB scratch, SP, #PAGE_SIZE` + `LDUR XZR, [scratch]` で guard page を触る。CL 深い再帰でのサイレントメモリ破壊を防止
 - **根拠**: LLVM `StackProber` / GCC `-mstack-probe`。Windows では必須 (Guard Page)
 - **難易度**: Easy
 
@@ -1324,7 +1445,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: OCaml exhaustiveness check / Rust match exhaustiveness。コンパイル時の論理エラー検出
 - **難易度**: Medium
 
-#### FR-401: `typecase`/`ecase` の特化展開
+#### FR-401: `typecase`/`ecase` の特化展開 ✅
 
 - **対象**: `packages/expand/src/macros-basic.lisp`
 - **内容**: `typecase` のアームが CL の基本型タグ（fixnum, cons, string, symbol, vector 等）に対応する場合、タグ値による分岐に特化。`(typecase x (fixnum ...) (cons ...) (string ...) (t ...))` → タグビット抽出 + ジャンプテーブル。FR-128 の typecase への適用と FR-236 の統合
@@ -1333,28 +1454,37 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ---
 
-### Phase 78 — Out-of-SSA & モダン IR 設計（未実装）
+### Phase 78 — Out-of-SSA & モダン IR 設計（一部実装: FR-403/404/405）
 
-#### FR-403: Out-of-SSA — Parallel Copy 挿入
+#### FR-403: Out-of-SSA — Parallel Copy 挿入 ✅
 
-- **対象**: `packages/emit/src/ssa.lisp`, `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/optimize/src/ssa-construction.lisp`, `packages/optimize/src/ssa-phi-elim.lisp`, `packages/optimize/src/cfg-analysis.lisp`
+- **現状**: ✅ 完了 — `ssa-destroy` が phi 引数ごとに predecessor→successor edge copy をスケジュールし、straight edge では predecessor 終端直前、conditional target edge では landing-pad block に parallel copy を挿入する
 - **内容**: SSA 形式の Phi ノードを除去する際に「並列コピー」を挿入して Lost-Copy Problem を回避。アルゴリズム: (1) 各 Phi ノードの predecessor ブロック末尾に parallel copy を配置、(2) 並列コピーをシーケンシャルコピーに変換（サイクル検出 + temp 使用）。Boissinot et al. (2009) の効率的実装を採用
 - **根拠**: Boissinot et al. "Revisiting Out-of-SSA Translation for Correctness, Code Quality and Efficiency" (CGO 2009)
 - **難易度**: Hard
 
-#### FR-404: Lost-Copy Problem & Swap Problem 解決
+- **関連実装**: `packages/optimize/src/ssa-construction.lisp` の `ssa-destroy` が `copies-to-insert` / edge-specific copy table / target landing-pad を使って Phi copy を挿入し、`cfg-split-critical-edges` と連携できる形で CFG edge semantics を保持する。`packages/optimize/tests/ssa-tests.lisp` の `ssa-destroy-places-phi-copies-before-terminator`、`ssa-destroy-keeps-conditional-edge-phi-copy-on-target-edge`、`ssa-round-trip-cases` が配置と round-trip を検証する。
 
-- **対象**: `packages/emit/src/ssa.lisp`
+#### FR-404: Lost-Copy Problem & Swap Problem 解決 ✅
+
+- **対象**: `packages/optimize/src/ssa-construction.lisp`
+- **現状**: ✅ 完了 — `ssa-sequentialize-copies` が copy graph の ready queue と cycle break temp を使い、同時 copy の依存順序と swap cycle を VM `move` 列へ変換する
 - **内容**: Out-of-SSA 変換の 2 大問題の解決: (1) **Lost-Copy**: `a=b; b=c; (phi a,b)` でコピー先が上書きされる問題 → 正しい依存順序でシーケンシャル化。(2) **Swap Problem**: `a=b; b=a` の循環コピー → 一時レジスタまたは `XCHG` 命令で解決
 - **根拠**: Sreedhar et al. (1999) / Briggs et al. (1998)。SSA 変換の正確性に必須
 - **難易度**: Hard
 
-#### FR-405: Critical Edge Splitting
+- **関連実装**: `packages/optimize/src/ssa-construction.lisp` の `ssa-sequentialize-copies` が destination が source として使われない copy を先に emit し、ready copy が尽きた cycle では `SSATMP` 一時レジスタを挿入して循環を破る。`packages/optimize/tests/ssa-tests.lisp` の `ssa-seq-copies-behavior` が empty / independent copies / swap cycle の挙動を検証する。
 
-- **対象**: `packages/optimize/src/cfg.lisp`
+#### FR-405: Critical Edge Splitting ✅
+
+- **対象**: `packages/optimize/src/cfg-analysis.lisp`, `packages/optimize/src/cfg.lisp`
+- **現状**: ✅ 完了 — `cfg-split-critical-edges` が複数 successor を持つ predecessor から複数 predecessor を持つ successor へ向かう critical edge を検出し、landing-pad block を挿入して CFG edge を張り替える
 - **内容**: CFG の「クリティカルエッジ」（複数の後継を持つブロックから複数の先行を持つブロックへのエッジ）を分割して中間ブロックを挿入。Phi ノードのコピー挿入・LICM・コードモーションで必要。`cfg-split-critical-edges` パス
 - **根拠**: CFG の標準前処理。LLVM `BreakCriticalEdges` pass
 - **難易度**: Easy
+
+- **関連実装**: `packages/optimize/src/cfg-analysis.lisp` の `cfg-split-critical-edges` は、`vm-jump` / `vm-jump-zero` 終端を必要に応じて landing-pad label へ更新し、`bb-successors` / `bb-predecessors` を再配線する。`packages/optimize/tests/cfg-tests.lisp` の `cfg-critical-edge-splitting-inserts-landing-pad` が block 数増加、元 edge の除去、pad block の jump target を検証し、`packages/optimize/tests/optimizer-roadmap-tests.lisp` が roadmap pipeline への登録を検証する。
 
 #### FR-406: Sea of Nodes IR
 
@@ -1547,7 +1677,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-436: FMA 利用方針と精度保証
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**: `a*b+c` パターンを `VFMADD` (x86-64) / `FMADD` (AArch64) に変換する際の精度変化の扱いを明文化。FMA は中間丸めを省略するため `(a*b)+c` と FMA は一般に異なる結果を生成（より正確）。デフォルト動作・`(declare (optimize (float-accuracy ...)))` での制御方針・IEEE 754 準拠モードでの FMA 無効化
 - **根拠**: IEEE 754-2008 §5.4.1 / GCC `-mfma` / Clang `-ffp-contract`
 - **難易度**: Medium
@@ -1595,72 +1725,99 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 85 — 動的言語ランタイム技術（未実装）
 
-#### FR-444: Hidden Class / Shape 最適化
+#### FR-444: Hidden Class / Shape 最適化 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `packages/compile/src/codegen.lisp`
+- **現状**: 🔶 一部完了 — optimizer helper 層に `make-opt-shape-descriptor-for-slots` / `opt-shape-slot-offset` を実装し、slot layout の安定オフセット（slot→index）を提供。VM/CLOS 実体へ shape-id を埋め込み、`slot-value` の guard + cached offset へ繋ぐ統合は未実装
 - **内容**: CLOS インスタンスに「Shape」（スロット名→インデックスのマッピング）を付与。同一クラス・同一スロット定義のインスタンスは同一 Shape を共有。`slot-value` アクセス時に Shape チェック（MIC、FR-009）でインデックスをキャッシュ。Shape 遷移: `change-class` / `add-slot` 時に新 Shape を派生
 - **根拠**: V8 Hidden Class / SpiderMonkey Shapes。動的言語でのプロパティアクセス最適化の基盤
 - **難易度**: Hard
 
-#### FR-445: Lazy Shape Transition ツリー
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-shape-descriptor-slots-map-to-stable-offsets` が、shape descriptor のオフセット一貫性を検証する。
+
+#### FR-445: Lazy Shape Transition ツリー 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`
+- **現状**: 🔶 一部完了 — `opt-shape-transition-cache` / `opt-shape-transition-put` / `opt-shape-transition-get` を実装し、(parent-shape, slot)→child-shape の forward transition cache と上限付き eviction を提供。CLOS 実インスタンス更新経路（`change-class` / slot追加）への接続は未実装
 - **内容**: Shape は変更のたびに新しい Shape に「遷移」し、遷移ツリーを形成。同じスロット追加順序を持つインスタンスは同一 Shape パスを共有。バックトラック不要の前方遷移のみ。Shape ツリーのキャッシュサイズ上限と eviction 戦略を定義
 - **根拠**: V8 Map Transitions / ChakraCore Property Map
 - **難易度**: Hard
 
-#### FR-446: IC Patching — コード直接書き換え
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-shape-transition-cache-stores-forward-transitions` が、forward transition キャッシュの保持/検索を検証する。
+
+#### FR-446: IC Patching — コード直接書き換え 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `packages/compile/src/codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-ic-make-patch-plan` / `opt-ic-patch-plan` を実装し、`uninitialized→monomorphic`・`monomorphic→polymorphic`・`*→megamorphic` の昇格に対して patch kind を判定する backend-agnostic 計画層を追加。実際の machine code 書き換え（mprotect/atomic patch/icache flush）は未実装
 - **内容**: JIT 生成コードの IC ガード命令を実行時に直接書き換えてキャッシュを更新。モノモーフィック → ポリモーフィックへの昇格時に `JMP` 先を変更。実行中のコードへの安全なパッチ方法: (1) 命令の原子的書き換え（1〜8 バイト境界）、(2) コードページの一時的 `mprotect` + 書き換え + `mprotect`、(3) instruction cache flush（AArch64 では `IC IVAU` + `DSB`）
 - **根拠**: V8 code patching / LLVM JIT self-modifying code
 - **難易度**: Very Hard
 
-#### FR-447: Inline Polymorphism — V8 方式ディスパッチ
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-ic-make-patch-plan-classifies-state-transitions` が patch plan の遷移分類を検証する。
+
+#### FR-447: Inline Polymorphism — V8 方式ディスパッチ 🔶
 
 - **対象**: `packages/vm/src/vm-clos.lisp`
+- **現状**: 🔶 一部完了 — `opt-build-inline-polymorphic-dispatch` を実装し、観測済み `(shape . target)` エントリから PIC 形式の guard chain（shape check + direct target）を構成する helper を提供。VM 実行系の `slot-value` / generic-call fast path への実挿入は未実装
 - **内容**: 同一コールサイトで 2〜4 型が観測される場合（Polymorphic IC の適用範囲）、型チェック + 直接呼び出しを連鎖させて `call_indirect` を除去。`(foo obj)` で `obj` が `ClassA`/`ClassB` の 2 型なら `(if (classA? obj) methodA methodB)` をインライン展開
 - **根拠**: V8 Polymorphic Inline Cache / Hölzle et al. (1991)
 - **難易度**: Medium
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-inline-polymorphic-dispatch-builds-guard-chain` が guard chain 生成を検証する。
 
 ---
 
 ### Phase 86 — 並行プログラミングモデルのコンパイル（未実装）
 
-#### FR-449: async/await → 状態機械変換
+#### FR-449: async/await → 状態機械変換 🔶
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen.lisp`
+- **現状**: 🔶 一部完了 — `opt-build-async-state-machine` / `opt-async-state-machine` を追加し、await point 列から線形 state/transition skeleton を構築する helper を実装。compile/cps 本体への lowering 統合（実際のコード生成）は未実装
 - **内容**: `async`/`await` スタイルの非同期コードを状態機械（State Machine）に変換。CPS 変換 (FR-004〜FR-006) の特殊ケース。各 `await` ポイントが状態遷移エッジ。状態は enum + union（Rust Future 相当）または closure（JS Promise 相当）で表現。ヒープ割り当てゼロの stackless coroutine として実装可能
 - **根拠**: Rust `async/await` desugaring / C# `async/await` state machine。CL の Green thread 実装の基盤
 - **難易度**: Hard
 
-#### FR-450: Coroutine Lowering — Stackful vs Stackless
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-async-state-machine-builds-linear-transitions` が await→state transition 生成を検証する。
+
+#### FR-450: Coroutine Lowering — Stackful vs Stackless 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/`
+- **現状**: 🔶 一部完了 — `opt-choose-coroutine-lowering-strategy` を実装し、call/cc 互換や deep yield 要件に基づく stackful / stackless 選択ロジックを helper として提供。実行基盤（runtime stack 管理・state machine emitted code）への接続は未実装
 - **内容**: CL の continuation / coroutine の実装選択: (1) **Stackful（独立スタック）**: 各コルーチンが独立したスタック領域を持つ。任意の深さで `yield` 可能だがメモリオーバーヘッドあり。(2) **Stackless（状態機械）**: `yield` は最上位フレームのみ。スタックなしでヒープに状態保存。`call/cc` のセマンティクスとの整合性を維持
 - **根拠**: Stackful: Lua coroutines / Go goroutines。Stackless: Python generators / Rust async
 - **難易度**: Hard
 
-#### FR-451: Channel / CSP 操作の最適化
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-choose-coroutine-lowering-strategy-prefers-stackful-when-needed` が戦略選択の分岐を検証する。
+
+#### FR-451: Channel / CSP 操作の最適化 🔶
 
 - **対象**: 将来の concurrency ライブラリ
+- **現状**: 🔶 一部完了 — `opt-channel-site` / `opt-channel-select-path` / `opt-channel-should-jump-table-select-p` を実装し、buffered fast path・unbuffered rendezvous・高競合 fallback の経路選択と、`select` arity に基づく jump-table 化判定 helper を提供。実ランタイムの channel 実装や lock-free send/recv 経路への接続は未実装
 - **内容**: Go の `chan` / Erlang の message passing に相当する channel 操作のコンパイル最適化: (1) **Fast path**: バッファあり channel でキューが空でなければロックフリー atomic で送受信、(2) **Synchronous path**: バッファなし channel でのランデブー同期、(3) **select** 文のジャンプテーブル化。`lparallel` / `chanl` の低レベル実装改善
 - **根拠**: Go runtime channel implementation / Erlang BEAM scheduler
 - **難易度**: Very Hard
 
-#### FR-452: STM（Software Transactional Memory）コンパイル
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-channel-select-path-classifies-buffered-sync-and-contended-cases` と `optimize-channel-jump-table-select-threshold` が、経路選択と select 閾値判定の回帰を検証する。
+
+#### FR-452: STM（Software Transactional Memory）コンパイル 🔶
 
 - **対象**: 将来の STM ライブラリ
+- **現状**: 🔶 一部完了 — `opt-stm-plan` / `opt-stm-build-plan` / `opt-stm-needs-log-p` を実装し、read/write set と pure 判定から transaction log 必要性を決定する helper を追加。実際の `(atomically ...)` 展開と runtime STM ログ実装への接続は未実装
 - **内容**: `(atomically ...)` ブロック内のメモリ操作をトランザクションログに記録するコード生成。ログのインライン化（関数呼び出しなし）・ホットセル（高頻度アクセス変数）の TLS キャッシュ。コンパイル時に純粋なブロック（FR-152 で pure と判定）のトランザクション化を省略
 - **根拠**: GHC STM / Clojure refs + dosync。cl-stm ライブラリの基盤
 - **難易度**: Very Hard
 
-#### FR-453: Lock-Free データ構造のコンパイル支援
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-stm-plan-skips-log-for-pure-block` / `optimize-stm-plan-enables-log-for-impure-read-write` が、pure ブロック省略と impure ログ有効化を検証する。
+
+#### FR-453: Lock-Free データ構造のコンパイル支援 🔶
 
 - **対象**: `packages/vm/src/hash.lisp`, `packages/runtime/src/heap.lisp`
+- **現状**: 🔶 一部完了 — `opt-lockfree-plan` / `opt-lockfree-select-reclamation` / `opt-lockfree-build-plan` を実装し、ABA リスクと競合度から reclamation 戦略（`:none` / `:hazard-pointer` / `:epoch`）を選択する helper を提供。CAS 命令列自動生成や hazard pointer runtime 統合は未実装
 - **内容**: ハッシュテーブル・キュー・スタックの lock-free 実装を CAS (Compare-And-Swap) ベースで生成。ABA 問題の自動検出と hazard pointer / epoch-based reclamation の統合。`(defstruct-lock-free foo ...)` マクロが lock-free 版の accessor を自動生成
 - **根拠**: Michael & Scott (1996) lock-free queue / Harris (2001) lock-free list
 - **難易度**: Very Hard
+
+- **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-lockfree-select-reclamation-chooses-policy-from-risk-and-contention` が戦略選択分岐を検証する。
 
 ---
 
@@ -1712,19 +1869,23 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Language Server Protocol v3.17 (Microsoft 2016)。VS Code / Emacs LSP / Neovim が標準でサポート
 - **難易度**: Hard
 
-#### FR-462: Flame Graph 生成
+#### FR-462: Flame Graph 生成 ✅
 
 - **対象**: `src/tools/profiler.lisp`
 - **内容**: サンプリングプロファイラ（`SIGPROF` + スタックウォーク / Linux `perf` / macOS `dtrace`）のデータを Brendan Gregg の Flame Graph 形式（SVG）に変換。(1) スタックフレームの CL シンボル名への変換（DWARF FR-330 情報を使用）、(2) hot path の視覚化、(3) `./cl-cc profile --flamegraph output.svg ./cl-cc selfhost`
 - **根拠**: Brendan Gregg "Flame Graphs" (2011) / py-spy / async-profiler
 - **難易度**: Medium
 
-#### FR-463: Compiler Explorer 互換出力
+#### FR-463: Compiler Explorer 互換出力 ✅
 
-- **対象**: `packages/cli/src/main.lisp`
-- **内容**: `./cl-cc compile --dump-ir PHASE FILE` で各コンパイルフェーズの IR をテキストで出力。フェーズ: `ast`, `cps`, `ssa`, `vm`, `opt`, `asm`。Compiler Explorer（godbolt.org）互換の色付きアセンブリ出力。`./cl-cc compile --annotate-source FILE` でソース行と生成命令の対応を表示
+- **対象**: `packages/cli/src/main-dump.lisp`, `packages/cli/src/main-utils.lisp`, `packages/cli/src/args.lisp`, `packages/cli/src/handlers.lisp`, `packages/pipeline/src/pipeline.lisp`
+- **内容**: `./cl-cc compile --dump-ir PHASE FILE` で各コンパイルフェーズの IR をテキストで出力。フェーズ: `ast`, `cps`, `ssa`, `vm`, `opt`, `asm`。Compiler Explorer（godbolt.org）互換の色付きアセンブリ出力。`./cl-cc compile --dump-ir PHASE --annotate-source FILE` または `--trace-emit --annotate-source` でダンプ出力にソース位置コメントを付与
 - **根拠**: Compiler Explorer / LLVM `-print-after-all`。コンパイラの透明性と教育的価値
 - **難易度**: Easy
+- **検証根拠**:
+  - 実装: `packages/cli/src/main-dump.lisp` — `%dump-ir-phase` が 6 フェーズ (`:ast`, `:cps`, `:ssa`, `:vm`, `:opt`, `:asm`) を `*ir-phase-dump-fns*` テーブルから検索し、各 `%dump-{phase}-phase` 関数へディスパッチ。ANSI 色付き ASM 出力、`--annotate-source` によるソース位置コメントに対応。`packages/cli/src/handlers.lisp` と `packages/pipeline/src/pipeline.lisp` は real CLI file path でも通常の sexp → macro expansion → lowering 経路を維持しつつ、最終 top-level AST に source metadata を補完する。
+  - API シンボル: `%dump-ir-phase`, `%dump-ast-phase`, `%dump-cps-phase`, `%dump-ssa-phase`, `%dump-vm-phase`, `%dump-opt-phase`, `%dump-asm-phase`, `*ir-phase-dump-fns*`, `*ir-phases*`
+  - テスト: `packages/cli/tests/main-dump-tests.lisp` — `cli-dump-ir-phase-dispatches-all-phases`, `cli-dump-ir-phase-annotate-source-writes-comment-for-ast`, `cli-dump-ir-phase-annotate-source-writes-comment-for-vm-and-opt`, `cli-dump-ir-phase-asm-output-is-ansi-colored`, `cli-dump-ir-phase-annotate-source-omits-comment-on-missing-location`, `cli-dump-ir-phase-phase-table-covers-all-recognized-phases`, `cli-dump-ir-phase-invalid-signals-error`。`packages/cli/tests/cli-tests.lisp` — `cli-real-file-dump-ir-annotation-preserves-source-location`, `cli-do-compile-dump-ir-annotate-source-preserves-real-file-location`, `cli-do-compile-dump-ir-annotate-source-macro-forms-preserve-real-file-location`
 
 #### FR-464: Reproducible Builds（再現可能ビルド）
 
@@ -1733,12 +1894,15 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Reproducible Builds project (debian.org/reproducible-builds)。セキュリティ監査・コンテナイメージの検証に必要
 - **難易度**: Medium
 
-#### FR-465: Build Cache（ccache 相当）
+#### FR-465: Build Cache（ccache 相当） 🔶
 
 - **対象**: `packages/pipeline/pipeline.lisp`
+- **現状**: 🔶 一部完了 — `packages/pipeline/src/pipeline-native.lisp` に native artifact cache を実装し、`%compile-cache-key` / `%compile-cache-path` で入力 source・arch・language・artifact に影響する native compile options から cache path を導出する。`compile-file-to-native` は cache hit 時に cached artifact を output へコピーし、native compilation / codegen work をスキップする。FASL cache、依存ファイルハッシュ、remote/content-addressable cache は未実装
 - **内容**: コンパイル入力（ソースファイルのハッシュ + コンパイルオプション + 依存ファイルハッシュ）をキーとして、コンパイル結果（FASL / native object）をコンテンツアドレサブルキャッシュに格納。ヒット時はコンパイルをスキップ。`~/.cache/cl-cc/` 以下に格納。`nix develop` 環境での rebuild 削減
 - **根拠**: ccache / Bazel remote cache。selfhost のビルド時間削減に直結
 - **難易度**: Medium
+
+- **関連実装**: `packages/pipeline/src/pipeline-native.lisp` の cache hit 経路は cached artifact をコピーし、miss 経路のみ `%compile-native-file-source` / codegen / Mach-O write を実行する。`%compile-cache-key` は source・arch・language に加え、`pass-pipeline` / `speed` / `inline-threshold-scale` など artifact bytes に影響する native options を key に含める。`packages/compile/tests/pipeline-native-tests.lisp` の `pipeline-native-cache-key-differs-by-dimension` / `pipeline-native-cache-key-ignores-observability-options` と、`packages/compile/tests/pipeline-native-io-tests.lisp` の `pipeline-native-compile-file-cache-hit-copies-artifact` / `pipeline-native-compile-file-cache-hit-skips-native-compilation` / `pipeline-native-compile-file-cache-key-receives-option-plist` が artifact reuse・compile skip・option-sensitive key を検証する。
 
 ---
 

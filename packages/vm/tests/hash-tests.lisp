@@ -153,3 +153,39 @@
     (vm-exec (cl-cc:make-vm-make-hash-table :dst :R0 :test nil) state)
     (vm-exec (cl-cc:make-vm-hash-table-test :dst :R1 :table :R0) state)
     (assert-equal 'eql (cl-cc/vm::vm-reg-get state :R1))))
+
+(deftest hash-lock-elision-wrapper-falls-back-after-abort
+  "vm-hash-with-lock-fallback increments abort count and retries under fallback path."
+  (let* ((table (make-hash-table :test 'eql))
+         (obj (make-instance 'cl-cc/vm::vm-hash-table-object
+                             :table table
+                             :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-test-lock")
+                                   #-sb-thread nil))
+         (attempts 0)
+         (cl-cc/vm::*vm-hash-enable-lock-elision-p* t)
+         (cl-cc/vm::*vm-hash-htm-supported-p* t)
+         (cl-cc/vm::*vm-hash-low-contention-p* t))
+    (cl-cc/vm::vm-hash-with-lock-fallback
+     obj
+     (lambda ()
+       (incf attempts)
+       (when (= attempts 1)
+         (error "simulated-htm-abort"))
+       (setf (gethash 'k table) 99)))
+    (assert-= 2 attempts)
+    (assert-= 1 (cl-cc/vm::vm-hash-table-htm-abort-count obj))
+    (assert-equal 99 (gethash 'k table))))
+
+(deftest hash-lock-elision-disabled-after-abort-threshold
+  "HTM lock elision is disabled once abort count reaches threshold for a table."
+  (let* ((table (make-hash-table :test 'eql))
+         (obj (make-instance 'cl-cc/vm::vm-hash-table-object
+                             :table table
+                             :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-test-lock")
+                                   #-sb-thread nil))
+         (cl-cc/vm::*vm-hash-enable-lock-elision-p* t)
+         (cl-cc/vm::*vm-hash-htm-supported-p* t)
+         (cl-cc/vm::*vm-hash-low-contention-p* t)
+         (cl-cc/vm::*vm-hash-htm-abort-threshold* 2))
+    (setf (cl-cc/vm::vm-hash-table-htm-abort-count obj) 2)
+    (assert-false (cl-cc/vm::vm-hash-htm-eligible-p obj))))

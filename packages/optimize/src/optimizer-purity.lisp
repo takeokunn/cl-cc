@@ -8,6 +8,10 @@
 
 (in-package :cl-cc/optimize)
 
+(defparameter *opt-pure-call-memo-max-size* 1024
+  "Max entry count used by pure-call optimization memo table.
+NIL disables size-based eviction for this optimization pass.")
+
 (defun opt-build-call-graph (instructions func-defs name-to-label)
   "Return label → direct callees graph for the linear function bodies in FUNC-DEFS."
   (let ((graph (make-hash-table :test #'equal)))
@@ -153,7 +157,8 @@ bodies. Recursive SCCs remain conservative and are not marked pure."
   (when (and key
              dst
              (not (member dst (cdr key) :test #'eq)))
-    (setf (gethash key call-cse) dst)))
+    (setf (gethash key call-cse) dst)
+    t))
 
 (defun %opt-resolved-pure-direct-call-label (inst reg-track pure-labels)
   "Return INST's direct callee label when it is known and transitively pure."
@@ -167,11 +172,12 @@ bodies. Recursive SCCs remain conservative and are not marked pure."
   "Rewrite repeated pure direct calls inside straight-line regions.
 
 The pass only reuses known direct `vm-call` sites whose callee label is marked
-pure in PURE-LABELS.  CSE state is flushed at labels and control-flow
+pure in PURE-LABELS. CSE state is flushed at labels and control-flow
 boundaries, and memo entries are killed whenever one of their argument/result
 registers is overwritten."
   (let ((reg-track (make-hash-table :test #'eq))
-        (call-cse (make-hash-table :test #'equal))
+        (call-cse (opt-make-pure-function-memo-table
+                   :max-size *opt-pure-call-memo-max-size*))
         (result nil))
     (labels ((flush-state ()
                (clrhash reg-track)
@@ -184,8 +190,12 @@ registers is overwritten."
           ((typep inst 'vm-call)
            (let* ((dst (opt-inst-dst inst))
                   (label (%opt-resolved-pure-direct-call-label inst reg-track pure-labels))
-                  (key (and label dst (%opt-pure-call-key label (vm-args inst))))
-                  (existing (and key (gethash key call-cse))))
+                  (args (vm-args inst))
+                  (key (and label dst (%opt-pure-call-key label args)))
+                  (existing (and key
+                                 (multiple-value-bind (cached found-p)
+                                     (opt-pure-function-memo-get call-cse pure-labels label args)
+                                   (and found-p cached)))))
              (cond
                ((and existing (eq existing dst))
                 ;; The same register still holds the same pure result.
@@ -198,7 +208,9 @@ registers is overwritten."
                 (%opt-pure-call-kill-reg call-cse dst)
                 (push inst result)
                 (remhash dst reg-track)
-                (%opt-pure-call-record-if-safe call-cse key dst)))))
+                (let ((recorded-p (%opt-pure-call-record-if-safe call-cse key dst)))
+                  (when (and recorded-p key dst)
+                    (opt-pure-function-memo-put call-cse pure-labels label args dst)))))))
           (t
            (let ((dst (opt-inst-dst inst)))
              (%opt-pure-call-kill-reg call-cse dst)

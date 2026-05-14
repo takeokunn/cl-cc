@@ -22,11 +22,25 @@
    vm-integer-add
    vm-integer-sub
    vm-integer-mul
-   vm-float-add
-   vm-float-sub
-   vm-float-mul
-   vm-float-div
-   vm-sub
+   vm-integer-mul-high-u
+    vm-integer-mul-high-s
+    vm-add-checked
+    vm-sub-checked
+    vm-mul-checked
+    vm-float-add
+    vm-float-sub
+    vm-float-mul
+    vm-float-div
+     vm-sqrt
+     vm-sin-inst
+     vm-cos-inst
+     vm-exp-inst
+     vm-log-inst
+     vm-tan-inst
+     vm-asin-inst
+     vm-acos-inst
+     vm-atan-inst
+     vm-sub
    vm-mul
    vm-label
    vm-jump
@@ -95,6 +109,7 @@
    vm-concatenate
    vm-select
    vm-cons-p
+   vm-hash-cons-p
    vm-symbol-p
    vm-number-p
    vm-integer-p
@@ -107,10 +122,12 @@
    *vm-host-bridge-functions*
    vm-generic-function-p
    vm-resolve-gf-method
-   vm-set-global
-   vm-get-global
-   vm-global-name
-   vm-global-vars
+    vm-set-global
+    vm-get-global
+    vm-set-global-p
+    vm-get-global-p
+    vm-global-name
+    vm-global-vars
    vm-values-list
     vm-establish-handler
     vm-remove-handler

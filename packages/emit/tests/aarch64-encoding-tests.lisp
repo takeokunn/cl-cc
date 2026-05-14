@@ -2,7 +2,8 @@
 ;;;;
 ;;;; Tests for src/emit/aarch64-codegen.lisp encoding functions:
 ;;;; encode-movz, encode-movk, encode-mov-rr, encode-add, encode-sub,
-;;;; encode-mul, encode-cbz, encode-b, encode-blr, encode-stur, encode-ldur,
+;;;; encode-mul, encode-umulh, encode-smulh, encode-cbz, encode-b,
+;;;; encode-blr, encode-stur, encode-ldur,
 ;;;; encode-stp-pre, encode-ldp-post, +a64-ret+, emit-a64-instr.
 
 (in-package :cl-cc/test)
@@ -94,6 +95,15 @@
     (assert-equal 1 (logand (ash word -5) #x1F))
     (assert-equal 2 (logand (ash word -16) #x1F))
     (assert-equal 31 (logand (ash word -10) #x1F))))
+
+(deftest a64-mul-high-encoders
+  "UMULH/SMULH preserve the Rd/Rn/Rm field layout while selecting the correct opcode family."
+  (assert-equal #x9BC27C20 (cl-cc/codegen::encode-umulh 0 1 2))
+  (assert-equal #x9B427C20 (cl-cc/codegen::encode-smulh 0 1 2)))
+
+(deftest a64-fsqrt-encoder
+  "FSQRT Dd,Dn preserves Rd/Rn fields while selecting the scalar double opcode."
+  (assert-equal #x1E61C020 (cl-cc/codegen::encode-fsqrt 0 1)))
 
 ;;; ─── encode-cbz ──────────────────────────────────────────────────────────
 

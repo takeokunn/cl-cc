@@ -47,7 +47,7 @@
 (defun %ast-var-function-value-p (name ctx)
   "Return T when NAME in function position should be treated as a variable value.
 Global functions/generics stay symbolic; only local lexical bindings count as
-first-class function values here." 
+first-class function values here."
   (let ((entry (%codegen-call-assoc name (ctx-env ctx)))
         (is-global-function (gethash name (ctx-global-functions ctx)))
         (is-global-generic (gethash name (ctx-global-generics ctx))))
@@ -129,6 +129,19 @@ first-class function values here."
                                 :src (if (eq func-sym 'car) (cadr entry) (cddr entry))))
         result-reg))))
 
+(defun %noescape-array-entry-size (entry)
+  (cadr entry))
+
+(defun %noescape-array-entry-element-regs (entry)
+  "Return element register list from legacy or typed noescape-array ENTRY payload."
+  (let ((payload (cddr entry)))
+    (if (and payload
+             (member (car payload)
+                     '(fixnum single-float double-float character bit nil)
+                     :test #'eq))
+        (cdr payload)
+        payload)))
+
 (defun %try-compile-noescape-array (func-sym args result-reg ctx)
   "Optimise ARRAY-LENGTH / AREF / ASET on noescape arrays to moves/consts."
   (when func-sym
@@ -137,38 +150,38 @@ first-class function values here."
         ((and (string= sname "ARRAY-LENGTH")
               (= (length args) 1)
               (typep (first args) 'ast-var))
-         (let* ((arg-name (ast-var-name (first args)))
-                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
-           (when entry
-             (emit ctx (make-vm-const :dst result-reg :value (cadr entry)))
-             result-reg)))
+           (let* ((arg-name (ast-var-name (first args)))
+                  (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
+             (when entry
+              (emit ctx (make-vm-const :dst result-reg :value (%noescape-array-entry-size entry)))
+               result-reg)))
         ((and (eq func-sym 'aref)
               (= (length args) 2)
               (typep (first args) 'ast-var))
-         (let* ((arg-name (ast-var-name (first args)))
-                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
-           (when entry
-             (if (typep (second args) 'ast-int)
-                 (let ((index (ast-int-value (second args))))
-                   (when (and (<= 0 index) (< index (cadr entry)))
-                     (emit ctx (make-vm-move :dst result-reg
-                                             :src (nth index (cddr entry))))))
-                 (%emit-noescape-array-read entry (second args) result-reg ctx))
-             result-reg)))
+          (let* ((arg-name (ast-var-name (first args)))
+                 (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
+             (when entry
+               (if (typep (second args) 'ast-int)
+                   (let ((index (ast-int-value (second args))))
+                     (when (and (<= 0 index) (< index (%noescape-array-entry-size entry)))
+                       (emit ctx (make-vm-move :dst result-reg
+                                               :src (nth index (%noescape-array-entry-element-regs entry))))))
+                   (%emit-noescape-array-read entry (second args) result-reg ctx))
+               result-reg)))
         ((and (string= sname "ASET")
               (= (length args) 3)
               (typep (first args) 'ast-var))
-         (let* ((arg-name (ast-var-name (first args)))
-                (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
-           (when entry
-             (if (typep (second args) 'ast-int)
-                 (let ((index (ast-int-value (second args))))
-                   (when (and (<= 0 index) (< index (cadr entry)))
-                     (let ((val-reg (compile-ast (third args) ctx)))
-                       (setf (nth index (cddr entry)) val-reg)
-                       (emit ctx (make-vm-move :dst result-reg :src val-reg)))))
-                 (%emit-noescape-array-write entry (second args) (third args) result-reg ctx))
-             result-reg)))))))
+          (let* ((arg-name (ast-var-name (first args)))
+                 (entry    (%codegen-call-assoc arg-name (ctx-noescape-array-bindings ctx))))
+             (when entry
+               (if (typep (second args) 'ast-int)
+                   (let ((index (ast-int-value (second args))))
+                     (when (and (<= 0 index) (< index (%noescape-array-entry-size entry)))
+                       (let ((val-reg (compile-ast (third args) ctx)))
+                        (setf (nth index (%noescape-array-entry-element-regs entry)) val-reg)
+                         (emit ctx (make-vm-move :dst result-reg :src val-reg)))))
+                   (%emit-noescape-array-write entry (second args) (third args) result-reg ctx))
+               result-reg)))))))
 
 (defun %try-compile-builtin (func-sym args result-reg ctx)
   "Phase-1 (table-driven) + Phase-2 (Prolog-style) builtin dispatch."

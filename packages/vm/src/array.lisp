@@ -10,14 +10,15 @@
 ;;; ─── Basic Array Instructions ────────────────────────────────────────────
 
 (define-vm-instruction vm-make-array (vm-instruction)
-  "Create an array of given size. Supports :initial-element, :fill-pointer, :adjustable."
+  "Create an array of given size. Supports :initial-element, :fill-pointer, :adjustable, :element-type."
   (dst nil :reader vm-dst)
   (size-reg nil :reader vm-size-reg)
   (initial-element nil :reader vm-initial-element)
   (fill-pointer nil :reader vm-fill-pointer)
   (adjustable nil :reader vm-adjustable)
+  (element-type nil :reader vm-element-type)
   (:sexp-tag :make-array)
-  (:sexp-slots dst size-reg initial-element fill-pointer adjustable))
+  (:sexp-slots dst size-reg initial-element fill-pointer adjustable element-type))
 
 (define-vm-instruction vm-aref (vm-instruction)
   "Get element at INDEX from ARRAY, store in DST."
@@ -86,26 +87,33 @@
   (declare (ignore labels))
   (let* ((size (vm-reg-get state (vm-size-reg inst)))
          (init-present-p (vm-initial-element inst))
-         (init-elem (if init-present-p
-                        (vm-reg-get state (vm-initial-element inst))
-                        0))
          (fp (vm-fill-pointer inst))
          (adj (vm-adjustable inst))
+         (elt-type (vm-element-type inst))
+         (default-init (case elt-type
+                         (character #\Nul)
+                         (single-float 0.0f0)
+                         (double-float 0.0d0)
+                         (bit 0)
+                         (otherwise 0)))
+         (init-elem (if init-present-p
+                        (vm-reg-get state (vm-initial-element inst))
+                        default-init))
          (arr (cond
-                 ((and fp adj)
-                  (make-array size :initial-element init-elem
-                              :fill-pointer (if (eq fp t) 0 fp)
-                              :adjustable t))
-                 (fp
-                  (make-array size :initial-element init-elem
-                              :fill-pointer (if (eq fp t) 0 fp)))
-                 (adj
-                  (make-array size :initial-element init-elem
-                              :adjustable t))
-                 (init-present-p
-                  (make-array size :initial-element init-elem))
-                 (t
-                  (make-array size :initial-element 0)))))
+                  ((and fp adj)
+                   (make-array size :element-type (or elt-type t) :initial-element init-elem
+                               :fill-pointer (if (eq fp t) 0 fp)
+                               :adjustable t))
+                  (fp
+                   (make-array size :element-type (or elt-type t) :initial-element init-elem
+                               :fill-pointer (if (eq fp t) 0 fp)))
+                  (adj
+                   (make-array size :element-type (or elt-type t) :initial-element init-elem
+                               :adjustable t))
+                  (init-present-p
+                   (make-array size :element-type (or elt-type t) :initial-element init-elem))
+                  (t
+                   (make-array size :element-type (or elt-type t) :initial-element init-elem)))))
     (vm-reg-set state (vm-dst inst) arr)
     (values (1+ pc) nil nil)))
 

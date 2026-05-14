@@ -9,6 +9,20 @@
   (in  (make-hash-table :test #'eq) :type hash-table)
   (out (make-hash-table :test #'eq) :type hash-table))
 
+(defstruct (opt-abstract-domain (:conc-name opt-domain-))
+  "Generic abstract interpretation domain descriptor.
+
+JOIN/LEQ/WIDEN/NARROW are binary operators over abstract states.
+TRANSFER maps (block in-state) -> out-state for the chosen domain."
+  name
+  top
+  bottom
+  join
+  leq
+  widen
+  narrow
+  transfer)
+
 (defun %opt-ensure-cfg (cfg-or-instructions)
   "Return CFG-OR-INSTRUCTIONS as a CFG, building one when needed."
   (if (cfg-p cfg-or-instructions)
@@ -135,14 +149,54 @@ the entry block for forward analyses and exit block for backward analyses."
     `(defun ,name ,lambda-list
        ,documentation
        (let ((cfg (%opt-ensure-cfg ,cfg-arg)))
-         (opt-run-dataflow cfg
-                           :direction ,direction
+          (opt-run-dataflow cfg
+                            :direction ,direction
                            :meet ,meet
                            :transfer ,transfer
                            :state-equal ,state-equal
                            :initial-state ,initial-state
-                           :boundary-state ,boundary-state
-                           :copy-state ,copy-state)))))
+                            :boundary-state ,boundary-state
+                            :copy-state ,copy-state)))))
+
+(defun opt-run-abstract-interpretation (cfg-or-instructions domain
+                                       &key
+                                         (direction :forward)
+                                         (widen-after 0)
+                                         (copy-state #'identity))
+  "Run abstract interpretation over CFG-OR-INSTRUCTIONS using DOMAIN.
+
+This is a thin orchestration layer over OPT-RUN-DATAFLOW that adds a pluggable
+domain API (join/leq/widen/narrow/transfer). Widening starts after WIDEN-AFTER
+iterations to accelerate convergence on growing lattices."
+  (let* ((cfg (%opt-ensure-cfg cfg-or-instructions))
+         (join (opt-domain-join domain))
+         (leq (or (opt-domain-leq domain) #'equal))
+         (widen (opt-domain-widen domain))
+         (narrow (opt-domain-narrow domain))
+         (transfer (opt-domain-transfer domain))
+         (boundary (opt-domain-bottom domain))
+         (iteration 0))
+    (declare (ignore narrow))
+    (opt-run-dataflow cfg
+                      :direction direction
+                      :meet (lambda (states)
+                              (cond
+                                ((null states) (%opt-dataflow-copy-state boundary copy-state))
+                                ((null (cdr states)) (%opt-dataflow-copy-state (car states) copy-state))
+                                (t
+                                 (let ((acc (%opt-dataflow-copy-state (car states) copy-state)))
+                                   (dolist (state (cdr states) acc)
+                                     (setf acc (funcall join acc state)
+                                           acc (if (and widen (> iteration widen-after))
+                                                   (funcall widen acc state)
+                                                   acc)))))))
+                      :transfer transfer
+                      :state-equal (lambda (old new)
+                                     (prog1 (funcall leq old new)
+                                       (incf iteration)))
+                      :initial-state (opt-domain-top domain)
+                      :boundary-state boundary
+                      :copy-state copy-state)))
 
 ;;; ─── Available Expressions ────────────────────────────────────────────────
 
@@ -268,4 +322,3 @@ the entry block for forward analyses and exit block for backward analyses."
   :boundary-state nil
   :copy-state #'copy-list
   :documentation "Compute reaching definitions for CFG-OR-INSTRUCTIONS.")
-

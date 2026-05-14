@@ -156,10 +156,11 @@
 ;;; ─── *phys-reg-to-x86-code* completeness ────────────────────────────────
 
 (deftest x86-phys-reg-map
-  "Physical register alist: :rax=0, :r15=15, covers 14 registers."
+  "Physical register alist: :rax=0, :rbp=5, :r15=15, covers 15 registers."
   (assert-equal 0  (cdr (assoc :rax cl-cc/codegen::*phys-reg-to-x86-code*)))
+  (assert-equal 5  (cdr (assoc :rbp cl-cc/codegen::*phys-reg-to-x86-code*)))
   (assert-equal 15 (cdr (assoc :r15 cl-cc/codegen::*phys-reg-to-x86-code*)))
-  (assert-equal 14 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
+  (assert-equal 15 (length cl-cc/codegen::*phys-reg-to-x86-code*)))
 
 ;;; ─── emit-vm-const and emit-vm-move sizes ───────────────────────────────
 
@@ -229,14 +230,83 @@ to be bound, which fails with NIL under raw invocation."
                 :result-register :R0
                 :leaf-p t))
          (ra (cl-cc/regalloc::make-regalloc-result :assignment (make-hash-table :test #'eq)
-                                          :spill-count 1
-                                          :instructions (cl-cc/vm::vm-program-instructions prog)))
-         (bytes (let ((cl-cc/regalloc::*current-regalloc* ra))
-                  (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
+                                           :spill-count 1
+                                           :instructions (cl-cc/vm::vm-program-instructions prog)))
+         (bytes (let ((cl-cc/codegen::*current-regalloc* ra))
+                   (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
     (assert-false (= #x55 (first bytes)))
     (assert-equal '(#x48 #x89 #x44 #x24 #xF8) (subseq bytes 0 5))
     (assert-equal '(#x48 #x8B #x5C #x24 #xF8) (subseq bytes 5 10))
     (assert-equal #xC3 (car (last bytes)))))
+
+(deftest x86-vm-program-default-fpe-allocates-rsp-spill-frame
+  "Default x86-64 native code omits RBP and allocates an RSP-relative spill frame for non-leaf spills."
+  (let* ((prog (cl-cc/vm::make-vm-program
+                :instructions (list (cl-cc:make-vm-spill-store :src-reg :rax :slot 1)
+                                    (cl-cc:make-vm-spill-load :dst-reg :rbx :slot 1))
+                :result-register :R0
+                :leaf-p nil))
+         (ra (cl-cc/regalloc::make-regalloc-result :assignment (make-hash-table :test #'eq)
+                                                   :spill-count 1
+                                                   :instructions (cl-cc/vm::vm-program-instructions prog)))
+         (bytes (let ((cl-cc/codegen::*current-regalloc* ra))
+                  (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
+    (assert-false (= #x55 (first bytes)))
+    (assert-equal '(#x48 #x81 #xEC #x08 #x00 #x00 #x00) (subseq bytes 0 7))
+    (assert-equal '(#x48 #x89 #x04 #x24) (subseq bytes 7 11))
+    (assert-equal '(#x48 #x8B #x1C #x24) (subseq bytes 11 15))
+    (assert-equal '(#x48 #x81 #xC4 #x08 #x00 #x00 #x00) (subseq bytes 15 22))
+    (assert-equal #xC3 (nth 22 bytes))))
+
+(deftest x86-vm-program-debug-opt-out-keeps-rbp-spills
+  "Disabling x86-64 FPE keeps the existing RBP-based spill layout for non-leaf spills."
+  (let* ((prog (cl-cc/vm::make-vm-program
+                :instructions (list (cl-cc:make-vm-spill-store :src-reg :rax :slot 1)
+                                    (cl-cc:make-vm-spill-load :dst-reg :rbx :slot 1))
+                :result-register :R0
+                :leaf-p nil))
+         (ra (cl-cc/regalloc::make-regalloc-result :assignment (make-hash-table :test #'eq)
+                                                   :spill-count 1
+                                                   :instructions (cl-cc/vm::vm-program-instructions prog)))
+         (bytes (let ((cl-cc/codegen::*current-regalloc* ra)
+                      (cl-cc/codegen::*x86-64-omit-frame-pointer* nil))
+                  (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
+    (assert-equal #x55 (first bytes))
+    (assert-equal '(#x48 #x89 #x45 #xF8) (subseq bytes 1 5))
+    (assert-equal '(#x48 #x8B #x5D #xF8) (subseq bytes 5 9))
+    (assert-equal #x5D (nth 9 bytes))
+    (assert-equal #xC3 (nth 10 bytes))))
+
+(deftest-each x86-stack-probe-count-thresholds
+  "stack-probe-count emits one probe per 4096-byte frame page."
+  :cases (("below-page" 4095 0)
+          ("one-page" 4096 1)
+          ("two-pages" 8192 2))
+  (frame-size expected)
+  (assert-= expected (cl-cc/codegen::stack-probe-count frame-size)))
+
+(deftest x86-stack-probe-emits-non-mutating-rsp-page-touch
+  "emit-or-mem-rsp-disp32-imm8 encodes OR qword ptr [rsp-4096], 0."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (s)
+                  (cl-cc/codegen::emit-or-mem-rsp-disp32-imm8 -4096 0 s)))))
+    (assert-equal '(#x48 #x83 #x8C #x24 #x00 #xF0 #xFF #xFF #x00) bytes)))
+
+(deftest x86-large-spill-frame-inserts-stack-probe-before-rsp-allocation
+  "Large native frames emit stack probes before the RSP spill-frame allocation sequence."
+  (let* ((prog (cl-cc/vm::make-vm-program
+                :instructions nil
+                :result-register :R0
+                :leaf-p t))
+         (ra (cl-cc/regalloc::make-regalloc-result :assignment (make-hash-table :test #'eq)
+                                                    :spill-count 513
+                                                    :instructions nil))
+         (bytes (let ((cl-cc/codegen::*current-regalloc* ra))
+                   (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
+    (assert-equal '(#x48 #x83 #x8C #x24 #x00 #xF0 #xFF #xFF #x00) (subseq bytes 0 9))
+    (assert-equal '(#x48 #x81 #xEC #x08 #x10 #x00 #x00) (subseq bytes 9 16))
+    (assert-equal '(#x48 #x81 #xC4 #x08 #x10 #x00 #x00) (subseq bytes 16 23))
+    (assert-= #xC3 (nth 23 bytes))))
 
 ;;; ─── instruction-size for specific types ────────────────────────────────
 
@@ -247,6 +317,8 @@ to be bound, which fails with NIL under raw invocation."
           ("vm-add"      (cl-cc:make-vm-add      :dst :R0 :lhs :R1 :rhs :R2)  6)
           ("vm-sub"      (cl-cc:make-vm-sub      :dst :R0 :lhs :R1 :rhs :R2)  6)
           ("vm-mul"      (cl-cc:make-vm-mul      :dst :R0 :lhs :R1 :rhs :R2)  7)
+          ("vm-integer-mul-high-u" (cl-cc:make-vm-integer-mul-high-u :dst :R0 :lhs :R1 :rhs :R2) 19)
+          ("vm-integer-mul-high-s" (cl-cc:make-vm-integer-mul-high-s :dst :R0 :lhs :R1 :rhs :R2) 19)
           ("vm-jump"     (cl-cc:make-vm-jump     :label "L")                    5)
           ("vm-ret"      (cl-cc:make-vm-ret)                                   1)
           ("vm-abs"      (make-vm-abs             :dst :R0 :src :R1)           15)

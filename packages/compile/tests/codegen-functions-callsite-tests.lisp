@@ -13,17 +13,41 @@
   "Compiling ast-apply with a constant spread list emits vm-call and returns a register."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc/ast:make-ast-apply
-                               :func (make-ast-function :name '+)
+                                :func (make-ast-function :name '+)
                                :args (list (make-ast-quote :value '(1 2 3))))
                              ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
     (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
     (assert-true (keywordp reg))))
 
+(deftest codegen-apply-quoted-nil-compilation
+  "Quoted NIL spread lowers APPLY to a direct vm-call with no vm-apply fallback."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc/ast:make-ast-apply
+                               :func (make-ast-function :name 'list)
+                               :args (list (make-ast-int :value 1)
+                                           (make-ast-int :value 2)
+                                           (make-ast-quote :value nil)))
+                             ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-apply-improper-quoted-list-falls-back-to-vm-apply
+  "Improper quoted spread lists stay on vm-apply so APPLY preserves runtime list validation."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc/ast:make-ast-apply
+                               :func (make-ast-function :name '+)
+                               :args (list (make-ast-quote :value '(1 . 2))))
+                             ctx)))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
+    (assert-true (keywordp reg))))
+
 (deftest-each codegen-apply-run
   "apply spreads list arguments to a function."
   :cases (("list-only"     6  "(apply #'+ '(1 2 3))")
-          ("leading-args"  10 "(apply #'+ 1 2 '(3 4))"))
+          ("leading-args"  10 "(apply #'+ 1 2 '(3 4))")
+          ("quoted-nil"     3 "(apply #'+ 1 2 nil)"))
   (expected code)
   (assert-run= expected code))
 

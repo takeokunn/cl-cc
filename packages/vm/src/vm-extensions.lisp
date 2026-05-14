@@ -9,7 +9,192 @@
 ;;; Load order: after vm-numeric.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-;;; FR-1201: Symbol property list operations
+;;; FR-1201 / FR-379: Symbol property list operations
+
+(defconstant +vm-symbol-plist-linear-limit+ 4
+  "Maximum plist entry count kept on the short linear path before hash promotion.")
+
+(defstruct (vm-symbol-property-hash-store
+             (:constructor make-vm-symbol-property-hash-store (table)))
+  "Internal promoted property store for symbols with many plist entries."
+  (table (make-hash-table :test #'eq) :read-only t))
+
+(defun %vm-symbol-property-entry-p (entry)
+  (typep entry 'vm-symbol-property-hash-store))
+
+(defun %vm-symbol-property-entry-table (entry)
+  (and (%vm-symbol-property-entry-p entry)
+       (vm-symbol-property-hash-store-table entry)))
+
+(defun %vm-plist-entry-count (plist)
+  (loop for tail on plist by #'cddr
+        while tail
+        count 1))
+
+(defun %vm-small-plist-get (plist indicator default)
+  (loop for tail on plist by #'cddr
+        while tail
+        when (eq (car tail) indicator)
+          do (return (cadr tail))
+        finally (return default)))
+
+(defun %vm-small-plist-set (plist indicator value)
+  (loop for tail on plist by #'cddr
+        while tail
+        when (eq (car tail) indicator)
+          do (setf (cadr tail) value)
+             (return plist)
+        finally (return (list* indicator value plist))))
+
+(defun %vm-small-plist-remprop (plist indicator)
+  (cond
+    ((null plist) (values nil nil))
+    ((eq (car plist) indicator) (values (cddr plist) t))
+    (t
+     (multiple-value-bind (tail removed-p)
+         (%vm-small-plist-remprop (cddr plist) indicator)
+       (values (list* (car plist) (cadr plist) tail) removed-p)))))
+
+(defun %vm-symbol-property-hash-table->plist (table)
+  (let ((plist nil))
+    (maphash (lambda (indicator value)
+               (setf plist (list* indicator value plist)))
+             table)
+    plist))
+
+(defun %vm-symbol-property-entry->plist (entry)
+  (cond
+    ((null entry) nil)
+    ((%vm-symbol-property-entry-p entry)
+     (%vm-symbol-property-hash-table->plist
+      (vm-symbol-property-hash-store-table entry)))
+    (t (copy-list entry))))
+
+(defun %vm-copy-symbol-property-entry (entry)
+  (cond
+    ((null entry) nil)
+    ((%vm-symbol-property-entry-p entry)
+     (let ((table (make-hash-table :test #'eq)))
+       (maphash (lambda (indicator value)
+                  (setf (gethash indicator table) value))
+                (vm-symbol-property-hash-store-table entry))
+       (make-vm-symbol-property-hash-store table)))
+    (t (copy-list entry))))
+
+(defun %vm-promote-symbol-property-plist (plist)
+  (let ((table (make-hash-table :test #'eq)))
+    (loop for tail on plist by #'cddr
+          while tail
+          do (setf (gethash (car tail) table) (cadr tail)))
+    (make-vm-symbol-property-hash-store table)))
+
+(defun %vm-normalize-symbol-property-entry (plist)
+  (let ((plist-copy (copy-list plist)))
+    (if (> (%vm-plist-entry-count plist-copy) +vm-symbol-plist-linear-limit+)
+        (%vm-promote-symbol-property-plist plist-copy)
+        plist-copy)))
+
+(defun %vm-symbol-property-entry-get (entry indicator default)
+  (cond
+    ((null entry) default)
+    ((%vm-symbol-property-entry-p entry)
+     (gethash indicator (vm-symbol-property-hash-store-table entry) default))
+    (t (%vm-small-plist-get entry indicator default))))
+
+(defun %vm-symbol-property-entry-set (entry indicator value)
+  (cond
+    ((null entry)
+     (list indicator value))
+    ((%vm-symbol-property-entry-p entry)
+     (setf (gethash indicator (vm-symbol-property-hash-store-table entry)) value)
+     entry)
+    (t
+     (let ((updated (%vm-small-plist-set entry indicator value)))
+       (if (> (%vm-plist-entry-count updated) +vm-symbol-plist-linear-limit+)
+           (%vm-promote-symbol-property-plist updated)
+           updated)))))
+
+(defun %vm-symbol-property-entry-remprop (entry indicator)
+  (cond
+    ((null entry) (values nil nil))
+    ((%vm-symbol-property-entry-p entry)
+     (let ((table (vm-symbol-property-hash-store-table entry)))
+       (multiple-value-bind (value found-p) (gethash indicator table)
+         (declare (ignore value))
+         (when found-p
+           (remhash indicator table))
+         (values (if (zerop (hash-table-count table)) nil entry)
+                 found-p))))
+    (t (%vm-small-plist-remprop entry indicator))))
+
+(defun %vm-touch-symbol-property-barrier (state)
+  (incf (vm-symbol-plist-read-barrier state)))
+
+(defun %vm-sync-host-symbol-plist (sym entry)
+  (setf (symbol-plist sym) (%vm-symbol-property-entry->plist entry)))
+
+(defun %vm-symbol-property-get (state table sym indicator default)
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (%vm-symbol-property-entry-get (gethash sym table) indicator default)))
+
+(defun %vm-symbol-property-set (state table sym indicator value &key (sync-host-p nil))
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (let* ((entry (gethash sym table))
+           (updated (%vm-symbol-property-entry-set entry indicator value)))
+      (setf (gethash sym table) updated)
+      (%vm-touch-symbol-property-barrier state)
+      (when sync-host-p
+        (%vm-sync-host-symbol-plist sym updated))
+      value)))
+
+(defun %vm-symbol-property-remprop (state table sym indicator &key (sync-host-p nil))
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (multiple-value-bind (updated found-p)
+        (%vm-symbol-property-entry-remprop (gethash sym table) indicator)
+      (if updated
+          (setf (gethash sym table) updated)
+          (remhash sym table))
+      (when found-p
+        (%vm-touch-symbol-property-barrier state))
+      (when sync-host-p
+        (%vm-sync-host-symbol-plist sym updated))
+      found-p)))
+
+(defun %vm-symbol-property-replace-plist (state table sym plist &key (sync-host-p nil))
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (let ((normalized (and plist (%vm-normalize-symbol-property-entry plist))))
+      (if normalized
+          (setf (gethash sym table) normalized)
+          (remhash sym table))
+      (%vm-touch-symbol-property-barrier state)
+      (when sync-host-p
+        (%vm-sync-host-symbol-plist sym normalized))
+      (%vm-symbol-property-entry->plist normalized))))
+
+(defun vm-symbol-plist-read-snapshot (state sym)
+  "Return a copy of SYM's user-visible plist and the current read barrier."
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (values (%vm-symbol-property-entry->plist
+             (gethash sym (vm-symbol-plists state)))
+            (vm-symbol-plist-read-barrier state))))
+
+(defun vm-system-property-get (state sym indicator &optional default)
+  "Return VM-only system property INDICATOR from SYM, or DEFAULT if absent."
+  (%vm-symbol-property-get state (vm-system-symbol-plists state) sym indicator default))
+
+(defun vm-system-property-set (state sym indicator value)
+  "Set VM-only system property INDICATOR on SYM to VALUE."
+  (%vm-symbol-property-set state (vm-system-symbol-plists state) sym indicator value))
+
+(defun vm-system-property-remprop (state sym indicator)
+  "Remove VM-only system property INDICATOR from SYM."
+  (%vm-symbol-property-remprop state (vm-system-symbol-plists state) sym indicator))
+
+(defun vm-system-property-plist (state sym)
+  "Return a plist snapshot of VM-only system properties for SYM."
+  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+    (%vm-symbol-property-entry->plist
+     (gethash sym (vm-system-symbol-plists state)))))
 
 (define-vm-instruction vm-symbol-get (vm-instruction)
   "Get property INDICATOR from symbol SYM's plist. Returns default if absent."
@@ -22,8 +207,8 @@
   (let* ((sym (vm-reg-get state (vm-sym inst)))
          (indicator (vm-reg-get state (vm-indicator inst)))
          (default (vm-reg-get state (vm-default inst)))
-         (plist (gethash sym (vm-symbol-plists state) nil))
-         (result (getf plist indicator default)))
+         (result (%vm-symbol-property-get state (vm-symbol-plists state)
+                                          sym indicator default)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -37,12 +222,11 @@
   (declare (ignore labels))
   (let* ((sym (vm-reg-get state (vm-sym inst)))
          (indicator (vm-reg-get state (vm-indicator inst)))
-         (val (vm-reg-get state (vm-value inst)))
-         (plist (gethash sym (vm-symbol-plists state) nil)))
-    (setf (getf plist indicator) val)
-    (setf (gethash sym (vm-symbol-plists state)) plist)
-     (vm-reg-set state (vm-dst inst) val)
-     (values (1+ pc) nil nil)))
+         (val (vm-reg-get state (vm-value inst))))
+    (%vm-symbol-property-set state (vm-symbol-plists state)
+                             sym indicator val :sync-host-p t)
+    (vm-reg-set state (vm-dst inst) val)
+    (values (1+ pc) nil nil)))
 
 (define-vm-binary-instruction vm-set-symbol-value :set-symbol-value
   "Set the dynamic value cell of LHS to RHS and return RHS.")
@@ -68,12 +252,8 @@
   (declare (ignore labels))
   (let* ((sym (vm-reg-get state (vm-sym inst)))
          (indicator (vm-reg-get state (vm-indicator inst)))
-         (plist (gethash sym (vm-symbol-plists state) nil))
-         (found-p (not (eq (getf plist indicator :__not-found__) :__not-found__))))
-    (remf plist indicator)
-    (if plist
-        (setf (gethash sym (vm-symbol-plists state)) plist)
-        (remhash sym (vm-symbol-plists state)))
+         (found-p (%vm-symbol-property-remprop state (vm-symbol-plists state)
+                                               sym indicator :sync-host-p t)))
     (vm-reg-set state (vm-dst inst) (if found-p t nil))
     (values (1+ pc) nil nil)))
 
@@ -85,7 +265,7 @@
 (defmethod execute-instruction ((inst vm-symbol-plist) state pc labels)
   (declare (ignore labels))
   (let* ((sym (vm-reg-get state (vm-src inst)))
-         (plist (gethash sym (vm-symbol-plists state) nil)))
+         (plist (nth-value 0 (vm-symbol-plist-read-snapshot state sym))))
     (vm-reg-set state (vm-dst inst) plist)
     (values (1+ pc) nil nil)))
 
@@ -98,10 +278,9 @@
   (declare (ignore labels))
   (let* ((sym (vm-reg-get state (vm-sym inst)))
          (new-plist (vm-reg-get state (vm-plist-reg inst))))
-    (if new-plist
-        (setf (gethash sym (vm-symbol-plists state)) new-plist)
-        (remhash sym (vm-symbol-plists state)))
-    (vm-reg-set state (vm-dst inst) new-plist)
+    (vm-reg-set state (vm-dst inst)
+                (%vm-symbol-property-replace-plist state (vm-symbol-plists state)
+                                                   sym new-plist :sync-host-p t))
     (values (1+ pc) nil nil)))
 
 ;;; FR-102: PROGV — dynamic variable binding

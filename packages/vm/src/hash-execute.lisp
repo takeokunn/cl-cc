@@ -13,7 +13,10 @@
                       (vm-reg-get state (vm-hash-test inst))))
           (test-designator (resolve-hash-test test-sym))
           (table (make-hash-table :test test-designator))
-         (hash-obj (make-instance 'vm-hash-table-object :table table)))
+         (hash-obj (make-instance 'vm-hash-table-object
+                                  :table table
+                                  :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-table-lock")
+                                        #-sb-thread nil)))
     (vm-reg-set state (vm-dst inst) hash-obj)
     (values (1+ pc) nil nil)))
 
@@ -23,17 +26,28 @@
          (table-obj (vm-reg-get state (vm-hash-table-reg inst)))
          (table (vm-hash-table-get-internal table-obj))
          (default-val (when (vm-hash-default inst)
-                        (vm-reg-get state (vm-hash-default inst)))))
-    (multiple-value-bind (value found-p)
-        (if default-val
-            (gethash key table default-val)
-            (gethash key table))
-      (vm-reg-set state (vm-dst inst) value)
-      (when (vm-found-dst inst)
-        (vm-reg-set state (vm-found-dst inst) (if found-p 1 0)))
-      ;; Set values-list so multiple-value-bind can pick up (value found-p)
-      (setf (vm-values-list state) (list value (if found-p 1 0)))
-      (values (1+ pc) nil nil))))
+                         (vm-reg-get state (vm-hash-default inst)))))
+    (if (typep table-obj 'vm-hash-table-object)
+        (vm-hash-with-lock-fallback
+         table-obj
+         (lambda ()
+           (multiple-value-bind (value found-p)
+               (if default-val
+                   (gethash key table default-val)
+                   (gethash key table))
+             (vm-reg-set state (vm-dst inst) value)
+             (when (vm-found-dst inst)
+               (vm-reg-set state (vm-found-dst inst) (if found-p 1 0)))
+             (setf (vm-values-list state) (list value (if found-p 1 0))))))
+        (multiple-value-bind (value found-p)
+            (if default-val
+                (gethash key table default-val)
+                (gethash key table))
+          (vm-reg-set state (vm-dst inst) value)
+          (when (vm-found-dst inst)
+            (vm-reg-set state (vm-found-dst inst) (if found-p 1 0)))
+          (setf (vm-values-list state) (list value (if found-p 1 0)))))
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-sethash) state pc labels)
   (declare (ignore labels))
@@ -41,7 +55,11 @@
          (value (vm-reg-get state (vm-hash-value inst)))
          (table-obj (vm-reg-get state (vm-hash-table-reg inst)))
          (table (vm-hash-table-get-internal table-obj)))
-    (setf (gethash key table) value)
+    (if (typep table-obj 'vm-hash-table-object)
+        (vm-hash-with-lock-fallback table-obj
+                                    (lambda ()
+                                      (setf (gethash key table) value)))
+        (setf (gethash key table) value))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-remhash) state pc labels)
@@ -49,14 +67,22 @@
   (let* ((key (vm-reg-get state (vm-hash-key inst)))
          (table-obj (vm-reg-get state (vm-hash-table-reg inst)))
          (table (vm-hash-table-get-internal table-obj)))
-    (remhash key table)
+    (if (typep table-obj 'vm-hash-table-object)
+        (vm-hash-with-lock-fallback table-obj
+                                    (lambda ()
+                                      (remhash key table)))
+        (remhash key table))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-clrhash) state pc labels)
   (declare (ignore labels))
   (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
          (table (vm-hash-table-get-internal table-obj)))
-    (clrhash table)
+    (if (typep table-obj 'vm-hash-table-object)
+        (vm-hash-with-lock-fallback table-obj
+                                    (lambda ()
+                                      (clrhash table)))
+        (clrhash table))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-hash-table-count) state pc labels)

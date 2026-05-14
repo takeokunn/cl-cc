@@ -163,6 +163,58 @@
       (ignore-errors (delete-file output)))
     (ignore-errors (delete-file input)))))
 
+(deftest pipeline-native-compile-file-cache-hit-skips-native-compilation
+  "compile-file-to-native avoids native compilation work when the cache artifact exists."
+  (uiop:with-temporary-file (:pathname input :type "php" :keep t)
+    (uiop:with-temporary-file (:pathname output :type "bin" :keep t)
+      (uiop:with-temporary-file (:pathname cache :type "bin" :keep t)
+        (with-open-file (stream input :direction :output :if-exists :supersede)
+          (write-line "<?php echo 1;" stream))
+        (with-native-cache-stubs (:cache-path cache)
+          (with-replaced-function (cl-cc::%compile-native-file-source
+                                  (lambda (&rest args)
+                                    (declare (ignore args))
+                                    (error "cache hit should skip native compilation")))
+            (assert-equal output
+                          (cl-cc::compile-file-to-native input :output-file output))))
+        (ignore-errors (delete-file cache)))
+      (ignore-errors (delete-file output)))
+    (ignore-errors (delete-file input))))
+
+(deftest pipeline-native-compile-file-cache-key-receives-option-plist
+  "compile-file-to-native passes native compile options into the cache key."
+  (uiop:with-temporary-file (:pathname input :type "php" :keep t)
+    (uiop:with-temporary-file (:pathname output :type "bin" :keep t)
+      (uiop:with-temporary-file (:pathname cache :type "bin" :keep t)
+        (let ((captured-args nil))
+          (with-open-file (stream input :direction :output :if-exists :supersede)
+            (write-line "<?php echo 1;" stream))
+          (with-replaced-function (cl-cc::%compile-cache-key
+                                   (lambda (&rest args)
+                                     (setf captured-args args)
+                                     "cache-key"))
+            (with-replaced-function (cl-cc::%compile-cache-path
+                                     (lambda (&rest args)
+                                       (declare (ignore args))
+                                       cache))
+              (with-replaced-function (cl-cc::%copy-file-bytes
+                                       (lambda (from to)
+                                         (declare (ignore from))
+                                         to))
+                (assert-equal output
+                              (cl-cc::compile-file-to-native
+                               input :output-file output
+                               :speed 3
+                               :inline-threshold-scale 2
+                               :pass-pipeline '(:fold :dce))))))
+          (assert-= 4 (length captured-args))
+          (assert-equal '(:fold :dce) (getf (fourth captured-args) :pass-pipeline))
+          (assert-= 2 (getf (fourth captured-args) :inline-threshold-scale))
+          (assert-= 3 (getf (fourth captured-args) :speed)))
+        (ignore-errors (delete-file cache)))
+      (ignore-errors (delete-file output)))
+    (ignore-errors (delete-file input))))
+
 ;;; ─── CPS-safe AST allowlist ─────────────────────────────────────────────────
 
 (deftest pipeline-native-cps-safe-ast-p-rejects-io-and-mv-forms-until-native-cps-lowering-exists

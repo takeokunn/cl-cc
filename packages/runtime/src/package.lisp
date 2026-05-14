@@ -200,5 +200,11 @@
    #:rt-object-pointer-slots
    ;; GC public API
    #:rt-gc-alloc #:rt-gc-add-root #:rt-gc-remove-root
-   #:rt-gc-write-barrier #:rt-gc-minor-collect #:rt-gc-major-collect
-   #:rt-gc-stats))
+    #:rt-gc-write-barrier #:rt-gc-minor-collect #:rt-gc-major-collect
+    #:rt-gc-stats
+    #:rt-gc-configure-concurrent-mode
+    #:rt-gc-concurrent-assist
+    #:*rt-concurrent-gc-enabled-p*
+    #:*rt-concurrent-gc-write-barrier-mode*
+    #:*rt-concurrent-gc-stw-phases*
+    #:*rt-concurrent-gc-mutator-assist-p*))

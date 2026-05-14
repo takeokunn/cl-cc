@@ -269,6 +269,109 @@
                 :phi :values :mv-bind :safepoint :nop))
     (assert-true (member op *mir-generic-ops*))))
 
+(deftest-each mir-op-effect-kind-classifies-core-ops
+  "mir-op-effect-kind classifies target-neutral MIR operations for IR effect analysis."
+  :cases (("pure arithmetic" :add :pure)
+          ("division may raise" :div :control)
+          ("modulo may raise" :mod :control)
+          ("memory read" :load :read-only)
+          ("memory write" :store :write-global)
+          ("stack allocation" :alloca :alloc)
+          ("control transfer" :branch :control)
+          ("unknown call" :call :unknown)
+          ("unknown op" :not-a-mir-op :unknown))
+  (op expected)
+  (assert-eq expected (cl-cc/mir:mir-op-effect-kind op)))
+
+(deftest mir-inst-effect-kind-allows-meta-override
+  "mir-inst-effect-kind respects precise metadata supplied by lowering passes."
+  (let* ((fn (mir-make-function :effects))
+         (blk (mirf-entry fn))
+         (dst (mir-new-value fn))
+         (call (mir-emit blk :call :dst dst :meta '(:effect-kind :read-only))))
+    (assert-eq :unknown (cl-cc/mir:mir-op-effect-kind :call))
+    (assert-eq :read-only (cl-cc/mir:mir-inst-effect-kind call))
+    (assert-false (cl-cc/mir:mir-inst-pure-p call))
+    (assert-false (cl-cc/mir:mir-inst-dce-eligible-p call))))
+
+(deftest mir-inst-effect-kind-rejects-malformed-meta
+  "Malformed instruction metadata falls back to the opcode effect without error."
+  (let* ((fn (mir-make-function :effects))
+         (blk (mirf-entry fn))
+         (dst (mir-new-value fn))
+         (call (mir-emit blk :call :dst dst :meta (cons :effect-kind :read-only)))
+         (div (mir-emit blk :div :dst (mir-new-value fn)
+                        :srcs (list (mir-new-value fn :type :integer)
+                                    (mir-new-value fn :type :integer)))))
+    (assert-eq :unknown (cl-cc/mir:mir-inst-effect-kind call))
+    (assert-eq :control (cl-cc/mir:mir-inst-effect-kind div))
+    (assert-false (cl-cc/mir:mir-inst-dce-eligible-p div))))
+
+(deftest mir-propagate-types-updates-instructions-and-values
+  "mir-propagate-types infers simple SSA value types over a straight-line MIR block."
+  (let* ((fn (mir-make-function :typed))
+         (blk (mirf-entry fn))
+         (a (mir-new-value fn))
+         (b (mir-new-value fn))
+         (sum (mir-new-value fn))
+         (cmp (mir-new-value fn)))
+    (mir-emit blk :const :dst a :srcs (list (make-mir-const :value 1 :type :integer)))
+    (mir-emit blk :const :dst b :srcs (list (make-mir-const :value 2 :type :integer)))
+    (let ((add-inst (mir-emit blk :add :dst sum :srcs (list a b)))
+          (cmp-inst (mir-emit blk :lt :dst cmp :srcs (list sum b))))
+      (cl-cc/mir:mir-propagate-types fn)
+      (assert-eq :integer (miri-type add-inst))
+      (assert-eq :integer (mirv-type sum))
+      (assert-eq :boolean (miri-type cmp-inst))
+      (assert-eq :boolean (mirv-type cmp)))))
+
+(deftest mir-propagate-types-joins-phi-input-types-conservatively
+  "Phi result types remain concrete only when all incoming value types agree."
+  (let* ((fn (mir-make-function :phi-types))
+         (entry (mirf-entry fn))
+         (then (mir-new-block fn :label :then))
+         (else (mir-new-block fn :label :else))
+         (merge (mir-new-block fn :label :merge))
+         (int-a (mir-new-value fn :type :integer))
+         (int-b (mir-new-value fn :type :integer))
+         (bool-c (mir-new-value fn :type :boolean))
+         (phi-same-dst (mir-new-value fn))
+         (phi-mixed-dst (mir-new-value fn))
+         (phi-same (mir-emit merge :phi :dst phi-same-dst
+                             :srcs (list (cons then int-a) (cons else int-b))))
+         (phi-mixed (mir-emit merge :phi :dst phi-mixed-dst
+                              :srcs (list (cons then int-a) (cons else bool-c)))))
+    (mir-add-succ entry then)
+    (mir-add-succ entry else)
+    (mir-add-succ then merge)
+    (mir-add-succ else merge)
+    (cl-cc/mir:mir-propagate-types fn)
+    (assert-eq :integer (miri-type phi-same))
+    (assert-eq :integer (mirv-type phi-same-dst))
+    (assert-eq :any (miri-type phi-mixed))
+    (assert-eq :any (mirv-type phi-mixed-dst))))
+
+(deftest mir-propagate-types-reaches-fixed-point-for-late-producers
+  "mir-propagate-types revisits phi nodes when later blocks refine source value types."
+  (let* ((fn (mir-make-function :fixed-point-types))
+         (entry (mirf-entry fn))
+         (merge (mir-new-block fn :label :merge))
+         (late (mir-new-block fn :label :late))
+         (a (mir-new-value fn))
+         (b (mir-new-value fn))
+         (late-sum (mir-new-value fn))
+         (phi-dst (mir-new-value fn))
+         (phi (mir-emit merge :phi :dst phi-dst
+                        :srcs (list (cons entry a) (cons late late-sum)))))
+    (mir-add-succ entry merge)
+    (mir-add-succ merge late)
+    (mir-emit entry :const :dst a :srcs (list (make-mir-const :value 1 :type :integer)))
+    (mir-emit late :const :dst b :srcs (list (make-mir-const :value 2 :type :integer)))
+    (mir-emit late :add :dst late-sum :srcs (list a b))
+    (cl-cc/mir:mir-propagate-types fn)
+    (assert-eq :integer (miri-type phi))
+    (assert-eq :integer (mirv-type phi-dst))))
+
 
 ;;; ─── %mir-rpo-dfs (extracted helper) ────────────────────────────────────────
 

@@ -17,6 +17,99 @@
 ;;; Phase 2: Numeric Tower (FR-301 to FR-305)
 ;;; ------------------------------------------------------------
 
+(defparameter +vm-bignum-digit-base+ 1000000000
+  "Base used by VM bignum planning helpers; each digit fits comfortably in a fixnum.")
+
+(defparameter +vm-bignum-karatsuba-threshold+ 64
+  "Digit-count threshold where bignum multiplication planning selects Karatsuba.")
+
+(defun vm-bignum-digit-vector (integer &optional (base +vm-bignum-digit-base+))
+  "Return INTEGER as a little-endian digit vector and sign using BASE."
+  (check-type integer integer)
+  (let ((n (abs integer))
+        (digits nil))
+    (if (zerop n)
+        (values (vector 0) 0)
+        (progn
+          (loop while (> n 0)
+                do (multiple-value-bind (q r) (floor n base)
+                     (push r digits)
+                     (setf n q)))
+          (values (coerce (nreverse digits) 'vector)
+                  (if (minusp integer) -1 1))))))
+
+(defun %vm-trim-bignum-digits (digits)
+  (let ((end (1- (length digits))))
+    (loop while (and (> end 0) (zerop (aref digits end)))
+          do (decf end))
+    (subseq digits 0 (1+ end))))
+
+(defun vm-bignum-schoolbook-multiply-digits
+    (lhs rhs &optional (base +vm-bignum-digit-base+))
+  "Multiply little-endian digit vectors LHS and RHS with schoolbook arithmetic."
+  (let ((result (make-array (+ (length lhs) (length rhs)) :initial-element 0)))
+    (dotimes (i (length lhs))
+      (let ((carry 0))
+        (dotimes (j (length rhs))
+          (let* ((index (+ i j))
+                 (total (+ (aref result index)
+                           (* (aref lhs i) (aref rhs j))
+                           carry)))
+            (multiple-value-bind (q r) (floor total base)
+              (setf (aref result index) r
+                    carry q))))
+        (loop for index from (+ i (length rhs))
+              while (> carry 0)
+              do (let ((total (+ (aref result index) carry)))
+                   (multiple-value-bind (q r) (floor total base)
+                     (setf (aref result index) r
+                           carry q))))))
+    (%vm-trim-bignum-digits result)))
+
+(defun vm-bignum-multiplication-strategy
+    (lhs rhs &key (threshold +vm-bignum-karatsuba-threshold+))
+  "Return the planned multiplication strategy for integer operands LHS and RHS."
+  (check-type lhs integer)
+  (check-type rhs integer)
+  (if (typep (* lhs rhs) 'fixnum)
+      :fixnum
+      (multiple-value-bind (lhs-digits lhs-sign) (vm-bignum-digit-vector lhs)
+        (declare (ignore lhs-sign))
+        (multiple-value-bind (rhs-digits rhs-sign) (vm-bignum-digit-vector rhs)
+          (declare (ignore rhs-sign))
+          (if (>= (max (length lhs-digits) (length rhs-digits)) threshold)
+              :karatsuba
+              :schoolbook)))))
+
+(defun vm-bignum-multiply-plan
+    (lhs rhs &key (threshold +vm-bignum-karatsuba-threshold+))
+  "Describe a bignum multiplication plan without depending on host bignum internals."
+  (multiple-value-bind (lhs-digits lhs-sign) (vm-bignum-digit-vector lhs)
+    (multiple-value-bind (rhs-digits rhs-sign) (vm-bignum-digit-vector rhs)
+      (list :strategy (vm-bignum-multiplication-strategy lhs rhs :threshold threshold)
+            :sign (* lhs-sign rhs-sign)
+            :lhs-digits lhs-digits
+            :rhs-digits rhs-digits))))
+
+(defun vm-complex-unbox-plan (value &key local-p)
+  "Describe whether VALUE can be represented as split real/imag registers."
+  (if (and local-p (complexp value))
+      (list :representation :split-registers
+            :real (realpart value)
+            :imag (imagpart value))
+      (list :representation :boxed
+            :value value)))
+
+(defun vm-complex-unboxed-add-plan (lhs rhs &key local-p)
+  "Return a split-register addition plan for local complex operands, or NIL."
+  (let ((lhs-plan (vm-complex-unbox-plan lhs :local-p local-p))
+        (rhs-plan (vm-complex-unbox-plan rhs :local-p local-p)))
+    (when (and (eq (getf lhs-plan :representation) :split-registers)
+               (eq (getf rhs-plan :representation) :split-registers))
+      (list :representation :split-registers
+            :real (+ (getf lhs-plan :real) (getf rhs-plan :real))
+            :imag (+ (getf lhs-plan :imag) (getf rhs-plan :imag))))))
+
 ;;; FR-301: round (binary, returns quotient + remainder as multiple values)
 
 (define-vm-instruction vm-round-inst (vm-instruction)

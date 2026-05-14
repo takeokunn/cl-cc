@@ -98,6 +98,17 @@
     (cl-cc/runtime:rt-gc-write-barrier heap obj slot 42)
     (assert-equal nil (cl-cc/runtime:rt-heap-satb-queue heap))))
 
+(deftest gc-write-barrier-satb-snapshot-major-gc-concurrent-black-object
+  "During :major-gc-concurrent, overwriting a heap pointer in a black object snapshots old value."
+  (let* ((heap (%make-wb-heap))
+         (obj 32)
+         (slot 1))
+    (%wb-write-marked-header heap obj 3 7)
+    (cl-cc/runtime:rt-heap-set heap (+ obj slot) 5)
+    (setf (cl-cc/runtime:rt-heap-gc-state heap) :major-gc-concurrent)
+    (cl-cc/runtime:rt-gc-write-barrier heap obj slot 42)
+    (assert-true (member 5 (cl-cc/runtime:rt-heap-satb-queue heap)))))
+
 (deftest gc-write-barrier-no-satb-old-value-not-heap-addr
   "During :major-gc, old value that is not a heap address is not snapshotted."
   (let* ((heap (%make-wb-heap))

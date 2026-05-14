@@ -147,20 +147,24 @@
         nil)))
 
 (defun %opt-roadmap-api-entry-fbound-p (entry)
-  "Return T when ENTRY names a callable API evidence target.
+  "Return T when ENTRY names a checkable API evidence target.
 ENTRY may be a symbol in the current image or a cons of
-(package-name-string . function-name-string) for external packages."
+(package-name-string . symbol-name-string) for external packages.
+Evidence anchors include functions and special variables."
   (cond
     ((symbolp entry)
-     (fboundp entry))
+     (or (fboundp entry)
+         (boundp entry)))
     ((and (consp entry)
-          (stringp (car entry))
-          (stringp (cdr entry)))
-     (let* ((pkg (find-package (car entry)))
-            (sym (and pkg (find-symbol (cdr entry) pkg))))
-       (and sym (fboundp sym))))
+           (stringp (car entry))
+           (stringp (cdr entry)))
+      (let* ((pkg (find-package (car entry)))
+             (sym (and pkg (find-symbol (cdr entry) pkg))))
+        (and sym
+             (or (fboundp sym)
+                 (boundp sym)))))
     (t
-     nil)))
+      nil)))
 
 (defun optimize-roadmap-evidence-well-formed-p (evidence)
   "Return T when EVIDENCE is a checkable roadmap implementation record."
@@ -251,6 +255,31 @@ ENTRY may be a symbol in the current image or a cons of
       opt-pass-code-sinking opt-pass-tail-duplication
       opt-pass-branch-correlation)
      (optimizer-roadmap-code-motion-evidence))
+    (287 287
+     ("packages/optimize/src/optimizer-licm.lisp"
+      "packages/optimize/src/optimizer-pipeline.lisp"
+      "packages/optimize/tests/optimizer-licm-tests.lisp"
+      "packages/optimize/tests/optimizer-cfg-inline-tests.lisp"
+      "packages/optimize/tests/optimizer-dataflow-passes-tests.lisp")
+     (opt-pass-licm opt-inst-loop-invariant-p opt-licm-emit-with-preheaders)
+     (constant-hoist-moves-loop-constant-to-preheader
+      licm-does-not-hoist-loop-defined-value
+      licm-pass-returns-straight-line-code-unchanged
+      licm-collect-invariants-finds-pure-const))
+    (261 261
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (make-opt-profile-data opt-profile-record-value
+      opt-profile-top-values opt-profile-value-range)
+     (optimizer-roadmap-value-profiling-top-k-and-range-behavior))
+    (283 283
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (make-opt-speculation-log opt-record-speculation-failure
+      opt-speculation-failed-p opt-speculation-allowed-p
+      opt-clear-speculation-log opt-save-speculation-log
+      opt-load-speculation-log)
+     (optimizer-roadmap-speculation-log-gating-and-persistence-behavior))
     (223 305
      ("packages/optimize/src/optimizer-pipeline.lisp"
       "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -267,9 +296,30 @@ ENTRY may be a symbol in the current image or a cons of
       "packages/vm/src/vm-dispatch.lisp"
       "packages/optimize/tests/optimizer-pipeline-tests.lisp")
      (opt-materialize-deopt-state opt-shape-slot-offset
-      opt-stack-map-live-root-p opt-merge-module-summaries
-      opt-sea-node-schedulable-p)
-     (optimize-roadmap-support-helpers-have-conservative-behavior))
+       opt-stack-map-live-root-p opt-merge-module-summaries
+       opt-sea-node-schedulable-p)
+      (optimize-roadmap-support-helpers-have-conservative-behavior))
+    (547 547
+     ("packages/optimize/src/effects.lisp"
+      "packages/mir/src/mir.lisp"
+      "packages/emit/tests/mir-tests.lisp")
+     (("CL-CC/MIR" . "MIR-INST-EFFECT-KIND")
+      ("CL-CC/MIR" . "MIR-INST-PURE-P")
+      ("CL-CC/MIR" . "MIR-INST-DCE-ELIGIBLE-P"))
+     (mir-op-effect-kind-classifies-core-ops
+      mir-inst-effect-kind-allows-meta-override
+      mir-inst-effect-kind-rejects-malformed-meta))
+    (548 548
+     ("packages/mir/src/mir.lisp"
+      "packages/emit/tests/mir-tests.lisp"
+      "packages/type/src/checker.lisp"
+      "packages/type/src/inference.lisp")
+     (("CL-CC/MIR" . "MIR-PROPAGATE-TYPES")
+      ("CL-CC/MIR" . "MIR-INFER-INST-TYPE")
+      ("CL-CC/MIR" . "MIR-JOIN-TYPES"))
+     (mir-propagate-types-updates-instructions-and-values
+      mir-propagate-types-joins-phi-input-types-conservatively
+      mir-propagate-types-reaches-fixed-point-for-late-producers))
     (530 nil
      ("packages/optimize/src/optimizer-pipeline.lisp"
       "packages/optimize/src/ssa.lisp"
@@ -304,4 +354,3 @@ currently carries its implementation evidence."
                   '(optimize-roadmap-doc-features
                     optimize-roadmap-register-doc-evidence)
                   '(optimize-roadmap-evidence-covers-doc-fr-list))))))
-

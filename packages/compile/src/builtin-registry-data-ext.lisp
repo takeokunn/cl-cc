@@ -106,10 +106,11 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
 
 (defparameter *builtin-binary-custom-entries*
   '((nth       make-vm-nth       :index     :list)
-    (nthcdr    make-vm-nthcdr    :index     :list)
-    (member    make-vm-member    :item      :list)
-    (cons      make-vm-cons      :car-src   :cdr-src)
-    (append    make-vm-append    :src1      :src2)
+     (nthcdr    make-vm-nthcdr    :index     :list)
+     (member    make-vm-member    :item      :list)
+     (cons      make-vm-cons      :car-src   :cdr-src)
+     (hash-cons make-vm-hash-cons :car-src   :cdr-src)
+     (append    make-vm-append    :src1      :src2)
     (assoc     make-vm-assoc    :key       :alist)
     (char      make-vm-char     :string    :index)
     (bit       make-vm-bit-access :arr     :idx)

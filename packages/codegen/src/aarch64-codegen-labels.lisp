@@ -49,6 +49,21 @@
     (setf (gethash 'vm-integer-sub ht) 4)   ; encode-sub
     (setf (gethash 'vm-mul ht) 4)           ; encode-mul
     (setf (gethash 'vm-integer-mul ht) 4)   ; encode-mul
+    ;; Checked arithmetic (FR-303): flag-setting ALU + B.cond + BRK
+    (setf (gethash 'vm-add-checked ht) 12)  ; ADDS + B.cond VC + BRK (3 instrs)
+    (setf (gethash 'vm-sub-checked ht) 12)  ; SUBS + B.cond VC + BRK (3 instrs)
+    (setf (gethash 'vm-mul-checked ht) 24)  ; MUL + SMULH + ASR + CMP + B.cond + BRK (6 instrs)
+    (setf (gethash 'vm-integer-mul-high-u ht) 4) ; encode-umulh
+    (setf (gethash 'vm-integer-mul-high-s ht) 4) ; encode-smulh
+    (setf (gethash 'vm-sqrt ht) 4)          ; encode-fsqrt
+    (setf (gethash 'vm-sin-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-cos-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-exp-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-log-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-tan-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-asin-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-acos-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-atan-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
     (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-select ht) 8)        ; encode-cmp + encode-csel

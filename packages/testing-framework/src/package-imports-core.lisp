@@ -128,6 +128,7 @@
           cl-cc:make-vm-lt cl-cc:make-vm-gt cl-cc:make-vm-le cl-cc:make-vm-ge
           cl-cc:make-vm-null-p cl-cc:make-vm-cons-p cl-cc:make-vm-number-p
           cl-cc:make-vm-set-global cl-cc:make-vm-get-global
+          cl-cc:vm-set-global-p cl-cc:vm-get-global-p
           cl-cc:make-vm-not cl-cc:make-vm-lognot
           cl-cc:make-vm-ash cl-cc:make-vm-logand cl-cc:make-vm-logior
           cl-cc:make-vm-logxor cl-cc:make-vm-logeqv cl-cc:make-vm-logtest

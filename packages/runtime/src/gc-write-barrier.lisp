@@ -30,7 +30,7 @@
   (let ((slot-addr (+ obj-addr slot-offset))
         (state     (rt-heap-gc-state heap)))
     ;; SATB snapshot: during major GC, preserve old pointer before overwrite
-    (when (eq state :major-gc)
+    (when (member state '(:major-gc :major-gc-concurrent) :test #'eq)
       (let ((old-val (rt-heap-ref heap slot-addr))
             (h       (rt-heap-object-header heap obj-addr)))
         (when (and (integerp h)

@@ -6,13 +6,18 @@
 #-cl-cc-self-hosting
 (export
  '(make-vm-instruction
-   make-vm-abs
-   make-vm-acons
-   make-vm-add
-   make-vm-alpha-char-p
+    make-vm-abs
+    make-vm-acons
+    make-vm-add
+    make-vm-add-checked
+    make-vm-sub-checked
+    make-vm-mul-checked
+    make-vm-alpha-char-p
    make-vm-integer-add
    make-vm-integer-sub
    make-vm-integer-mul
+   make-vm-integer-mul-high-u
+   make-vm-integer-mul-high-s
    make-vm-float-add
    make-vm-float-sub
    make-vm-float-mul
@@ -72,9 +77,10 @@
    make-vm-coerce-to-string
    make-vm-coerce-to-vector
    make-vm-clear-values
-   make-vm-concatenate
-   make-vm-cons
-   make-vm-cons-p
+    make-vm-concatenate
+    make-vm-cons
+    make-vm-hash-cons
+    make-vm-cons-p
    make-vm-const
    make-vm-complex
    make-vm-conjugate

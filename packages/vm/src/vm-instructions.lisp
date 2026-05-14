@@ -37,6 +37,26 @@
 (define-vm-instruction vm-integer-mul (vm-mul)
   (:sexp-tag :imul)
   (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-integer-mul-high-u (vm-mul)
+  (:sexp-tag :umulh)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-integer-mul-high-s (vm-mul)
+  (:sexp-tag :smulh)
+  (:sexp-slots dst lhs rhs))
+
+;;; Checked arithmetic instructions (FR-303 overflow detection).
+;;; These behave identically to their unchecked counterparts in the VM
+;;; interpreter (CL arithmetic auto-promotes to bignum), but signal the
+;;; native codegen to emit hardware overflow detection + trap.
+(define-vm-instruction vm-add-checked (vm-binop)
+  (:sexp-tag :add-checked)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-sub-checked (vm-binop)
+  (:sexp-tag :sub-checked)
+  (:sexp-slots dst lhs rhs))
+(define-vm-instruction vm-mul-checked (vm-binop)
+  (:sexp-tag :mul-checked)
+  (:sexp-slots dst lhs rhs))
 
 (define-vm-instruction vm-float-add (vm-add)
   (:sexp-tag :fadd)

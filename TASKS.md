@@ -19,22 +19,22 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: `(copy-structure structure-object)` — 全スロットをシャローコピーした新インスタンスを返す
 
-- [ ] **FR-585** `handler-case :no-error` 節
+- [x] **FR-585** `handler-case :no-error` 節
   - 詳細: `docs/ansi-cl-lang.md` の FR-585 セクションを参照
   - 対象: `packages/expand/src/macros-stdlib.lisp`
   - 内容: フォームがシグナルなしに完了した場合のみ `success-body` を実行する `:no-error` 節サポート
 
-- [ ] **FR-548** `fdefinition` / `(setf fdefinition)`
+- [x] **FR-548** `fdefinition` / `(setf fdefinition)`
   - 詳細: `docs/ansi-cl-lang.md` の FR-548 セクションを参照
   - 対象: `packages/vm/src/vm.lisp`, `packages/compile/src/builtin-registry.lisp`
   - 内容: `(fdefinition name)` — 関数名からオブジェクト取得。`(setf (fdefinition name) fn)` — 設定
 
-- [ ] **FR-552** `find-class` / `(setf find-class)`
+- [x] **FR-552** `find-class` / `(setf find-class)`
   - 詳細: `docs/ansi-cl-lang.md` の FR-552 セクションを参照
   - 対象: `packages/vm/src/vm-clos.lisp`
   - 内容: `(find-class name &optional errorp environment)` — クラスオブジェクト取得・登録
 
-- [ ] **FR-545** `defstruct :include` 継承バグ修正
+- [x] **FR-545** `defstruct :include` 継承バグ修正
   - 詳細: `docs/ansi-cl-lang.md` の FR-545 セクションを参照
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: `:include` 継承時に子スロットアクセサが正しく生成されるよう修正 (ANSI CL 8.1.5.5)
@@ -59,22 +59,22 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/vm/src/strings.lisp`
   - 内容: `:start`/`:end` パラメータを受け取り部分文字列変換。`nstring-upcase`/`nstring-downcase` も同様
 
-- [ ] **FR-440** `sort`/`stable-sort :key` サポート
+- [x] **FR-440** `sort`/`stable-sort :key` サポート
   - 詳細: `docs/runtime-core.md` の FR-440 セクションを参照
-  - 対象: `packages/expand/src/macros-stdlib.lisp`
+  - 対象: `packages/expand/src/macros-list-utils.lisp`
   - 内容: `:key` 引数を受け付け、比較時に各要素に key 関数を適用
 
-- [ ] **FR-444** `copy-seq` ベクタ対応
+- [x] **FR-444** `copy-seq` ベクタ対応
   - 詳細: `docs/runtime-core.md` の FR-444 セクションを参照
   - 対象: `packages/expand/src/macros-sequence.lisp`
-  - 内容: 入力型に応じてリストは `copy-list`、ベクタはベクタコピー
+  - 内容: 入力型に応じてリストは `copy-list`、ベクタは `subseq` によるベクタコピー
 
-- [ ] **FR-445** `fill`/`replace` `:start/:end`
+- [x] **FR-445** `fill`/`replace` `:start/:end`
   - 詳細: `docs/runtime-core.md` の FR-445 セクションを参照
   - 対象: `packages/expand/src/macros-sequence.lisp`
   - 内容: `:start`/`:end` キーワードの処理で部分範囲への操作を可能にする
 
-- [ ] **FR-446** `defstruct :copier` オプション
+- [x] **FR-446** `defstruct :copier` オプション
   - 詳細: `docs/runtime-core.md` の FR-446 セクションを参照
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: デフォルトで `copy-<name>` 関数を生成。`:copier nil` で抑制

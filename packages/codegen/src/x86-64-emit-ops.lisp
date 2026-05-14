@@ -3,7 +3,8 @@
 ;;;; Emitter macro DSL and emit-vm-* functions for:
 ;;;;   Macro DSL: define-binary-alu-emitter, define-cmov-emitter, define-cmp-emitter,
 ;;;;              define-unary-mov-emitter, define-float-binary-emitter
-;;;;   const, move, float arith, int arith (add/sub/mul), div/rem, floor-div/mod
+;;;;   const, move, float arith, int arith (add/sub/mul/mul-high), div/rem,
+;;;;   floor-div/mod
 ;;;;   comparisons: lt/gt/le/ge/num-eq/eq
 ;;;;   unary: neg, not, lognot, logcount, integer-length, bswap
 ;;;;   inc/dec, abs, ash, rotate, min/max, select
@@ -65,6 +66,14 @@
        (emit-movsd-xx dst lhs stream)
        (,asm-op dst rhs stream))))
 
+(defmacro define-float-unary-emitter (fn-name asm-op)
+  "Define an XMM unary emitter: MOVSD dst←src, then ASM-OP dst←dst."
+  `(defun ,fn-name (inst stream)
+     (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+           (src (vm-reg-to-xmm (vm-src inst))))
+       (emit-movsd-xx dst src stream)
+       (,asm-op dst dst stream))))
+
 (defun emit-vm-const (inst stream)
   "Emit code for VM CONST instruction."
   (let ((value (vm-value inst)))
@@ -93,10 +102,107 @@
 (define-float-binary-emitter emit-vm-float-sub emit-subsd-xx)
 (define-float-binary-emitter emit-vm-float-mul emit-mulsd-xx)
 (define-float-binary-emitter emit-vm-float-div emit-divsd-xx)
+(define-float-unary-emitter emit-vm-sqrt emit-sqrtsd-xx)
+
+;;; Libm-call transcendental emitters (FR-286)
+;;;
+;;; sin/cos/exp/log have no single-instruction x86-64 encoding.
+;;; Emit an indirect CALL through R11 (scratch, non-allocatable) to the
+;;; host libm function.  System V ABI: arg in XMM0, return in XMM0.
+;;;
+;;; Encoding per call (21 bytes):
+;;;   MOVSD XMM0, src       ; 4 bytes  (F2 0F 10 ModR/M)
+;;;   MOV   R11, imm64      ; 10 bytes (REX.W B8+rd + 8-byte addr)
+;;;   CALL  R11             ; 3 bytes  (REX.W FF /2)
+;;;   MOVSD dst, XMM0       ; 4 bytes
+
+(defun %libm-function-address (name)
+  "Return the absolute address of C library function NAME as a 64-bit integer."
+  (sb-sys:sap-int
+   (sb-alien:alien-sap
+    (sb-alien:extern-alien name (function double-float double-float)))))
+
+(defmacro define-float-libm-unary-emitter (fn-name libm-fn)
+  "Define an XMM unary emitter that calls libm function LIBM-FN via indirect CALL.
+   Pattern: MOVSD XMM0,src + MOV R11,addr + CALL R11 + MOVSD dst,XMM0 (21 bytes).
+   R11 is a scratch register (not allocatable).  XMM0 is the SysV ABI float arg/ret."
+  `(defun ,fn-name (inst stream)
+     (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+           (src (vm-reg-to-xmm (vm-src inst))))
+       (emit-movsd-xx +xmm0+ src stream)
+       (emit-mov-ri64 +r11+ (load-time-value (%libm-function-address ,libm-fn)) stream)
+       (emit-call-r64 +r11+ stream)
+       (emit-movsd-xx dst +xmm0+ stream))))
+
+(define-float-libm-unary-emitter emit-vm-sin "sin")
+(define-float-libm-unary-emitter emit-vm-cos "cos")
+(define-float-libm-unary-emitter emit-vm-exp "exp")
+(define-float-libm-unary-emitter emit-vm-log "log")
+(define-float-libm-unary-emitter emit-vm-tan "tan")
+(define-float-libm-unary-emitter emit-vm-asin "asin")
+(define-float-libm-unary-emitter emit-vm-acos "acos")
+(define-float-libm-unary-emitter emit-vm-atan "atan")
 
 (define-binary-alu-emitter emit-vm-add    emit-add-rr64  "vm-add: dst = lhs + rhs.")
 (define-binary-alu-emitter emit-vm-sub    emit-sub-rr64  "vm-sub: dst = lhs - rhs.")
 (define-binary-alu-emitter emit-vm-mul    emit-imul-rr64 "vm-mul: dst = lhs * rhs.")
+
+;;; Checked arithmetic emitters (FR-303 overflow detection)
+;;;;
+;;;; Pattern: MOV dst,lhs + ALU dst,rhs + JO +2 (skip UD2) + UD2 (trap)
+;;;; On overflow, execution falls into UD2 which signals an error.
+;;;; JO rel32 is 6 bytes; UD2 is 2 bytes; JO offset = +2 (skip past UD2).
+;;;
+;;; vm-add-checked: 3 (MOV) + 3 (ADD) + 6 (JO) + 2 (UD2) = 14 bytes
+;;; vm-sub-checked: 3 (MOV) + 3 (SUB) + 6 (JO) + 2 (UD2) = 14 bytes
+;;; vm-mul-checked: 3 (MOV) + 4 (IMUL) + 6 (JO) + 2 (UD2) = 15 bytes
+
+(defun emit-vm-add-checked (inst stream)
+  "vm-add-checked: dst = lhs + rhs with hardware overflow trap (FR-303)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-add-rr64 dst rhs stream)
+    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
+    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2 (undefined opcode trap)
+
+(defun emit-vm-sub-checked (inst stream)
+  "vm-sub-checked: dst = lhs - rhs with hardware overflow trap (FR-303)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-sub-rr64 dst rhs stream)
+    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
+    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2
+
+(defun emit-vm-mul-checked (inst stream)
+  "vm-mul-checked: dst = lhs * rhs with hardware overflow trap (FR-303).
+   IMUL sets OF on overflow when the full result does not fit in the destination."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-imul-rr64 dst rhs stream)
+    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
+    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2
+
+(defun emit-vm-integer-mul-high-u (inst stream)
+  "vm-integer-mul-high-u: dst = unsigned high 64 bits of lhs*rhs."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mul-high-sequence lhs rhs nil stream)
+    (emit-mov-rr64 dst +r11+ stream)))
+
+(defun emit-vm-integer-mul-high-s (inst stream)
+  "vm-integer-mul-high-s: dst = signed high 64 bits of lhs*rhs."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mul-high-sequence lhs rhs t stream)
+    (emit-mov-rr64 dst +r11+ stream)))
 
 (defun emit-vm-truncate (inst stream)
   "vm-truncate: dst = truncate(lhs / rhs)  -- quotient, truncate-toward-zero."

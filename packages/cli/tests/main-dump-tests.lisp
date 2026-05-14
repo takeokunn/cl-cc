@@ -103,6 +103,7 @@
     (assert-equal '(:trace-json-stream :trace-stream
                     :print-pass-stats t
                     :pass-pipeline t
+                    :inline-threshold-scale 1
                     :print-pass-timings t
                     :print-opt-remarks t
                     :opt-remarks-mode :missed)
@@ -115,3 +116,86 @@
         (assert-false t))
     (error (e)
       (assert-true (search "Unknown IR phase" (princ-to-string e))))))
+
+;;; FR-463 regression: %dump-ir-phase dispatches all 6 recognized IR phases
+;;; and produces non-empty output for a minimal compilation-result.
+
+(defun %make-minimal-compilation-result (&key (source-location-p t))
+  "Build a compilation-result with enough fields populated that every IR phase
+dump function can write at least one line without erroring."
+  (let ((ast (cl-cc:make-ast-int :value 42
+                                 :source-file (and source-location-p "test.lisp")
+                                 :source-line (and source-location-p 1)
+                                 :source-column (and source-location-p 0))))
+    (cl-cc:make-compilation-result
+     :program (cl-cc:make-vm-program
+               :instructions (list (cl-cc:make-vm-const :dst :r0 :value 42)))
+     :assembly "mov rax, 42"
+     :globals (make-hash-table :test #'equal)
+     :type nil
+     :type-env nil
+     :cps '(lambda (k) (funcall k 42))
+     :ast ast
+     :vm-instructions (list (cl-cc:make-vm-const :dst :r0 :value 42))
+     :optimized-instructions (list (cl-cc:make-vm-const :dst :r0 :value 42)))))
+
+(deftest-each cli-dump-ir-phase-dispatches-all-phases
+  "Each recognized IR phase keyword produces non-empty output via %dump-ir-phase."
+  :cases (("ast" :ast)
+          ("cps" :cps)
+          ("ssa" :ssa)
+          ("vm"  :vm)
+          ("opt" :opt)
+          ("asm" :asm))
+  (phase)
+  (let* ((result (%make-minimal-compilation-result))
+         (stream (make-string-output-stream)))
+    (cl-cc/cli::%dump-ir-phase phase result stream nil)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (> (length output) 0)))))
+
+(deftest cli-dump-ir-phase-annotate-source-writes-comment-for-ast
+  "With annotate-source T, the AST phase emits a source location comment line."
+  (let* ((result (%make-minimal-compilation-result))
+         (stream (make-string-output-stream)))
+    (cl-cc/cli::%dump-ir-phase :ast result stream t)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (search "; source:" output)))))
+
+(deftest-each cli-dump-ir-phase-annotate-source-writes-comment-for-vm-and-opt
+  "With annotate-source T, VM and OPT phases emit source location comment lines."
+  :cases (("vm" :vm)
+          ("opt" :opt))
+  (phase)
+  (let* ((result (%make-minimal-compilation-result))
+         (stream (make-string-output-stream)))
+    (cl-cc/cli::%dump-ir-phase phase result stream t)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (search "; source:" output)))))
+
+(deftest cli-dump-ir-phase-asm-output-is-ansi-colored
+  "ASM phase wraps assembly output in ANSI opcode color and reset sequences."
+  (let* ((result (%make-minimal-compilation-result))
+         (stream (make-string-output-stream)))
+    (cl-cc/cli::%dump-ir-phase :asm result stream nil)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (search cl-cc/cli::+ansi-opcode+ output))
+      (assert-true (search cl-cc/cli::+ansi-reset+ output)))))
+
+(deftest-each cli-dump-ir-phase-annotate-source-omits-comment-on-missing-location
+  "annotate-source T emits no source comment when the AST has no source location."
+  :cases (("ast" :ast)
+          ("vm"  :vm)
+          ("opt" :opt))
+  (phase)
+  (let* ((result (%make-minimal-compilation-result :source-location-p nil))
+         (stream (make-string-output-stream)))
+    (cl-cc/cli::%dump-ir-phase phase result stream t)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (> (length output) 0))
+      (assert-false (search "; source:" output)))))
+
+(deftest cli-dump-ir-phase-phase-table-covers-all-recognized-phases
+  "*ir-phase-dump-fns* covers every phase in *ir-phases*."
+  (dolist (phase cl-cc/cli::*ir-phases*)
+    (assert-true (cdr (assoc phase cl-cc/cli::*ir-phase-dump-fns*)))))

@@ -35,6 +35,7 @@
 (deftest-each cli-print-global-help
   "Global help text includes the command usage banner, shared flags, and version."
   :cases (("usage"       "Usage: cl-cc <command>")
+          ("debug"       "--debug")
           ("opt-remarks" "--opt-remarks <mode>")
           ("time-passes" "--time-passes")
           ("trace-json"  "--trace-json <file>")
@@ -65,6 +66,14 @@
                      (*error-output* s))
                  (cl-cc/cli::%print-command-help "run")))))
     (assert-true (search expected-str out))))
+
+(deftest cli-print-compile-help-includes-debug-flag
+  "Compile help text documents the --debug frame-pointer opt-out flag."
+  (let ((out (with-output-to-string (s)
+               (let ((*standard-output* s)
+                     (*error-output* s))
+                 (cl-cc/cli::%print-command-help "compile")))))
+    (assert-true (search "--debug" out))))
 
 (deftest cli-print-unknown-command-falls-back
   "Unknown command help prints an error and falls back to global help."

@@ -118,3 +118,50 @@
     (cl-cc/runtime:rt-gc-major-collect heap)
     (cl-cc/runtime:rt-gc-major-collect heap)
     (assert-= 2 (getf (cl-cc/runtime:rt-gc-stats heap) :major-gc-count))))
+
+(deftest gc-configure-concurrent-mode-updates-runtime-flags
+  "rt-gc-configure-concurrent-mode updates runtime concurrent-GC flags and surfaces them in stats."
+  (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 128)))
+    (cl-cc/runtime:rt-gc-configure-concurrent-mode
+     :enabled-p t
+     :write-barrier :satb
+     :stw-phases '(:initial-mark :final-remark)
+     :mutator-assist-p t)
+    (let ((stats (cl-cc/runtime:rt-gc-stats heap)))
+      (assert-true (getf stats :concurrent-gc-enabled-p))
+      (assert-eq :satb (getf stats :concurrent-gc-write-barrier))
+      (assert-equal '(:initial-mark :final-remark)
+                    (getf stats :concurrent-gc-stw-phases))
+      (assert-true (getf stats :concurrent-gc-mutator-assist-p)))))
+
+(deftest gc-major-collect-enters-concurrent-state-when-enabled
+  "Major GC enters concurrent state when concurrent mode is enabled and restores :normal on completion."
+  (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 128)))
+    (cl-cc/runtime:rt-gc-configure-concurrent-mode :enabled-p t)
+    (cl-cc/runtime:rt-gc-major-collect heap)
+    (assert-eq :normal (cl-cc/runtime:rt-heap-gc-state heap))
+    (assert-true (getf (cl-cc/runtime:rt-gc-stats heap) :concurrent-gc-enabled-p))
+    (cl-cc/runtime:rt-gc-configure-concurrent-mode :enabled-p nil)))
+
+(deftest gc-concurrent-assist-marks-satb-old-pointers-with-budget
+  "rt-gc-concurrent-assist marks queued old-space SATB pointers up to budget."
+  (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 128))
+         (old-base (cl-cc/runtime:rt-heap-old-base heap))
+         (a old-base)
+         (b (+ old-base 3)))
+    (cl-cc/runtime:rt-heap-set-header
+     heap a (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+    (cl-cc/runtime:rt-heap-set-header
+     heap b (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+    (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 6))
+    (setf (cl-cc/runtime:rt-heap-satb-queue heap) (list a b))
+    (cl-cc/runtime:rt-gc-configure-concurrent-mode
+     :enabled-p t
+     :mutator-assist-p t)
+    (setf (cl-cc/runtime:rt-heap-gc-state heap) :major-gc-concurrent)
+    (assert-= 1 (cl-cc/runtime:rt-gc-concurrent-assist heap :budget 1))
+    (assert-true
+     (or (cl-cc/runtime:header-marked-p (cl-cc/runtime:rt-heap-object-header heap a))
+         (cl-cc/runtime:header-marked-p (cl-cc/runtime:rt-heap-object-header heap b))))
+    (assert-= 1 (length (cl-cc/runtime:rt-heap-satb-queue heap)))
+    (cl-cc/runtime:rt-gc-configure-concurrent-mode :enabled-p nil)))

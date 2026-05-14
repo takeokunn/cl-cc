@@ -55,3 +55,38 @@ that would trip the expander during recursion."
   (form)
   (let ((result (assert-expansion-head form 'cl-cc/vm::%make-hash-table-with-test)))
     (assert-true result)))
+
+(deftest expander-format-literal-single-aesthetic-directive
+  "format nil with a literal ~A control expands to a direct string conversion."
+  (assert-equal '(princ-to-string value)
+                (cl-cc/expand:compiler-macroexpand-all
+                 '(format nil "~A" value))))
+
+(deftest expander-format-literal-supported-directives
+  "format nil parses supported literal directives without keeping runtime FORMAT."
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all
+                  '(format nil "x=~A n=~D~%~~" value count)))
+         (printed (format nil "~S" result)))
+    (assert-eq 'cl-cc/expand::string-concat (car result))
+    (assert-true (search "STRING-CONCAT" printed))
+    (assert-true (search "PRINC-TO-STRING" printed))
+    (assert-true (search "WRITE-TO-STRING" printed))
+    (assert-true (search "*PRINT-BASE*" printed))
+    (assert-true (search (string #\Newline) printed))
+    (assert-true (member "~" result :test #'equal))
+    (assert-false (search "MAKE-STRING-OUTPUT-STREAM" printed))))
+
+(deftest expander-format-literal-unsupported-directive-falls-back
+  "Unsupported literal directives preserve the existing string-stream FORMAT path."
+  (let* ((result (cl-cc/expand:compiler-macroexpand-all
+                  '(format nil "~S" value)))
+         (printed (format nil "~S" result)))
+    (assert-eq 'let (car result))
+    (assert-true (search "MAKE-STRING-OUTPUT-STREAM" printed))
+    (assert-true (search "FORMAT" printed))))
+
+(deftest expander-format-literal-extra-args-fall-back
+  "Extra arguments fall back so runtime FORMAT still evaluates ignored arguments."
+  (let ((result (cl-cc/expand:compiler-macroexpand-all
+                 '(format nil "literal" extra))))
+    (assert-eq 'let (car result))))

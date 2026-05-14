@@ -47,26 +47,29 @@
       (%expander-form 'defun pred-name (%expander-form 'obj) pred-body))))
 
 (defun %defstruct-typed-expansion-parts (model)
-  "Build ctor/accessor/predicate parts for typed defstruct expansion."
+  "Build ctor/accessor/predicate/copier parts for typed defstruct expansion."
   (let ((name        (getf model :name))
         (struct-type (getf model :struct-type))
         (ctor-name   (getf model :ctor-name))
         (boa-args    (getf model :boa-args))
         (all-slots   (getf model :all-slots))
         (conc-name   (getf model :conc-name))
-        (pred-name   (getf model :pred-name)))
+        (pred-name   (getf model :pred-name))
+        (copier-name (getf model :copier-name)))
     (let ((ctor-form      (when ctor-name
                             (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
           (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
           (pred-form      (when pred-name
-                            (%defstruct-typed-predicate pred-name name struct-type (length all-slots)))))
-      (%expander-form name ctor-form accessor-forms pred-form))))
+                            (%defstruct-typed-predicate pred-name name struct-type (length all-slots))))
+          (copier-form    (%defstruct-copier-form copier-name name all-slots struct-type)))
+      (%expander-form name ctor-form accessor-forms pred-form copier-form))))
 
-(defun %defstruct-typed-expansion-forms (name ctor-form accessor-forms pred-form)
+(defun %defstruct-typed-expansion-forms (name ctor-form accessor-forms pred-form copier-form)
   "Build the ordered PROGN tail forms for typed expansion."
-  (append (when ctor-form  (list ctor-form))
+  (append (when ctor-form   (list ctor-form))
           accessor-forms
-          (when pred-form  (list pred-form))
+          (when pred-form   (list pred-form))
+          (when copier-form (list copier-form))
           (list (%expander-form 'quote name))))
 
 (defun %defstruct-typed-expansion (model)
@@ -76,4 +79,5 @@
           (%defstruct-typed-expansion-forms (first parts)
                                             (second parts)
                                             (third parts)
-                                            (fourth parts)))))
+                                            (fourth parts)
+                                            (fifth parts)))))

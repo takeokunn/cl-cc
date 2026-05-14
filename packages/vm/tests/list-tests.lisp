@@ -133,6 +133,42 @@
           (assert-false (eq c1 c2))
           (assert-true  (eq c1 c2))))))
 
+(deftest vm-hash-cons-instruction-reuses-identical-flat-pairs
+  "vm-hash-cons exposes explicit hash-consing without changing vm-cons freshness."
+  (let ((s (make-test-vm)))
+    (cl-cc/vm::vm-clear-hash-cons-table)
+    (cl-cc:vm-reg-set s 1 'a)
+    (cl-cc:vm-reg-set s 2 'b)
+    (exec1 (cl-cc:make-vm-hash-cons :dst 0 :car-src 1 :cdr-src 2) s)
+    (exec1 (cl-cc:make-vm-hash-cons :dst 3 :car-src 1 :cdr-src 2) s)
+    (assert-true (eq (cl-cc:vm-reg-get s 0)
+                     (cl-cc:vm-reg-get s 3)))
+    (exec1 (cl-cc:make-vm-cons :dst 4 :car-src 1 :cdr-src 2) s)
+    (assert-false (eq (cl-cc:vm-reg-get s 0)
+                      (cl-cc:vm-reg-get s 4)))))
+
+(deftest vm-hash-cons-reuses-structurally-equivalent-nested-trees
+  "vm-hash-cons recursively canonicalizes nested cons trees."
+  (cl-cc/vm::vm-clear-hash-cons-table)
+  (let* ((left-1 (list 'a 'b))
+         (right-1 (list 'c 'd))
+         (left-2 (list 'a 'b))
+         (right-2 (list 'c 'd))
+         (t1 (cl-cc/vm::vm-hash-cons left-1 right-1))
+         (t2 (cl-cc/vm::vm-hash-cons left-2 right-2)))
+    (assert-true (eq t1 t2))
+    (assert-true (eq (car t1) (car t2)))
+    (assert-true (eq (cdr t1) (cdr t2)))))
+
+(deftest vm-hash-cons-cyclic-input-does-not-overflow
+  "vm-hash-cons handles cyclic inputs without recursion overflow."
+  (cl-cc/vm::vm-clear-hash-cons-table)
+  (let ((x (cons 'a nil)))
+    (setf (cdr x) x)
+    (let ((result (cl-cc/vm::vm-hash-cons x 'b)))
+      (assert-true (consp result))
+      (assert-eq 'b (cdr result)))))
+
 (deftest vm-extensible-sequence-builtins
   "The partial sequence protocol works for list and vector builtins."
   (assert-equal 'b (cl-cc/vm::vm-sequence-elt '(a b c) 1))
@@ -173,4 +209,3 @@
     (exec1 (cl-cc:make-vm-nth :dst 3 :index 2 :list 1) s)
     (assert-= 3 (cl-cc:vm-reg-get s 0))
     (assert-= 20 (cl-cc:vm-reg-get s 3))))
-

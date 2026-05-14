@@ -52,6 +52,7 @@
         (own-slots       (getf model :own-slots))
         (all-slots       (getf model :all-slots))
         (pred-name       (getf model :pred-name))
+        (copier-name     (getf model :copier-name))
         (print-fn        (getf model :print-fn))
         (print-fn-opt    (getf model :print-fn-opt))
         (derived-classes (getf model :derived-classes)))
@@ -66,12 +67,14 @@
                                                (%expander-form 'obj)
                                                (%expander-form 'typep 'obj
                                                                (%expander-form 'quote name)))))
+           (copier-form      (%defstruct-copier-form copier-name name all-slots nil))
            (print-form       (%defstruct-print-form name print-fn print-fn-opt))
            (derive-form      (%defstruct-derive-form name derived-classes)))
       (cons 'progn
             (append (list defclass-form)
                     (when ctor-form   (list ctor-form))
                     (when pred-form   (list pred-form))
+                    (when copier-form (list copier-form))
                     (when print-form  (list print-form))
                     (when derive-form (list derive-form))
                     (list (%expander-form 'quote name)))))))

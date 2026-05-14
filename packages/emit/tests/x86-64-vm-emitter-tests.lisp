@@ -49,11 +49,15 @@
           ("vm-rem"      (lambda (s) (cl-cc/codegen::emit-vm-rem
                            (cl-cc:make-vm-rem :dst :R0 :lhs :R1 :rhs :R2) s))     21)
           ("vm-ash"      (lambda (s) (cl-cc/codegen::emit-vm-ash
-                           (make-vm-ash :dst :R0 :lhs :R1 :rhs :R2) s))            24)
+                            (make-vm-ash :dst :R0 :lhs :R1 :rhs :R2) s))            24)
           ("vm-mul"      (lambda (s) (cl-cc/codegen::emit-vm-mul
-                           (cl-cc:make-vm-mul :dst :R0 :lhs :R1 :rhs :R2) s))      7)
+                            (cl-cc:make-vm-mul :dst :R0 :lhs :R1 :rhs :R2) s))      7)
+          ("vm-integer-mul-high-u" (lambda (s) (cl-cc/codegen::emit-vm-integer-mul-high-u
+                             (cl-cc:make-vm-integer-mul-high-u :dst :R0 :lhs :R1 :rhs :R2) s)) 19)
+          ("vm-integer-mul-high-s" (lambda (s) (cl-cc/codegen::emit-vm-integer-mul-high-s
+                             (cl-cc:make-vm-integer-mul-high-s :dst :R0 :lhs :R1 :rhs :R2) s)) 19)
           ("vm-div"      (lambda (s) (cl-cc/codegen::emit-vm-div
-                           (cl-cc:make-vm-div :dst :R0 :lhs :R1 :rhs :R2) s))     34)
+                            (cl-cc:make-vm-div :dst :R0 :lhs :R1 :rhs :R2) s))     34)
           ("vm-mod"      (lambda (s) (cl-cc/codegen::emit-vm-mod
                            (cl-cc:make-vm-mod :dst :R0 :lhs :R1 :rhs :R2) s))     37)
           ("vm-lt"       (lambda (s) (cl-cc/codegen::emit-vm-lt
@@ -82,6 +86,7 @@
 (deftest x86-instruction-size-table-coverage
   "Instruction size table has entries for all expected VM types."
   (dolist (tp '(cl-cc/vm::vm-const cl-cc/vm::vm-move cl-cc/vm::vm-add cl-cc/vm::vm-sub cl-cc/vm::vm-mul
+                cl-cc/vm::vm-integer-mul-high-u cl-cc/vm::vm-integer-mul-high-s
                 cl-cc/vm::vm-halt cl-cc/vm::vm-label cl-cc/vm::vm-jump cl-cc/vm::vm-jump-zero cl-cc/vm::vm-ret
                 cl-cc/vm::vm-lt cl-cc/vm::vm-gt cl-cc/vm::vm-le cl-cc/vm::vm-ge cl-cc/vm::vm-num-eq cl-cc/vm::vm-eq
                 cl-cc/vm::vm-neg cl-cc/vm::vm-not cl-cc/vm::vm-lognot cl-cc/vm::vm-inc cl-cc/vm::vm-dec

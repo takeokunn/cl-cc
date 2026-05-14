@@ -69,6 +69,54 @@
     (cl-cc/optimize::opt-pure-function-memo-put memo pures "impure" '() :result)
     (assert-= 0 (hash-table-count memo))))
 
+(deftest opt-memo-lru-evicts-oldest-entry-at-max-size
+  "When max-size is set, inserting over capacity evicts the least-recently-used key."
+  (let ((memo  (cl-cc/optimize::opt-make-pure-function-memo-table :max-size 2))
+        (pures (make-hash-table :test #'equal)))
+    (setf (gethash "fn" pures) t)
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(1) :a)
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(2) :b)
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(3) :c)
+    (assert-= 2 (hash-table-count memo))
+    (multiple-value-bind (v1 f1)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(1))
+      (declare (ignore v1))
+      (assert-false f1))
+    (multiple-value-bind (v2 f2)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(2))
+      (assert-true f2)
+      (assert-eq :b v2))
+    (multiple-value-bind (v3 f3)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(3))
+      (assert-true f3)
+      (assert-eq :c v3))))
+
+(deftest opt-memo-lru-touch-on-get-updates-recentness
+  "A successful memo get updates recency so a different key is evicted next."
+  (let ((memo  (cl-cc/optimize::opt-make-pure-function-memo-table :max-size 2))
+        (pures (make-hash-table :test #'equal)))
+    (setf (gethash "fn" pures) t)
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(1) :a)
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(2) :b)
+    ;; touch key(1): now key(2) becomes LRU
+    (multiple-value-bind (_v f)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(1))
+      (declare (ignore _v))
+      (assert-true f))
+    (cl-cc/optimize::opt-pure-function-memo-put memo pures "fn" '(3) :c)
+    (multiple-value-bind (_v f)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(2))
+      (declare (ignore _v))
+      (assert-false f))
+    (multiple-value-bind (v1 f1)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(1))
+      (assert-true f1)
+      (assert-eq :a v1))
+    (multiple-value-bind (v3 f3)
+        (cl-cc/optimize::opt-pure-function-memo-get memo pures "fn" '(3))
+      (assert-true f3)
+      (assert-eq :c v3))))
+
 ;;; ─── opt-function-body-instruction-tables ───────────────────────────────────
 
 (deftest opt-body-instruction-set-empty

@@ -9,6 +9,7 @@
 #-cl-cc-self-hosting
 (export
  '(vm-cons
+   vm-hash-cons
    vm-car
    vm-cdr
    vm-rplaca

@@ -33,6 +33,7 @@ Options:
   --lang lisp|php         Source language (auto-detect from file extension)
   --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source       Add source-location comments when available
+  --debug                 Keep frame pointers for native compile debugging
   --stdlib                Prepend standard library (run/eval only)
   --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
   --verbose               Show compilation details on stderr
@@ -40,6 +41,8 @@ Options:
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --pgo-generate <file>   Write lightweight optimizer profile data
+  --pgo-use <file>        Load optimizer profile data (speed/policy hint)
   --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
@@ -62,8 +65,10 @@ Options:
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
-  --trace-json <file>     Write Chrome trace JSON for optimizer passes
-  --flamegraph <file>     Write a sampled VM flame graph SVG
+   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+   --pgo-generate <file>   Write lightweight optimizer profile data
+   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")
@@ -77,13 +82,16 @@ Options:
   --lang lisp|php       Source language (auto-detect from .php extension)
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source     Add source-location comments when available
+  --debug               Keep frame pointers for native compile debugging
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose             Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
-  --trace-json <file>     Write Chrome trace JSON for optimizer passes
-  --flamegraph <file>     Write a sampled VM flame graph SVG
+   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+   --pgo-generate <file>   Write lightweight optimizer profile data
+   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")
@@ -98,8 +106,10 @@ Options:
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
-  --trace-json <file>     Write Chrome trace JSON for optimizer passes
-  --flamegraph <file>     Write a sampled VM flame graph SVG
+   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+   --pgo-generate <file>   Write lightweight optimizer profile data
+   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")

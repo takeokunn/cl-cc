@@ -1173,18 +1173,20 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 #### FR-547: Effect System in IR (IRエフェクトシステム) 🔶
 
 - **対象**: `packages/optimize/src/effects.lisp`, `packages/mir/src/mir.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: `effects.lisp` に命令別副作用分類（`inst-effects`）が存在。しかし MIR/CPS IR ノードへのエフェクト注釈なし
+- **現状**: `effects.lisp` に命令別副作用分類が存在し、`packages/mir/src/mir.lisp` に MIR op → effect-kind 分類と `miri-meta` の `:effect-kind` override を追加済み。MIR `:div` / `:mod` は raise 可能命令として `:control` 扱いにして未使用DCE対象から外している。codegen/CPS ノード全体への注釈伝播は要継続
 - **内容**: 各 IR 命令に `{read-heap, write-heap, alloc, io, raise}` のエフェクトセットを付与。エフェクトベースのコードモーション判定（純粋命令のみ hoist/sink）。エフェクト推論（関数シグネチャにエフェクトを伝播）。Koka / OCaml 5 の effect inference に相当
 - **根拠**: エフェクト情報で最適化の保守性を排除。現行 `opt-inst-pure-p` が未完全な純粋性チェックをしているが、エフェクトシステムで完全化
 - **難易度**: Hard
+- **関連実装**: `packages/mir/src/mir.lisp` に `mir-op-effect-kind` / `mir-inst-effect-kind` / `mir-inst-pure-p` / `mir-inst-dce-eligible-p` を追加し、`packages/emit/tests/mir-tests.lisp` で純粋演算・raise 可能算術・load/store・alloc・control・call、metadata override、不正metadata fallback を検証する。
 
 #### FR-548: Typed SSA / Bidirectional Type Checking in IR (型付きSSA・双方向型検査) 🔶
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/type/src/checker.lisp`
-- **現状**: MIR 命令に型注釈なし。型チェック（`checker.lisp`）は AST レベルで実行され IR に伝播しない
+- **現状**: MIR value/instruction の `type` slot を使い、`mir-propagate-types` で `:const` / 算術 / 比較 / `:phi` の保守的な固定点型伝播を追加済み。型チェック（`checker.lisp`）からの双方向検査接続は要継続
 - **内容**: MIR 命令の各引数と結果に ML 風型を付与。Phi 命令には合流型（join type）を付与。型伝播で SSA use-def 鎖に沿って型情報を伝播。双方向型検査（synthesis mode + checking mode）を `check/synth` モードで実装。不要な型チェック命令（`vm-integer-p` 等）を型証明で消去
 - **根拠**: LLVM typed IR / Typed Assembly Language (TAL)。型情報を IR に保持することで型ベース最適化の精度向上
 - **難易度**: Hard
+- **関連実装**: `packages/mir/src/mir.lisp` に `mir-operand-type` / `mir-join-types` / `mir-infer-inst-type` / `mir-propagate-inst-type` / `mir-propagate-types` を追加し、`packages/emit/tests/mir-tests.lisp` で直線ブロックの算術・比較型伝播、phi join の保守的挙動、後続producerによりphi型が更新される固定点伝播を検証する。
 
 #### FR-549: Multi-Level IR / Progressive Lowering (マルチレベルIR・段階的降下) ✅
 
@@ -1389,11 +1391,13 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 57 — プロファイル高度化（一部実装・要継続）
 
-#### FR-261: Value Profiling (値プロファイリング) 🔶
+#### FR-261: Value Profiling (値プロファイリング) ✅
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
-- **現状**: FR-058（Type Feedback PGO）は型頻度カウンタのみ。実際の値（定数、範囲）の収集なし。FR-224（Sampling Profiler）はPC位置のみ
-- **内容**: IC hit時に型だけでなく実際の値のヒストグラムを記録。頻出定数→定数畳み込み、値範囲→範囲解析（FR-038）にフィードバック。テーブルサイズ上限付きTop-K値記録
+- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`
+- **現状**: `opt-profile-data` が site ごとの値ヒストグラム、`value-limit` による bounded Top-K、numeric `opt-profile-value-range` を保持する conservative helper layer になった
+- **内容**: `opt-profile-record-value` は site 単位で頻出値を保持し、`opt-profile-top-values` で頻度順に参照できる。numeric 値は pruning と分離して min/max を蓄積し、定数特殊化や範囲解析へ受け渡せる
+- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-profile-record-value` / `opt-profile-top-values` / `opt-profile-value-range`
+- **検証**: `packages/optimize/tests/optimizer-roadmap-backend-tests.lisp` の `optimizer-roadmap-value-profiling-top-k-and-range-behavior`
 - **根拠**: V8 value profiling / HotSpot -XX:+ProfileReturnOnly。型プロファイリングの精密化
 - **難易度**: Medium
 
@@ -1477,11 +1481,13 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: V8 deopt inside loop / HotSpot uncommon_trap in compiled loop。ループ内の型仮定を安全に保護
 - **難易度**: Hard
 
-#### FR-283: Speculation Log (投機ログ) 🔶
+#### FR-283: Speculation Log (投機ログ) ✅
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/vm/src/vm.lisp`
-- **現状**: 型ガード（FR-232）の失敗記録なし。同一ガードが毎回コンパイル時に同じ投機を行い、実行時に何度でも失敗し続ける可能性がある
-- **内容**: `*speculation-log*` — call-site IDをキーとして「この投機は過去に失敗した」フラグを保持するグローバルテーブル。再コンパイル時にログを参照し、失敗実績のある投機は採用しない。ログはプロセス間で `.prof` ファイルに永続化可能
+- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`
+- **現状**: `*opt-speculation-log*` が process-global default log として動作し、`opt-speculation-allowed-p` / `opt-clear-speculation-log` / `opt-save-speculation-log` / `opt-load-speculation-log` で gating と `.prof` 永続化を扱える
+- **内容**: 失敗実績は既存の `opt-record-speculation-failure` と `opt-speculation-failed-p` で更新・参照し、再コンパイル側は allowed predicate で同一投機を抑制できる。保存形式は単純 S 式で、プロセス間 replay に使える
+- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `*opt-speculation-log*` / `opt-speculation-allowed-p` / `opt-save-speculation-log` / `opt-load-speculation-log`
+- **検証**: `packages/optimize/tests/optimizer-roadmap-backend-tests.lisp` の `optimizer-roadmap-speculation-log-gating-and-persistence-behavior`
 - **根拠**: GraalVM SpeculationLog / HotSpot replay compile。同一の有害な投機を繰り返すコンパイル・デコンパイルループ（deopt storm）を防ぐ
 - **難易度**: Medium
 
@@ -1517,13 +1523,16 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 62 — ループ最適化（一部実装・要継続）
 
-#### FR-287: Loop Invariant Code Motion (LICM — ループ不変コード移動) 🔶
+#### FR-287: Loop Invariant Code Motion (LICM — ループ不変コード移動) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/cfg.lisp`
-- **現状**: 最適化パスはフラット命令列に対して動作。CFGループ構造を利用したループ外ホイスティングなし
-- **内容**: ループ検出（back-edge + dominator tree）→ループ不変命令の検出（全オペランドがループ外で定義）→プリヘッダブロックへのホイスト。副作用のある命令（ヒープ書き込み・IO）はホイスト禁止。エイリアス解析（FR-030）と連携して副作用を精密に判定
+- **現状**: `packages/optimize/src/optimizer-licm.lisp` に CFG ベースの `opt-pass-licm` を実装済み。
+- **内容**: ループ検出（back-edge + dominator tree）→ループ不変命令の検出（全オペランドがループ外で定義）→プリヘッダブロックへのホイスト。副作用のある命令（ヒープ書き込み・IO）はホイスト禁止。
 - **根拠**: 全主要コンパイラの基本最適化。`(loop for i from 0 to n sum (length fixed-list))` で `length`計算をループ外に移動
 - **難易度**: Medium
+
+- **関連実装**: `opt-pass-licm` は `cfg-build` / `cfg-compute-dominators` / `cfg-compute-loop-depths` で自然ループを検出し、`opt-inst-loop-invariant-p` で純粋かつループ外定義のみを読む命令を選別する。`opt-licm-emit-with-preheaders` が preheader を挿入し、invariant 命令をループヘッダ前へ移動する。
+- **検証**: `optimizer-cfg-inline-tests.lisp` の `constant-hoist-moves-loop-constant-to-preheader`、`optimizer-dataflow-passes-tests.lisp` の `licm-does-not-hoist-loop-defined-value`、`optimizer-licm-tests.lisp` の LICM helper/entry tests。
 
 #### FR-288: Loop Unrolling (ループ展開) 🔶
 

@@ -26,6 +26,16 @@
       (assert-= 42 (aref arr 0))
       (assert-= 42 (aref arr 2)))))
 
+(deftest vm-array-make-with-element-type-character-uses-character-default
+  "vm-make-array respects :element-type and initializes character arrays with #\\Nul by default."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 2)
+    (exec1 (cl-cc:make-vm-make-array :dst 0 :size-reg 1 :element-type 'character) s)
+    (let ((arr (cl-cc:vm-reg-get s 0)))
+      (assert-true (typep arr '(simple-array character (*))))
+      (assert-true (char= #\Nul (aref arr 0)))
+      (assert-true (char= #\Nul (aref arr 1))))))
+
 (deftest vm-array-aref-and-aset
   "vm-aref and vm-aset read and write array elements."
   (let ((s (make-test-vm))

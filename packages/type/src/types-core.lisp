@@ -39,14 +39,34 @@ variable itself: LOWER-BOUND <: this-var <: UPPER-BOUND."
   (upper-bound nil)
   (lower-bound nil))
 
-(defun fresh-type-var (&key (name nil) upper-bound lower-bound)
+(defun fresh-type-var (&rest args)
   "Return a fresh unification variable with a unique ID.
+Accepts either legacy positional NAME or keyword :NAME.
 UPPER-BOUND and LOWER-BOUND are optional type-node bounds used by bounded
 polymorphism."
-  (incf *type-var-counter*)
-  (%make-type-var :id *type-var-counter* :name name
-                  :upper-bound upper-bound
-                  :lower-bound lower-bound))
+  (let ((name nil)
+        (upper-bound nil)
+        (lower-bound nil)
+        (key-args args))
+    (when (and key-args (not (keywordp (first key-args))))
+      (setf name (first key-args)
+            key-args (rest key-args)))
+    (when (oddp (length key-args))
+      (error "fresh-type-var keyword arguments must be key/value pairs: ~S" key-args))
+    (loop for (key value) on key-args by #'cddr
+          do (case key
+               (:name
+                (setf name value))
+               (:upper-bound
+                (setf upper-bound value))
+               (:lower-bound
+                (setf lower-bound value))
+               (otherwise
+                (error "Unknown fresh-type-var keyword: ~S" key))))
+    (incf *type-var-counter*)
+    (%make-type-var :id *type-var-counter* :name name
+                    :upper-bound upper-bound
+                    :lower-bound lower-bound)))
 
 (defun reset-type-vars! ()
   "Reset the type variable counter — use only in tests."

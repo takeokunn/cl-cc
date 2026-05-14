@@ -10,6 +10,46 @@
   (let ((expanded (if (typep expr 'ast-node) expr (compiler-macroexpand-all expr))))
     (if (typep expanded 'ast-node) expanded (lower-sexp-to-ast expanded))))
 
+(defun %ast-has-source-location-p (ast)
+  "Return T when AST already carries any explicit source location metadata."
+  (or (ast-source-file ast)
+      (ast-source-line ast)
+      (ast-source-column ast)))
+
+(defun %maybe-attach-ast-source-location (ast location)
+  "Attach LOCATION=(file line col) to AST only when AST lacks source metadata."
+  (when (and (typep ast 'ast-node) location (not (%ast-has-source-location-p ast)))
+    (destructuring-bind (file line col) location
+      (setf (ast-source-file ast) file
+            (ast-source-line ast) line
+            (ast-source-column ast) col)))
+  ast)
+
+(defun %compilation-result-ast-list (result)
+  "Return RESULT's AST payload as a list while preserving NIL as NIL."
+  (let ((asts (compilation-result-ast result)))
+    (cond
+      ((null asts) nil)
+      ((listp asts) asts)
+      (t (list asts)))))
+
+(defun %attach-source-locations-to-result (result locations)
+  "Attach LOCATIONS to RESULT's top-level AST nodes in order, if absent.
+Each location is a list (source-file source-line source-column)."
+  (when locations
+    (let ((asts (%compilation-result-ast-list result)))
+      (loop for ast in asts
+            for location in locations
+            do (%maybe-attach-ast-source-location ast location))))
+  result)
+
+(defun %call-with-source-file-macro-eval (source-file thunk)
+  "Run THUNK with host macro evaluation for real source-file compile-string paths."
+  (if source-file
+      (let ((cl-cc/expand:*macro-eval-fn* #'eval))
+        (funcall thunk))
+      (funcall thunk)))
+
 (defun %type-check-safe (ast type-check)
   "Run type inference on AST; on error warn unless TYPE-CHECK is :strict."
   (when type-check
@@ -26,8 +66,41 @@
        (symbolp (car form))
        (member (string-upcase (symbol-name (car form)))
                *definition-and-declaration-form-heads*
-               :test #'string=)
+                :test #'string=)
        t))
+
+(defun %pipeline-in-package-form-p (form)
+  "Return T when FORM is a top-level in-package declaration."
+  (and (consp form)
+       (eq (car form) 'in-package)))
+
+(defun %lisp-top-level-source-forms-and-locations (source &optional source-file)
+  "Parse SOURCE into normal Lisp sexps plus parallel top-level source locations.
+Returns two values: (1) the parsed top-level forms, and (2) a list of
+(source-file source-line source-column) triples aligned with those forms."
+  (multiple-value-bind (cst-list diagnostics)
+      (parse-cl-source source source-file)
+    (declare (ignore diagnostics))
+    (values
+     (mapcar #'cst-to-sexp cst-list)
+     (mapcar (lambda (cst-node)
+               (multiple-value-bind (line col)
+                   (byte-offset-to-line-col source (cst-node-start-byte cst-node))
+                 (list (or source-file (cst-node-source-file cst-node))
+                       line
+                       col)))
+             cst-list))))
+
+(defun %non-in-package-form-locations (forms locations)
+  "Drop LOCATION entries for top-level in-package forms, mirroring compilation."
+  (loop for form in forms
+        for location in locations
+        unless (%pipeline-in-package-form-p form)
+          collect location))
+
+(defun %non-in-package-forms (forms)
+  "Return FORMS with top-level in-package declarations removed."
+  (remove-if #'%pipeline-in-package-form-p forms))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; CPS rewriting for top-level form batches
@@ -121,12 +194,16 @@ Definition and control-effect forms stay on the direct path."
 ;;; Language-level parsing
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(defun parse-source-for-language (source language)
-  "Parse SOURCE according to LANGUAGE, returning a list of AST nodes or s-expressions.
-:LISP returns s-expressions (compile-toplevel-forms handles lowering).
+(defun parse-source-for-language (source language &key source-file)
+  "Parse SOURCE according to LANGUAGE, returning top-level forms for compilation.
+:LISP always returns normal s-expressions; when SOURCE-FILE is provided, a second
+value carries top-level source locations for later AST annotation.
 :PHP calls parse-php-source which returns AST nodes directly."
   (cond
-    ((eq language :lisp) (parse-all-forms source))
+    ((eq language :lisp)
+     (if source-file
+         (%lisp-top-level-source-forms-and-locations source source-file)
+         (values (parse-all-forms source) nil)))
     ((eq language :php)  (parse-php-source source))
     (t (error "Unknown language: ~S" language))))
 
@@ -141,20 +218,24 @@ Definition and control-effect forms stay on the direct path."
 ;;; after compile-toplevel-forms, which they depend on.
 
 (defun compile-expression (expr &key (target :x86_64) type-check (safety 1)
-                                     pass-pipeline print-pass-timings timing-stream
-                                     print-opt-remarks opt-remarks-stream
-                                     (opt-remarks-mode :all)
-                                     print-pass-stats stats-stream trace-json-stream)
+                                      speed (inline-threshold-scale 1)
+                                       pass-pipeline print-pass-timings timing-stream
+                                      print-opt-remarks opt-remarks-stream
+                                      (opt-remarks-mode :all)
+                                      print-pass-stats stats-stream trace-json-stream)
   (let* ((opts (%make-pipeline-opts
-                :target target :type-check type-check :safety safety
-                :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
-                :timing-stream timing-stream :print-pass-stats print-pass-stats
-                :stats-stream stats-stream :trace-json-stream trace-json-stream
-                :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
-                :opt-remarks-mode opt-remarks-mode))
+                 :target target :type-check type-check :safety safety
+                  :speed speed
+                 :inline-threshold-scale inline-threshold-scale
+                  :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                 :timing-stream timing-stream :print-pass-stats print-pass-stats
+                 :stats-stream stats-stream :trace-json-stream trace-json-stream
+                 :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
+                 :opt-remarks-mode opt-remarks-mode))
          (ctx           (make-instance 'compiler-context :safety safety))
          (ast           (optimize-ast (%prepare-ast expr)))
          (inferred-type (%type-check-safe ast type-check)))
+    (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
     (multiple-value-bind (cps cps-result)
         (%maybe-compile-expression-via-cps ast opts)
       (if cps-result
@@ -171,37 +252,88 @@ Definition and control-effect forms stay on the direct path."
           (let ((result-reg (compile-ast ast ctx)))
             (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts))))))
 
+(defun %pipeline-ast-declarations-for-optimize-policy (ast)
+  "Return declaration list associated with AST when available."
+  (cond
+    ((typep ast 'cl-cc/ast:ast-defun) (cl-cc/ast:ast-defun-declarations ast))
+    ((typep ast 'cl-cc/ast:ast-lambda) (cl-cc/ast:ast-lambda-declarations ast))
+    ((typep ast 'cl-cc/ast:ast-let) (cl-cc/ast:ast-let-declarations ast))
+    (t nil)))
+
+(defun %pipeline-maybe-bump-opts-speed-from-ast (opts ast)
+  "Merge local `(declare (optimize (speed ...)))` into OPTS conservatively.
+
+Uses max(current-speed, local-speed) when local speed is an integer."
+  (let* ((decls (%pipeline-ast-declarations-for-optimize-policy ast))
+         (local-speed (and decls (cl-cc/expand:declaration-optimize-quality decls 'speed)))
+         (current-speed (pipeline-opts-speed opts)))
+    (when (integerp local-speed)
+      (setf (pipeline-opts-speed opts)
+            (if (integerp current-speed)
+                (max current-speed local-speed)
+                local-speed)))
+    opts))
+
 (defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1)
-                                   pass-pipeline print-pass-timings timing-stream
-                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                   print-pass-stats stats-stream trace-json-stream)
-  (let ((forms (parse-source-for-language source language))
-        (opts  (%make-pipeline-opts
-                :target target :type-check type-check :safety safety
-                :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
-                :timing-stream timing-stream :print-pass-stats print-pass-stats
-                :stats-stream stats-stream :trace-json-stream trace-json-stream
-                :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
-                :opt-remarks-mode opt-remarks-mode)))
-    (if (eq language :lisp)
-        (%compile-string-forms forms opts)
-        (apply #'compile-toplevel-forms forms (%opts->compile-kwargs opts)))))
+                                    source-file speed (inline-threshold-scale 1)
+                                    pass-pipeline print-pass-timings timing-stream
+                                    print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                    print-pass-stats stats-stream trace-json-stream)
+  (multiple-value-bind (forms source-locations)
+      (parse-source-for-language source language :source-file source-file)
+    (let* ((opts  (%make-pipeline-opts
+                    :target target :type-check type-check :safety safety
+                    :speed speed
+                    :inline-threshold-scale inline-threshold-scale
+                   :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                   :timing-stream timing-stream :print-pass-stats print-pass-stats
+                   :stats-stream stats-stream :trace-json-stream trace-json-stream
+                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
+                   :opt-remarks-mode opt-remarks-mode))
+           (result (%call-with-source-file-macro-eval
+                    (and (eq language :lisp) source-file)
+                    (lambda ()
+                      (if (eq language :lisp)
+                          (%compile-string-forms forms opts)
+                          (apply #'compile-toplevel-forms forms (%opts->compile-kwargs opts)))))))
+      (if (and (eq language :lisp) source-locations)
+          (%attach-source-locations-to-result result
+                                             (%non-in-package-form-locations forms source-locations))
+          result))))
 
 (defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1)
-                                               pass-pipeline print-pass-timings timing-stream
-                                               print-opt-remarks opt-remarks-stream
-                                               (opt-remarks-mode :all)
+                                                source-file speed (inline-threshold-scale 1)
+                                                 pass-pipeline print-pass-timings timing-stream
+                                                print-opt-remarks opt-remarks-stream
+                                                (opt-remarks-mode :all)
                                                print-pass-stats stats-stream trace-json-stream)
   "Compile SOURCE with standard library prepended."
-  (let* ((opts (%make-pipeline-opts
-                :target target :type-check type-check :safety safety
-                :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
-                :timing-stream timing-stream :print-pass-stats print-pass-stats
-                :stats-stream stats-stream :trace-json-stream trace-json-stream
-                :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
-                :opt-remarks-mode opt-remarks-mode))
-         (*enable-cps-vm-primary-path* nil)
-         (all-forms (append (get-stdlib-forms) (parse-all-forms source))))
-    (apply #'compile-toplevel-forms
-           (%maybe-cps-toplevel-forms all-forms opts)
-           (%opts->compile-kwargs opts))))
+  (multiple-value-bind (source-forms source-locations)
+      (if source-file
+          (%lisp-top-level-source-forms-and-locations source source-file)
+          (values (parse-all-forms source) nil))
+    (let* ((opts (%make-pipeline-opts
+                   :target target :type-check type-check :safety safety
+                   :speed speed
+                   :inline-threshold-scale inline-threshold-scale
+                  :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                  :timing-stream timing-stream :print-pass-stats print-pass-stats
+                  :stats-stream stats-stream :trace-json-stream trace-json-stream
+                  :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
+                  :opt-remarks-mode opt-remarks-mode))
+           (*enable-cps-vm-primary-path* nil)
+           (stdlib-forms (get-stdlib-forms))
+           (all-forms (append stdlib-forms source-forms))
+           (result (%call-with-source-file-macro-eval
+                    source-file
+                    (lambda ()
+                      (apply #'compile-toplevel-forms
+                             all-forms
+                             (%opts->compile-kwargs opts))))))
+      (if source-locations
+          (%attach-source-locations-to-result
+           result
+           (append (mapcar (lambda (_form) nil)
+                           (%non-in-package-forms stdlib-forms))
+                   (%non-in-package-form-locations source-forms source-locations)))
+          result))))

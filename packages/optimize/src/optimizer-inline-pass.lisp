@@ -12,23 +12,64 @@
 
 (in-package :cl-cc/optimize)
 
-(defun opt-make-pure-function-memo-table ()
-  "Create a memo table for pure-function result caching."
-  (make-hash-table :test #'equal))
+(defvar *opt-pure-memo-metadata* (make-hash-table :test #'eq)
+  "EQ map: memo hash-table -> plist metadata (:max-size, :order).")
+
+(defun %opt-memo-metadata (memo-table)
+  (or (gethash memo-table *opt-pure-memo-metadata*)
+      (setf (gethash memo-table *opt-pure-memo-metadata*)
+            (list :max-size nil :order nil))))
+
+(defun %opt-memo-order-touch (memo-table key)
+  "Mark KEY as most-recently-used for MEMO-TABLE."
+  (let* ((meta (%opt-memo-metadata memo-table))
+         (order (getf meta :order)))
+    (setf (getf meta :order)
+          (cons key (remove key order :test #'equal)))
+    meta))
+
+(defun %opt-memo-evict-if-needed (memo-table)
+  "Evict least-recently-used entries when MEMO-TABLE exceeds max-size."
+  (let* ((meta (%opt-memo-metadata memo-table))
+         (max-size (getf meta :max-size)))
+    (when (and (integerp max-size) (plusp max-size))
+      (loop while (> (hash-table-count memo-table) max-size)
+            do (let* ((order (getf meta :order))
+                      (victim (car (last order))))
+                 (when victim
+                   (remhash victim memo-table)
+                   (setf (getf meta :order)
+                         (remove victim order :test #'equal))))))))
+
+(defun opt-make-pure-function-memo-table (&key max-size)
+  "Create a memo table for pure-function result caching.
+
+When MAX-SIZE is a positive integer, the table enforces a least-recently-used
+eviction policy at insertion time."
+  (let ((table (make-hash-table :test #'equal)))
+    (setf (gethash table *opt-pure-memo-metadata*)
+          (list :max-size max-size :order nil))
+    table))
 
 (defun opt-pure-function-memo-get (memo-table pure-labels label args)
   "Return cached result for pure LABEL/ARGS, or NIL with a miss flag."
   (if (gethash label pure-labels)
-      (multiple-value-bind (value found-p)
-          (gethash (list label args) memo-table)
-        (values value found-p))
+      (let ((key (list label args)))
+        (multiple-value-bind (value found-p)
+            (gethash key memo-table)
+          (when found-p
+            (%opt-memo-order-touch memo-table key))
+          (values value found-p)))
       (values nil nil)))
 
 (defun opt-pure-function-memo-put (memo-table pure-labels label args result)
   "Store RESULT for pure LABEL/ARGS in MEMO-TABLE.
 Impure or unknown labels are ignored conservatively."
   (when (gethash label pure-labels)
-    (setf (gethash (list label args) memo-table) result))
+    (let ((key (list label args)))
+      (setf (gethash key memo-table) result)
+      (%opt-memo-order-touch memo-table key)
+      (%opt-memo-evict-if-needed memo-table)))
   result)
 
 (defun opt-function-body-instruction-tables (func-defs)
