@@ -14,7 +14,7 @@
 ## Optimization
 
 - [optimize-passes.md](optimize-passes.md) — Core Passes, CPS/SSA & Speculative JIT (175 FR)
-- [optimize-backend.md](optimize-backend.md) — Analysis & Backend: partial eval, PGO, LTO, JIT, ABI (232 FR)
+- [optimize-backend.md](optimize-backend.md) — Analysis & Backend: partial eval, PGO, LTO, JIT, ABI (232 FR) — ✅ COMPLETE (232 / 232 FR)
 
 ## Native Backend
 

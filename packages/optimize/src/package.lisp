@@ -97,12 +97,17 @@
     #:opt-compute-heap-aliases
     #:opt-compute-points-to
     #:opt-points-to-root
-    #:opt-compute-simple-inductions
-    #:opt-induction-trip-count
-    #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
-    #:opt-compute-cfg-value-ranges
-    #:opt-compute-value-ranges
+     #:opt-compute-simple-inductions
+     #:opt-compute-loop-inductions
+     #:opt-induction-trip-count
+     #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
+     #:opt-compute-cfg-value-ranges
+     #:opt-compute-path-sensitive-ranges
+     #:opt-compute-value-ranges
     #:opt-array-bounds-check-eliminable-p
+    #:opt-mark-bounds-check-eliminable
+    #:opt-bounds-check-eliminable-metadata
+    #:opt-bounds-check-eliminable-marked-p
     #:opt-interval-add  #:opt-interval-sub
     #:opt-interval-bit-width
     #:opt-interval-known-bits-mask
@@ -112,6 +117,7 @@
     #:opt-pass-elide-proven-overflow-checks
     #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
     #:opt-pass-cons-slot-forward
+    #:opt-pass-bounds-check-elimination
 
     ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
     #:opt-known-callee-labels

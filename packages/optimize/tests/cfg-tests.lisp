@@ -176,6 +176,17 @@
     (assert-true (member "cold" labels :test #'equal))
     (assert-true (< (position "hot"  labels :test #'equal)
                     (position "cold" labels :test #'equal)))))
+
+(deftest cfg-hot-cold-flatten-places-error-handler-last
+  "Hot/cold flattening places explicit signal/error blocks at the end."
+  (let ((cfg (make-test-cfg-cold-signal)))
+    (cl-cc/optimize:cfg-compute-dominators cfg)
+    (cl-cc/optimize:cfg-compute-loop-depths cfg)
+    (let* ((flat (cl-cc/optimize:cfg-flatten-hot-cold cfg))
+           (labels (loop for inst in flat
+                         when (typep inst 'cl-cc/vm::vm-label)
+                         collect (cl-cc/vm::vm-name inst))))
+      (assert-string= "cold" (car (last labels))))))
 (deftest cfg-critical-edge-splitting-inserts-landing-pad
   "Critical edge splitting inserts a landing-pad block and rewires the edge."
   (let* ((cfg (make-test-cfg-critical-edge))

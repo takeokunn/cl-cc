@@ -59,8 +59,9 @@ optimizer's pass table wiring.")
     (:devirtualize              . ,#'opt-pass-devirtualize)
       (:inline                    . ,#'opt-pass-inline-iterative)
       (:fold                      . ,#'opt-pass-fold)
-      (:overflow-check-elim       . ,#'opt-pass-elide-proven-overflow-checks)
-      (:sccp                      . ,#'opt-pass-sccp)
+       (:overflow-check-elim       . ,#'opt-pass-elide-proven-overflow-checks)
+       (:bounds-check-elim         . ,#'opt-pass-bounds-check-elimination)
+       (:sccp                      . ,#'opt-pass-sccp)
      (:cons-slot-forward         . ,#'opt-pass-cons-slot-forward)
       (:strength-reduce           . ,#'opt-pass-strength-reduce)
      (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
@@ -110,8 +111,8 @@ optimizer's pass table wiring.")
     :call-site-splitting
      :devirtualize
       :inline
-       :overflow-check-elim
-       :sccp
+        :overflow-check-elim
+        :sccp
        :cons-slot-forward
       :bswap-recognition
      :rotate-recognition

@@ -27,7 +27,9 @@
     (nreverse result)))
 
 (defparameter *cfg-cold-inst-types*
-  '(vm-signal-error vm-establish-handler vm-remove-handler vm-establish-catch vm-throw)
+  '(vm-signal vm-error-instruction vm-cerror vm-warn
+    vm-signal-error vm-establish-handler vm-remove-handler
+    vm-establish-catch vm-throw)
   "Instruction types that mark a basic block as a cold (exception/handler) path.")
 
 (defun %cfg-block-cold-p (block)
@@ -44,21 +46,31 @@
     ((< (bb-loop-depth a) (bb-loop-depth b)) nil)
     (t (< (bb-rpo-index a) (bb-rpo-index b)))))
 
+(defun %cfg-emit-block (block result)
+  "Prepend BLOCK's label and instructions to RESULT and return the new list."
+  (when (bb-label block)
+    (push (bb-label block) result))
+  (dolist (inst (bb-instructions block) result)
+    (push inst result)))
+
 (defun cfg-flatten-hot-cold (cfg)
   "Emit a flat instruction list using loop depth as a hot/cold heuristic.
 
-   Reachable blocks are ordered by explicit cold-path markers first, then by
-   descending bb-loop-depth, with RPO used as the stable tie-breaker. This
-   keeps loop bodies and error/condition blocks in a better layout without
-   changing control-flow semantics."
+   Reachable blocks keep the entry block first, then place non-cold blocks in
+   descending loop-depth order so loop bodies are contiguous.  Blocks containing
+   condition/error-handler instructions are placed last, preserving RPO within
+   equal hotness bands."
   (let* ((rpo     (cfg-compute-rpo cfg))
-         (ordered (stable-sort (copy-list rpo) #'%cfg-block-hotter-p))
+         (entry   (cfg-entry cfg))
+         (rest    (remove entry rpo :test #'eq))
+         (hot     (remove-if #'%cfg-block-cold-p rest))
+         (cold    (remove-if-not #'%cfg-block-cold-p rest))
+         (ordered (append (and entry (list entry))
+                          (stable-sort (copy-list hot) #'%cfg-block-hotter-p)
+                          (stable-sort (copy-list cold) #'%cfg-block-hotter-p)))
          (result  nil))
     (dolist (b ordered)
-      (when (bb-label b)
-        (push (bb-label b) result))
-      (dolist (inst (bb-instructions b))
-        (push inst result)))
+      (setf result (%cfg-emit-block b result)))
     (nreverse result)))
 
 ;;; ─── Accessors / Utilities ───────────────────────────────────────────────

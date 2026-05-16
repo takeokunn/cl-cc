@@ -126,6 +126,48 @@
         (assert-false has-r1-phi)
         (assert-= 0 total-phis)))))
 
+(deftest ssa-phi-placement-prunes-local-only-reads
+  "ssa-place-phis skips phis when a register is only read inside defining blocks."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-jump-zero :reg :r0 :label "then")
+                      (make-vm-const :dst :r1 :value 10)
+                      (make-vm-add :dst :r2 :lhs :r1 :rhs :r0)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "then")
+                      (make-vm-const :dst :r1 :value 20)
+                      (make-vm-add :dst :r3 :lhs :r1 :rhs :r0)
+                      (make-vm-label :name "join")
+                      (make-vm-ret :reg :r0))))
+    (multiple-value-bind (cfg phi-map _renamed)
+        (cl-cc/optimize:ssa-construct insts)
+      (declare (ignore cfg _renamed))
+      (let ((has-r1-phi nil))
+        (maphash (lambda (_b phis)
+                   (declare (ignore _b))
+                   (when (find-if (lambda (p) (eq (cl-cc:phi-reg p) :r1)) phis)
+                     (setf has-r1-phi t)))
+                 phi-map)
+        (assert-false has-r1-phi)))))
+
+(deftest ssa-phi-placement-keeps-live-in-join-phi
+  "ssa-place-phis keeps a join phi when a multi-defined register is read at the join."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-jump-zero :reg :r0 :label "then")
+                      (make-vm-const :dst :r1 :value 10)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "then")
+                      (make-vm-const :dst :r1 :value 20)
+                      (make-vm-label :name "join")
+                      (make-vm-add :dst :r2 :lhs :r1 :rhs :r0)
+                      (make-vm-ret :reg :r2))))
+    (multiple-value-bind (cfg phi-map _renamed)
+        (cl-cc/optimize:ssa-construct insts)
+      (declare (ignore cfg _renamed))
+      (let ((join (cl-cc/optimize:cfg-get-block-by-label cfg "join")))
+        (assert-true
+         (find-if (lambda (p) (eq (cl-cc:phi-reg p) :r1))
+                  (gethash join phi-map)))))))
+
 (deftest ssa-lcssa-inserts-exit-phi-for-loop-defined-value
   "ssa-place-lcssa-phis adds an exit phi when a loop-defined reg is read outside." 
   (let* ((insts (list (make-vm-const :dst :i :value 0)
@@ -173,6 +215,78 @@
       (let ((rewritten (first (gethash join new-renamed-map))))
         (assert-eq :r2 (cl-cc/vm::vm-lhs rewritten))
         (assert-eq :r4 (cl-cc/vm::vm-rhs rewritten))))))
+
+(deftest ssa-trivial-phi-elimination-shortcuts-phi-of-phi-chain
+  "Phi elimination shortcuts A=phi(B,...) through a predecessor-local B phi."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi-b  (cl-cc/optimize:make-ssa-phi
+                  :dst :b.0
+                  :args (list (cons pred-a :b-from-1)
+                              (cons pred-b :b-from-2))
+                  :reg :b))
+         (phi-a  (cl-cc/optimize:make-ssa-phi
+                  :dst :a.0
+                  :args (list (cons pred-b :b.0)
+                              (cons pred-a :c.0))
+                  :reg :a))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq)))
+    (setf (gethash pred-b phi-map) (list phi-b)
+          (gethash join phi-map) (list phi-a)
+          (gethash join renamed) (list (make-vm-ret :reg :a.0)))
+    (multiple-value-bind (new-phi-map _new-renamed)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (declare (ignore _new-renamed))
+      (let* ((new-phi-a (find-if (lambda (p) (eq (cl-cc:phi-dst p) :a.0))
+                                 (gethash join new-phi-map)))
+             (shortcut (assoc pred-b (cl-cc:phi-args new-phi-a) :test #'eq)))
+        (assert-true new-phi-a)
+        (assert-eq :b-from-2 (cdr shortcut))))))
+
+(deftest ssa-trivial-phi-elimination-runs-all-passes-together
+  "Trivial phi elimination combines shortcutting, same-arg collapse, and dead removal."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi-b  (cl-cc/optimize:make-ssa-phi
+                  :dst :b.0
+                  :args (list (cons pred-a :x.0)
+                              (cons pred-b :x.0))
+                  :reg :b))
+         (phi-a  (cl-cc/optimize:make-ssa-phi
+                  :dst :a.0
+                  :args (list (cons pred-b :b.0)
+                              (cons pred-a :x.0))
+                  :reg :a))
+         (phi-same (cl-cc/optimize:make-ssa-phi
+                    :dst :same.0
+                    :args (list (cons pred-a :v.0)
+                                (cons pred-b :v.0))
+                    :reg :same))
+         (phi-dead (cl-cc/optimize:make-ssa-phi
+                    :dst :dead.0
+                    :args (list (cons pred-a :d1.0)
+                                (cons pred-b :d2.0))
+                    :reg :dead))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq))
+         (inst (make-vm-add :dst :r9 :lhs :a.0 :rhs :same.0)))
+    (setf (gethash pred-b phi-map) (list phi-b)
+          (gethash join phi-map) (list phi-a phi-same phi-dead)
+          (gethash join renamed) (list inst))
+    (multiple-value-bind (new-phi-map new-renamed-map)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (let ((total-phis 0)
+            (rewritten (first (gethash join new-renamed-map))))
+        (maphash (lambda (_b phis)
+                   (declare (ignore _b))
+                   (incf total-phis (length phis)))
+                 new-phi-map)
+        (assert-= 0 total-phis)
+        (assert-eq :x.0 (cl-cc/vm::vm-lhs rewritten))
+        (assert-eq :v.0 (cl-cc/vm::vm-rhs rewritten))))))
 
 ;;; ─── Parallel Copy Sequentialization ─────────────────────────────────────
 

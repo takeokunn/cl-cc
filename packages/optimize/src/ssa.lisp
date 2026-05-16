@@ -63,6 +63,56 @@
   (args nil :type list)                ; ((bb . versioned-reg) ...)
   (reg  nil))                          ; original (pre-SSA) register name
 
+(defun %ssa-block-use-def (block)
+  "Return two lists: registers used before local definition, and definitions."
+  (let ((uses nil)
+        (defs nil))
+    (dolist (inst (bb-instructions block))
+      (dolist (r (opt-inst-read-regs inst))
+        (when (and r (not (member r defs :test #'eq)))
+          (pushnew r uses :test #'eq)))
+      (let ((dst (ignore-errors (vm-dst inst))))
+        (when dst
+          (pushnew dst defs :test #'eq))))
+    (values uses defs)))
+
+(defun %ssa-compute-live-in (cfg)
+  "Compute block live-in sets for pruned SSA phi placement."
+  (let ((use-map (make-hash-table :test #'eq))
+        (def-map (make-hash-table :test #'eq))
+        (live-in (make-hash-table :test #'eq))
+        (live-out (make-hash-table :test #'eq)))
+    (loop for b across (cfg-blocks cfg)
+          do (multiple-value-bind (uses defs)
+                 (%ssa-block-use-def b)
+               (setf (gethash b use-map) uses
+                     (gethash b def-map) defs
+                     (gethash b live-in) nil
+                     (gethash b live-out) nil)))
+    (let ((changed t)
+          (order (reverse (cfg-compute-rpo cfg))))
+      (loop while changed
+            do (setf changed nil)
+               (dolist (b order)
+                 (let* ((old-in (gethash b live-in))
+                        (old-out (gethash b live-out))
+                        (new-out nil))
+                   (dolist (succ (bb-successors b))
+                     (setf new-out (union new-out (gethash succ live-in)
+                                          :test #'eq)))
+                   (let ((new-in (union (gethash b use-map)
+                                        (set-difference new-out (gethash b def-map)
+                                                        :test #'eq)
+                                        :test #'eq)))
+                     (unless (and (null (set-difference old-in new-in :test #'eq))
+                                  (null (set-difference new-in old-in :test #'eq))
+                                  (null (set-difference old-out new-out :test #'eq))
+                                  (null (set-difference new-out old-out :test #'eq)))
+                       (setf (gethash b live-in) new-in
+                             (gethash b live-out) new-out
+                             changed t)))))))
+    live-in))
+
 ;;; ─── Phi Placement (Cytron Algorithm) ───────────────────────────────────
 
 (defun ssa-place-phis (cfg)
@@ -75,11 +125,12 @@
        defsites(v) = blocks where v is defined (has a dst write)
        Insert phi(v) at each block in IDF(defsites(v))
        if v is not already live-in there"
-  ;; Step 1: collect all registers, their definition blocks, and read-uses.
-  ;; Semi-pruned SSA: if a variable is never read, skip phi placement.
+  ;; Step 1: collect all registers, their definition blocks, and live-in uses.
+  ;; Pruned SSA: if a variable is not live-in at a frontier block, skip phi placement.
   (let ((def-sites  (make-hash-table :test #'eq))  ; reg → list of blocks
-        (used-regs  (make-hash-table :test #'eq))  ; reg → t when read anywhere
-        (phi-map    (make-hash-table :test #'eq))) ; block → list of ssa-phi
+         (used-regs  (make-hash-table :test #'eq))  ; reg → t when read anywhere
+         (live-in    (%ssa-compute-live-in cfg))
+         (phi-map    (make-hash-table :test #'eq))) ; block → list of ssa-phi
 
     (loop for b across (cfg-blocks cfg)
           do (dolist (inst (bb-instructions b))
@@ -93,12 +144,13 @@
     ;; Step 2: for each register, place phis at IDF(def-sites)
     (maphash
      (lambda (reg blocks)
-       (when (gethash reg used-regs)
-         (let ((idf (cfg-idf blocks)))
-           (dolist (f idf)
-             (unless (find-if (lambda (p) (eq (phi-reg p) reg))
-                              (gethash f phi-map))
-               (push (make-ssa-phi :reg reg) (gethash f phi-map)))))))
+        (when (gethash reg used-regs)
+          (let ((idf (cfg-idf blocks)))
+            (dolist (f idf)
+              (when (and (member reg (gethash f live-in) :test #'eq)
+                         (not (find-if (lambda (p) (eq (phi-reg p) reg))
+                                       (gethash f phi-map))))
+                (push (make-ssa-phi :reg reg) (gethash f phi-map)))))))
      def-sites)
 
     phi-map))

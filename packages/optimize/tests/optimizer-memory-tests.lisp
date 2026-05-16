@@ -478,6 +478,70 @@
     (assert-= 1 (cl-cc/optimize::opt-interval-lo iv))
     (assert-= 3 (cl-cc/optimize::opt-interval-hi iv))))
 
+(defun %test-path-sensitive-branch-cfg ()
+  (cl-cc/optimize:cfg-build
+   (list (make-vm-get-global :dst :raw :name 'raw)
+         (make-vm-const :dst :mask :value #xFF)
+         (make-vm-logand :dst :idx :lhs :raw :rhs :mask)
+         (make-vm-const :dst :len :value 10)
+         (make-vm-lt :dst :cmp :lhs :idx :rhs :len)
+         (make-vm-jump-zero :reg :cmp :label "then")
+         (make-vm-jump :label "join")
+         (make-vm-label :name "then")
+         (make-vm-jump :label "join")
+         (make-vm-label :name "join")
+         (make-vm-ret :reg :idx))))
+
+(deftest path-sensitive-ranges-narrow-jump-target-branch-from-lt
+  "opt-compute-path-sensitive-ranges narrows the jump-target (false) branch for vm-lt.
+vm-jump-zero jumps when the condition is false, so the jump target gets idx >= 10."
+  (let* ((cfg (%test-path-sensitive-branch-cfg))
+         (then-block (cl-cc/optimize:cfg-get-block-by-label cfg "then"))
+         (ranges (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg))
+         (iv (gethash (cons then-block :idx) ranges)))
+    (assert-true iv)
+    (assert-= 10 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 255 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest path-sensitive-ranges-narrow-fallthrough-branch-from-lt
+  "opt-compute-path-sensitive-ranges narrows the fallthrough (true) branch for vm-lt.
+vm-jump-zero does NOT jump when condition is non-zero/true, so fallthrough gets idx < 10."
+  (let* ((cfg (%test-path-sensitive-branch-cfg))
+         (entry (cl-cc/optimize:cfg-entry cfg))
+         (then-block (cl-cc/optimize:cfg-get-block-by-label cfg "then"))
+         (fallthrough-block (find-if (lambda (succ) (not (eq succ then-block)))
+                                     (cl-cc/optimize:bb-successors entry)))
+         (ranges (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg))
+         (iv (gethash (cons fallthrough-block :idx) ranges)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= 9 (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest path-sensitive-ranges-join-unions-narrowed-predecessors
+  "Path-sensitive range analysis unions narrowed true/false facts at joins."
+  (let* ((cfg (%test-path-sensitive-branch-cfg))
+         (join-block (cl-cc/optimize:cfg-get-block-by-label cfg "join"))
+         (ranges (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg))
+         (iv (gethash (cons join-block :idx) ranges)))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo iv))
+    (assert-= #xFF (cl-cc/optimize::opt-interval-hi iv))))
+
+(deftest bounds-check-elimination-uses-path-sensitive-ranges
+  "opt-array-bounds-check-eliminable-p uses path-sensitive block facts on the safe fallthrough."
+  (let* ((cfg (%test-path-sensitive-branch-cfg))
+         (entry (cl-cc/optimize:cfg-entry cfg))
+         (then-block (cl-cc/optimize:cfg-get-block-by-label cfg "then"))
+         (fallthrough-block (find-if (lambda (succ) (not (eq succ then-block)))
+                                     (cl-cc/optimize:bb-successors entry)))
+         (ranges (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg)))
+    ;; jump-target (then) is the false branch: idx >= 10 — NOT bounds-check-eliminable
+    (assert-false
+     (cl-cc/optimize:opt-array-bounds-check-eliminable-p :idx :len ranges then-block))
+    ;; fallthrough is the true branch: idx < 10 — bounds-check-eliminable
+    (assert-true
+     (cl-cc/optimize:opt-array-bounds-check-eliminable-p :idx :len ranges fallthrough-block))))
+
 (deftest simple-induction-detects-affine-update
   "opt-compute-simple-inductions records init and step for affine self updates."
   (let* ((insts (list (make-vm-const :dst :i :value 0)
@@ -503,6 +567,64 @@
   (assert-= 5 (cl-cc/optimize::opt-induction-trip-count 0 10 2))
   (assert-= 6 (cl-cc/optimize::opt-induction-trip-count 0 10 2 :inclusive-p t))
   (assert-= 4 (cl-cc/optimize::opt-induction-trip-count 10 0 -3)))
+
+(deftest simple-induction-detects-inc-and-dec-updates
+  "SCEV recognizes vm-inc and vm-dec as unit induction updates."
+  (let* ((inc-insts (list (make-vm-const :dst :i :value 0)
+                          (make-vm-inc :dst :i :src :i)))
+         (dec-insts (list (make-vm-const :dst :j :value 10)
+                          (make-vm-dec :dst :j :src :j)))
+         (inc-ivs (cl-cc/optimize:opt-compute-simple-inductions inc-insts))
+         (dec-ivs (cl-cc/optimize:opt-compute-simple-inductions dec-insts)))
+    (assert-= 1 (cl-cc/optimize:opt-iv-step (gethash :i inc-ivs)))
+    (assert-= -1 (cl-cc/optimize:opt-iv-step (gethash :j dec-ivs)))))
+
+(deftest induction-trip-count-comparison-predicates
+  "SCEV trip-count helper handles vm-le, vm-ge, and vm-eq predicates."
+  (assert-= 6 (cl-cc/optimize:opt-induction-trip-count 0 10 2 :predicate 'vm-le))
+  (assert-= 6 (cl-cc/optimize:opt-induction-trip-count 10 0 -2 :predicate 'vm-ge))
+  (assert-= 1 (cl-cc/optimize:opt-induction-trip-count 4 4 1 :predicate 'vm-eq))
+  (assert-= 0 (cl-cc/optimize:opt-induction-trip-count 3 4 1 :predicate 'vm-eq)))
+
+(deftest loop-induction-analysis-is-scoped-to-natural-loop
+  "opt-compute-loop-inductions uses CFG natural loops and seeds constants from the preheader."
+  (let* ((insts (list (make-vm-const :dst :i :value 0)
+                      (make-vm-label :name "loop")
+                      (make-vm-inc :dst :i :src :i)
+                      (make-vm-jump :label "loop")))
+         (cfg (cl-cc/optimize:cfg-build insts))
+         (header (cl-cc/optimize:cfg-get-block-by-label cfg "loop"))
+         (loops (cl-cc/optimize:opt-compute-loop-inductions cfg))
+         (ivs (gethash header loops))
+         (iv (and ivs (gethash :i ivs))))
+    (assert-true iv)
+    (assert-= 0 (cl-cc/optimize:opt-iv-init iv))
+    (assert-= 1 (cl-cc/optimize:opt-iv-step iv))))
+
+(deftest bounds-check-elimination-annotates-provably-safe-loop-access
+  "BCE annotates an array access in a simple loop when index and length ranges are proven safe."
+  (let* ((aref-inst (cl-cc:make-vm-aref :dst :out :array-reg :arr :index-reg :idx))
+         (insts (list (make-vm-const :dst :len :value 4)
+                      (make-vm-make-array :dst :arr :size-reg :len)
+                      (make-vm-const :dst :idx :value 2)
+                      (make-vm-label :name "loop")
+                      aref-inst
+                      (make-vm-jump :label "loop")))
+         (result (cl-cc/optimize:opt-pass-bounds-check-elimination insts)))
+    (assert-equal insts result)
+    (assert-true (cl-cc/optimize:opt-bounds-check-eliminable-marked-p aref-inst))
+    (assert-eq :idx (getf (cl-cc/optimize:opt-bounds-check-eliminable-metadata aref-inst)
+                          :index-reg))))
+
+(deftest bounds-check-elimination-keeps-out-of-bounds-access-checked
+  "BCE does not annotate an array access when the proven index equals the length."
+  (let* ((aref-inst (cl-cc:make-vm-aref :dst :out :array-reg :arr :index-reg :idx))
+         (insts (list (make-vm-const :dst :len :value 4)
+                      (make-vm-make-array :dst :arr :size-reg :len)
+                      (make-vm-const :dst :idx :value 4)
+                      aref-inst)))
+    (cl-cc/optimize:opt-pass-bounds-check-elimination insts)
+    (assert-false (cl-cc/optimize:opt-bounds-check-eliminable-marked-p aref-inst))))
 
 (deftest constant-intervals-unknown-operand-kills-dst
   "opt-compute-constant-intervals: an unknown operand in a binary op removes the dst interval."

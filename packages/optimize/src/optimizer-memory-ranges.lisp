@@ -56,6 +56,165 @@ returns the merged exit-state interval table for convenience callers."
       (%opt-cfg-result-exit-state (opt-compute-cfg-value-ranges instructions))
       (%opt-compute-value-ranges-linear instructions)))
 
+(defparameter +opt-range-negative-infinity+ most-negative-fixnum
+  "Finite sentinel used as the conservative lower bound for path facts.")
+
+(defparameter +opt-range-positive-infinity+ most-positive-fixnum
+  "Finite sentinel used as the conservative upper bound for path facts.")
+
+(defun %opt-top-interval ()
+  (opt-make-interval +opt-range-negative-infinity+
+                     +opt-range-positive-infinity+))
+
+(defun %opt-interval-intersect (a b)
+  "Return the intersection of A and B, or NIL when empty."
+  (let ((lo (max (opt-interval-lo a) (opt-interval-lo b)))
+        (hi (min (opt-interval-hi a) (opt-interval-hi b))))
+    (when (<= lo hi)
+      (opt-make-interval lo hi))))
+
+(defun %opt-state-interval-or-top (state reg)
+  (or (gethash reg state) (%opt-top-interval)))
+
+(defun %opt-narrow-state-reg (state reg constraint)
+  "Intersect REG in STATE with CONSTRAINT. Return NIL if the edge is infeasible."
+  (let ((narrowed (%opt-interval-intersect
+                   (%opt-state-interval-or-top state reg)
+                   constraint)))
+    (when narrowed
+      (setf (gethash reg state) narrowed)
+      state)))
+
+(defun %opt-last-instruction-of-type (instructions type)
+  (find-if (lambda (inst) (typep inst type)) (reverse instructions)))
+
+(defun %opt-branch-predicate-inst (block jump-inst)
+  "Return the comparison instruction feeding JUMP-INST, if it is block-local."
+  (let ((cond-reg (vm-reg jump-inst)))
+    (find-if (lambda (inst)
+               (and (typep inst '(or vm-lt vm-le vm-gt vm-ge vm-eq vm-num-eq))
+                    (eq (vm-dst inst) cond-reg)))
+             (reverse (bb-instructions block)))))
+
+(defun %opt-successor-is-jump-target-p (succ jump-inst)
+  (let ((label (bb-label succ)))
+    (and label (equal (vm-name label) (vm-label-name jump-inst)))))
+
+(defun %opt-apply-lt-constraint (state lhs rhs true-p strict-p)
+  "Apply LHS < RHS or LHS <= RHS when TRUE-P, otherwise its negation."
+  (let* ((lhs-iv (%opt-state-interval-or-top state lhs))
+         (rhs-iv (%opt-state-interval-or-top state rhs))
+         (lhs-lo (opt-interval-lo lhs-iv))
+         (lhs-hi (opt-interval-hi lhs-iv))
+         (rhs-lo (opt-interval-lo rhs-iv))
+         (rhs-hi (opt-interval-hi rhs-iv)))
+    (if true-p
+        (let ((lhs-bound (if strict-p (1- rhs-hi) rhs-hi))
+              (rhs-bound (if strict-p (1+ lhs-lo) lhs-lo)))
+          (and (%opt-narrow-state-reg state lhs
+                                      (opt-make-interval +opt-range-negative-infinity+
+                                                         lhs-bound))
+               (%opt-narrow-state-reg state rhs
+                                      (opt-make-interval rhs-bound
+                                                         +opt-range-positive-infinity+))))
+        (let ((lhs-bound (if strict-p rhs-lo (1+ rhs-lo)))
+              (rhs-bound (if strict-p lhs-hi (1- lhs-hi))))
+          (and (%opt-narrow-state-reg state lhs
+                                      (opt-make-interval lhs-bound
+                                                         +opt-range-positive-infinity+))
+               (%opt-narrow-state-reg state rhs
+                                      (opt-make-interval +opt-range-negative-infinity+
+                                                         rhs-bound)))))))
+
+(defun %opt-apply-eq-constraint (state lhs rhs true-p)
+  "Apply equality narrowing for the true edge; false edge has no interval fact."
+  (if (not true-p)
+      state
+      (let* ((lhs-iv (%opt-state-interval-or-top state lhs))
+             (rhs-iv (%opt-state-interval-or-top state rhs))
+             (intersection (%opt-interval-intersect lhs-iv rhs-iv)))
+        (when intersection
+          (setf (gethash lhs state) intersection
+                (gethash rhs state) intersection)
+          state))))
+
+(defun %opt-apply-branch-predicate-fact (state cmp-inst true-p)
+  "Return STATE narrowed by CMP-INST for TRUE-P, or NIL if infeasible.
+
+For vm-jump-zero, the explicit jump target is the zero/false branch
+(the VM jumps when the condition register is 0), while the fallthrough
+is the non-zero/true branch."
+  (cond
+    ((typep cmp-inst 'vm-lt)
+     (%opt-apply-lt-constraint state (vm-lhs cmp-inst) (vm-rhs cmp-inst) true-p t))
+    ((typep cmp-inst 'vm-le)
+     (%opt-apply-lt-constraint state (vm-lhs cmp-inst) (vm-rhs cmp-inst) true-p nil))
+    ((typep cmp-inst 'vm-gt)
+     (%opt-apply-lt-constraint state (vm-rhs cmp-inst) (vm-lhs cmp-inst) true-p t))
+    ((typep cmp-inst 'vm-ge)
+     (%opt-apply-lt-constraint state (vm-rhs cmp-inst) (vm-lhs cmp-inst) true-p nil))
+    ((typep cmp-inst '(or vm-eq vm-num-eq))
+     (%opt-apply-eq-constraint state (vm-lhs cmp-inst) (vm-rhs cmp-inst) true-p))
+    (t state)))
+
+(defun %opt-path-edge-state (block succ state-out)
+  "Return the outgoing interval state for edge BLOCK -> SUCC."
+  (let* ((state (%opt-copy-interval-state state-out))
+         (jump (%opt-last-instruction-of-type (bb-instructions block) 'vm-jump-zero))
+         (cmp (and jump (%opt-branch-predicate-inst block jump))))
+    (if cmp
+        (%opt-apply-branch-predicate-fact
+         state cmp (not (%opt-successor-is-jump-target-p succ jump)))
+        state)))
+
+(defun %opt-predecessor-path-states (block out-table)
+  (loop for pred in (bb-predecessors block)
+        for out-state = (gethash pred out-table)
+        for edge-state = (and out-state (%opt-path-edge-state pred block out-state))
+        when edge-state
+          collect edge-state))
+
+(defun %opt-path-sensitive-entry-table (in-table)
+  "Flatten block entry states to a (BLOCK . REG) -> interval hash-table."
+  (let ((ranges (make-hash-table :test #'equal)))
+    (maphash (lambda (block state)
+               (maphash (lambda (reg interval)
+                          (setf (gethash (cons block reg) ranges)
+                                (opt-make-interval (opt-interval-lo interval)
+                                                   (opt-interval-hi interval))))
+                        state))
+             in-table)
+    ranges))
+
+(defun opt-compute-path-sensitive-ranges (instructions)
+  "Compute value ranges with branch predicate narrowing.
+Returns a hash-table mapping (block . reg) to (lo . hi) interval."
+  (let* ((cfg (if (cfg-p instructions) instructions (cfg-build instructions)))
+         (rpo (progn (cfg-compute-dominators cfg) (cfg-compute-rpo cfg)))
+         (in-table (make-hash-table :test #'eq))
+         (out-table (make-hash-table :test #'eq))
+         (empty-state (make-hash-table :test #'eq)))
+    (when (cfg-entry cfg)
+      (setf (gethash (cfg-entry cfg) in-table) (%opt-copy-interval-state empty-state)))
+    (let ((changed t))
+      (loop while changed
+            do (setf changed nil)
+               (dolist (block rpo)
+                 (let* ((incoming (if (eq block (cfg-entry cfg))
+                                      (or (gethash block in-table) empty-state)
+                                      (%opt-merge-interval-states
+                                       (%opt-predecessor-path-states block out-table))))
+                        (old-in (gethash block in-table))
+                        (out (%opt-cfg-value-ranges-transfer block incoming))
+                        (old-out (gethash block out-table)))
+                   (unless (and old-in (%opt-interval-state-equal-p old-in incoming))
+                     (setf (gethash block in-table) (%opt-copy-interval-state incoming)
+                           changed t))
+                   (unless (and old-out (%opt-interval-state-equal-p old-out out))
+                     (setf (gethash block out-table) out
+                           changed t))))))
+    (%opt-path-sensitive-entry-table in-table)))
+
 (defun opt-compute-constant-intervals (instructions)
   "Compute a conservative interval map from straight-line constant arithmetic.
 
@@ -63,10 +222,17 @@ Handles vm-const and interval propagation through vm-add/vm-sub/vm-mul when
 both operands already have known intervals."
   (opt-compute-value-ranges instructions))
 
-(defun opt-array-bounds-check-eliminable-p (index-reg length-reg intervals)
-  "Return T when INTERVALS prove INDEX-REG is within LENGTH-REG bounds."
-  (opt-interval-valid-index-p (gethash index-reg intervals)
-                              (gethash length-reg intervals)))
+(defun opt-array-bounds-check-eliminable-p (index-reg length-reg intervals &optional block)
+  "Return T when INTERVALS prove INDEX-REG is within LENGTH-REG bounds.
+
+INTERVALS may be the classic reg -> interval table, or the path-sensitive
+(block . reg) -> interval table returned by OPT-COMPUTE-PATH-SENSITIVE-RANGES
+when BLOCK is supplied."
+  (flet ((lookup (reg)
+           (or (gethash reg intervals)
+               (and block (gethash (cons block reg) intervals)))))
+    (opt-interval-valid-index-p (lookup index-reg)
+                                (lookup length-reg))))
 
 (defstruct (opt-induction-var (:conc-name opt-iv-))
   "Minimal scalar-evolution summary for a single affine induction variable."
@@ -96,7 +262,11 @@ both operands already have known intervals."
             (when (and ok (not (zerop c))) (values dst c t))))))
       ((and dst (typep inst 'vm-sub) (eq dst (vm-lhs inst)))
        (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-rhs inst) constants)
-         (when (and ok (not (zerop c))) (values dst (- c) t)))))))
+         (when (and ok (not (zerop c))) (values dst (- c) t))))
+      ((and dst (typep inst 'vm-inc) (eq dst (vm-src inst)))
+       (values dst 1 t))
+      ((and dst (typep inst 'vm-dec) (eq dst (vm-src inst)))
+       (values dst -1 t)))))
 
 (defun %opt-copy-constant-fact (inst constants)
   "Propagate a constant fact through a vm-move, or kill the destination fact."
@@ -105,15 +275,9 @@ both operands already have known intervals."
         (setf (gethash (vm-dst inst) constants) value)
         (remhash (vm-dst inst) constants))))
 
-(defun opt-compute-simple-inductions (instructions)
-  "Return reg -> opt-induction-var summaries for simple affine updates.
-
-Recognized patterns are intentionally conservative: a register must first hold a
-known integer constant, then be updated by `(add dst dst const)`,
-`(add dst const dst)`, or `(sub dst dst const)`. This supplies the small SCEV
-facts needed by loop unrolling, peeling, and bounds-check reasoning without
-changing program instructions."
-  (let ((constants (make-hash-table :test #'eq))
+(defun %opt-compute-simple-inductions-with-constants (instructions constants)
+  "Return simple induction summaries for INSTRUCTIONS seeded by CONSTANTS."
+  (let ((constants (%opt-copy-constant-table constants))
         (inductions (make-hash-table :test #'eq)))
     (dolist (inst instructions inductions)
       (cond
@@ -143,12 +307,107 @@ changing program instructions."
                    (remhash dst constants)
                    (remhash dst inductions))))))))))
 
-(defun opt-induction-trip-count (init limit step &key inclusive-p)
+(defun opt-compute-simple-inductions (instructions)
+  "Return reg -> opt-induction-var summaries for simple affine updates.
+
+  Recognized patterns are intentionally conservative: a register must first hold a
+  known integer constant, then be updated by `(add dst dst const)`,
+`(add dst const dst)`, `(sub dst dst const)`, `vm-inc`, or `vm-dec`. This
+supplies the small SCEV facts needed by loop unrolling, peeling, and
+bounds-check reasoning without changing program instructions."
+  (%opt-compute-simple-inductions-with-constants
+   instructions
+   (make-hash-table :test #'eq)))
+
+(defun %opt-copy-constant-table (constants)
+  "Return an EQ copy of a reg -> integer constant table."
+  (let ((copy (make-hash-table :test #'eq)))
+    (when constants
+      (maphash (lambda (reg value)
+                 (setf (gethash reg copy) value))
+               constants))
+    copy))
+
+(defun %opt-constant-transfer-inst (inst constants)
+  "Conservatively update CONSTANTS for simple constant propagation."
+  (cond
+    ((typep inst 'vm-const)
+     (if (integerp (vm-value inst))
+         (setf (gethash (vm-dst inst) constants) (vm-value inst))
+         (remhash (vm-dst inst) constants)))
+    ((typep inst 'vm-move)
+     (%opt-copy-constant-fact inst constants))
+    (t
+     (let ((dst (opt-inst-dst inst)))
+       (when dst (remhash dst constants)))))
+  constants)
+
+(defun %opt-loop-member-table (blocks)
+  (let ((members (make-hash-table :test #'eq)))
+    (dolist (block blocks members)
+      (setf (gethash block members) t))))
+
+(defun %opt-blocks-in-rpo-order (blocks)
+  (sort (copy-list blocks) #'< :key #'bb-rpo-index))
+
+(defun %opt-blocks-instructions (blocks)
+  (loop for block in (%opt-blocks-in-rpo-order blocks)
+        append (bb-instructions block)))
+
+(defun %opt-loop-seed-constants (loop-blocks)
+  "Collect constants from non-loop predecessors entering LOOP-BLOCKS."
+  (let ((members (%opt-loop-member-table loop-blocks))
+        (constants (make-hash-table :test #'eq)))
+    (dolist (block loop-blocks constants)
+      (dolist (pred (bb-predecessors block))
+        (unless (gethash pred members)
+          (dolist (inst (bb-instructions pred))
+            (%opt-constant-transfer-inst inst constants)))))))
+
+(defun opt-compute-loop-inductions (cfg-or-instructions)
+  "Return header-block -> (reg -> opt-induction-var) for CFG natural loops.
+
+The analysis uses CFG backedges (`tail -> header` where HEADER dominates TAIL)
+and `cfg-collect-natural-loop` to keep induction facts scoped to each loop.
+Constants from non-loop predecessor blocks seed the per-loop SCEV scan."
+  (let* ((cfg (if (cfg-p cfg-or-instructions)
+                  cfg-or-instructions
+                  (cfg-build cfg-or-instructions)))
+         (result (make-hash-table :test #'eq)))
+    (cfg-compute-dominators cfg)
+    (cfg-compute-loop-depths cfg)
+    (cfg-compute-rpo cfg)
+    (loop for tail across (cfg-blocks cfg)
+          do (dolist (header (bb-successors tail))
+               (when (cfg-dominates-p header tail)
+                 (let* ((loop-blocks (cfg-collect-natural-loop header tail))
+                        (seed (%opt-loop-seed-constants loop-blocks))
+                        (ivs (%opt-compute-simple-inductions-with-constants
+                              (%opt-blocks-instructions loop-blocks)
+                              seed)))
+                   (when (> (hash-table-count ivs) 0)
+                     (setf (gethash header result) ivs))))))
+    result))
+
+(defun opt-induction-trip-count (init limit step &key inclusive-p predicate)
   "Return a conservative integer trip count for an affine induction variable.
 
-The loop condition is interpreted as `< limit` for positive STEP and `> limit`
-for negative STEP. With INCLUSIVE-P, the corresponding boundary is `<=` or `>=`.
-Returns NIL when STEP is zero."
+  The loop condition is interpreted as `< limit` for positive STEP and `> limit`
+  for negative STEP. With INCLUSIVE-P, the corresponding boundary is `<=` or `>=`.
+PREDICATE may be a comparison instruction class/symbol such as `vm-le`, `vm-ge`,
+or `vm-eq`; it overrides INCLUSIVE-P when supplied. Returns NIL when STEP is
+zero except equality predicates, which are single-test guards."
+  (let ((pred (and predicate
+                   (if (symbolp predicate) predicate (type-of predicate)))))
+    (cond
+      ((member pred '(vm-le vm-ge) :test #'eq)
+       (return-from opt-induction-trip-count
+         (opt-induction-trip-count init limit step :inclusive-p t)))
+      ((member pred '(vm-eq vm-num-eq) :test #'eq)
+       (return-from opt-induction-trip-count
+         (cond
+           ((= init limit) 1)
+           (t 0))))))
   (cond
     ((zerop step) nil)
     ((plusp step)

@@ -65,16 +65,57 @@
   "Return a hash-set of all registers read in RENAMED-MAP instructions and phi args."
   (let ((uses (make-hash-table :test #'eq)))
     (maphash (lambda (_blk insts)
+               (declare (ignore _blk))
                (dolist (inst insts)
                  (dolist (reg (opt-inst-read-regs inst))
                    (when reg (setf (gethash reg uses) t)))))
              renamed-map)
     (maphash (lambda (_blk phis)
+               (declare (ignore _blk))
                (dolist (phi phis)
                  (dolist (arg (phi-args phi))
                    (when (cdr arg) (setf (gethash (cdr arg) uses) t)))))
-             phi-map)
-    uses))
+              phi-map)
+     uses))
+
+(defun %ssa-phi-by-dst-in-block (phi-map block dst)
+  "Return the phi in BLOCK whose destination is DST, if any."
+  (find dst (gethash block phi-map) :key #'phi-dst :test #'eq))
+
+(defun %ssa-shortcut-phi-args (phi-map)
+  "Shortcut phi arguments that name another phi defined on the incoming edge.
+
+For an argument (P . B) in A = phi(...), when B is the destination of a phi
+located in predecessor block P, replace B with that phi's argument for P."
+  (let ((new-map (make-hash-table :test #'eq))
+        (changed nil))
+    (maphash
+     (lambda (blk phis)
+       (setf (gethash blk new-map)
+             (mapcar
+              (lambda (phi)
+                (let ((new-args
+                        (mapcar
+                         (lambda (arg)
+                           (let* ((pred (car arg))
+                                  (value (cdr arg))
+                                  (producer (%ssa-phi-by-dst-in-block phi-map pred value))
+                                  (producer-arg (and producer
+                                                     (assoc pred (phi-args producer)
+                                                            :test #'eq))))
+                             (if producer-arg
+                                 (let ((shortcut (cdr producer-arg)))
+                                   (unless (eq value shortcut)
+                                     (setf changed t))
+                                   (cons pred shortcut))
+                                 arg)))
+                         (phi-args phi))))
+                  (make-ssa-phi :dst (phi-dst phi)
+                                :args new-args
+                                :reg (phi-reg phi))))
+              phis)))
+     phi-map)
+    (values new-map changed)))
 
 (defun ssa-eliminate-trivial-phis (phi-map renamed-map)
   "Collapse trivial phi-nodes and remove dead phi nodes."
@@ -82,15 +123,21 @@
     with changed = t
     while changed do
       (setf changed nil)
+      (multiple-value-bind (shortcut-map shortcut-changed)
+          (%ssa-shortcut-phi-args phi-map)
+        (when shortcut-changed
+          (setf phi-map shortcut-map
+                changed t)))
       (let ((replacements (make-hash-table :test #'eq)))
         (loop
           with round-changed = t
           while round-changed do
             (setf round-changed nil)
             (maphash (lambda (_blk phis)
+                       (declare (ignore _blk))
                        (dolist (phi phis)
                          (let* ((resolved-args (mapcar (lambda (arg)
-                                                         (%ssa-resolve-reg (cdr arg) replacements))
+                                                          (%ssa-resolve-reg (cdr arg) replacements))
                                                        (phi-args phi)))
                                 (first (car resolved-args)))
                            (when (and first

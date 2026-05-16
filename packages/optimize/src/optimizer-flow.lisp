@@ -100,6 +100,15 @@ Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
   "Maps jump instruction types to their threading handlers.")
 
 (defun opt-pass-jump (instructions)
+  "Thread jump chains, remove fallthrough jumps, and propagate edge facts.
+
+The value-propagation part is deliberately conservative: it only carries facts
+derived from vm-jump-zero conditions whose comparison operands are both known
+constants in the predecessor block, only into single-predecessor successors,
+and never across CFG back-edges."
+  (opt-pass-jump-threading-with-propagation instructions))
+
+(defun %opt-pass-jump-chain-only (instructions)
   "Thread jump chains and remove jumps to the immediately following label."
   (multiple-value-bind (vec idx) (opt-build-label-index instructions)
     (let ((result nil)
@@ -107,14 +116,124 @@ Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
       (loop for i from 0 below n
             for inst = (aref vec i)
              do (let ((handler (loop for entry in *opt-jump-thread-table*
-                                     for type = (car entry)
-                                     for fn = (cdr entry)
-                                     when (typep inst type) return fn)))
-                 (if handler
-                     (let ((new (funcall handler inst vec i idx)))
-                       (when new (push new result)))
-                     (push inst result))))
+                                      for type = (car entry)
+                                      for fn = (cdr entry)
+                                      when (typep inst type) return fn)))
+                  (if handler
+                      (let ((new (funcall handler inst vec i idx)))
+                        (when new (push new result)))
+                      (push inst result))))
       (nreverse result))))
+
+(defun %opt-jump-comparison-p (inst)
+  "Return T when INST is a comparison supported by jump fact propagation."
+  (typep inst '(or vm-lt vm-le vm-gt vm-ge vm-eq vm-num-eq)))
+
+(defun %opt-jump-fact-killed-p (fact dst)
+  "Return T when a write to DST invalidates FACT's comparison operands."
+  (and fact dst
+       (or (eq dst (getf fact :lhs))
+           (eq dst (getf fact :rhs)))))
+
+(defun %opt-jump-same-comparison-p (inst fact)
+  "Return T when INST repeats the comparison described by FACT."
+  (and fact
+       (%opt-jump-comparison-p inst)
+       (eq (type-of inst) (getf fact :pred))
+       (eq (vm-lhs inst) (getf fact :lhs))
+       (eq (vm-rhs inst) (getf fact :rhs))
+       (opt-inst-dst inst)))
+
+(defun %opt-jump-branch-comparison-fact (block)
+  "Return a comparison fact for BLOCK's vm-jump-zero terminator, or NIL.
+
+The comparison must define the branch condition register, and both comparison
+operands must be known constants at that point in the same block. The returned
+fact does not include the edge value; callers add :VALUE for taken/fallthrough
+successors."
+  (let* ((insts (bb-instructions block))
+         (term (car (last insts))))
+    (unless (typep term 'vm-jump-zero)
+      (return-from %opt-jump-branch-comparison-fact nil))
+    (let ((env (make-hash-table :test #'eq))
+          (cond-reg (vm-reg term))
+          (fact nil))
+      (dolist (inst insts fact)
+        (when (eq inst term)
+          (return fact))
+        (let ((dst (opt-inst-dst inst)))
+          (when dst
+            (cond
+              ((typep inst 'vm-const)
+               (setf (gethash dst env) (vm-value inst)))
+              (t
+               (remhash dst env))))
+          (when (and dst (eq dst cond-reg))
+            (setf fact nil)
+            (when (%opt-jump-comparison-p inst)
+              (multiple-value-bind (lval lfound) (gethash (vm-lhs inst) env)
+                (declare (ignore lval))
+                (multiple-value-bind (rval rfound) (gethash (vm-rhs inst) env)
+                  (declare (ignore rval))
+                  (when (and lfound rfound)
+                    (setf fact (list :pred (type-of inst)
+                                     :lhs (vm-lhs inst)
+                                     :rhs (vm-rhs inst)))))))))))))
+
+(defun %opt-jump-back-edge-p (pred succ)
+  "Return T when PRED -> SUCC is a CFG back-edge."
+  (and (bb-idom pred)
+       (cfg-dominates-p succ pred)))
+
+(defun %opt-jump-edge-fact (pred succ cfg live-fact)
+  "Return the fact propagated on edge PRED -> SUCC, or NIL."
+  (unless (and (= (length (bb-predecessors succ)) 1)
+               (not (%opt-jump-back-edge-p pred succ)))
+    (return-from %opt-jump-edge-fact nil))
+  (let* ((term (car (last (bb-instructions pred))))
+         (branch-fact (%opt-jump-branch-comparison-fact pred)))
+    (if (and branch-fact (typep term 'vm-jump-zero))
+        (let ((target (cfg-get-block-by-label cfg (vm-label-name term))))
+          (append branch-fact (list :value (if (eq succ target) 0 1))))
+        live-fact)))
+
+(defun %opt-jump-rewrite-block-with-fact (block fact)
+  "Rewrite redundant comparisons in BLOCK using incoming FACT.
+Returns the still-live fact after scanning the block."
+  (let ((live-fact fact)
+        (new-insts nil))
+    (dolist (inst (bb-instructions block))
+      (let ((dst (opt-inst-dst inst)))
+        (when (%opt-jump-fact-killed-p live-fact dst)
+          (setf live-fact nil))
+        (cond
+          ((%opt-jump-same-comparison-p inst live-fact)
+           (push (make-vm-const :dst dst :value (getf live-fact :value))
+                 new-insts))
+          (t
+           (push inst new-insts)))))
+    (setf (bb-instructions block) (nreverse new-insts))
+    live-fact))
+
+(defun %opt-pass-jump-propagate-edge-values (instructions)
+  "Propagate known comparison values from conditional CFG edges."
+  (let ((cfg (cfg-build instructions)))
+    (cfg-compute-dominators cfg)
+    (let ((rpo (cfg-compute-rpo cfg))
+          (facts (make-hash-table :test #'eq)))
+      (dolist (block rpo)
+        (let ((live-fact (%opt-jump-rewrite-block-with-fact
+                          block (gethash block facts))))
+          (dolist (succ (bb-successors block))
+            (let ((edge-fact (%opt-jump-edge-fact block succ cfg live-fact)))
+              (when edge-fact
+                (setf (gethash succ facts) edge-fact))))))
+      (cfg-flatten cfg))))
+
+(defun opt-pass-jump-threading-with-propagation (instructions)
+  "Run jump-chain threading, then conservative comparison-value propagation."
+  (%opt-pass-jump-propagate-edge-values
+   (%opt-pass-jump-chain-only instructions)))
 
 ;;; ─── Pass 4: Unreachable Code Elimination ────────────────────────────────
 
@@ -147,10 +266,110 @@ Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
                         base
                         (format nil "~A_~D" base i)))
          (if (gethash name used)
-             (incf i)
-             (return name)))))
+              (incf i)
+              (return name)))))
 
-(defun opt-pass-loop-rotation (instructions)
+(defun %opt-loop-label-positions (vec)
+  "Return a label-name -> vector-position table for VEC."
+  (let ((positions (make-hash-table :test #'equal)))
+    (loop for i from 0 below (length vec)
+          for inst = (aref vec i)
+          when (vm-label-p inst)
+          do (setf (gethash (vm-name inst) positions) i))
+    positions))
+
+(defun %opt-loop-inst-position (vec inst)
+  "Return the position of INST in VEC using object identity."
+  (loop for i from 0 below (length vec)
+        when (eq (aref vec i) inst)
+        return i))
+
+(defun %opt-loop-last-jump-to (block label-name)
+  "Return BLOCK's final vm-jump when it jumps to LABEL-NAME."
+  (let ((term (car (last (bb-instructions block)))))
+    (and (typep term 'vm-jump)
+         (equal (vm-label-name term) label-name)
+         term)))
+
+(defun %opt-loop-cfg-candidate (instructions)
+  "Find a conservative single-latch natural loop candidate using the CFG.
+Returns a plist with linear positions needed by the existing transforms."
+  (handler-case
+      (let* ((vec (coerce instructions 'vector))
+             (label-pos (%opt-loop-label-positions vec))
+             (cfg (cfg-build instructions)))
+        (cfg-compute-dominators cfg)
+        (cfg-compute-loop-depths cfg)
+        (loop for latch across (cfg-blocks cfg)
+              thereis
+              (loop for header in (bb-successors latch)
+                    thereis
+                    (and (cfg-dominates-p header latch)
+                         (bb-label header)
+                         (let* ((header-name (vm-name (bb-label header)))
+                                (loop-blocks (cfg-collect-natural-loop header latch))
+                                (latches (remove-if-not
+                                          (lambda (b) (%opt-loop-last-jump-to b header-name))
+                                          loop-blocks)))
+                           (when (= (length latches) 1)
+                             (let* ((header-insts (bb-instructions header))
+                                    (cond-inst (first header-insts))
+                                    (jz-inst (second header-insts))
+                                    (back-inst (%opt-loop-last-jump-to latch header-name))
+                                    (header-pos (gethash header-name label-pos))
+                                    (exit-pos (and (typep jz-inst 'vm-jump-zero)
+                                                   (gethash (vm-label-name jz-inst) label-pos)))
+                                    (back-pos (%opt-loop-inst-position vec back-inst)))
+                               (when (and cond-inst
+                                          (typep jz-inst 'vm-jump-zero)
+                                          (not (vm-label-p cond-inst))
+                                          header-pos exit-pos back-pos
+                                          (< header-pos back-pos exit-pos))
+                                 (list :header-name header-name
+                                       :header-pos header-pos
+                                       :exit-pos exit-pos
+                                       :back-pos back-pos
+                                       :cond-inst cond-inst
+                                       :jz-inst jz-inst)))))))))
+    (error () nil)))
+
+(defun %opt-loop-rotation-apply-candidate (instructions candidate)
+  "Apply loop rotation for a CFG-derived CANDIDATE and return a fresh list."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (header-pos (getf candidate :header-pos))
+         (exit-pos (getf candidate :exit-pos))
+         (back-pos (getf candidate :back-pos))
+         (header-name (getf candidate :header-name))
+         (cond-inst (getf candidate :cond-inst))
+         (jz-inst (getf candidate :jz-inst))
+         (used-labels (make-hash-table :test #'equal))
+         (result nil))
+    (loop for inst across vec
+          when (vm-label-p inst)
+          do (setf (gethash (vm-name inst) used-labels) t))
+    (let* ((body-label-name (%opt-loop-rotation-fresh-label
+                             (format nil "~A_body" header-name) used-labels))
+           (guard-label-name (%opt-loop-rotation-fresh-label
+                              (format nil "~A_guard" header-name) used-labels)))
+      (loop for i from 0 below header-pos
+            for inst = (aref vec i)
+            do (push (if (and (typep inst 'vm-jump)
+                              (equal (vm-label-name inst) header-name))
+                         (make-vm-jump :label guard-label-name)
+                         inst)
+                     result))
+      (push (make-vm-jump :label guard-label-name) result)
+      (push (make-vm-label :name body-label-name) result)
+      (loop for i from (+ header-pos 3) below back-pos do (push (aref vec i) result))
+      (push (make-vm-label :name guard-label-name) result)
+      (push cond-inst result)
+      (push jz-inst result)
+      (push (make-vm-jump :label body-label-name) result)
+      (loop for i from exit-pos below n do (push (aref vec i) result))
+      (nreverse result))))
+
+(defun %opt-pass-loop-rotation-linear (instructions)
   "Rotate simple while-shaped loops into guard+do-while form.
 
 Conservative subset only. Matches this linear shape:
@@ -220,9 +439,41 @@ The transform is skipped unless all structural checks pass."
                        (incf i)))))
       (nreverse result))))
 
+(defun opt-pass-loop-rotation (instructions)
+  "Rotate loops using CFG natural-loop detection, falling back to linear matching."
+  (let ((candidate (%opt-loop-cfg-candidate instructions)))
+    (if candidate
+        (%opt-loop-rotation-apply-candidate instructions candidate)
+        (%opt-pass-loop-rotation-linear instructions))))
+
 ;;; ─── Conservative loop peeling (FR-170 subset) ──────────────────────────
 
-(defun opt-pass-loop-peeling (instructions)
+(defun %opt-loop-peeling-apply-candidate (instructions candidate)
+  "Apply one-iteration peeling for a CFG-derived CANDIDATE."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (header-pos (getf candidate :header-pos))
+         (back-pos (getf candidate :back-pos))
+         (cond-inst (getf candidate :cond-inst))
+         (jz-inst (getf candidate :jz-inst))
+         (body-insts (loop for i from (+ header-pos 3) below back-pos
+                           collect (aref vec i)))
+         (result nil))
+    (when (some #'vm-label-p body-insts)
+      (return-from %opt-loop-peeling-apply-candidate nil))
+    (loop for i from 0 below header-pos
+          for inst = (aref vec i)
+          unless (and (= i (1- header-pos))
+                      (typep inst 'vm-jump)
+                      (equal (vm-label-name inst) (getf candidate :header-name)))
+            do (push inst result))
+    (push cond-inst result)
+    (push jz-inst result)
+    (dolist (b body-insts) (push b result))
+    (loop for i from header-pos below n do (push (aref vec i) result))
+    (cfg-flatten (cfg-build (nreverse result)))))
+
+(defun %opt-pass-loop-peeling-linear (instructions)
   "Peel the first iteration of a simple while-shaped loop.
 
 Conservative subset only. Matches this linear shape:
@@ -277,5 +528,11 @@ This duplicates only one first-iteration body before the original loop header."
                      (push cur result)
                      (incf i)))))
     (nreverse result)))
+
+(defun opt-pass-loop-peeling (instructions)
+  "Peel loops using CFG natural-loop detection, falling back to linear matching."
+  (let* ((candidate (%opt-loop-cfg-candidate instructions))
+         (peeled (and candidate (%opt-loop-peeling-apply-candidate instructions candidate))))
+    (or peeled (%opt-pass-loop-peeling-linear instructions))))
 
 ;;; ─── Conservative loop unrolling (FR-021 subset) ────────────────────────
