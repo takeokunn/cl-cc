@@ -188,8 +188,67 @@ Round is excluded from the values-list check (nil means skip)."
    (lambda (state)
      (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)
      (assert-= expected-q (cl-cc:vm-reg-get state 0))
-     (when expected-vals
-       (assert-equal expected-vals (cl-cc:vm-values-list state))))))
+      (when expected-vals
+        (assert-equal expected-vals (cl-cc:vm-values-list state))))))
+
+(deftest prim-truncate-bignum-uses-vm-bignum-division-path
+  "vm-truncate on bignum operands routes through vm-bignum-burnikel-ziegler-divide."
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-burnikel-ziegler-divide
+                             (lambda (lhs rhs &key base block-size rounding)
+                               (declare (ignore lhs rhs base block-size rounding))
+                               (setf called t)
+                               (values 9 1)))
+      (%with-binary-vm-state
+       (+ most-positive-fixnum 10)
+       3
+       (lambda (state)
+         (exec1 (cl-cc:make-vm-truncate :dst 0 :lhs 1 :rhs 2) state)
+         (assert-true called)
+         (assert-= 9 (cl-cc:vm-reg-get state 0))
+         (assert-equal '(9 1) (cl-cc:vm-values-list state)))))))
+
+(deftest prim-div-bignum-uses-vm-bignum-division-path
+  "vm-div on bignum operands routes through vm-bignum-burnikel-ziegler-divide." 
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-burnikel-ziegler-divide
+                             (lambda (lhs rhs &key base block-size rounding)
+                               (declare (ignore lhs rhs base block-size rounding))
+                               (setf called t)
+                               (values 8 2)))
+      (%with-binary-vm-state
+       (+ most-positive-fixnum 10)
+       3
+       (lambda (state)
+         (exec1 (cl-cc:make-vm-div :dst 0 :lhs 1 :rhs 2) state)
+         (assert-true called)
+         (assert-= 8 (cl-cc:vm-reg-get state 0)))))))
+
+(deftest prim-div-bignum-matches-floor-for-negative-operands
+  "vm-div keeps floor semantics for negative bignum operands." 
+  (let* ((lhs (- (+ most-positive-fixnum 10)))
+         (rhs 3))
+    (%with-binary-vm-state
+     lhs rhs
+     (lambda (state)
+       (exec1 (cl-cc:make-vm-div :dst 0 :lhs 1 :rhs 2) state)
+       (assert-= (floor lhs rhs) (cl-cc:vm-reg-get state 0))))))
+
+(deftest prim-mul-bignum-uses-vm-bignum-multiply-path
+  "vm-mul on bignum operands routes through vm-bignum-multiply-integers." 
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-multiply-integers
+                             (lambda (lhs rhs &key base threshold)
+                               (declare (ignore lhs rhs base threshold))
+                               (setf called t)
+                               77))
+      (%with-binary-vm-state
+       (+ most-positive-fixnum 10)
+       3
+       (lambda (state)
+         (exec1 (cl-cc:make-vm-mul :dst 0 :lhs 1 :rhs 2) state)
+         (assert-true called)
+         (assert-= 77 (cl-cc:vm-reg-get state 0)))))))
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 7: Boolean Operations

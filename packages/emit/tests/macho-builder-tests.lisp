@@ -86,7 +86,7 @@
     (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
     (cl-cc/binary:add-entry-point b 0)
     (let* ((result (cl-cc/binary:build-mach-o b code))
-           (symtab-cmd-off (+ 32 72 (+ 72 80)))
+           (symtab-cmd-off (+ 32 72 (+ 72 80) 72 32))
            (symoff (+ (aref result (+ symtab-cmd-off 8))
                       (ash (aref result (+ symtab-cmd-off 9)) 8)
                       (ash (aref result (+ symtab-cmd-off 10)) 16)
@@ -99,8 +99,8 @@
                       (ash (aref result (+ symtab-cmd-off 17)) 8)
                       (ash (aref result (+ symtab-cmd-off 18)) 16)
                       (ash (aref result (+ symtab-cmd-off 19)) 24))))
-      (assert-equal 5 (aref result 16))
-      (assert-equal #x03 (aref result symtab-cmd-off))
+      (assert-equal 7 (aref result 16))
+      (assert-equal #x02 (aref result symtab-cmd-off))
       (assert-equal 1 nsyms)
       (assert-equal 18 (- stroff symoff))
       (assert-equal (char-code #\_) (aref result (+ stroff 1)))
@@ -113,7 +113,7 @@
     (cl-cc/binary:add-text-segment b code)
     (cl-cc/binary:add-entry-point b 0)
     (let ((result (cl-cc/binary:build-mach-o b code)))
-      (assert-equal 3 (aref result 16))
+      (assert-equal 5 (aref result 16))
       (assert-equal 0 (aref result 17))
       (assert-equal 0 (aref result 18))
       (assert-equal 0 (aref result 19))
@@ -235,3 +235,45 @@
       (cl-cc/binary:add-symbol b name :value 0 :sect 1))
     (assert-equal expected (length (cl-cc/binary::mach-o-builder-symbol-table b)))))
 
+;;; ─── Bug-fix regression: LC_LOAD_DYLINKER, MH_DYLDLINK, entryoff ───────
+
+(deftest macho-build-has-lc-load-dylinker
+  "build-mach-o emits LC_LOAD_DYLINKER (cmd byte #x0E) after the last segment command."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-entry-point b 0)
+    (let* ((result (cl-cc/binary:build-mach-o b code))
+           (idx (position #x0E result)))
+      (assert-true idx)
+      (assert-equal #x00 (aref result (+ idx 1)))
+      (assert-equal #x00 (aref result (+ idx 2)))
+      (assert-equal #x00 (aref result (+ idx 3))))))
+
+(deftest macho-build-header-has-dyldlink-flag
+  "build-mach-o sets MH_DYLDLINK (#x4) in the header flags."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#xC3))))
+    (cl-cc/binary:add-entry-point b 0)
+    (let* ((result (cl-cc/binary:build-mach-o b code))
+           (flags (+ (aref result 24)
+                     (ash (aref result 25) 8)
+                     (ash (aref result 26) 16)
+                     (ash (aref result 27) 24))))
+      (assert-true (logbitp 2 flags)))))
+
+(deftest macho-entryoff-is-code-offset
+  "build-mach-o sets LC_MAIN entryoff to code-offset (4096) — the offset of code within __TEXT.
+__TEXT.fileoff=0 so entryoff equals the absolute file offset of the first instruction."
+  (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
+         (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
+    (cl-cc/binary:add-text-segment b code)
+    (cl-cc/binary:add-entry-point b 0)
+    (let* ((result (cl-cc/binary:build-mach-o b code))
+           ;; LC_MAIN starts after: header(32)+pagezero(72)+text+section(152)+linkedit(72)+dylinker(32)
+           (main-off (+ 32 72 152 72 32))
+           (entryoff (+ (aref result (+ main-off 8))
+                        (ash (aref result (+ main-off 9)) 8)
+                        (ash (aref result (+ main-off 10)) 16)
+                        (ash (aref result (+ main-off 11)) 24))))
+      (assert-equal 4096 entryoff))))

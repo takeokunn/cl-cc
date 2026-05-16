@@ -84,6 +84,44 @@
                  #(3 2 1) #(6 5 4) 10)))
     (assert-equal '(8 8 0 6 5) (coerce digits 'list))))
 
+(deftest vm-bignum-karatsuba-multiply-digits-matches-schoolbook
+  "Karatsuba digit multiplication matches schoolbook results for the same operands."
+  (let* ((lhs #(9 8 7 6 5 4 3 2))
+         (rhs #(1 2 3 4 5 6 7 8))
+         (schoolbook (cl-cc/vm::vm-bignum-schoolbook-multiply-digits lhs rhs 10))
+         (karatsuba  (cl-cc/vm::vm-bignum-karatsuba-multiply-digits lhs rhs 10 2)))
+    (assert-equal (coerce schoolbook 'list)
+                  (coerce karatsuba 'list))))
+
+(deftest vm-bignum-multiply-digits-selects-karatsuba-by-threshold
+  "vm-bignum-multiply-digits uses Karatsuba path when threshold condition is met."
+  (let* ((lhs #(9 8 7 6 5 4 3 2))
+         (rhs #(1 2 3 4 5 6 7 8))
+         (result (cl-cc/vm::vm-bignum-multiply-digits
+                  lhs rhs :base 10 :threshold 4))
+         (expected (cl-cc/vm::vm-bignum-karatsuba-multiply-digits lhs rhs 10 2)))
+    (assert-equal (coerce expected 'list)
+                  (coerce result 'list))))
+
+(deftest vm-bignum-integer-from-digits-reconstructs-value
+  "vm-bignum-integer-from-digits reconstructs signed integer values from little-endian digits."
+  (assert-= 123456789
+           (cl-cc/vm::vm-bignum-integer-from-digits #(789 456 123) 1 1000))
+  (assert-= -123456789
+           (cl-cc/vm::vm-bignum-integer-from-digits #(789 456 123) -1 1000)))
+
+(deftest-each vm-bignum-multiply-integers-matches-host
+  "vm-bignum-multiply-integers matches host integer multiplication across signs and large operands."
+  :cases (("positive-large"
+           (expt cl-cc/vm::+vm-bignum-digit-base+ 6)
+           (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 4) 12345))
+          ("mixed-sign-large"
+           (- (expt cl-cc/vm::+vm-bignum-digit-base+ 5))
+           (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 3) 6789)))
+  (lhs rhs)
+  (assert-eql (* lhs rhs)
+              (cl-cc/vm::vm-bignum-multiply-integers lhs rhs :threshold 4)))
+
 (deftest-each vm-bignum-multiplication-strategy-selects-thresholded-plan
   "vm-bignum-multiplication-strategy distinguishes fixnum, schoolbook, and Karatsuba plans."
   :cases (("fixnum" 21 2 4 :fixnum)
@@ -102,6 +140,28 @@
     (assert-= -1 (getf plan :sign))
     (assert-true (vectorp (getf plan :lhs-digits)))
     (assert-true (vectorp (getf plan :rhs-digits)))))
+
+(deftest vm-bignum-burnikel-ziegler-divide-plan-records-chunk-metadata
+  "Burnikel-Ziegler division plan records chunk sizing and digit metadata."
+  (let ((plan (cl-cc/vm::vm-bignum-burnikel-ziegler-divide-plan
+               (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 6) 123)
+               (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 3) 7)
+               :block-size 8)))
+    (assert-eq :burnikel-ziegler (getf plan :algorithm))
+    (assert-= 8 (getf plan :chunk-size))
+    (assert-true (plusp (getf plan :chunk-count)))
+    (assert-true (vectorp (getf plan :lhs-digits)))
+    (assert-true (vectorp (getf plan :rhs-digits)))))
+
+(deftest vm-bignum-burnikel-ziegler-divide-matches-truncate
+  "VM bignum Burnikel-Ziegler entry-point returns truncate-compatible quotient/remainder." 
+  (let* ((lhs (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 7) 99))
+         (rhs (+ (expt cl-cc/vm::+vm-bignum-digit-base+ 3) 5)))
+    (multiple-value-bind (q r)
+        (cl-cc/vm::vm-bignum-burnikel-ziegler-divide lhs rhs)
+      (multiple-value-bind (eq er) (truncate lhs rhs)
+        (assert-= eq q)
+        (assert-= er r)))))
 
 (deftest-each vm-float-rounding
   "Float rounding operations store quotient and set values-list."
@@ -169,3 +229,13 @@
     (assert-eq :split-registers (getf plan :representation))
     (assert-= 4 (getf plan :real))
     (assert-= 6 (getf plan :imag))))
+
+(deftest vm-complex-add-with-unboxing-uses-split-plan-for-local-values
+  "vm-complex-add-with-unboxing uses split-register plan for local complex operands."
+  (assert-equal #C(4 6)
+                (cl-cc/vm::vm-complex-add-with-unboxing #C(1 2) #C(3 4) :local-p t)))
+
+(deftest vm-complex-add-with-unboxing-falls-back-to-boxed-add-for-escaping-values
+  "vm-complex-add-with-unboxing falls back to boxed addition when local unboxing is not allowed."
+  (assert-equal #C(4 6)
+                (cl-cc/vm::vm-complex-add-with-unboxing #C(1 2) #C(3 4) :local-p nil)))

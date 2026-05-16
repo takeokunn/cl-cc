@@ -151,6 +151,21 @@ This is a planning oracle for FR-252 and does not mutate allocation policy yet."
      graph)
     hints))
 
+(defun regalloc-build-allocation-policy-from-hints (hints label)
+  "Build a conservative allocation policy plist for LABEL from HINTS.
+
+Returned plist keys:
+  :prefer-callee-saved-p  -- keep long-lived values in callee-saved regs
+  :prefer-caller-saved-p  -- bias toward caller-saved regs for leaf chains
+
+This hook is intentionally side-effect free and can be consumed by allocator
+entry points without changing interval semantics."
+  (let* ((entry (and hints (gethash label hints)))
+         (leaf-p (and entry (getf entry :leaf-p)))
+         (leaf-callee-chain-p (and entry (getf entry :leaf-callee-chain-p))))
+    (list :prefer-callee-saved-p (not leaf-callee-chain-p)
+          :prefer-caller-saved-p (and leaf-p leaf-callee-chain-p))))
+
 (defun compute-live-intervals (instructions &optional float-vregs)
   "Compute live intervals for all virtual registers.
    Returns a list of live-interval objects sorted by start point."

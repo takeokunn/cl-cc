@@ -5,8 +5,8 @@
 (defmacro with-native-build-stubs ((&key cache-path) &body body)
   "Stub native binary emission helpers for routing-focused tests." 
   `(with-replaced-function (cl-cc:compile-to-x86-64-bytes
-                            (lambda (program)
-                              (declare (ignore program))
+                            (lambda (program &rest args)
+                              (declare (ignore program args))
                               #(1 2 3)))
      (with-replaced-function (cl-cc/binary:make-mach-o-builder
                               (lambda (&rest args)

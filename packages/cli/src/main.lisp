@@ -34,6 +34,9 @@ Options:
   --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source       Add source-location comments when available
   --debug                 Keep frame pointers for native compile debugging
+  --retpoline             Enable retpoline mitigation for indirect branches
+  --stack-protector       Enable stack canary checks in native prologue/epilogue
+  --shadow-stack          Enable CET shadow-stack planning/integration path
   --stdlib                Prepend standard library (run/eval only)
   --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
   --verbose               Show compilation details on stderr
@@ -83,6 +86,9 @@ Options:
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source     Add source-location comments when available
   --debug               Keep frame pointers for native compile debugging
+  --retpoline           Enable retpoline mitigation for indirect branches
+  --stack-protector     Enable stack canary checks in native prologue/epilogue
+  --shadow-stack        Enable CET shadow-stack planning/integration path
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose             Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)

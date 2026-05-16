@@ -182,6 +182,30 @@
       (let ((cl-cc/optimize::*opt-inline-threshold-scale* 2))
         (assert-true (>= (cl-cc/optimize::opt-adaptive-inline-threshold def) base))))))
 
+(deftest opt-adaptive-inline-threshold-ml-bonus-is-applied
+  "Adaptive threshold increases when ML-guided inline score is enabled."
+  (let* ((ci (make-vm-closure :dst :r0 :label "cheap"
+                              :params '(:r1) :captured nil
+                              :optional-params nil :rest-param nil :key-params nil))
+         (body (append (loop repeat 6 collect (make-vm-const :dst :r2 :value 0))
+                       (list (make-vm-ret :reg :r1))))
+         (def (list :closure ci :params '(:r1) :body body)))
+    (let ((cl-cc/optimize::*opt-enable-ml-inline-score* nil))
+      (let ((without-ml (cl-cc/optimize::opt-adaptive-inline-threshold def)))
+        (let ((cl-cc/optimize::*opt-enable-ml-inline-score* t)
+              (cl-cc/optimize::*opt-inline-ml-model-version* "mlgo-v2"))
+          (assert-true (>= (cl-cc/optimize::opt-adaptive-inline-threshold def)
+                           without-ml)))))))
+
+(deftest opt-inline-inst-cost-respects-learned-target
+  "Inline instruction cost reflects learned target-specific adjustments."
+  (let ((inst (make-vm-add :dst :r0 :lhs :r1 :rhs :r2)))
+    (let ((cl-cc/optimize::*opt-learned-cost-target* :x86-64))
+      (let ((x86-cost (cl-cc/optimize::opt-inline-inst-cost inst)))
+        (let ((cl-cc/optimize::*opt-learned-cost-target* :aarch64))
+          (let ((a64-cost (cl-cc/optimize::opt-inline-inst-cost inst)))
+            (assert-true (/= x86-cost a64-cost))))))))
+
 (deftest opt-pass-inline-iterative-uses-adaptive-threshold
   "The iterative inline wrapper runs with adaptive thresholds without error."
   (let* ((ci   (make-vm-closure :dst :r0 :label "f"

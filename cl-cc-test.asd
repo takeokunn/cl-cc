@@ -27,17 +27,17 @@
      (:file "framework-runner-tests")
      (:file "framework-parallel-tests")
      (:file "entrypoint-contract-tests")))
-   (:module "cli-tests"
-    :pathname "packages/cli/tests"
-    :serial t
-    :components
-    ((:file "test-support")
-     (:file "args-tests")
-     (:file "cli-tests")
-     (:file "main-tests")
-     (:file "main-dump-tests")
-     (:file "main-utils-tests")))
-   (:module "vm-tests"
+    (:module "cli-tests"
+     :pathname "packages/cli/tests"
+     :serial t
+     :components
+     ((:file "test-support")
+      (:file "args-tests")
+      (:file "cli-tests")
+      (:file "main-tests")
+      (:file "main-dump-tests")
+      (:file "main-utils-tests")))
+    (:module "vm-tests"
     :pathname "packages/vm/tests"
     :serial t
     :components
@@ -427,7 +427,8 @@
      (:file "x86-64-emit-tests")
      (:file "x86-64-emit-logical-tests")
      (:file "x86-64-emit-ops-tests")
-     (:file "elf-tests")
+      (:file "ebpf-tests")
+      (:file "elf-tests")
      (:file "elf-extended-tests")
      (:file "macho-tests")
      (:file "macho-builder-tests")))
@@ -445,6 +446,7 @@
      (:file "gc-stats-tests")
      (:file "gc-sweep-major-tests")
      (:file "heap-tests")
+      (:file "heap-sanitizer-tests")
      (:file "heap-gc-tests")
      (:file "heap-trace-tests")
      (:file "gc-write-barrier-tests")

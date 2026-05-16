@@ -15,6 +15,8 @@ self-hosting."
   "Expand (setf (ACCESSOR OBJ) VAL) via *accessor-slot-map* for known struct accessors,
 or fall back to the runtime slot writer for unknown accessors."
   (let ((mapping (gethash (car place) *accessor-slot-map*)))
+    (when (gethash (car place) *defstruct-read-only-accessor-map*)
+      (error "SETF: ~S is read-only defstruct accessor" (car place)))
     (%expander-form 'rt-slot-set
                     (second place)
                     (%expander-form 'quote (if mapping (cdr mapping) (car place)))

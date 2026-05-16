@@ -19,7 +19,7 @@
   (assert-equal #x0100000C cl-cc/binary:+cpu-type-arm64+)
   (assert-equal 2 cl-cc/binary:+mh-execute+)
   (assert-equal #x19 cl-cc/binary:+lc-segment-64+)
-  (assert-equal #x03 cl-cc/binary:+lc-symtab+))
+  (assert-equal #x02 cl-cc/binary:+lc-symtab+))
 
 ;;; ─── Structure Defaults ─────────────────────────────────────────────────
 
@@ -118,4 +118,3 @@
       (assert-equal #xFA (aref data 1))
       (assert-equal #xED (aref data 2))
       (assert-equal #xFE (aref data 3)))))
-

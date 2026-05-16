@@ -108,7 +108,7 @@
 ;;; ─── PUSH/POP single-byte opcode coverage ───────────────────────────────
 
 (deftest-each x86-push-pop-single-byte-opcodes
-  "PUSH/POP registers all emit single-byte opcodes."
+  "PUSH/POP RAX-RDI (reg < 8) emit single-byte opcodes."
   :cases (("push-rax" cl-cc/codegen::+rax+ #'cl-cc/codegen::emit-push-r64 #x50)
           ("push-rcx" cl-cc/codegen::+rcx+ #'cl-cc/codegen::emit-push-r64 #x51)
           ("pop-rax"  cl-cc/codegen::+rax+ #'cl-cc/codegen::emit-pop-r64  #x58)
@@ -119,6 +119,70 @@
   (let ((bytes (%x86-collect-bytes (lambda (s) (funcall emit-fn reg s)))))
     (assert-equal 1 (length bytes))
     (assert-equal opcode (first bytes))))
+
+(deftest-each x86-push-pop-extended-regs-two-byte-encoding
+  "PUSH/POP R8-R15 (reg >= 8) emit REX.B prefix (#x41) followed by opcode byte."
+  :cases (("push-r8"  8  #'cl-cc/codegen::emit-push-r64 #x50)
+          ("push-r12" 12 #'cl-cc/codegen::emit-push-r64 #x54)
+          ("push-r13" 13 #'cl-cc/codegen::emit-push-r64 #x55)
+          ("push-r14" 14 #'cl-cc/codegen::emit-push-r64 #x56)
+          ("push-r15" 15 #'cl-cc/codegen::emit-push-r64 #x57)
+          ("pop-r12"  12 #'cl-cc/codegen::emit-pop-r64  #x5C)
+          ("pop-r13"  13 #'cl-cc/codegen::emit-pop-r64  #x5D)
+          ("pop-r15"  15 #'cl-cc/codegen::emit-pop-r64  #x5F))
+  (reg emit-fn opcode)
+  (let ((bytes (%x86-collect-bytes (lambda (s) (funcall emit-fn reg s)))))
+    (assert-equal 2 (length bytes))
+    (assert-equal #x41 (first bytes))
+    (assert-equal opcode (second bytes))))
+
+(deftest-each x86-push-r64-byte-size
+  "push-r64-byte-size returns 1 for RAX-RDI (reg < 8) and 2 for R8-R15 (reg >= 8)."
+  :cases (("rax" 0 1)
+          ("rbp" 5 1)
+          ("rdi" 7 1)
+          ("r8"  8 2)
+          ("r12" 12 2)
+          ("r15" 15 2))
+  (reg expected)
+  (assert-equal expected (cl-cc/codegen::push-r64-byte-size reg)))
+
+(deftest-each x86-pop-r64-byte-size
+  "pop-r64-byte-size returns 1 for RAX-RDI (reg < 8) and 2 for R8-R15 (reg >= 8)."
+  :cases (("rax" 0 1)
+          ("rbp" 5 1)
+          ("rdi" 7 1)
+          ("r8"  8 2)
+          ("r12" 12 2)
+          ("r15" 15 2))
+  (reg expected)
+  (assert-equal expected (cl-cc/codegen::pop-r64-byte-size reg)))
+
+(deftest x86-prologue-with-r12-callee-saved-uses-two-byte-push
+  "A program whose regalloc assigns :r12 emits 2-byte PUSH R12 (#x41 #x54) and POP R12 (#x41 #x5C) in prologue/epilogue."
+  (let* ((assignment (let ((ht (make-hash-table :test #'eq)))
+                       (setf (gethash :R0 ht) :r12)
+                       ht))
+         (ra (cl-cc/regalloc::make-regalloc-result
+              :assignment assignment
+              :spill-count 0
+              :instructions nil))
+         (prog (cl-cc/vm::make-vm-program
+                :instructions nil
+                :result-register :R0
+                :leaf-p nil))
+         (bytes (let ((cl-cc/codegen::*current-regalloc* ra))
+                  (%x86-collect-bytes
+                   (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
+    ;; Prologue: PUSH R12 must be 2-byte encoding with REX.B prefix
+    (assert-equal #x41 (first bytes))
+    (assert-equal #x54 (second bytes))
+    ;; Epilogue: POP R12 must be 2-byte encoding with REX.B prefix
+    (assert-equal #x41 (third bytes))
+    (assert-equal #x5C (fourth bytes))
+    ;; RET follows immediately
+    (assert-equal #xC3 (fifth bytes))
+    (assert-equal 5 (length bytes))))
 
 ;;; ─── SETcc opcode2 values for each comparison ───────────────────────────
 
@@ -272,10 +336,11 @@ to be bound, which fails with NIL under raw invocation."
                       (cl-cc/codegen::*x86-64-omit-frame-pointer* nil))
                   (%x86-collect-bytes (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
     (assert-equal #x55 (first bytes))
-    (assert-equal '(#x48 #x89 #x45 #xF8) (subseq bytes 1 5))
-    (assert-equal '(#x48 #x8B #x5D #xF8) (subseq bytes 5 9))
-    (assert-equal #x5D (nth 9 bytes))
-    (assert-equal #xC3 (nth 10 bytes))))
+    (assert-equal '(#x48 #x89 #xE5) (subseq bytes 1 4))
+    (assert-equal '(#x48 #x89 #x45 #xF8) (subseq bytes 4 8))
+    (assert-equal '(#x48 #x8B #x5D #xF8) (subseq bytes 8 12))
+    (assert-equal #x5D (nth 12 bytes))
+    (assert-equal #xC3 (nth 13 bytes))))
 
 (deftest-each x86-stack-probe-count-thresholds
   "stack-probe-count emits one probe per 4096-byte frame page."

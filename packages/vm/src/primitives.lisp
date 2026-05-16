@@ -116,12 +116,25 @@ The path value is diagnostic and keeps the runtime specialization testable."
 
 (defmethod execute-instruction ((inst vm-div) state pc labels)
   (declare (ignore labels))
-  (let ((divisor (vm-reg-get state (vm-rhs inst))))
+  (let* ((lhs (vm-reg-get state (vm-lhs inst)))
+         (divisor (vm-reg-get state (vm-rhs inst))))
     (if (zerop divisor)
         (error "vm-div: Division by zero")
-        (let ((result (floor (vm-reg-get state (vm-lhs inst)) divisor)))
+        (let ((result (if (or (typep lhs 'bignum) (typep divisor 'bignum))
+                          (nth-value 0 (vm-bignum-burnikel-ziegler-divide lhs divisor :rounding :floor))
+                          (floor lhs divisor))))
           (vm-reg-set state (vm-dst inst) result)
           (values (1+ pc) nil nil)))))
+
+(defmethod execute-instruction ((inst vm-mul) state pc labels)
+  (declare (ignore labels))
+  (let* ((lhs (vm-reg-get state (vm-lhs inst)))
+         (rhs (vm-reg-get state (vm-rhs inst)))
+         (result (if (or (typep lhs 'bignum) (typep rhs 'bignum))
+                     (vm-bignum-multiply-integers lhs rhs)
+                     (* lhs rhs))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-cl-div) state pc labels)
   (declare (ignore labels))
@@ -160,13 +173,24 @@ Each SPEC is (instruction-type host-function)."
   `(progn
      ,@(loop for (inst-type host-fn) in specs
              collect `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
-                        (declare (ignore labels))
-                        (multiple-value-bind (q r)
-                            (,host-fn (vm-reg-get state (vm-lhs inst))
-                                      (vm-reg-get state (vm-rhs inst)))
-                          (vm-reg-set state (vm-dst inst) q)
-                          (setf (vm-values-list state) (list q r)))
-                         (values (1+ pc) nil nil)))))
+                         (declare (ignore labels))
+                         (let* ((lhs (vm-reg-get state (vm-lhs inst)))
+                                (rhs (vm-reg-get state (vm-rhs inst))))
+                           (when (zerop rhs)
+                             (error "Division by zero"))
+                           (multiple-value-bind (q r)
+                               (if (or (typep lhs 'bignum) (typep rhs 'bignum))
+                                   (vm-bignum-burnikel-ziegler-divide
+                                    lhs rhs
+                                    :rounding ,(case host-fn
+                                                 (truncate :truncate)
+                                                 (floor :floor)
+                                                 (ceiling :ceiling)
+                                                 (otherwise :truncate)))
+                                   (,host-fn lhs rhs))
+                           (vm-reg-set state (vm-dst inst) q)
+                             (setf (vm-values-list state) (list q r))))
+                          (values (1+ pc) nil nil)))))
 
 (define-vm-division-executors
   (vm-truncate     truncate)

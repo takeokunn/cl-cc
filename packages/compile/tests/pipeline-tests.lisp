@@ -76,6 +76,26 @@
                                 :inline-threshold-scale 2)))
     (assert-true (typep result 'cl-cc/compile:compilation-result))))
 
+(deftest pipeline-compile-string-emits-pgo-counter-plan
+  "compile-string returns a compilation-result carrying deterministic PGO counter plan metadata."
+  (let* ((result (compile-string "(+ 1 2)" :target :vm))
+         (plan (cl-cc/compile:compilation-result-pgo-counter-plan result)))
+    (assert-true plan)
+    (assert-true (integerp (getf plan :total-bb)))
+    (assert-true (integerp (getf plan :total-edge)))
+    (assert-true (consp (getf plan :bb-counters)))
+    (assert-true (consp (getf plan :edge-counters)))
+    (assert-true (consp (getf plan :bb-runtime-keys)))
+    (assert-true (listp (getf plan :edge-runtime-keys)))))
+
+(deftest pipeline-compile-string-with-stdlib-emits-pgo-counter-plan
+  "compile-string-with-stdlib also backfills pgo counter metadata for CLI --stdlib PGO paths."
+  (let* ((result (cl-cc:compile-string-with-stdlib "(+ 1 2)" :target :vm))
+         (plan (cl-cc/compile:compilation-result-pgo-counter-plan result)))
+    (assert-true plan)
+    (assert-true (integerp (getf plan :total-bb)))
+    (assert-true (consp (getf plan :bb-runtime-keys)))))
+
 (deftest pipeline-maybe-bump-opts-speed-from-ast-defun-declaration
   "%pipeline-maybe-bump-opts-speed-from-ast picks up local defun optimize speed declaration."
   (let* ((opts (cl-cc::%make-pipeline-opts :target :vm :speed nil))

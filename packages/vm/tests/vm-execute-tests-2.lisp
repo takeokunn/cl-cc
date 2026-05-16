@@ -109,9 +109,26 @@
                                   :params nil
                                   :captured-values nil)))
       (cl-cc:vm-reg-set s :R0 closure)
-      (cl-cc/vm::execute-instruction
-       (cl-cc:make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
-      (assert-true (not (null (gethash 'myfn (cl-cc/vm::vm-function-registry s))))))))
+       (cl-cc/vm::execute-instruction
+        (cl-cc:make-vm-register-function :name 'myfn :src :R0) s 0 (make-hash-table :test #'equal))
+      (assert-true (not (null (gethash 'myfn (cl-cc/vm::vm-function-registry s)))))
+      (assert-equal '(:known-function . myfn)
+                    (cl-cc/vm::vm-closure-dispatch-tag closure)))))
+
+(deftest vm-defunctionalized-dispatch-resolves-known-function-tag
+  "%vm-defunctionalized-dispatch resolves tagged known functions through registry."
+  (let ((s (make-test-vm)))
+    (let* ((registered (make-instance 'cl-cc/vm::vm-closure-object
+                                      :entry-label "fn-registered"
+                                      :params nil
+                                      :captured-values nil))
+           (placeholder (make-instance 'cl-cc/vm::vm-closure-object
+                                       :entry-label "fn-placeholder"
+                                       :params nil
+                                       :captured-values nil
+                                       :dispatch-tag '(:known-function . myfn))))
+      (setf (gethash 'myfn (cl-cc/vm::vm-function-registry s)) registered)
+      (assert-eq registered (cl-cc/vm::%vm-defunctionalized-dispatch s placeholder)))))
 
 (deftest vm-execute-make-closure-stores-vector-captures
   "vm-make-closure stores captured values in a vector and vm-closure-ref-idx reads by index."
@@ -130,3 +147,22 @@
        (cl-cc:make-vm-closure-ref-idx :dst :R4 :closure :R3 :index 1)
        s 0 (%labels))
       (assert-= 20 (cl-cc:vm-reg-get s :R4)))))
+
+(deftest vm-execute-vm-closure-propagates-dispatch-tag
+  "vm-closure instruction forwards dispatch-tag into vm-closure-object." 
+  (let ((s (make-test-vm)))
+    (cl-cc:execute-instruction
+     (cl-cc:make-vm-closure :dst :R0
+                            :label "L_TAG"
+                            :params nil
+                            :optional-params nil
+                            :rest-param nil
+                            :key-params nil
+                            :rest-stack-alloc-p nil
+                            :inline-policy nil
+                            :dispatch-tag '(:known-function . tagged)
+                            :captured nil)
+     s 0 (%labels))
+    (let ((closure (cl-cc:vm-reg-get s :R0)))
+      (assert-equal '(:known-function . tagged)
+                    (cl-cc/vm::vm-closure-dispatch-tag closure)))))

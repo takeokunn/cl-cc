@@ -152,22 +152,64 @@
 ;;; Cons / List Operations
 ;;; ------------------------------------------------------------
 
+(defstruct (rt-cow-list (:constructor %make-rt-cow-list))
+  "Runtime copy-on-write list wrapper used by rt-copy-list/rt-rplac* operations."
+  (backing nil)
+  (refcount 1 :type integer))
+
+(defparameter *rt-cow-list-enabled* t
+  "When true, rt-copy-list returns copy-on-write wrappers for list values.")
+
+(defun %rt-cow-list-materialize (value)
+  (if (rt-cow-list-p value)
+      (rt-cow-list-backing value)
+      value))
+
+(defun %rt-cow-list-share (value)
+  (if (rt-cow-list-p value)
+      (progn
+        (incf (rt-cow-list-refcount value))
+        (%make-rt-cow-list :backing (rt-cow-list-backing value)
+                           :refcount (rt-cow-list-refcount value)))
+      ;; Plain lists are assumed shared with at least one external owner.
+      ;; Start with refcount=2 so first write performs copy-on-write.
+      (%make-rt-cow-list :backing value :refcount 2)))
+
+(defun %rt-cow-list-ensure-writable (value)
+  (if (rt-cow-list-p value)
+      (progn
+        (when (> (rt-cow-list-refcount value) 1)
+          (decf (rt-cow-list-refcount value))
+          (setf (rt-cow-list-backing value) (copy-list (rt-cow-list-backing value))
+                (rt-cow-list-refcount value) 1))
+        (rt-cow-list-backing value))
+      value))
+
 (defun rt-cons (car cdr) (cons car cdr))
-(defun rt-car (x) (car x))
-(defun rt-cdr (x) (cdr x))
-(defun rt-rplaca (cons val) (rplaca cons val) nil)
-(defun rt-rplacd (cons val) (rplacd cons val) nil)
+(defun rt-car (x) (car (%rt-cow-list-materialize x)))
+(defun rt-cdr (x) (cdr (%rt-cow-list-materialize x)))
+(defun rt-rplaca (cons val)
+  (rplaca (%rt-cow-list-ensure-writable cons) val)
+  nil)
+(defun rt-rplacd (cons val)
+  (rplacd (%rt-cow-list-ensure-writable cons) val)
+  nil)
 (defun rt-make-list (n &optional (init nil)) (make-list n :initial-element init))
-(defun rt-list-length (l) (length l))
-(defun rt-nconc (a b) (nconc a b))
-(defun rt-reverse (l) (reverse l))
-(defun rt-nreverse (l) (nreverse l))
-(defun rt-member (x l) (member x l))
-(defun rt-nth (n l) (nth n l))
-(defun rt-nthcdr (n l) (nthcdr n l))
-(defun rt-last (l) (last l))
-(defun rt-butlast (l) (butlast l))
-(defun rt-copy-list (l) (copy-list l))
+(defun rt-list-length (l) (length (%rt-cow-list-materialize l)))
+(defun rt-nconc (a b) (nconc (%rt-cow-list-ensure-writable a)
+                            (%rt-cow-list-materialize b)))
+(defun rt-reverse (l) (reverse (%rt-cow-list-materialize l)))
+(defun rt-nreverse (l) (nreverse (%rt-cow-list-ensure-writable l)))
+(defun rt-member (x l) (member x (%rt-cow-list-materialize l)))
+(defun rt-nth (n l) (nth n (%rt-cow-list-materialize l)))
+(defun rt-nthcdr (n l) (nthcdr n (%rt-cow-list-materialize l)))
+(defun rt-last (l) (last (%rt-cow-list-materialize l)))
+(defun rt-butlast (l) (butlast (%rt-cow-list-materialize l)))
+(defun rt-copy-list (l)
+  (let ((materialized (%rt-cow-list-materialize l)))
+    (if *rt-cow-list-enabled*
+        (%rt-cow-list-share materialized)
+        (copy-list materialized))))
 (defun rt-copy-tree (l) (copy-tree l))
 (defun rt-assoc (key alist) (assoc key alist))
 (defun rt-acons (key val alist) (acons key val alist))
@@ -181,7 +223,9 @@
 (define-rt-predicate rt-endp endp)
 (define-rt-predicate rt-null null)
 (defun rt-push-list (val list-place) (cons val list-place))
-(defun rt-pop-list (list-place) (values (car list-place) (cdr list-place)))
+(defun rt-pop-list (list-place)
+  (let ((list-value (%rt-cow-list-materialize list-place)))
+    (values (car list-value) (cdr list-value))))
 (define-rt-binary-predicate rt-equal equal)
 (defun rt-string-coerce (x) (string x))
 (defun rt-coerce-to-string (x) (if (stringp x) x (format nil "~A" x)))
@@ -190,4 +234,3 @@
 
 ;; Arrays/Vectors, Arithmetic, Bitwise, Comparisons, and Math rt-* wrappers
 ;; are in runtime-ops.lisp (loaded next).
-

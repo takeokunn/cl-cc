@@ -7,10 +7,14 @@
 (our-defmacro copy-seq (seq)
   "Return a fresh copy of SEQ (works for lists and vectors)."
   (let ((s (gensym "SEQ")))
-    `(let ((,s ,seq))
-       (if (listp ,s)
-           (copy-list ,s)
-           (subseq ,s 0)))))
+    (let* ((vm-pkg (find-package "CL-CC/VM"))
+           (cow-copy-sym (and vm-pkg (find-symbol "VM-COW-COPY-SEQ" vm-pkg))))
+      `(let ((,s ,seq))
+         ,(if cow-copy-sym
+              `(,cow-copy-sym ,s)
+              `(if (listp ,s)
+                   (copy-list ,s)
+                   (subseq ,s 0)))))))
 
 ;; FILL (FR-502): fill a sequence (list or vector) with item; supports :start/:end
 (our-defmacro fill (seq item &key start end)

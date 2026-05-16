@@ -115,6 +115,17 @@
   (serialize-uint32-le (nlist-n-desc nlist) buffer)
   (serialize-uint64-le (nlist-n-value nlist) buffer))
 
+(defun serialize-lc-load-dylinker (buffer)
+  "Serialize LC_LOAD_DYLINKER /usr/lib/dyld command (32 bytes) to BUFFER.
+cmdsize must be 8-byte aligned for 64-bit Mach-O: 12 header + 13 string + 7 pad = 32."
+  (serialize-uint32-le +lc-load-dylinker+ buffer)
+  (serialize-uint32-le 32 buffer)
+  (serialize-uint32-le 12 buffer)
+  (loop for c across "/usr/lib/dyld"
+        do (buffer-write-byte buffer (char-code c)))
+  (loop repeat 7
+        do (buffer-write-byte buffer 0)))
+
 ;;; Builder Class
 
 (defclass mach-o-builder ()

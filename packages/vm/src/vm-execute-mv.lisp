@@ -207,7 +207,8 @@
       (unless (vm-closure-program-flat closure)
         (setf (vm-closure-program-flat closure) *vm-exec-flat*))
       (unless (vm-closure-label-table closure)
-        (setf (vm-closure-label-table closure) labels)))
+        (setf (vm-closure-label-table closure) labels))
+      (setf (vm-closure-dispatch-tag closure) (cons :known-function name)))
     (setf (gethash name (vm-function-registry state)) closure)
     (values (1+ pc) nil nil)))
 

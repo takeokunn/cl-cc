@@ -67,6 +67,7 @@
                   :key-params key-closure-data
                   :rest-stack-alloc-p rest-stack-alloc-p
                   :inline-policy inline-policy
+                  :dispatch-tag '(:anonymous . nil)
                   :captured captured-vars))
       (%call-with-declaration-policies
        ctx
@@ -128,6 +129,7 @@
                   :key-params key-closure-data
                   :rest-stack-alloc-p rest-stack-alloc-p
                   :inline-policy inline-policy
+                  :dispatch-tag (cons :known-function name)
                   :captured captured-vars))
       (setf (ctx-env ctx) (cons (cons name closure-reg) (ctx-env ctx)))
       (emit ctx (make-vm-register-function :name name :src closure-reg))

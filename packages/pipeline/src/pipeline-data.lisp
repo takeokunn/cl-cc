@@ -31,7 +31,15 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (trace-json-stream  nil)
   (print-opt-remarks  nil)
   (opt-remarks-stream nil)
-  (opt-remarks-mode   :all    :type keyword))
+  (opt-remarks-mode   :all    :type keyword)
+  (retpoline          nil)
+  (stack-protector    nil)
+  (shadow-stack       nil)
+  (asan               nil)
+  (msan               nil)
+  (tsan               nil)
+  (ubsan              nil)
+  (hwasan             nil))
 
 (defun %opts->optimize-kwargs (opts)
   "Extract the pass/stats/remarks subset of OPTS as a keyword plist for
@@ -46,7 +54,15 @@ optimize-instructions."
         :trace-json-stream  (pipeline-opts-trace-json-stream opts)
         :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
         :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
-        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)))
+        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
+        :retpoline          (pipeline-opts-retpoline opts)
+        :stack-protector    (pipeline-opts-stack-protector opts)
+        :shadow-stack       (pipeline-opts-shadow-stack opts)
+        :asan               (pipeline-opts-asan opts)
+        :msan               (pipeline-opts-msan opts)
+        :tsan               (pipeline-opts-tsan opts)
+        :ubsan              (pipeline-opts-ubsan opts)
+        :hwasan             (pipeline-opts-hwasan opts)))
 
 (defun %opts->compile-kwargs (opts)
   "Spread all OPTS fields into a keyword plist for compile-expression /

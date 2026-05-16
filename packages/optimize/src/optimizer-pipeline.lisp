@@ -30,6 +30,26 @@ optimizer's pass table wiring.")
       (opt-pass-pure-call-optimization instructions)
       instructions))
 
+(defun %maybe-run-fr523-affine-loop-analysis (instructions)
+  (if (fboundp 'opt-pass-affine-loop-analysis)
+      (opt-pass-affine-loop-analysis instructions)
+      instructions))
+
+(defun %maybe-run-fr524-loop-interchange (instructions)
+  (if (fboundp 'opt-pass-loop-interchange)
+      (opt-pass-loop-interchange instructions)
+      instructions))
+
+(defun %maybe-run-fr525-polyhedral-schedule (instructions)
+  (if (fboundp 'opt-pass-polyhedral-schedule)
+      (opt-pass-polyhedral-schedule instructions)
+      instructions))
+
+(defun %maybe-run-fr526-loop-fusion-fission (instructions)
+  (if (fboundp 'opt-pass-loop-fusion-fission)
+      (opt-pass-loop-fusion-fission instructions)
+      instructions))
+
 ;;; Single source of truth: ordered keyword → function pairs.
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
@@ -46,6 +66,10 @@ optimizer's pass table wiring.")
      (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
      (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
      (:fill-recognition          . ,#'opt-pass-fill-recognition)
+     (:affine-loop-analysis      . ,#'%maybe-run-fr523-affine-loop-analysis)
+     (:loop-interchange          . ,#'%maybe-run-fr524-loop-interchange)
+     (:polyhedral-schedule       . ,#'%maybe-run-fr525-polyhedral-schedule)
+     (:loop-fusion-fission       . ,#'%maybe-run-fr526-loop-fusion-fission)
      (:reassociate               . ,#'opt-pass-reassociate)
      (:copy-prop                 . ,#'opt-pass-copy-prop)
      (:pure-call-optimization    . ,#'%maybe-run-pure-call-optimization)
@@ -92,6 +116,10 @@ optimizer's pass table wiring.")
       :bswap-recognition
      :rotate-recognition
      :fill-recognition
+     :affine-loop-analysis
+     :loop-interchange
+     :polyhedral-schedule
+     :loop-fusion-fission
      :reassociate
      :copy-prop
      :pure-call-optimization
@@ -305,10 +333,16 @@ Returns the resulting gate value for convenience."
                                                   (opt-remarks-mode :all)
                                                   speed
                                                   (inline-threshold-scale 1)
-                                                  trace-json-stream)
+                                                  trace-json-stream
+                                                  retpoline
+                                                  stack-protector
+                                                  shadow-stack
+                                                  asan msan tsan ubsan hwasan)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
 Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
 When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
+  (declare (ignore retpoline stack-protector shadow-stack
+                   asan msan tsan ubsan hwasan))
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
   (when speed

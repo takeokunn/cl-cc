@@ -54,7 +54,7 @@
   (let* ((key (vm-reg-get state (vm-hash-key inst)))
          (value (vm-reg-get state (vm-hash-value inst)))
          (table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
+         (table (vm-hash-table-get-internal (vm-hash-ensure-writable table-obj))))
     (if (typep table-obj 'vm-hash-table-object)
         (vm-hash-with-lock-fallback table-obj
                                     (lambda ()
@@ -66,7 +66,7 @@
   (declare (ignore labels))
   (let* ((key (vm-reg-get state (vm-hash-key inst)))
          (table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
+         (table (vm-hash-table-get-internal (vm-hash-ensure-writable table-obj))))
     (if (typep table-obj 'vm-hash-table-object)
         (vm-hash-with-lock-fallback table-obj
                                     (lambda ()
@@ -77,7 +77,7 @@
 (defmethod execute-instruction ((inst vm-clrhash) state pc labels)
   (declare (ignore labels))
   (let* ((table-obj (vm-reg-get state (vm-hash-table-reg inst)))
-         (table (vm-hash-table-get-internal table-obj)))
+         (table (vm-hash-table-get-internal (vm-hash-ensure-writable table-obj))))
     (if (typep table-obj 'vm-hash-table-object)
         (vm-hash-with-lock-fallback table-obj
                                     (lambda ()

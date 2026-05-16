@@ -128,6 +128,7 @@
    #:compilation-result-ast
    #:compilation-result-vm-instructions
    #:compilation-result-optimized-instructions
+   #:compilation-result-pgo-counter-plan
 
    ;; ── CPS transformation re-exports ──
    #:cps-transform

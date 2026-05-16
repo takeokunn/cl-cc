@@ -12,6 +12,10 @@
 (defvar *accessor-slot-map* (make-hash-table :test #'eq)
   "Maps accessor function names to (class-name . slot-name) for setf expansion.")
 
+(defvar *defstruct-read-only-accessor-map* (make-hash-table :test #'eq)
+  "Set-like table of read-only defstruct accessor names.
+When accessor is present, `(setf (accessor obj) ...)` is rejected at expansion.")
+
 (defvar *defstruct-slot-registry* (make-hash-table :test #'eq)
   "Maps struct name to list of (slot-name default-value) for :include inheritance.")
 
@@ -30,6 +34,7 @@ Used by `(declaim (optimize ...))` during source compilation.")
   "Execute BODY with fresh, thread-local defstruct registry tables.
 Prevents concurrent tests from mutating shared global hash tables."
   `(let ((*accessor-slot-map*        (make-hash-table :test #'eq))
+         (*defstruct-read-only-accessor-map* (make-hash-table :test #'eq))
          (*defstruct-slot-registry*  (make-hash-table :test #'eq))
          (*defstruct-type-registry*  (make-hash-table :test #'eq))
          (*declaim-inline-registry*  (make-hash-table :test #'eq))

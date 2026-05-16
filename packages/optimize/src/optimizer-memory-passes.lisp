@@ -293,14 +293,22 @@ single-block instruction streams so existing behavior stays intact."
 (defun %available-store-location-key (inst alias-roots)
   "Return the modeled memory key for store/load INST, or NIL when unsupported.
 
-CFG-aware forwarding currently models only globals for safety. SLOT-based
-forwarding remains on the straight-line path until flow-sensitive aliasing is added."
-  (declare (ignore alias-roots))
+CFG-aware forwarding models globals and slot accesses keyed by alias roots."
   (typecase inst
     ((or vm-set-global vm-get-global)
      (list :global (typecase inst
                      (vm-set-global (cl-cc/vm::vm-set-global-name inst))
                      (vm-get-global (cl-cc/vm::vm-get-global-name inst)))))
+    ((or vm-slot-write vm-slot-read)
+     (typecase inst
+       (vm-slot-write
+        (opt-slot-alias-key (cl-cc/vm::vm-slot-write-obj-reg inst)
+                            (cl-cc/vm::vm-slot-write-slot-name inst)
+                            alias-roots))
+       (vm-slot-read
+        (opt-slot-alias-key (cl-cc/vm::vm-slot-read-obj-reg inst)
+                            (cl-cc/vm::vm-slot-read-slot-name inst)
+                            alias-roots))))
     (t nil)))
 
 (defun %available-store-remember-store (state inst alias-roots)
@@ -352,8 +360,8 @@ forwarding remains on the straight-line path until flow-sensitive aliasing is ad
            (if store
                (%available-store-kill-dependent-on-reg state dst :exclude-key key)
                (%available-store-kill-dependent-on-reg state dst))))
-        (vm-set-global
-          (%available-store-remember-store state inst alias-roots))
+        ((or vm-set-global vm-slot-write)
+         (%available-store-remember-store state inst alias-roots))
         (t
          (let ((dst (opt-inst-dst inst)))
            (when dst
@@ -372,6 +380,82 @@ forwarding remains on the straight-line path until flow-sensitive aliasing is ad
      (when (typep store 'vm-slot-write)
        (make-vm-move :dst (cl-cc/vm::vm-slot-read-dst inst)
                      :src (cl-cc/vm::vm-slot-write-value-reg store))))))
+
+(defun %available-store-const-value-before-terminator (block reg)
+  "Return constant integer value of REG at BLOCK terminator when provable, else NIL.
+
+Conservative straight-line scan: tracks vm-const and vm-move aliases within BLOCK."
+  (let ((env (make-hash-table :test #'eq)))
+    (dolist (inst (bb-instructions block))
+      (typecase inst
+        (vm-const
+         (let ((dst (vm-dst inst))
+               (value (vm-value inst)))
+           (when (and dst (integerp value))
+             (setf (gethash dst env) value))))
+        (vm-move
+         (let ((dst (vm-dst inst))
+               (src (vm-src inst)))
+           (when dst
+             (if src
+                 (multiple-value-bind (value found-p) (gethash src env)
+                   (if found-p
+                       (setf (gethash dst env) value)
+                       (remhash dst env)))
+                 (remhash dst env)))))
+        (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (remhash dst env))))))
+    (gethash reg env)))
+
+(defun %available-store-edge-feasible-p (pred succ)
+  "Return T when edge PRED -> SUCC is feasible under local constant branch facts.
+
+Only handles vm-jump-zero with block-local constant condition values.
+Unknown conditions remain feasible (conservative)."
+  (let ((term (car (last (bb-instructions pred)))))
+    (cond
+      ((typep term 'vm-jump-zero)
+       (let* ((cond-reg (vm-reg term))
+              (target-label (vm-label-name term))
+              (succ-label (and (bb-label succ) (vm-name (bb-label succ))))
+              (const-value (%available-store-const-value-before-terminator pred cond-reg))
+              (zero-edge-p (and succ-label (equal succ-label target-label))))
+         (if const-value
+             (if (= const-value 0)
+                 zero-edge-p
+                 (not zero-edge-p))
+             t)))
+      (t t))))
+
+(defun %available-store-refined-entry-state (block flow reachable)
+  "Compute BLOCK entry state by merging only feasible predecessor OUT states."
+  (let* ((preds (bb-predecessors block))
+         (feasible-preds (remove-if-not (lambda (pred)
+                                          (and (gethash pred reachable)
+                                               (%available-store-edge-feasible-p pred block)))
+                                        preds))
+         (states (mapcar (lambda (pred)
+                           (gethash pred (opt-dataflow-result-out flow)))
+                         feasible-preds)))
+    (%available-store-merge-states states)))
+
+(defun %available-store-reachable-blocks (cfg)
+  "Return EQ hash-table of blocks reachable under local constant branch pruning."
+  (let ((reachable (make-hash-table :test #'eq))
+        (work nil))
+    (when (cfg-entry cfg)
+      (setf (gethash (cfg-entry cfg) reachable) t)
+      (push (cfg-entry cfg) work))
+    (loop while work
+          do (let ((block (pop work)))
+               (dolist (succ (bb-successors block))
+                 (when (and (%available-store-edge-feasible-p block succ)
+                            (not (gethash succ reachable)))
+                   (setf (gethash succ reachable) t)
+                   (push succ work)))))
+    reachable))
 
 (defun %available-store-build-rewrite-map (block entry-state alias-roots)
   "Return hash-table mapping original instructions to rewritten instructions for BLOCK.
@@ -393,10 +477,17 @@ loads in-place."
                  (%available-store-kill-dependent-on-reg state dst :exclude-key key))
                (%available-store-kill-dependent-on-reg state dst))))
         (vm-slot-read
-         (let ((dst (cl-cc/vm::vm-slot-read-dst inst)))
-           (%available-store-kill-dependent-on-reg state dst)))
-        (vm-set-global
-          (%available-store-remember-store state inst alias-roots))
+         (let* ((key         (%available-store-location-key inst alias-roots))
+                (store       (and key (gethash key state)))
+                (replacement (and store (%available-store-forwarded-load inst store)))
+                (dst         (cl-cc/vm::vm-slot-read-dst inst)))
+           (if replacement
+               (progn
+                 (setf (gethash inst rewrites) replacement)
+                 (%available-store-kill-dependent-on-reg state dst :exclude-key key))
+               (%available-store-kill-dependent-on-reg state dst))))
+        ((or vm-set-global vm-slot-write)
+         (%available-store-remember-store state inst alias-roots))
         (t
          (let ((dst (opt-inst-dst inst)))
            (when dst
@@ -436,9 +527,9 @@ loads in-place."
                  (progn
                    (%available-store-kill-dependent-on-reg state dst)
                    (emit inst)))))
-          (vm-set-global
-            (%available-store-remember-store state inst alias-roots)
-            (emit inst))
+          ((or vm-set-global vm-slot-write)
+           (%available-store-remember-store state inst alias-roots)
+           (emit inst))
           (t
            (let ((dst (opt-inst-dst inst)))
              (when dst
@@ -461,14 +552,16 @@ loads in-place."
                                         :initial-state initial
                                         :boundary-state initial
                                         :copy-state #'%available-store-copy-state)))
-    (let ((rewrites (make-hash-table :test #'eq)))
+    (let ((rewrites (make-hash-table :test #'eq))
+          (reachable (%available-store-reachable-blocks cfg)))
       (loop for block across (cfg-blocks cfg)
-            when block
-            do (let ((per-block
-                      (%available-store-build-rewrite-map
-                       block
-                       (gethash block (opt-dataflow-result-in flow))
-                       alias-roots)))
+            when (and block (gethash block reachable))
+            do (let* ((entry-state (%available-store-refined-entry-state block flow reachable))
+                      (per-block
+                       (%available-store-build-rewrite-map
+                        block
+                        entry-state
+                        alias-roots)))
                  (maphash (lambda (old new)
                             (setf (gethash old rewrites) new))
                           per-block)))

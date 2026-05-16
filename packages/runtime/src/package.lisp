@@ -107,9 +107,13 @@
     #:rt-boundp #:rt-fboundp #:rt-makunbound
    #:rt-random #:rt-make-random-state
    #:rt-get-universal-time #:rt-get-internal-real-time #:rt-get-internal-run-time
-   #:rt-read-from-string #:rt-read-sexp
-   #:rt-coerce
-   ;; I/O
+    #:rt-read-from-string #:rt-read-sexp
+    #:rt-coerce
+    ;; Runtime region API (FR-254 integration)
+    #:rt-make-region #:rt-close-region #:rt-region-active-p
+    #:rt-region-alloc #:rt-region-ref-valid-p #:rt-region-deref #:rt-with-region
+    #:rt-region-capacity #:rt-region-used
+    ;; I/O
    #:rt-print #:rt-princ #:rt-prin1 #:rt-terpri #:rt-fresh-line
    #:rt-write-char #:rt-write-string #:rt-write-line #:rt-write-byte
    #:rt-format #:rt-read-char #:rt-read-line #:rt-read-byte
@@ -190,8 +194,14 @@
    #:rt-heap-card-table #:rt-heap-roots #:rt-heap-satb-queue
    #:rt-heap-free-list #:rt-heap-gc-state
    ;; Heap word access
-   #:rt-heap-ref #:rt-heap-set
-   #:rt-heap-object-header #:rt-heap-set-header #:rt-heap-object-size
+    #:rt-heap-ref #:rt-heap-set
+    ;; Sanitizer runtime controls (FR-489..493)
+     #:*rt-asan-enabled* #:*rt-msan-enabled* #:*rt-tsan-enabled* #:*rt-hwasan-enabled* #:*rt-ubsan-enabled*
+    #:*rt-tsan-thread-id*
+    #:rt-sanitizer-reset-state
+    #:rt-sanitizer-poison-address #:rt-sanitizer-unpoison-address
+    #:rt-sanitizer-set-address-tag
+    #:rt-heap-object-header #:rt-heap-set-header #:rt-heap-object-size
    ;; Card table
    #:rt-card-index #:rt-card-dirty-p #:rt-card-mark-dirty #:rt-card-clear #:rt-card-clear-all
    ;; Address predicates

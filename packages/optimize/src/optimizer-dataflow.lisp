@@ -195,8 +195,83 @@ iterations to accelerate convergence on growing lattices."
                                      (prog1 (funcall leq old new)
                                        (incf iteration)))
                       :initial-state (opt-domain-top domain)
-                      :boundary-state boundary
-                      :copy-state copy-state)))
+                       :boundary-state boundary
+                       :copy-state copy-state)))
+
+(defun %opt-interval-env-copy (env)
+  (let ((copy (make-hash-table :test #'eq)))
+    (when env
+      (maphash (lambda (reg interval)
+                 (setf (gethash reg copy)
+                       (and interval (cons (car interval) (cdr interval)))))
+               env))
+    copy))
+
+(defun %opt-interval-env-equal (a b)
+  (and (= (hash-table-count a) (hash-table-count b))
+       (let ((ok t))
+         (maphash (lambda (reg interval)
+                    (multiple-value-bind (other found-p) (gethash reg b)
+                      (unless (and found-p (equal interval other))
+                        (setf ok nil))))
+                  a)
+         ok)))
+
+(defun %opt-interval-join-two (a b)
+  (let ((joined (%opt-interval-env-copy a)))
+    (maphash (lambda (reg interval)
+               (multiple-value-bind (other found-p) (gethash reg joined)
+                 (if found-p
+                     (setf (gethash reg joined)
+                           (cons (min (car other) (car interval))
+                                 (max (cdr other) (cdr interval))))
+                     (setf (gethash reg joined)
+                           (cons (car interval) (cdr interval))))))
+             b)
+    joined))
+
+(defun %opt-interval-domain-join (a b)
+  (%opt-interval-join-two a b))
+
+(defun %opt-interval-domain-transfer (block in-state)
+  (let ((state (%opt-interval-env-copy in-state)))
+    (dolist (inst (bb-instructions block) state)
+      (typecase inst
+        (vm-const
+         (let ((dst (vm-dst inst))
+               (value (vm-value inst)))
+           (when (and dst (integerp value))
+             (setf (gethash dst state) (cons value value)))))
+        ((or vm-add vm-integer-add)
+         (let* ((dst (vm-dst inst))
+                (lhs (gethash (vm-lhs inst) state))
+                (rhs (gethash (vm-rhs inst) state)))
+           (if (and dst lhs rhs)
+               (setf (gethash dst state)
+                     (cons (+ (car lhs) (car rhs))
+                           (+ (cdr lhs) (cdr rhs))))
+               (when dst
+                 (remhash dst state)))))
+        (t
+         (let ((dst (opt-inst-dst inst)))
+           (when dst
+             (remhash dst state))))))))
+
+(defun opt-run-integer-interval-abstract-interpretation (cfg-or-instructions)
+  "Run a concrete integer-interval abstract interpretation over CFG-OR-INSTRUCTIONS.
+
+Intervals are represented as cons cells (LO . HI) per virtual register."
+  (let ((domain (make-opt-abstract-domain
+                 :name :integer-interval
+                 :top (make-hash-table :test #'eq)
+                 :bottom (make-hash-table :test #'eq)
+                 :join #'%opt-interval-domain-join
+                 :leq #'%opt-interval-env-equal
+                 :widen #'%opt-interval-domain-join
+                 :transfer #'%opt-interval-domain-transfer)))
+    (opt-run-abstract-interpretation cfg-or-instructions domain
+                                     :direction :forward
+                                     :copy-state #'%opt-interval-env-copy)))
 
 ;;; ─── Available Expressions ────────────────────────────────────────────────
 

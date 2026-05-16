@@ -136,6 +136,9 @@
     #:lookup-opt-roadmap-evidence
     #:optimize-backend-roadmap-doc-features
     #:optimize-backend-roadmap-doc-fr-ids
+    #:optimize-backend-roadmap-status-summary
+    #:optimize-backend-roadmap-all-fr-complete-p
+    #:optimize-backend-roadmap-fr-ids-by-status
     #:optimize-backend-roadmap-register-doc-evidence
     #:lookup-opt-backend-roadmap-evidence
     #:optimize-roadmap-evidence-well-formed-p
@@ -177,7 +180,9 @@
      #:opt-pgo-best-successor
      #:opt-pgo-build-hot-chain
      #:opt-pgo-rotate-loop
-     #:opt-lattice-bottom
+     #:opt-pgo-build-counter-plan
+     #:opt-pgo-make-profile-template
+      #:opt-lattice-bottom
      #:opt-lattice-constant
      #:opt-lattice-overdefined
      #:opt-lattice-meet
@@ -245,15 +250,23 @@
       #:opt-shadow-stack-plan-needs-save-restore-p
       #:opt-build-shadow-stack-plan
      #:make-opt-wasm-tailcall-plan
-    #:opt-wasm-select-tailcall-opcode
-    #:opt-build-wasm-tailcall-plan
-    #:make-opt-wasm-gc-layout
-    #:opt-build-wasm-gc-layout
-    #:make-opt-debug-loc
-    #:opt-build-dwarf-line-row
-    #:opt-build-wasm-source-map-entry
-    #:opt-format-diagnostic-reason
-    #:make-opt-tls-plan
+     #:opt-wasm-select-tailcall-opcode
+     #:opt-wasm-select-direct-tailcall-opcode
+     #:opt-build-wasm-tailcall-plan
+     #:make-opt-wasm-gc-layout
+     #:opt-build-wasm-gc-layout
+     #:opt-wasm-gc-layout-valid-p
+     #:opt-wasm-gc-runtime-host-compatible-p
+     #:opt-build-wasm-gc-optimization-plan
+      #:make-opt-debug-loc
+     #:opt-build-dwarf-line-row
+     #:opt-build-wasm-source-map-entry
+     #:opt-build-wasm-source-map-v3
+     #:opt-format-diagnostic-reason
+     #:opt-build-diagnostic-caret-line
+     #:opt-diagnostic-did-you-mean
+     #:opt-format-type-trace
+     #:make-opt-tls-plan
     #:opt-tls-plan-target
     #:opt-tls-plan-base-register
     #:opt-tls-plan-model
@@ -277,13 +290,33 @@
      #:opt-partial-spec-static-args
      #:opt-partial-spec-dynamic-args
      #:opt-partial-spec-residual-body
+     #:make-opt-partial-eval-result
+     #:opt-partial-eval-function-name
+     #:opt-partial-eval-parameters
+     #:opt-partial-eval-signature
+     #:opt-partial-eval-binding-times
+     #:opt-partial-eval-form-kinds
+     #:opt-partial-eval-residual-body
+     #:opt-partial-eval-dynamic-body
+     #:opt-partial-eval-specialization
+     #:make-opt-partial-program-result
+     #:opt-partial-program-function-results
      #:opt-specialize-constant-args
+  #:opt-partial-evaluate-function
+  #:opt-partial-evaluate-program
+  #:opt-partial-evaluate-modules
+  #:opt-partial-evaluate-modules-cached
+  #:opt-partial-evaluate-modules-incremental
+  #:opt-partial-evaluate-functions-incremental
      #:make-opt-binding-time
      #:opt-binding-time-parameter
      #:opt-binding-time-kind
      #:opt-binding-time-value
      #:opt-binding-time-lattice
      #:opt-sccp-analyze-binding-times
+     #:opt-run-binding-time-analysis
+     #:opt-offline-bta-classify-form
+     #:opt-offline-bta-analyze-body
      #:make-opt-specialization-plan
      #:opt-specialization-plan-callee-label
      #:opt-specialization-plan-specialized-name
@@ -293,6 +326,8 @@
      #:opt-specialization-plan-clone-needed-p
      #:opt-specialization-plan-cache-hit-p
      #:opt-build-specialization-plan
+     #:opt-pass-specialize-known-args
+     #:opt-pass-partial-evaluation
      #:make-opt-cow-object
      #:opt-cow-object-payload
      #:opt-cow-object-refcount

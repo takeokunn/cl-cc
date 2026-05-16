@@ -72,6 +72,20 @@ BASE-ADDR is the virtual memory address for the segment."
    :cmdsize 72
    :sections nil))
 
+(defun %make-linkedit-segment (fileoff filesize vmaddr)
+  "Create the __LINKEDIT segment required for code signing."
+  (make-segment-command
+   :segname "__LINKEDIT"
+   :vmaddr vmaddr
+   :vmsize (max #x1000 (align-up filesize #x1000))
+   :fileoff fileoff
+   :filesize filesize
+   :maxprot 1
+   :initprot 1
+   :nsects 0
+   :cmdsize 72
+   :sections nil))
+
 (defun add-data-segment (builder data-bytes &key (base-addr #x100001000))
   "Add __DATA segment to BUILDER.
 DATA-BYTES should be a simple-array of (unsigned-byte 8).
@@ -130,78 +144,110 @@ SECT is the section number."
 
 (defun build-mach-o (builder code-bytes)
   "Build complete Mach-O executable from BUILDER and CODE-BYTES.
-Returns a simple-array of (unsigned-byte 8)."
+Returns a simple-array of (unsigned-byte 8).
+
+Layout: __PAGEZERO (fileoff=0) + __TEXT (fileoff=0, covers header through code)
++ __LINKEDIT (after code) + LC_LOAD_DYLINKER + LC_MAIN.
+__TEXT.fileoff=0 is required by macOS strict validation for code signing."
   (declare (type mach-o-builder builder)
            (type (simple-array (unsigned-byte 8) (*)) code-bytes))
-  ;; Create output buffer
   (let* ((buffer (make-byte-buffer 65536))
-          ;; Calculate sizes
-          (header-size 32)
-          (segments (cons (%make-pagezero-segment)
-                          (nreverse (mach-o-builder-segments builder))))
-          (symbols (nreverse (mach-o-builder-symbol-table builder)))
-          (string-table (subseq (mach-o-builder-string-table builder)
-                                0
-                                (fill-pointer (mach-o-builder-string-table builder))))
-          (has-symbols (plusp (length symbols)))
-          ;; Segment command size: 72 bytes header + 80 bytes per section
-          (seg-cmd-sizes (loop for seg in segments
-                               sum (+ 72 (* 80 (segment-command-nsects seg)))))
-          (main-cmd-size 24)
-          (symtab-cmd-size (if has-symbols 24 0))
-          (dysymtab-cmd-size (if has-symbols 80 0))
-          (cmds-size (+ seg-cmd-sizes main-cmd-size symtab-cmd-size dysymtab-cmd-size))
-          ;; Align code to page boundary
-          (code-offset (align-up (+ header-size cmds-size) 4096))
-          (payload-end (loop with off = code-offset
-                             for seg in segments
-                             do (incf off (align-up (length (if (and (string= (segment-command-segname seg) "__TEXT")
-                                                                     (zerop (length (segment-command-payload seg))))
-                                                                code-bytes
-                                                                (segment-command-payload seg)))
-                                                      #x1000))
-                             finally (return off)))
-          (symoff (if has-symbols payload-end 0))
-          (nsyms (length symbols))
-          (stroff (if has-symbols (+ symoff (* nsyms 18)) 0))
-          (strsize (length string-table)))
+         (header-size 32)
+         (user-segments (nreverse (mach-o-builder-segments builder)))
+         (symbols (nreverse (mach-o-builder-symbol-table builder)))
+         (string-table (subseq (mach-o-builder-string-table builder)
+                               0
+                               (fill-pointer (mach-o-builder-string-table builder))))
+         (has-symbols (plusp (length symbols)))
+         ;; Command sizes: PAGEZERO(72) + user segs + LINKEDIT(72) + DYLINKER(32) + MAIN(24)
+         (pagezero-cmd-size 72)
+         (user-seg-cmd-sizes (loop for seg in user-segments
+                                   sum (+ 72 (* 80 (segment-command-nsects seg)))))
+         (linkedit-cmd-size 72)
+         (dylinker-cmd-size 32)
+         (main-cmd-size 24)
+         (symtab-cmd-size (if has-symbols 24 0))
+         (dysymtab-cmd-size (if has-symbols 80 0))
+         (cmds-size (+ pagezero-cmd-size user-seg-cmd-sizes linkedit-cmd-size
+                       dylinker-cmd-size main-cmd-size
+                       symtab-cmd-size dysymtab-cmd-size))
+         ;; Code starts at the first page after header+cmds
+         (code-offset (align-up (+ header-size cmds-size) 4096))
+         ;; __LINKEDIT starts after all user-segment payloads, aligned to 4096
+         (linkedit-fileoff (let ((off code-offset))
+                             (dolist (seg user-segments off)
+                               (let ((payload-len
+                                      (if (and (string= (segment-command-segname seg) "__TEXT")
+                                               (zerop (length (segment-command-payload seg))))
+                                          (length code-bytes)
+                                          (length (segment-command-payload seg)))))
+                                 (incf off (align-up payload-len #x1000))))))
+         ;; Symbol table and string table go into __LINKEDIT
+         (nsyms (length symbols))
+         (symoff (if has-symbols linkedit-fileoff 0))
+         (stroff (if has-symbols (+ symoff (* nsyms 18)) 0))
+         (strsize (length string-table))
+         (linkedit-filesize (if has-symbols (+ (* nsyms 18) strsize) 0))
+         (linkedit-seg (%make-linkedit-segment linkedit-fileoff linkedit-filesize
+                                               (+ #x100000000 linkedit-fileoff))))
 
-    ;; Update header
-      (let ((header (mach-o-builder-header builder)))
-       (setf (mach-header-ncmds header) (+ 1 (length segments) (if has-symbols 2 0))
-             (mach-header-sizeofcmds header) cmds-size
-             (mach-header-flags header) (logior +mh-noundefs+ +mh-pie+)))
+    ;; Update Mach-O header
+    (let ((header (mach-o-builder-header builder)))
+      (setf (mach-header-ncmds header)
+            ;; PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN [+ SYMTAB + DYSYMTAB]
+            (+ 4 (length user-segments) (if has-symbols 2 0))
+            (mach-header-sizeofcmds header) cmds-size
+            (mach-header-flags header) (logior +mh-noundefs+ +mh-dyldlink+ +mh-pie+)))
 
-    ;; Update segment/section file offsets
-    (let ((file-offset code-offset))
-      (dolist (seg segments)
-        (let ((payload (if (and (string= (segment-command-segname seg) "__TEXT")
-                                (zerop (length (segment-command-payload seg))))
-                           code-bytes
-                           (segment-command-payload seg))))
-        (setf (segment-command-fileoff seg) file-offset
-              (segment-command-filesize seg)
-              (if (string= (segment-command-segname seg) "__PAGEZERO")
-                  0
-                  (length payload)))
-        (dolist (sect (segment-command-sections seg))
-          (setf (section-offset sect) file-offset))
-        (incf file-offset (align-up (segment-command-filesize seg) #x1000)))))
-
-    ;; Update entry point
+    ;; Set entryoff = code-offset (offset within __TEXT, which starts at fileoff=0)
     (setf (entry-point-command-entryoff (mach-o-builder-entry-point builder))
           code-offset)
 
-    ;; Write header
+    ;; Update user segments: __TEXT gets fileoff=0 covering header through code;
+    ;; other segments get sequential file offsets after code.
+    (let ((next-off (+ code-offset (align-up (length code-bytes) #x1000))))
+      (dolist (seg user-segments)
+        (let* ((is-text (and (string= (segment-command-segname seg) "__TEXT")
+                             (zerop (length (segment-command-payload seg)))))
+               (payload (if is-text code-bytes (segment-command-payload seg)))
+               (payload-len (length payload)))
+          (cond
+            ((string= (segment-command-segname seg) "__TEXT")
+             ;; __TEXT: fileoff=0, covers from file start through end of code
+             (setf (segment-command-fileoff seg) 0
+                   (segment-command-filesize seg) (+ code-offset payload-len)
+                   (segment-command-vmsize seg) (align-up (+ code-offset payload-len) #x1000))
+             (dolist (sect (segment-command-sections seg))
+               ;; Absolute file offset of code; vm address = segment base + code-offset
+               (setf (section-offset sect) code-offset
+                     (section-addr sect) (+ (segment-command-vmaddr seg) code-offset))))
+            (t
+             ;; Other segments (e.g. __DATA): sequential after code
+             (setf (segment-command-fileoff seg) next-off
+                   (segment-command-filesize seg) payload-len)
+             (dolist (sect (segment-command-sections seg))
+               (setf (section-offset sect) next-off))
+             (incf next-off (align-up payload-len #x1000)))))))
+
+    ;; Serialize Mach-O header
     (serialize-mach-header (mach-o-builder-header builder) buffer)
 
-    ;; Write segment commands with sections
-    (dolist (seg segments)
+    ;; Serialize __PAGEZERO (fileoff=0, filesize=0)
+    (serialize-segment-command (%make-pagezero-segment) buffer)
+
+    ;; Serialize user segments with their sections
+    (dolist (seg user-segments)
       (serialize-segment-command seg buffer)
       (dolist (sect (segment-command-sections seg))
         (serialize-section sect buffer)))
 
-    ;; Write LC_SYMTAB / LC_DYSYMTAB load commands when symbols exist.
+    ;; Serialize __LINKEDIT
+    (serialize-segment-command linkedit-seg buffer)
+
+    ;; Serialize LC_LOAD_DYLINKER
+    (serialize-lc-load-dylinker buffer)
+
+    ;; Serialize LC_SYMTAB / LC_DYSYMTAB when symbols exist
     (when has-symbols
       (serialize-symtab-command
        (make-symtab-command :symoff symoff :nsyms nsyms :stroff stroff :strsize strsize)
@@ -210,38 +256,44 @@ Returns a simple-array of (unsigned-byte 8)."
        (make-dysymtab-command :iextdefsym 0 :nextdefsym 0 :iundefsym 0 :nundefsym nsyms)
        buffer))
 
-    ;; Write LC_MAIN
+    ;; Serialize LC_MAIN
     (serialize-entry-point (mach-o-builder-entry-point builder) buffer)
 
-    ;; Pad to code offset
-    (let ((current-pos (length (byte-buffer-data buffer))))
-      (loop repeat (- code-offset current-pos)
+    ;; Pad header area to code-offset
+    (let ((pos (length (byte-buffer-data buffer))))
+      (loop repeat (- code-offset pos)
             do (buffer-write-byte buffer 0)))
 
-    ;; Write segment payloads
-    (dolist (seg segments)
-      (unless (string= (segment-command-segname seg) "__PAGEZERO")
-        (let* ((payload (if (and (string= (segment-command-segname seg) "__TEXT")
-                                 (zerop (length (segment-command-payload seg))))
-                            code-bytes
-                            (segment-command-payload seg)))
-               (target-off (segment-command-fileoff seg))
-               (current-pos (length (byte-buffer-data buffer))))
-          (when (> target-off current-pos)
-            (loop repeat (- target-off current-pos)
-                  do (buffer-write-byte buffer 0)))
-          (serialize-bytes payload buffer)
-          (let ((aligned-end (align-up (+ target-off (length payload)) #x1000)))
-            (loop repeat (- aligned-end (length (byte-buffer-data buffer)))
-                  do (buffer-write-byte buffer 0))))))
+    ;; Write user segment payloads
+    (dolist (seg user-segments)
+      (let* ((is-text (and (string= (segment-command-segname seg) "__TEXT")
+                           (zerop (length (segment-command-payload seg)))))
+             (payload (if is-text code-bytes (segment-command-payload seg)))
+             ;; TEXT code is at code-offset; other segs use their fileoff
+             (target-off (if (string= (segment-command-segname seg) "__TEXT")
+                             code-offset
+                             (segment-command-fileoff seg))))
+        (let ((pos (length (byte-buffer-data buffer))))
+          (when (> target-off pos)
+            (loop repeat (- target-off pos)
+                  do (buffer-write-byte buffer 0))))
+        (serialize-bytes payload buffer)
+        (let ((aligned-end (align-up (+ target-off (length payload)) #x1000)))
+          (loop repeat (- aligned-end (length (byte-buffer-data buffer)))
+                do (buffer-write-byte buffer 0)))))
 
-    ;; Write symbol table and string table payloads after segment data.
+    ;; Pad to __LINKEDIT start
+    (let ((pos (length (byte-buffer-data buffer))))
+      (when (< pos linkedit-fileoff)
+        (loop repeat (- linkedit-fileoff pos)
+              do (buffer-write-byte buffer 0))))
+
+    ;; Write symbol table and string table into __LINKEDIT
     (when has-symbols
       (dolist (sym symbols)
         (serialize-nlist sym buffer))
       (serialize-bytes (coerce string-table '(simple-array (unsigned-byte 8) (*))) buffer))
 
-    ;; Return the result as a simple-array
     (buffer-get-bytes buffer)))
 
 (defun write-mach-o-file (filename mach-o-bytes)

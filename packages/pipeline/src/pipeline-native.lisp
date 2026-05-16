@@ -28,12 +28,15 @@ without hanging forever on platform utility calls like chmod."
     (error () nil)))
 
 (defun %write-native-binary (builder code-bytes output-path)
-  "Finalize BUILDER with CODE-BYTES, write Mach-O to OUTPUT-PATH, and mark it executable."
+  "Finalize BUILDER with CODE-BYTES, write Mach-O to OUTPUT-PATH, mark it executable,
+and apply an ad-hoc code signature (required by macOS kernel for unsigned executables)."
   (cl-cc/binary:add-text-segment builder code-bytes)
   (cl-cc/binary:add-symbol builder "_main" :value 0 :type #x0F :sect 1)
   (let ((mach-o-bytes (cl-cc/binary:build-mach-o builder code-bytes)))
     (cl-cc/binary:write-mach-o-file output-path mach-o-bytes))
   (%run-short-native-command (list "chmod" "+x" (namestring output-path)))
+  (%run-short-native-command (list "codesign" "-s" "-" "--force"
+                                   (namestring output-path)))
   output-path)
 
 (defparameter *compile-cache-root*
@@ -44,7 +47,15 @@ without hanging forever on platform utility calls like chmod."
   "Return the native compile options that can change cached artifact bytes."
   (list :pass-pipeline (getf opts :pass-pipeline)
         :inline-threshold-scale (getf opts :inline-threshold-scale)
-        :speed (getf opts :speed)))
+        :speed (getf opts :speed)
+        :retpoline (getf opts :retpoline)
+        :stack-protector (getf opts :stack-protector)
+        :shadow-stack (getf opts :shadow-stack)
+        :asan (getf opts :asan)
+        :msan (getf opts :msan)
+        :tsan (getf opts :tsan)
+        :ubsan (getf opts :ubsan)
+        :hwasan (getf opts :hwasan)))
 
 (defun %compile-cache-key (source arch language &optional opts)
   (format nil "~A-~A-~A-~A"
@@ -77,9 +88,11 @@ without hanging forever on platform utility calls like chmod."
 ;;; Internal functions accept (target opts) and apply opts directly as &key args.
 
 (defun %make-native-opts (&key pass-pipeline speed (inline-threshold-scale 1)
-                                print-pass-timings timing-stream
-                                print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                print-pass-stats stats-stream trace-json-stream)
+                                 print-pass-timings timing-stream
+                                 print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                 print-pass-stats stats-stream trace-json-stream
+                                 retpoline stack-protector shadow-stack
+                                 asan msan tsan ubsan hwasan)
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
   (append (list :pass-pipeline pass-pipeline)
           (if speed (list :speed speed) nil)
@@ -91,7 +104,15 @@ without hanging forever on platform utility calls like chmod."
                 :opt-remarks-mode    opt-remarks-mode
                 :print-pass-stats    print-pass-stats
                 :stats-stream        stats-stream
-                :trace-json-stream   trace-json-stream)))
+                :trace-json-stream   trace-json-stream
+                :retpoline          retpoline
+                :stack-protector    stack-protector
+                :shadow-stack       shadow-stack
+                :asan               asan
+                :msan               msan
+                :tsan               tsan
+                :ubsan              ubsan
+                :hwasan             hwasan)))
 
 (defun %maybe-compile-native-via-cps (form target opts &key type-check (safety 1))
   "Try compiling FORM through a narrow CPS-backed native path.
@@ -150,18 +171,42 @@ Returns two values: the compilation result and whether the CPS-native path was u
           :arm64
           (error "Unknown native architecture: ~S" arch))))
 
-(defun %native-code-bytes-for-arch (arch program)
+(defun %native-code-bytes-for-arch (arch program &optional opts)
   (if (eq arch :x86-64)
-      (compile-to-x86-64-bytes program)
+      (apply #'compile-to-x86-64-bytes
+             program
+             (if opts
+                 (list :retpoline (getf opts :retpoline)
+                       :stack-protector (getf opts :stack-protector)
+                       :shadow-stack (getf opts :shadow-stack)
+                       :asan (getf opts :asan)
+                       :msan (getf opts :msan)
+                       :tsan (getf opts :tsan)
+                       :ubsan (getf opts :ubsan)
+                       :hwasan (getf opts :hwasan))
+                 nil))
       (if (eq arch :arm64)
-          (compile-to-aarch64-bytes program)
+          (apply #'compile-to-aarch64-bytes
+                 program
+                 (if opts
+                     (list :retpoline (getf opts :retpoline)
+                           :stack-protector (getf opts :stack-protector)
+                           :shadow-stack (getf opts :shadow-stack)
+                           :asan (getf opts :asan)
+                           :msan (getf opts :msan)
+                           :tsan (getf opts :tsan)
+                           :ubsan (getf opts :ubsan)
+                           :hwasan (getf opts :hwasan))
+                     nil))
           (error "Unknown native architecture: ~S" arch))))
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp)
-                                  pass-pipeline speed (inline-threshold-scale 1)
-                                  print-pass-timings timing-stream
-                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                  print-pass-stats stats-stream trace-json-stream)
+                                   pass-pipeline speed (inline-threshold-scale 1)
+                                   print-pass-timings timing-stream
+                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                   print-pass-stats stats-stream trace-json-stream
+                                   retpoline stack-protector shadow-stack
+                                   asan msan tsan ubsan hwasan)
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -170,20 +215,36 @@ LANGUAGE is :LISP (default) or :PHP.
 
 Returns the output file path on success."
   (let* ((native-target (%native-target-for-arch arch))
-          (opts (%make-native-opts :pass-pipeline pass-pipeline
-                                   :speed speed
-                                   :inline-threshold-scale inline-threshold-scale
-                                   :print-pass-timings print-pass-timings
-                                   :timing-stream timing-stream
-                                  :print-opt-remarks print-opt-remarks
-                                  :opt-remarks-stream opt-remarks-stream
-                                  :opt-remarks-mode opt-remarks-mode
-                                  :print-pass-stats print-pass-stats
-                                  :stats-stream stats-stream
-                                  :trace-json-stream trace-json-stream))
+           (opts (%make-native-opts :pass-pipeline pass-pipeline
+                                    :speed speed
+                                    :inline-threshold-scale inline-threshold-scale
+                                    :print-pass-timings print-pass-timings
+                                    :timing-stream timing-stream
+                                    :print-opt-remarks print-opt-remarks
+                                    :opt-remarks-stream opt-remarks-stream
+                                    :opt-remarks-mode opt-remarks-mode
+                                     :print-pass-stats print-pass-stats
+                                     :stats-stream stats-stream
+                                      :trace-json-stream trace-json-stream
+                                      :retpoline retpoline
+                                      :stack-protector stack-protector
+                                      :shadow-stack shadow-stack
+                                      :asan asan
+                                      :msan msan
+                                      :tsan tsan
+                                      :ubsan ubsan
+                                      :hwasan hwasan))
          (result (%compile-native-source source native-target language opts))
          (program (compilation-result-program result))
-         (code-bytes (%native-code-bytes-for-arch arch program))
+         (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
+                            (or (getf opts :retpoline) cl-cc/codegen::*x86-64-use-retpoline*))
+                            (cl-cc/codegen::*x86-64-stack-protector-enabled*
+                             (or (getf opts :stack-protector)
+                                 cl-cc/codegen::*x86-64-stack-protector-enabled*))
+                            (cl-cc/codegen::*x86-64-shadow-stack-enabled*
+                             (or (getf opts :shadow-stack)
+                                 cl-cc/codegen::*x86-64-shadow-stack-enabled*)))
+                        (%native-code-bytes-for-arch arch program opts)))
          (builder (cl-cc/binary:make-mach-o-builder arch)))
     (%write-native-binary builder code-bytes output-file)))
 
@@ -248,10 +309,12 @@ Returns the output file path on success."
       (%compile-native-lisp-forms source target opts)))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil)
-                                          pass-pipeline speed (inline-threshold-scale 1)
-                                          print-pass-timings timing-stream
-                                          print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                          print-pass-stats stats-stream trace-json-stream)
+                                            pass-pipeline speed (inline-threshold-scale 1)
+                                            print-pass-timings timing-stream
+                                            print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                            print-pass-stats stats-stream trace-json-stream
+                                             retpoline stack-protector shadow-stack
+                                             asan msan tsan ubsan hwasan)
   "Compile a CL-CC source file to a native Mach-O executable.
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
@@ -267,9 +330,17 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                                    :print-opt-remarks print-opt-remarks
                                    :opt-remarks-stream opt-remarks-stream
                                    :opt-remarks-mode opt-remarks-mode
-                                   :print-pass-stats print-pass-stats
-                                   :stats-stream stats-stream
-                                   :trace-json-stream trace-json-stream))
+                                    :print-pass-stats print-pass-stats
+                                    :stats-stream stats-stream
+                                     :trace-json-stream trace-json-stream
+                                     :retpoline retpoline
+                                     :stack-protector stack-protector
+                                     :shadow-stack shadow-stack
+                                     :asan asan
+                                     :msan msan
+                                     :tsan tsan
+                                     :ubsan ubsan
+                                     :hwasan hwasan))
           (cache-key (%compile-cache-key source arch effective-language opts))
          (cache-path (%compile-cache-path cache-key output)))
     (ensure-directories-exist cache-path)
@@ -282,7 +353,15 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
         (let* ((native-target (%native-target-for-arch arch))
                (result (%compile-native-file-source source native-target effective-language opts))
                (program (compilation-result-program result))
-               (code-bytes (%native-code-bytes-for-arch arch program))
+                (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
+                                   (or (getf opts :retpoline) cl-cc/codegen::*x86-64-use-retpoline*))
+                                  (cl-cc/codegen::*x86-64-stack-protector-enabled*
+                                   (or (getf opts :stack-protector)
+                                       cl-cc/codegen::*x86-64-stack-protector-enabled*))
+                                  (cl-cc/codegen::*x86-64-shadow-stack-enabled*
+                                   (or (getf opts :shadow-stack)
+                                       cl-cc/codegen::*x86-64-shadow-stack-enabled*)))
+                              (%native-code-bytes-for-arch arch program opts)))
                (builder (cl-cc/binary:make-mach-o-builder arch)))
           (%write-native-binary builder code-bytes output)
           (%copy-file-bytes output cache-path)

@@ -319,3 +319,17 @@
          (out (gethash entry (cl-cc/optimize:opt-dataflow-result-out result))))
     (assert-true (typep result 'cl-cc/optimize::opt-dataflow-result))
     (assert-true (member (cl-cc:bb-id entry) out :test #'eql))))
+
+(deftest integer-interval-abstract-interpretation-propagates-const-and-add
+  "opt-run-integer-interval-abstract-interpretation tracks register intervals through const/add."
+  (let* ((cfg (cl-cc/optimize:cfg-build
+               (list (make-vm-const :dst :r0 :value 10)
+                     (make-vm-const :dst :r1 :value 20)
+                     (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                     (make-vm-ret :reg :r2))))
+         (entry (cl-cc/optimize:cfg-entry cfg))
+         (result (cl-cc/optimize::opt-run-integer-interval-abstract-interpretation cfg))
+         (out (gethash entry (cl-cc/optimize:opt-dataflow-result-out result))))
+    (assert-equal '(10 . 10) (gethash :r0 out))
+    (assert-equal '(20 . 20) (gethash :r1 out))
+    (assert-equal '(30 . 30) (gethash :r2 out))))

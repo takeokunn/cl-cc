@@ -13,6 +13,33 @@
 
 (in-package :cl-cc/codegen)
 
+(defun emit-x86-64-cfi-indirect-target-guard (func-reg stream)
+  "Emit conservative x86-64 CFI guard for an indirect branch target in FUNC-REG.
+
+Checks:
+1) target != NULL
+2) first 4 bytes at target match ENDBR64 signature
+
+When FUNC-REG is RAX, use RCX as scratch to avoid clobbering the branch target."
+  ;; null target check
+  (emit-test-rr64 func-reg func-reg stream)
+  ;; JNE +2 => non-zero target skips UD2
+  (emit-byte #x0F stream)
+  (emit-byte #x85 stream)
+  (emit-dword 2 stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x0B stream)
+  ;; ENDBR64 signature check
+  (let ((scratch (if (= func-reg +rax+) +rcx+ +rax+)))
+    (emit-mov-rm64 scratch func-reg 0 stream)
+    (emit-cmp-ri32 scratch #xFA1E0FF3 stream)
+    ;; JE +2 => valid entry marker skips trap
+    (emit-byte #x0F stream)
+    (emit-byte #x84 stream)
+    (emit-dword 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
+
 ;;; VM Instruction Emitters (with label support)
 
 (defun emit-vm-halt-inst (inst stream)
@@ -34,8 +61,52 @@
    destination register."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (func (vm-reg-to-x86 (vm-func-reg inst))))
-    (emit-call-r64 func stream)
-    (emit-mov-rr64 dst +rax+ stream)))
+    ;; Conservative CFI guard: null indirect target traps immediately.
+    (when *x86-64-cfi-enabled*
+      (emit-x86-64-cfi-indirect-target-guard func stream))
+    (if *x86-64-use-retpoline*
+        ;; Retpoline call-safe lowering:
+        ;;   call .+0              ; get RIP
+        ;;   pop  r11
+        ;;   add  r11, 5           ; callee return target = after-call
+        ;;   push r11
+        ;;   call setup
+        ;; after-call:
+        ;;   mov  dst, rax
+        ;;   jmp  end              ; skip thunk region on normal return
+        ;; capture:
+        ;;   pause; lfence; jmp capture
+        ;; setup:
+        ;;   mov [rsp], func
+        ;;   ret
+        ;; end:
+        (progn
+          ;; call .+0
+          (emit-byte #xE8 stream)
+          (emit-dword 0 stream)
+          ;; pop r11
+          (emit-pop-r64 +r11+ stream)
+          ;; add r11, 16 (from call .+0 return address to after-call)
+          (emit-add-ri32 +r11+ 16 stream)
+          ;; push r11 (callee return target)
+          (emit-push-r64 +r11+ stream)
+          ;; call setup (setup starts 18 bytes after post-call PC)
+          (emit-byte #xE8 stream)
+          (emit-dword 18 stream)
+          ;; after-call
+          (emit-mov-rr64 dst +rax+ stream)
+          ;; jump over thunk region to end
+          (emit-jmp-rel32 15 stream)
+          ;; thunk capture loop
+          (emit-byte #xF3 stream) (emit-byte #x90 stream) ; PAUSE
+          (emit-byte #x0F stream) (emit-byte #xAE stream) (emit-byte #xE8 stream) ; LFENCE
+          (emit-jmp-rel32 -10 stream)
+          ;; setup: write target and return
+          (emit-mov-mr64 +rsp+ 0 func stream)
+          (emit-ret stream))
+        (emit-call-r64 func stream))
+    (unless *x86-64-use-retpoline*
+      (emit-mov-rr64 dst +rax+ stream))))
 
 (defun emit-vm-tail-call-inst (inst stream)
   "Emit code for VM TAIL-CALL instruction.
@@ -45,7 +116,75 @@
    destination move is emitted here."
   (let ((dst (vm-dst inst)))
     (declare (ignore dst))
-    (emit-jmp-r64 (vm-reg-to-x86 (vm-func-reg inst)) stream)))
+    (let ((func (vm-reg-to-x86 (vm-func-reg inst))))
+      ;; Conservative CFI guard: null indirect target traps immediately.
+      (when *x86-64-cfi-enabled*
+        (emit-x86-64-cfi-indirect-target-guard func stream))
+      (if *x86-64-use-retpoline*
+          ;; Retpoline tail-call lowering:
+          ;;   call setup
+          ;; capture:
+          ;;   pause; lfence; jmp capture
+          ;; setup:
+          ;;   mov [rsp], func
+          ;;   ret
+          (progn
+            (emit-byte #xE8 stream)
+            (emit-dword 10 stream)
+            (emit-byte #xF3 stream) (emit-byte #x90 stream) ; PAUSE
+            (emit-byte #x0F stream) (emit-byte #xAE stream) (emit-byte #xE8 stream) ; LFENCE
+            (emit-jmp-rel32 -10 stream)
+            (emit-mov-mr64 +rsp+ 0 func stream)
+          (emit-ret stream))
+          (emit-jmp-r64 func stream)))))
+
+(defun emit-vm-shadow-stack-control-inst (inst stream)
+  "Emit CET shadow-stack transition sequences for non-local control ops.
+
+These instructions participate in exception/restart control flow and require
+dedicated native lowering to preserve shadow-stack semantics. Current lowering
+materializes explicit CET SS instructions under the shadow-stack gate:
+
+- Shadow-stack enabled  => emit CET SS save/restore/adjust instruction slots.
+- Shadow-stack disabled => 2-byte NOP placeholder (reserved integration slot)."
+  (if *x86-64-shadow-stack-enabled*
+      (cond
+        ;; handler/restart push-like sites => SAVEPREVSSP (4B) + NOP2 (2B) = 6B
+        ((or (typep inst 'cl-cc/vm::vm-push-handler)
+             (typep inst 'cl-cc/vm::vm-bind-restart)
+             (typep inst 'cl-cc/vm::vm-establish-handler)
+             (typep inst 'cl-cc/vm::vm-establish-catch))
+         ;; F3 0F 01 EA = SAVEPREVSSP
+         (emit-byte #xF3 stream)
+         (emit-byte #x0F stream)
+         (emit-byte #x01 stream)
+         (emit-byte #xEA stream)
+         (emit-byte #x66 stream)
+         (emit-byte #x90 stream))
+        ;; pop/invoke restart sites => RSTORSSP [RAX] (4B) + NOP2 (2B) = 6B
+        ((or (typep inst 'cl-cc/vm::vm-pop-handler)
+             (typep inst 'cl-cc/vm::vm-invoke-restart)
+             (typep inst 'cl-cc/vm::vm-remove-handler))
+         ;; F3 0F 01 /5, ModRM 00 101 000 = 0x28 => RSTORSSP [RAX]
+         (emit-byte #xF3 stream)
+         (emit-byte #x0F stream)
+         (emit-byte #x01 stream)
+         (emit-byte #x28 stream)
+         (emit-byte #x66 stream)
+         (emit-byte #x90 stream))
+        ;; condition/error paths => INCSSPQ RAX (5B) + NOP1 (1B) = 6B
+        (t
+         ;; F3 48 0F AE /5 with ModRM 11 101 000 = 0xE8 => INCSSPQ RAX
+         (emit-byte #xF3 stream)
+         (emit-byte #x48 stream)
+         (emit-byte #x0F stream)
+         (emit-byte #xAE stream)
+         (emit-byte #xE8 stream)
+         (emit-byte #x90 stream)))
+      (progn
+        ;; Keep fixed 2-byte footprint for label-size accounting.
+        (emit-byte #x66 stream)
+        (emit-byte #x90 stream))))
 
 (defun emit-vm-jump-inst (inst stream current-pos label-offsets)
   "Emit code for VM JUMP instruction (unconditional jump)."
@@ -185,7 +324,23 @@
     (vm-integer-p    . emit-vm-true-pred)
     (vm-cons-p       . emit-vm-false-pred)
     (vm-symbol-p     . emit-vm-false-pred)
-    (vm-function-p   . emit-vm-false-pred))
+    (vm-function-p   . emit-vm-false-pred)
+    ;; Non-local control flow (FR-318 integration safety path)
+    (cl-cc/vm::vm-push-handler   . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-pop-handler    . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-bind-restart   . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-invoke-restart . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-signal         . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-error-instruction . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-cerror         . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-warn           . emit-vm-shadow-stack-control-inst)
+    ;; VM non-local control ops from vm-run.lisp
+    (cl-cc/vm::vm-establish-handler . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-remove-handler    . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-sync-handler-regs . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-signal-error      . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-establish-catch   . emit-vm-shadow-stack-control-inst)
+    (cl-cc/vm::vm-throw             . emit-vm-shadow-stack-control-inst))
   "Alist mapping VM instruction type symbols to emitter function names.")
 
 (defparameter *x86-64-emitter-table*

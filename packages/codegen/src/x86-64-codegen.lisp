@@ -81,7 +81,16 @@
     (vm-logbitp                        15)
     ;; Type predicates: null-p = 11; others = 10 (MOV imm64)
     (vm-null-p                         11)
-    ((vm-number-p vm-integer-p vm-cons-p vm-symbol-p vm-function-p) 10))
+    ((vm-number-p vm-integer-p vm-cons-p vm-symbol-p vm-function-p) 10)
+    ;; FR-318 staged path: non-local control instructions use conditional
+    ;; shadow-stack marker sequences (enabled=6 bytes / disabled=2 bytes).
+    ((cl-cc/vm::vm-push-handler cl-cc/vm::vm-pop-handler
+      cl-cc/vm::vm-bind-restart cl-cc/vm::vm-invoke-restart
+      cl-cc/vm::vm-signal cl-cc/vm::vm-error-instruction
+      cl-cc/vm::vm-cerror cl-cc/vm::vm-warn
+      cl-cc/vm::vm-establish-handler cl-cc/vm::vm-remove-handler
+      cl-cc/vm::vm-sync-handler-regs cl-cc/vm::vm-signal-error
+      cl-cc/vm::vm-establish-catch cl-cc/vm::vm-throw) 2))
   "Declarative spec: VM instruction types → x86-64 encoded byte sizes.
    Each entry is (type-spec size) where type-spec is a symbol or list of symbols.")
 
@@ -115,11 +124,17 @@
                (src (vm-reg-to-x86 (vm-src inst))))
            (if (= dst src) 0 3))))
     (vm-halt
-     (if (x86-64-float-vreg-p (vm-reg inst))
+      (if (x86-64-float-vreg-p (vm-reg inst))
          (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
            (if (= result-reg +xmm0+) 0 4))
-         (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
-           (if (= result-reg +rax+) 0 3))))
+          (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
+            (if (= result-reg +rax+) 0 3))))
+    (vm-call
+     (+ (if *x86-64-use-retpoline* 44 6)
+        (if *x86-64-cfi-enabled* 28 0)))
+    (vm-tail-call
+     (+ (if *x86-64-use-retpoline* 20 3)
+        (if *x86-64-cfi-enabled* 28 0)))
     ((or vm-spill-store vm-spill-load)
      (let* ((offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
             (mod (cond
@@ -139,7 +154,25 @@
                             (2 4)))))
        (+ 2 addr-size)))
     (t
-      (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))))
+     (let ((tp (string-downcase (symbol-name (type-of inst)))))
+       (if (member tp
+                   '("vm-push-handler"
+                     "vm-pop-handler"
+                     "vm-bind-restart"
+                     "vm-invoke-restart"
+                     "vm-signal"
+                     "vm-error-instruction"
+                     "vm-cerror"
+                     "vm-warn"
+                     "vm-establish-handler"
+                     "vm-remove-handler"
+                     "vm-sync-handler-regs"
+                     "vm-signal-error"
+                     "vm-establish-catch"
+                     "vm-throw")
+                    :test #'string=)
+            (if *x86-64-shadow-stack-enabled* 6 2)
+            (or (gethash (type-of inst) *x86-64-instruction-sizes*) 0))))))
 
 (defun build-label-offsets (instructions prologue-size)
   "Build a hash table mapping label names to byte offsets.
@@ -200,6 +233,213 @@ Result plist keys:
           :pre-fence pre-fence
           :post-fence post-fence)))
 
+(defun x86-64-env-true-p (value)
+  "Return T when VALUE represents an enabled boolean environment flag." 
+  (and value
+       (member (string-downcase value)
+               '("1" "true" "yes" "on" "enabled")
+               :test #'string=)))
+
+(defun x86-64-ibrs-token-present-p (text)
+  "Return T when TEXT includes an IBRS/eIBRS capability token.
+
+The detector is intentionally permissive to support varying host feature
+formats such as:\n
+- Linux `/proc/cpuinfo` flags: `... ibrs ...`\n
+- Darwin sysctl strings: `... IBRS ...` or `... eIBRS ...`."
+  (and (stringp text)
+       (let* ((lower (string-downcase text))
+              (len (length lower)))
+         (labels ((token-char-p (ch)
+                    (or (alpha-char-p ch)
+                        (digit-char-p ch)
+                        (char= ch #\_)
+                        (char= ch #\-)
+                        (char= ch #\.)))
+                  (matches-token-at-p (i token)
+                    (let* ((tlen (length token))
+                           (end (+ i tlen)))
+                      (and (<= end len)
+                           (string= lower token :start1 i :end1 end)
+                           (or (= i 0)
+                               (not (token-char-p (char lower (1- i)))))
+                           (or (= end len)
+                               (not (token-char-p (char lower end))))))))
+           (loop for i from 0 below len
+                 thereis (or (matches-token-at-p i "ibrs")
+                             (matches-token-at-p i "eibrs")))))))
+
+(defun x86-64-host-supports-ibrs-p ()
+  "Best-effort host capability probe for IBRS/eIBRS.
+
+Priority:
+1) Darwin: `sysctl -a` output token scan
+2) Linux: `/proc/cpuinfo` token scan
+
+All probe failures are treated as "unknown" => NIL.
+Environment variables remain the primary override path."
+   (or
+    ;; macOS / Darwin path
+    (ignore-errors
+      (when (and (find-package :uiop)
+                 (fboundp 'uiop:run-program))
+        (let ((out (sb-ext:with-timeout 2
+                     (uiop:run-program
+                      '("sysctl" "-a")
+                      :output :string
+                      :ignore-error-status t))))
+          (and (x86-64-ibrs-token-present-p out) t))))
+   ;; Linux path
+   (ignore-errors
+     (with-open-file (in "/proc/cpuinfo" :direction :input)
+       (let ((buf (make-string-output-stream)))
+         (loop for line = (read-line in nil nil)
+               while line
+               do (progn (write-string line buf)
+                         (write-char #\Newline buf)))
+         (and (x86-64-ibrs-token-present-p (get-output-stream-string buf)) t))))))
+
+(defun x86-64-supports-ibrs-p ()
+  "Return T when runtime feature flags indicate IBRS/eIBRS support.
+
+Environment overrides:
+- CLCC_IBRS=1
+- CLCC_EIBRS=1"
+  (or (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_IBRS")))
+      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_EIBRS")))
+      (x86-64-host-supports-ibrs-p)))
+
+(defun x86-64-supports-cet-ss-p ()
+  "Return T when runtime feature flags indicate CET Shadow Stack support.
+
+Environment override:
+- CLCC_CET_SS=1"
+  (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_CET_SS"))))
+
+(defun x86-64-program-has-nonlocal-control-p (instructions)
+  "Return T when INSTRUCTIONS include non-local control-flow operations.
+
+This is a conservative detector used for shadow-stack planning."
+  (some (lambda (inst)
+          (let ((tp (string-downcase (symbol-name (type-of inst)))))
+            (member tp
+                    '("vm-push-handler"
+                      "vm-pop-handler"
+                      "vm-bind-restart"
+                      "vm-invoke-restart"
+                      "vm-signal"
+                      "vm-error-instruction"
+                      "vm-cerror"
+                      "vm-warn"
+                      "vm-establish-handler"
+                      "vm-remove-handler"
+                      "vm-sync-handler-regs"
+                      "vm-signal-error"
+                      "vm-establish-catch"
+                      "vm-throw")
+                    :test #'string=)))
+        instructions))
+
+(defun x86-64-stack-canary-plan (&key has-stack-buffer-p
+                                      (guard-slot -8)
+                                      (failure-target 'clcc_stack_chk_fail))
+  "Return x86-64 stack-canary emission metadata derived from optimizer planning.
+
+Result plist keys:
+- :enabled-p      whether stack protector should be emitted
+- :guard-slot     stack slot used for canary shadow copy
+- :failure-target branch target used on canary mismatch
+- :prologue       backend-neutral prologue sequence
+- :epilogue       backend-neutral epilogue sequence"
+  (let* ((plan (opt-stack-canary-emit-plan
+                :has-stack-buffer-p has-stack-buffer-p
+                :guard-slot guard-slot
+                :failure-target failure-target))
+         (prologue (opt-stack-canary-prologue-seq plan :temp-reg :rax))
+         (epilogue (opt-stack-canary-epilogue-seq plan :temp-reg :rax)))
+    (list :enabled-p (getf plan :enabled-p)
+          :guard-slot (getf plan :guard-slot)
+          :failure-target (getf plan :failure-target)
+          :prologue prologue
+          :epilogue epilogue)))
+
+(defun x86-64-stack-buffer-inst-p (inst)
+  "Conservative predicate for VM instructions that imply stack-buffer risk."
+  (let ((tp (string-downcase (symbol-name (type-of inst)))))
+    (member tp
+            '("vm-make-array"
+              "vm-aset"
+              "vm-aref-multi"
+              "vm-adjust-array"
+              "vm-vector-push"
+              "vm-vector-push-extend"
+              "vm-set-fill-pointer"
+              "vm-fill"
+              "vm-row-major-aref"
+              "vm-array-row-major-index"
+              "vm-svset"
+              "vm-svref")
+            :test #'string=)))
+
+(defun x86-64-program-has-stack-buffer-p (instructions)
+  "Return T when INSTRUCTIONS include buffer-like array/vector operations."
+  (some #'x86-64-stack-buffer-inst-p instructions))
+
+(defun x86-64-cfi-plan (&key has-indirect-calls-p)
+  "Return x86-64 CFI entry planning metadata.
+
+Result plist keys:
+- :enabled-p whether CFI entry marker is enabled
+- :entry-opcode marker opcode keyword (`:endbr64` or `:none`)"
+  (let* ((plan (opt-build-cfi-plan
+                :target :x86-64
+                :has-indirect-calls-p has-indirect-calls-p))
+         (entry-opcode (opt-cfi-entry-opcode plan)))
+    (list :enabled-p (eq entry-opcode :endbr64)
+          :entry-opcode entry-opcode)))
+
+(defun emit-x86-64-cfi-entry (stream cfi-plan)
+  "Emit x86-64 CFI entry marker (ENDBR64) when enabled in CFI-PLAN."
+  (when (eq (getf cfi-plan :entry-opcode) :endbr64)
+    ;; ENDBR64 = F3 0F 1E FA
+    (emit-byte #xF3 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x1E stream)
+    (emit-byte #xFA stream)))
+
+(defconstant +x86-64-tls-canary-disp32+ #x28
+  "Linux/x86-64 TLS canary offset in FS segment.")
+
+(defun emit-x86-64-stack-canary-prologue (stream canary-plan frame-pointer-p)
+  "Emit stack canary prologue sequence when enabled."
+  (when (and frame-pointer-p (getf canary-plan :enabled-p))
+    (let ((slot (getf canary-plan :guard-slot)))
+      (emit-mov-rm64-fs-disp32 +rax+ +x86-64-tls-canary-disp32+ stream)
+      (emit-mov-mr64 +rbp+ slot +rax+ stream))))
+
+(defun emit-x86-64-stack-canary-epilogue (stream canary-plan frame-pointer-p)
+  "Emit stack canary epilogue check when enabled.
+
+On mismatch, trap with UD2."
+  (when (and frame-pointer-p (getf canary-plan :enabled-p))
+    (let ((slot (getf canary-plan :guard-slot)))
+      (emit-mov-rm64 +rax+ +rbp+ slot stream)
+      (emit-cmp-rm64-fs-disp32 +rax+ +x86-64-tls-canary-disp32+ stream)
+      ;; JE +2 (equal => skip trap, mismatch => fallthrough into UD2)
+      (emit-byte #x0F stream)
+      (emit-byte #x84 stream)
+      (emit-dword 2 stream)
+      (emit-byte #x0F stream)
+      (emit-byte #x0B stream))))
+
+(defun push-r64-byte-size (reg)
+  "Return byte count for PUSH reg: 2 for R8-R15, 1 for RAX-RDI."
+  (if (>= reg 8) 2 1))
+
+(defun pop-r64-byte-size (reg)
+  "Return byte count for POP reg: 2 for R8-R15, 1 for RAX-RDI."
+  (if (>= reg 8) 2 1))
+
 ;; Per-instruction emitters (emit-vm-halt-inst through emit-vm-spill-load-inst),
 ;; *x86-64-emitter-entries*, *x86-64-emitter-table*, and
 ;; emit-vm-instruction-with-labels are in x86-64-codegen-dispatch.lisp (loaded next).
@@ -210,6 +450,12 @@ Result plist keys:
    second pass emits code with resolved jump targets."
   (let* ((instructions (vm-program-instructions program))
          (cfg (cfg-build instructions))
+         (has-indirect-calls-p
+           (some (lambda (inst)
+                   (typep inst '(or vm-call vm-tail-call vm-generic-call)))
+                 instructions))
+         (cfi-plan (x86-64-cfi-plan :has-indirect-calls-p has-indirect-calls-p))
+         (cfi-entry-size (if (eq (getf cfi-plan :entry-opcode) :endbr64) 4 0))
          (leaf-p (vm-program-leaf-p program))
           (spill-count (regalloc-spill-count *current-regalloc*))
           (red-zone-spill-p (x86-64-red-zone-spill-p leaf-p spill-count))
@@ -229,14 +475,35 @@ Result plist keys:
                                 0))
           (*current-spill-base-reg* (if frame-pointer-p +rbp+ +rsp+))
           (*current-spill-offset-bias* (if frame-pointer-p 0 spill-frame-size))
+          (supports-ibrs-p (x86-64-supports-ibrs-p))
+          (use-retpoline-p
+            (opt-should-use-retpoline-p
+             :target :x86-64
+             :has-indirect-branch-p has-indirect-calls-p
+             :supports-ibrs-p supports-ibrs-p))
+          (shadow-stack-plan
+            (opt-build-shadow-stack-plan
+             :target :x86-64
+             :supports-cet-ss-p (x86-64-supports-cet-ss-p)
+             :has-nonlocal-control-p (x86-64-program-has-nonlocal-control-p instructions)
+             :has-setjmp-longjmp-p nil))
+          (has-stack-buffer-p (and *x86-64-stack-protector-enabled*
+                                   (x86-64-program-has-stack-buffer-p instructions)))
+          (canary-plan (x86-64-stack-canary-plan
+                        :has-stack-buffer-p has-stack-buffer-p))
           (probe-count (stack-probe-count
-                         (x86-64-stack-frame-size save-regs spill-frame-size)))
+                          (x86-64-stack-frame-size save-regs spill-frame-size)))
           (probe-size (* probe-count +x86-64-stack-probe-size+))
-          (spill-frame-adjust-size (if (plusp spill-frame-size) 7 0))
-          ;; Each push/pop is 1 byte in the current encoder.
-          (prologue-size (+ probe-size
-                            (length save-regs)
-                            spill-frame-adjust-size))
+           (canary-prologue-size (if (and frame-pointer-p (getf canary-plan :enabled-p)) 13 0))
+           (frame-pointer-establish-size (if frame-pointer-p 3 0))
+           (spill-frame-adjust-size (if (plusp spill-frame-size) 7 0))
+          ;; Push sizes: 1 byte for RAX-RDI, 2 bytes for R8-R15 (REX.B prefix).
+           (prologue-size (+ cfi-entry-size
+                              probe-size
+                              (reduce #'+ save-regs :key #'push-r64-byte-size :initial-value 0)
+                              frame-pointer-establish-size
+                              canary-prologue-size
+                              spill-frame-adjust-size))
              (ordered-instructions (if (cfg-entry cfg)
                                        (progn
                                         (cfg-compute-dominators cfg)
@@ -244,26 +511,50 @@ Result plist keys:
                                       (cfg-flatten-hot-cold cfg))
                                     instructions))
            ;; First pass: build label offset table
-           (label-offsets (build-label-offsets ordered-instructions prologue-size)))
+           (label-offsets
+             (let ((*x86-64-use-retpoline* (or *x86-64-use-retpoline* use-retpoline-p))
+                   (*x86-64-cfi-enabled* (or *x86-64-cfi-enabled* (getf cfi-plan :enabled-p))))
+               (build-label-offsets ordered-instructions prologue-size))))
+
+    ;; CFI entry marker (FR-315): must be at function entry.
+    (emit-x86-64-cfi-entry stream cfi-plan)
 
     ;; Stack probing: touch each guard page before the large frame is used.
     (emit-x86-64-stack-probes stream probe-count)
 
-    ;; Prologue: save only the callee-saved registers actually used
-    (dolist (reg save-regs)
-      (emit-push-r64 reg stream))
+    ;; Prologue: save only the callee-saved registers actually used.
+    ;; When frame pointer is enabled, establish RBP after saving old RBP.
+    (if frame-pointer-p
+        (progn
+          (emit-push-r64 +rbp+ stream)
+          (emit-mov-rr64 +rbp+ +rsp+ stream)
+          (dolist (reg (cdr save-regs))
+            (emit-push-r64 reg stream)))
+        (dolist (reg save-regs)
+          (emit-push-r64 reg stream)))
 
     (when (plusp spill-frame-size)
       (emit-sub-ri32 +rsp+ spill-frame-size stream))
 
+    ;; Stack protector prologue (FR-317)
+    (emit-x86-64-stack-canary-prologue stream canary-plan frame-pointer-p)
+
     ;; Second pass: emit instructions with resolved jumps
-    (let ((pos prologue-size))
+    (let ((pos prologue-size)
+          (*x86-64-use-retpoline* (or *x86-64-use-retpoline* use-retpoline-p))
+          (*x86-64-cfi-enabled* (or *x86-64-cfi-enabled* (getf cfi-plan :enabled-p)))
+          (*x86-64-shadow-stack-enabled*
+            (or *x86-64-shadow-stack-enabled*
+                (opt-shadow-stack-plan-enabled-p shadow-stack-plan))))
       (dolist (inst ordered-instructions)
         (emit-vm-instruction-with-labels inst stream pos label-offsets)
         (incf pos (instruction-size inst))))
 
     (when (plusp spill-frame-size)
       (emit-add-ri32 +rsp+ spill-frame-size stream))
+
+    ;; Stack protector epilogue (FR-317)
+    (emit-x86-64-stack-canary-epilogue stream canary-plan frame-pointer-p)
 
     ;; Epilogue: restore callee-saved registers in reverse order
     (dolist (reg (reverse save-regs))
@@ -274,11 +565,14 @@ Result plist keys:
 
 ;;; Public API
 
-(defun compile-to-x86-64-bytes (program)
+(defun compile-to-x86-64-bytes (program &key retpoline stack-protector shadow-stack
+                                          asan msan tsan ubsan hwasan)
   "Compile VM program to x86-64 machine code bytes.
 
    Returns: (simple-array (unsigned-byte 8) (*))"
   ;; Run register allocation before emitting machine code
+  (declare (ignore shadow-stack))
+  (let ((sanitizer-enabled (or asan msan tsan ubsan hwasan)))
   (let* ((instructions (vm-program-instructions program))
          (float-vregs (x86-64-compute-float-vregs instructions))
          (target (x86-64-codegen-target))
@@ -289,6 +583,13 @@ Result plist keys:
                                :leaf-p (vm-program-leaf-p program))))
     ;; Store the regalloc result for use during code generation
     (let ((*current-regalloc* ra)
-          (*current-float-vregs* float-vregs))
+          (*current-float-vregs* float-vregs)
+          (*x86-64-stack-protector-enabled*
+            (or stack-protector sanitizer-enabled *x86-64-stack-protector-enabled*))
+          (*x86-64-omit-frame-pointer*
+            (if (or stack-protector sanitizer-enabled *x86-64-stack-protector-enabled*)
+                nil
+                *x86-64-omit-frame-pointer*))
+          (*x86-64-use-retpoline* (or retpoline *x86-64-use-retpoline*)))
       (with-output-to-vector (stream)
-        (emit-vm-program allocated-program stream)))))
+        (emit-vm-program allocated-program stream))))))

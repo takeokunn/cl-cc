@@ -25,6 +25,12 @@
   (active       nil                         :type list)
   (interval-map (make-hash-table :test 'eq) :type hash-table))
 
+(defvar *current-allocation-policy* nil
+  "Hint-derived allocation policy plist bound during allocation.
+Recognized keys:
+  :prefer-callee-saved-p
+  :prefer-caller-saved-p")
+
 (defun %lsa-interval-pool (state interval)
   "Return the free-register pool for INTERVAL's register class."
   (if (interval-fp-p interval) (lsa-free-fp-regs state) (lsa-free-regs state)))
@@ -132,15 +138,38 @@
   (let* ((param-index (interval-parameter-index interval))
          (arg-regs (if (interval-fp-p interval) (target-fp-arg-regs cc) (target-arg-regs cc)))
          (preferred (and (integerp param-index)
-                         (< param-index (length arg-regs))
-                         (nth param-index arg-regs))))
+                          (< param-index (length arg-regs))
+                          (nth param-index arg-regs))))
     (and preferred (member preferred free-regs) preferred)))
 
+(defun %hint-policy-preferred-reg (interval cc free-regs)
+  "Strategy: when policy prefers caller-saved regs, bias allocation accordingly.
+Safety guard: do not force caller-saved for call-crossing intervals."
+  (when (and (getf *current-allocation-policy* :prefer-caller-saved-p)
+             (not (interval-crosses-call-p interval))
+             (not (interval-fp-p interval)))
+    (find-if (lambda (reg) (member reg free-regs :test #'eq))
+             (target-caller-saved cc))))
+
 (defparameter *preferred-register-strategies*
-  (list #'%return-value-preferred-reg
+  (list #'%hint-policy-preferred-reg
+        #'%return-value-preferred-reg
         #'%call-crossing-preferred-reg
         #'%param-preferred-reg)
   "Ordered list of preferred-register strategies tried left-to-right; first truthy result wins.")
+
+(defun %derive-single-function-policy (instructions)
+  "Best-effort default policy derivation for single-function instruction streams."
+  (let* ((bodies (regalloc-collect-linear-functions instructions))
+         (labels nil))
+    (maphash (lambda (label body)
+               (declare (ignore body))
+               (push label labels))
+             bodies)
+    (when (= (length labels) 1)
+      (let* ((label (first labels))
+             (hints (regalloc-compute-interprocedural-hints instructions)))
+        (regalloc-build-allocation-policy-from-hints hints label)))))
 
 (defun %preferred-register-for-interval (interval cc free-regs)
   "Return a preferred free physical register for INTERVAL, or NIL."
@@ -271,11 +300,16 @@
 
 ;;; Public API
 
-(defun allocate-registers (instructions cc &optional float-vregs)
+(defun allocate-registers (instructions cc &optional float-vregs allocation-policy)
   "Run register allocation on VM instruction list.
    CC is a target-desc object.
+   ALLOCATION-POLICY is an optional plist (e.g. from
+   REGALLOC-BUILD-ALLOCATION-POLICY-FROM-HINTS) used to bias preferred registers.
    Returns a regalloc-result."
-  (let ((intervals (compute-live-intervals instructions float-vregs)))
+  (let* ((intervals (compute-live-intervals instructions float-vregs))
+         (effective-policy (or allocation-policy
+                               (%derive-single-function-policy instructions)))
+         (*current-allocation-policy* effective-policy))
     (multiple-value-bind (assignment spill-map spill-count)
         (linear-scan-allocate intervals cc)
       (let* ((remat-map (let ((ht (make-hash-table :test #'eq)))

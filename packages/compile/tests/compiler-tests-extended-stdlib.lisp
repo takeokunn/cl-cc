@@ -388,4 +388,24 @@
   (form verify)
   (funcall verify (run-string form)))
 
+;;; FR-254: with-region macro expansion/compile path
+(deftest compile-with-region-runtime-lifetime
+  "with-region macro expands through compiler path and enforces lifetime at runtime." 
+  (assert-= 7
+           (run-string "(with-region (r) (cl-cc/runtime:rt-region-deref (cl-cc/runtime:rt-region-alloc r 7)))"
+                       :stdlib t))
+  (assert-true
+   (run-string "(handler-case (let (ref) (with-region (r) (setf ref (cl-cc/runtime:rt-region-alloc r 9))) (cl-cc/runtime:rt-region-deref ref) nil) (error () t))"
+               :stdlib t)))
+
+(deftest compile-copy-hash-table-cow-write-keeps-original
+  "copy-hash-table copy-on-write path keeps original table unchanged on mutation." 
+  (assert-= 1
+           (run-string "(let* ((h (make-hash-table))
+                               (_ (setf (gethash 'a h) 1))
+                               (c (copy-hash-table h)))
+                          (setf (gethash 'a c) 99)
+                          (gethash 'a h))"
+                       :stdlib t)))
+
 ;;; (run-tests is defined in framework.lisp)

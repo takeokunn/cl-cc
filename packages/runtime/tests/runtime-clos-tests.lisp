@@ -79,6 +79,50 @@
     (assert-eq :eql (cl-cc/runtime:rt-call-generic gf :read))
     (assert-eq :class (cl-cc/runtime:rt-call-generic gf :write))))
 
+(deftest rt-call-generic-standard-method-combination-runs-before-primary-after
+  "rt-call-generic executes before -> primary -> after (after in reverse order)."
+  (let ((cl-cc/runtime:*rt-class-registry* (make-hash-table :test #'eq)))
+    (let* ((klass (cl-cc/runtime:rt-defclass 'rt-combo-node '() '()))
+           (obj (make-hash-table :test #'eq))
+           (log '())
+           (gf (make-hash-table :test #'equal)))
+      (setf (gethash :__class__ obj) klass
+            (gethash :__name__ gf) 'rt-combo)
+      (cl-cc/runtime:rt-register-method gf '(:__BEFORE__ rt-combo-node)
+                                        (lambda (_) (declare (ignore _)) (push :before log)))
+      (cl-cc/runtime:rt-register-method gf 'rt-combo-node
+                                        (lambda (_) (declare (ignore _)) (push :primary log) :ok))
+      (cl-cc/runtime:rt-register-method gf '(:__AFTER__ rt-combo-node)
+                                        (lambda (_) (declare (ignore _)) (push :after-1 log)))
+      (cl-cc/runtime:rt-register-method gf '(:__AFTER__ t)
+                                        (lambda (_) (declare (ignore _)) (push :after-2 log)))
+      (assert-eq :ok (cl-cc/runtime:rt-call-generic gf obj))
+      (assert-equal '(:after-1 :after-2 :primary :before) log))))
+
+(deftest rt-call-generic-custom-method-combination-folds-qualified-methods
+  "rt-call-generic folds qualified methods using custom method-combination operator." 
+  (let ((cl-cc/runtime:*rt-class-registry* (make-hash-table :test #'eq)))
+    (let* ((klass (cl-cc/runtime:rt-defclass 'rt-sum-node '() '()))
+           (obj (make-hash-table :test #'eq))
+           (gf (make-hash-table :test #'equal)))
+      (setf (gethash :__class__ obj) klass
+            (gethash :__name__ gf) 'rt-sum
+            (gethash :__method-combination__ gf) '+)
+      (cl-cc/runtime:rt-register-method gf '(:__+__ rt-sum-node)
+                                        (lambda (_) (declare (ignore _)) 10))
+      (cl-cc/runtime:rt-register-method gf '(:__+__ t)
+                                        (lambda (_) (declare (ignore _)) 7))
+      (assert-= 17 (cl-cc/runtime:rt-call-generic gf obj)))))
+
+(deftest rt-register-method-with-qualifier-normalizes-qualified-key
+  "rt-register-method accepts optional qualifier and stores qualified method key."
+  (let ((gf (make-hash-table :test #'equal)))
+    (setf (gethash :__methods__ gf) (make-hash-table :test #'equal)
+          (gethash :__eql-index__ gf) (make-hash-table :test #'equal))
+    (cl-cc/runtime:rt-register-method gf 'my-class (lambda (x) x) :before)
+    (assert-true (functionp (gethash '(:__BEFORE__ my-class)
+                                      (gethash :__methods__ gf))))))
+
 ;;; ─── Argument Classification ────────────────────────────────────────────────
 
 (deftest-each rt-classify-arg-primitive-types

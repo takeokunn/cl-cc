@@ -17,7 +17,31 @@
   ((module :initarg :module :initform nil :accessor wasm-target-module
     :documentation "The wasm-module-ir being built.")
    (reg-map :initarg :reg-map :initform nil :accessor wasm-target-reg-map
-    :documentation "Current wasm-reg-map for the function being emitted."))
+    :documentation "Current wasm-reg-map for the function being emitted.")
+   (known-func-labels :initarg :known-func-labels
+    :initform (make-hash-table)
+    :accessor wasm-target-known-func-labels
+    :documentation "Best-effort map from VM register to direct function label.")
+   (known-slot-indexes :initarg :known-slot-indexes
+    :initform (make-hash-table :test #'equal)
+    :accessor wasm-target-known-slot-indexes
+    :documentation "Best-effort map from slot-name symbol/string to slot index.")
+   (class-slot-layouts :initarg :class-slot-layouts
+    :initform (make-hash-table :test #'equal)
+    :accessor wasm-target-class-slot-layouts
+    :documentation "Map class-name => slot-name/index hash-table.")
+   (class-slot-orders :initarg :class-slot-orders
+    :initform (make-hash-table :test #'equal)
+    :accessor wasm-target-class-slot-orders
+    :documentation "Map class-name => effective slot-name order list.")
+   (known-class-by-reg :initarg :known-class-by-reg
+    :initform (make-hash-table)
+    :accessor wasm-target-known-class-by-reg
+    :documentation "Map VM register => class-name symbol/string.")
+   (known-object-class-by-reg :initarg :known-object-class-by-reg
+    :initform (make-hash-table)
+    :accessor wasm-target-known-object-class-by-reg
+    :documentation "Map VM object register => class-name symbol/string."))
   (:documentation "WASM backend target. Emits WebAssembly Text Format (WAT)."))
 
 ;;; target-register: maps VM register to WAT local index (integer)
@@ -66,7 +90,12 @@
   ;; Type 7: closure
   (format stream "~%  (type $closure_t (struct (field $entry i32) (field $env (ref null $env_t))))")
   ;; Type 8: class metadata
-  (format stream "~%  (type $class_meta_t (struct (field $name (ref $symbol_t)) (field $slot_names (ref $eqref_array_t))))")
+  ;; Fields:
+  ;; - name: class symbol
+  ;; - slot_names: effective slot-name vector
+  ;; - method_combination: symbol metadata (staged placeholder)
+  ;; - methods: method table payload (staged eqref array)
+  (format stream "~%  (type $class_meta_t (struct (field $name (ref $symbol_t)) (field $slot_names (ref $eqref_array_t)) (field $method_combination (ref $symbol_t)) (field $methods (ref $eqref_array_t))))")
   ;; Type 9: CLOS instance
   (format stream "~%  (type $instance_t (struct (field $class (ref $class_meta_t)) (field $slots (mut (ref $eqref_array_t)))))")
   ;; Type 10: hash table
@@ -111,12 +140,12 @@
       (format stream ")"))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
-;;; WAT module: calling-convention globals ($cl_arg0..$cl_arg7)
+;;; WAT module: calling-convention globals ($cl_arg0..$cl_arg15)
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defconstant +wasm-max-call-args+ 8
+(defconstant +wasm-max-call-args+ 16
   "Maximum number of function arguments supported by the WASM calling convention.
-   Arguments are passed via globals $cl_arg0 through $cl_arg7 before call_indirect.")
+   Arguments are passed via globals $cl_arg0 through $cl_arg15 before call_indirect.")
 
 (defun emit-wat-call-globals (stream)
   "Emit WASM globals used to pass function arguments across call_indirect.
@@ -205,7 +234,10 @@
   (format stream "~%  (import \"cl_io\" \"write_string\" (func $host_write_string (param (ref $string_t))))")
   (format stream "~%  (import \"cl_io\" \"error\" (func $host_error (param (ref $string_t))))")
   ;; print_val: host-side formatter for any eqref value (used by vm-print)
-  (format stream "~%  (import \"cl_io\" \"print_val\" (func $host_print_val (param eqref)))"))
+  (format stream "~%  (import \"cl_io\" \"print_val\" (func $host_print_val (param eqref)))")
+  ;; FR-321 staged runtime MOP bridge imports
+  (format stream "~%  (import \"cl_runtime\" \"register_method\" (func $host_rt_register_method (param eqref) (param eqref) (param eqref) (param eqref)))")
+  (format stream "~%  (import \"cl_runtime\" \"call_generic\" (func $host_rt_call_generic (param eqref) (param i32) (result eqref)))"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; emit-wasm-module: serialize a wasm-module-ir to WAT text
@@ -225,7 +257,7 @@
   (emit-wat-table module stream)
   ;; User-defined global variables (from defvar/setq)
   (emit-wat-globals module stream)
-  ;; Argument-passing calling convention globals ($cl_arg0..$cl_arg7)
+  ;; Argument-passing calling convention globals ($cl_arg0..$cl_arg15)
   (emit-wat-call-globals stream)
   ;; Functions
   (dolist (func (wasm-module-functions module))

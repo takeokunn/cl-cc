@@ -11,6 +11,18 @@
 (defparameter *x86-64-omit-frame-pointer* t
   "When true, prefer RSP-relative spill slots over reserving RBP as a frame pointer.")
 
+(defparameter *x86-64-use-retpoline* nil
+  "When true, lower indirect call/jump sites through retpoline sequences.")
+
+(defparameter *x86-64-stack-protector-enabled* nil
+  "When true, emit stack protector checks for x86-64 functions.")
+
+(defparameter *x86-64-cfi-enabled* nil
+  "When true, emit conservative indirect-call/jump guards for x86-64 CFI paths.")
+
+(defparameter *x86-64-shadow-stack-enabled* nil
+  "When true, x86-64 CET shadow-stack plan is considered enabled.")
+
 (defun x86-64-codegen-target ()
   "Return the x86-64 target descriptor for the active frame-pointer policy."
   (if *x86-64-omit-frame-pointer*

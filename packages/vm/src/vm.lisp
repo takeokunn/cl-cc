@@ -19,6 +19,8 @@ closures, and reader states."))
 (defclass vm-closure-object (vm-heap-object)
   ((entry-label :initarg :entry-label :reader vm-closure-entry-label
                 :documentation "Label where function code begins")
+   (dispatch-tag :initarg :dispatch-tag :initform nil :accessor vm-closure-dispatch-tag
+                 :documentation "Optional defunctionalization dispatch tag for known closures.")
    (params :initarg :params :reader vm-closure-params
             :documentation "List of required parameter register names")
    (optional-params :initarg :optional-params :initform nil :reader vm-closure-optional-params

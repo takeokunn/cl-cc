@@ -88,6 +88,28 @@
     (assert-true (getf (gethash "caller" hints) :leaf-callee-chain-p))
     (assert-false (getf (gethash "root" hints) :leaf-callee-chain-p))))
 
+(deftest regalloc-interprocedural-policy-hook-derives-preferences
+  "Policy hook derives caller/callee-saved bias from interprocedural hints."
+  (let* ((insts (list
+                 (make-vm-label :name "leaf")
+                 (make-vm-const :dst :r0 :value 1)
+                 (make-vm-ret :reg :r0)
+                 (make-vm-label :name "caller")
+                 (make-vm-func-ref :dst :f :label "leaf")
+                 (make-vm-call :dst :r1 :func :f :args nil)
+                 (make-vm-ret :reg :r1)
+                 (make-vm-label :name "root")
+                 (make-vm-func-ref :dst :g :label "caller")
+                 (make-vm-call :dst :r2 :func :g :args nil)
+                 (make-vm-ret :reg :r2)))
+         (hints (cl-cc/regalloc::regalloc-compute-interprocedural-hints insts))
+         (leaf-policy (cl-cc/regalloc::regalloc-build-allocation-policy-from-hints hints "leaf"))
+         (root-policy (cl-cc/regalloc::regalloc-build-allocation-policy-from-hints hints "root")))
+    (assert-true (getf leaf-policy :prefer-caller-saved-p))
+    (assert-false (getf leaf-policy :prefer-callee-saved-p))
+    (assert-true (getf root-policy :prefer-callee-saved-p))
+    (assert-false (getf root-policy :prefer-caller-saved-p))))
+
 ;;; Linear Scan Allocation Tests
 
 (deftest regalloc-allocate-fits-in-physical-regs-with-distinct-assignments
@@ -202,6 +224,47 @@
          (r0-int (find :r0 intervals :key #'cl-cc:interval-vreg))
          (result (allocate-registers instructions *x86-64-target*)))
     (assert-true (cl-cc/regalloc::interval-crosses-call-p r0-int))
+    (assert-true (member (regalloc-lookup result :r0)
+                         (cl-cc/target:target-callee-saved *x86-64-target*)
+                         :test #'eq))))
+
+(deftest regalloc-interprocedural-policy-caller-saved-respects-call-crossing-safety
+  "Caller-saved preference does not override call-crossing safety constraints."
+  (let* ((interval (make-live-interval :vreg :r0 :start 0 :end 10 :crosses-call-p t))
+         (free-regs (copy-list (cl-cc/target:target-caller-saved *x86-64-target*)))
+         (cl-cc/regalloc::*current-allocation-policy*
+           (list :prefer-callee-saved-p nil :prefer-caller-saved-p t)))
+    (assert-null (cl-cc/regalloc::%hint-policy-preferred-reg
+                  interval
+                  *x86-64-target*
+                  free-regs))))
+
+(deftest regalloc-interprocedural-policy-end-to-end-keeps-call-crossing-safe
+  "Hint-derived caller preference still keeps call-crossing values on callee-safe paths."
+  (let* ((instructions (list (make-vm-label :name 'main)
+                             (make-vm-const :dst :r0 :value 1)
+                             (make-vm-call :dst :r2 :func :leaf :args '(:r4))
+                             (make-vm-add :dst :r5 :lhs :r0 :rhs :r2)
+                             (make-vm-halt :reg :r5)
+                             (make-vm-label :name 'leaf)
+                             (make-vm-const :dst :r6 :value 7)
+                             (make-vm-halt :reg :r6)))
+         (hints (cl-cc/regalloc::regalloc-compute-interprocedural-hints instructions))
+         (policy (cl-cc/regalloc::regalloc-build-allocation-policy-from-hints hints 'main))
+         (result (allocate-registers instructions *x86-64-target* nil policy)))
+    (assert-true (member (regalloc-lookup result :r0)
+                         (cl-cc/target:target-callee-saved *x86-64-target*)
+                         :test #'eq))))
+
+(deftest regalloc-interprocedural-policy-prefers-callee-saved-on-call-crossing
+  "Hint-derived policy can explicitly keep call-crossing values on callee-saved regs."
+  (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
+                             (make-vm-call :dst :r2 :func :r3 :args '(:r4))
+                             (make-vm-add :dst :r5 :lhs :r0 :rhs :r2)
+                             (make-vm-halt :reg :r5)))
+         (policy (list :prefer-callee-saved-p t
+                       :prefer-caller-saved-p nil))
+         (result (allocate-registers instructions *x86-64-target* nil policy)))
     (assert-true (member (regalloc-lookup result :r0)
                          (cl-cc/target:target-callee-saved *x86-64-target*)
                          :test #'eq))))

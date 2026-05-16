@@ -151,6 +151,38 @@
     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-mul)) result))
     (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-ash)) result))))
 
+
+(deftest fr-282-div-by-3-word64-range-emits-unsigned-mul-high-seq
+  "FR-282: proved unsigned 64-bit dividend range uses magic-number mul-high lowering."
+  (let* ((mask    (make-vm-const  :dst :mask :value #xffffffffffffffff))
+         (masked  (make-vm-logand :dst :x64 :lhs :x :rhs :mask))
+         (const-3 (make-vm-const  :dst :d :value 3))
+         (div     (make-vm-div    :dst :q :lhs :x64 :rhs :d))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce
+                   (list mask masked const-3 div))))
+    (flet ((has-inst-p (name)
+             (some (lambda (i) (typep i (find-class (intern name "CL-CC/VM")))) result)))
+      (assert-false (has-inst-p "VM-DIV"))
+      (assert-true  (has-inst-p "VM-INTEGER-MUL-HIGH-U"))
+      (assert-true  (has-inst-p "VM-ASH"))
+      (assert-false (has-inst-p "VM-SUB")))))
+
+(deftest fr-282-div-by-7-word64-range-emits-add-adjusted-unsigned-mul-high-seq
+  "FR-282: uncooperative divisor uses the add-adjusted unsigned magic sequence."
+  (let* ((mask    (make-vm-const  :dst :mask :value #xffffffffffffffff))
+         (masked  (make-vm-logand :dst :x64 :lhs :x :rhs :mask))
+         (const-7 (make-vm-const  :dst :d :value 7))
+         (div     (make-vm-div    :dst :q :lhs :x64 :rhs :d))
+         (result  (cl-cc/optimize::opt-pass-strength-reduce
+                   (list mask masked const-7 div))))
+    (flet ((has-inst-p (name)
+             (some (lambda (i) (typep i (find-class (intern name "CL-CC/VM")))) result)))
+      (assert-false (has-inst-p "VM-DIV"))
+      (assert-true  (has-inst-p "VM-INTEGER-MUL-HIGH-U"))
+      (assert-true  (has-inst-p "VM-SUB"))
+      (assert-true  (has-inst-p "VM-ADD"))
+      (assert-true  (has-inst-p "VM-ASH")))))
+
 (deftest fr-282-div-by-3-negative-dividend-transformed-when-bounded
   "FR-282 extension: (/ x 3) can be lowered on bounded negative intervals via affine reciprocal."
   (let* ((const-neg (make-vm-const :dst :x :value -9))

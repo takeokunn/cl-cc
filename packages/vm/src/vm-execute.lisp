@@ -92,6 +92,7 @@ The cl-cc execution model treats both NIL and numeric zero as false."
                                   :rest-param (vm-closure-rest-param inst)
                                   :key-params (vm-closure-key-params inst)
                                   :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
+                                  :dispatch-tag (vm-closure-inst-dispatch-tag inst)
                                   :captured-values captured-vals)))
     (vm-reg-set state dst-reg closure)
     ;; Fix self-references for recursive labels: if a captured register

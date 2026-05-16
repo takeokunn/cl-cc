@@ -107,10 +107,11 @@ Returns :lisp or :php."
       (uiop:quit 1))))
 
 (defun %maybe-make-profiled-vm-state (opts)
-  "Create a profiled VM state when flamegraph output is requested."
-  (when (compile-opts-flamegraph-path opts)
+  "Create a profiled VM state when profiling outputs are requested."
+  (when (or (compile-opts-flamegraph-path opts)
+            (compile-opts-pgo-generate-path opts))
     (let ((vm-state (cl-cc/vm:make-vm-state
-                                   :output-stream *standard-output*)))
+                                    :output-stream *standard-output*)))
       (setf (cl-cc/vm:vm-profile-enabled-p vm-state) t
             (cl-cc/vm:vm-profile-call-stack vm-state) (list "<toplevel>"))
       vm-state)))

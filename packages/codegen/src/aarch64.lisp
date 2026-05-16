@@ -130,7 +130,8 @@
                               "rt-register-method"
                               (list (vm-gf-reg inst)
                                     (vm-method-specializer inst)
-                                    (vm-method-reg inst))))
+                                    (vm-method-reg inst)
+                                    (vm-method-qualifier inst))))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-generic-call) stream)
   (%aarch64-emit-runtime-call target stream

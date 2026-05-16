@@ -123,3 +123,147 @@
     (assert-= #x48 (nth 0 bytes))
     (assert-= #xFF (nth 1 bytes))
     (assert-= #xE1 (nth 2 bytes))))
+
+(deftest x86-64-call-encoding-retpoline
+  "vm-call emits retpoline-expanded sequence when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-use-retpoline* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-call-like-inst
+                     (cl-cc:make-vm-call :dst :R0 :func :R1 :args nil) s))))))
+    (assert-= 44 (length bytes))
+    ;; starts with CALL rel32
+    (assert-= #xE8 (nth 0 bytes))
+    ;; includes PAUSE + LFENCE in thunk capture loop
+    (assert-true (find #xF3 bytes))
+    (assert-true (find #xAE bytes))))
+
+(deftest x86-64-tail-call-encoding-retpoline
+  "vm-tail-call emits retpoline-expanded sequence when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-use-retpoline* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-tail-call-inst
+                     (cl-cc:make-vm-tail-call :dst :R0 :func :R1 :args nil) s))))))
+    (assert-= 20 (length bytes))
+    (assert-= #xE8 (nth 0 bytes))
+    (assert-true (find #xF3 bytes))
+    (assert-= #xC3 (car (last bytes)))))
+
+(deftest x86-64-call-cfi-guard-avoids-clobbering-rax-target
+  "CFI guard uses a non-RAX scratch register when indirect target is RAX."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-cfi-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-call-like-inst
+                     (cl-cc:make-vm-call :dst :R1 :func :R0 :args nil) s))))))
+    ;; CALL RAX must remain at end of non-retpoline path.
+    (assert-equal '(#x48 #xFF #xD0) (subseq bytes (- (length bytes) 6) (- (length bytes) 3)))
+    ;; Guard must not clobber target via `mov rax, [rax]`.
+    (assert-false (search '(#x48 #x8B #x00) bytes :test #'eql))))
+
+(deftest x86-64-shadow-stack-control-inst-emits-nop-when-shadow-stack-disabled
+  "Non-local control VM instructions reserve a 2-byte integration slot when shadow-stack is disabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* nil))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-push-handler :handler-type :error :handler-label "Lh" :result-reg :R0)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 2 (length bytes))
+    (assert-= #x66 (nth 0 bytes))
+    (assert-= #x90 (nth 1 bytes))))
+
+(deftest x86-64-shadow-stack-control-inst-emits-saveprevssp-when-enabled
+  "Non-local control push/bind paths emit CET SAVEPREVSSP-based save slot when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-push-handler :handler-type :error :handler-label "Lh" :result-reg :R0)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x0F #x01 #xEA #x66 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-uses-distinct-restore-marker
+  "Pop/invoke restart paths emit CET RSTORSSP-based restore slot."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-pop-handler)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x0F #x01 #x28 #x66 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-uses-incsspq-for-adjust-paths
+  "Condition/error non-local paths emit CET INCSSPQ-based adjust slot."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-signal :condition-reg :R0)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x48 #x0F #xAE #xE8 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-covers-vm-establish-catch
+  "VM catch establishment path also lowers to CET save slot when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-establish-catch
+                      :tag-reg :R0 :handler-label "Lc" :result-reg :R1)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x0F #x01 #xEA #x66 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-covers-vm-remove-handler
+  "VM handler removal path lowers to CET restore slot when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-remove-handler)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x0F #x01 #x28 #x66 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-covers-vm-sync-handler-regs
+  "VM handler snapshot sync path lowers to CET adjust slot when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-sync-handler-regs)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x48 #x0F #xAE #xE8 #x90) bytes)))
+
+(deftest x86-64-shadow-stack-control-inst-covers-vm-throw
+  "VM throw path lowers to CET adjust slot when enabled."
+  (let ((bytes (let ((cl-cc/codegen::*x86-64-shadow-stack-enabled* t))
+                 (%x86-collect-bytes
+                  (lambda (s)
+                    (cl-cc/codegen::emit-vm-instruction-with-labels
+                     (cl-cc/vm::make-vm-throw :tag-reg :R0 :value-reg :R1)
+                     s
+                     0
+                     (make-hash-table :test #'equal)))))))
+    (assert-= 6 (length bytes))
+    (assert-equal '(#xF3 #x48 #x0F #xAE #xE8 #x90) bytes)))

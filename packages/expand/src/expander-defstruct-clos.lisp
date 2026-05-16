@@ -4,13 +4,19 @@
 ;;; ── Standard CLOS-based defstruct expansion ───────────────────────────────
 
 (defun %defstruct-register-accessors (name conc-name own-slots)
-  "Register writable accessors for SETF expansion metadata."
+  "Register defstruct accessors for SETF expansion metadata.
+
+Writable accessors are stored in `*accessor-slot-map*`.
+Read-only accessors are recorded in `*defstruct-read-only-accessor-map*`."
   (dolist (slot own-slots)
-    (let ((slot-name  (first slot))
-          (read-only-p (third slot)))
+    (let* ((slot-name  (first slot))
+           (read-only-p (third slot))
+           (accessor (%defstruct-accessor-name conc-name slot-name)))
       (unless read-only-p
-        (setf (gethash (%defstruct-accessor-name conc-name slot-name) *accessor-slot-map*)
-              (cons name slot-name))))))
+        (setf (gethash accessor *accessor-slot-map*)
+              (cons name slot-name)))
+      (when read-only-p
+        (setf (gethash accessor *defstruct-read-only-accessor-map*) t)))))
 
 (defun %defstruct-defclass-slots (conc-name own-slots)
   "Build DEFCLASS slot specs for own defstruct slots."

@@ -118,6 +118,26 @@ Unknown or malformed optimize specs are ignored conservatively."
                   (cons 'progn body)
                   (list '%progv-exit saved-var))))))
 
+;; Runtime region helper (FR-254 integration)
+(register-macro 'with-region
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((binding (second form))
+           (body (cddr form))
+           (name (first binding)))
+      (unless (and (consp binding) (symbolp name))
+        (error "with-region expects (with-region (name) body...), got ~S" form))
+      (let* ((runtime-pkg (or (find-package "CL-CC/RUNTIME")
+                              (find-package "CL-CC")))
+             (make-sym (or (and runtime-pkg (find-symbol "RT-MAKE-REGION" runtime-pkg))
+                           (intern "RT-MAKE-REGION" *package*)))
+             (close-sym (or (and runtime-pkg (find-symbol "RT-CLOSE-REGION" runtime-pkg))
+                            (intern "RT-CLOSE-REGION" *package*))))
+      (list 'let (list (list name (list make-sym)))
+            (list 'unwind-protect
+                  (cons 'progn body)
+                  (list close-sym name)))))))
+
 ;;; File I/O
 
 (register-macro 'with-open-file

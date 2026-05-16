@@ -35,10 +35,12 @@
 ;; Load Command Types
 (defconstant +lc-segment-64+ #x19
   "64-bit segment load command.")
-(defconstant +lc-symtab+ #x03
-  "Symbol table load command.")
+(defconstant +lc-symtab+ #x02
+  "Symbol table load command (LC_SYMTAB). #x03 is the obsolete LC_SYMSEG.")
 (defconstant +lc-dysymtab+ #x0B
   "Dynamic symbol table load command.")
+(defconstant +lc-load-dylinker+ #x0E
+  "Dynamic linker load command.")
 (defconstant +lc-main+ #x80000028
   "Main entry point load command (LC_MAIN | LC_REQ_DYLD).")
 

@@ -9,8 +9,10 @@
   "Largest dividend upper bound FR-282 verifies exhaustively for reciprocal division.
 
 Non-power-of-two division strength reduction stays intentionally conservative:
-the pass only searches exact multiply/shift reciprocals for small, finite,
-non-negative dividend intervals. Larger or unknown ranges keep vm-div.")
+the pass first searches exact multiply/shift reciprocals for small, finite
+intervals. For proved non-negative 64-bit word ranges it falls back to
+unsigned magic-number lowering with vm-integer-mul-high-u. Unknown or
+out-of-word ranges keep vm-div.")
 
 (defun %opt-verified-reciprocal-div-exact-p (divisor multiplier shift lo hi)
   "Return T when floor(X / DIVISOR) == floor((X * MULTIPLIER) / 2^SHIFT) on [LO, HI]."
@@ -126,6 +128,110 @@ instructions are limited to vm-const, vm-mul, vm-add, and vm-ash."
                 (make-vm-const :dst shift-reg :value (- shift))
                 (make-vm-ash   :dst dst :lhs sum-reg :rhs shift-reg)))))))
 
+
+(defconstant +opt-strength-reduce-word64-bits+ 64
+  "Native word width used by FR-282 unsigned magic-number division.")
+
+(defconstant +opt-strength-reduce-word64-modulus+
+  (ash 1 +opt-strength-reduce-word64-bits+)
+  "2^64, used when deriving fixed-width unsigned division magic numbers.")
+
+(defconstant +opt-strength-reduce-word64-max+
+  (1- +opt-strength-reduce-word64-modulus+)
+  "Largest unsigned 64-bit dividend accepted by FR-282 magic lowering.")
+
+(defun %opt-word64-nonnegative-interval-p (interval)
+  "Return T when INTERVAL is proven to fit the unsigned 64-bit dividend domain."
+  (and interval
+       (integerp (opt-interval-lo interval))
+       (integerp (opt-interval-hi interval))
+       (<= 0 (opt-interval-lo interval))
+       (<= (opt-interval-lo interval) (opt-interval-hi interval))
+       (<= (opt-interval-hi interval) +opt-strength-reduce-word64-max+)))
+
+(defun %opt-find-unsigned-magic-div-params (divisor)
+  "Return (MULTIPLIER SHIFT ADD-ADJUST-P) for unsigned 64-bit division by DIVISOR.
+
+This is the Hacker-Delight / Granlund-Montgomery style magic-number
+search used when exhaustive interval verification is too large. MULTIPLIER is
+always the low 64-bit immediate consumed by vm-integer-mul-high-u. When
+ADD-ADJUST-P is true, the quotient is computed as:
+  ((((n - mulhi(n, m)) >> 1) + mulhi(n, m)) >> (SHIFT - 1))
+Otherwise it is:
+  (mulhi(n, m) >> SHIFT)."
+  (when (and (integerp divisor)
+             (> divisor 1)
+             (<= divisor +opt-strength-reduce-word64-max+)
+             (not (opt-power-of-2-p divisor)))
+    (let* ((word-bits +opt-strength-reduce-word64-bits+)
+           (two-word +opt-strength-reduce-word64-modulus+)
+           (word-max +opt-strength-reduce-word64-max+)
+           (nc (- word-max (mod word-max divisor)))
+           (p word-bits)
+           (q1 (floor two-word nc))
+           (r1 (- two-word (* q1 nc)))
+           (q2 (floor word-max divisor))
+           (r2 (- word-max (* q2 divisor))))
+      (loop
+        (incf p)
+        (setf q1 (* 2 q1)
+              r1 (* 2 r1))
+        (when (>= r1 nc)
+          (incf q1)
+          (decf r1 nc))
+        (setf q2 (* 2 q2)
+              r2 (1+ (* 2 r2)))
+        (when (>= r2 divisor)
+          (incf q2)
+          (decf r2 divisor))
+        (let ((delta (- divisor 1 r2)))
+          (unless (and (< p (* 2 word-bits))
+                       (or (< q1 delta)
+                           (and (= q1 delta) (zerop r1))))
+            (let* ((magic (1+ q2))
+                   (add-adjust-p (>= magic two-word))
+                   (multiplier (if add-adjust-p
+                                   (- magic two-word)
+                                   magic))
+                   (shift (- p word-bits)))
+              (return (list multiplier shift add-adjust-p)))))))))
+
+(defun %opt-emit-final-right-shift (dst src shift new-reg-fn)
+  "Return instructions moving SRC to DST or arithmetic-shifting it right by SHIFT."
+  (if (zerop shift)
+      (list (make-vm-move :dst dst :src src))
+      (let ((shift-reg (funcall new-reg-fn)))
+        (list (make-vm-const :dst shift-reg :value (- shift))
+              (make-vm-ash :dst dst :lhs src :rhs shift-reg)))))
+
+(defun %opt-div-by-unsigned-magic-seq (dst src divisor interval new-reg-fn)
+  "Build a full unsigned 64-bit magic division sequence for DST <- floor(SRC / DIVISOR).
+
+The transformation is only selected when interval analysis proves SRC is in the
+unsigned 64-bit domain, preserving CL floor semantics for the values covered by
+that fixed-width lowering. Unknown, signed, or wider values remain on vm-div."
+  (when (%opt-word64-nonnegative-interval-p interval)
+    (let ((params (%opt-find-unsigned-magic-div-params divisor)))
+      (when params
+        (destructuring-bind (multiplier shift add-adjust-p) params
+          (let ((mult-reg (funcall new-reg-fn))
+                (high-reg (funcall new-reg-fn)))
+            (append
+             (list (make-vm-const :dst mult-reg :value multiplier)
+                   (make-vm-integer-mul-high-u :dst high-reg :lhs src :rhs mult-reg))
+             (if add-adjust-p
+                 (let ((diff-reg (funcall new-reg-fn))
+                       (one-reg (funcall new-reg-fn))
+                       (half-reg (funcall new-reg-fn))
+                       (sum-reg (funcall new-reg-fn)))
+                   (append
+                    (list (make-vm-sub :dst diff-reg :lhs src :rhs high-reg)
+                          (make-vm-const :dst one-reg :value -1)
+                          (make-vm-ash :dst half-reg :lhs diff-reg :rhs one-reg)
+                          (make-vm-add :dst sum-reg :lhs half-reg :rhs high-reg))
+                    (%opt-emit-final-right-shift dst sum-reg (1- shift) new-reg-fn)))
+                 (%opt-emit-final-right-shift dst high-reg shift new-reg-fn)))))))))
+
 (defun %opt-mul-by-const-seq (dst src n new-reg-fn)
   "Build a shift/add instruction sequence computing DST ← SRC * N.
 NEW-REG-FN is a thunk that allocates fresh temporary register keywords.
@@ -166,8 +272,8 @@ Returns a list of vm instructions (may include vm-const, vm-ash, vm-add, vm-move
    - (* x 2^k) → (ash x k)
    - (* 2^k x) → (ash x k)   [commutative]
    - (/ x 2^k) → (ash x -k)  [floor semantics: (floor x 2^k) = (ash x -k)]
-   - (/ x D)   → verified reciprocal multiply/shift when D is a positive
-                 non-power-of-2 constant and x is proved non-negative + bounded
+   - (/ x D)   → verified reciprocal multiply/shift for small proved intervals,
+                 or unsigned 64-bit magic multiply-high when x is proven word-sized
    - (mod x 2^k) → (logand x (2^k - 1))
    - (* x N)   → shift/add decomposition for small integer constants N
    At vm-label boundaries, flush the constant environment."
@@ -252,7 +358,8 @@ Returns a list of vm instructions (may include vm-const, vm-ash, vm-add, vm-move
                       (> rv 1)
                       (not (opt-power-of-2-p rv)))
                  (let ((seq (or (%opt-div-by-verified-reciprocal-seq dst lhs rv lhs-interval #'new-reg)
-                                (%opt-div-by-verified-reciprocal-seq-with-bias dst lhs rv lhs-interval #'new-reg))))
+                                (%opt-div-by-verified-reciprocal-seq-with-bias dst lhs rv lhs-interval #'new-reg)
+                                 (%opt-div-by-unsigned-magic-seq dst lhs rv lhs-interval #'new-reg))))
                    (if seq
                        (progn
                          (remhash dst env)

@@ -139,6 +139,26 @@
       (assert-equal 'widget (car entry))
       (assert-equal 'width (cdr entry)))))
 
+(deftest ds-read-only-accessor-not-registered-for-setf
+  "Read-only defstruct accessor is excluded from writable accessor map."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp (ds-expand '(defstruct packet (id 0 :read-only t) payload)))
+           (slot-specs (fourth (second exp)))
+           (id-slot (first slot-specs))
+           (payload-slot (second slot-specs))
+           (id-accessor (getf (rest id-slot) :reader))
+           (payload-accessor (getf (rest payload-slot) :accessor)))
+      (assert-true (null (gethash id-accessor cl-cc/expand:*accessor-slot-map*)))
+      (assert-true (gethash id-accessor cl-cc/expand:*defstruct-read-only-accessor-map*))
+      (assert-true (gethash payload-accessor cl-cc/expand:*accessor-slot-map*)))))
+
+(deftest ds-read-only-accessor-setf-signals-error
+  "SETF through read-only defstruct accessor is rejected at expansion time."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (ds-expand '(defstruct packet (id 0 :read-only t) payload))
+    (assert-signals error
+      (cl-cc/expand:compiler-macroexpand-all '(setf (cl-cc/expand::packet-id p) 10)))))
+
 (deftest ds-empty-struct-has-zero-slots
   "Empty defstruct generates a defclass with zero slot specs."
   (cl-cc/expand:with-fresh-defstruct-registries

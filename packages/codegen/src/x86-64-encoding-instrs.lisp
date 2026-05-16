@@ -44,6 +44,28 @@
   (emit-byte #x89 stream)
   (%emit-modrm-address (x86-64-memory-mod base offset) src base offset stream))
 
+(defun emit-mov-rm64-fs-disp32 (dst disp32 stream)
+  "MOV dst, FS:[disp32] using absolute disp32 addressing.
+
+   Encoding: 64 REX.W 8B /r (mod=00 r/m=100) SIB(00,100,101) disp32"
+  (emit-byte #x64 stream)
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3)) stream)
+  (emit-byte #x8B stream)
+  (emit-byte (modrm 0 dst 4) stream)
+  (emit-byte (sib 0 4 5) stream)
+  (emit-dword disp32 stream))
+
+(defun emit-cmp-rm64-fs-disp32 (reg disp32 stream)
+  "CMP reg, FS:[disp32] using absolute disp32 addressing.
+
+   Encoding: 64 REX.W 3B /r (mod=00 r/m=100) SIB(00,100,101) disp32"
+  (emit-byte #x64 stream)
+  (emit-byte (rex-prefix :w 1 :r (ash reg -3)) stream)
+  (emit-byte #x3B stream)
+  (emit-byte (modrm 0 reg 4) stream)
+  (emit-byte (sib 0 4 5) stream)
+  (emit-dword disp32 stream))
+
 (defun emit-mov-rm64-indexed (dst base index scale offset stream)
   "MOV dst, [base + index*scale + offset] (load from indexed memory)."
   (emit-byte (rex-prefix :w 1 :r (ash dst -3) :x (ash index -3) :b (ash base -3)) stream)
@@ -192,13 +214,17 @@
 (defun emit-push-r64 (reg stream)
   "PUSH reg (64-bit).
 
-   Encoding: 50+ rd"
+   Encoding: [REX.B] 50+ rd. REX.B (#x41) required for R8-R15."
+  (when (>= reg 8)
+    (emit-byte #x41 stream))
   (emit-byte (+ #x50 (logand reg #x7)) stream))
 
 (defun emit-pop-r64 (reg stream)
   "POP reg (64-bit).
 
-   Encoding: 58+ rd"
+   Encoding: [REX.B] 58+ rd. REX.B (#x41) required for R8-R15."
+  (when (>= reg 8)
+    (emit-byte #x41 stream))
   (emit-byte (+ #x58 (logand reg #x7)) stream))
 
 (defun emit-ret (stream)
@@ -266,6 +292,16 @@
 
    Encoding: REX.W + 81 /7 id"
   (emit-byte (rex-prefix :w 1 :b (ash reg -3)) stream)
+  (emit-byte #x81 stream)
+  (emit-byte (modrm 3 7 reg) stream)
+  (emit-dword imm stream))
+
+(defun emit-cmp-ri32 (reg imm stream)
+  "CMP reg32, imm32.
+
+   Encoding: 81 /7 id (+ optional REX.B for reg >= 8)."
+  (when (>= reg 8)
+    (emit-byte (rex-prefix :b (ash reg -3)) stream))
   (emit-byte #x81 stream)
   (emit-byte (modrm 3 7 reg) stream)
   (emit-dword imm stream))

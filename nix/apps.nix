@@ -137,8 +137,8 @@ let
         # Setting it to nil and then passing it as :defaults to make-pathname hangs SBCL
         # 2.6.1 on macOS ARM64; (uiop:temporary-directory) reads TMPDIR from the runtime
         # environment and caches the result in *temporary-directory*.
-        ''(setf *default-pathname-defaults* (uiop:getcwd))''
-        ''(setf uiop:*temporary-directory* (uiop:temporary-directory))''
+        "(setf *default-pathname-defaults* (uiop:getcwd))"
+        "(setf uiop:*temporary-directory* (uiop:temporary-directory))"
         # Load :cl-cc-test FASLs (pre-compiled via sbclWithTests) after CWD reset
         # so any top-level path computations in test files see the correct CWD.
         ''(format t "# loading :cl-cc-test~%")''

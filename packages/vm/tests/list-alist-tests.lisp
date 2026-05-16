@@ -52,7 +52,7 @@
     (assert-equal '(a b c d) (cl-cc:vm-reg-get s 0))))
 
 (deftest-each vm-list-copy-ops
-  "copy-list makes a shallow copy (outer distinct, nested refs shared); copy-tree makes deep copy."
+  "copy-list preserves value semantics (COW-friendly); copy-tree makes deep copy."
   :cases (("copy-list" #'cl-cc:make-vm-copy-list (list 1 2 3)                nil)
           ("copy-tree" #'cl-cc:make-vm-copy-tree (list (list 1 2) (list 3 4)) t))
   (constructor orig deep-p)
@@ -61,9 +61,40 @@
     (exec1 (funcall constructor :dst 0 :src 1) s)
     (let ((copy (cl-cc:vm-reg-get s 0)))
       (assert-equal orig copy)
-      (assert-true (not (eq orig copy)))
       (when deep-p
         (assert-true (not (eq (first orig) (first copy))))))))
+
+(deftest vm-list-copy-list-cow-write-keeps-original
+  "Mutating vm-copy-list result does not mutate the original list."
+  (let ((s (make-test-vm)))
+    (let ((orig (list 1 2 3)))
+      (cl-cc:vm-reg-set s 1 orig)
+      (exec1 (cl-cc:make-vm-copy-list :dst 0 :src 1) s)
+      (cl-cc:vm-reg-set s 2 99)
+      (exec1 (cl-cc:make-vm-rplaca :cons-reg 0 :val-reg 2) s)
+      (assert-= 1 (first orig))
+      (assert-= 99 (car (cl-cc:vm-reg-get s 0))))))
+
+(deftest vm-list-copy-list-cow-nreverse-keeps-original
+  "nreverse on vm-copy-list result should not mutate original list." 
+  (let ((s (make-test-vm)))
+    (let ((orig (list 1 2 3)))
+      (cl-cc:vm-reg-set s 1 orig)
+      (exec1 (cl-cc:make-vm-copy-list :dst 0 :src 1) s)
+      (exec1 (cl-cc:make-vm-nreverse :dst 2 :src 0) s)
+      (assert-equal '(1 2 3) orig)
+      (assert-equal '(3 2 1) (cl-cc:vm-reg-get s 2)))))
+
+(deftest vm-list-copy-list-cow-nconc-keeps-original
+  "nconc on vm-copy-list result should not mutate original list." 
+  (let ((s (make-test-vm)))
+    (let ((orig (list 1 2 3)))
+      (cl-cc:vm-reg-set s 1 orig)
+      (cl-cc:vm-reg-set s 2 (list 4 5))
+      (exec1 (cl-cc:make-vm-copy-list :dst 0 :src 1) s)
+      (exec1 (cl-cc:make-vm-nconc :dst 3 :lhs 0 :rhs 2) s)
+      (assert-equal '(1 2 3) orig)
+      (assert-equal '(1 2 3 4 5) (cl-cc:vm-reg-get s 3)))))
 
 (deftest vm-list-subst-replaces
   "vm-subst substitutes new for old in tree."

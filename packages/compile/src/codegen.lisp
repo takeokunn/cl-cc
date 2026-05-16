@@ -27,7 +27,8 @@
   (cps nil)
   (ast nil)
   (vm-instructions nil)
-  (optimized-instructions nil))
+  (optimized-instructions nil)
+  (pgo-counter-plan nil))
 
 (defun %type-check-form (ast type-env type-check)
   "Run the type checker on AST in TYPE-ENV, honoring TYPE-CHECK strictness.
@@ -235,10 +236,12 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
-                                      speed (inline-threshold-scale 1)
-                                      pass-pipeline print-pass-timings timing-stream
-                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                     print-pass-stats stats-stream trace-json-stream)
+                                        speed (inline-threshold-scale 1)
+                                        pass-pipeline print-pass-timings timing-stream
+                                       print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                       print-pass-stats stats-stream trace-json-stream
+                                       retpoline stack-protector shadow-stack
+                                       asan msan tsan ubsan hwasan)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
@@ -247,18 +250,20 @@ Returns a compilation-result struct with program, assembly, and globals."
         (last-type     nil)
         (last-cps      nil)
         (compiled-asts nil)
-        (type-env      (type-env-empty))
+         (type-env      (type-env-empty))
          (opts          (%make-compile-opts :pass-pipeline pass-pipeline
-                                            :speed speed
-                                            :inline-threshold-scale inline-threshold-scale
+                                             :speed speed
+                                             :inline-threshold-scale inline-threshold-scale
                                             :print-pass-timings print-pass-timings
                                           :timing-stream timing-stream
                                           :print-opt-remarks print-opt-remarks
                                           :opt-remarks-stream opt-remarks-stream
-                                          :opt-remarks-mode opt-remarks-mode
-                                          :print-pass-stats print-pass-stats
-                                          :stats-stream stats-stream
-                                          :trace-json-stream trace-json-stream)))
+                                           :opt-remarks-mode opt-remarks-mode
+                                           :print-pass-stats print-pass-stats
+                                           :stats-stream stats-stream
+                                           :trace-json-stream trace-json-stream)))
+    (declare (ignore retpoline stack-protector shadow-stack
+                     asan msan tsan ubsan hwasan))
     (let ((*compile-time-value-env*    nil)
           (*compile-time-function-env* nil))
        (dolist (form forms)

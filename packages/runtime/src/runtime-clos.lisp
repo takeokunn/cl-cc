@@ -93,7 +93,29 @@
           (= (length specializer) 1)
           (%rt-eql-specializer-p (car specializer)))
      (list (second (car specializer))))
-    (t nil)))
+     (t nil)))
+
+(defun %rt-method-key-qualifier (specs)
+  "Return qualifier keyword for SPECS, or NIL for primary methods.
+
+Accepted qualified forms:
+- (:__BEFORE__ class)
+- (:__AFTER__ class)
+- (:__AROUND__ class)"
+  (when (and (consp specs)
+             (= (length specs) 2)
+             (keywordp (first specs))
+             (member (first specs) '(:__BEFORE__ :__AFTER__ :__AROUND__) :test #'eq))
+    (first specs)))
+
+(defun %rt-method-key-specializer (specs)
+  "Return the base specializer key from SPECS.
+
+Qualified method keys like `(:__BEFORE__ class)` normalize to `class` for
+classification/EQL indexing purposes; unqualified keys return unchanged." 
+  (or (and (%rt-method-key-qualifier specs)
+           (second specs))
+      specs))
 
 ;;; ------------------------------------------------------------
 ;;; Generic Dispatch
@@ -116,17 +138,48 @@ CLOS descriptor hash tables → slot :__name__; primitives → *rt-primitive-typ
                          *rt-primitive-type-classifiers*))
           t)))
 
-(defun rt-register-method (gf specs method)
+(defun rt-register-method (gf specs method &optional qualifier)
+  "Register METHOD in GF under SPECS, optionally qualified by QUALIFIER.
+
+When QUALIFIER is provided, SPECS are normalized to a qualified method key
+`(:__<QUALIFIER>__ <SPECIALIZER>)` to match runtime dispatch table layout."
   (unless (hash-table-p gf)
     (error "rt-register-method expects a generic-function descriptor hash table, got ~S" gf))
-  (let ((methods-ht (or (gethash :__methods__ gf)
-                        (setf (gethash :__methods__ gf) (make-hash-table :test #'equal))))
+  (let* ((normalized-specs
+           (if qualifier
+               (list (intern (format nil "__~A__" (string-upcase (string qualifier))) :keyword)
+                     specs)
+               specs))
+         (methods-ht (or (gethash :__methods__ gf)
+                          (setf (gethash :__methods__ gf) (make-hash-table :test #'equal))))
         (eql-index (or (gethash :__eql-index__ gf)
-                       (setf (gethash :__eql-index__ gf) (make-hash-table :test #'equal)))))
-    (setf (gethash specs methods-ht) method)
-    (dolist (key (%rt-extract-eql-specializer-keys specs))
+                        (setf (gethash :__eql-index__ gf) (make-hash-table :test #'equal))))
+         (specializer (%rt-method-key-specializer normalized-specs)))
+    (setf (gethash normalized-specs methods-ht) method)
+    (dolist (key (%rt-extract-eql-specializer-keys specializer))
       (pushnew method (gethash key eql-index) :test #'eq))
     method))
+
+(defun %rt-lookup-qualified-methods (methods-ht qualifier class-name)
+  "Return applicable qualified methods for QUALIFIER and CLASS-NAME in CPL order."
+  (let ((result nil)
+        (class-ht (and class-name (gethash class-name *rt-class-registry*))))
+    (flet ((maybe-push (spec)
+             (let ((m (gethash spec methods-ht)))
+               (when m (push m result)))))
+      (maybe-push (list qualifier class-name))
+      (when class-ht
+        (dolist (ancestor (cdr (gethash :__cpl__ class-ht)))
+          (maybe-push (list qualifier ancestor))))
+      (maybe-push (list qualifier t)))
+    (nreverse result)))
+
+(defun %rt-resolve-combination-operator (combination)
+  "Resolve custom method-combination COMBINATION symbol to host operator."
+  (or (and (symbolp combination)
+           (fboundp combination)
+           (symbol-function combination))
+      (error "Unsupported runtime method combination operator: ~S" combination)))
 
 (defun %rt-lookup-method-by-class (methods-ht class-name)
   (or (gethash class-name methods-ht)
@@ -143,15 +196,43 @@ CLOS descriptor hash tables → slot :__name__; primitives → *rt-primitive-typ
              (eql-index   (gethash :__eql-index__ gf))
              (first-arg   (first args))
              (class-name  (%rt-classify-arg first-arg))
-             (method      (or (and eql-index
-                                   (let ((bucket (gethash first-arg eql-index)))
-                                     (cond
-                                       ((null bucket) nil)
-                                       ((listp bucket) (first bucket))
-                                       (t bucket))))
-                               (%rt-lookup-method-by-class methods-ht class-name))))
-        (unless method
-          (error "No applicable runtime generic method for ~S on ~S"
-                 (gethash :__name__ gf) class-name))
-        (apply method args))
+             (combination (gethash :__method-combination__ gf))
+             (before-methods (%rt-lookup-qualified-methods methods-ht :__BEFORE__ class-name))
+             (after-methods (%rt-lookup-qualified-methods methods-ht :__AFTER__ class-name))
+             (around-methods (%rt-lookup-qualified-methods methods-ht :__AROUND__ class-name))
+             (primary-method (or (and eql-index
+                                      (let ((bucket (gethash first-arg eql-index)))
+                                        (cond
+                                          ((null bucket) nil)
+                                          ((listp bucket) (first bucket))
+                                          (t bucket))))
+                                  (%rt-lookup-method-by-class methods-ht class-name))))
+        (cond
+          ((and combination (not (eq combination 'standard)))
+           (let* ((qual-key (intern (format nil "__~A__" (string-upcase (string combination))) :keyword))
+                  (combo-methods (%rt-lookup-qualified-methods methods-ht qual-key class-name))
+                  (methods (or combo-methods (and primary-method (list primary-method)))))
+             (unless methods
+               (error "No applicable runtime generic method for ~S on ~S"
+                      (gethash :__name__ gf) class-name))
+             (apply (%rt-resolve-combination-operator combination)
+                    (mapcar (lambda (m) (apply m args)) methods))))
+          ((or around-methods before-methods after-methods)
+           ;; Conservative standard-combination runtime behavior:
+           ;; around (most specific, single) -> before* -> primary -> after* (reverse)
+           (let ((result nil))
+             (when around-methods
+               (setf result (apply (first around-methods) args)))
+             (dolist (m before-methods) (apply m args))
+             (unless primary-method
+               (error "No applicable runtime generic primary method for ~S on ~S"
+                      (gethash :__name__ gf) class-name))
+             (setf result (apply primary-method args))
+             (dolist (m (reverse after-methods)) (apply m args))
+             result))
+          (t
+           (unless primary-method
+             (error "No applicable runtime generic method for ~S on ~S"
+                    (gethash :__name__ gf) class-name))
+           (apply primary-method args))))
       (apply gf args)))

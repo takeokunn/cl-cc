@@ -147,8 +147,16 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   (let* ((opts (cl-cc/cli::make-compile-opts :flamegraph-path "/tmp/cl-cc-test.svg"))
          (vm-state (cl-cc/cli::%maybe-make-profiled-vm-state opts)))
     (assert-true vm-state)
-     (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
-     (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
+      (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
+      (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
+
+(deftest cli-maybe-make-profiled-vm-state-enabled-for-pgo-generate
+  "PGO-generate options also enable profiled VM state for bb/branch counting."
+  (let* ((opts (cl-cc/cli::make-compile-opts :pgo-generate-path "/tmp/cl-cc-test-pgo.sexp"))
+         (vm-state (cl-cc/cli::%maybe-make-profiled-vm-state opts)))
+    (assert-true vm-state)
+    (assert-true (cl-cc/vm::vm-profile-enabled-p vm-state))
+    (assert-equal '("<toplevel>") (cl-cc/vm::vm-profile-call-stack vm-state))))
 
 (deftest cli-parse-compile-opts-includes-pgo-flags
   "%parse-compile-opts captures --pgo-generate/--pgo-use values."
@@ -172,10 +180,14 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
          (progn
            (cl-cc/cli::%maybe-write-pgo-profile opts result)
            (assert-true (probe-file tmp))
-           (let ((content (cl-cc/cli::%read-file tmp)))
-             (assert-true (search ":CL-CC-PGO-V1" (string-upcase content)))
-             (assert-true (search ":TOTAL-INSTRUCTIONS" (string-upcase content)))))
-      (ignore-errors (delete-file tmp)))))
+            (let ((content (cl-cc/cli::%read-file tmp)))
+              (assert-true (search ":CL-CC-PGO-V1" (string-upcase content)))
+              (assert-true (search ":TOTAL-INSTRUCTIONS" (string-upcase content)))
+              (assert-true (search ":COUNTER-PLAN" (string-upcase content)))
+              (assert-true (search ":COUNTER-TEMPLATE" (string-upcase content)))
+              (assert-true (search ":BB-COUNTER-COUNTS" (string-upcase content)))
+              (assert-true (search ":EDGE-COUNTER-COUNTS" (string-upcase content)))))
+       (ignore-errors (delete-file tmp)))))
 
 (deftest cli-compile-opts-kwargs-uses-pgo-use-profile-to-set-speed
   "%compile-opts-kwargs derives :speed from --pgo-use profile when available."
@@ -201,6 +213,30 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   (let* ((opts (cl-cc/cli::make-compile-opts :pgo-use-path "/tmp/does-not-exist-profile.sexp"))
          (kwargs (cl-cc/cli::%compile-opts-kwargs opts nil)))
     (assert-null (getf kwargs :speed))))
+
+(deftest cli-runtime-sanitizer-flags-follow-compile-options
+  "%call-with-runtime-sanitizer-flags propagates CLI sanitizer flags to runtime toggles."
+  (let ((opts (cl-cc/cli::make-compile-opts :asan t :msan t :tsan t :ubsan t :hwasan t)))
+    (cl-cc/cli::%call-with-runtime-sanitizer-flags
+     opts
+     (lambda ()
+       (assert-true cl-cc/runtime:*rt-asan-enabled*)
+       (assert-true cl-cc/runtime:*rt-msan-enabled*)
+       (assert-true cl-cc/runtime:*rt-tsan-enabled*)
+       (assert-true cl-cc/runtime:*rt-ubsan-enabled*)
+       (assert-true cl-cc/runtime:*rt-hwasan-enabled*)))))
+
+(deftest cli-runtime-sanitizer-flags-can-be-disabled
+  "%call-with-runtime-sanitizer-flags keeps runtime toggles disabled by default."
+  (let ((opts (cl-cc/cli::make-compile-opts)))
+    (cl-cc/cli::%call-with-runtime-sanitizer-flags
+     opts
+     (lambda ()
+       (assert-false cl-cc/runtime:*rt-asan-enabled*)
+       (assert-false cl-cc/runtime:*rt-msan-enabled*)
+       (assert-false cl-cc/runtime:*rt-tsan-enabled*)
+       (assert-false cl-cc/runtime:*rt-ubsan-enabled*)
+       (assert-false cl-cc/runtime:*rt-hwasan-enabled*)))))
 
 (deftest cli-read-command-source-roundtrip
   "%read-command-source reuses the CLI read path for ordinary source files."
@@ -326,3 +362,20 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
                           (funcall (symbol-function fn-sym)
                                    (make-cli-parsed :command command))))))))
     (assert-string= command help-command)))
+
+(deftest cli-do-check-error-prints-diagnostic-snippet
+  "%do-check on invalid input prints diagnostic reason, caret snippet, and type trace."
+  (%with-temp-file (path "(+ 1\n")
+    (let ((stderr (make-string-output-stream)))
+      (with-fake-quit
+        (assert-= 1
+                  (%capture-fake-quit-code
+                   (lambda ()
+                     (let ((*error-output* stderr))
+                       (cl-cc/cli::%do-check
+                        (make-cli-parsed :command "check"
+                                         :positional (list path))))))))
+      (let ((out (get-output-stream-string stderr)))
+        (assert-true (search "type-check: failed" out))
+        (assert-true (search "^" out))
+        (assert-true (search "Type trace:" out))))))

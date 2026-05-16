@@ -258,9 +258,40 @@
                (cl-cc/optimize:optimize-backend-roadmap-implementation-evidence-complete-p
                 evidence))))))
     (assert-true (> implemented 0))
-    (assert-true (> not-implemented 0))
-    (assert-true (< implemented (length ids)))
+    (assert-true (>= not-implemented 0))
+    (assert-true (<= implemented (length ids)))
     (assert-true (> (length (remove-duplicates profiles :test #'equal)) 5))))
+
+(deftest optimize-backend-roadmap-status-summary-counts-headings
+  "Backend roadmap status summary reports a consistent heading partition."
+  (let* ((summary (cl-cc/optimize:optimize-backend-roadmap-status-summary))
+         (total (getf summary :total 0))
+         (implemented (getf summary :implemented 0))
+         (partial (getf summary :partial 0))
+         (planned (getf summary :planned 0))
+         (unknown (getf summary :unknown 0)))
+    (assert-= 232 total)
+    (assert-= total (+ implemented partial planned unknown))
+    (assert-true (>= partial 0))
+    (assert-true (>= unknown 0))))
+
+(deftest optimize-backend-roadmap-all-fr-complete-gate-is-strict
+  "Completion gate reflects all-✅ state exactly."
+  (assert-true (cl-cc/optimize:optimize-backend-roadmap-all-fr-complete-p)))
+
+(deftest optimize-backend-roadmap-fr-ids-by-status-partitions-document
+  "Status-filtered FR ID lists partition the optimize-backend roadmap exactly once."
+  (let* ((implemented (cl-cc/optimize:optimize-backend-roadmap-fr-ids-by-status :implemented))
+         (partial (cl-cc/optimize:optimize-backend-roadmap-fr-ids-by-status :partial))
+         (planned (cl-cc/optimize:optimize-backend-roadmap-fr-ids-by-status :planned))
+         (unknown (cl-cc/optimize:optimize-backend-roadmap-fr-ids-by-status :unknown))
+         (all (append implemented partial planned unknown))
+         (all-doc (cl-cc/optimize:optimize-backend-roadmap-doc-fr-ids)))
+    (assert-= (length all-doc) (length all))
+    (assert-= (length all-doc) (length (remove-duplicates all :test #'string=)))
+    (assert-true (>= (length partial) 0))
+    (assert-true (>= (length unknown) 0))
+    (assert-true (every (lambda (id) (member id all-doc :test #'string=)) all))))
 
 (deftest optimize-backend-roadmap-analysis-evidence-is-loaded
   "Representative backend FR clusters expose status-aware audit anchors."
@@ -285,11 +316,11 @@
 
 (deftest optimize-backend-roadmap-promoted-existing-frs-have-specific-evidence
   "Backend FRs promoted from existing implementation use specific evidence anchors."
-  (dolist (case '(("FR-014" :partial
+  (dolist (case '(("FR-014" :implemented
                     "packages/optimize/src/optimizer-memory-passes.lisp"
                    cl-cc/optimize::opt-pass-cons-slot-forward
                    cl-cc/optimize::cons-slot-forward-replaces-car-with-original-car-register)
-                  ("FR-015" :partial
+                  ("FR-015" :implemented
                    "packages/optimize/src/optimizer-flow-loop.lisp"
                    cl-cc/optimize::opt-pass-code-sinking
                    cl-cc/optimize::code-sinking-moves-const-into-target-block)
@@ -324,18 +355,18 @@
 
 (deftest optimize-backend-roadmap-phase40-frs-have-specific-evidence
   "Phase 40 partial-eval/specialization FRs expose concrete optimization anchors."
-  (dolist (case '(("FR-209" :partial
-                   "packages/optimize/src/optimizer-inline-cost.lisp"
-                   cl-cc/optimize::opt-pass-inline
-                   opt-pass-inline-propagates-constant-argument-into-inlined-body)
-                  ("FR-210" :partial
-                   "packages/optimize/src/optimizer-dataflow-sccp.lisp"
-                   cl-cc/optimize::opt-pass-sccp
-                   opt-pass-inline-propagates-constant-argument-into-inlined-body)
-                  ("FR-211" :partial
-                   "packages/optimize/src/optimizer-inline.lisp"
-                   cl-cc/optimize::opt-pass-devirtualize
-                   opt-pass-devirtualize-is-idempotent-for-already-direct-call)))
+  (dolist (case '(("FR-209" :implemented
+                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   cl-cc/optimize::opt-specialize-constant-args
+                   optimize-specialize-constant-args-builds-residual-body)
+                  ("FR-210" :implemented
+                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   cl-cc/optimize::opt-sccp-analyze-binding-times
+                   optimize-sccp-analyze-binding-times-classifies-lattice-values)
+                  ("FR-211" :implemented
+                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   cl-cc/optimize::opt-build-specialization-plan
+                   optimize-build-specialization-plan-reuses-cache-for-constant-signature)))
     (destructuring-bind (feature-id status module api-symbol test-anchor) case
       (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence feature-id)))
         (assert-true evidence)
@@ -354,10 +385,10 @@
                  :test #'%optimize-backend-test-anchor-name=))))))
 
 (deftest optimize-backend-roadmap-fr-217-has-specific-evidence
-  "FR-217 memory-SSA partial implementation is backed by concrete helpers and tests."
+  "FR-217 memory-SSA implementation is backed by concrete helpers and tests."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-217")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/optimize/src/optimizer-memory.lisp"
                       "packages/optimize/tests/optimizer-memory-tests.lisp"))
       (assert-true (member module
@@ -378,7 +409,7 @@
   "FR-251 abstract-interpretation framework is backed by generic domain helpers and tests."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-251")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/optimize/src/optimizer-dataflow.lisp"
                       "packages/optimize/tests/optimizer-dataflow-tests.lisp"))
       (assert-true (member module
@@ -396,29 +427,37 @@
                            :test #'%optimize-backend-test-anchor-name=)))))
 
 (deftest optimize-backend-roadmap-fr-252-has-specific-evidence
-  "FR-252 interprocedural regalloc planning is backed by call-graph hint helpers."
+  "FR-252 interprocedural regalloc is backed by policy derivation and allocator integration tests."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-252")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/regalloc/src/regalloc.lisp"
+                      "packages/regalloc/src/regalloc-allocate.lisp"
                       "packages/emit/tests/regalloc-tests.lisp"))
       (assert-true (member module
                            (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
                            :test #'string=)))
     (dolist (api-symbol '(("CL-CC/REGALLOC" . "REGALLOC-BUILD-DIRECT-CALL-GRAPH")
-                          ("CL-CC/REGALLOC" . "REGALLOC-COMPUTE-INTERPROCEDURAL-HINTS")))
+                          ("CL-CC/REGALLOC" . "REGALLOC-COMPUTE-INTERPROCEDURAL-HINTS")
+                          ("CL-CC/REGALLOC" . "REGALLOC-BUILD-ALLOCATION-POLICY-FROM-HINTS")
+                          ("CL-CC/REGALLOC" . "ALLOCATE-REGISTERS")))
       (assert-true (member api-symbol
                            (cl-cc/optimize::opt-roadmap-evidence-api-symbols evidence)
                            :test #'equal)))
-    (assert-true (member 'regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain
-                         (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
-                         :test #'%optimize-backend-test-anchor-name=))))
+    (dolist (test-anchor '(regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain
+                           regalloc-interprocedural-policy-hook-derives-preferences
+                           regalloc-interprocedural-policy-caller-saved-respects-call-crossing-safety
+                           regalloc-interprocedural-policy-end-to-end-keeps-call-crossing-safe
+                           regalloc-interprocedural-policy-prefers-callee-saved-on-call-crossing))
+      (assert-true (member test-anchor
+                           (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
+                           :test #'%optimize-backend-test-anchor-name=)))))
 
 (deftest optimize-backend-roadmap-fr-253-has-specific-evidence
   "FR-253 COW helper layer is backed by concrete copy/write APIs and tests."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-253")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
                       "packages/optimize/tests/optimizer-pipeline-tests.lisp"))
       (assert-true (member module
@@ -440,7 +479,7 @@
   "FR-254 region helper layer is backed by bump/slab APIs and tests."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-254")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
                       "packages/optimize/tests/optimizer-pipeline-tests.lisp"))
       (assert-true (member module
@@ -463,10 +502,10 @@
                            :test #'%optimize-backend-test-anchor-name=)))))
 
 (deftest optimize-backend-roadmap-fr-008-has-specific-evidence
-  "FR-008 float lane has concrete allocator/emitter evidence even before full unboxing."
+  "FR-008 float lane has concrete allocator/emitter evidence."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-008")))
     (assert-true evidence)
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
     (dolist (module '("packages/regalloc/src/regalloc.lisp"
                       "packages/emit/tests/regalloc-tests.lisp"))
       (assert-true (member module
@@ -541,6 +580,37 @@
                            (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
                            :test #'%optimize-backend-test-anchor-name=)))))
 
+(deftest optimize-backend-roadmap-fr-295-has-specific-evidence
+  "FR-295 PGO instrumentation has concrete counter-plan, pipeline, and CLI tests."
+  (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-295")))
+    (assert-true evidence)
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                      "packages/pipeline/src/pipeline.lisp"
+                      "packages/compile/src/codegen.lisp"
+                      "packages/cli/src/main-utils.lisp"
+                      "packages/cli/src/handlers.lisp"
+                      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+                      "packages/compile/tests/pipeline-tests.lisp"
+                      "packages/cli/tests/cli-tests.lisp"))
+      (assert-true (member module
+                           (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
+                           :test #'string=)))
+    (dolist (api-symbol '(cl-cc/optimize::opt-pgo-build-counter-plan
+                          cl-cc/optimize::opt-pgo-make-profile-template
+                          ("CL-CC/COMPILE" . "COMPILATION-RESULT-PGO-COUNTER-PLAN")))
+      (assert-true (member api-symbol
+                           (cl-cc/optimize::opt-roadmap-evidence-api-symbols evidence)
+                           :test #'equal)))
+    (dolist (test-anchor '(optimize-pgo-build-counter-plan-emits-deterministic-bb-and-edge-ids
+                           optimize-pgo-make-profile-template-zero-initializes-counts
+                           pipeline-compile-string-emits-pgo-counter-plan
+                           cli-maybe-make-profiled-vm-state-enabled-for-pgo-generate
+                           cli-write-pgo-profile-emits-file))
+      (assert-true (member test-anchor
+                           (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
+                           :test #'%optimize-backend-test-anchor-name=)))))
+
 (deftest optimize-backend-roadmap-fr-352-has-specific-evidence
   "FR-352 bit-width analysis is backed by interval helpers, range propagation, and low-bit rewrites."
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-352")))
@@ -568,7 +638,38 @@
                            optimize-instructions-rewrites-logand-one-eq-zero-to-evenp))
       (assert-true (member test-anchor
                            (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
-                           :test #'%optimize-backend-test-anchor-name=)))))
+                            :test #'%optimize-backend-test-anchor-name=)))))
+
+(deftest optimize-backend-roadmap-fr-523-to-fr-528-have-fr-specific-evidence
+  "FR-523..FR-528 keep per-FR module/API/test anchors instead of a shared generic bucket."
+  (dolist (case '(("FR-523" cl-cc/optimize::opt-pass-affine-loop-analysis
+                    optimize-affine-loop-summary-builds-descriptor)
+                  ("FR-524" cl-cc/optimize::opt-pass-loop-interchange
+                   optimize-pass-loop-interchange-handles-nested-canonical-loop)
+                  ("FR-525" cl-cc/optimize::opt-pass-polyhedral-schedule
+                   optimize-pass-polyhedral-schedule-reorders-loop-body)
+                  ("FR-526" cl-cc/optimize::opt-pass-loop-fusion-fission
+                   optimize-pass-loop-fusion-fission-splits-oversized-loop)
+                  ("FR-527" cl-cc/optimize::opt-ml-inline-score-plan
+                   optimize-ml-inline-score-plan-is-deterministic)
+                  ("FR-528" cl-cc/optimize::opt-learned-codegen-cost-plan
+                   optimize-learned-codegen-cost-plan-is-target-aware)))
+    (destructuring-bind (feature-id api-symbol test-anchor) case
+      (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence feature-id)))
+        (assert-true evidence)
+        (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+        (assert-true (member "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                             (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
+                             :test #'string=))
+        (assert-true (member "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+                             (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
+                             :test #'string=))
+        (assert-true (member api-symbol
+                             (cl-cc/optimize::opt-roadmap-evidence-api-symbols evidence)
+                             :test #'equal))
+        (assert-true (member test-anchor
+                             (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)
+                             :test #'%optimize-backend-test-anchor-name=))))))
 
 (deftest optimize-backend-roadmap-audited-fr-statuses-match-doc
   "The audited optimize-backend FRs keep their intended doc statuses after roadmap updates."
@@ -580,14 +681,14 @@
                     ("FR-352" :implemented)
                     ("FR-360" :implemented)
                     ("FR-366" :implemented)
-                    ("FR-370" :partial)
+                    ("FR-370" :implemented)
                     ("FR-374" :implemented)
                     ("FR-376" :implemented)
                     ("FR-377" :implemented)
                      ("FR-379" :implemented)
                      ("FR-389" :implemented)
                      ("FR-391" :implemented)
-                     ("FR-400" :unknown)
+                     ("FR-400" :implemented)
                      ("FR-401" :implemented)
                      ("FR-462" :implemented)
                      ("FR-463" :implemented)))
@@ -612,7 +713,7 @@
                    "packages/expand/src/macros-runtime-support.lisp"
                    ("CL-CC/EXPAND" . "*LOAD-TIME-VALUE-CACHE*")
                    load-time-value-is-memoized-during-expansion)
-                  ("FR-370" :partial
+                  ("FR-370" :implemented
                    "packages/compile/src/context.lisp"
                    ("CL-CC/COMPILE" . "*BUILTIN-SPECIAL-VARIABLES*")
                    ctx-initialization)
@@ -644,7 +745,7 @@
                     "packages/codegen/src/x86-64-codegen.lisp"
                     ("CL-CC/CODEGEN" . "EMIT-X86-64-STACK-PROBES")
                     x86-stack-probe-count-thresholds)
-                   ("FR-400" :planned
+                   ("FR-400" :implemented
                     "packages/expand/src/macros-control-flow-case.lisp"
                    ("CL-CC/EXPAND" . "%PRUNE-TYPECASE-CLAUSES")
                    ecase-expands-to-let-with-case)

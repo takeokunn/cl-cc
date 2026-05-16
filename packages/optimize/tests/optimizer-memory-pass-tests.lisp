@@ -183,7 +183,60 @@
      (some (lambda (i)
              (and (typep i 'cl-cc/vm::vm-move)
                   (eq :r2 (cl-cc/vm::vm-dst i))))
-           result))))
+            result))))
+
+(deftest store-to-load-forward-cross-block-dominating-slot-write-replaces-slot-read
+  "A dominating slot write is forwardable across branch/join when incoming paths agree."
+  (let* ((result (cl-cc/optimize::opt-pass-store-to-load-forward
+                  (list (cl-cc:make-vm-slot-write :obj-reg :obj :slot-name 'slot :value-reg :val)
+                        (make-vm-jump-zero :reg :r9 :label "else")
+                        (make-vm-const :dst :r7 :value 1)
+                        (make-vm-jump :label "join")
+                        (make-vm-label :name "else")
+                        (make-vm-const :dst :r8 :value 2)
+                        (make-vm-label :name "join")
+                        (cl-cc:make-vm-slot-read :dst :out :obj-reg :obj :slot-name 'slot)
+                        (make-vm-ret :reg :out)))))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :out (cl-cc/vm::vm-dst i))
+                  (eq :val (cl-cc/vm::vm-src i))))
+           result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-slot-read)) result))))
+
+(deftest store-to-load-forward-branch-constant-prunes-infeasible-edge
+  "When branch condition is locally constant, infeasible join edge is pruned for forwarding.
+
+Path shape:
+  set x=1
+  cond=0
+  jump-zero cond -> else
+  then: set x=2 (infeasible)
+  else: (no overwrite)
+  join: get x
+
+Without path refinement, join disagrees (x=1 vs x=2) and load is preserved.
+With refinement, infeasible then-edge is excluded and load forwards from x=1."
+  (let* ((result (cl-cc/optimize::opt-pass-store-to-load-forward
+                  (list (make-vm-const :dst :r0 :value 1)
+                        (make-vm-set-global :src :r0 :name 'x)
+                        (make-vm-const :dst :rc :value 0)
+                        (make-vm-jump-zero :reg :rc :label "else")
+                        (make-vm-const :dst :r1 :value 2)
+                        (make-vm-set-global :src :r1 :name 'x)
+                        (make-vm-jump :label "join")
+                        (make-vm-label :name "else")
+                        (make-vm-label :name "join")
+                        (make-vm-get-global :dst :r2 :name 'x)
+                        (make-vm-ret :reg :r2)))))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-move)
+                  (eq :r2 (cl-cc/vm::vm-dst i))
+                  (eq :r0 (cl-cc/vm::vm-src i))))
+           result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-get-global)) result))))
 
 ;;; ─── opt-pass-cons-slot-forward ──────────────────────────────────────────
 

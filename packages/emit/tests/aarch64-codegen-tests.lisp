@@ -50,6 +50,35 @@ Returns the byte vector, or NIL on error."
     (assert-equal '(:dmb-ish) (getf plan :pre-fence))
     (assert-equal '(:dmb-ish) (getf plan :post-fence))))
 
+(deftest aarch64-cfi-plan-enables-bti-c-for-indirect-calls
+  "AArch64 CFI plan enables BTI C marker when indirect calls are present."
+  (let ((enabled (cl-cc/codegen::aarch64-cfi-plan :has-indirect-calls-p t))
+        (disabled (cl-cc/codegen::aarch64-cfi-plan :has-indirect-calls-p nil)))
+    (assert-true (getf enabled :enabled-p))
+    (assert-eq :bti-c (getf enabled :entry-opcode))
+    (assert-false (getf disabled :enabled-p))
+    (assert-eq :none (getf disabled :entry-opcode))))
+
+(deftest aarch64-cfi-entry-emits-bti-c-bytes
+  "AArch64 CFI entry emitter serializes BTI C opcode bytes."
+  (let ((bytes (%a64-collect-bytes
+                (lambda (s)
+                  (cl-cc/codegen::emit-aarch64-cfi-entry
+                   s
+                   (cl-cc/codegen::aarch64-cfi-plan :has-indirect-calls-p t))))))
+    ;; BTI C = 0xD503245F (little-endian)
+    (assert-equal '(#x5F #x24 #x03 #xD5) bytes)))
+
+(deftest aarch64-program-with-indirect-call-starts-with-bti-c
+  "Full AArch64 program emission inserts BTI C at function entry when indirect call exists."
+  (let* ((program (cl-cc/vm::make-vm-program
+                   :instructions (list (cl-cc:make-vm-call :dst :R0 :func :R1 :args nil)
+                                       (cl-cc:make-vm-halt :reg :R0))
+                   :result-register :R0
+                   :leaf-p nil))
+         (bytes (coerce (cl-cc/codegen::compile-to-aarch64-bytes program) 'list)))
+    (assert-equal '(#x5F #x24 #x03 #xD5) (subseq bytes 0 4))))
+
 (deftest aarch64-used-callee-saved-pairs-maps-keyword-registers
   "AArch64 callee-saved detection maps regalloc keyword registers to numeric STP/LDP pairs."
   (let ((assignment (make-hash-table :test #'eq)))

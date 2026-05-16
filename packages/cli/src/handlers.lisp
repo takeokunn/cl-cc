@@ -13,10 +13,27 @@
 ;; `compile-opts` is defined in main-dump.lisp, which loads after this file.
 ;; Prevent premature inlining warnings for its accessors during compile-file.
 (declaim (notinline compile-opts-flamegraph-path
-                    compile-opts-pgo-generate-path
-                    compile-opts-pgo-use-path
-                    compile-opts-trace-json-path
-                    compile-opts-trace-emit))
+                     compile-opts-pgo-generate-path
+                     compile-opts-pgo-use-path
+                     compile-opts-trace-json-path
+                     compile-opts-trace-emit
+                     compile-opts-retpoline
+                     compile-opts-stack-protector
+                     compile-opts-shadow-stack
+                     compile-opts-asan
+                     compile-opts-msan
+                     compile-opts-tsan
+                     compile-opts-ubsan
+                     compile-opts-hwasan))
+
+(defun %call-with-runtime-sanitizer-flags (opts thunk)
+  "Execute THUNK with runtime sanitizer toggles derived from OPTS."
+  (let ((cl-cc/runtime::*rt-asan-enabled* (not (null (compile-opts-asan opts))))
+        (cl-cc/runtime::*rt-msan-enabled* (not (null (compile-opts-msan opts))))
+        (cl-cc/runtime::*rt-tsan-enabled* (not (null (compile-opts-tsan opts))))
+        (cl-cc/runtime::*rt-hwasan-enabled* (not (null (compile-opts-hwasan opts))))
+        (cl-cc/runtime::*rt-ubsan-enabled* (not (null (compile-opts-ubsan opts)))))
+    (funcall thunk)))
 
 (defun %pgo-profile-instructions (result)
   "Return instruction list to profile from RESULT, preferring optimized stream."
@@ -29,7 +46,19 @@
   (let ((counts (make-hash-table :test #'equal))
         (insts (%pgo-profile-instructions result))
         (bb (and vm-state (cl-cc/vm:vm-get-profile-bb-counts vm-state)))
-        (branches (and vm-state (cl-cc/vm:vm-get-profile-branch-counts vm-state))))
+        (branches (and vm-state (cl-cc/vm:vm-get-profile-branch-counts vm-state)))
+        (counter-plan (cl-cc/compile:compilation-result-pgo-counter-plan result))
+        (counter-template nil)
+        (bb-counter-counts nil)
+        (edge-counter-counts nil))
+    (when counter-plan
+      (setf counter-template (cl-cc/optimize:opt-pgo-make-profile-template counter-plan))
+      (setf bb-counter-counts
+            (loop for (bb-id . pc) in (getf counter-plan :bb-runtime-keys)
+                  collect (cons bb-id (if bb (gethash pc bb 0) 0))))
+      (setf edge-counter-counts
+            (loop for (edge-id . runtime-key) in (getf counter-plan :edge-runtime-keys)
+                  collect (cons edge-id (if branches (gethash runtime-key branches 0) 0)))))
     (dolist (inst insts)
       (let ((op (string-upcase (symbol-name (type-of inst)))))
         (incf (gethash op counts 0))))
@@ -56,7 +85,16 @@
         (maphash (lambda (k v)
                    (format out "   (~S . ~D)~%" k v))
                  branches))
-      (format out " ))~%"))))
+      (format out " )~%")
+      (when counter-plan
+        (format out " :counter-plan ~S~%" counter-plan))
+      (when counter-template
+        (format out " :counter-template ~S~%" counter-template))
+      (when counter-plan
+        (format out " :bb-counter-counts ~S~%" bb-counter-counts))
+      (when counter-plan
+        (format out " :edge-counter-counts ~S~%" edge-counter-counts))
+      (format out " )~%"))))
 
 (defun %maybe-write-pgo-profile (opts result &optional vm-state)
   "Emit a profile file when --pgo-generate is set."
@@ -69,17 +107,59 @@
   `(handler-case
        (progn ,@body)
      (error (e)
-       (format *error-output* "Error: ~A~%" e)
+       (format *error-output* "~A~%"
+               (cl-cc/optimize:opt-format-diagnostic-reason
+                "cli"
+                "failed"
+                (princ-to-string e)))
        (uiop:quit 1))))
+
+(defun %first-line (text)
+  "Return first line of TEXT, or empty string when TEXT is NIL."
+  (let* ((s (or text ""))
+         (newline-pos (position #\Newline s)))
+    (if newline-pos
+        (subseq s 0 newline-pos)
+        s)))
+
+(defun %source-line-at (source line-number)
+  "Return LINE-NUMBER (1-based) from SOURCE, or first line when unavailable."
+  (if (and (integerp line-number) (plusp line-number))
+      (with-input-from-string (in (or source ""))
+        (loop for idx from 1
+              for line = (read-line in nil nil)
+              while line
+              when (= idx line-number) do (return line)
+              finally (return (%first-line source))))
+      (%first-line source)))
+
+(defun %extract-line-column-from-location (location)
+  "Parse LOCATION like file:line:column or file:line and return line/column."
+  (when (stringp location)
+    (let* ((last-colon (position #\: location :from-end t))
+           (prev-colon (and last-colon
+                            (position #\: location :from-end t :end last-colon))))
+      (cond
+        ((and prev-colon last-colon)
+         (values (ignore-errors (parse-integer (subseq location (1+ prev-colon) last-colon)))
+                 (ignore-errors (parse-integer (subseq location (1+ last-colon))))))
+        (last-colon
+         (values (ignore-errors (parse-integer (subseq location (1+ last-colon))))
+                 nil))
+        (t
+         (values nil nil))))))
 
 (defun %run-compiled-result (result vm-state opts)
   "Execute RESULT's program in VM-STATE, emitting trace/flamegraph when opts request it."
   (when (compile-opts-trace-emit opts)
     (%trace-emit-stages result *standard-output*))
-  (prog1 (run-compiled (compilation-result-program result) :state vm-state)
-    (when (compile-opts-flamegraph-path opts)
-      (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                             (cl-cc/vm:vm-get-profile-samples vm-state)))))
+  (%call-with-runtime-sanitizer-flags
+   opts
+   (lambda ()
+     (prog1 (run-compiled (compilation-result-program result) :state vm-state)
+       (when (compile-opts-flamegraph-path opts)
+         (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
+                                (cl-cc/vm:vm-get-profile-samples vm-state)))))))
 
 (defun %do-run (parsed)
   (let* ((file (%required-file-arg parsed "run"))
@@ -137,10 +217,18 @@
                 (if (eq (or language :lisp) :lisp)
                     (apply #'compile-string source :source-file file :language :lisp kwargs)
                     (apply #'compile-string source :language (or language :lisp) kwargs))))
-       (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
-               (if debug nil cl-cc/codegen::*x86-64-omit-frame-pointer*))
-             (cl-cc/codegen::*a64-omit-frame-pointer*
-               (if debug nil cl-cc/codegen::*a64-omit-frame-pointer*)))
+        (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
+                (if (or debug (compile-opts-stack-protector opts))
+                    nil
+                    cl-cc/codegen::*x86-64-omit-frame-pointer*))
+              (cl-cc/codegen::*x86-64-use-retpoline*
+                (if (compile-opts-retpoline opts) t cl-cc/codegen::*x86-64-use-retpoline*))
+              (cl-cc/codegen::*x86-64-stack-protector-enabled*
+                (if (compile-opts-stack-protector opts) t cl-cc/codegen::*x86-64-stack-protector-enabled*))
+              (cl-cc/codegen::*x86-64-shadow-stack-enabled*
+                (if (compile-opts-shadow-stack opts) t cl-cc/codegen::*x86-64-shadow-stack-enabled*))
+              (cl-cc/codegen::*a64-omit-frame-pointer*
+                (if debug nil cl-cc/codegen::*a64-omit-frame-pointer*)))
          (if dump-ir
              (let ((phase (%parse-ir-phase dump-ir)))
               (unless phase
@@ -179,16 +267,19 @@
                    (format t "~A~%" result)
                    (uiop:quit 0))))))))))
 
-(defun %compile-and-run-eval-form (expr stdlib kwargs vm-state)
+(defun %compile-and-run-eval-form (expr stdlib kwargs vm-state opts)
   "Compile and run EXPR for the eval command.
 When --stdlib is requested, try the ordinary fast path first so core CL forms
 do not pay the full stdlib cold-compile cost. Fall back to the full stdlib path
 only when the fast path cannot compile or run the form."
   (labels ((compile-and-run (compile-fn)
              (let* ((compiled (apply compile-fn expr :target :vm kwargs))
-                    (result (run-compiled (compilation-result-program compiled)
-                                          :state vm-state)))
-               (values result compiled))))
+                    (result (%call-with-runtime-sanitizer-flags
+                             opts
+                             (lambda ()
+                               (run-compiled (compilation-result-program compiled)
+                                             :state vm-state)))))
+                (values result compiled))))
     (if stdlib
         (handler-case
             (compile-and-run #'compile-string)
@@ -215,8 +306,8 @@ only when the fast path cannot compile or run the form."
                    (kwargs (%compile-opts-kwargs opts stream))
                    (result nil)
                    (compiled nil))
-               (multiple-value-setq (result compiled)
-                 (%compile-and-run-eval-form expr stdlib kwargs vm-state))
+                 (multiple-value-setq (result compiled)
+                  (%compile-and-run-eval-form expr stdlib kwargs vm-state opts))
                (%maybe-write-pgo-profile opts compiled vm-state)
                (when (compile-opts-trace-emit opts)
                  (%trace-emit-stages compiled *standard-output*))
@@ -304,5 +395,26 @@ only when the fast path cannot compile or run the form."
                 (format t "<no type inferred>~%")))
           (uiop:quit 0))
       (error (e)
-        (format *error-output* "Type error: ~A~%" e)
+        (let* ((message (princ-to-string e))
+               (location (and (typep e 'cl-cc/ast:ast-compilation-error)
+                              (cl-cc/ast:ast-error-location e)))
+               (line-number nil)
+               (column-number nil))
+          (multiple-value-setq (line-number column-number)
+            (%extract-line-column-from-location location))
+          (let* ((line-text (%source-line-at source line-number))
+                 (snippet (cl-cc/optimize:opt-build-diagnostic-caret-line
+                           line-text
+                           (or column-number 1)))
+                 (trace (cl-cc/optimize:opt-format-type-trace
+                         (list message))))
+            (format *error-output* "~A~%"
+                    (cl-cc/optimize:opt-format-diagnostic-reason
+                     "type-check"
+                     "failed"
+                     message))
+            (when location
+              (format *error-output* "at ~A~%" location))
+            (format *error-output* "~A~%" snippet)
+            (format *error-output* "~A~%" trace)))
         (uiop:quit 1)))))

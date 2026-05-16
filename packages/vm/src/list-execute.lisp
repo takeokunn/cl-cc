@@ -33,8 +33,17 @@
     (vm-reg-set state (vm-dst inst) (vm-hash-cons car-val cdr-val))
     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-car :unary car)
-(define-simple-instruction vm-cdr :unary cdr)
+(defmethod execute-instruction ((inst vm-car) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst) (car (%vm-cow-list-materialize value)))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-cdr) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst) (cdr (%vm-cow-list-materialize value)))
+    (values (1+ pc) nil nil)))
 
 ;;; Instruction Execution - List Construction
 
@@ -59,7 +68,7 @@
   (declare (ignore labels))
   (let ((item (vm-reg-get state (vm-item-reg inst)))
         (list (vm-reg-get state (vm-list-reg inst))))
-    (vm-reg-set state (vm-dst inst) (member item list))
+    (vm-reg-set state (vm-dst inst) (member item (%vm-cow-list-materialize list)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-nth) state pc labels)
@@ -73,7 +82,7 @@
   (declare (ignore labels))
   (let ((index (vm-reg-get state (vm-index-reg inst)))
         (list (vm-reg-get state (vm-list-reg inst))))
-    (vm-reg-set state (vm-dst inst) (nthcdr index list))
+    (vm-reg-set state (vm-dst inst) (nthcdr index (%vm-cow-list-materialize list)))
     (values (1+ pc) nil nil)))
 
 ;;; Instruction Execution - Named Accessors
@@ -95,14 +104,49 @@
 
 ;;; Instruction Execution - Destructive Operations
 
-(define-simple-instruction vm-nreverse :unary nreverse)
+(defstruct (vm-cow-list (:constructor %make-vm-cow-list))
+  (backing nil)
+  (refcount 1 :type integer))
+
+(defparameter *vm-cow-list-enabled* t)
+
+(defun %vm-cow-list-materialize (value)
+  (if (vm-cow-list-p value)
+      (vm-cow-list-backing value)
+      value))
+
+(defun %vm-cow-list-share (value)
+  (if (vm-cow-list-p value)
+      (progn
+        (incf (vm-cow-list-refcount value))
+        (%make-vm-cow-list :backing (vm-cow-list-backing value)
+                           :refcount (vm-cow-list-refcount value)))
+      (%make-vm-cow-list :backing value :refcount 2)))
+
+(defun %vm-cow-list-ensure-writable (value)
+  (if (vm-cow-list-p value)
+      (progn
+        (when (> (vm-cow-list-refcount value) 1)
+          (decf (vm-cow-list-refcount value))
+          (setf (vm-cow-list-backing value) (copy-list (vm-cow-list-backing value))
+                (vm-cow-list-refcount value) 1))
+        (vm-cow-list-backing value))
+      value))
+
+(defmethod execute-instruction ((inst vm-nreverse) state pc labels)
+  (declare (ignore labels))
+  (let* ((value (vm-reg-get state (vm-src inst)))
+         (writable (%vm-cow-list-ensure-writable value)))
+    (vm-reg-set state (vm-dst inst) (nreverse writable))
+    (values (1+ pc) nil nil)))
+
 (define-simple-instruction vm-nreconc  :binary nreconc)
 
 (defmethod execute-instruction ((inst vm-rplaca) state pc labels)
   (declare (ignore labels))
   (let ((cons-val (vm-reg-get state (vm-cons-reg inst)))
         (new-val (vm-reg-get state (vm-val-reg inst))))
-    (rplaca cons-val new-val)
+    (rplaca (%vm-cow-list-ensure-writable cons-val) new-val)
     (vm-reg-set state (vm-cons-reg inst) cons-val)
     (values (1+ pc) nil nil)))
 
@@ -110,7 +154,7 @@
   (declare (ignore labels))
   (let ((cons-val (vm-reg-get state (vm-cons-reg inst)))
         (new-val (vm-reg-get state (vm-val-reg inst))))
-    (rplacd cons-val new-val)
+    (rplacd (%vm-cow-list-ensure-writable cons-val) new-val)
     (vm-reg-set state (vm-cons-reg inst) cons-val)
     (values (1+ pc) nil nil)))
 
@@ -231,8 +275,22 @@
     (values (1+ pc) nil nil)))
 
 (define-simple-instruction vm-equal :binary equal)
-(define-simple-instruction vm-nconc :binary nconc)
-(define-simple-instruction vm-copy-list :unary copy-list)
+(defmethod execute-instruction ((inst vm-nconc) state pc labels)
+  (declare (ignore labels))
+  (let* ((lhs (vm-reg-get state (vm-lhs inst)))
+         (rhs (vm-reg-get state (vm-rhs inst)))
+         (lhs-writable (%vm-cow-list-ensure-writable lhs))
+         (rhs-value (%vm-cow-list-materialize rhs)))
+    (vm-reg-set state (vm-dst inst) (nconc lhs-writable rhs-value))
+    (values (1+ pc) nil nil)))
+(defmethod execute-instruction ((inst vm-copy-list) state pc labels)
+  (declare (ignore labels))
+  (let ((list-val (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if *vm-cow-list-enabled*
+                    (%vm-cow-list-share (%vm-cow-list-materialize list-val))
+                    (copy-list (%vm-cow-list-materialize list-val))))
+    (values (1+ pc) nil nil)))
 (define-simple-instruction vm-copy-tree :unary copy-tree)
 
 (defmethod execute-instruction ((inst vm-subst) state pc labels)
@@ -243,5 +301,10 @@
     (vm-reg-set state (vm-dst inst) (subst new-val old-val tree))
     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-listp :pred1 listp)
+(defmethod execute-instruction ((inst vm-listp) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (or (listp value) (vm-cow-list-p value)) 1 0))
+    (values (1+ pc) nil nil)))
 (define-simple-instruction vm-atom :pred1 atom)

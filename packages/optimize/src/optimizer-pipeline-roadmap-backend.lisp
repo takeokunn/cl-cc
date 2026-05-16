@@ -113,10 +113,17 @@
        abstract-interpretation-runs-over-cfg-and-produces-result))
      (252 252
       ("packages/regalloc/src/regalloc.lisp"
+       "packages/regalloc/src/regalloc-allocate.lisp"
        "packages/emit/tests/regalloc-tests.lisp")
       (("CL-CC/REGALLOC" . "REGALLOC-BUILD-DIRECT-CALL-GRAPH")
-       ("CL-CC/REGALLOC" . "REGALLOC-COMPUTE-INTERPROCEDURAL-HINTS"))
-      (regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain))
+       ("CL-CC/REGALLOC" . "REGALLOC-COMPUTE-INTERPROCEDURAL-HINTS")
+       ("CL-CC/REGALLOC" . "REGALLOC-BUILD-ALLOCATION-POLICY-FROM-HINTS")
+       ("CL-CC/REGALLOC" . "ALLOCATE-REGISTERS"))
+      (regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain
+       regalloc-interprocedural-policy-hook-derives-preferences
+       regalloc-interprocedural-policy-caller-saved-respects-call-crossing-safety
+       regalloc-interprocedural-policy-end-to-end-keeps-call-crossing-safe
+       regalloc-interprocedural-policy-prefers-callee-saved-on-call-crossing))
      (253 253
       ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
        "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -136,6 +143,23 @@
        (opt-pgo-best-successor opt-pgo-build-hot-chain opt-pgo-rotate-loop)
        (optimize-pgo-build-hot-chain-prefers-hottest-successors
         optimize-pgo-rotate-loop-places-preferred-exit-at-bottom))
+      (295 295
+       ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        "packages/pipeline/src/pipeline.lisp"
+        "packages/compile/src/codegen.lisp"
+        "packages/cli/src/main-utils.lisp"
+        "packages/cli/src/handlers.lisp"
+        "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+        "packages/compile/tests/pipeline-tests.lisp"
+        "packages/cli/tests/cli-tests.lisp")
+       (opt-pgo-build-counter-plan
+        opt-pgo-make-profile-template
+        ("CL-CC/COMPILE" . "COMPILATION-RESULT-PGO-COUNTER-PLAN"))
+       (optimize-pgo-build-counter-plan-emits-deterministic-bb-and-edge-ids
+        optimize-pgo-make-profile-template-zero-initializes-counts
+        pipeline-compile-string-emits-pgo-counter-plan
+        cli-maybe-make-profiled-vm-state-enabled-for-pgo-generate
+        cli-write-pgo-profile-emits-file))
       (301 301
        ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
         "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -208,41 +232,98 @@
       (optimize-lockfree-select-reclamation-chooses-policy-from-risk-and-contention))
       (315 315
        ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        "packages/codegen/src/x86-64-codegen.lisp"
+        "packages/codegen/src/aarch64-codegen.lisp"
+        "packages/emit/tests/x86-64-codegen-tests.lisp"
+        "packages/emit/tests/x86-64-codegen-insn-tests.lisp"
+        "packages/emit/tests/aarch64-codegen-tests.lisp"
         "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-       (make-opt-cfi-plan opt-build-cfi-plan opt-cfi-entry-opcode)
+       (make-opt-cfi-plan opt-build-cfi-plan opt-cfi-entry-opcode
+        ("CL-CC/CODEGEN" . "X86-64-CFI-PLAN")
+        ("CL-CC/CODEGEN" . "EMIT-X86-64-CFI-ENTRY")
+        ("CL-CC/CODEGEN" . "AARCH64-CFI-PLAN")
+        ("CL-CC/CODEGEN" . "EMIT-AARCH64-CFI-ENTRY"))
        (optimize-build-cfi-plan-selects-target-specific-guards
-        optimize-cfi-entry-opcode-materializes-selected-marker))
+        optimize-cfi-entry-opcode-materializes-selected-marker
+        x86-64-cfi-entry-emits-endbr64-bytes
+        x86-64-program-with-indirect-call-starts-with-endbr64
+        x86-64-call-cfi-guard-avoids-clobbering-rax-target
+        aarch64-cfi-entry-emits-bti-c-bytes
+        aarch64-program-with-indirect-call-starts-with-bti-c))
       (316 316
        ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        "packages/codegen/src/x86-64-codegen-dispatch.lisp"
+        "packages/codegen/src/x86-64-regs.lisp"
+        "packages/emit/tests/x86-64-codegen-insn-tests.lisp"
+        "packages/cli/src/args.lisp"
+        "packages/cli/src/main-dump.lisp"
         "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-       (opt-should-use-retpoline-p opt-retpoline-thunk-name)
+       (opt-should-use-retpoline-p opt-retpoline-thunk-name
+        ("CL-CC/CODEGEN" . "EMIT-VM-CALL-LIKE-INST")
+        ("CL-CC/CODEGEN" . "EMIT-VM-TAIL-CALL-INST")
+        ("CL-CC/CODEGEN" . "*X86-64-USE-RETPOLINE*"))
        (optimize-should-use-retpoline-p-depends-on-target-and-ibrs
-        optimize-retpoline-thunk-name-is-target-register-specific))
+        optimize-retpoline-thunk-name-is-target-register-specific
+        x86-64-call-encoding-retpoline
+        x86-64-tail-call-encoding-retpoline))
       (317 317
        ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        "packages/codegen/src/x86-64-codegen.lisp"
+        "packages/emit/tests/x86-64-codegen-tests.lisp"
+        "packages/cli/src/args.lisp"
+        "packages/cli/src/main-dump.lisp"
         "packages/optimize/tests/optimizer-pipeline-tests.lisp")
        (opt-needs-stack-canary-p opt-stack-canary-emit-plan
-        opt-stack-canary-prologue-seq opt-stack-canary-epilogue-seq)
+        opt-stack-canary-prologue-seq opt-stack-canary-epilogue-seq
+        ("CL-CC/CODEGEN" . "X86-64-STACK-CANARY-PLAN")
+        ("CL-CC/CODEGEN" . "EMIT-X86-64-STACK-CANARY-PROLOGUE")
+        ("CL-CC/CODEGEN" . "EMIT-X86-64-STACK-CANARY-EPILOGUE"))
        (optimize-needs-stack-canary-p-follows-stack-buffer-presence
         optimize-stack-canary-emit-plan-describes-prologue-and-epilogue
         optimize-stack-canary-sequences-describe-prologue-and-epilogue-ops
-        optimize-stack-canary-sequences-are-empty-when-disabled))
+        optimize-stack-canary-sequences-are-empty-when-disabled
+        x86-64-stack-canary-plan-materializes-prologue-and-epilogue
+        x86-64-stack-protector-emitter-signature-bytes))
       (318 318
        ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        "packages/codegen/src/x86-64-codegen.lisp"
+        "packages/codegen/src/x86-64-codegen-dispatch.lisp"
+        "packages/emit/tests/x86-64-codegen-insn-tests.lisp"
         "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-       (make-opt-shadow-stack-plan opt-build-shadow-stack-plan)
+       (make-opt-shadow-stack-plan opt-build-shadow-stack-plan
+        ("CL-CC/CODEGEN" . "EMIT-VM-SHADOW-STACK-CONTROL-INST")
+        ("CL-CC/CODEGEN" . "*X86-64-SHADOW-STACK-ENABLED*"))
        (optimize-build-shadow-stack-plan-enables-only-for-x86-64-with-cet
-        optimize-shadow-stack-plan-requires-save-restore-for-nonlocal-control))
+        optimize-shadow-stack-plan-requires-save-restore-for-nonlocal-control
+        x86-64-shadow-stack-control-inst-emits-saveprevssp-when-enabled
+        x86-64-shadow-stack-control-inst-uses-distinct-restore-marker
+        x86-64-shadow-stack-control-inst-uses-incsspq-for-adjust-paths
+        x86-64-shadow-stack-control-inst-covers-vm-establish-catch
+        x86-64-shadow-stack-control-inst-covers-vm-throw))
      (320 320
       ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
-       "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-      (opt-wasm-select-tailcall-opcode make-opt-wasm-tailcall-plan opt-build-wasm-tailcall-plan)
-      (optimize-wasm-select-tailcall-opcode-uses-return-call-forms))
+       "packages/codegen/src/wasm-emit.lisp"
+       "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+       "packages/emit/tests/wasm-tests.lisp")
+      (opt-wasm-select-tailcall-opcode
+       opt-wasm-select-direct-tailcall-opcode
+       make-opt-wasm-tailcall-plan
+       opt-build-wasm-tailcall-plan)
+      (optimize-wasm-select-tailcall-opcode-uses-return-call-forms
+       wasm-tail-call-dispatch-uses-return-call-indirect
+       wasm-tail-call-direct-path-uses-return-call-when-callee-known))
      (321 321
       ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
        "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-      (make-opt-wasm-gc-layout opt-build-wasm-gc-layout)
-      (optimize-build-wasm-gc-layout-preserves-kind-and-fields))
+      (make-opt-wasm-gc-layout
+       opt-build-wasm-gc-layout
+       opt-wasm-gc-layout-valid-p
+       opt-wasm-gc-runtime-host-compatible-p
+       opt-build-wasm-gc-optimization-plan)
+      (optimize-build-wasm-gc-layout-preserves-kind-and-fields
+       optimize-wasm-gc-layout-validates-struct-and-array-shapes
+       optimize-wasm-gc-runtime-host-compatibility-requires-feature-and-valid-layout
+       optimize-wasm-gc-optimization-plan-reflects-layout-kind))
      (330 330
       ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
        "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -996,6 +1077,14 @@
      (reassociate-commutative-p-true-for-commutative-ops
       reassociate-moves-constant-inward
       commutative-binop-table-coverage))
+    (517 517
+     ("packages/optimize/src/optimizer-dataflow.lisp"
+      "packages/optimize/src/optimizer-pipeline.lisp"
+      "packages/optimize/tests/optimizer-dataflow-tests.lisp")
+     (opt-run-dataflow opt-compute-available-expressions opt-compute-reaching-definitions)
+     (dataflow-worklist-forward-branch-join-converges
+      available-expressions-join-intersects-predecessors
+      reaching-definitions-join-unions-predecessors))
     (518 518
      ("packages/optimize/src/optimizer-dataflow.lisp"
       "packages/optimize/src/optimizer-cse-gvn.lisp"
@@ -1030,21 +1119,79 @@
      (gvn-uses-available-expressions-at-join
       gvn-redundant-overwrite-does-not-poison-same-syntax-expression
       optimizer-gvn-dominates-branch))
-     (522 522
-      ("packages/optimize/src/optimizer-purity.lisp"
-       "packages/optimize/src/optimizer-inline-cost.lisp"
-       "packages/optimize/src/optimizer-inline-pass.lisp"
-       "packages/optimize/tests/optimizer-inline-tests.lisp")
+    (522 522
+     ("packages/optimize/src/optimizer-purity.lisp"
+      "packages/optimize/src/optimizer-inline-cost.lisp"
+      "packages/optimize/src/optimizer-inline-pass.lisp"
+      "packages/optimize/tests/optimizer-inline-tests.lisp")
       (opt-build-call-graph opt-call-graph-recursive-labels
        opt-pass-inline opt-pass-global-dce)
       (opt-build-call-graph-no-calls
        opt-call-graph-recursive-labels-no-recursion
        opt-call-graph-recursive-labels-direct-recursion
        opt-call-graph-recursive-labels-mutual-recursion
-       opt-pass-inline-skips-recursive-callee)))
+       opt-pass-inline-skips-recursive-callee))
+    (523 523
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-build-affine-loop-summary
+      opt-pass-affine-loop-analysis)
+     (optimize-affine-loop-summary-builds-descriptor
+      optimize-pass-affine-loop-analysis-captures-real-loop-summary
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
+    (524 524
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-loop-interchange-plan
+      opt-pass-loop-interchange)
+     (optimize-loop-interchange-plan-requires-safety
+      optimize-pass-loop-interchange-handles-nested-canonical-loop
+      optimize-pass-loop-interchange-skips-side-effecting-loop
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
+    (525 525
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-polyhedral-schedule-plan
+      opt-pass-polyhedral-schedule)
+     (optimize-polyhedral-schedule-plan-preserves-objective
+      optimize-pass-polyhedral-schedule-reorders-loop-body
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
+    (526 526
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-loop-fusion-fission-plan
+      opt-pass-loop-fusion-fission)
+     (optimize-loop-fusion-fission-plan-selects-strategy
+      optimize-pass-loop-fusion-fission-fuses-adjacent-loops
+      optimize-pass-loop-fusion-fission-skips-unsafe-fusion
+      optimize-pass-loop-fusion-fission-splits-oversized-loop
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
+    (527 527
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-ml-inline-score-plan)
+     (optimize-ml-inline-score-plan-is-deterministic
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
+    (528 528
+     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
+     (opt-learned-codegen-cost-plan)
+     (optimize-learned-codegen-cost-plan-is-target-aware
+      optimize-backend-roadmap-analysis-evidence-is-loaded
+      optimize-backend-roadmap-evidence-covers-doc-fr-list))
     "Alist of (lo hi modules api-symbols test-anchors) range entries for
-`%opt-backend-roadmap-evidence-profile'.  The default fallback is handled
-by the function itself.")
+`%opt-backend-roadmap-evidence-profile'."))
 
 (defun %opt-backend-roadmap-evidence-profile (feature-id)
   "Return audit-evidence anchors for a docs/optimize-backend.md FR.
@@ -1063,11 +1210,7 @@ are tracked as planned evidence, not completed implementation."
           (destructuring-bind (_lo _hi modules api-symbols test-anchors) entry
             (declare (ignore _lo _hi))
             (values modules api-symbols test-anchors))
-          (values '("packages/optimize/src/optimizer-pipeline.lisp"
-                    "packages/optimize/tests/optimizer-pipeline-tests.lisp")
-                  '(optimize-backend-roadmap-doc-features
-                    optimize-backend-roadmap-register-doc-evidence)
-                  '(optimize-backend-roadmap-evidence-covers-doc-fr-list))))))
+          (error "No optimize-backend evidence profile entry for ~A" feature-id)))))
 
 (defun make-opt-roadmap-evidence-for-feature
     (feature &key (doc-module "docs/optimize-passes.md") profile-function)

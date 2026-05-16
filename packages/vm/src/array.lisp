@@ -1,5 +1,34 @@
 (in-package :cl-cc/vm)
 
+(defstruct (vm-cow-vector (:constructor %make-vm-cow-vector))
+  (backing #() :type vector)
+  (refcount 1 :type integer))
+
+(defparameter *vm-cow-vector-enabled* t)
+
+(defun %vm-cow-vector-materialize (value)
+  (if (vm-cow-vector-p value)
+      (vm-cow-vector-backing value)
+      value))
+
+(defun %vm-cow-vector-share (value)
+  (if (vm-cow-vector-p value)
+      (progn
+        (incf (vm-cow-vector-refcount value))
+        (%make-vm-cow-vector :backing (vm-cow-vector-backing value)
+                             :refcount (vm-cow-vector-refcount value)))
+      (%make-vm-cow-vector :backing value :refcount 2)))
+
+(defun %vm-cow-vector-ensure-writable (value)
+  (if (vm-cow-vector-p value)
+      (progn
+        (when (> (vm-cow-vector-refcount value) 1)
+          (decf (vm-cow-vector-refcount value))
+          (setf (vm-cow-vector-backing value) (copy-seq (vm-cow-vector-backing value))
+                (vm-cow-vector-refcount value) 1))
+        (vm-cow-vector-backing value))
+      value))
+
 ;;; VM Array/Vector Operations
 ;;;
 ;;; This file extends the VM with array and vector instructions including
@@ -119,21 +148,21 @@
 
 (defmethod execute-instruction ((inst vm-aref) state pc labels)
   (declare (ignore labels))
-  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+  (let ((arr (%vm-cow-vector-materialize (vm-reg-get state (vm-array-reg inst))))
         (idx (vm-reg-get state (vm-index-reg inst))))
     (vm-reg-set state (vm-dst inst) (aref arr idx))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-aref-multi) state pc labels)
   (declare (ignore labels))
-  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+  (let ((arr (%vm-cow-vector-materialize (vm-reg-get state (vm-array-reg inst))))
         (idxs (mapcar (lambda (r) (vm-reg-get state r)) (vm-index-regs inst))))
     (vm-reg-set state (vm-dst inst) (apply #'aref arr idxs))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-aset) state pc labels)
   (declare (ignore labels))
-  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+  (let ((arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst))))
         (idx (vm-reg-get state (vm-index-reg inst)))
         (val (vm-reg-get state (vm-val-reg inst))))
     (setf (aref arr idx) val)
@@ -141,7 +170,7 @@
 
 (defmethod execute-instruction ((inst vm-fill) state pc labels)
   (declare (ignore labels))
-  (let ((arr (vm-reg-get state (vm-array-reg inst)))
+  (let ((arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst))))
         (val (vm-reg-get state (vm-val-reg inst))))
     (fill arr val)
     (values (1+ pc) nil nil)))
@@ -149,12 +178,22 @@
 (defmethod execute-instruction ((inst vm-vector-push-extend) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-val-reg inst)))
-        (arr (vm-reg-get state (vm-array-reg inst))))
+        (arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst)))))
     (vm-reg-set state (vm-dst inst) (vector-push-extend val arr))
     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-array-length :unary length)
-(define-simple-instruction vm-vectorp :pred1 vectorp)
+(defmethod execute-instruction ((inst vm-array-length) state pc labels)
+  (declare (ignore labels))
+  (let ((src (%vm-cow-vector-materialize (vm-reg-get state (vm-src inst)))))
+    (vm-reg-set state (vm-dst inst) (length src))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-vectorp) state pc labels)
+  (declare (ignore labels))
+  (let ((src (vm-reg-get state (vm-src inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (or (vectorp src) (vm-cow-vector-p src)) 1 0))
+    (values (1+ pc) nil nil)))
 
 ;;; ─── FR-601: Array dimension queries ─────────────────────────────────────
 
@@ -220,7 +259,7 @@
 (defmethod execute-instruction ((inst vm-svref) state pc labels)
   (declare (ignore labels))
   (vm-reg-set state (vm-dst inst)
-              (svref (vm-reg-get state (vm-lhs inst))
+              (svref (%vm-cow-vector-materialize (vm-reg-get state (vm-lhs inst)))
                      (vm-reg-get state (vm-rhs inst))))
   (values (1+ pc) nil nil))
 
@@ -231,11 +270,24 @@
   (:sexp-tag :svset) (:sexp-slots dst array-reg index-reg val-reg))
 (defmethod execute-instruction ((inst vm-svset) state pc labels)
   (declare (ignore labels))
-  (let ((val (vm-reg-get state (vm-val-reg inst))))
-    (setf (svref (vm-reg-get state (vm-array-reg inst))
-                 (vm-reg-get state (vm-index-reg inst))) val)
+  (let* ((arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst))))
+         (idx (vm-reg-get state (vm-index-reg inst)))
+         (val (vm-reg-get state (vm-val-reg inst))))
+    (setf (svref arr idx) val)
     (vm-reg-set state (vm-dst inst) val)
     (values (1+ pc) nil nil)))
+
+(defun vm-cow-copy-seq (sequence)
+  "Return COW wrapper for vectors and list COW wrappers for lists when enabled."
+  (cond
+    ((listp sequence)
+     (copy-list sequence))
+    ((vectorp sequence)
+     (if *vm-cow-vector-enabled*
+         (%vm-cow-vector-share sequence)
+         (copy-seq sequence)))
+    (t
+     (copy-seq sequence))))
 
 ;;; ─── FR-604: fill-pointer and vector-push ────────────────────────────────
 

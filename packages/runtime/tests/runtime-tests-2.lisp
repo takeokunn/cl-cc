@@ -19,6 +19,22 @@
     (assert-= 10 (cl-cc/runtime:rt-car c))
     (assert-= 20 (cl-cc/runtime:rt-cdr c))))
 
+(deftest rt-copy-list-cow-read-path
+  "rt-copy-list returns a COW-capable value that preserves list reads."
+  (let* ((base '(1 2 3))
+         (copy (cl-cc/runtime:rt-copy-list base)))
+    (assert-= 1 (cl-cc/runtime:rt-car copy))
+    (assert-equal '(2 3) (cl-cc/runtime:rt-cdr copy))
+    (assert-= 3 (cl-cc/runtime:rt-list-length copy))))
+
+(deftest rt-copy-list-cow-write-does-not-mutate-base-list
+  "Mutating a copied COW list does not mutate the original shared list." 
+  (let* ((base '(1 2 3))
+         (copy (cl-cc/runtime:rt-copy-list base)))
+    (cl-cc/runtime:rt-rplaca copy 99)
+    (assert-= 99 (cl-cc/runtime:rt-car copy))
+    (assert-= 1 (car base))))
+
 (deftest rt-list-push-pop
   "rt-pop-list returns head+tail; rt-push-list conses onto front."
   (multiple-value-bind (head tail)
@@ -128,3 +144,30 @@
           ("eql-f"    #'cl-cc/runtime:rt-eql    42 43 0))
   (cmp-fn a b expected)
   (assert-= expected (funcall cmp-fn a b)))
+
+;;; ─── Runtime Region Operations ─────────────────────────────────────────────
+
+(deftest rt-region-lifetime-guards-references
+  "rt-with-region/alloc/deref enforce region lifetime at runtime." 
+  (let (escaped-ref)
+    (cl-cc/runtime:rt-with-region (region)
+      (assert-true (cl-cc/runtime:rt-region-active-p region))
+      (let ((ref (cl-cc/runtime:rt-region-alloc region 42)))
+        (setf escaped-ref ref)
+        (assert-true (cl-cc/runtime:rt-region-ref-valid-p ref))
+        (assert-= 42 (cl-cc/runtime:rt-region-deref ref))))
+    (assert-false (cl-cc/runtime:rt-region-ref-valid-p escaped-ref))
+    (assert-signals error
+      (cl-cc/runtime:rt-region-deref escaped-ref))))
+
+(deftest rt-region-bump-pointer-accounting
+  "Region allocation advances bump index and close resets usage." 
+  (let ((r (cl-cc/runtime:rt-make-region)))
+    (assert-= 0 (cl-cc/runtime:rt-region-used r))
+    (let ((cap (cl-cc/runtime:rt-region-capacity r)))
+      (assert-true (> cap 0))
+      (cl-cc/runtime:rt-region-alloc r :a)
+      (cl-cc/runtime:rt-region-alloc r :b)
+      (assert-= 2 (cl-cc/runtime:rt-region-used r))
+      (cl-cc/runtime:rt-close-region r)
+      (assert-= 0 (cl-cc/runtime:rt-region-used r)))))

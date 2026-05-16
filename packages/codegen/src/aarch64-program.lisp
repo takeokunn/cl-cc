@@ -74,7 +74,26 @@
       (t (let ((emitter (gethash tp *a64-emitter-table*)))
            (if emitter
                (funcall emitter inst stream)
-               (error "Unsupported AArch64 instruction: ~A" tp)))))))
+                (error "Unsupported AArch64 instruction: ~A" tp)))))))
+
+(defun aarch64-cfi-plan (&key has-indirect-calls-p)
+  "Return AArch64 CFI entry planning metadata.
+
+Result plist keys:
+- :enabled-p whether CFI entry marker is enabled
+- :entry-opcode marker opcode keyword (`:bti-c` or `:none`)"
+  (let* ((plan (opt-build-cfi-plan
+                :target :aarch64
+                :has-indirect-calls-p has-indirect-calls-p))
+         (entry-opcode (opt-cfi-entry-opcode plan)))
+    (list :enabled-p (eq entry-opcode :bti-c)
+          :entry-opcode entry-opcode)))
+
+(defun emit-aarch64-cfi-entry (stream cfi-plan)
+  "Emit AArch64 CFI entry marker (BTI C) when enabled in CFI-PLAN."
+  (when (eq (getf cfi-plan :entry-opcode) :bti-c)
+    ;; BTI C = 0xD503245F
+    (emit-a64-instr #xD503245F stream)))
 
 ;;; AArch64 callee-saved registers to save/restore (X19-X28, X29, X30)
 ;;; X29 = frame pointer (FP), X30 = link register (LR)
@@ -152,7 +171,13 @@
    Uses two-pass approach for label resolution."
   (let* ((instructions (vm-program-instructions program))
          (cfg (cfg-build instructions))
-          (leaf-p (vm-program-leaf-p program))
+          (has-indirect-calls-p
+            (some (lambda (inst)
+                    (typep inst '(or vm-call vm-tail-call vm-generic-call)))
+                  instructions))
+          (cfi-plan (aarch64-cfi-plan :has-indirect-calls-p has-indirect-calls-p))
+          (cfi-entry-size (if (eq (getf cfi-plan :entry-opcode) :bti-c) 4 0))
+           (leaf-p (vm-program-leaf-p program))
           (spill-count (regalloc-spill-count *current-a64-regalloc*))
           (frame-pointer-p (and (not *a64-omit-frame-pointer*)
                                 (or (not leaf-p)
@@ -171,9 +196,10 @@
            ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
            ;; Each stack probe is SUB-immediate + STUR, two 4-byte instructions.
            (spill-frame-adjust-size (if (plusp spill-frame-size) 4 0))
-           (prologue-size (+ (* 8 probe-count)
-                             (* 4 (1+ (length save-pairs)))
-                             spill-frame-adjust-size))
+            (prologue-size (+ cfi-entry-size
+                              (* 8 probe-count)
+                              (* 4 (1+ (length save-pairs)))
+                              spill-frame-adjust-size))
            (ordered-instructions (if (cfg-entry cfg)
                                       (progn
                                         (cfg-compute-dominators cfg)
@@ -181,8 +207,11 @@
                                       (cfg-flatten-hot-cold cfg))
                                      instructions))
           (label-offsets (build-a64-label-offsets ordered-instructions prologue-size)))
+      ;; CFI entry marker (FR-315): must be at function entry.
+      (emit-aarch64-cfi-entry stream cfi-plan)
+
      ;; Stack probing: touch each guard page before the large frame is used.
-     (emit-a64-stack-probes stream probe-count)
+      (emit-a64-stack-probes stream probe-count)
      ;; Prologue
      (emit-a64-prologue stream save-pairs)
      (when (plusp spill-frame-size)
@@ -199,9 +228,11 @@
 
 ;;; Public API
 
-(defun compile-to-aarch64-bytes (program)
+(defun compile-to-aarch64-bytes (program &key retpoline stack-protector shadow-stack
+                                         asan msan tsan ubsan hwasan)
   "Compile VM program to AArch64 machine code bytes.
    Returns: (simple-array (unsigned-byte 8) (*))"
+  (declare (ignore retpoline stack-protector shadow-stack asan msan tsan ubsan hwasan))
   (let* ((instructions (vm-program-instructions program))
           (ra (allocate-registers instructions (a64-codegen-target)))
           (allocated-program (make-vm-program

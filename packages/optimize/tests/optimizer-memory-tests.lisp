@@ -123,6 +123,134 @@
     (assert-equal wr-loc rd-loc)
     (assert-= 2 (cl-cc/optimize::opt-memory-ssa-version-at rd ann :point :in))))
 
+(deftest memory-ssa-cfg-snapshot-cross-block-dominating-store-threads-version
+  "CFG-aware memory snapshot threads dominating global store version across join."
+  (let* ((set1 (make-vm-set-global :src :r0 :name 'g))
+         (get1 (make-vm-get-global :dst :r1 :name 'g))
+         (ann  (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                (list set1
+                      (make-vm-jump-zero :reg :r9 :label "else")
+                      (make-vm-const :dst :r7 :value 1)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-const :dst :r8 :value 2)
+                       (make-vm-label :name "join")
+                       get1
+                       (make-vm-ret :reg :r1)))))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at set1 ann :point :out))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))
+    (assert-eq :state (getf (gethash get1 ann) :incoming-from))))
+
+(deftest memory-ssa-cfg-snapshot-join-disagree-synthesizes-phi-version
+  "CFG-aware memory snapshot synthesizes a MemoryPhi-like version at join on disagreement."
+  (let* ((set-a (make-vm-set-global :src :r0 :name 'g))
+         (set-b (make-vm-set-global :src :r1 :name 'g))
+         (get1  (make-vm-get-global :dst :r2 :name 'g))
+         (ann   (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                 (list (make-vm-jump-zero :reg :r9 :label "else")
+                       set-a
+                       (make-vm-jump :label "join")
+                       (make-vm-label :name "else")
+                        set-b
+                        (make-vm-label :name "join")
+                        get1
+                        (make-vm-ret :reg :r2)))))
+    (let ((join-in (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))
+          (entry (gethash get1 ann)))
+    (assert-= 1 (cl-cc/optimize::opt-memory-ssa-version-at set-a ann :point :out))
+    (assert-= 2 (cl-cc/optimize::opt-memory-ssa-version-at set-b ann :point :out))
+      (assert-true (and (integerp join-in) (> join-in 2)))
+      (assert-eq :phi (getf entry :incoming-from)))))
+
+(deftest memory-ssa-cfg-snapshot-empty-join-propagates-synthetic-phi-to-successor
+  "Synthetic join phi should propagate through an empty join block to successor uses."
+  (let* ((set-a (make-vm-set-global :src :r0 :name 'g))
+         (set-b (make-vm-set-global :src :r1 :name 'g))
+         (get1  (make-vm-get-global :dst :r2 :name 'g))
+         (ann   (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                 (list (make-vm-jump-zero :reg :r9 :label "else")
+                       set-a
+                       (make-vm-jump :label "join")
+                       (make-vm-label :name "else")
+                       set-b
+                       (make-vm-label :name "join")
+                       (make-vm-jump :label "after")
+                       (make-vm-label :name "after")
+                       get1
+                       (make-vm-ret :reg :r2)))))
+    (let ((join-in (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))
+          (entry (gethash get1 ann)))
+      (assert-true (and (integerp join-in) (> join-in 2)))
+      (assert-eq :state (getf entry :incoming-from)))))
+
+(deftest memory-ssa-cfg-snapshot-local-def-overrides-phi-origin-for-following-use
+  "A local memory def should switch incoming origin from :phi to :state for later uses in block."
+  (let* ((set-a (make-vm-set-global :src :r0 :name 'g))
+         (set-b (make-vm-set-global :src :r1 :name 'g))
+         (set-c (make-vm-set-global :src :r3 :name 'g))
+         (get1  (make-vm-get-global :dst :r2 :name 'g))
+         (ann   (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                 (list (make-vm-jump-zero :reg :r9 :label "else")
+                       set-a
+                       (make-vm-jump :label "join")
+                       (make-vm-label :name "else")
+                       set-b
+                       (make-vm-label :name "join")
+                       set-c
+                       get1
+                       (make-vm-ret :reg :r2)))))
+    (assert-eq :phi (getf (gethash set-c ann) :incoming-from))
+    (assert-eq :state (getf (gethash get1 ann) :incoming-from))
+    (assert-eql (cl-cc/optimize::opt-memory-ssa-version-at set-c ann :point :out)
+                (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))))
+
+(deftest memory-ssa-cfg-snapshot-records-explicit-memory-phi-nodes
+  "CFG-aware memory snapshot records explicit MemoryPhi node metadata at join blocks."
+  (let* ((set-a (make-vm-set-global :src :r0 :name 'g))
+         (set-b (make-vm-set-global :src :r1 :name 'g))
+         (get1  (make-vm-get-global :dst :r2 :name 'g))
+         (ann   (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                 (list (make-vm-jump-zero :reg :r9 :label "else")
+                       set-a
+                       (make-vm-jump :label "join")
+                       (make-vm-label :name "else")
+                       set-b
+                       (make-vm-label :name "join")
+                       get1
+                       (make-vm-ret :reg :r2))))
+         (phi-map (cl-cc/optimize::opt-memory-ssa-phi-nodes ann))
+         (all-phis nil))
+    (maphash (lambda (_block nodes)
+               (setf all-phis (nconc all-phis (copy-list nodes))))
+             phi-map)
+    (assert-true (consp all-phis))
+    (let ((phi (find (list :global 'g) all-phis
+                     :key #'cl-cc/optimize::opt-memory-phi-location
+                     :test #'equal)))
+      (assert-true phi)
+      (assert-true (> (cl-cc/optimize::opt-memory-phi-version phi) 2))
+      (assert-= 2 (length (cl-cc/optimize::opt-memory-phi-incoming phi))))))
+
+(deftest memory-ssa-cfg-snapshot-branch-constant-prunes-infeasible-edge
+  "Memory SSA join excludes infeasible predecessor when branch condition is constant." 
+  (let* ((set-a (make-vm-set-global :src :r0 :name 'g))
+         (set-b (make-vm-set-global :src :r1 :name 'g))
+         (get1  (make-vm-get-global :dst :r2 :name 'g))
+         (ann   (cl-cc/optimize::opt-compute-memory-ssa-cfg-snapshot
+                 (list (make-vm-const :dst :r9 :value 0)
+                       (make-vm-jump-zero :reg :r9 :label "else")
+                       set-a
+                       (make-vm-jump :label "join")
+                       (make-vm-label :name "else")
+                       set-b
+                       (make-vm-label :name "join")
+                       get1
+                       (make-vm-ret :reg :r2)))))
+    ;; only else edge is feasible => join should take set-b version directly
+    (assert-= (cl-cc/optimize::opt-memory-ssa-version-at set-b ann :point :out)
+              (cl-cc/optimize::opt-memory-ssa-version-at get1 ann :point :in))
+    (assert-eq :state (getf (gethash get1 ann) :incoming-from))))
+
 ;;; ─── opt-interval-* arithmetic ───────────────────────────────────────────
 
 (deftest interval-make-and-read-lo-hi

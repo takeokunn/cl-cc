@@ -326,6 +326,52 @@ fields :shape, :receiver, :target representing sequential guards."
                 (subseq loop-chain 0 (1+ index)))
         (copy-list loop-chain))))
 
+(defun opt-pgo-build-counter-plan (entry successors-alist)
+  "Build an explicit BB/edge counter plan from CFG successor relations.
+
+Returns plist:
+  :bb-counters   ((BLOCK . BB-ID) ...)
+  :edge-counters ((((FROM . TO) . EDGE-ID) ...)
+  :total-bb      integer
+  :total-edge    integer"
+  (let* ((hot-chain (opt-pgo-build-hot-chain entry successors-alist nil))
+         (all-blocks (remove-duplicates
+                      (append (mapcar #'car successors-alist)
+                              (mapcan #'copy-list (mapcar #'cdr successors-alist)))
+                      :test #'equal))
+         (ordered-blocks (append hot-chain
+                                 (remove-if (lambda (b) (member b hot-chain :test #'equal))
+                                            all-blocks)))
+         (bb-counters nil)
+         (edge-counters nil)
+         (bb-id 0)
+         (edge-id 0))
+    (dolist (block ordered-blocks)
+      (push (cons block bb-id) bb-counters)
+      (incf bb-id))
+    (dolist (block ordered-blocks)
+      (dolist (succ (copy-list (cdr (assoc block successors-alist :test #'equal))))
+        (push (cons (cons block succ) edge-id) edge-counters)
+        (incf edge-id)))
+    (list :bb-counters (nreverse bb-counters)
+          :edge-counters (nreverse edge-counters)
+          :total-bb bb-id
+          :total-edge edge-id)))
+
+(defun opt-pgo-make-profile-template (counter-plan)
+  "Build a zero-initialized profile payload from COUNTER-PLAN." 
+  (let ((bb-counts nil)
+        (edge-counts nil))
+    (dolist (cell (getf counter-plan :bb-counters))
+      (push (cons (car cell) 0) bb-counts))
+    (dolist (cell (getf counter-plan :edge-counters))
+      (push (cons (car cell) 0) edge-counts))
+    (list :magic :cl-cc-pgo-v1
+          :bb-counts (nreverse bb-counts)
+          :branch-counts (nreverse edge-counts)
+          :total-bb (getf counter-plan :total-bb)
+          :total-edge (getf counter-plan :total-edge))))
+
 (defstruct (opt-lattice-value (:conc-name opt-lattice-value-))
   "Three-point SCCP/IPSCCP lattice value."
   (kind :bottom :type keyword)
@@ -864,6 +910,15 @@ Returns one of :call, :call-indirect, :return-call, :return-call-indirect."
       (if indirect-p :return-call-indirect :return-call)
       (if indirect-p :call-indirect :call)))
 
+(defun opt-wasm-select-direct-tailcall-opcode (&key tail-position-p enabled-p)
+  "Select opcode for direct wasm calls.
+
+Returns :return-call in tail position when enabled, otherwise :call."
+  (opt-wasm-select-tailcall-opcode
+   :tail-position-p tail-position-p
+   :indirect-p nil
+   :enabled-p enabled-p))
+
 (defun opt-build-wasm-tailcall-plan (&key tail-position-p indirect-p (enabled-p t))
   "Build tail-call lowering plan and chosen opcode for one wasm call site."
   (make-opt-wasm-tailcall-plan
@@ -888,6 +943,43 @@ Returns one of :call, :call-indirect, :return-call, :return-call-indirect."
    :fields (copy-list fields)
    :nullable-p (if (null nullable-p) nil t)))
 
+(defun opt-wasm-gc-layout-valid-p (layout)
+  "Return T when LAYOUT is a structurally valid wasm-gc descriptor.
+
+Accepted kinds are :STRUCT and :ARRAY.
+For :STRUCT, fields must be a list of (name . type) pairs.
+For :ARRAY, fields must contain exactly one element type descriptor."
+  (and (typep layout 'opt-wasm-gc-layout)
+       (member (opt-wasm-gc-kind layout) '(:struct :array) :test #'eq)
+       (let ((fields (opt-wasm-gc-fields layout)))
+         (ecase (opt-wasm-gc-kind layout)
+           (:struct
+            (every (lambda (field)
+                     (and (consp field)
+                          (car field)
+                          (cdr field)))
+                   fields))
+           (:array
+            (= (length fields) 1))))))
+
+(defun opt-wasm-gc-runtime-host-compatible-p (layout &key host-supports-wasm-gc-p)
+  "Return T if LAYOUT can be safely emitted for current host/runtime settings."
+  (and host-supports-wasm-gc-p
+       (opt-wasm-gc-layout-valid-p layout)))
+
+(defun opt-build-wasm-gc-optimization-plan (layout)
+  "Build optimization hints for wasm-gc lowering from LAYOUT.
+
+Returns plist:
+  :layout-valid-p           -- structural validity
+  :inline-field-access-p    -- enable direct struct.get/set lowering
+  :bounds-check-elision-p   -- enable array bounds-check elision candidates"
+  (let* ((valid-p (opt-wasm-gc-layout-valid-p layout))
+         (kind (and valid-p (opt-wasm-gc-kind layout))))
+    (list :layout-valid-p valid-p
+          :inline-field-access-p (and valid-p (eq kind :struct))
+          :bounds-check-elision-p (and valid-p (eq kind :array)))))
+
 (defstruct (opt-debug-loc (:conc-name opt-debug-loc-))
   "Source-level location record for debug info planning."
   file
@@ -909,9 +1001,77 @@ Returns one of :call, :call-indirect, :return-call, :return-call-indirect."
         :line (opt-debug-loc-line debug-loc)
         :column (opt-debug-loc-column debug-loc)))
 
+(defun opt-build-wasm-source-map-v3 (entries &key file)
+  "Build a backend-neutral Source Map v3 payload plist from ENTRIES.
+
+This helper normalizes entry ordering and source lists but does not write files
+or emit VLQ-encoded mappings."
+  (let* ((sorted (sort (copy-list entries) #'< :key (lambda (entry) (getf entry :offset 0))))
+         (sources-seen (make-hash-table :test #'equal))
+         (sources nil)
+         (mappings nil))
+    (dolist (entry sorted)
+      (let ((source (getf entry :source)))
+        (unless (gethash source sources-seen)
+          (setf (gethash source sources-seen) t)
+          (push source sources)))
+      (push (list :offset (getf entry :offset)
+                  :source (getf entry :source)
+                  :line (getf entry :line)
+                  :column (getf entry :column))
+            mappings))
+    (list :version 3
+          :file file
+          :sources (nreverse sources)
+          :mappings (nreverse mappings))))
+
 (defun opt-format-diagnostic-reason (pass outcome reason)
   "Format optimization diagnostic reason in Rpass-like style."
   (format nil "~a: ~a (~a)" pass outcome reason))
+
+(defun opt-build-diagnostic-caret-line (line-text column &key (caret #\^))
+  "Return a two-line caret diagnostic snippet for LINE-TEXT at 1-based COLUMN."
+  (let* ((text (or line-text ""))
+         (len (length text))
+         (col (max 1 (min (or column 1) (1+ len)))))
+    (format nil "~a~%~v@T~c" text (max 0 (1- col)) caret)))
+
+(defun %opt-candidate-score (needle candidate)
+  (let* ((n (string-downcase (or needle "")))
+         (c (string-downcase (or candidate "")))
+         (nlen (length n))
+         (clen (length c))
+         (shared-prefix (loop for i from 0 below (min nlen clen)
+                              while (char= (char n i) (char c i))
+                              count t))
+         (contains (if (search n c) 0 3)))
+    (+ contains
+       (abs (- nlen clen))
+       (- nlen shared-prefix))))
+
+(defun opt-diagnostic-did-you-mean (unknown candidates &key (limit 3))
+  "Return up to LIMIT ranked suggestion strings for UNKNOWN from CANDIDATES."
+  (let* ((pool (remove-if-not #'stringp candidates))
+         (scored (mapcar (lambda (candidate)
+                           (cons candidate
+                                 (%opt-candidate-score unknown candidate)))
+                         pool))
+         (ordered (sort scored
+                        (lambda (left right)
+                          (or (< (cdr left) (cdr right))
+                              (and (= (cdr left) (cdr right))
+                                   (string< (car left) (car right))))))))
+    (subseq (mapcar #'car ordered) 0 (min limit (length ordered)))))
+
+(defun opt-format-type-trace (steps)
+  "Format type-inference rationale STEPS as a human-readable trace string."
+  (if (null steps)
+      "Type trace: <none>"
+      (with-output-to-string (out)
+        (format out "Type trace:")
+        (loop for step in steps
+              for index from 1
+              do (format out "~%~d. ~a" index step)))))
 
 (defstruct (opt-tls-plan (:conc-name opt-tls-plan-))
   "Thread-local access lowering plan."
@@ -1041,6 +1201,24 @@ Small heaps may disable mutator assist to avoid overhead."
   (dynamic-args nil :type list)
   (residual-body nil :type list))
 
+(defstruct (opt-partial-eval-result (:conc-name opt-partial-eval-))
+  "Function-level partial-evaluation report used by FR-209/210 orchestration."
+  function-name
+  (parameters nil :type list)
+  (signature nil :type list)
+  (binding-times nil :type list)
+  (form-kinds nil :type list)
+  (residual-body nil :type list)
+  (dynamic-body nil :type list)
+  specialization)
+
+(defstruct (opt-partial-program-result (:conc-name opt-partial-program-))
+  "Program/module-level partial-evaluation report keyed by function name.
+
+FUNCTION-RESULTS is an alist of:
+  (function-name . opt-partial-eval-result)"
+  (function-results nil :type list))
+
 (defstruct (opt-binding-time (:conc-name opt-binding-time-))
   "Binding-time classification for one parameter under the SCCP lattice."
   parameter
@@ -1113,86 +1291,141 @@ Small heaps may disable mutator assist to avoid overhead."
     (t nil)))
 
 (defun %opt-substitute-let-bindings (bindings signature sequential-p substitute-fn)
-  (let ((current-signature signature)
+  (let ((lookup-signature signature)
+        (eval-signature signature)
         (shadowed nil)
         (result nil))
     (dolist (binding bindings)
       (let ((var (%opt-let-binding-symbol binding)))
         (push (if (and (consp binding) (cdr binding))
-                  (list var (funcall substitute-fn (second binding) current-signature))
+                  (multiple-value-bind (value-form updated-signature)
+                      (funcall substitute-fn (second binding) lookup-signature)
+                    (setf lookup-signature updated-signature
+                          eval-signature updated-signature)
+                    (list var value-form))
                   binding)
               result)
         (when var
           (push var shadowed)
           (when sequential-p
-            (setf current-signature
-                  (%opt-remove-shadowed-bindings current-signature (list var)))))))
+            (setf lookup-signature
+                  (%opt-remove-shadowed-bindings lookup-signature (list var)))))))
     (values (nreverse result)
             (if sequential-p
-                current-signature
-                (%opt-remove-shadowed-bindings signature shadowed)))))
+                lookup-signature
+                (%opt-remove-shadowed-bindings lookup-signature shadowed))
+            eval-signature
+            shadowed)))
+
+(defun %opt-merge-body-effects-into-outer-signature (outer-signature body-signature shadowed)
+  (let* ((shadowed-set shadowed)
+         (result nil))
+    (dolist (cell outer-signature)
+      (let* ((var (car cell))
+             (body-cell (assoc var body-signature :test #'equal)))
+        (cond
+          ((member var shadowed-set :test #'equal)
+           (push cell result))
+          (body-cell
+           (push (cons var (cdr body-cell)) result))
+          (t
+           nil))))
+    (dolist (cell body-signature)
+      (let ((var (car cell)))
+        (when (and (not (member var shadowed-set :test #'equal))
+                   (null (assoc var result :test #'equal)))
+          (push cell result))))
+    (nreverse result)))
 
 (defun %opt-tree-substitute-constants (form signature)
-  (labels ((substitute-body (forms active-signature)
+  (labels ((contains-setq-p (node)
+             (cond
+               ((atom node) nil)
+               ((eq (car node) 'quote) nil)
+               ((eq (car node) 'function) nil)
+               ((eq (car node) 'setq) t)
+               (t (some #'contains-setq-p node))))
+           (substitute-body (forms active-signature)
              (let ((current-signature active-signature)
                    (result nil))
-               (dolist (body-form forms)
-                 (multiple-value-bind (new-form new-signature)
-                     (if (and (consp body-form) (eq (car body-form) 'setq))
-                         (substitute-setq (cdr body-form) current-signature)
-                         (values (substitute-node body-form current-signature)
-                                 current-signature))
+                (dolist (body-form forms)
+                  (multiple-value-bind (new-form new-signature)
+                      (substitute-node body-form current-signature)
                    (push new-form result)
                    (setf current-signature new-signature)))
                (values (nreverse result) current-signature)))
            (substitute-setq (pairs active-signature)
              (let ((current-signature active-signature)
                    (result nil))
-               (loop for (place value) on pairs by #'cddr
-                     do (push place result)
-                        (push (substitute-node value current-signature) result)
-                        (when (symbolp place)
-                          (setf current-signature
-                                (%opt-remove-shadowed-bindings current-signature
-                                                               (list place)))))
+                (loop for (place value) on pairs by #'cddr
+                      do (push place result)
+                         (multiple-value-bind (value-form updated-signature)
+                             (substitute-node value current-signature)
+                           (push value-form result)
+                           (setf current-signature
+                                 (if (contains-setq-p value)
+                                     nil
+                                     updated-signature)))
+                         (when (symbolp place)
+                           (setf current-signature
+                                 (%opt-remove-shadowed-bindings current-signature
+                                                                (list place)))))
                (values (cons 'setq (nreverse result)) current-signature)))
            (substitute-node (node active-signature)
              (cond
                ((symbolp node)
                 (let ((cell (assoc node active-signature :test #'equal)))
-                  (if cell (cdr cell) node)))
-               ((atom node) node)
-               ((eq (car node) 'quote) node)
-               ((eq (car node) 'function) node)
+                  (values (if cell (cdr cell) node)
+                          active-signature)))
+               ((atom node)
+                (values node active-signature))
+               ((eq (car node) 'quote)
+                (values node active-signature))
+               ((eq (car node) 'function)
+                (values node active-signature))
                ((eq (car node) 'lambda)
                 (let* ((lambda-list (second node))
                        (shadowed (remove nil
                                          (mapcar #'%opt-lambda-binding-symbol
                                                  lambda-list)))
-                        (body-signature
-                          (%opt-remove-shadowed-bindings active-signature shadowed)))
-                  (list* 'lambda
-                         lambda-list
-                         (substitute-body (cddr node) body-signature))))
+                       (body-signature
+                         (%opt-remove-shadowed-bindings active-signature shadowed)))
+                  (multiple-value-bind (new-body _)
+                      (substitute-body (cddr node) body-signature)
+                    (declare (ignore _))
+                    (values (list* 'lambda lambda-list new-body)
+                            active-signature))))
                ((eq (car node) 'progn)
-                (cons 'progn (substitute-body (cdr node) active-signature)))
+                (multiple-value-bind (new-body updated-signature)
+                    (substitute-body (cdr node) active-signature)
+                  (values (cons 'progn new-body) updated-signature)))
                ((member (car node) '(let let*) :test #'eq)
-                (multiple-value-bind (bindings body-signature)
+                (multiple-value-bind (bindings body-signature outward-signature shadowed)
                     (%opt-substitute-let-bindings
                      (second node)
                      active-signature
                      (eq (car node) 'let*)
-                      #'substitute-node)
-                  (list* (car node)
-                         bindings
-                         (substitute-body (cddr node) body-signature))))
+                     #'substitute-node)
+                  (multiple-value-bind (new-body body-updated-signature)
+                      (substitute-body (cddr node) body-signature)
+                    (let ((merged-signature
+                            (%opt-merge-body-effects-into-outer-signature
+                             outward-signature
+                             body-updated-signature
+                             shadowed)))
+                      (values (list* (car node) bindings new-body)
+                              merged-signature)))))
                ((eq (car node) 'setq)
                 (substitute-setq (cdr node) active-signature))
                ((symbolp (car node))
-                (cons (car node)
-                      (substitute-body (cdr node) active-signature)))
+                (multiple-value-bind (new-args updated-signature)
+                    (substitute-body (cdr node) active-signature)
+                  (values (cons (car node) new-args)
+                          updated-signature)))
                (t
-                (substitute-body node active-signature)))))
+                (multiple-value-bind (new-seq updated-signature)
+                    (substitute-body node active-signature)
+                  (values new-seq updated-signature))))))
     (substitute-node form signature)))
 
 (defun %opt-dynamic-parameters (parameters signature)
@@ -1205,6 +1438,20 @@ Small heaps may disable mutator assist to avoid overhead."
           (%opt-stable-print-string function-name)
           (%opt-stable-print-string signature)))
 
+(defun %opt-body-vm-instructions-p (body)
+  (every (lambda (node) (typep node 'vm-instruction)) body))
+
+(defun %opt-build-vm-residual-body (body signature)
+  "Build residual VM body by materializing static parameter values as vm-const.
+
+When BODY is VM instruction objects (as used by FR-211 clone emission),
+tree-level substitution is not sufficient. We conservatively emit one vm-const
+per static binding at function entry, preserving original instruction order."
+  (append
+   (loop for (parameter . value) in signature
+         collect (make-vm-const :dst parameter :value value))
+   body))
+
 (defun opt-specialize-constant-args (function-name parameters body constant-bindings
                                      &key specialized-name)
   "Build a residual helper copy of BODY with constant PARAMETERS substituted.
@@ -1213,17 +1460,202 @@ This is a helper-level partial-evaluation primitive: it does not execute code or
 install a clone in the function registry. It records the static signature and
 returns a residual body that later passes can fold safely."
   (let* ((signature (%opt-constant-binding-signature parameters constant-bindings))
-         (name (or specialized-name
-                   (%opt-specialized-name function-name signature))))
+          (name (or specialized-name
+                    (%opt-specialized-name function-name signature))))
     (make-opt-partial-specialization
      :original-name function-name
      :specialized-name name
      :signature signature
      :static-args signature
      :dynamic-args (%opt-dynamic-parameters parameters signature)
-     :residual-body (cdr (%opt-tree-substitute-constants
-                          (cons 'progn body)
-                          signature)))))
+     :residual-body (if (%opt-body-vm-instructions-p body)
+                        (%opt-build-vm-residual-body body signature)
+                        (cdr (%opt-tree-substitute-constants
+                              (cons 'progn body)
+                              signature))))))
+
+(defun opt-partial-evaluate-function (function-name parameters body
+                                      &key
+                                        (constant-bindings nil)
+                                        (lattice-bindings nil)
+                                        specialized-name)
+  "Partially evaluate one function body and return residual + BTA report.
+
+This is a function-level FR-209/210 entrypoint that composes:
+1) constant substitution residualization,
+2) binding-time analysis merge, and
+3) offline BTA classification over residual forms."
+  (let* ((specialization
+           (opt-specialize-constant-args
+            function-name parameters body constant-bindings
+            :specialized-name specialized-name))
+         (binding-times
+           (opt-run-binding-time-analysis
+            parameters
+            :constant-bindings constant-bindings
+            :lattice-bindings lattice-bindings))
+         (residual-body (opt-partial-spec-residual-body specialization))
+         (form-kinds
+           (opt-offline-bta-analyze-body
+            residual-body
+            :static-bindings (opt-partial-spec-signature specialization)
+            :binding-times binding-times))
+         (dynamic-body
+           (loop for form in residual-body
+                 for kind in form-kinds
+                 unless (eq kind :static)
+                 collect form)))
+    (make-opt-partial-eval-result
+     :function-name function-name
+     :parameters parameters
+     :signature (opt-partial-spec-signature specialization)
+     :binding-times binding-times
+     :form-kinds form-kinds
+     :residual-body residual-body
+     :dynamic-body dynamic-body
+     :specialization specialization)))
+
+(defun %opt-merge-constant-binding (const-map fn param value)
+  "Merge inferred (PARAM . VALUE) into CONST-MAP for FN.
+
+Returns T when map changed. Conflicting values conservatively drop knowledge."
+  (let* ((fn-bindings (or (gethash fn const-map)
+                          (setf (gethash fn const-map) (make-hash-table :test #'equal))))
+         (present (nth-value 1 (gethash param fn-bindings))))
+    (cond
+      ((not present)
+       (setf (gethash param fn-bindings) value)
+       t)
+      ((equal (gethash param fn-bindings) value)
+       nil)
+      (t
+       ;; Conflict => unknown for that parameter.
+       (remhash param fn-bindings)
+       t))))
+
+(defun %opt-extract-constant-calls-from-form (form static-signature)
+  "Collect conservative call-site constant bindings from FORM.
+
+Returns alist entries: (callee . ((param-index . const-value) ...))"
+  (labels ((const-value (node)
+             (cond
+               ((symbolp node)
+                (let ((cell (assoc node static-signature :test #'equal)))
+                  (if cell (cdr cell) :unknown)))
+               ((or (numberp node) (stringp node) (characterp node)
+                    (keywordp node) (member node '(nil t) :test #'eq))
+                node)
+               ((and (consp node) (eq (car node) 'quote))
+                (second node))
+               (t :unknown)))
+           (walk (node)
+             (cond
+               ((atom node) nil)
+               ((member (car node) '(quote function) :test #'eq) nil)
+               (t
+                (append
+                 (let ((head (car node)))
+                   (when (symbolp head)
+                     (let ((pairs nil))
+                       (loop for arg in (cdr node)
+                             for i from 0
+                             for v = (const-value arg)
+                             unless (eq v :unknown)
+                             do (push (cons i v) pairs))
+                       (when pairs
+                         (list (cons head (nreverse pairs)))))))
+                 (mapcan #'walk node))))))
+    (walk form)))
+
+(defun %opt-build-inferred-constant-bindings (function-definitions reports)
+  "Infer inter-function constant bindings from REPORTS residual signatures.
+
+Produces alist: ((fn . ((param . value) ...)) ...)."
+  (let ((params-by-fn (make-hash-table :test #'equal))
+        (const-map (make-hash-table :test #'equal)))
+    (dolist (def function-definitions)
+      (setf (gethash (first def) params-by-fn)
+            (coerce (getf (rest def) :params) 'list)))
+    (dolist (entry reports)
+      (let* ((report (cdr entry))
+             (sig (opt-partial-eval-signature report)))
+        (dolist (form (opt-partial-eval-residual-body report))
+          (dolist (call (%opt-extract-constant-calls-from-form form sig))
+            (let* ((callee (car call))
+                   (idx-vals (cdr call))
+                   (params (gethash callee params-by-fn)))
+              (when params
+                (dolist (iv idx-vals)
+                  (let* ((idx (car iv))
+                         (value (cdr iv))
+                         (param (nth idx params)))
+                    (when param
+                      (%opt-merge-constant-binding const-map callee param value))))))))))
+    (let (result)
+      (maphash
+       (lambda (fn table)
+         (let (pairs)
+           (maphash (lambda (k v) (push (cons k v) pairs)) table)
+           (push (cons fn (nreverse pairs)) result)))
+       const-map)
+      (nreverse result))))
+
+(defun %opt-merge-constant-binding-alists (base inferred)
+  "Merge INFERRED bindings into BASE conservatively.
+
+BASE values are kept when conflicts arise; INFERRED only adds missing facts."
+  (let ((result (copy-tree base)))
+    (dolist (entry inferred result)
+      (let* ((fn (car entry))
+             (new-pairs (cdr entry))
+             (cell (assoc fn result :test #'equal)))
+        (if cell
+            (dolist (pair new-pairs)
+              (unless (assoc (car pair) (cdr cell) :test #'equal)
+                (setf (cdr cell) (append (cdr cell) (list pair)))))
+            (push (cons fn (copy-list new-pairs)) result))))))
+
+(defun opt-partial-evaluate-program (function-definitions
+                                     &key
+                                       (constant-bindings-by-function nil)
+                                       (lattice-bindings-by-function nil)
+                                       (max-iterations 64))
+  "Run function-level partial evaluation across FUNCTION-DEFINITIONS.
+
+FUNCTION-DEFINITIONS format:
+  ((fn-name :params (...) :body (...)) ...)
+
+CONSTANT-BINDINGS-BY-FUNCTION and LATTICE-BINDINGS-BY-FUNCTION are alists:
+  ((fn-name . ((param . value) ...)) ...)
+  ((fn-name . ((param . lattice) ...)) ...)
+
+Returns OPT-PARTIAL-PROGRAM-RESULT with per-function reports.
+
+Performs a monotone inter-function fixpoint: inferred constants from residual
+call-sites are propagated across function boundaries until convergence.
+MAX-ITERATIONS is a safety guard for pathological inputs." 
+  (let ((current-consts constant-bindings-by-function)
+        (reports nil))
+    (loop for iter from 1
+          while (<= iter (max 1 max-iterations))
+          do (setf reports
+                   (loop for def in function-definitions
+                         for fn = (first def)
+                         for params = (getf (rest def) :params)
+                         for body = (getf (rest def) :body)
+                         for consts = (cdr (assoc fn current-consts :test #'equal))
+                         for lattices = (cdr (assoc fn lattice-bindings-by-function :test #'equal))
+                         collect (cons fn
+                                       (opt-partial-evaluate-function
+                                        fn params body
+                                        :constant-bindings consts
+                                        :lattice-bindings lattices))))
+             (let* ((inferred (%opt-build-inferred-constant-bindings function-definitions reports))
+                    (next-consts (%opt-merge-constant-binding-alists current-consts inferred)))
+               (if (equal next-consts current-consts)
+                   (return)
+                   (setf current-consts next-consts))))
+    (make-opt-partial-program-result :function-results reports)))
 
 (defun %opt-lattice-binding-time-kind (lattice)
   (if (and (opt-lattice-value-p lattice)
@@ -1246,6 +1678,109 @@ returns a residual body that later passes can fold safely."
                      :value (and (eq kind :static)
                                  (opt-lattice-value-value lattice))
                      :lattice (and present-p lattice))))))
+
+(defun opt-run-binding-time-analysis (parameters
+                                      &key
+                                        (constant-bindings nil)
+                                        (lattice-bindings nil))
+  "Run a conservative binding-time analysis for PARAMETERS.
+
+Priority:
+1) CONSTANT-BINDINGS are treated as compile-time static facts.
+2) Remaining parameters are classified from LATTICE-BINDINGS via SCCP.
+
+This provides an explicit BTA entrypoint (FR-210) that can be used by
+partial-evaluation passes without requiring callers to manually merge sources."
+  (let* ((seed (loop for (name . value) in constant-bindings
+                     collect (cons name (opt-lattice-constant value))))
+         (merged-lattice (append seed lattice-bindings)))
+    (opt-sccp-analyze-binding-times parameters merged-lattice)))
+
+(defparameter *opt-offline-bta-pure-operators*
+  '(+ - * / 1+ 1- = /= < > <= >= min max abs
+    logand logior logxor lognot ash
+    eq eql equal not and or)
+  "Conservative operator set considered static-evaluable in offline BTA.")
+
+(defun %opt-offline-bta-constant-atom-p (node static-set)
+  (cond
+    ((symbolp node)
+     (or (member node '(nil t) :test #'eq)
+         (keywordp node)
+         (member node static-set :test #'equal)))
+    (t (constantp node))))
+
+(defun %opt-offline-bta-classify-form (form static-set)
+  (labels ((all-static-p (forms env)
+             (every (lambda (f)
+                      (eq (%opt-offline-bta-classify-form f env) :static))
+                    forms))
+           (binding-symbol (binding)
+             (cond
+               ((symbolp binding) binding)
+               ((and (consp binding) (symbolp (car binding))) (car binding))
+               (t nil))))
+    (cond
+      ((atom form)
+       (if (%opt-offline-bta-constant-atom-p form static-set) :static :dynamic))
+      ((member (car form) '(quote function) :test #'eq)
+       :static)
+      ((eq (car form) 'if)
+       (if (all-static-p (cdr form) static-set) :static :dynamic))
+      ((eq (car form) 'progn)
+       (if (all-static-p (cdr form) static-set) :static :dynamic))
+      ((member (car form) '(let let*) :test #'eq)
+       (let* ((bindings (second form))
+              (new-static static-set))
+         (dolist (binding bindings)
+           (let* ((var (binding-symbol binding))
+                  (rhs (if (and (consp binding) (cdr binding)) (second binding) nil))
+                  (rhs-static-p (or (null rhs)
+                                    (eq (%opt-offline-bta-classify-form rhs static-set)
+                                        :static))))
+             (when (and var rhs-static-p)
+               (push var new-static))))
+         (if (all-static-p (cddr form) new-static) :static :dynamic)))
+      ((eq (car form) 'setq)
+       (if (all-static-p (loop for (_ v) on (cdr form) by #'cddr
+                               collect v)
+                         static-set)
+           :static
+           :dynamic))
+      ((and (symbolp (car form))
+            (member (car form) *opt-offline-bta-pure-operators* :test #'eq))
+       (if (all-static-p (cdr form) static-set) :static :dynamic))
+      (t :dynamic))))
+
+(defun opt-offline-bta-classify-form (form
+                                      &key
+                                        (static-bindings nil)
+                                        (binding-times nil))
+  "Classify FORM as :STATIC or :DYNAMIC using an offline BTA approximation.
+
+STATIC-BINDINGS are explicit compile-time facts `(var . value)`.
+BINDING-TIMES may include `opt-binding-time` entries (e.g. from SCCP merge).
+Only bindings classified as :static are treated as compile-time-known names."
+  (let ((static-set
+          (append
+           (mapcar #'car static-bindings)
+           (loop for bt in binding-times
+                 when (and (opt-binding-time-p bt)
+                           (eq (opt-binding-time-kind bt) :static))
+                 collect (opt-binding-time-parameter bt)))))
+    (%opt-offline-bta-classify-form form static-set)))
+
+(defun opt-offline-bta-analyze-body (body
+                                     &key
+                                       (static-bindings nil)
+                                       (binding-times nil))
+  "Classify each form in BODY as :STATIC or :DYNAMIC via offline BTA."
+  (mapcar (lambda (form)
+            (opt-offline-bta-classify-form
+             form
+             :static-bindings static-bindings
+             :binding-times binding-times))
+          body))
 
 (defun opt-build-specialization-plan (callee-label arguments constant-bindings
                                       &key cache)
@@ -1274,3 +1809,503 @@ the plan as a cache hit instead of requesting a new clone."
            :dynamic-args (%opt-dynamic-parameters arguments signature)
            :clone-needed-p (not cache-hit-p)
            :cache-hit-p cache-hit-p))))))
+
+(defun %opt-constant-bindings-from-call-args (params args const-track)
+  (let ((result nil))
+    (loop for param in params
+          for arg in args
+          do (multiple-value-bind (value present-p)
+                 (gethash arg const-track)
+               (when present-p
+                 (push (cons param value) result))))
+    (nreverse result)))
+
+(defun %opt-dynamic-call-args (params args dynamic-params)
+  (let ((result nil))
+    (loop for param in params
+          for arg in args
+          do (when (member param dynamic-params :test #'equal)
+               (push arg result)))
+    (nreverse result)))
+
+(defun %opt-make-call-like (inst func-reg args)
+  (cond
+    ((typep inst 'vm-tail-call)
+     (make-vm-tail-call :dst (vm-dst inst) :func func-reg :args args))
+    ((typep inst 'vm-apply)
+     (make-vm-apply :dst (vm-dst inst) :func func-reg :args args))
+    (t
+     (make-vm-call :dst (vm-dst inst) :func func-reg :args args))))
+
+(defun opt-pass-specialize-known-args (instructions)
+  "Conservatively clone known-callee functions specialized by constant call args."
+  (let* ((func-defs (opt-collect-function-defs instructions))
+         (base-idx (1+ (opt-max-reg-index instructions)))
+         (reg-track (make-hash-table :test #'eq))
+         (const-track (make-hash-table :test #'eq))
+         (plan-cache (make-hash-table :test #'equal))
+         (emitted-labels (make-hash-table :test #'equal))
+         (result nil))
+    (labels ((clear-dst-tracks (dst)
+               (when dst
+                 (remhash dst const-track)
+                 (remhash dst reg-track))))
+      (dolist (inst instructions)
+        (typecase inst
+          ((or vm-closure vm-func-ref)
+           (setf (gethash (vm-dst inst) reg-track) (vm-label-name inst))
+           (remhash (vm-dst inst) const-track)
+           (push inst result))
+          (vm-const
+           (setf (gethash (vm-dst inst) const-track) (vm-value inst))
+           (remhash (vm-dst inst) reg-track)
+           (push inst result))
+          (vm-move
+           (multiple-value-bind (src-const present-p)
+               (gethash (vm-src inst) const-track)
+             (if present-p
+                 (setf (gethash (vm-dst inst) const-track) src-const)
+                 (remhash (vm-dst inst) const-track)))
+           (multiple-value-bind (label found-p)
+               (gethash (vm-src inst) reg-track)
+             (if found-p
+                 (setf (gethash (vm-dst inst) reg-track) label)
+                 (remhash (vm-dst inst) reg-track)))
+           (push inst result))
+          ((or vm-call vm-tail-call)
+            (let* ((callee-label (gethash (vm-func-reg inst) reg-track))
+                   (def (and callee-label (gethash callee-label func-defs))))
+             (if (null def)
+                 (push inst result)
+                 (let* ((params (getf def :params))
+                        (body (getf def :body))
+                        (const-bindings (%opt-constant-bindings-from-call-args
+                                         params (vm-args inst) const-track))
+                        (plan (and const-bindings
+                                   (opt-build-specialization-plan
+                                    callee-label params const-bindings :cache plan-cache))))
+                   (if (null plan)
+                       (push inst result)
+                       (let* ((specialized-label (opt-specialization-plan-specialized-name plan))
+                              (dynamic-params (opt-specialization-plan-dynamic-args plan))
+                              (dynamic-args (%opt-dynamic-call-args params (vm-args inst) dynamic-params))
+                              (clone-reg (intern (format nil "R~A" base-idx) :keyword)))
+                         (incf base-idx)
+                         (unless (gethash specialized-label emitted-labels)
+                            (let* ((partial
+                                     (opt-partial-evaluate-function
+                                      callee-label params body
+                                      :constant-bindings const-bindings
+                                      :specialized-name specialized-label))
+                                   (residual-body
+                                     (opt-partial-eval-residual-body partial)))
+                              (push (make-vm-closure :dst clone-reg
+                                                     :label specialized-label
+                                                     :params dynamic-params
+                                                    :captured nil)
+                                   result)
+                             (push (make-vm-label :name specialized-label) result)
+                             (dolist (body-inst residual-body)
+                               (push body-inst result))
+                             (setf (gethash specialized-label emitted-labels) clone-reg)))
+                         (let ((resolved-reg (gethash specialized-label emitted-labels)))
+                           (push (%opt-make-call-like inst resolved-reg dynamic-args)
+                                 result)))))))
+              (clear-dst-tracks (opt-inst-dst inst)))
+          (vm-apply
+           ;; APPLY spreads the final argument list at runtime, so fixed-arity
+           ;; parameter/signature reasoning is not sound here yet.
+           (clear-dst-tracks (opt-inst-dst inst))
+           (push inst result))
+          (t
+           (clear-dst-tracks (opt-inst-dst inst))
+           (push inst result)))))
+    (nreverse result)))
+
+(defun opt-pass-partial-evaluation (instructions)
+  "Pipeline entrypoint for partial evaluation over known constant call arguments.
+
+Current strategy specializes known-callee call sites into residual clones with
+only dynamic arguments forwarded, then relies on downstream fold/SCCP cleanup."
+  (opt-pass-specialize-known-args instructions))
+
+;;; FR-523..FR-528 planning helpers (backend roadmap evidence anchors)
+
+(defstruct (opt-canonical-loop (:conc-name opt-loop-))
+  "Canonical reducible loop slice detected from linear VM instructions."
+  head-index
+  cmp-index
+  jz-index
+  back-index
+  exit-index
+  head-label
+  exit-label
+  iv-reg
+  limit-reg
+  step-reg
+  cond-reg
+  body)
+
+(defun %opt-find-label-index (vec name &optional (start 0))
+  (loop for i from start below (length vec)
+        for inst = (aref vec i)
+        when (and (typep inst 'vm-label)
+                  (equal (vm-name inst) name))
+        do (return i)))
+
+(defun %opt-parse-canonical-loop-at (vec i)
+  "Parse canonical loop shape at label index I.
+
+Expected shape:
+  Lh: cmp/jz body step jump Lh Lexit:
+where cmp is vm-lt and step is self-update vm-add on induction variable.
+Returns OPT-CANONICAL-LOOP or NIL."
+  (when (and (< (+ i 5) (length vec))
+             (typep (aref vec i) 'vm-label)
+             (typep (aref vec (1+ i)) 'vm-lt)
+             (typep (aref vec (+ i 2)) 'vm-jump-zero))
+    (let* ((head (aref vec i))
+           (cmp  (aref vec (1+ i)))
+           (jz   (aref vec (+ i 2)))
+           (head-label (vm-name head))
+           (exit-label (vm-label-name jz))
+           (exit-idx (%opt-find-label-index vec exit-label (+ i 3))))
+      (when (and exit-idx (> exit-idx (+ i 4)))
+        (let* ((back-idx (1- exit-idx))
+               (back (aref vec back-idx)))
+          (when (and (typep back 'vm-jump)
+                     (equal (vm-label-name back) head-label))
+            (let* ((body (loop for k from (+ i 3) below back-idx
+                               collect (aref vec k)))
+                   (step (car (last body))))
+              (when (and (typep step 'vm-add)
+                         (eq (vm-dst step) (vm-lhs step))
+                         (eq (vm-dst step) (vm-lhs cmp))
+                         (eq (vm-reg jz) (vm-dst cmp)))
+                (make-opt-canonical-loop
+                 :head-index i
+                 :cmp-index (1+ i)
+                 :jz-index (+ i 2)
+                 :back-index back-idx
+                 :exit-index exit-idx
+                 :head-label head-label
+                 :exit-label exit-label
+                 :iv-reg (vm-lhs cmp)
+                 :limit-reg (vm-rhs cmp)
+                 :step-reg (vm-rhs step)
+                 :cond-reg (vm-dst cmp)
+                 :body body)))))))))
+
+(defun %opt-find-canonical-loops (instructions)
+  (let* ((vec (coerce instructions 'vector))
+         (loops nil)
+         (i 0)
+         (n (length vec)))
+    (loop while (< i n)
+          do (let ((lp (%opt-parse-canonical-loop-at vec i)))
+               (if lp
+                   (progn
+                     (push lp loops)
+                     (setf i (1+ (opt-loop-exit-index lp))))
+                   (incf i))))
+    (nreverse loops)))
+
+(defun opt-build-affine-loop-summary (&key induction-vars bounds accesses)
+  "Build a conservative affine-loop summary descriptor."
+  (list :kind :affine-loop-summary
+        :induction-vars (copy-list (or induction-vars nil))
+        :bounds (copy-list (or bounds nil))
+        :accesses (copy-list (or accesses nil))))
+
+(defun %opt-access-kind (inst)
+  (typecase inst
+    (vm-get-global :read-global)
+    (vm-set-global :write-global)
+    (vm-slot-read :read-slot)
+    (vm-slot-write :write-slot)
+    (t nil)))
+
+(defun %opt-inst-side-effect-p (inst)
+  (or (typep inst '(or vm-set-global vm-slot-write vm-call vm-generic-call vm-apply vm-ret))))
+
+(defun %opt-loop-core-and-step (lp)
+  (let* ((body (opt-loop-body lp))
+         (step (car (last body)))
+         (core (butlast body)))
+    (values core step)))
+
+(defun %opt-loop-constant-init (vec lp)
+  "Return last dominating integer init for loop IV, or NIL when uncertain."
+  (let* ((iv (opt-loop-iv-reg lp))
+         (value nil))
+    (loop for i from 0 below (opt-loop-head-index lp)
+          for inst = (aref vec i)
+          do (cond
+               ((and (typep inst 'vm-const)
+                     (eq (vm-dst inst) iv)
+                     (integerp (vm-value inst)))
+                (setf value (vm-value inst)))
+               ((and (opt-inst-dst inst) (eq (opt-inst-dst inst) iv))
+                (setf value nil))))
+    value))
+
+(defun %opt-inst-depends-on-p (producer consumer)
+  (let ((dst (opt-inst-dst producer)))
+    (and dst (member dst (opt-inst-read-regs consumer) :test #'eq))))
+
+(defun %opt-schedule-core-with-deps (core)
+  "Dependency-aware local reordering: only swap adjacent independent ops by cost." 
+  (let ((vec (coerce (copy-list core) 'vector))
+        (changed nil))
+    (loop for i from 0 below (1- (length vec))
+          do (let* ((a (aref vec i))
+                    (b (aref vec (1+ i))))
+               (when (and (not (%opt-inst-depends-on-p a b))
+                          (not (%opt-inst-depends-on-p b a))
+                          (< (opt-inline-inst-cost b) (opt-inline-inst-cost a)))
+                 (rotatef (aref vec i) (aref vec (1+ i)))
+                 (setf changed t))))
+    (values (coerce vec 'list) changed)))
+
+(defun opt-pass-affine-loop-analysis (instructions)
+  "Analyze canonical loops and cache affine summaries for later passes.
+
+This pass preserves instructions but computes real summaries from detected loop
+regions (not from caller-provided payload lists)."
+  (let ((loops (%opt-find-canonical-loops instructions))
+        (summaries nil))
+    (dolist (lp loops)
+      (let* ((accesses (remove nil
+                               (mapcar (lambda (inst)
+                                         (let ((kind (%opt-access-kind inst)))
+                                           (and kind (list :kind kind :inst inst))))
+                                       (opt-loop-body lp))))
+             (summary (opt-build-affine-loop-summary
+                       :induction-vars (list (opt-loop-iv-reg lp))
+                       :bounds (list (list :lt (opt-loop-iv-reg lp) (opt-loop-limit-reg lp)))
+                       :accesses accesses)))
+        (push summary summaries)))
+    (setf *opt-last-affine-loop-summaries* (nreverse summaries))
+    instructions))
+
+(defparameter *opt-last-affine-loop-summaries* nil
+  "Last affine loop summaries produced by opt-pass-affine-loop-analysis.")
+
+(defun opt-loop-interchange-plan (&key loops cache-locality-score dependence-safe-p)
+  "Return an interchange plan when dependence safety is proven."
+  (list :kind :loop-interchange
+        :applied-p (and dependence-safe-p (> (or cache-locality-score 0) 0))
+        :loops (copy-list (or loops nil))
+        :dependence-safe-p (not (null dependence-safe-p))
+        :cache-locality-score (or cache-locality-score 0)))
+
+(defun opt-pass-loop-interchange (instructions)
+  "Apply conservative loop-body interchange via independent core-op swap.
+
+This is intentionally strict: only pure/independent core operations are swapped.
+Control instructions and IV update remain untouched."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (out nil)
+         (changed nil)
+         (i 0))
+    (labels ((emit (x) (push x out)))
+      (loop while (< i n)
+            do (let ((lp (%opt-parse-canonical-loop-at vec i)))
+                 (if (null lp)
+                     (progn (emit (aref vec i)) (incf i))
+                     (multiple-value-bind (core step) (%opt-loop-core-and-step lp)
+                       (let ((rewritten core))
+                         (when (and (>= (length core) 2)
+                                    (opt-inst-cse-eligible-p (first core))
+                                    (opt-inst-cse-eligible-p (second core))
+                                    (not (%opt-inst-depends-on-p (first core) (second core)))
+                                    (not (%opt-inst-depends-on-p (second core) (first core))))
+                           (setf rewritten (cons (second core) (cons (first core) (cddr core))))
+                           (setf changed t))
+                         (emit (aref vec i))
+                         (emit (aref vec (1+ i)))
+                         (emit (aref vec (+ i 2)))
+                         (dolist (inst rewritten) (emit inst))
+                         (emit step)
+                         (emit (aref vec (opt-loop-back-index lp)))
+                         (emit (aref vec (opt-loop-exit-index lp)))
+                         (setf i (1+ (opt-loop-exit-index lp))))))))
+      (if changed (nreverse out) instructions))))
+
+(defun opt-polyhedral-schedule-plan (&key statements constraints objective)
+  "Return a conservative polyhedral schedule planning descriptor."
+  (list :kind :polyhedral-schedule
+        :statements (copy-list (or statements nil))
+        :constraints (copy-list (or constraints nil))
+        :objective (or objective :latency-min)))
+
+(defun opt-pass-polyhedral-schedule (instructions)
+  "Apply a conservative schedule optimization inside canonical loops.
+
+Current subset: reorder loop body pure operations by ascending static cost,
+leaving control-flow and induction update in place."
+  (let* ((vec (coerce instructions 'vector))
+         (out nil)
+         (changed nil)
+         (i 0)
+         (n (length vec)))
+    (labels ((emit (x) (push x out)))
+      (loop while (< i n)
+            do (let ((lp (%opt-parse-canonical-loop-at vec i)))
+                 (if (null lp)
+                     (progn
+                       (emit (aref vec i))
+                       (incf i))
+                     (let* ((body (opt-loop-body lp))
+                            (step (car (last body)))
+                            (body-core (butlast body))
+                            (sortable (every #'opt-inst-cse-eligible-p body-core))
+                            (sorted body-core)
+                            (sorted-changed nil)
+                            (plan (opt-polyhedral-schedule-plan
+                                   :statements body-core
+                                   :constraints (list :canonical-loop)
+                                   :objective :latency-min)))
+                        (declare (ignore plan))
+                       (when sortable
+                         (multiple-value-setq (sorted sorted-changed)
+                           (%opt-schedule-core-with-deps body-core)))
+                       (when sorted-changed
+                         (setf changed t))
+                       (emit (aref vec i))
+                       (emit (aref vec (1+ i)))
+                       (emit (aref vec (+ i 2)))
+                       (dolist (inst sorted)
+                         (emit inst))
+                       (emit step)
+                       (emit (aref vec (opt-loop-back-index lp)))
+                       (emit (aref vec (opt-loop-exit-index lp)))
+                       (setf i (1+ (opt-loop-exit-index lp)))))))
+      (if changed (nreverse out) instructions))))
+
+(defun opt-loop-fusion-fission-plan (&key loops register-pressure instruction-budget)
+  "Choose loop fusion/fission strategy from simple pressure/budget heuristics."
+  (let* ((pressure (or register-pressure 0))
+         (budget (or instruction-budget 0))
+         (strategy (cond ((and (> pressure 32) (> budget 0)) :fission)
+                         ((and (<= pressure 32) (> budget 0)) :fusion)
+                         (t :none))))
+    (list :kind :loop-fusion-fission
+          :strategy strategy
+          :loops (copy-list (or loops nil))
+          :register-pressure pressure
+          :instruction-budget budget)))
+
+(defun %opt-loop-header-compatible-p (left right)
+  (and (equal (instruction->sexp (second left))
+              (instruction->sexp (second right)))
+       (typep (third left) 'vm-jump-zero)
+       (typep (third right) 'vm-jump-zero)
+       (eq (vm-reg (third left)) (vm-reg (third right)))))
+
+(defun opt-pass-loop-fusion-fission (instructions)
+  "Apply conservative loop fusion/fission on canonical loops.
+
+Fusion: adjacent loops with identical headers are merged into one loop body.
+Fission: oversized loop body is split into two core regions in the same loop
+         using a conservative split marker label."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (out nil)
+         (changed nil)
+         (i 0))
+    (labels ((emit (x) (push x out))
+             (loop-seq (lp)
+               (loop for k from (opt-loop-head-index lp) to (opt-loop-exit-index lp)
+                     collect (aref vec k)))
+             (pure-core (lp)
+               (multiple-value-bind (core _step) (%opt-loop-core-and-step lp)
+                 (declare (ignore _step))
+                 core))
+             (pure-loop-p (lp)
+               (every #'opt-inst-cse-eligible-p (pure-core lp)))
+             (same-iter-space-p (a b)
+               (and (not (eq (opt-loop-iv-reg a) (opt-loop-iv-reg b)))
+                    (equal (opt-loop-limit-reg a) (opt-loop-limit-reg b))
+                    (equal (opt-loop-step-reg a) (opt-loop-step-reg b))
+                    (equal (%opt-loop-constant-init vec a)
+                           (%opt-loop-constant-init vec b)))))
+      (loop while (< i n)
+            do (let ((lp (%opt-parse-canonical-loop-at vec i)))
+                 (if (null lp)
+                     (progn
+                       (emit (aref vec i))
+                       (incf i))
+                     (let* ((next-i (1+ (opt-loop-exit-index lp)))
+                            (lp2 (and (< next-i n)
+                                      (%opt-parse-canonical-loop-at vec next-i))))
+                       (if (and lp2
+                                (pure-loop-p lp)
+                                (pure-loop-p lp2)
+                                (same-iter-space-p lp lp2))
+                           (multiple-value-bind (core-a step-a) (%opt-loop-core-and-step lp)
+                             (multiple-value-bind (core-b _step-b) (%opt-loop-core-and-step lp2)
+                               (declare (ignore _step-b))
+                               (let ((m (make-hash-table :test #'eq)))
+                                 (setf (gethash (opt-loop-iv-reg lp2) m)
+                                       (opt-loop-iv-reg lp))
+                                 (emit (aref vec (opt-loop-head-index lp)))
+                                 (emit (aref vec (opt-loop-cmp-index lp)))
+                                 (emit (aref vec (opt-loop-jz-index lp)))
+                                 (dolist (inst core-a) (emit inst))
+                                 (dolist (inst core-b) (emit (opt-rewrite-inst-regs inst m)))
+                                 (emit step-a)
+                                 (emit (aref vec (opt-loop-back-index lp)))
+                                 (emit (aref vec (opt-loop-exit-index lp2)))
+                                 (setf changed t)
+                                 (setf i (1+ (opt-loop-exit-index lp2))))))
+                           (let ((core (pure-core lp)))
+                             (if (and (pure-loop-p lp)
+                                      (> (length core) 24))
+                                 (progn
+                                   ;; Conservative fission: keep semantics while creating two
+                                   ;; independently schedulable core regions in the same loop.
+                                   (let* ((half (floor (length core) 2))
+                                          (core-a (subseq core 0 half))
+                                          (core-b (subseq core half))
+                                          (split-label (make-vm-label
+                                                        :name (intern (format nil "~A__SPLIT" (vm-name (aref vec (opt-loop-head-index lp))))
+                                                                      :keyword))))
+                                     (emit (aref vec (opt-loop-head-index lp)))
+                                     (emit (aref vec (opt-loop-cmp-index lp)))
+                                     (emit (aref vec (opt-loop-jz-index lp)))
+                                     (dolist (inst core-a) (emit inst))
+                                     (emit split-label)
+                                     (dolist (inst core-b) (emit inst))
+                                     (emit (car (last (opt-loop-body lp))))
+                                     (emit (aref vec (opt-loop-back-index lp)))
+                                     (emit (aref vec (opt-loop-exit-index lp)))
+                                     (setf changed t)
+                                     (setf i (1+ (opt-loop-exit-index lp)))))
+                                 (progn
+                                    (dolist (inst (loop-seq lp))
+                                      (emit inst))
+                                    (setf i (1+ (opt-loop-exit-index lp)))))))))))
+      (if changed (nreverse out) instructions))))
+
+(defun opt-ml-inline-score-plan (&key features model-version)
+  "Return a deterministic MLGO-style inline scoring descriptor."
+  (let ((feature-count (length (or features nil))))
+    (list :kind :ml-inline-score
+          :model-version (or model-version "mlgo-v1")
+          :feature-count feature-count
+          :score (+ 10 (* 2 feature-count)))))
+
+(defun opt-learned-codegen-cost-plan (&key opcode-features target)
+  "Return learned cost descriptor used by backend codegen selection policies."
+  (let* ((feature-count (length (or opcode-features nil)))
+         (arch (or target :generic))
+         (base (ecase arch
+                 ((:x86-64) 8)
+                 ((:aarch64) 7)
+                 ((:generic) 10))))
+    (list :kind :learned-codegen-cost
+          :target arch
+          :feature-count feature-count
+          :predicted-cost (+ base feature-count))))

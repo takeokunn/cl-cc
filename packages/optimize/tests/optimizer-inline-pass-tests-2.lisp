@@ -18,6 +18,15 @@
                       (make-vm-ret   :reg :r0)))
     (assert-true (>= (cl-cc/optimize::opt-inline-inst-cost inst) 0))))
 
+(deftest opt-inline-inst-cost-target-difference
+  "Learned target-aware normalization keeps x86-64/aarch64 cost differences visible."
+  (let ((inst (make-vm-add :dst :r0 :lhs :r1 :rhs :r2)))
+    (let ((cl-cc/optimize::*opt-learned-cost-target* :x86-64))
+      (let ((x86-cost (cl-cc/optimize::opt-inline-inst-cost inst)))
+        (let ((cl-cc/optimize::*opt-learned-cost-target* :aarch64))
+          (let ((a64-cost (cl-cc/optimize::opt-inline-inst-cost inst)))
+            (assert-true (/= x86-cost a64-cost))))))))
+
 ;;; ─── opt-inline-body-cost ───────────────────────────────────────────────────
 
 (deftest-each opt-inline-body-cost-cases
@@ -50,6 +59,19 @@
          (def (list :closure ci :params '(:r0) :body (list (make-vm-ret :reg :r0))))
          (threshold (cl-cc/optimize::opt-adaptive-inline-threshold def)))
     (assert-true (>= threshold 8))))
+
+(deftest opt-adaptive-threshold-ml-bonus-unit
+  "Adaptive threshold gets an ML bonus when the ML score hook is enabled."
+  (let* ((ci (make-vm-closure :dst :r9 :label "cheap" :params '(:r0) :captured nil))
+         (body (append (loop repeat 6 collect (make-vm-move :dst :r1 :src :r0))
+                       (list (make-vm-ret :reg :r1))))
+         (def (list :closure ci :params '(:r0) :body body)))
+    (let ((cl-cc/optimize::*opt-enable-ml-inline-score* nil))
+      (let ((without-ml (cl-cc/optimize::opt-adaptive-inline-threshold def)))
+        (let ((cl-cc/optimize::*opt-enable-ml-inline-score* t)
+              (cl-cc/optimize::*opt-inline-ml-model-version* "mlgo-v2"))
+          (assert-true (>= (cl-cc/optimize::opt-adaptive-inline-threshold def)
+                           without-ml)))))))
 
 ;;; ─── opt-inline-eligible-p ──────────────────────────────────────────────────
 

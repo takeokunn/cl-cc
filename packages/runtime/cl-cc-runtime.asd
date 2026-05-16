@@ -14,8 +14,9 @@
   :pathname "src"
   :serial t
   :components
-  ((:file "package")
-   (:file "runtime")
+   ((:file "package")
+    (:file "runtime-region")
+    (:file "runtime")
    (:file "runtime-ops")
    (:file "runtime-strings")
    (:file "runtime-math-io")

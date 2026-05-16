@@ -97,7 +97,23 @@ Returns (values next-pc halt-p result) like execute-instruction."
                  (vm-method-call-stack state))
           (vm-profile-enter-call state (vm-closure-entry-label first-method))
           (vm-bind-closure-args first-method state all-arg-values)
-          (values (vm-label-table-lookup labels (vm-closure-entry-label first-method)) nil nil)))))
+           (values (vm-label-table-lookup labels (vm-closure-entry-label first-method)) nil nil)))))
+
+(defun %vm-defunctionalized-dispatch (state closure)
+  "Resolve CLOSURE through a lightweight defunctionalized dispatch tag.
+
+This keeps an explicit tagged-dispatch step for known global closures while
+preserving existing closure semantics."
+  (let ((tag (and (typep closure 'vm-closure-object)
+                  (vm-closure-dispatch-tag closure))))
+    (if (null tag)
+        closure
+        (ecase (car tag)
+          (:known-function
+           (or (gethash (cdr tag) (vm-function-registry state))
+               closure))
+          (:anonymous
+           closure)))))
 
 (defun %vm-dispatch-call (func state pc labels arg-regs dst-reg tail-p)
   "Shared call dispatch for vm-call and vm-tail-call.
@@ -117,19 +133,20 @@ Returns (values next-pc halt-p result) like execute-instruction."
        (values (1+ pc) nil nil))
     ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
     (t
-      (let ((arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
-        (if (and (vm-closure-program-flat func)
-                 (vm-closure-label-table func)
+      (let* ((resolved-func (%vm-defunctionalized-dispatch state func))
+             (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+        (if (and (vm-closure-program-flat resolved-func)
+                 (vm-closure-label-table resolved-func)
                  (or (not *vm-exec-flat*)
-                     (not (eq (vm-closure-program-flat func) *vm-exec-flat*))
-                     (not (eq (vm-closure-label-table func) *vm-exec-labels*))))
+                     (not (eq (vm-closure-program-flat resolved-func) *vm-exec-flat*))
+                     (not (eq (vm-closure-label-table resolved-func) *vm-exec-labels*))))
             (progn
-              (vm-reg-set state dst-reg (%vm-call-closure-sync func state arg-values))
+              (vm-reg-set state dst-reg (%vm-call-closure-sync resolved-func state arg-values))
               (values (1+ pc) nil nil))
             (progn
               (unless tail-p
                 (vm-push-call-frame state (1+ pc) dst-reg)
                 (push nil (vm-method-call-stack state)))
-              (vm-profile-enter-call state (vm-closure-entry-label func) :tail-p tail-p)
-              (vm-bind-closure-args func state arg-values)
-              (values (vm-label-table-lookup labels (vm-closure-entry-label func)) nil nil)))))))
+              (vm-profile-enter-call state (vm-closure-entry-label resolved-func) :tail-p tail-p)
+              (vm-bind-closure-args resolved-func state arg-values)
+              (values (vm-label-table-lookup labels (vm-closure-entry-label resolved-func)) nil nil)))))))

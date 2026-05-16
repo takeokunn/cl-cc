@@ -15,11 +15,56 @@
   "PGO-guided multiplier for adaptive inline thresholds.
 1 means no change; values >1 make inlining more aggressive for hot profiles.")
 
+(defparameter *opt-enable-ml-inline-score* t
+  "When non-NIL, adaptive inlining also consults ML-guided score helpers.")
+
+(defparameter *opt-inline-ml-model-version* "mlgo-v2"
+  "Model version tag passed to `opt-ml-inline-score-plan`.")
+
+(defparameter *opt-learned-cost-target* :generic
+  "Target architecture hint for learned inline cost adjustment.")
+
+(defun %opt-inline-score-features (def)
+  "Build coarse feature tags for ML-guided inline score estimation."
+  (let* ((body (butlast (getf def :body)))
+         (inst-count (length body))
+         (call-heavy-p (some (lambda (inst)
+                               (typep inst '(or vm-call vm-generic-call vm-apply)))
+                             body))
+         (cheap-count (count-if (lambda (inst)
+                                  (<= (egraph-default-cost (vm-inst-to-enode-op inst) nil) 1))
+                                body))
+         (cheap-ratio (if (zerop inst-count) 1.0 (/ cheap-count inst-count))))
+    (remove nil
+            (list (if (<= inst-count 6) :small-body :large-body)
+                  (when (>= cheap-ratio 0.75) :cheap-body)
+                  (when call-heavy-p :call-heavy)))))
+
+(defun %opt-ml-inline-threshold-bonus (def)
+  "Translate ML inline score into a small threshold bonus."
+  (if (and *opt-enable-ml-inline-score*
+           (fboundp 'opt-ml-inline-score-plan))
+      (let* ((plan (opt-ml-inline-score-plan
+                    :features (%opt-inline-score-features def)
+                    :model-version *opt-inline-ml-model-version*))
+             (score (or (getf plan :score) 0)))
+        (cond ((>= score 16) 6)
+              ((>= score 12) 3)
+              (t 0)))
+      0))
+
 (defun opt-inline-inst-cost (inst)
   "Return the inline cost of INST using the shared e-graph opcode table.
 This keeps inlining policy aligned with the optimizer's existing cost model
 instead of relying on raw instruction count."
-  (egraph-default-cost (vm-inst-to-enode-op inst) nil))
+  (let* ((base (egraph-default-cost (vm-inst-to-enode-op inst) nil))
+         (learned (and (fboundp 'opt-learned-codegen-cost-plan)
+                       (opt-learned-codegen-cost-plan
+                        :opcode-features (list (vm-inst-to-enode-op inst))
+                        :target *opt-learned-cost-target*)))
+         (predicted (or (and learned (getf learned :predicted-cost)) 10))
+         (normalized (max 1 (ceiling predicted 4))))
+    (+ base normalized)))
 
 (defun opt-inline-body-cost (body)
   "Return the total inline cost of BODY, excluding the final vm-ret."
@@ -32,7 +77,7 @@ call-heavy bodies are kept near the base threshold."
   (let* ((body (butlast (getf def :body)))
          (inst-count (length body))
          (cheap-count (count-if (lambda (inst)
-                                  (<= (opt-inline-inst-cost inst) 1))
+                                  (<= (egraph-default-cost (vm-inst-to-enode-op inst) nil) 1))
                                 body))
          (call-heavy-p (some (lambda (inst)
                                (typep inst '(or vm-call vm-generic-call vm-apply)))
@@ -46,11 +91,12 @@ call-heavy bodies are kept near the base threshold."
                           ((>= cheap-ratio 0.75) 20)
                           ((>= cheap-ratio 0.50) 8)
                           (t 0)))))
-           (scaled (if (and (integerp *opt-inline-threshold-scale*)
-                            (> *opt-inline-threshold-scale* 1))
-                       (* raw *opt-inline-threshold-scale*)
-                       raw)))
-      (min max-threshold scaled))))
+            (scaled (if (and (integerp *opt-inline-threshold-scale*)
+                             (> *opt-inline-threshold-scale* 1))
+                        (* raw *opt-inline-threshold-scale*)
+                        raw))
+            (with-ml (+ scaled (%opt-ml-inline-threshold-bonus def))))
+      (min max-threshold with-ml))))
 
 (defun opt-inline-eligible-p (def threshold)
   "Return T if DEF satisfies all inlining preconditions:

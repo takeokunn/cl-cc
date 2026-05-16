@@ -10,8 +10,12 @@
 (defclass vm-hash-table-object ()
   ((table :initarg :table :reader vm-hash-table-internal
           :documentation "The underlying Common Lisp hash table")
+   (shared-p :initarg :shared-p :initform nil :accessor vm-hash-table-shared-p
+             :documentation "When true, next write performs copy-on-write detach.")
+   (refcount :initarg :refcount :initform 1 :accessor vm-hash-table-refcount
+             :documentation "Approximate sharing count used by VM hash COW.")
    (lock :initarg :lock :reader vm-hash-table-lock
-         :documentation "Per-table lock used by fallback critical section path.")
+          :documentation "Per-table lock used by fallback critical section path.")
    (htm-abort-count :initform 0 :accessor vm-hash-table-htm-abort-count
                     :documentation "Observed HTM transaction abort count for this table."))
   (:documentation "Represents a hash table in the VM heap."))
@@ -55,6 +59,35 @@ abort count and retry under table lock fallback path."
             (incf (vm-hash-table-htm-abort-count table-obj))
             (fallback)))
         (fallback))))
+
+(defun vm-hash-ensure-writable (table-obj)
+  "Ensure TABLE-OBJ is writable for mutation under copy-on-write policy."
+  (when (and (typep table-obj 'vm-hash-table-object)
+             (or (vm-hash-table-shared-p table-obj)
+                 (> (vm-hash-table-refcount table-obj) 1)))
+    (let* ((src (vm-hash-table-internal table-obj))
+           (copy (make-hash-table :test (hash-table-test src))))
+      (maphash (lambda (k v) (setf (gethash k copy) v)) src)
+      (setf (slot-value table-obj 'table) copy
+            (vm-hash-table-shared-p table-obj) nil
+            (vm-hash-table-refcount table-obj) 1)))
+  table-obj)
+
+(defun vm-cow-copy-hash-table (table-obj)
+  "Return a logically copied hash object; writes detach on first mutation."
+  (if (typep table-obj 'vm-hash-table-object)
+      (progn
+        (setf (vm-hash-table-shared-p table-obj) t)
+        (incf (vm-hash-table-refcount table-obj))
+        (make-instance 'vm-hash-table-object
+                       :table (vm-hash-table-internal table-obj)
+                       :shared-p t
+                       :refcount (vm-hash-table-refcount table-obj)
+                       :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-table-lock")
+                             #-sb-thread nil))
+      (let ((copy (make-hash-table :test (hash-table-test table-obj))))
+        (maphash (lambda (k v) (setf (gethash k copy) v)) table-obj)
+        copy)))
 
 ;;; Hash Table Instruction Classes
 

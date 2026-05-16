@@ -154,8 +154,8 @@
 ;;; ─── *x86-64-emitter-entries* / *x86-64-emitter-table* ─────────────────────
 
 (deftest x86-64-emitter-table-integrity
-  "*x86-64-emitter-entries* has 70 entries; each entry appears in *x86-64-emitter-table*."
-  (assert-= 70 (length cl-cc/codegen::*x86-64-emitter-entries*))
+  "*x86-64-emitter-entries* has 84 entries; each entry appears in *x86-64-emitter-table*."
+  (assert-= 84 (length cl-cc/codegen::*x86-64-emitter-entries*))
   (dolist (entry cl-cc/codegen::*x86-64-emitter-entries*)
     (assert-true (gethash (car entry) cl-cc/codegen::*x86-64-emitter-table*))))
 
@@ -171,6 +171,18 @@
          (bytes (cl-cc/codegen::compile-to-x86-64-bytes prog)))
     (assert-= 1 (length bytes))
     (assert-= #xC3 (aref bytes 0))))
+
+(deftest x86-64-sanitizer-flags-enable-stack-protector-policy
+  "Passing sanitizer flags to compile-to-x86-64-bytes enables stack-protector policy during emission."
+  (let* ((prog (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
+         (saw-stack-protector nil))
+    (with-replaced-function (cl-cc/codegen::emit-vm-program
+                             (lambda (program stream)
+                               (declare (ignore program stream))
+                               (setf saw-stack-protector cl-cc/codegen::*x86-64-stack-protector-enabled*)
+                               nil))
+      (cl-cc/codegen::compile-to-x86-64-bytes prog :asan t)
+      (assert-true saw-stack-protector))))
 
 (deftest x86-64-leaf-and-nonleaf-without-spills-share-fpe-layout
   "Default FPE does not add an RBP frame for leaf or non-leaf programs when no spill frame is needed."
@@ -238,6 +250,134 @@
     (assert-eq :lock-xadd (getf plan :opcode))
     (assert-equal '(:mfence) (getf plan :pre-fence))
     (assert-equal '(:mfence) (getf plan :post-fence))))
+
+(deftest x86-64-stack-canary-plan-materializes-prologue-and-epilogue
+  "x86-64 stack canary plan exposes backend-neutral prologue/epilogue operations."
+  (let ((enabled (cl-cc/codegen::x86-64-stack-canary-plan
+                  :has-stack-buffer-p t
+                  :guard-slot -16
+                  :failure-target 'panic))
+        (disabled (cl-cc/codegen::x86-64-stack-canary-plan
+                   :has-stack-buffer-p nil
+                   :guard-slot -16
+                   :failure-target 'panic)))
+    (assert-true (getf enabled :enabled-p))
+    (assert-equal -16 (getf enabled :guard-slot))
+    (assert-eq 'panic (getf enabled :failure-target))
+    (assert-equal '((:op :load-canary :source :tls-canary :dst :rax)
+                    (:op :store-canary :src :rax :slot -16))
+                  (getf enabled :prologue))
+    (assert-equal '((:op :load-canary :source -16 :dst :rax)
+                    (:op :compare-canary :left :rax :right :tls-canary)
+                    (:op :branch-if-canary-mismatch :target panic))
+                  (getf enabled :epilogue))
+    (assert-false (getf disabled :enabled-p))
+    (assert-null (getf disabled :prologue))
+    (assert-null (getf disabled :epilogue))))
+
+(deftest x86-64-stack-protector-emitter-signature-bytes
+  "Stack protector emitters include FS canary load/compare and mismatch UD2 trap bytes."
+  (let* ((plan (cl-cc/codegen::x86-64-stack-canary-plan
+                :has-stack-buffer-p t
+                :guard-slot -16
+                :failure-target 'panic))
+         (bytes (%x86-collect-bytes
+                 (lambda (stream)
+                   (cl-cc/codegen::emit-x86-64-stack-canary-prologue stream plan t)
+                   (cl-cc/codegen::emit-x86-64-stack-canary-epilogue stream plan t)))))
+    ;; mov rax, qword ptr fs:[0x28]  => 64 48 8B 04 25 28 00 00 00
+    (assert-true (search '(#x64 #x48 #x8B #x04 #x25 #x28 #x00 #x00 #x00) bytes :test #'eql))
+    ;; cmp rax, qword ptr fs:[0x28]  => 64 48 3B 04 25 28 00 00 00
+    (assert-true (search '(#x64 #x48 #x3B #x04 #x25 #x28 #x00 #x00 #x00) bytes :test #'eql))
+    ;; mismatch trap path includes UD2 bytes.
+    (assert-true (search '(#x0F #x0B) bytes :test #'eql))))
+
+(deftest x86-64-cfi-plan-enables-endbr64-for-indirect-calls
+  "x86-64 CFI plan emits ENDBR64 marker when indirect calls are present."
+  (let ((enabled (cl-cc/codegen::x86-64-cfi-plan :has-indirect-calls-p t))
+        (disabled (cl-cc/codegen::x86-64-cfi-plan :has-indirect-calls-p nil)))
+    (assert-true (getf enabled :enabled-p))
+    (assert-eq :endbr64 (getf enabled :entry-opcode))
+    (assert-false (getf disabled :enabled-p))
+    (assert-eq :none (getf disabled :entry-opcode))))
+
+(deftest x86-64-cfi-entry-emits-endbr64-bytes
+  "CFI entry emitter serializes ENDBR64 bytes when enabled."
+  (let ((bytes (%x86-collect-bytes
+                (lambda (stream)
+                  (cl-cc/codegen::emit-x86-64-cfi-entry
+                   stream
+                   (cl-cc/codegen::x86-64-cfi-plan :has-indirect-calls-p t))))))
+    (assert-equal '(#xF3 #x0F #x1E #xFA) bytes)))
+
+(deftest x86-64-program-with-indirect-call-starts-with-endbr64
+  "Full x86-64 program emission inserts ENDBR64 at function entry when indirect call exists."
+  (let* ((program (cl-cc/vm::make-vm-program
+                   :instructions (list (cl-cc:make-vm-call :dst :R0 :func :R1 :args nil)
+                                       (cl-cc:make-vm-halt :reg :R0))
+                   :result-register :R0
+                   :leaf-p nil))
+         (bytes (coerce (cl-cc/codegen::compile-to-x86-64-bytes program) 'list)))
+    (assert-equal '(#xF3 #x0F #x1E #xFA) (subseq bytes 0 4))))
+
+(deftest x86-64-cfi-call-tail-call-size-accounting-matches-guard-bytes
+  "instruction-size accounts for CFI guard bytes on vm-call/vm-tail-call."
+  (let ((cl-cc/codegen::*x86-64-cfi-enabled* t)
+        (cl-cc/codegen::*x86-64-use-retpoline* nil))
+    (assert-= 34
+             (cl-cc/codegen::instruction-size
+              (cl-cc:make-vm-call :dst :R0 :func :R1 :args nil)))
+    (assert-= 31
+             (cl-cc/codegen::instruction-size
+              (cl-cc:make-vm-tail-call :dst :R0 :func :R1 :args nil)))))
+
+(deftest x86-64-program-has-stack-buffer-p-detects-array-vector-ops
+  "Stack-buffer detector turns true for array/vector-like VM instructions."
+  (assert-true
+   (cl-cc/codegen::x86-64-program-has-stack-buffer-p
+    (list (cl-cc:make-vm-make-array :dst :R0 :size-reg :R1 :initial-element nil))))
+  (assert-true
+   (cl-cc/codegen::x86-64-program-has-stack-buffer-p
+    (list (cl-cc:make-vm-aset :array-reg :R0 :index-reg :R1 :val-reg :R2))))
+  (assert-true
+   (cl-cc/codegen::x86-64-program-has-stack-buffer-p
+    (list (cl-cc:make-vm-set-fill-pointer :dst :R0 :array-reg :R1 :val-reg :R2))))
+  (assert-false
+   (cl-cc/codegen::x86-64-program-has-stack-buffer-p
+    (list (cl-cc:make-vm-const :dst :R0 :value 1)))))
+
+(deftest x86-64-program-has-nonlocal-control-p-detects-condition-handlers
+  "Shadow-stack nonlocal detector turns true for condition/restart VM ops."
+  (assert-true
+   (cl-cc/codegen::x86-64-program-has-nonlocal-control-p
+    (list (cl-cc:make-vm-signal :condition-reg :R0))))
+  (assert-false
+   (cl-cc/codegen::x86-64-program-has-nonlocal-control-p
+    (list (cl-cc:make-vm-const :dst :R0 :value 1)))))
+
+(deftest x86-64-ibrs-token-present-p-detects-common-host-feature-formats
+  "IBRS detector recognizes Linux/Darwin style capability strings."
+  (assert-true
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "flags\t: fpu vme ibrs avx2"))
+  (assert-true
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "machdep.cpu.features: SSE4.2,IBRS,AVX2"))
+  (assert-true
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "machdep.cpu.features: SSE4.2,eIBRS,AVX2"))
+  (assert-false
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "flags\t: fpu vme avx2"))
+  (assert-false
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "flags\t: fpu vme noibrs avx2"))
+  (assert-false
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "flags\t: fpu vme ibrs2 avx2"))
+  (assert-false
+   (cl-cc/codegen::x86-64-ibrs-token-present-p
+    "machdep.cpu.features: SSE4.2,eibrs_disabled,AVX2")))
 
 ;;; ─── Byte-collection helper ─────────────────────────────────────────────────
 ;;; Used by x86-64-codegen-emitter-tests and x86-64-codegen-insn-tests,

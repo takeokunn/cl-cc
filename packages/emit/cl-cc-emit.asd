@@ -7,4 +7,8 @@
   :pathname "src"
   :serial t
   :components
-  ((:file "package")))
+  ((:file "package")
+   (:file "gpu")
+   (:file "apple-ane")
+   (:file "ebpf")
+   (:file "fpga")))
