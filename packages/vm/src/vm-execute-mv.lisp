@@ -112,8 +112,21 @@
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-clear-values) state pc labels)
-  (declare (ignore labels inst))
+  (declare (ignore labels))
   (setf (vm-values-list state) nil)
+  (values (1+ pc) nil nil))
+
+;;; FR-073: Multiple values via registers (≤3)
+(defmethod execute-instruction ((inst vm-values-regs) state pc labels)
+  "Store up to 3 values in the VM values buffer without heap allocation.
+   The native codegen maps these to physical return registers (RAX/RDX/RCX)."
+  (declare (ignore labels))
+  (let ((vals (list (vm-reg-get state (vm-vr0 inst)))))
+    (when (>= (vm-vr-count inst) 2)
+      (push (vm-reg-get state (vm-vr1 inst)) vals))
+    (when (>= (vm-vr-count inst) 3)
+      (push (vm-reg-get state (vm-vr2 inst)) vals))
+    (setf (vm-values-list state) (nreverse vals)))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-ensure-values) state pc labels)

@@ -250,7 +250,8 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-const        . emit-vm-const)
     (vm-move         . emit-vm-move)
     (vm-add          . emit-vm-add)
-    (vm-integer-add  . emit-vm-add)
+    ;; FR-171: vm-integer-add uses LEA optimization (active)
+    (vm-integer-add  . emit-vm-integer-add)
     (vm-float-add    . emit-vm-float-add)
     (vm-sub          . emit-vm-sub)
     (vm-integer-sub  . emit-vm-sub)
@@ -274,6 +275,8 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-asin-inst    . emit-vm-asin)
     (vm-acos-inst    . emit-vm-acos)
     (vm-atan-inst    . emit-vm-atan)
+    ;; FR-298: vm-print with real I/O (indirect call through R11)
+    (vm-print        . emit-vm-print)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)
@@ -340,7 +343,9 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (cl-cc/vm::vm-sync-handler-regs . emit-vm-shadow-stack-control-inst)
     (cl-cc/vm::vm-signal-error      . emit-vm-shadow-stack-control-inst)
     (cl-cc/vm::vm-establish-catch   . emit-vm-shadow-stack-control-inst)
-    (cl-cc/vm::vm-throw             . emit-vm-shadow-stack-control-inst))
+    (cl-cc/vm::vm-throw             . emit-vm-shadow-stack-control-inst)
+    ;; FR-073: Multiple values via registers (active)
+    (vm-values-regs  . emit-vm-values-regs))
   "Alist mapping VM instruction type symbols to emitter function names.")
 
 (defparameter *x86-64-emitter-table*
@@ -354,7 +359,7 @@ materializes explicit CET SS instructions under the shadow-stack gate:
   (let ((tp (type-of inst)))
     (cond
       ;; No-op instructions
-      ((or (eq tp 'vm-label) (eq tp 'vm-print)) nil)
+      ((eq tp 'vm-label) nil)
       ;; Jump instructions need extra args (current-pos, label-offsets)
       ((eq tp 'vm-jump)
        (emit-vm-jump-inst inst stream current-pos label-offsets))

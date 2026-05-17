@@ -56,10 +56,12 @@
   (:sexp-tag :register-method))
 
 (define-vm-instruction vm-generic-call (vm-instruction)
-  "Dispatch and call a generic function method."
+  "Dispatch and call a generic function method.
+   FR-009: ic-cache slot stores (key method gen) for monomorphic inline cache."
   (dst nil :reader vm-dst)
   (gf-reg nil :reader vm-gf-reg)
   (args nil :reader vm-args)
+  (ic-cache nil :accessor vm-ic-cache)
   (:sexp-tag :generic-call))
 
 ;;; ── Slot predicate instructions ──────────────────────────────────────────

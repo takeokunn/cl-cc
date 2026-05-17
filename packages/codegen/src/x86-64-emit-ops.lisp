@@ -143,7 +143,64 @@
 (define-float-libm-unary-emitter emit-vm-acos "acos")
 (define-float-libm-unary-emitter emit-vm-atan "atan")
 
+;;; FR-298: Runtime function address resolution (same pattern as libm calls)
+
+(defun %runtime-function-address (name)
+  "Resolve the address of a runtime function NAME at load-time via FFI.
+   Returns a raw address suitable for indirect CALL through R11."
+  (sb-sys:sap-int
+   (sb-alien:alien-sap
+    (sb-alien:extern-alien name (function sb-alien:void)))))
+
+(defun emit-vm-print (inst stream)
+  "Emit code for VM PRINT instruction (FR-298).
+   Moves value to RDI (SysV ABI first arg), resolves rt-print address via FFI,
+   and calls via R11.  Uses the same indirect-call pattern as libm transcendentals."
+  (let ((src (vm-reg-to-x86 (vm-reg inst))))
+    ;; MOV RDI, src — pass value as first argument
+    (unless (= src +rdi+)
+      (emit-mov-rr64 +rdi+ src stream))
+    ;; MOV R11, rt-print-address — resolve at load-time
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_print")) stream)
+    ;; CALL R11 — indirect call to runtime
+    (emit-call-r64 +r11+ stream)))
+
+;;; FR-073: Multiple Values via Registers
+(defun emit-vm-values-regs (inst stream)
+  "Emit code for VM-VALUES-REGS: place up to 3 values in return registers.
+   RAX = reg0, RDX = reg1, RCX = reg2.  Avoids list allocation."
+  (let* ((count (vm-vr-count inst))
+         (r0 (vm-reg-to-x86 (vm-vr0 inst))))
+    ;; Value 1 → RAX
+    (unless (= r0 +rax+)
+      (emit-mov-rr64 +rax+ r0 stream))
+    (when (>= count 2)
+      (let ((r1 (vm-reg-to-x86 (vm-vr1 inst))))
+        (unless (= r1 +rdx+)
+          (emit-mov-rr64 +rdx+ r1 stream))))
+    (when (>= count 3)
+      (let ((r2 (vm-reg-to-x86 (vm-vr2 inst))))
+        (unless (= r2 +rcx+)
+          (emit-mov-rr64 +rcx+ r2 stream))))))
+
 (define-binary-alu-emitter emit-vm-add    emit-add-rr64  "vm-add: dst = lhs + rhs.")
+
+;; FR-171: LEA optimization for vm-add when dst == lhs (common SSA pattern).
+;; Replaces MOV dst,lhs + ADD dst,rhs (6 bytes) with LEA dst,[lhs+rhs] (4 bytes).
+(defun emit-vm-integer-add (inst stream)
+  "vm-integer-add: dst = lhs + rhs. Uses LEA when dst equals lhs for 2-byte savings.
+LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (if (and (= dst lhs)
+             ;; Guard: LEA mod=00+SIB requires base != RBP/R13 and index != RSP/R12
+             (not (member lhs '(#.+rbp+ #.+r13+)))
+             (not (member rhs '(#.+rsp+ #.+r12+))))
+        (emit-lea-rr64 dst lhs rhs stream 1)
+        (progn
+          (emit-mov-rr64 dst lhs stream)
+          (emit-add-rr64 dst rhs stream)))))
 (define-binary-alu-emitter emit-vm-sub    emit-sub-rr64  "vm-sub: dst = lhs - rhs.")
 (define-binary-alu-emitter emit-vm-mul    emit-imul-rr64 "vm-mul: dst = lhs * rhs.")
 

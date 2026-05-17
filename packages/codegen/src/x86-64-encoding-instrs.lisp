@@ -80,6 +80,37 @@
   (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
                                src base index scale offset stream))
 
+;;; ── LEA instruction (FR-171) ─────────────────────────────────────────────────
+
+(defun emit-lea-rr64 (dst base index stream &optional (scale 1))
+  "LEA dst, [base + index*SCALE] — 64-bit load effective address.
+SCALE must be 1, 2, 4, or 8.  Uses memory form with SIB byte.
+Safety: base=RBP/R13 requires disp8/disp32 with mod=00; index=RSP/R12 is invalid.
+The caller (emit-vm-integer-add) ensures base/index come from regalloc which
+avoids RBP/R13/RSP/R12 for LEA operands."
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :x (ash index -3) :b (ash base -3)) stream)
+  (emit-byte #x8D stream)
+  ;; MOD=00, REG=dst, R/M=100 (SIB follows).  Safe because regalloc avoids
+  ;; RBP/R13 as base (would need disp8/32) and RSP/R12 as index (invalid).
+  (emit-byte (logior (ash dst 3) #x04) stream)
+  (emit-byte (sib (scale->sib-bits scale) index base) stream))
+
+(defun emit-lea-rr64-offset (dst base offset stream)
+  "LEA dst, [base + OFFSET] — 64-bit load effective address with displacement.
+OFFSET must fit in signed 32 bits.  No index register or scale."
+  (let ((mod (x86-64-memory-mod base offset)))
+    (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash base -3)) stream)
+    (emit-byte #x8D stream)
+    (%emit-modrm-address mod dst base offset stream)))
+
+(defun emit-lea-indexed (dst base index scale offset stream)
+  "LEA dst, [base + index*SCALE + OFFSET] — full indexed LEA.
+SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :x (ash index -3) :b (ash base -3)) stream)
+  (emit-byte #x8D stream)
+  (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
+                                dst base index scale offset stream))
+
 ;;; ── XMM / scalar-double instructions ─────────────────────────────────────────
 
 (defun emit-movq-xmm-r64 (dst-xmm src-gpr stream)
@@ -317,6 +348,28 @@
 (defun emit-je-short (offset stream)
   "JE rel8 (short conditional jump if equal/zero). 74 cb"
   (emit-byte #x74 stream)
+  (emit-byte (logand offset #xFF) stream))
+
+;; FR-403: Short jump encoders for branch displacement optimization
+
+(defun emit-jmp-rel8 (offset stream)
+  "JMP rel8 (short unconditional jump). EB cb"
+  (emit-byte #xEB stream)
+  (emit-byte (logand offset #xFF) stream))
+
+(defun emit-jne-rel8 (offset stream)
+  "JNE rel8 (short jump if not equal/not zero). 75 cb"
+  (emit-byte #x75 stream)
+  (emit-byte (logand offset #xFF) stream))
+
+(defun emit-jns-rel8 (offset stream)
+  "JNS rel8 (short jump if not sign / positive). 79 cb"
+  (emit-byte #x79 stream)
+  (emit-byte (logand offset #xFF) stream))
+
+(defun emit-jge-rel8 (offset stream)
+  "JGE rel8 (short jump if greater or equal, signed). 7D cb"
+  (emit-byte #x7D stream)
   (emit-byte (logand offset #xFF) stream))
 
 ;;; ── Bit-manipulation instructions ────────────────────────────────────────────

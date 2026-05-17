@@ -86,4 +86,8 @@
 
    ;; ELF64 backend
    #:compile-to-elf64
+   #:compile-to-elf64-exec
+   #:make-elf64-executable
+   #:elf64-add-load-segment
+   #:elf64-add-gnu-stack-segment
    #:write-elf64-file))

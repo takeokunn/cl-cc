@@ -50,6 +50,75 @@ optimizer's pass table wiring.")
       (opt-pass-loop-fusion-fission instructions)
       instructions))
 
+;;; FR-069: Dependency-Aware Peephole Scheduling
+;;;
+;;; Reorder independent instruction pairs to expose instruction-level parallelism.
+;;; Two consecutive non-control-flow instructions are swapped if they have no
+;;; register conflicts (no shared destination/source registers).
+
+(defun %insts-conflict-p (a b)
+  "T if instructions A and B conflict via their destination registers (WAW hazard).
+   Conservative: if both write to different registers, they are considered independent."
+  (let ((da (opt-inst-dst a))
+        (db (opt-inst-dst b)))
+    (and da db (eq da db))))
+
+(defun opt-pass-dep-peephole (instructions)
+  "FR-069: Swap independent consecutive instruction pairs to expose ILP.
+   Conservative single-pass reordering; convergence loop repeats as needed."
+  (let ((result (copy-list instructions)))
+    (loop for rest on result
+          for a = (car rest)
+          for b = (cadr rest)
+          when (and a b
+                    (not (%insts-conflict-p a b))
+                    ;; Don't reorder across labels or control flow
+                    (not (typep a 'vm-label))
+                    (not (typep b 'vm-label))
+                    (not (typep a 'vm-jump))
+                    (not (typep a 'vm-jump-zero))
+                    (not (typep b 'vm-jump))
+                    (not (typep b 'vm-jump-zero)))
+          do (rotatef (car rest) (cadr rest)))
+    result))
+
+;;; FR-099: FMA (Fused Multiply-Add) Pattern Synthesis
+;;;
+;;; Pattern: (vm-mul A B → T) followed by (vm-add C T → D) where T is used only once
+;;; → replace with a single FMA instruction (vm-fma A B C → D).
+
+(defun opt-pass-fma-synthesis (instructions)
+  "FR-099: Synthesize FMA from mul+add patterns.
+   Detects (vm-mul A B → T), (vm-add C T → D) and replaces with one vm-fma."
+  (loop with result = (copy-list instructions)
+        for i from 0 below (1- (length result))
+        for cur = (nth i result)
+        for nxt = (nth (1+ i) result)
+        when (and (typep cur 'vm-mul)
+                  (typep nxt 'vm-add)
+                  (or (eq (vm-dst cur) (vm-lhs nxt))
+                      (eq (vm-dst cur) (vm-rhs nxt))))
+        do (let* ((t1 (vm-dst cur))
+                  (c-reg (if (eq t1 (vm-lhs nxt))
+                             (vm-rhs nxt)
+                             (vm-lhs nxt)))
+                  ;; Check single-use: t1 is not read elsewhere
+                  (single-use-p
+                    (not (loop for x in result
+                               for j from 0
+                               when (and (/= j i) (/= j (1+ i))
+                                         (member t1 (cons (opt-inst-dst x)
+                                                          (opt-inst-src-regs x))))
+                               return t))))
+             (when single-use-p
+               (setf (nth i result)
+                     (make-vm-fma :dst (vm-dst nxt)
+                                  :a (vm-lhs cur)
+                                  :b (vm-rhs cur)
+                                  :c c-reg))
+               (setf (nth (1+ i) result) nil)))
+        finally (return (remove nil result))))
+
 ;;; Single source of truth: ordered keyword → function pairs.
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*

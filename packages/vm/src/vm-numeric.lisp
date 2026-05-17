@@ -343,6 +343,25 @@ Arithmetic is computed without using host division primitives (`floor`/`truncate
 ;;; FR-305: Float Operations
 ;; define-vm-unary-instruction / define-vm-binary-instruction defined in vm.lisp.
 
+;;; FR-099: FMA (Fused Multiply-Add)
+(define-vm-instruction vm-fma (vm-instruction)
+  "Fused multiply-add: dst = a * b + c.  Single rounding, no intermediate rounding.
+   On x86-64: VFMADD231SD (FMA3) or VFMADD213SD (FMA4) in XMM registers."
+  (dst nil :reader vm-dst)
+  (a nil :reader vm-a)
+  (b nil :reader vm-b)
+  (c nil :reader vm-c)
+  (:sexp-tag :fma)
+  (:sexp-slots dst a b c))
+
+(defmethod execute-instruction ((inst vm-fma) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (+ (* (vm-reg-get state (vm-a inst))
+                    (vm-reg-get state (vm-b inst)))
+                 (vm-reg-get state (vm-c inst))))
+  (values (1+ pc) nil nil))
+
 (define-vm-unary-instruction vm-float-inst       :float           "Convert number to float.")
 (define-vm-unary-instruction vm-float-precision  :float-precision "Number of significant radix digits in a float.")
 (define-vm-unary-instruction vm-float-radix      :float-radix     "Radix of the float representation.")

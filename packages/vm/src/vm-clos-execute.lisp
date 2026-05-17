@@ -264,13 +264,48 @@
                   (setf (gethash specializer qual-ht) method-closure)
                   ;; Before/after: accumulate methods in a list
                   (push method-closure (gethash specializer qual-ht)))))))
+    ;; FR-009: Invalidate all IC caches for this GF
+    (incf (gethash '__ic-gen__ gf-ht 0))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-generic-call) state pc labels)
   (let* ((gf-ht (vm-reg-get state (vm-gf-reg inst)))
          (arg-regs (vm-args inst))
          (dst-reg (vm-dst inst)))
-    (vm-dispatch-generic-call gf-ht state pc arg-regs dst-reg labels)))
+    ;; FR-009: Check monomorphic inline cache before full dispatch
+    (let ((cache (vm-ic-cache inst))
+          (gf-gen (gethash '__ic-gen__ gf-ht 0)))
+      (when (and cache (consp cache) (>= (length cache) 4)
+                 (eql (nth 3 cache) gf-gen)
+                 (equal (nth 0 cache)
+                        (mapcar (lambda (r) (vm-classify-arg (vm-reg-get state r) state))
+                                arg-regs)))
+        (return-from execute-instruction
+          (let* ((method (nth 1 cache))
+                 (methods (nth 2 cache))
+                 (vals (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+            (vm-push-call-frame state (1+ pc) dst-reg)
+            (push (list gf-ht methods vals) (vm-method-call-stack state))
+            (vm-profile-enter-call state (vm-closure-entry-label method))
+            (vm-bind-closure-args method state vals)
+            (values (vm-label-table-lookup labels (vm-closure-entry-label method))
+                    nil nil)))))
+    ;; Full dispatch + update cache
+    (multiple-value-bind (next-pc halt-p result)
+        (vm-dispatch-generic-call gf-ht state pc arg-regs dst-reg labels)
+      (declare (ignore halt-p result))
+      (let* ((vals (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
+             (methods (vm-get-all-applicable-methods gf-ht state vals))
+             (primary (car methods)))
+        (when primary
+          (setf (vm-ic-cache inst)
+                (list
+                 (mapcar (lambda (r) (vm-classify-arg (vm-reg-get state r) state))
+                         arg-regs)
+                 primary
+                 methods                     ; store full applicable methods for call-next-method
+                 (gethash '__ic-gen__ gf-ht 0)))))
+      (values next-pc halt-p result))))
 
 ;;; FR-677: class-name and class-of
 

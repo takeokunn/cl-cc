@@ -21,6 +21,8 @@
 (defconstant +elf-version-cur+ 1)   ; EV_CURRENT
 (defconstant +elf-osabi-none+  0)   ; ELFOSABI_NONE
 (defconstant +elf-type-rel+    1)   ; ET_REL (relocatable)
+(defconstant +elf-type-exec+   2)   ; ET_EXEC (executable) — FR-291
+(defconstant +elf-type-dyn+    3)   ; ET_DYN (shared object / PIE)
 (defconstant +elf-machine-x86-64+ #x3e)  ; EM_X86_64
 (defconstant +elf-machine-aarch64+ #xB7) ; EM_AARCH64
 
@@ -56,6 +58,23 @@
 (defconstant +r-x86-64-plt32+  4)
 (defconstant +r-x86-64-32+    10)
 (defconstant +r-x86-64-32s+   11)
+
+;;; Program header types (FR-291: ELF executable generation)
+(defconstant +pt-null+    0)    ; PT_NULL
+(defconstant +pt-load+    1)    ; PT_LOAD — loadable segment
+(defconstant +pt-dynamic+ 2)    ; PT_DYNAMIC
+(defconstant +pt-interp+  3)    ; PT_INTERP
+(defconstant +pt-note+    4)    ; PT_NOTE
+(defconstant +pt-phdr+    6)    ; PT_PHDR — program header table
+(defconstant +pt-gnu-stack+ #x6474e551)  ; PT_GNU_STACK
+
+;;; Program header flags
+(defconstant +pf-x+ 1)          ; executable
+(defconstant +pf-w+ 2)          ; writable
+(defconstant +pf-r+ 4)          ; readable
+
+;;; ELF64 program header size
+(defconstant +elf64-phdr-size+ 56)  ; Elf64_Phdr
 
 ;;; ELF64 structure sizes (bytes)
 (defconstant +elf64-ehdr-size+ 64)   ; ELF header
@@ -114,24 +133,32 @@
 ;;; ------------------------------------------------------------
 
 (defstruct (elf64-builder (:conc-name elf64-))
-  "Accumulates sections for an ELF64 relocatable object file."
+  "Accumulates sections for an ELF64 relocatable object file.
+FR-291: Extended with program header and entry point support for executables."
   (machine +elf-machine-x86-64+ :type (unsigned-byte 16))
+  (elf-type +elf-type-rel+ :type (unsigned-byte 16))  ; ET_REL, ET_EXEC, ET_DYN
+  (entry-point 0 :type (unsigned-byte 64))             ; e_entry for executables
   ;; .text section data
   (text-buf    (elf-make-buffer))
   ;; .bss section size in bytes (NOBITS, occupies memory only)
   (bss-size 0 :type integer)
   ;; Relocation entries: list of (offset type sym-name addend)
-  ;; offset = byte offset in .text; sym-name = string; addend = integer
   (rela-entries nil)
   ;; Symbol entries: list of (name binding type section-idx value size)
-  ;; section-idx: 0=undef, 1=.text
   (symbols nil)
   ;; File symbol (index 0 in symtab is always STN_UNDEF)
-  (symbol-count 0))
+  (symbol-count 0)
+  ;; FR-291: Program headers for executable generation
+  ;; List of (type flags offset vaddr paddr filesz memsz align)
+  (phdrs nil))
 
 (defun make-elf64-object (&key (machine +elf-machine-x86-64+))
-  "Create a fresh ELF64 builder."
+  "Create a fresh ELF64 builder for ET_REL (.o file)."
   (make-elf64-builder :machine machine))
+
+(defun make-elf64-executable (&key (machine +elf-machine-x86-64+) (entry-point 0))
+  "Create an ELF64 builder for ET_EXEC (static executable). FR-291."
+  (make-elf64-builder :machine machine :elf-type +elf-type-exec+ :entry-point entry-point))
 
 (defun elf64-add-text-bytes (builder bytes)
   "Append BYTES (vector or list of (unsigned-byte 8)) to .text section."
@@ -160,6 +187,21 @@
     (push (list name +stb-global+ +stt-func+ section-idx value size) (elf64-symbols builder))
     (setf (elf64-symbol-count builder) (1+ idx))
     idx))
+
+;;; FR-291: Program header (segment) support for executables
+
+(defun elf64-add-load-segment (builder vaddr memsz &key (flags (+ +pf-r+ +pf-x+)) (filesz nil) (align #x1000))
+  "Add a PT_LOAD program header covering [VADDR, VADDR+MEMSZ).
+FILESZ defaults to MEMSZ (no .bss tail).  ALIGN defaults to 4KB page.
+FLAGS default to PF_R | PF_X (readable+executable)."
+  (push (list +pt-load+ flags (or filesz memsz) vaddr vaddr filesz memsz align)
+        (elf64-phdrs builder)))
+
+(defun elf64-add-gnu-stack-segment (builder &optional (flags (+ +pf-r+ +pf-w+)))
+  "Add PT_GNU_STACK segment with FLAGS (defaults to RW, no exec).
+Required by Linux kernel for NX (non-executable stack) support."
+  (push (list +pt-gnu-stack+ flags 0 0 0 0 0 0)
+        (elf64-phdrs builder)))
 
 
 ;;; (elf64-build-symtab, elf64-build-rela, elf64-write-shdr, elf64-finalize,

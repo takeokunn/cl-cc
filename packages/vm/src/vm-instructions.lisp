@@ -196,6 +196,21 @@
   "Clear vm-values-list to nil (reset multiple-values buffer before a form)."
   (:sexp-tag :clear-values))
 
+;;; FR-073: Multiple Values via Registers (≤3 values)
+(define-vm-instruction vm-values-regs (vm-instruction)
+  "Return up to 3 values via physical registers (RAX, RDX, RCX) instead of
+   allocating a heap list.  This avoids the list allocation and GC overhead
+   for the common small-values case in native code.
+
+   Only used when the compiler statically knows the arity and the values
+   fit in ≤3 registers.  Falls back to vm-values-list for >3 values."
+  (reg0 nil :reader vm-vr0)   ; value 1 → RAX
+  (reg1 nil :reader vm-vr1)   ; value 2 → RDX (optional)
+  (reg2 nil :reader vm-vr2)   ; value 3 → RCX (optional)
+  (count 0 :reader vm-vr-count)
+  (:sexp-tag :values-regs)
+  (:sexp-slots reg0 reg1 reg2 count))
+
 (define-vm-instruction vm-ensure-values (vm-instruction)
   "If vm-values-list is nil, set it to (list (reg-get SRC)).
    Used after compiling a form for multiple-value-call to normalise

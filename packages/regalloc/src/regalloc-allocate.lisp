@@ -196,7 +196,72 @@ Safety guard: do not force caller-saved for call-crossing intervals."
           (if pool
               (%lsa-allocate-from-pool state interval cc pool)
               (%lsa-evict-and-assign state interval)))))
-    (values (lsa-assignment state) (lsa-spill-map state) (lsa-spill-count state))))
+    ;; FR-199: Apply spill slot sharing / stack coloring.
+    ;; Compute the actual spill count from the colored map's max slot index.
+    (let ((colored-map (%maybe-color-spill-slots intervals (lsa-spill-map state)))
+          (max-slot 0))
+      (maphash (lambda (vreg slot)
+                 (declare (ignore vreg))
+                 (setf max-slot (max max-slot slot)))
+               colored-map)
+      ;; colored-count = max-slot (non-inclusive, slots are 1-indexed)
+      (values (lsa-assignment state) colored-map
+              (max (lsa-spill-count state) max-slot)))))
+
+;;; FR-199: Spill Slot Sharing / Stack Coloring
+;;;
+;;; After linear scan, spilled vregs whose live ranges do not overlap are assigned
+;;; the same stack slot via greedy interval-graph coloring.  This reduces O(N)
+;;; stack slots to O(χ(G)), where χ(G) is the chromatic number of the interference
+;;; graph of spilled intervals.
+
+(defun regalloc-color-spill-slots (intervals spill-map)
+  "Assign shared spill slots to non-overlapping spilled vregs using greedy coloring.
+   Two spilled vregs interfere (cannot share a slot) if their live intervals overlap.
+
+   Returns an updated spill-map hash-table mapping vreg → shared slot number."
+  (let* ((spilled (remove-if-not (lambda (int)
+                                   (gethash (interval-vreg int) spill-map))
+                                 intervals))
+         ;; Build color assignment: vreg → shared slot number
+         (color-map (make-hash-table :test #'eq))
+         (n (length spilled)))
+    (when (< n 2)
+      (return-from regalloc-color-spill-slots spill-map))
+    ;; Sort intervals by start position for deterministic coloring
+    (setf spilled (sort (copy-list spilled) #'< :key #'interval-start))
+    ;; Greedy coloring
+    (dolist (int spilled)
+      (let* ((vreg (interval-vreg int))
+             (used-slots nil))
+        ;; Collect slots already assigned to overlapping intervals
+        (dolist (other spilled)
+          (when (and (not (eq (interval-vreg other) vreg))
+                     (gethash (interval-vreg other) color-map))
+            ;; Check interval overlap
+            (when (and (<= (interval-start int) (interval-end other))
+                       (<= (interval-start other) (interval-end int)))
+              (push (gethash (interval-vreg other) color-map) used-slots))))
+        ;; Find the smallest unused slot number (1-origin to match existing spill convention)
+        (loop for slot from 1
+              when (not (member slot used-slots))
+              do (setf (gethash vreg color-map) slot)
+                 (return))))
+    ;; Rebuild spill-map with shared slot numbers
+    (let ((new-map (make-hash-table :test #'eq)))
+      (maphash (lambda (vreg old-slot)
+                 (declare (ignore old-slot))
+                 (let ((shared (gethash vreg color-map)))
+                   (setf (gethash vreg new-map) shared)))
+               spill-map)
+      new-map)))
+
+(defun %maybe-color-spill-slots (intervals spill-map)
+  "Wrapper that optionally applies spill slot coloring.  Controlled by a special
+   variable for safety during testing."
+  (if (and spill-map intervals)
+      (regalloc-color-spill-slots intervals spill-map)
+      spill-map))
 
 ;;; Spill Code Insertion
 

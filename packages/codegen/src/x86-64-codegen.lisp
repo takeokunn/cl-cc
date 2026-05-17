@@ -38,7 +38,9 @@
     (vm-jump-zero                       9)  ; TEST + JE rel32 (3 + 6)
     (vm-ret                             1)  ; RET
     ;; No-ops in native codegen
-    ((vm-print vm-closure)              0)
+    ;; I/O: vm-print = MOV RDI(3) + MOV R11(10) + CALL R11(3) = 16 bytes (FR-298)
+    (vm-print                           16)
+    (vm-closure                          0)
     (vm-call                            6)
     (vm-tail-call                       3)
     ;; Register spilling

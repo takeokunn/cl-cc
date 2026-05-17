@@ -214,3 +214,61 @@
     (destructuring-bind (rn rm) pair
       (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
   (emit-a64-instr +a64-ret+ stream))
+
+;;; FR-268: AArch64 Constant Islands / Literal Pools
+;;;
+;;; ADR/ADRP + LDR for PC-relative constant pool loading.  Large immediates
+;;; (beyond MOVZ/MOVK 16-bit range) are loaded from a literal pool placed
+;;; at the end of the function.
+
+(defun encode-adr (rd offset)
+  "ADR Rd, #offset  — PC-relative address (1 MiB range, page-relative).
+   Encoding: 0xx10000 iiiii iiiiii iiiii iiiii xxxxx"
+  (logior (ash (ldb (byte 2 29) (logand offset #x1FFFFF)) 29) ; immlo[1:0]
+          #x10000000
+          (ash (ldb (byte 3 5) (logand offset #x1FFFFF)) 8)  ; immhi[18:16]
+          (ash rd 0)))
+
+(defun encode-adrp (rd offset)
+  "ADRP Rd, #offset  — PC-relative page address (4 GiB range).
+   Encoding: 1xx10000 iiiii iiiiii iiiii iiiii xxxxx"
+  (logior (ash 1 31)
+          (ash (ldb (byte 2 29) (logand offset #x1FFFFF)) 29)
+          #x10000000
+          (ash (ldb (byte 3 5) (logand offset #x1FFFFF)) 8)
+          (ash rd 0)))
+
+(defun encode-ldr-literal (rt offset)
+  "LDR Rt, [PC, #offset]  — load from literal pool (word, scaled by 4).
+   Encoding: 0xx11000 iiiii iiiiii iiiii iiiii xxxxx"
+  (declare (type fixnum rt offset))
+  (let ((imm19 (ash offset -2)))  ; 19-bit signed immediate / 4
+    (logior #x18000000
+            (ash (ldb (byte 19 0) (logand imm19 #x7FFFF)) 5)
+            (ash rt 0))))
+
+;;; FR-268: Literal pool builder
+;;;
+;;; Accumulates 64-bit constants and emits them at function end.  The pool is
+;;; placed after the RET instruction, aligned to 8 bytes.
+
+(defstruct a64-literal-pool
+  "Accumulates 64-bit constant values for PC-relative loading."
+  (entries nil :type list))  ; list of u64 values
+
+(defun a64-pool-add (pool value)
+  "Add a 64-bit VALUE to the literal pool.  Returns the 0-based entry index."
+  (let ((idx (length (a64-literal-pool-entries pool))))
+    (push value (a64-literal-pool-entries pool))
+    idx))
+
+(defun a64-pool-emit (pool stream)
+  "Emit all pool entries as 8-byte little-endian values, 8-byte aligned."
+  (let* ((entries (nreverse (a64-literal-pool-entries pool)))
+         (pad (mod (- 8 (mod (* 4 (length entries)) 8)) 8)))
+    (dolist (val entries)
+      ;; Emit 8 bytes little-endian
+      (emit-a64-instr (logand val #xFFFFFFFF) stream)
+      (emit-a64-instr (ash val -32) stream))
+    ;; Align to 8 bytes
+    (loop repeat (/ pad 4) do (emit-a64-instr 0 stream))))
