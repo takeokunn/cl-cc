@@ -105,5 +105,5 @@
          (out (cl-cc/optimize::opt-pass-closure-capture-dedup
                (list c1 jmp lbl c2))))
     (assert-eq (length out) 4)
-    (assert-true (cl-cc/vm::vm-make-closure-p (fourth out)))
+    (assert-true (cl-cc/vm::vm-closure-p (fourth out)))
     (assert-eq (cl-cc/vm::vm-dst (fourth out)) :r2)))
