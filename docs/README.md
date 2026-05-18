@@ -31,7 +31,7 @@
 
 ## Memory & GC
 
-- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (166 FR)
+- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (166 FR: 50✅/15⚠️/101⏸️)
 
 ## Tooling
 

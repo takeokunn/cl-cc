@@ -1,9 +1,6 @@
 ;;;; cl-cc-cps.asd — skeleton for the cps feature package
 ;;;;
-;;;; Phase 1 of the ideal package-by-feature redesign (post 2026-05-01 plan).
-;;;; This system is intentionally empty — files will migrate here in
-;;;; subsequent phases. Currently NOT wired into root cl-cc.asd, so loading
-;;;; this system as part of `:cl-cc` is a no-op.
+;;;; Feature-owned CPS source system.
 
 (asdf:defsystem :cl-cc-cps
   :description "CPS form definitions and AST->CPS transformation"

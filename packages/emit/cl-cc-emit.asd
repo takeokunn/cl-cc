@@ -8,7 +8,4 @@
   :serial t
   :components
   ((:file "package")
-   (:file "gpu")
-   (:file "apple-ane")
-   (:file "ebpf")
-   (:file "fpga")))
+   (:file "ebpf")))

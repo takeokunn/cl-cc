@@ -102,9 +102,9 @@
                            :timeout nil
                            :depends-on nil
                            :tags nil))
-         (result (%run-single-test test-plist 1 '())))
+          (result (%run-single-test test-plist 1 '())))
     (assert-eq :pending (getf result :status))
-    (assert-true (search "later" (getf result :detail))))
+    (assert-true (search "later" (getf result :detail)))))
 
 (deftest effective-test-timeout-bogus-normalizes-to-default
   "%effective-test-timeout returns the default when given a non-integer keyword."
@@ -137,6 +137,51 @@
           (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
           (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
 
+(deftest-each default-test-timeout-rejects-invalid-env-values
+  "%default-test-timeout falls back to 10 for non-positive or malformed env values."
+  :cases (("zero" "0")
+          ("negative" "-1")
+          ("malformed" "1abc"))
+  (value)
+  (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
+    (unwind-protect
+         (progn
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" value 1)
+           (assert-= 10 (%default-test-timeout)))
+      (if old
+          (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
+
+(deftest default-test-timeout-env-applies-to-slow-test
+  "CLCC_TEST_TIMEOUT=1 is used as the per-test default and times out a slow sequential test."
+  (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
+    (unwind-protect
+         (let* ((*test-runner-mode* :sequential)
+                (test-plist (list :name 'env-slow-demo
+                                  :fn (lambda () (sleep 2))
+                                  :suite 'cl-cc-unit-suite
+                                  :timeout nil
+                                  :depends-on nil
+                                  :tags nil)))
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "1" 1)
+           (let ((result (%run-single-test test-plist 1 '())))
+             (assert-eq :fail (getf result :status))
+             (assert-true (search "timeout after 1 seconds" (getf result :detail)))))
+      (if old
+          (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
+
+(deftest effective-test-timeout-explicit-value-overrides-env-default
+  "A valid per-test :timeout overrides CLCC_TEST_TIMEOUT."
+  (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
+    (unwind-protect
+         (progn
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "1" 1)
+           (assert-equal 3 (%effective-test-timeout (list :timeout 3))))
+      (if old
+          (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
+
 (deftest default-suite-timeout-honors-env-var-and-falls-back-to-600
   "%default-suite-timeout: unset→600; set to 90→90; set to bogus→600."
   (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT")))
@@ -148,6 +193,40 @@
            (assert-= 90 (%default-suite-timeout))
            (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "bogus" 1)
            (assert-= 600 (%default-suite-timeout)))
+      (if old
+          (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
+
+(deftest-each default-suite-timeout-rejects-invalid-env-values
+  "%default-suite-timeout falls back to 600 for non-positive or malformed env values."
+  :cases (("zero" "0")
+          ("negative" "-1")
+          ("malformed" "1abc"))
+  (value)
+  (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT")))
+    (unwind-protect
+         (progn
+           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" value 1)
+           (assert-= 600 (%default-suite-timeout)))
+      (if old
+          (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
+          (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
+
+(deftest default-suite-timeout-env-drives-suite-deadline
+  "CLCC_SUITE_TIMEOUT=1 produces a deadline that terminates waiting for a hung worker."
+  (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT"))
+        (thread nil))
+    (unwind-protect
+         (progn
+           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "1" 1)
+           (let ((deadline (+ (get-internal-real-time)
+                              (round (* (%default-suite-timeout)
+                                        internal-time-units-per-second)))))
+             (setf thread (sb-thread:make-thread (lambda () (loop (sleep 1)))
+                                                 :name "suite-timeout-env-demo"))
+             (assert-eq :suite-timeout
+                        (%join-worker-threads-until-deadline (list thread) deadline))))
+      (when thread (%terminate-thread-safely thread))
       (if old
           (sb-posix:setenv "CLCC_SUITE_TIMEOUT" old 1)
           (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
@@ -172,6 +251,8 @@
     (assert-eql 124 captured)
     (assert-true (search "OTHER-SUITE" (string-upcase (get-output-stream-string err-out))))))
 
+(deftest run-single-test-skip-condition-returns-skip-with-reason
+  "%run-single-test: a skip-condition signals :skip status with the reason in :detail."
   (let* ((test-plist (list :name 'skip-demo
                            :fn (lambda () (error 'skip-condition :reason "not today"))
                            :suite 'cl-cc-unit-suite

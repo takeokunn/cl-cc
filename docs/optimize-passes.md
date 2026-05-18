@@ -84,7 +84,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LICM拡張: SCEVで不変と証明できる計算を巻き上げ
   - LLVM の ScalarEvolution パスに相当
 
-- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` に `opt-compute-simple-inductions` / `opt-induction-trip-count` を実装済み。
+- **関連実装**: `packages/optimize/src/optimizer-memory-ranges.lisp` に `opt-compute-simple-inductions` / `opt-induction-trip-count` を実装済み。
   - 対象: `i = i + c` / `i = i - c` の単純 affine update を保守的に検出。
   - 出力: `opt-induction-var`（init/step/update-inst）と保守的 trip-count 推定。
   - 制限: 一般SCEV（多項式再帰、複合条件、nested loop の閉形式）は未実装。
@@ -98,7 +98,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 不明な場合は剰余エピローグ付き部分展開
   - 効果: ILP露出、分岐オーバーヘッド削減
 
-- **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-loop-unrolling` を追加済み（保守的サブセット）。
+- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-loop-unrolling` を追加済み（保守的サブセット）。
   - 対象: `vm-lt + vm-jump-zero + backedge jump` の単純 counted loop 形のみ。
   - 条件: ループ変数/上限/step がコンパイル時計算可能かつ小trip-count（上限あり）。
   - 変換: 小回数ループを完全展開（full unroll）。
@@ -199,7 +199,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - HotSpot C2・LLVM `CorrelatedValuePropagationPass` と同等
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` に `opt-compute-value-ranges` を実装済み。
+- **関連実装**: `packages/optimize/src/optimizer-memory-ranges.lisp` に `opt-compute-value-ranges` を実装済み。
   - 整数定数・move・単項/二項算術（add/sub/mul/neg/abs/inc/dec）で interval を前向き伝播。
   - `packages/optimize/tests/optimizer-memory-tests.lisp` の `value-ranges-*` で挙動を検証。
   - 制限: 比較分岐由来の述語感度（path-sensitive range narrowing）や一般ループ閉形式推論は未実装。
@@ -213,7 +213,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - ループ内の `aref` が最も恩恵を受ける
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` に `opt-array-bounds-check-eliminable-p` を実装済み（判定 helper）。
+- **関連実装**: `packages/optimize/src/optimizer-memory-ranges.lisp` に `opt-array-bounds-check-eliminable-p` を実装済み（判定 helper）。
   - `opt-compute-value-ranges` の interval を使って `0 <= idx < len` を保守的に証明。
   - 制限: codegen での境界検査命令の実除去統合は未実装。
 
@@ -368,7 +368,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 現状は `define-simple-instruction` で毎回 `execute-instruction` ディスパッチが発生
 - **難易度**: Medium
 
-- **関連実装**: VM側は `packages/vm/src/list.lisp` と `packages/vm/src/vm-opcodes-defs.lisp` に `cons` / `car` / `cdr` の直接opcodeを持つ。optimizer側では `packages/optimize/src/optimizer-tables.lisp` と `packages/optimize/src/optimizer.lisp` が定数cons/nilに対する `vm-car` / `vm-cdr` foldingを扱い、`packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-cons-slot-forward` がfresh `vm-cons` 直後の `vm-car` / `vm-cdr` を元slot registerからの `vm-move` へ置換する。source overwrite、control-flow、call/unknown effect、`rplaca` などの破壊的更新は保守的にfactを破棄する。`packages/optimize/tests/optimizer-tables-tests.lisp` / `optimizer-tests.lisp` / `optimizer-memory-tests.lisp` がfolding、alias経由forwarding、source overwrite、破壊的更新、source上書きconsのno-opを検証する。
+- **関連実装**: VM側は `packages/vm/src/list.lisp` と `packages/vm/src/vm-opcodes-defs.lisp` に `cons` / `car` / `cdr` の直接opcodeを持つ。optimizer側では `packages/optimize/src/optimizer-tables.lisp` と `packages/optimize/src/optimizer.lisp` が定数cons/nilに対する `vm-car` / `vm-cdr` foldingを扱い、`packages/optimize/src/optimizer-memory-dse.lisp` の `opt-pass-cons-slot-forward` がfresh `vm-cons` 直後の `vm-car` / `vm-cdr` を元slot registerからの `vm-move` へ置換する。source overwrite、control-flow、call/unknown effect、`rplaca` などの破壊的更新は保守的にfactを破棄する。`packages/optimize/tests/optimizer-tables-tests.lisp` / `optimizer-tests.lisp` / `optimizer-memory-tests.lisp` がfolding、alias経由forwarding、source overwrite、破壊的更新、source上書きconsのno-opを検証する。
 
 #### FR-081: Macro Expansion Memoization ✅
 
@@ -508,7 +508,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`MachineSink`パス。特に分岐の片方でのみ使われる値の移動に効果大
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-code-sinking` を追加済み（保守的サブセット）。
+- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-code-sinking` を追加済み（保守的サブセット）。
   - 対象: `(vm-const dst v)` の直後が `vm-jump`、かつ `dst` が関数全体で1回だけ read されるケース。
   - 動作: `vm-const` を jump 先ラベル直後へ移動（複製なし）。
   - 制限: 一般命令の sinking、複数使用値、制御依存を伴う高度な sinking は未実装。
@@ -574,7 +574,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`LoopRotate`パス。cl-ccのLICM（FR-003）とloop unrolling（FR-022）の効果を最大化する前提変換
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-loop-rotation` を追加済み（保守的サブセット）。
+- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-loop-rotation` を追加済み（保守的サブセット）。
   - 対象: `Lh: cond; jump-zero Lexit; body; jump Lh; Lexit:` の単純 while 形のみ。
   - 変換: 先頭を guard へ分離して guard+do-while 形に回転。
   - 今後の拡張: 一般CFG（複数header/ネスト/複合分岐）への対応。
@@ -587,7 +587,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`LoopPeel`。`(dolist (x list) ...)`の初回nil チェック除去に有効
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-loop-peeling` を追加済み（保守的サブセット）。
+- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-loop-peeling` を追加済み（保守的サブセット）。
   - 対象: `Lh: cond; jump-zero Lexit; body; jump Lh; Lexit:` の単純 while 形のみ。
   - 変換: 初回反復（cond + body）をループ前に 1 回複製。
   - 今後の拡張: 一般CFG・多重ループ・プロファイル誘導 peeling。
@@ -1393,10 +1393,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-261: Value Profiling (値プロファイリング) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-ic.lisp`
 - **現状**: `opt-profile-data` が site ごとの値ヒストグラム、`value-limit` による bounded Top-K、numeric `opt-profile-value-range` を保持する conservative helper layer になった
 - **内容**: `opt-profile-record-value` は site 単位で頻出値を保持し、`opt-profile-top-values` で頻度順に参照できる。numeric 値は pruning と分離して min/max を蓄積し、定数特殊化や範囲解析へ受け渡せる
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-profile-record-value` / `opt-profile-top-values` / `opt-profile-value-range`
+- **関連実装**: `packages/optimize/src/optimizer-speculative-ic.lisp` の `opt-profile-record-value` / `opt-profile-top-values` / `opt-profile-value-range`
 - **検証**: `packages/optimize/tests/optimizer-roadmap-backend-tests.lisp` の `optimizer-roadmap-value-profiling-top-k-and-range-behavior`
 - **根拠**: V8 value profiling / HotSpot -XX:+ProfileReturnOnly。型プロファイリングの精密化
 - **難易度**: Medium
@@ -1484,10 +1484,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 #### FR-283: Speculation Log (投機ログ) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-ic.lisp`
 - **現状**: `*opt-speculation-log*` が process-global default log として動作し、`opt-speculation-allowed-p` / `opt-clear-speculation-log` / `opt-save-speculation-log` / `opt-load-speculation-log` で gating と `.prof` 永続化を扱える
 - **内容**: 失敗実績は既存の `opt-record-speculation-failure` と `opt-speculation-failed-p` で更新・参照し、再コンパイル側は allowed predicate で同一投機を抑制できる。保存形式は単純 S 式で、プロセス間 replay に使える
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `*opt-speculation-log*` / `opt-speculation-allowed-p` / `opt-save-speculation-log` / `opt-load-speculation-log`
+- **関連実装**: `packages/optimize/src/optimizer-speculative-ic.lisp` の `*opt-speculation-log*` / `opt-speculation-allowed-p` / `opt-save-speculation-log` / `opt-load-speculation-log`
 - **検証**: `packages/optimize/tests/optimizer-roadmap-backend-tests.lisp` の `optimizer-roadmap-speculation-log-gating-and-persistence-behavior`
 - **根拠**: GraalVM SpeculationLog / HotSpot replay compile。同一の有害な投機を繰り返すコンパイル・デコンパイルループ（deopt storm）を防ぐ
 - **難易度**: Medium

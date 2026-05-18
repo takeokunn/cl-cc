@@ -49,18 +49,9 @@
     #:compile-to-x86-64-bytes
     #:compile-to-aarch64-bytes
 
-    ;; Heterogeneous backend planning APIs (FR-438/439/440/442)
-    #:gpu-offload-plan
-    #:make-gpu-offload-plan
-    #:plan-gpu-offload
-    #:apple-ane-plan
-    #:make-apple-ane-plan
-    #:plan-apple-ane-offload
-    #:ebpf-program-plan
-    #:make-ebpf-program-plan
-    #:plan-ebpf-program
-    #:compile-ebpf-program
-    #:emit-ebpf-bytecode
-    #:fpga-hls-plan
-    #:make-fpga-hls-plan
-    #:plan-fpga-hls))
+     ;; Heterogeneous backend planning APIs (FR-442)
+     #:ebpf-program-plan
+     #:make-ebpf-program-plan
+     #:plan-ebpf-program
+     #:compile-ebpf-program
+     #:emit-ebpf-bytecode))

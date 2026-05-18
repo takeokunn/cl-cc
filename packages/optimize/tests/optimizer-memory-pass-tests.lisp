@@ -1,5 +1,5 @@
 ;;;; tests/unit/optimize/optimizer-memory-pass-tests.lisp
-;;;; Unit tests for optimizer-memory.lisp — alias queries, store/load passes
+;;;; Unit tests for optimizer-memory-alias.lisp — alias queries, store/load passes
 ;;;;
 ;;;; Covers: opt-must-alias-p, opt-may-alias-p, opt-slot-alias-key,
 ;;;;   opt-rewrite-inst-regs, opt-pass-dead-store-elim,

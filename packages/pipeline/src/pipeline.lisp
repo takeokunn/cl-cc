@@ -5,6 +5,37 @@
 ;;; Internal helpers
 ;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %opts->optimize-kwargs (opts)
+  "Extract the pass/stats/remarks subset of OPTS as a keyword plist for
+optimize-instructions."
+  (list :pass-pipeline      (pipeline-opts-pass-pipeline opts)
+        :speed              (pipeline-opts-speed opts)
+        :inline-threshold-scale (pipeline-opts-inline-threshold-scale opts)
+        :print-pass-timings (pipeline-opts-print-pass-timings opts)
+        :timing-stream      (pipeline-opts-timing-stream opts)
+        :print-pass-stats   (pipeline-opts-print-pass-stats opts)
+        :stats-stream       (pipeline-opts-stats-stream opts)
+        :trace-json-stream  (pipeline-opts-trace-json-stream opts)
+        :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
+        :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
+        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
+        :retpoline          (pipeline-opts-retpoline opts)
+        :stack-protector    (pipeline-opts-stack-protector opts)
+        :shadow-stack       (pipeline-opts-shadow-stack opts)
+        :asan               (pipeline-opts-asan opts)
+        :msan               (pipeline-opts-msan opts)
+        :tsan               (pipeline-opts-tsan opts)
+        :ubsan              (pipeline-opts-ubsan opts)
+        :hwasan             (pipeline-opts-hwasan opts)))
+
+(defun %opts->compile-kwargs (opts)
+  "Spread all OPTS fields into a keyword plist for compile-expression /
+compile-toplevel-forms."
+  (list* :target     (pipeline-opts-target opts)
+         :type-check (pipeline-opts-type-check opts)
+         :safety     (pipeline-opts-safety opts)
+         (%opts->optimize-kwargs opts)))
+
 (defun %prepare-ast (expr)
   "Macro-expand EXPR (if not already an AST node), then lower to an AST node."
   (let ((expanded (if (typep expr 'ast-node) expr (compiler-macroexpand-all expr))))
@@ -107,12 +138,22 @@ Returns two values: (1) the parsed top-level forms, and (2) a list of
 ;;; ─────────────────────────────────────────────────────────────────────────
 
 (defun %pipeline-cps-safe-ast-p (target ast)
+  "Return T when AST can use the CPS top-level rewrite for TARGET.
+
+TARGET selects the backend-specific safety predicate. VM compilation can use
+the CPS VM predicate, WASM currently stays on the direct path, and native
+targets use the native CPS safety predicate."
   (cond
     ((eq target :vm)   (%cps-vm-compile-safe-ast-p ast))
     ((eq target :wasm) nil)
     (t                 (%cps-native-compile-safe-ast-p ast))))
 
 (defun %maybe-cps-toplevel-form (form opts)
+  "Rewrite FORM into a CPS identity-entry form when OPTS make that safe.
+
+Top-level IN-PACKAGE forms are returned unchanged. Other forms are prepared,
+optimized, checked for target-specific CPS safety, and either replaced with the
+CPS entry expression or returned as the original form."
   (if (and (consp form) (eq (car form) 'in-package))
       form
       (let* ((ast      (optimize-ast (%prepare-ast form)))
@@ -131,6 +172,11 @@ Definition and control-effect forms stay on the direct path."
 ;;; ─────────────────────────────────────────────────────────────────────────
 
 (defun %pipeline-expression-cps-safe-p (ast opts)
+  "Return T when AST may use the compile-expression CPS fast path.
+
+OPTS supplies the target backend. The recursion guard prevents a CPS rewrite
+from recursively re-entering the same fast path while compiling the generated
+identity-entry expression."
   (and (not *compile-expression-cps-recursion-guard*)
        (let ((target (pipeline-opts-target opts)))
          (cond
@@ -151,6 +197,11 @@ Definition and control-effect forms stay on the direct path."
         (values nil nil))))
 
 (defun %pipeline-runtime-instructions (target full-instrs optimized-instrs)
+  "Select the instruction stream embedded in the runtime VM program.
+
+VM and WASM targets keep FULL-INSTRS so interpreter-visible profiling and
+control-flow metadata remain aligned. Native targets prefer OPTIMIZED-INSTRS
+when available, falling back to FULL-INSTRS."
   (if (or (eq target :vm) (eq target :wasm))
       full-instrs
       (or optimized-instrs full-instrs)))
@@ -315,7 +366,16 @@ value carries top-level source locations for later AST annotation.
                                       (opt-remarks-mode :all)
                                       print-pass-stats stats-stream trace-json-stream
                                        retpoline stack-protector shadow-stack
-                                       asan msan tsan ubsan hwasan)
+                                        asan msan tsan ubsan hwasan)
+  "Compile EXPR and return a compilation-result object.
+
+EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
+backend (:VM, :WASM, or a native target keyword). TYPE-CHECK enables type
+inference, with :STRICT re-signaling type errors. SAFETY, SPEED,
+INLINE-THRESHOLD-SCALE, pass tracing, optimization remarks, and sanitizer
+keywords are forwarded to later pipeline stages. The result contains the VM
+program, emitted assembly text, AST, optional inferred type, instruction
+streams, and PGO counter plan."
   (let* ((opts (%make-pipeline-opts
                  :target target :type-check type-check :safety safety
                   :speed speed
@@ -382,8 +442,14 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                     pass-pipeline print-pass-timings timing-stream
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
-                                     retpoline stack-protector shadow-stack
-                                     asan msan tsan ubsan hwasan)
+                                      retpoline stack-protector shadow-stack
+                                      asan msan tsan ubsan hwasan)
+  "Compile SOURCE text and return a compilation-result object.
+
+LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
+Lisp input, enables source-location annotations on top-level AST nodes and host
+macro evaluation for real file compilation. TARGET and the remaining keyword
+arguments are forwarded to the expression, top-level, and optimization stages."
   (multiple-value-bind (forms source-locations)
       (parse-source-for-language source language :source-file source-file)
     (let* ((opts  (%make-pipeline-opts
@@ -420,9 +486,14 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                                  print-opt-remarks opt-remarks-stream
                                                  (opt-remarks-mode :all)
                                                 print-pass-stats stats-stream trace-json-stream
-                                                 retpoline stack-protector shadow-stack
-                                                 asan msan tsan ubsan hwasan)
-  "Compile SOURCE with standard library prepended."
+                                                  retpoline stack-protector shadow-stack
+                                                  asan msan tsan ubsan hwasan)
+  "Compile Lisp SOURCE with the standard library forms prepended.
+
+The standard library is obtained from GET-STDLIB-FORMS, combined with parsed
+SOURCE forms, and compiled as one top-level batch. SOURCE-FILE preserves source
+locations for user forms; stdlib forms receive NIL locations. Returns the same
+compilation-result object shape as COMPILE-STRING."
   (multiple-value-bind (source-forms source-locations)
       (if source-file
           (%lisp-top-level-source-forms-and-locations source source-file)

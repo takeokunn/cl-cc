@@ -2,12 +2,20 @@
 ;;;; Pipeline — Runtime entrypoints and VM execution helpers
 
 (defun %copy-snapshot-ht (src)
+  "Return an EQ hash-table copy of SRC for mutable per-run registry state.
+
+The returned table has the same keys and values as SRC but can be mutated by a
+single run-string invocation without changing the stdlib snapshot."
   (let ((dst (make-hash-table :test #'eq :size (+ (hash-table-count src) 8))))
     (maphash (lambda (k v) (setf (gethash k dst) v)) src)
     dst))
 
 (defun run-string (source &key stdlib pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream (inline-threshold-scale 1))
-  "Compile and run SOURCE. When STDLIB is true, include standard library."
+  "Compile and execute Lisp SOURCE in the VM, returning the program result.
+
+When STDLIB is true, warm or reuse the stdlib VM snapshot and copy stdlib
+compile-time registries before compiling SOURCE. Pass/remark/statistics keyword
+arguments are forwarded to COMPILE-STRING or COMPILE-STRING-WITH-STDLIB."
   (let ((*package*          (or (find-package :cl-cc) *package*))
         (*labels-boxed-fns* nil)
         (compile-kwargs (list :target :vm

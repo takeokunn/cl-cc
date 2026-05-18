@@ -272,3 +272,165 @@
                         (multiple-value-bind (symbol status)
                             (find-symbol "RT-GC-ENTER-SAFE-REGION" "CL-CC/RUNTIME")
                           (and status (fboundp symbol)))))))
+
+;;; ------------------------------------------------------------
+;;; FR-338: Parallel GC worker interface (⚠️ Pure CL/SB-THREAD interface)
+;;; ------------------------------------------------------------
+
+(deftest fr-338-parallel-root-scan-sequential-fallback
+  "FR-338: root-scan worker API returns registered root addresses in fallback mode."
+  (let ((heap (%make-small-heap-fr)))
+    (let* ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+           (root (cons nil addr)))
+      (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
+      (cl-cc/runtime:rt-gc-add-root heap root)
+      (let ((roots (cl-cc/runtime:rt-gc-parallel-root-scan heap 1)))
+        (assert-true (member addr roots :test #'eql)))
+      (cl-cc/runtime:rt-gc-remove-root heap root))))
+
+(deftest fr-338-worker-count-detection-is-non-negative
+  "FR-338: worker-count detection returns a portable non-negative integer."
+  (assert-true (integerp (cl-cc/runtime:rt-gc-detect-worker-count)))
+  (assert-true (>= (cl-cc/runtime:rt-gc-detect-worker-count) 0)))
+
+;;; ------------------------------------------------------------
+;;; FR-343..345: TLAB and zero-fill interface (⚠️ Pure CL implementation)
+;;; ------------------------------------------------------------
+
+(deftest fr-343-tlab-alloc-bumps-private-buffer
+  "FR-343: rt-gc-tlab-alloc allocates from a thread-local buffer and advances FREE."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime::*gc-tlab-size-words* 8))
+    (let* ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-a 3))
+           (tlab (cl-cc/runtime::%rt-gc-tlab-for heap :worker-a)))
+      (assert-= addr (cl-cc/runtime:rt-tlab-base tlab))
+      (assert-= (+ addr 3) (cl-cc/runtime:rt-tlab-free tlab)))))
+
+(deftest fr-344-tlab-retire-records-waste-and-dummy-header
+  "FR-344: retiring TLABs records unused words and writes a dummy fill header."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime::*gc-tlab-size-words* 8)
+        (cl-cc/runtime::*gc-tlab-retire-fill* t))
+    (let* ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-b 3))
+           (tlab (cl-cc/runtime::%rt-gc-tlab-for heap :worker-b))
+           (free-before (cl-cc/runtime:rt-tlab-free tlab)))
+      (declare (ignore addr))
+      (cl-cc/runtime:rt-gc-tlab-retire-all heap)
+      (assert-true (cl-cc/runtime:rt-tlab-retired-p tlab))
+      (assert-true (> (cl-cc/runtime:rt-tlab-waste-bytes tlab) 0))
+      (assert-= 5 (cl-cc/runtime:header-size
+                   (cl-cc/runtime:rt-heap-object-header heap free-before))))))
+
+(deftest fr-345-tlab-allocation-returns-zero-filled-words
+  "FR-345: Pure CL fallback exposes zero-initialized allocation words for SIMD zeroing sites."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime::*gc-tlab-size-words* 8))
+    (let ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-c 3)))
+      (assert-= 0 (cl-cc/runtime:rt-heap-ref heap addr))
+      (assert-= 0 (cl-cc/runtime:rt-heap-ref heap (+ addr 1)))
+      (assert-= 0 (cl-cc/runtime:rt-heap-ref heap (+ addr 2))))))
+
+;;; ------------------------------------------------------------
+;;; FR-347: Compressed object references (⚠️ Pure CL offset codec)
+;;; ------------------------------------------------------------
+
+(deftest fr-347-compressed-reference-roundtrip
+  "FR-347: compressed object references round-trip as 32-bit heap-relative offsets."
+  (let* ((heap (%make-small-heap-fr))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (offset (cl-cc/runtime:rt-compress-object-ref heap addr)))
+    (assert-true (<= 0 offset #xffffffff))
+    (assert-= addr (cl-cc/runtime:rt-decompress-object-ref heap offset))))
+
+;;; ------------------------------------------------------------
+;;; FR-363..365: NUMA allocation, local GC schedule, and interleaving metadata
+;;; ------------------------------------------------------------
+
+(deftest fr-363-numa-local-alloc-records-node-metadata
+  "FR-363: portable NUMA local allocation records node metadata for the allocated address."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime:*rt-numa-enabled* t))
+    (let ((addr (cl-cc/runtime:rt-numa-local-alloc heap :thread-1 3)))
+      (assert-true (integerp addr))
+      (assert-= 0 (gethash addr (cl-cc/runtime::rt-heap-numa-node-map heap))))))
+
+(deftest fr-364-numa-gc-affinity-records-worker-schedule
+  "FR-364: NUMA-local GC API records a worker-to-node schedule."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime:*gc-worker-count* 2))
+    (let ((schedule (cl-cc/runtime:rt-gc-numa-affinity heap 0)))
+      (assert-= 2 (length schedule))
+      (assert-equal schedule (cl-cc/runtime::rt-heap-numa-gc-schedule heap)))))
+
+(deftest fr-365-heap-interleave-records-shared-region
+  "FR-365: interleaving API records shared-data region metadata."
+  (let ((heap (%make-small-heap-fr)))
+    (let ((region (cl-cc/runtime:rt-heap-interleave heap 4 8)))
+      (assert-equal :interleave (getf region :policy))
+      (assert-true (member region (cl-cc/runtime::rt-heap-interleaved-regions heap)
+                           :test #'equal)))))
+
+;;; ------------------------------------------------------------
+;;; FR-367 / FR-371 / FR-375 / FR-391 / FR-392 additional warning-FR evidence
+;;; ------------------------------------------------------------
+
+(deftest fr-367-gc-probes-log-when-enabled
+  "FR-367: DTrace/eBPF portable probe stubs emit trace lines when enabled."
+  (let ((cl-cc/runtime:*gc-probes-enabled* t))
+    (let ((output (with-output-to-string (*trace-output*)
+                    (cl-cc/runtime:rt-gc-probe-alloc 7)
+                    (cl-cc/runtime:rt-gc-probe-gc-start :minor)
+                    (cl-cc/runtime:rt-gc-probe-gc-end :minor))))
+      (assert-true (search "GC-PROBE-ALLOC 7" output))
+      (assert-true (search "GC-PROBE-GC-START :MINOR" output))
+      (assert-true (search "GC-PROBE-GC-END :MINOR" output)))))
+
+(deftest fr-371-safe-region-depth-roundtrip
+  "FR-371: cooperative safepoint safe-region depth increments and decrements."
+  (let ((thread-id :fr-371-thread))
+    (assert-= 1 (cl-cc/runtime:rt-gc-enter-safe-region thread-id))
+    (assert-= 0 (cl-cc/runtime:rt-gc-leave-safe-region thread-id))))
+
+(deftest fr-375-asan-shadow-memory-poisoning
+  "FR-375: ASan shadow-memory fallback rejects poisoned heap addresses."
+  (let ((heap (%make-small-heap-fr))
+        (cl-cc/runtime:*rt-asan-enabled* t))
+    (cl-cc/runtime:rt-sanitizer-reset-state)
+    (cl-cc/runtime:rt-sanitizer-poison-address 0)
+    (assert-signals error (cl-cc/runtime:rt-heap-ref heap 0))
+    (cl-cc/runtime:rt-sanitizer-unpoison-address 0)
+    (assert-= 0 (cl-cc/runtime:rt-heap-ref heap 0))))
+
+(deftest fr-391-heap-growth-policy-expands-old-space
+  "FR-391: high post-GC occupancy grows old-space capacity in Pure CL fallback."
+  (let ((heap (cl-cc/runtime:make-rt-heap :young-size 64 :old-size 64)))
+    (setf (cl-cc/runtime:rt-heap-young-free heap)
+          (+ (cl-cc/runtime::rt-heap-young-from-base heap)
+             (cl-cc/runtime::rt-heap-young-semi-size heap))
+          (cl-cc/runtime::rt-heap-old-free heap)
+          (+ (cl-cc/runtime:rt-heap-old-base heap)
+             (cl-cc/runtime::rt-heap-old-size heap)))
+    (let ((old-size-before (cl-cc/runtime::rt-heap-old-size heap)))
+      (assert-true (cl-cc/runtime:rt-heap-maybe-grow heap))
+      (assert-true (> (cl-cc/runtime::rt-heap-old-size heap) old-size-before)))))
+
+(deftest fr-392-heap-shrink-policy-reduces-grown-heap
+  "FR-392: sustained low occupancy shrinks a previously grown Pure CL heap."
+  (let ((heap (cl-cc/runtime:make-rt-heap :young-size 64 :old-size 64)))
+    (setf (cl-cc/runtime:rt-heap-young-free heap)
+          (+ (cl-cc/runtime::rt-heap-young-from-base heap)
+             (cl-cc/runtime::rt-heap-young-semi-size heap))
+          (cl-cc/runtime::rt-heap-old-free heap)
+          (+ (cl-cc/runtime:rt-heap-old-base heap)
+             (cl-cc/runtime::rt-heap-old-size heap)))
+    (cl-cc/runtime:rt-heap-maybe-grow heap)
+    (setf (cl-cc/runtime:rt-heap-young-free heap)
+          (cl-cc/runtime::rt-heap-young-from-base heap)
+          (cl-cc/runtime::rt-heap-old-free heap)
+          (cl-cc/runtime:rt-heap-old-base heap))
+    (let ((words-before (length (cl-cc/runtime::rt-heap-words heap))))
+      (cl-cc/runtime:rt-heap-maybe-shrink heap)
+      (cl-cc/runtime:rt-heap-maybe-shrink heap)
+      (assert-true (cl-cc/runtime:rt-heap-maybe-shrink heap))
+      (assert-true (< (length (cl-cc/runtime::rt-heap-words heap)) words-before)))))
+

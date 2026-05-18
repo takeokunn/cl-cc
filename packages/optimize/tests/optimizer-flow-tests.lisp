@@ -1,5 +1,5 @@
 ;;;; tests/unit/optimize/optimizer-flow-tests.lisp
-;;;; Unit tests for optimizer-flow.lisp — DCE, jump threading, loop transforms
+;;;; Unit tests for optimizer-flow-core.lisp — DCE, jump threading, loop transforms
 ;;;;
 ;;;; Covers: opt-pass-dce, opt-build-label-index, opt-thread-label,
 ;;;;   opt-pass-jump, %opt-rewrite-block-terminator, opt-pass-unreachable,

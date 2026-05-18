@@ -178,7 +178,9 @@
 (deftest gc-promotion-promotes-old-object
   "An object that survives enough minor GCs is promoted to old space."
   ;; Use a larger heap to fit the object after repeated copies.
-  (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 64)))
+  ;; Bind *gc-tenuring-threshold* to insulate against parallel-test mutation.
+  (let* ((cl-cc/runtime:*gc-tenuring-threshold* cl-cc/runtime:*gc-tenuring-threshold*)
+         (heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 64)))
     (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
       ;; Write header with age already at the tenuring threshold so the
       ;; very next minor GC will promote it.

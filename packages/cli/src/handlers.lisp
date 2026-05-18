@@ -2,7 +2,7 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
 ;;; Contains subcommand implementations only:
-;;;   %do-run, %do-compile, %do-eval, %count-parens, %do-repl, %do-check.
+;;;   run, compile, eval, repl, and check handlers plus REPL helpers.
 ;;;
 ;;; Top-level help and dispatch live in main.lisp.
 ;;; Shared argument/file/output helpers live in main-utils.lisp.
@@ -42,7 +42,12 @@
       (cl-cc/vm:vm-program-instructions (cl-cc/compile:compilation-result-program result))))
 
 (defun %write-pgo-profile (path result &optional vm-state)
-  "Write a lightweight opcode-frequency profile for RESULT to PATH."
+  "Write a lightweight PGO profile for RESULT to PATH.
+
+RESULT supplies instruction streams and the optional counter plan. VM-STATE,
+when provided, contributes runtime basic-block, branch, and counter counts.
+The file is written as a readable plist-like form and PATH's parent directory
+is created as needed."
   (let ((counts (make-hash-table :test #'equal))
         (insts (%pgo-profile-instructions result))
         (bb (and vm-state (cl-cc/vm:vm-get-profile-bb-counts vm-state)))
@@ -103,7 +108,11 @@
       (%write-pgo-profile path result vm-state))))
 
 (defmacro %with-cli-error-handler (&body body)
-  "Wrap BODY; on any error print to *error-output* and exit with status 1."
+  "Evaluate BODY and convert unhandled errors into CLI diagnostics.
+
+Expands to a HANDLER-CASE around BODY. On ERROR, the condition message is
+formatted through the optimizer diagnostic formatter, written to
+*ERROR-OUTPUT*, and the process exits with status 1."
   `(handler-case
        (progn ,@body)
      (error (e)
@@ -134,7 +143,10 @@
       (%first-line source)))
 
 (defun %extract-line-column-from-location (location)
-  "Parse LOCATION like file:line:column or file:line and return line/column."
+  "Parse LOCATION like file:line:column or file:line.
+
+Returns two values: the parsed 1-based line number and optional column number.
+Unreadable or absent fields return NIL rather than signaling."
   (when (stringp location)
     (let* ((last-colon (position #\: location :from-end t))
            (prev-colon (and last-colon
@@ -150,7 +162,10 @@
          (values nil nil))))))
 
 (defun %run-compiled-result (result vm-state opts)
-  "Execute RESULT's program in VM-STATE, emitting trace/flamegraph when opts request it."
+  "Execute RESULT's program in VM-STATE under runtime options from OPTS.
+
+When OPTS request trace emission or flamegraph output, write those artifacts
+around the execution. Returns the value produced by RUN-COMPILED."
   (when (compile-opts-trace-emit opts)
     (%trace-emit-stages result *standard-output*))
   (%call-with-runtime-sanitizer-flags
@@ -162,6 +177,11 @@
                                 (cl-cc/vm:vm-get-profile-samples vm-state)))))))
 
 (defun %do-run (parsed)
+  "Handle the `cl-cc run' subcommand using PARSED command-line arguments.
+
+Reads the required input file, detects Lisp or PHP mode, compiles to the VM,
+executes the program, optionally emits trace/flamegraph/PGO artifacts, and
+exits with status 0 on success."
   (let* ((file (%required-file-arg parsed "run"))
          (lang-flag (or (flag parsed "--lang") ""))
          (language (%detect-language file lang-flag))
@@ -197,6 +217,11 @@
             (uiop:quit 0)))))))
 
 (defun %do-compile (parsed)
+  "Handle the `cl-cc compile' subcommand using PARSED arguments.
+
+Reads the source file, applies target architecture and compile options, either
+dumps the requested IR phase or writes a native binary, prints the output path,
+and exits with status 0 on success."
   (let* ((file (%required-file-arg parsed "compile"))
          (arch-str (or (flag parsed "--arch") "x86-64"))
          (arch (%arch-keyword arch-str))
@@ -269,9 +294,10 @@
 
 (defun %compile-and-run-eval-form (expr stdlib kwargs vm-state opts)
   "Compile and run EXPR for the eval command.
-When --stdlib is requested, try the ordinary fast path first so core CL forms
-do not pay the full stdlib cold-compile cost. Fall back to the full stdlib path
-only when the fast path cannot compile or run the form."
+STDLIB selects whether the stdlib-aware compiler may be used. KWARGS are
+forwarded to the compiler, VM-STATE is passed to RUN-COMPILED, and OPTS supply
+runtime sanitizer flags. Returns two values: the evaluated result and the
+compilation-result object used to produce it."
   (labels ((compile-and-run (compile-fn)
              (let* ((compiled (apply compile-fn expr :target :vm kwargs))
                     (result (%call-with-runtime-sanitizer-flags
@@ -288,6 +314,11 @@ only when the fast path cannot compile or run the form."
         (compile-and-run #'compile-string))))
 
 (defun %do-eval (parsed)
+  "Handle the `cl-cc eval' subcommand using PARSED arguments.
+
+Compiles and executes the single expression argument in the VM, prints the
+result with READ syntax, optionally emits profiling artifacts, and exits with
+status 0 on success or 2 when the expression is missing."
   (let ((expr (car (parsed-args-positional parsed))))
     (unless expr
       (format *error-output* "Error: 'eval' requires an expression argument.~%")
@@ -318,7 +349,11 @@ only when the fast path cannot compile or run the form."
               (uiop:quit 0))))))))
 
 (defun %count-parens (str)
-  "Return (values open close) paren counts in STR."
+  "Count top-level parentheses in STR while ignoring parentheses in strings.
+
+Returns two values: the number of opening parentheses and the number of closing
+parentheses observed outside string literals. Backslash escapes are honored
+inside strings for REPL input balancing."
   (let ((open 0)
         (close 0)
         (in-string nil)
@@ -334,7 +369,11 @@ only when the fast path cannot compile or run the form."
     (values open close)))
 
 (defun %do-repl (parsed)
-  "Start the interactive CL-CC REPL."
+  "Handle the `cl-cc repl' subcommand using PARSED arguments.
+
+Resets persistent REPL state, optionally preloads the standard library, reads
+balanced forms from *STANDARD-INPUT*, evaluates them through RUN-STRING-REPL,
+prints non-NIL results, and exits cleanly on EOF or quit commands."
   (let ((stdlib (flag parsed "--stdlib")))
     (cl-cc:reset-repl-state)
     (when stdlib
@@ -378,6 +417,11 @@ only when the fast path cannot compile or run the form."
                  (force-output))))))))))
 
 (defun %do-check (parsed)
+  "Handle the `cl-cc check' subcommand using PARSED arguments.
+
+Reads the required source file, runs type inference in warning or strict mode,
+prints the inferred type when available, and reports structured diagnostics
+with a source caret and type trace on failure."
   (let* ((file (%required-file-arg parsed "check"))
          (strict (flag parsed "--strict"))
          (verbose (flag parsed "--verbose"))

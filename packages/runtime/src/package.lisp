@@ -200,8 +200,13 @@
    #:rt-heap-free-list #:rt-heap-gc-state
     ;; Heap word access
      #:rt-heap-ref #:rt-heap-set
-     ;; Heap ASLR / guard pages (FR-373, FR-376)
-     #:rt-heap-randomize-base #:rt-install-stack-guard
+      ;; Heap ASLR / guard pages (FR-373, FR-376)
+      #:rt-heap-randomize-base #:rt-install-stack-guard
+      #:*rt-stack-guard-registry*
+       ;; Compressed object references (FR-347)
+       #:rt-compress-object-ref #:rt-decompress-object-ref
+      ;; Heap growth/shrink policy (FR-391, FR-392)
+      #:rt-heap-maybe-grow #:rt-heap-maybe-shrink
     ;; Sanitizer runtime controls (FR-489..493)
      #:*rt-asan-enabled* #:*rt-msan-enabled* #:*rt-tsan-enabled* #:*rt-hwasan-enabled* #:*rt-ubsan-enabled*
     #:*rt-tsan-thread-id*
@@ -243,19 +248,28 @@
      ;; Memory pressure (FR-334)
      #:rt-heap-occupancy-pct #:rt-heap-register-pressure-hook
      ;; NUMA-local GC (FR-364)
-     #:rt-gc-numa-affinity
+     #:*rt-numa-enabled*
+      #:rt-numa-node-of-thread #:rt-numa-local-alloc
+      #:rt-gc-numa-affinity #:rt-heap-interleave
     ;; Fragmentation (FR-380)
     #:rt-heap-fragmentation-pct #:rt-heap-should-compact-p
     ;; GC inhibit (FR-428)
     #:without-gcing #:rt-gc-inhibit-p
-    ;; Dynamic tenure (FR-085)
-    #:rt-gc-dynamic-tenure
+     ;; Dynamic tenure (FR-085)
+     #:rt-gc-dynamic-tenure
+     ;; TLAB allocation (FR-343)
+     #:rt-tlab #:rt-tlab-p #:make-rt-tlab
+     #:rt-tlab-base #:rt-tlab-free #:rt-tlab-limit
+     #:rt-tlab-thread-id #:rt-tlab-waste-bytes
+     #:rt-tlab-retired-p
+     #:rt-gc-tlab-alloc #:rt-gc-tlab-retire-all
     ;; GC verification (FR-413)
     #:rt-gc-verify-heap #:*gc-verify-after-collect*
      ;; GC stress (FR-414)
      #:*gc-stress-mode*
-     ;; Immortal objects (FR-377)
-     #:rt-make-immortal #:rt-immortal-p
+      ;; Immortal objects (FR-377)
+      #:*rt-immortal-registry*
+      #:rt-make-immortal #:rt-immortal-p #:rt-immortal-objects-count
      ;; Heap census (FR-446)
     #:rt-gc-heap-census
     ;; Barrier batching (FR-453)
@@ -280,12 +294,20 @@
     #:header-finalized-p #:header-set-finalized #:header-clear-finalized
     #:*rt-finalizer-registry* #:*rt-finalization-queue*
     ;; Precise roots (FR-332)
-    #:rt-gc-add-root-typed #:*gc-threads*
-    #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
+     #:rt-gc-add-root-typed #:*gc-threads*
+     #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
     ;; Profiling (FR-366)
     #:rt-gc-profile-sample #:rt-gc-profile-report #:*gc-profile-enabled*
     #:*gc-profile-interval*
-    ;; Heap snapshot (FR-368)
+    ;; Allocation tracing probes (FR-367)
+    #:*gc-probes-enabled* #:rt-gc-probe-alloc
+    #:rt-gc-probe-gc-start #:rt-gc-probe-gc-end
+     ;; Parallel/concurrent GC verification (FR-338, FR-339)
+     #:*gc-worker-count*
+     #:rt-gc-detect-worker-count
+     #:rt-gc-parallel-root-scan #:rt-gc-parallel-mark #:rt-gc-parallel-sweep
+     #:%rt-gc-work-stealing-drain #:rt-gc-verify-tri-color-invariant
+     ;; Heap snapshot (FR-368)
     #:rt-gc-heap-snapshot
     ;; DOT graph (FR-415)
     #:rt-gc-heap-dump-dot))

@@ -74,13 +74,13 @@
      (:file "format-tests")
      (:file "io-tests")
      (:file "io-runners-tests")))
-   (:module "ast-tests"
-    :pathname "packages/ast/tests"
-    :serial t
-    :components
-    ((:file "ast-tests")
-     (:file "ast-analysis-tests")))
-   (:module "parse-tests"
+    (:module "ast-tests"
+     :pathname "packages/ast/tests"
+     :serial t
+     :components
+     ((:file "ast-tests")
+      (:file "ast-analysis-tests")))
+    (:module "parse-tests"
     :pathname "packages/parse/tests"
     :serial t
     :components
@@ -433,11 +433,12 @@
       (:file "elf-extended-tests")
       (:file "macho-tests")
       (:file "macho-builder-tests")))
-    (:module "binary-tests"
-     :pathname "packages/binary/tests"
-     :serial t
-     :components
-     ((:file "binary-fr-tests")))
+     (:module "binary-tests"
+      :pathname "packages/binary/tests"
+      :serial t
+      :components
+      ((:file "binary-buffer-tests")
+       (:file "binary-fr-tests")))
     (:module "runtime-tests"
      :pathname "packages/runtime/tests"
      :serial t

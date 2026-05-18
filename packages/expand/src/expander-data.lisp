@@ -30,24 +30,6 @@ Used by `(declaim (inline ...))` / `(declaim (notinline ...))` during source com
   "Maps optimize qualities to global quality levels 0..3.
 Used by `(declaim (optimize ...))` during source compilation.")
 
-(defmacro with-fresh-defstruct-registries (&body body)
-  "Execute BODY with fresh, thread-local defstruct registry tables.
-Prevents concurrent tests from mutating shared global hash tables."
-  `(let ((*accessor-slot-map*        (make-hash-table :test #'eq))
-         (*defstruct-read-only-accessor-map* (make-hash-table :test #'eq))
-         (*defstruct-slot-registry*  (make-hash-table :test #'eq))
-         (*defstruct-type-registry*  (make-hash-table :test #'eq))
-         (*declaim-inline-registry*  (make-hash-table :test #'eq))
-         (*declaim-optimize-registry* (make-hash-table :test #'eq)))
-     ,@body))
-
-(defun %bootstrap-macro-eval (form)
-  "Bootstrap macro evaluator.
-Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available."
-  (if (fboundp 'our-eval)
-      (our-eval form)
-      (error "OUR-EVAL is unavailable during macro bootstrap for ~S" form)))
-
 (defvar *macro-eval-fn* #'%bootstrap-macro-eval
   "Function used to evaluate macro bodies at compile time.
 Initially a bootstrap wrapper that prefers our-eval and only falls back to host
@@ -170,24 +152,6 @@ These recurse into subforms but their head is not macro-expanded.")
  Known entries: aref, fill-pointer, getf, car, first, cdr, rest, nth, cadr, cddr.")
 
 ;;; ── Query helpers for the data layer ─────────────────────────────────────
-
-(defun %symbol-list-member-p (name items)
-  (and (member name items :test #'eq) t))
-
-(defun %symbol-alist-cdr (name entries)
-  (cdr (assoc name entries :test #'eq)))
-
-(defun compiler-special-form-p (name)
-  "Return T when NAME is handled directly by the compiler/parser layer."
-  (%symbol-list-member-p name *compiler-special-forms*))
-
-(defun builtin-name-p (name)
-  "Return T when NAME appears in the consolidated builtin registry."
-  (%symbol-list-member-p name *all-builtin-names*))
-
-(defun variadic-fold-identity (name)
-  "Return the identity element for a variadic fold builtin, or NIL if unknown."
-  (%symbol-alist-cdr name *variadic-fold-identities*))
 
 ;;; ── Expander dispatch table ───────────────────────────────────────────────
 ;;;

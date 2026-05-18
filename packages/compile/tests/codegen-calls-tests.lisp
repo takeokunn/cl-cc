@@ -183,7 +183,7 @@
          (r1 (cl-cc/compile:make-register ctx))
          (result-reg (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
-          (list (cons 'arr (list 2 r0 r1))))
+          (list (cons 'arr (list 2 nil r0 r1))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-array
                 'array-length
                 (list (make-ast-var :name 'arr))
@@ -201,7 +201,7 @@
          (r2 (cl-cc/compile:make-register ctx))
          (result-reg (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
-          (list (cons 'arr (list 3 r0 r1 r2))))
+          (list (cons 'arr (list 3 nil r0 r1 r2))))
     (let ((ret (cl-cc/compile::%try-compile-noescape-array
                 'aref
                 (list (make-ast-var :name 'arr) (make-ast-int :value 1))

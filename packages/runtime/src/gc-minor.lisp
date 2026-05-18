@@ -51,8 +51,8 @@
                                   (dolist (offset (rt-object-pointer-slots heap addr))
                                     (let* ((slot-addr (+ addr offset))
                                            (val (rt-heap-ref heap slot-addr))
-                                           (from-addr (%rt-gc-value-address-for-predicate
-                                                       val in-source-p :legacy-raw-p t)))
+                                            (from-addr (%rt-gc-value-address-for-predicate
+                                                        val in-source-p)))
                                       (when from-addr
                                         (rt-heap-set heap slot-addr
                                                      (%rt-gc-rebox-pointer-like
@@ -88,8 +88,8 @@
                 (dolist (offset (rt-object-pointer-slots heap scan))
                   (let* ((slot-addr (+ scan offset))
                          (val (rt-heap-ref heap slot-addr))
-                         (from-addr (%rt-gc-value-address-for-predicate
-                                     val in-source-p :legacy-raw-p t)))
+                          (from-addr (%rt-gc-value-address-for-predicate
+                                      val in-source-p)))
                     (when from-addr
                       (rt-heap-set heap slot-addr
                                    (%rt-gc-rebox-pointer-like
@@ -119,7 +119,7 @@
                  (when (rt-young-addr-p heap new-val)
                    (rt-card-mark-dirty heap old-addr))))
               ;; Slot holds a live young address — dirty the card
-              ((let ((target (%rt-gc-pointer-address heap val :legacy-raw-p t)))
+              ((let ((target (%rt-gc-pointer-address heap val)))
                  (and target (rt-young-addr-p heap target)))
                (rt-card-mark-dirty heap old-addr)))))))))
 
@@ -143,6 +143,9 @@
         (promoted-before (rt-heap-words-promoted heap))
         (live-words 0))
   (setf (rt-heap-gc-state heap) :minor-gc)
+  ;; FR-343: retire all TLABs before semispace flip so no thread-local buffer
+  ;; continues allocating into the evacuation source after this collection.
+  (rt-gc-tlab-retire-all heap)
   (unwind-protect
       (let* (;; Save old from-space range (evacuation source)
              (evac-source         (rt-heap-young-from-base heap))
@@ -167,10 +170,7 @@
             (let* ((val (cdr root-cell))
                    (from-addr
                      (case (%rt-gc-root-type heap root-cell)
-                       (:pointer (%rt-gc-value-address-for-predicate val #'in-source-p
-                                                                     :legacy-raw-p nil))
-                       (:any (%rt-gc-value-address-for-predicate val #'in-source-p
-                                                                 :legacy-raw-p t))
+                        ((:pointer :any) (%rt-gc-value-address-for-predicate val #'in-source-p))
                        (otherwise nil))))
               (when from-addr
                 (setf (cdr root-cell)
@@ -188,8 +188,8 @@
                                 (rt-special-variable-global-only-p sym)))
                      (val (%rt-gc-binding-value binding))
                      (from-addr (and (not skip)
-                                     (%rt-gc-value-address-for-predicate
-                                      val #'in-source-p :legacy-raw-p t))))
+                                      (%rt-gc-value-address-for-predicate
+                                       val #'in-source-p))))
                 (when from-addr
                   (%rt-gc-set-binding-value
                    binding
@@ -202,8 +202,8 @@
           (when (boundp '*rt-global-var-registry*)
             (maphash
              (lambda (sym val)
-               (let ((from-addr (%rt-gc-value-address-for-predicate
-                                 val #'in-source-p :legacy-raw-p t)))
+                (let ((from-addr (%rt-gc-value-address-for-predicate
+                                  val #'in-source-p)))
                  (when from-addr
                    (setf (gethash sym *rt-global-var-registry*)
                           (%rt-gc-rebox-pointer-like
@@ -215,15 +215,14 @@
             (dolist (thread-state *gc-threads*)
               (dolist (word (%rt-gc-thread-words thread-state))
                 (let ((from-addr (%rt-gc-value-address-for-predicate
-                                  word #'in-source-p :legacy-raw-p t)))
+                                   word #'in-source-p)))
                   (when from-addr
                     (%gc-ensure-copied heap from-addr to-free-cell
                                        promoted-list-cell #'in-source-p))))))
           ;; Step 2: Drain SATB queue — treat entries as additional roots
           (let ((new-satb nil))
             (dolist (ptr (rt-heap-satb-queue heap))
-              (let ((from-addr (%rt-gc-value-address-for-predicate ptr #'in-source-p
-                                                                    :legacy-raw-p t)))
+              (let ((from-addr (%rt-gc-value-address-for-predicate ptr #'in-source-p)))
                 (cond
                 (from-addr
                   ;; Young pointer in SATB — evacuate it

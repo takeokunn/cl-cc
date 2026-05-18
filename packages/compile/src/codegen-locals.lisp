@@ -62,13 +62,7 @@ Falls through to an oob error when no index matches."
 
 (defun %emit-noescape-array-read (entry index-ast result-reg ctx)
   (let* ((size      (cadr entry))
-         (payload   (cddr entry))
-         (elements  (if (and payload
-                             (member (car payload)
-                                     '(fixnum single-float double-float character bit nil)
-                                     :test #'eq))
-                        (cdr payload)
-                        payload))
+         (elements  (cdr (cddr entry)))
          (index-reg (compile-ast index-ast ctx))
          (end-label (make-label ctx "noescape_array_read_end")))
     (%emit-noescape-dispatch-loop
@@ -80,13 +74,7 @@ Falls through to an oob error when no index matches."
 
 (defun %emit-noescape-array-write (entry index-ast value-ast result-reg ctx)
   (let* ((size      (cadr entry))
-         (payload   (cddr entry))
-         (elements  (if (and payload
-                             (member (car payload)
-                                     '(fixnum single-float double-float character bit nil)
-                                     :test #'eq))
-                        (cdr payload)
-                        payload))
+         (elements  (cdr (cddr entry)))
          (index-reg (compile-ast index-ast ctx))
          (val-reg   (compile-ast value-ast ctx))
          (end-label (make-label ctx "noescape_array_write_end")))

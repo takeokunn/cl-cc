@@ -18,7 +18,37 @@
 
 Each nested table maps logical thread ids to a private LIFO queue.  In native
 backends these queues can be thread-local lock-free buffers; the Pure CL runtime
-uses ordinary lists because mutation is cooperative and serialized by the host.")
+  uses ordinary lists because mutation is cooperative and serialized by the host.")
+
+(defun %rt-gc-satb-sb-thread-function (name)
+  "Return the SB-THREAD function named NAME, or NIL when unavailable."
+  (ignore-errors
+    (let ((package (find-package "SB-THREAD")))
+      (when package
+        (multiple-value-bind (symbol status) (find-symbol name package)
+          (when (and status (fboundp symbol))
+            (symbol-function symbol)))))))
+
+(defun %rt-gc-satb-make-mutex (name)
+  "Create an optional host mutex without reader-time SB-THREAD dependency."
+  (let ((make-mutex (%rt-gc-satb-sb-thread-function "MAKE-MUTEX")))
+    (and make-mutex (ignore-errors (funcall make-mutex :name name)))))
+
+(defvar *rt-gc-satb-thread-queues-lock*
+  (%rt-gc-satb-make-mutex "gc-satb-thread-queues")
+  "Mutex protecting *rt-gc-satb-thread-queues* and nested SATB queue tables.")
+
+(defmacro with-gc-satb-thread-queues-locked (() &body body)
+  "Execute BODY while holding the SATB thread-queue hash-table mutex."
+  (let ((fn (gensym "CALL-WITH-MUTEX"))
+        (lock (gensym "LOCK")))
+    `(let ((,lock *rt-gc-satb-thread-queues-lock*))
+       (if ,lock
+           (let ((,fn (%rt-gc-satb-sb-thread-function "CALL-WITH-MUTEX")))
+             (if ,fn
+                 (funcall ,fn (lambda () ,@body) ,lock)
+                 (progn ,@body)))
+           (progn ,@body)))))
 
 ;;; ------------------------------------------------------------
 ;;; Section 4: Write Barrier — SATB + Card Table
@@ -33,10 +63,11 @@ uses ordinary lists because mutation is cooperative and serialized by the host."
   t)
 
 (defun %rt-gc-satb-thread-table (heap &key create)
-  (or (gethash heap *rt-gc-satb-thread-queues*)
-      (when create
-        (setf (gethash heap *rt-gc-satb-thread-queues*)
-              (make-hash-table :test #'equal)))))
+  (with-gc-satb-thread-queues-locked ()
+    (or (gethash heap *rt-gc-satb-thread-queues*)
+        (when create
+          (setf (gethash heap *rt-gc-satb-thread-queues*)
+                (make-hash-table :test #'equal))))))
 
 (defun rt-gc-satb-enqueue (heap value &optional (thread-id *rt-current-thread-id*))
   "Append VALUE to THREAD-ID's SATB queue for HEAP and return VALUE.
@@ -44,21 +75,25 @@ uses ordinary lists because mutation is cooperative and serialized by the host."
 This is the FR-339 pre-write barrier hook preserving the SATB invariant: the
 snapshot observed at initial mark remains traceable because overwritten pointer
 values are retained until final remark drains all per-thread queues."
-  (let ((table (%rt-gc-satb-thread-table heap :create t)))
-    (push value (gethash thread-id table)))
+  (with-gc-satb-thread-queues-locked ()
+    (let ((table (or (gethash heap *rt-gc-satb-thread-queues*)
+                     (setf (gethash heap *rt-gc-satb-thread-queues*)
+                           (make-hash-table :test #'equal)))))
+      (push value (gethash thread-id table))))
   value)
 
 (defun rt-gc-drain-satb-thread-queues (heap)
   "Return and clear all per-thread SATB entries for HEAP."
-  (let ((table (%rt-gc-satb-thread-table heap))
-        (entries nil))
-    (when table
-      (maphash (lambda (thread-id queue)
-                 (declare (ignore thread-id))
-                 (setf entries (nconc queue entries)))
-               table)
-      (clrhash table))
-    entries))
+  (with-gc-satb-thread-queues-locked ()
+    (let ((table (gethash heap *rt-gc-satb-thread-queues*))
+          (entries nil))
+      (when table
+        (maphash (lambda (thread-id queue)
+                   (declare (ignore thread-id))
+                   (setf entries (nconc queue entries)))
+                 table)
+        (clrhash table))
+      entries)))
 
 (defun %rt-gc-write-barrier-addr-p (heap value)
   "Conservative heap-address predicate for write-barrier checks.
@@ -68,7 +103,7 @@ Unlike %RT-GC-POINTER-ADDRESS this does NOT require a valid object header at the
 target address — it is safe for write-barrier use where being slightly conservative
 (treating a non-pointer word as a potential heap address) is harmless.
 
-Both NaN-boxed pointer values and legacy raw heap addresses are recognized."
+Both NaN-boxed pointer values and canonical internal heap addresses are recognized."
   (cond
     ((and (integerp value) (val-pointer-p value))
      (let ((addr (decode-pointer value)))

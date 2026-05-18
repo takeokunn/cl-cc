@@ -488,4 +488,4 @@ Unknown roots remain conservative and therefore return T."
       (error () inst))))
 
 ;; opt-pass-dead-store-elim and opt-pass-store-to-load-forward are in
-;; optimizer-memory-passes.lisp (loaded next).
+;; optimizer-memory-dse.lisp (loaded next).

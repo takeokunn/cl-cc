@@ -133,14 +133,8 @@ first-class function values here."
   (cadr entry))
 
 (defun %noescape-array-entry-element-regs (entry)
-  "Return element register list from legacy or typed noescape-array ENTRY payload."
-  (let ((payload (cddr entry)))
-    (if (and payload
-             (member (car payload)
-                     '(fixnum single-float double-float character bit nil)
-                     :test #'eq))
-        (cdr payload)
-        payload)))
+  "Return element register list from typed noescape-array ENTRY payload."
+  (cdr (cddr entry)))
 
 (defun %try-compile-noescape-array (func-sym args result-reg ctx)
   "Optimise ARRAY-LENGTH / AREF / ASET on noescape arrays to moves/consts."

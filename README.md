@@ -20,8 +20,12 @@ fast unit plan. Integration and self-hosting E2E suites are selected by suite
 taxonomy and run explicitly; they no longer depend on `slow` names.
 `nix flake check` invokes the same fast plan via `checks.tests`.
 
-Set `CLCC_TEST_TIMEOUT` to override the default per-test timeout (seconds; default: 10).
-Set `CLCC_SUITE_TIMEOUT` to override the whole-suite timeout (seconds; default: 600).
+Timeouts are explicit for test execution. Set `CLCC_TEST_TIMEOUT` to override
+the default per-test timeout (positive integer seconds; default: `10`). Set
+`CLCC_SUITE_TIMEOUT` to override the whole-suite timeout (positive integer
+seconds; default: `600`). Invalid, zero, or negative values are ignored and the
+defaults are used. Individual tests may declare a positive `:timeout`, which
+overrides `CLCC_TEST_TIMEOUT` for that test.
 Stale FASLs (e.g. after switching between project paths) can be cleared with
 `rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/`. The runner
 otherwise keeps the warm cache to make repeat invocations fast.

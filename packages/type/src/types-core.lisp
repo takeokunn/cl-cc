@@ -41,7 +41,7 @@ variable itself: LOWER-BOUND <: this-var <: UPPER-BOUND."
 
 (defun fresh-type-var (&rest args)
   "Return a fresh unification variable with a unique ID.
-Accepts either legacy positional NAME or keyword :NAME.
+Accepts either positional NAME or keyword :NAME.
 UPPER-BOUND and LOWER-BOUND are optional type-node bounds used by bounded
 polymorphism."
   (let ((name nil)

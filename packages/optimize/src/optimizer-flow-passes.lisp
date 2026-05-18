@@ -1,11 +1,11 @@
 ;;;; packages/optimize/src/optimizer-flow-passes.lisp — Advanced CFG optimization passes
 ;;;
-;;; Extracted from optimizer-flow.lisp.
+;;; Extracted from optimizer-flow-core.lisp.
 ;;; Contains: branch-correlation, block-merge, tail-merge.
 ;;;
-;;; Depends on optimizer-flow.lisp (opt-pass-dominated-type-check-elim,
+;;; Depends on optimizer-flow-core.lisp (opt-pass-dominated-type-check-elim,
 ;;;   opt-foldable-type-pred-p, opt-inst-dst, cfg-build, cfg-flatten, bb-*).
-;;; Load order: immediately after optimizer-flow.lisp.
+;;; Load order: immediately after optimizer-flow-core.lisp.
 
 (in-package :cl-cc/optimize)
 
@@ -220,9 +220,6 @@ block are replaced with vm-const 1/0."
 (defparameter *opt-tail-dup-max-instructions* 12
   "Maximum number of tail-block instructions duplicated into a predecessor.")
 
-(defparameter *tail-dup-max-insts* *opt-tail-dup-max-instructions*
-  "Compatibility alias for the old tail-duplication instruction budget.")
-
 (defun %tail-dup-terminator (block)
   "Return BLOCK's last instruction, or NIL."
   (car (last (bb-instructions block))))
@@ -377,3 +374,240 @@ Duplication is only applied when it removes at least one jump."
     (multiple-value-bind (out changed)
         (%tail-dup-linear instructions candidates)
       (if changed out (cfg-flatten cfg)))))
+
+(in-package :cl-cc/optimize)
+;;; ─── Pass 2: Dead Code Elimination ──────────────────────────────────────
+
+(defun opt-pass-dce (instructions)
+  "Dead code elimination via global usedness analysis.
+   Pass 1: collect every register that appears as a source operand anywhere
+   in the program into a 'used' set (ignoring control flow).
+   Pass 2: remove pure instructions (vm-const, vm-move) whose destination
+   register never appears in the used set.
+   This is safe across branches/labels: a register defined in both branches
+   is preserved as long as it is read anywhere -- the linear-order issue that
+   plagued the previous backward-liveness DCE is entirely avoided."
+  (let ((used (make-hash-table :test #'eq)))
+    ;; Pass 1: mark every register that is read by any instruction
+    (dolist (inst instructions)
+      (dolist (reg (opt-inst-read-regs inst))
+        (setf (gethash reg used) t)))
+    ;; Pass 2: drop DCE-eligible instructions (pure + alloc) whose dst is never read
+    (remove-if (lambda (inst)
+                 (and (opt-inst-dce-eligible-p inst)
+                      (let ((dst (ignore-errors (vm-dst inst))))
+                        (and dst (not (gethash dst used))))))
+               instructions)))
+
+;;; ─── Pass 3: Jump Threading + Dead Jump Elimination ─────────────────────
+
+(defun opt-build-label-index (instructions)
+  "Return (values vector label→index-ht) for threading analysis."
+  (let ((vec (coerce instructions 'vector))
+        (idx (make-hash-table :test #'equal)))
+    (loop for i from 0 below (length vec)
+          when (vm-label-p (aref vec i))
+          do (setf (gethash (vm-name (aref vec i)) idx) i))
+    (values vec idx)))
+
+(defun opt-thread-label (label idx vec &optional (seen (make-hash-table :test #'equal)))
+  "Follow jump chains starting at LABEL. Returns the ultimate jump target label.
+
+   Cycle detection prevents infinite loops in pathological (cyclic) code while
+   still allowing long but valid jump chains to fully thread."
+  (when (gethash label seen)
+    (return-from opt-thread-label label))
+  (setf (gethash label seen) t)
+  (let ((pos (gethash label idx)))
+    (unless pos (return-from opt-thread-label label))
+    ;; Scan forward past any labels to find the first real instruction
+    (loop for i from pos below (length vec)
+          for inst = (aref vec i)
+          do (typecase inst
+                (vm-label nil) ; skip label markers
+                (vm-jump ; found a chained jump → follow it
+                 (let ((next (vm-label-name inst)))
+                   (return-from opt-thread-label
+                     (opt-thread-label next idx vec seen))))
+                (t (return-from opt-thread-label label)))))
+  label)
+
+(defun %opt-rewrite-block-terminator (block old-label new-label)
+  "Rewrite the jump terminator of BLOCK from OLD-LABEL to NEW-LABEL when it matches.
+Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
+  (let ((cell (last (bb-instructions block))))
+    (when cell
+      (let ((term (car cell)))
+        (when (equal (vm-label-name term) old-label)
+          (setf (car cell)
+                (typecase term
+                  (vm-jump
+                   (make-vm-jump :label new-label))
+                  (vm-jump-zero
+                   (make-vm-jump-zero :reg (vm-reg term) :label new-label))
+                  (t (return-from %opt-rewrite-block-terminator)))))))))
+
+(defun opt-falls-through-to-p (vec i target)
+  "T if scanning forward from position I+1 we reach TARGET before any non-label."
+  (loop for j from (1+ i) below (length vec)
+        for inst = (aref vec j)
+        if (not (vm-label-p inst)) return nil
+        if (equal (vm-name inst) target) return t
+        finally (return nil)))
+
+(defun %opt-thread-jump (inst vec i idx)
+  "Thread unconditional INST; return the (possibly relabeled) jump, or NIL if it falls through."
+  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
+    (unless (opt-falls-through-to-p vec i threaded)
+      (if (equal threaded (vm-label-name inst))
+          inst
+          (make-vm-jump :label threaded)))))
+
+(defun %opt-thread-jump-zero (inst vec i idx)
+  "Thread conditional INST; always return an instruction (never elide conditionals)."
+  (declare (ignore i))
+  (let ((threaded (opt-thread-label (vm-label-name inst) idx vec)))
+    (if (equal threaded (vm-label-name inst))
+        inst
+        (make-vm-jump-zero :reg (vm-reg inst) :label threaded))))
+
+(defparameter *opt-jump-thread-table*
+  (list (cons 'vm-jump      #'%opt-thread-jump)
+        (cons 'vm-jump-zero #'%opt-thread-jump-zero))
+  "Maps jump instruction types to their threading handlers.")
+
+(defun opt-pass-jump (instructions)
+  "Thread jump chains, remove fallthrough jumps, and propagate edge facts.
+
+The value-propagation part is deliberately conservative: it only carries facts
+derived from vm-jump-zero conditions whose comparison operands are both known
+constants in the predecessor block, only into single-predecessor successors,
+and never across CFG back-edges."
+  (opt-pass-jump-threading-with-propagation instructions))
+
+(defun %opt-pass-jump-chain-only (instructions)
+  "Thread jump chains and remove jumps to the immediately following label."
+  (multiple-value-bind (vec idx) (opt-build-label-index instructions)
+    (let ((result nil)
+          (n (length vec)))
+      (loop for i from 0 below n
+            for inst = (aref vec i)
+             do (let ((handler (loop for entry in *opt-jump-thread-table*
+                                      for type = (car entry)
+                                      for fn = (cdr entry)
+                                      when (typep inst type) return fn)))
+                  (if handler
+                      (let ((new (funcall handler inst vec i idx)))
+                        (when new (push new result)))
+                      (push inst result))))
+      (nreverse result))))
+
+(defun %opt-jump-comparison-p (inst)
+  "Return T when INST is a comparison supported by jump fact propagation."
+  (typep inst '(or vm-lt vm-le vm-gt vm-ge vm-eq vm-num-eq)))
+
+(defun %opt-jump-fact-killed-p (fact dst)
+  "Return T when a write to DST invalidates FACT's comparison operands."
+  (and fact dst
+       (or (eq dst (getf fact :lhs))
+           (eq dst (getf fact :rhs)))))
+
+(defun %opt-jump-same-comparison-p (inst fact)
+  "Return T when INST repeats the comparison described by FACT."
+  (and fact
+       (%opt-jump-comparison-p inst)
+       (eq (type-of inst) (getf fact :pred))
+       (eq (vm-lhs inst) (getf fact :lhs))
+       (eq (vm-rhs inst) (getf fact :rhs))
+       (opt-inst-dst inst)))
+
+(defun %opt-jump-branch-comparison-fact (block)
+  "Return a comparison fact for BLOCK's vm-jump-zero terminator, or NIL.
+
+The comparison must define the branch condition register, and both comparison
+operands must be known constants at that point in the same block. The returned
+fact does not include the edge value; callers add :VALUE for taken/fallthrough
+successors."
+  (let* ((insts (bb-instructions block))
+         (term (car (last insts))))
+    (unless (typep term 'vm-jump-zero)
+      (return-from %opt-jump-branch-comparison-fact nil))
+    (let ((env (make-hash-table :test #'eq))
+          (cond-reg (vm-reg term))
+          (fact nil))
+      (dolist (inst insts fact)
+        (when (eq inst term)
+          (return fact))
+        (let ((dst (opt-inst-dst inst)))
+          (when dst
+            (cond
+              ((typep inst 'vm-const)
+               (setf (gethash dst env) (vm-value inst)))
+              (t
+               (remhash dst env))))
+          (when (and dst (eq dst cond-reg))
+            (setf fact nil)
+            (when (%opt-jump-comparison-p inst)
+              (multiple-value-bind (lval lfound) (gethash (vm-lhs inst) env)
+                (declare (ignore lval))
+                (multiple-value-bind (rval rfound) (gethash (vm-rhs inst) env)
+                  (declare (ignore rval))
+                  (when (and lfound rfound)
+                    (setf fact (list :pred (type-of inst)
+                                     :lhs (vm-lhs inst)
+                                     :rhs (vm-rhs inst)))))))))))))
+
+(defun %opt-jump-back-edge-p (pred succ)
+  "Return T when PRED -> SUCC is a CFG back-edge."
+  (and (bb-idom pred)
+       (cfg-dominates-p succ pred)))
+
+(defun %opt-jump-edge-fact (pred succ cfg live-fact)
+  "Return the fact propagated on edge PRED -> SUCC, or NIL."
+  (unless (and (= (length (bb-predecessors succ)) 1)
+               (not (%opt-jump-back-edge-p pred succ)))
+    (return-from %opt-jump-edge-fact nil))
+  (let* ((term (car (last (bb-instructions pred))))
+         (branch-fact (%opt-jump-branch-comparison-fact pred)))
+    (if (and branch-fact (typep term 'vm-jump-zero))
+        (let ((target (cfg-get-block-by-label cfg (vm-label-name term))))
+          (append branch-fact (list :value (if (eq succ target) 0 1))))
+        live-fact)))
+
+(defun %opt-jump-rewrite-block-with-fact (block fact)
+  "Rewrite redundant comparisons in BLOCK using incoming FACT.
+Returns the still-live fact after scanning the block."
+  (let ((live-fact fact)
+        (new-insts nil))
+    (dolist (inst (bb-instructions block))
+      (let ((dst (opt-inst-dst inst)))
+        (when (%opt-jump-fact-killed-p live-fact dst)
+          (setf live-fact nil))
+        (cond
+          ((%opt-jump-same-comparison-p inst live-fact)
+           (push (make-vm-const :dst dst :value (getf live-fact :value))
+                 new-insts))
+          (t
+           (push inst new-insts)))))
+    (setf (bb-instructions block) (nreverse new-insts))
+    live-fact))
+
+(defun %opt-pass-jump-propagate-edge-values (instructions)
+  "Propagate known comparison values from conditional CFG edges."
+  (let ((cfg (cfg-build instructions)))
+    (cfg-compute-dominators cfg)
+    (let ((rpo (cfg-compute-rpo cfg))
+          (facts (make-hash-table :test #'eq)))
+      (dolist (block rpo)
+        (let ((live-fact (%opt-jump-rewrite-block-with-fact
+                          block (gethash block facts))))
+          (dolist (succ (bb-successors block))
+            (let ((edge-fact (%opt-jump-edge-fact block succ cfg live-fact)))
+              (when edge-fact
+                (setf (gethash succ facts) edge-fact))))))
+      (cfg-flatten cfg))))
+
+(defun opt-pass-jump-threading-with-propagation (instructions)
+  "Run jump-chain threading, then conservative comparison-value propagation."
+  (%opt-pass-jump-propagate-edge-values
+   (%opt-pass-jump-chain-only instructions)))

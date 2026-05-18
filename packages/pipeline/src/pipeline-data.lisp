@@ -41,37 +41,6 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (ubsan              nil)
   (hwasan             nil))
 
-(defun %opts->optimize-kwargs (opts)
-  "Extract the pass/stats/remarks subset of OPTS as a keyword plist for
-optimize-instructions."
-  (list :pass-pipeline      (pipeline-opts-pass-pipeline opts)
-        :speed              (pipeline-opts-speed opts)
-        :inline-threshold-scale (pipeline-opts-inline-threshold-scale opts)
-        :print-pass-timings (pipeline-opts-print-pass-timings opts)
-        :timing-stream      (pipeline-opts-timing-stream opts)
-        :print-pass-stats   (pipeline-opts-print-pass-stats opts)
-        :stats-stream       (pipeline-opts-stats-stream opts)
-        :trace-json-stream  (pipeline-opts-trace-json-stream opts)
-        :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
-        :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
-        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
-        :retpoline          (pipeline-opts-retpoline opts)
-        :stack-protector    (pipeline-opts-stack-protector opts)
-        :shadow-stack       (pipeline-opts-shadow-stack opts)
-        :asan               (pipeline-opts-asan opts)
-        :msan               (pipeline-opts-msan opts)
-        :tsan               (pipeline-opts-tsan opts)
-        :ubsan              (pipeline-opts-ubsan opts)
-        :hwasan             (pipeline-opts-hwasan opts)))
-
-(defun %opts->compile-kwargs (opts)
-  "Spread all OPTS fields into a keyword plist for compile-expression /
-compile-toplevel-forms."
-  (list* :target     (pipeline-opts-target opts)
-         :type-check (pipeline-opts-type-check opts)
-         :safety     (pipeline-opts-safety opts)
-         (%opts->optimize-kwargs opts)))
-
 ;;; ─────────────────────────────────────────────────────────────────────────
 
 (defparameter *cps-host-eval-unsafe-ast-types*

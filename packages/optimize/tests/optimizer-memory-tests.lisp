@@ -1,5 +1,5 @@
 ;;;; tests/unit/optimize/optimizer-memory-tests.lisp
-;;;; Unit tests for optimizer-memory.lisp — heap alias and interval analysis
+;;;; Unit tests for optimizer-memory-alias.lisp — heap alias and interval analysis
 ;;;;
 ;;;; Covers: opt-heap-root-inst-p, opt-heap-root-kind,
 ;;;;   opt-compute-heap-aliases, opt-compute-points-to,

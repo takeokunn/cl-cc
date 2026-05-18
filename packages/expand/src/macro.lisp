@@ -4,6 +4,13 @@
 ;; the intended dynamic binding even when this file is compiled first.
 (defvar *macro-eval-fn*)
 
+(defun %bootstrap-macro-eval (form)
+  "Bootstrap macro evaluator.
+Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not yet available."
+  (if (fboundp 'our-eval)
+      (our-eval form)
+      (error "OUR-EVAL is unavailable during macro bootstrap for ~S" form)))
+
 ;;; CL-CC Macro System
 ;;; A complete macro system implementation with:
 ;;; - Full destructuring-bind for lambda lists

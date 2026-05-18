@@ -1,6 +1,5 @@
 ;;;; packages/pipeline/src/pipeline-stdlib.lisp — Standard Library Cache Infrastructure
 ;;;
-;;; Extracted from pipeline.lisp.
 ;;; Contains the stdlib expanded-form cache: snapshot/restore helpers,
 ;;; cache build, and get-stdlib-forms entry point.
 ;;;
@@ -8,8 +7,7 @@
 ;;; with its own rollback logic; keeping it separate lets pipeline.lisp
 ;;; focus on compile-expression, compile-string, and run-string.
 ;;;
-;;; Depends on pipeline.lisp (compile-expression is in the same module,
-;;; but this file loads BEFORE pipeline.lisp).  Actually depends on
+;;; This file loads before pipeline.lisp and depends on
 ;;; stdlib-source{,-ext}.lisp (*standard-library-source*),
 ;;; expand/macro.lisp (*macro-eval-fn*, compiler-macroexpand-all),
 ;;; and parse/cl/* (parse-all-forms).
@@ -21,16 +19,15 @@
 
 (defparameter *stdlib-expanded-cache* nil
   "Cached list of stdlib forms after parse + macro-expand, but BEFORE
-`lower-sexp-to-ast'.  Entries are s-expressions (or occasionally
-already-lowered AST nodes, whenever `compiler-macroexpand-all' short-circuits
-because a form was handed in pre-lowered).
+`lower-sexp-to-ast'. Entries are s-expressions copied before each caller hands
+them to the normal lowering pipeline.
 
 Rationale for caching at the sexp level rather than post-lower AST:
 AST nodes carry identity-sensitive state (gensym registers, slot writers
 via defstruct, label counters introduced during lowering) that must NOT
-be shared across independent compiler contexts.  The previous post-lower
-cache broke tests like OR-UNIQUE-GENSYM-PER-EXPANSION because the same
-AST node was handed to multiple compilations, yielding colliding gensyms.
+be shared across independent compiler contexts.  A post-lower
+cache would hand the same AST node to multiple compilations, yielding colliding
+gensyms and shared lowering state.
 Sexps, by contrast, are plain reader data and are naturally immutable
 when treated as read-only — every call to `get-stdlib-forms' produces a
 fresh AST tree downstream via the standard lowering pipeline.
@@ -92,11 +89,10 @@ from the caller's perspective.
 
 Strategy: build a FRESH replacement hash populated from SNAPSHOT first,
 THEN overwrite the live table's contents in one `clrhash'+`maphash' pair.
-If the fresh-build step throws, the live table is untouched (original
-torn state still observable, but no worse than pre-call).  The previous
-naive `clrhash'+re-populate approach would leave the live table EMPTY if
-`maphash' re-population threw (e.g., OOM), which is strictly worse than
-the torn state we were trying to recover from.
+If the fresh-build step throws, the live table is untouched (the original
+torn state remains observable, but no worse than pre-call).  Building first
+avoids leaving the live table empty if `maphash' re-population throws
+(e.g., OOM) during the commit step.
 
 Object identity of `*macro-environment*' and its backing hash table is
 preserved, so any code holding a reference sees the rollback."
@@ -127,22 +123,20 @@ back mid-sequence but whose dependents remained registered).  Normal
 completion intentionally leaves the snapshot-less state in place — the
 registry is populated and stays so.
 
-INVARIANT: returned list contains ONLY sexps, never AST nodes.  The
-previous cache allowed AST nodes (for paths where `compiler-macroexpand-all'
-short-circuited on pre-lowered input) but shared AST nodes carry
-identity-sensitive gensym registers and re-introduce the
-OR-UNIQUE-GENSYM-PER-EXPANSION regression.  We assert this explicitly
-below as a tripwire against silent re-introduction of that bug."
+INVARIANT: returned list contains ONLY sexps, never AST nodes.  Shared AST
+nodes carry identity-sensitive gensym registers and can collide across
+independent compilations, so the assertion below preserves the sexp-only
+cache contract."
   (let ((snapshot (%snapshot-macro-env-table))
         (success-p nil)
         (*package* (or (find-package :cl-cc) *package*)))
     (unwind-protect
          (let ((result (mapcar #'compiler-macroexpand-all
                                 (parse-all-forms *standard-library-source*))))
-           ;; Tripwire: stdlib source is plain text; every entry MUST be a sexp.
-           (dolist (form result)
-             (when (typep form 'ast-node)
-               (error "stdlib cache builder produced an AST node; only sexps allowed (would re-introduce gensym sharing bug)")))
+            ;; Tripwire: stdlib source is plain text; every entry MUST be a sexp.
+            (dolist (form result)
+              (when (typep form 'ast-node)
+                (error "stdlib cache builder produced an AST node; only sexps are allowed in the shared stdlib cache")))
            (setf success-p t)
            result)
       (unless success-p

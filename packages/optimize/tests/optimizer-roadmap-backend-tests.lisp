@@ -317,7 +317,7 @@
 (deftest optimize-backend-roadmap-promoted-existing-frs-have-specific-evidence
   "Backend FRs promoted from existing implementation use specific evidence anchors."
   (dolist (case '(("FR-014" :implemented
-                    "packages/optimize/src/optimizer-memory-passes.lisp"
+                    "packages/optimize/src/optimizer-memory-dse.lisp"
                    cl-cc/optimize::opt-pass-cons-slot-forward
                    cl-cc/optimize::cons-slot-forward-replaces-car-with-original-car-register)
                   ("FR-015" :implemented
@@ -356,15 +356,15 @@
 (deftest optimize-backend-roadmap-phase40-frs-have-specific-evidence
   "Phase 40 partial-eval/specialization FRs expose concrete optimization anchors."
   (dolist (case '(("FR-209" :implemented
-                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   "packages/optimize/src/optimizer-speculative-peval.lisp"
                    cl-cc/optimize::opt-specialize-constant-args
                    optimize-specialize-constant-args-builds-residual-body)
                   ("FR-210" :implemented
-                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   "packages/optimize/src/optimizer-speculative-peval.lisp"
                    cl-cc/optimize::opt-sccp-analyze-binding-times
                    optimize-sccp-analyze-binding-times-classifies-lattice-values)
                   ("FR-211" :implemented
-                   "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+                   "packages/optimize/src/optimizer-speculative-peval.lisp"
                    cl-cc/optimize::opt-build-specialization-plan
                    optimize-build-specialization-plan-reuses-cache-for-constant-signature)))
     (destructuring-bind (feature-id status module api-symbol test-anchor) case
@@ -389,7 +389,7 @@
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-217")))
     (assert-true evidence)
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-    (dolist (module '("packages/optimize/src/optimizer-memory.lisp"
+    (dolist (module '("packages/optimize/src/optimizer-memory-alias.lisp"
                       "packages/optimize/tests/optimizer-memory-tests.lisp"))
       (assert-true (member module
                            (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
@@ -458,7 +458,7 @@
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-253")))
     (assert-true evidence)
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-    (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+    (dolist (module '("packages/optimize/src/optimizer-speculative-peval.lisp"
                       "packages/optimize/tests/optimizer-pipeline-tests.lisp"))
       (assert-true (member module
                            (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
@@ -480,7 +480,7 @@
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-254")))
     (assert-true evidence)
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-    (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+    (dolist (module '("packages/optimize/src/optimizer-speculative-peval.lisp"
                       "packages/optimize/tests/optimizer-pipeline-tests.lisp"))
       (assert-true (member module
                            (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
@@ -585,7 +585,7 @@
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-295")))
     (assert-true evidence)
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-    (dolist (module '("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+    (dolist (module '("packages/optimize/src/optimizer-speculative-peval.lisp"
                       "packages/pipeline/src/pipeline.lisp"
                       "packages/compile/src/codegen.lisp"
                       "packages/cli/src/main-utils.lisp"
@@ -616,7 +616,7 @@
   (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence "FR-352")))
     (assert-true evidence)
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-    (dolist (module '("packages/optimize/src/optimizer-memory.lisp"
+    (dolist (module '("packages/optimize/src/optimizer-memory-alias.lisp"
                       "packages/optimize/src/optimizer-memory-ranges.lisp"
                       "packages/optimize/src/optimizer.lisp"
                       "packages/optimize/tests/optimizer-memory-tests.lisp"
@@ -658,7 +658,7 @@
       (let ((evidence (cl-cc/optimize:lookup-opt-backend-roadmap-evidence feature-id)))
         (assert-true evidence)
         (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-        (assert-true (member "packages/optimize/src/optimizer-pipeline-speculative.lisp"
+        (assert-true (member "packages/optimize/src/optimizer-speculative-peval.lisp"
                              (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
                              :test #'string=))
         (assert-true (member "packages/optimize/tests/optimizer-pipeline-tests.lisp"
@@ -702,7 +702,7 @@
                    ("CL-CC/CODEGEN" . "EMIT-VM-ADD-CHECKED")
                    x86-emit-add-checked-emits-14-bytes)
                   ("FR-352" :implemented
-                   "packages/optimize/src/optimizer-memory.lisp"
+                   "packages/optimize/src/optimizer-memory-alias.lisp"
                    cl-cc/optimize::opt-interval-logand
                    overflow-check-elim-rewrites-proven-8-bit-add-to-unchecked-integer-add)
                   ("FR-360" :implemented
@@ -742,7 +742,7 @@
                       ("CL-CC/CODEGEN" . "X86-64-RED-ZONE-SPILL-P")
                       x86-vm-program-leaf-red-zone-spills-skip-rbp-frame)
                    ("FR-391" :implemented
-                    "packages/codegen/src/x86-64-codegen.lisp"
+                    "packages/codegen/src/x86-64-codegen-core.lisp"
                     ("CL-CC/CODEGEN" . "EMIT-X86-64-STACK-PROBES")
                     x86-stack-probe-count-thresholds)
                    ("FR-400" :implemented

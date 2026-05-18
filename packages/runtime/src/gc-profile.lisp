@@ -102,7 +102,7 @@ has neither signal.  Young objects without an access bit are treated as :WARM."
                    :references
                     (loop for offset in (rt-object-pointer-slots heap addr)
                           for value = (rt-heap-ref heap (+ addr offset))
-                          for target = (%rt-gc-pointer-address heap value :legacy-raw-p t)
+                          for target = (%rt-gc-pointer-address heap value)
                           when target
                             collect (list :slot offset :address target)))
              objects)))
@@ -310,7 +310,7 @@ counts.  PREVIOUS-SNAPSHOT should be a value returned by RT-GC-HEAP-SNAPSHOT."
            :total-objects object-count :total-bytes total-bytes)))
 
 (defun %rt-gc-pointer-value-matches-p (heap value target)
-  (let ((addr (%rt-gc-pointer-address heap value :legacy-raw-p t)))
+  (let ((addr (%rt-gc-pointer-address heap value)))
     (eql addr target)))
 
 (defun %rt-gc-heap-reference-count (heap target)

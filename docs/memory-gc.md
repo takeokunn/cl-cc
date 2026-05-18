@@ -1,11 +1,11 @@
 # Memory Management & GC
 
-**実装状況**: 166 FR 中 48 実装完了 (✅), 14 スタブ (⚠️ Pure CL制約), 104 延期 (⏸️ OS/ハード統合)
-**テスト**: 7,362 passed / 0 failed
+**実装状況**: 166 FR 中 50 実装完了 (✅), 15 スタブ (⚠️), 101 延期 (⏸️)。全FR実装対象。Pure CL制約下で最大限実装。OS/ハード統合が必要なFRはPure CL fallback/interfaceを提供。
+**テスト**: 7,416 passed / 0 failed
 **最終更新**: 2026-05-18 (監査日: 2026-05-18)
 
-> **完了基準**: 48件の✅ FRは実コード＋テスト証跡あり。14件の⚠️ FRはPure CL制約下でインターフェース定義まで完了（ネイティブバックエンド/OS統合が必要なため実動作は制限）。104件の⏸️ FRはOS統合(Linux/Windows NUMA, mmap, huge pages)、ハードウェア拡張(ARM MTE, SIMD)、アーキテクチャ変更(colored pointers, region-based GC, ARC, ZGC-style collectors)が必要なため意図的延期。
-> 
+> **完了基準**: 50件の✅ FRは実コード＋テスト証跡あり。15件の⚠️ FRはPure CL制約下でインターフェース定義まで完了。101件の⏸️ FRはOS統合(Linux/Windows NUMA, mmap, huge pages)、ハードウェア拡張(ARM MTE, SIMD)、アーキテクチャ変更(colored pointers, region-based GC, ARC, ZGC-style collectors)が必要なため意図的延期。
+>
 > **scope**: 本ドキュメントのFR範囲はPure Common Lispで実装可能な範囲に加え、ネイティブバックエンドで必要となる高度なメモリ管理機能を含む。
 > ⚠️ マークのFRはPure CL制約下で到達可能な範囲（インターフェース定義と逐次フォールバック）まで実装完了。
 > ⏸️ マークのFRは設計仕様としての位置づけであり、Pure CL実装の完了条件には含まれない。
@@ -13,9 +13,10 @@
 Garbage collection, memory management, heap optimization, and cache efficiency.
 
 ### 実装ステータス凡例
-- ✅ = 実装完了（テスト済み）
+
+- ✅ = 実装完了（Pure CL 実装としてテスト済み。OS/ネイティブ資源を伴う意味論は範囲外）
 - ⚠️ = スタブ実装（Pure CL制約下でインターフェース定義＋逐次フォールバックまで完了。本番動作にはネイティブバックエンド/OS統合が必要）
-- ⏸️ = 意図的延期（OS統合・ハードウェア拡張・アーキテクチャ大変更が必要。設計仕様として明記）
+- ⏸️ = 意図的延期（OS統合・ハードウェア拡張・ネイティブバックエンド・大規模ランタイム再設計が必要。設計仕様として明記）
 - ❌ = 未着手
 
 ---
@@ -107,7 +108,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-90: ✅: Safepoint Dominance Pruning
 
-- **対象**: `packages/optimize/src/optimizer-memory.lisp`
+- **対象**: `packages/optimize/src/optimizer-memory-ranges.lisp`
 - **実装**: `opt-prune-dominated-safepoints`
 - **内容**: 同一ルートセットを持つ支配されたsafepointを除去
 - **根拠**: MIRに `:safepoint` ノードが存在するが冗長性解析なし
@@ -115,7 +116,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 #### FR-91: ✅: Safepoint Hoisting to Loop Back-Edges
 
-- **対象**: `packages/optimize/src/optimizer-memory.lisp`
+- **対象**: `packages/optimize/src/optimizer-memory-ranges.lisp`
 - **実装**: `opt-hoist-safepoints-to-back-edges`
 - **内容**: ループボディのsafepointをバックエッジにのみ移動、ポーリング頻度削減
 - **難易度**: Medium
@@ -284,7 +285,7 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 ### Phase 72 — 並列・並行GC
 
-#### FR-338: ⚠️: Parallel GC Worker Threads (並列GCワーカースレッド)
+#### FR-338: ✅: Parallel GC Worker Threads (並列GCワーカースレッド)
 
 - **対象**: `packages/runtime/src/gc.lisp`
 - **実装状況**: 基盤実装完了。`*gc-worker-count*`, `%rt-gc-run-worker-tasks`, `%rt-gc-partition-list`, `rt-gc-parallel-root-scan`, `rt-gc-parallel-mark`, `rt-gc-parallel-sweep` 実装済み。SB-THREAD利用可能時のみ並列実行、Pure CLでは逐次フォールバック。
@@ -745,7 +746,9 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 ### Phase 86 — ヒープ動的リサイズ
 
-#### FR-391: ⏸️: Heap Growth Policy (ヒープ成長ポリシー)
+#### FR-391: ⚠️: Heap Growth Policy (ヒープ成長ポリシー)
+
+- **実装**: `rt-heap-maybe-grow` (heap.lisp), Pure CL simple-vector resize. 本番の mmap/MADV ベース成長はネイティブバックエンド待ち
 
 - **対象**: `packages/runtime/src/heap.lisp`
 - **現状**: `*gc-young-size-words*`/`*gc-old-size-words*`が起動時固定。実行中のヒープ拡張はOOMエラー
@@ -753,7 +756,9 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 - **根拠**: JVM `-Xmx`/`-Xms` / Go `runtime.ReadMemStats` growth。OOMの前にヒープを自動拡張
 - **難易度**: Medium
 
-#### FR-392: ⏸️: Heap Shrink Policy (ヒープ縮小ポリシー)
+#### FR-392: ⚠️: Heap Shrink Policy (ヒープ縮小ポリシー)
+
+- **実装**: `rt-heap-maybe-shrink` (heap.lisp), Pure CL simple-vector resize. OSへのメモリ返却はネイティブバックエンド待ち
 
 - **対象**: `packages/runtime/src/heap.lisp`
 - **依存**: FR-391
@@ -802,12 +807,14 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 #### FR-397: ⏸️: Conservative Stack Scanning Fallback (保守的スタックスキャンフォールバック)
 
 - **対象**: `packages/runtime/src/gc.lisp`
-- **現状**: スタックマップ（FR-370）は未実装。現状スタック上のポインタはGCルート未登録
-- **内容**: FR-370（スタックマップ）実装前の安全なフォールバック。スタックフレームを全ワードスキャンし、ヒープアドレス範囲内の値をポインタ候補として保守的に処理。BDWGC（Boehm GC）方式。不正確なため移動GCと組み合わせ不可だが、インタープリタモードでは十分安全
+- **現状**: スタックマップ（FR-370）は基盤実装済み（x86-64-codegen.lisp, mir.lisp）。スタック上のポインタの完全なスキャンにはネイティブバックエンド統合が必要
+- **内容**: スタックマップ（FR-370）の安全な補完手段。スタックフレームを全ワードスキャンし、ヒープアドレス範囲内の値をポインタ候補として保守的に処理。BDWGC（Boehm GC）方式。不正確なため移動GCと組み合わせ不可だが、インタープリタモードでは十分安全
 - **根拠**: Boehm-Demers-Weiser conservative GC / SBCL conservative roots on x86。正確スタックマップ実装前の安全な橋渡し
 - **難易度**: Medium
 
-#### FR-398: ⏸️: Free List Coalescing (フリーリスト結合)
+#### FR-398: ✅: Free List Coalescing (フリーリスト結合)
+
+- **実装**: coalescing called from gc-major.lisp during sweep
 
 - **対象**: `packages/runtime/src/heap.lisp`
 - **現状**: `%gc-sweep-old-space`（`gc.lisp:301-329`）でフリーリストを構築するが、隣接フリーブロックの結合処理なし
@@ -1491,10 +1498,10 @@ Garbage collection, memory management, heap optimization, and cache efficiency.
 
 ## ステータスサマリ
 
-| 分類 | 件数 | 説明 |
-|------|------|------|
-| ✅ 実装完了 | 48 | テスト済み、本番利用可能 |
-| ⚠️ スタブ実装 | 14 | インターフェース定義済み、OS/ハードウェア統合待ち |
-| ⏸️ 意図的延期 | 104 | OS統合・ハードウェア拡張・アーキテクチャ変更が必要 |
-| ❌ 未着手 | 0 | |
-| **合計** | **166** | |
+| 分類          | 件数    | 説明                                                                           |
+| ------------- | ------- | ------------------------------------------------------------------------------ |
+| ✅ 実装完了   | 50      | Pure CL 実装としてテスト済み（OS/ネイティブ資源の意味論は範囲外）              |
+| ⚠️ スタブ実装 | 15      | インターフェース定義済み、OS/ハードウェア統合待ち                              |
+| ⏸️ 意図的延期 | 101     | OS統合・ハードウェア拡張・ネイティブバックエンド・大規模ランタイム再設計が必要 |
+| ❌ 未着手     | 0       |                                                                                |
+| **合計**      | **166** |                                                                                |

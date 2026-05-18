@@ -81,14 +81,6 @@ let
       src = "packages/vm";
       deps = [ "cl-cc-bootstrap" ];
     };
-    cl-cc-vm-interp = {
-      src = "packages/vm-interp";
-      deps = [ ];
-    };
-    cl-cc-vm-isa = {
-      src = "packages/vm-isa";
-      deps = [ ];
-    };
     cl-cc-php = {
       src = "packages/php";
       deps = [

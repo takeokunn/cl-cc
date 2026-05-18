@@ -310,7 +310,7 @@ resets the current block (used by the backend doc which has ### section separato
            (regalloc-spec '("CL-CC/REGALLOC" . "COMPUTE-LIVE-INTERVALS"))
            (evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-329")))
       (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
-      (assert-true (member "packages/codegen/src/x86-64-codegen.lisp"
+      (assert-true (member "packages/codegen/src/x86-64-codegen-core.lisp"
                            (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
                            :test #'string=))
       (assert-true (member "packages/regalloc/src/regalloc.lisp"

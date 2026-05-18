@@ -210,7 +210,7 @@ stable, isolated context."
          (arr-reg (cl-cc/compile:make-register ctx))
          (z-reg   (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-noescape-array-bindings ctx)
-          (list (cons 'arr (list 3 z-reg z-reg z-reg))))
+          (list (cons 'arr (list 3 nil z-reg z-reg z-reg))))
     (compile-ast (make-ast-call :func 'array-length
                                 :args (list (make-ast-var :name 'arr)))
                  ctx)

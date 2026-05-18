@@ -44,13 +44,20 @@ Runner-observed environment variables:
 - `CLCC_TEST_TIMEOUT` — Overrides the default per-test wall-clock timeout in seconds.
   Framework default is `10` (`packages/testing-framework/src/framework-timeouts.lisp` `%default-test-timeout`),
   and the canonical Nix entrypoints (`nix run .#test`, `checks.tests`) export `CLCC_TEST_TIMEOUT=10`
-  via `nix/apps.nix` so hung unit tests fail fast. Long-running integration and E2E tests run explicitly by suite taxonomy.
+  via `nix/apps.nix` so hung unit tests fail fast. Values must be positive integer seconds; invalid,
+  zero, or negative values are ignored and fall back to `10`. A positive per-test `:timeout`
+  overrides this default. Long-running integration and E2E tests run explicitly by suite taxonomy.
 - `CLCC_SUITE_TIMEOUT` — Whole-suite wall-clock deadline in seconds. When exceeded the suite
   runner signals `sb-ext:timeout` (orderly path) or fires a daemon thread that calls
   `sb-ext:exit :abort t` (GC-safepoint-immune last resort). Framework default is `600`;
-  canonical Nix entrypoints export `CLCC_SUITE_TIMEOUT=1500` via `nix/apps.nix`. The shell
-  wrapper adds `--kill-after=30` to the outer `timeout` command for a final SIGKILL backstop.
+  canonical Nix entrypoints export `CLCC_SUITE_TIMEOUT=600` via `nix/apps.nix` unless the caller
+  already set it. Values must be positive integer seconds; invalid, zero, or negative values are
+  ignored and fall back to `600`.
   Source: `packages/testing-framework/src/framework-parallel-runner.lisp` (`%default-suite-timeout`, `*suite-killer-exit-fn*`).
+- External helper commands also have explicit timeouts: CPU detection uses
+  `*cpu-detect-command-timeout-seconds*`, native compilation helper commands use
+  `cl-cc/pipeline:*native-command-timeout-seconds*`, and x86-64 host feature probing uses
+  `cl-cc/codegen::*x86-64-host-probe-timeout-seconds*`.
 - `DYLD_INSERT_LIBRARIES` — Set automatically by `nix run .#test` on macOS to inject
   `libdispatch_sem_fix.dylib`, which replaces `dispatch_semaphore_*` with Mach semaphores.
   Required on macOS 26 ARM64 where `dispatch_semaphore_signal` fails to wake

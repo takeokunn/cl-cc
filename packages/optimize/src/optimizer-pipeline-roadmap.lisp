@@ -170,9 +170,23 @@ Accepted STATUS keywords: :implemented, :partial, :planned, :unknown."
 
 (defun %opt-roadmap-module-present-p (path)
   "Return T when PATH identifies a checkout file."
-  (and (stringp path)
-       (or (ignore-errors (probe-file (asdf:system-relative-pathname :cl-cc path)))
-           (probe-file (merge-pathnames path (uiop:getcwd))))))
+  (labels ((present-p (candidate)
+             (or (ignore-errors (probe-file (asdf:system-relative-pathname :cl-cc candidate)))
+                 (probe-file (merge-pathnames candidate (uiop:getcwd))))))
+    (and (stringp path)
+         (or (present-p path)
+             (and (string= path "packages/optimize/src/optimizer-speculative-ic.lisp")
+                  (every #'present-p
+                         '("packages/optimize/src/optimizer-speculative-ic.lisp"
+                           "packages/optimize/src/optimizer-speculative-profile.lisp"
+                           "packages/optimize/src/optimizer-speculative-shape.lisp"
+                           "packages/optimize/src/optimizer-speculative-concurrency.lisp"
+                           "packages/optimize/src/optimizer-speculative-security.lisp"
+                           "packages/optimize/src/optimizer-speculative-wasm.lisp"
+                           "packages/optimize/src/optimizer-speculative-debug.lisp"
+                           "packages/optimize/src/optimizer-speculative-atomics.lisp"
+                           "packages/optimize/src/optimizer-speculative-peval.lisp"
+                           "packages/optimize/src/optimizer-speculative-passes.lisp")))))))
 
 (defun %opt-roadmap-test-anchor-registered-p (anchor)
   "Return T when ANCHOR names a loaded cl-cc/test test."
@@ -259,7 +273,7 @@ Evidence anchors include functions and special variables."
       opt-profile-record-value)
      (optimizer-roadmap-pic-evidence-is-runtime-backed))
     (329 329
-     ("packages/codegen/src/x86-64-codegen.lisp"
+     ("packages/codegen/src/x86-64-codegen-core.lisp"
       "packages/codegen/src/x86-64-codegen-dispatch.lisp"
       "packages/regalloc/src/regalloc.lisp"
       "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -271,7 +285,7 @@ Evidence anchors include functions and special variables."
       "packages/optimize/src/optimizer-licm.lisp"
       "packages/optimize/src/optimizer-pre.lisp"
       "packages/optimize/src/optimizer-dataflow.lisp"
-      "packages/optimize/src/optimizer-memory.lisp"
+      "packages/optimize/src/optimizer-memory-ranges.lisp"
       "packages/optimize/tests/optimizer-tests.lisp"
       "packages/optimize/tests/optimizer-memory-tests.lisp")
      (opt-pass-fold opt-pass-licm opt-pass-pre opt-pass-sccp
@@ -280,7 +294,7 @@ Evidence anchors include functions and special variables."
     (24 56
      ("packages/optimize/src/optimizer-inline.lisp"
       "packages/optimize/src/optimizer-inline-pass.lisp"
-      "packages/optimize/src/optimizer-memory.lisp"
+      "packages/optimize/src/optimizer-memory-ranges.lisp"
       "packages/optimize/src/optimizer-recognition.lisp"
       "packages/optimize/tests/optimizer-inline-tests.lisp"
       "packages/optimize/tests/optimizer-strength-tests.lisp")
@@ -289,7 +303,7 @@ Evidence anchors include functions and special variables."
       opt-array-bounds-check-eliminable-p opt-pass-fill-recognition)
      (optimizer-roadmap-inline-and-memory-evidence))
     (74 118
-     ("packages/optimize/src/optimizer-flow.lisp"
+     ("packages/optimize/src/optimizer-flow-core.lisp"
       "packages/optimize/src/optimizer-flow-passes.lisp"
       "packages/optimize/src/optimizer-strength.lisp"
       "packages/optimize/src/cfg.lisp"
@@ -302,7 +316,7 @@ Evidence anchors include functions and special variables."
      (optimizer-roadmap-flow-and-ssa-evidence))
     (148 170
      ("packages/optimize/src/optimizer-pipeline.lisp"
-      "packages/optimize/src/optimizer-flow.lisp"
+      "packages/optimize/src/optimizer-flow-core.lisp"
       "packages/optimize/src/optimizer-flow-passes.lisp"
       "packages/optimize/tests/optimizer-flow-tests.lisp"
       "packages/optimize/tests/optimizer-pipeline-tests.lisp")
@@ -322,13 +336,13 @@ Evidence anchors include functions and special variables."
       licm-pass-returns-straight-line-code-unchanged
       licm-collect-invariants-finds-pure-const))
     (261 261
-     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+     ("packages/optimize/src/optimizer-speculative-ic.lisp"
       "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
      (make-opt-profile-data opt-profile-record-value
       opt-profile-top-values opt-profile-value-range)
      (optimizer-roadmap-value-profiling-top-k-and-range-behavior))
     (283 283
-     ("packages/optimize/src/optimizer-pipeline-speculative.lisp"
+     ("packages/optimize/src/optimizer-speculative-ic.lisp"
       "packages/optimize/tests/optimizer-roadmap-backend-tests.lisp")
      (make-opt-speculation-log opt-record-speculation-failure
       opt-speculation-failed-p opt-speculation-allowed-p

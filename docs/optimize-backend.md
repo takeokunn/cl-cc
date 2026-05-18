@@ -46,13 +46,13 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-216: Store-to-Load Forwarding (ストア→ロード転送) ✅
 
-- **対象**: `packages/optimize/src/optimizer-memory.lisp`, `packages/optimize/src/optimizer-memory-passes.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
+- **対象**: `packages/optimize/src/optimizer-memory-alias.lisp`, `packages/optimize/src/optimizer-memory-interval.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: `vm-set-global` → `vm-get-global` の同一変数パターンでロードをストア値に置換。`vm-slot-write` → `vm-slot-read` の同一オブジェクト・同一スロットパターンも対象。alias analysis（FR-017）と連携
 - **根拠**: LLVM MemorySSA-based store-to-load forwarding / GCC tree-ssa-forwprop。ローカル変数の冗長なロード除去
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-store-to-load-forward` は、single-block では従来の straight-line 実装（global + slot）を使用し、multi-block では `cfg-build` + `opt-run-dataflow` により available-store を計算して `vm-set-global` / `vm-get-global` のみを転送する保守的実装を採用する。CFG 経路では `vm-slot-write` を状態に保持せず clobber 扱いに倒し、不健全な slot alias 伝播を回避する。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の cross-block / join テストが CFG 経路を検証し、既存の global・slot・moved-alias テストが single-block 経路を検証する。FR-216 は本ドキュメントの完了契約（safe store-to-load forwarding across straight-line + CFG-global path）を満たす。
+- **関連実装**: `packages/optimize/src/optimizer-memory-forward.lisp` の `opt-pass-store-to-load-forward` は、single-block では従来の straight-line 実装（global + slot）を使用し、multi-block では `cfg-build` + `opt-run-dataflow` により available-store を計算して `vm-set-global` / `vm-get-global` のみを転送する保守的実装を採用する。CFG 経路では `vm-slot-write` を状態に保持せず clobber 扱いに倒し、不健全な slot alias 伝播を回避する。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の cross-block / join テストが CFG 経路を検証し、既存の global・slot・moved-alias テストが single-block 経路を検証する。FR-216 は本ドキュメントの完了契約（safe store-to-load forwarding across straight-line + CFG-global path）を満たす。
 
 #### FR-217: Memory SSA (メモリSSA) ✅
 
@@ -180,7 +180,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: PHP/Swift COW arrays / Clojure persistent data structures。大規模データのコピー操作を遅延化
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `make-opt-cow-object` / `opt-cow-copy` / `opt-cow-write` と、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-cow-copy-is-constant-time-share` / `optimize-cow-write-detaches-when-shared` が、共有参照の遅延コピー動作を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `make-opt-cow-object` / `opt-cow-copy` / `opt-cow-write` と、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-cow-copy-is-constant-time-share` / `optimize-cow-write-detaches-when-shared` が、共有参照の遅延コピー動作を検証する。
 
 #### FR-254: Region-Based Memory Management (リージョンベースメモリ管理) ✅
 
@@ -281,7 +281,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-304: Integer Range Analysis (整数範囲解析) ✅
 
-- **対象**: `packages/optimize/src/optimizer-memory.lisp`
+- **対象**: `packages/optimize/src/optimizer-memory-ssa.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: `vm-const` / `vm-move` / `vm-add` / `vm-sub` / `vm-mul` / `vm-neg` / `vm-abs` / `vm-inc` / `vm-dec` を対象に整数区間を伝播し、unknown write は destination fact を kill する。CFG 合流でのラティス計算により backend 側で配列境界チェックやオーバーフロー検査削減のための保守的 oracle を供給
 - **根拠**: LLVM `LazyValueInfo` / GCC VRP (Value Range Propagation) と同じく CFG join での保守的 meet に基づく。`packages/optimize/tests/optimizer-memory-tests.lisp` が join union・片側不在 fact の drop・loop self-update kill・既存 straight-line API の回帰を検証
@@ -387,43 +387,43 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-523: Affine Loop Analysis (アフィンループ解析) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: canonical loop 形（`label`/`lt`/`jump-zero`/`step`/`back-jump`）を命令列から検出し、induction variable・bound・access kind を抽出して affine summary を生成する解析 pass を実装。
 - **根拠**: LLVM Polly / GCC Graphite / MLIR affine dialect。ループ最適化の理論的基盤
 - **難易度**: Very Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-pass-affine-loop-analysis` が実命令列から summary を抽出し、`*opt-last-affine-loop-summaries*` へ記録する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-affine-loop-analysis-captures-real-loop-summary` が実ループ入力での要約抽出を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-pass-affine-loop-analysis` が実命令列から summary を抽出し、`*opt-last-affine-loop-summaries*` へ記録する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-affine-loop-analysis-captures-real-loop-summary` が実ループ入力での要約抽出を検証する。
 
 #### FR-524: Polyhedral Loop Interchange (ループ交換) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: canonical loop の body-core 先頭2命令が `pure` かつ相互依存しない場合に限り、命令順を入れ替える保守的な loop-interchange 変換を適用する。制御骨格（header/jump/step）は保持する。
 - **根拠**: GCC `-floop-interchange` / LLVM LoopInterchange pass。行列乗算での 10x 以上の性能差を生む変換
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-pass-loop-interchange` が independent/pure な core-op swap を実行し、副作用を含む loop body は変換対象にしない。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-loop-interchange-handles-nested-canonical-loop`（テスト名は互換維持）/ `optimize-pass-loop-interchange-skips-side-effecting-loop` が変換発生条件と安全側挙動を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-pass-loop-interchange` が independent/pure な core-op swap を実行し、副作用を含む loop body は変換対象にしない。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-loop-interchange-handles-nested-canonical-loop`（テスト名は互換維持）/ `optimize-pass-loop-interchange-skips-side-effecting-loop` が変換発生条件と安全側挙動を検証する。
 
 #### FR-525: Polyhedral Schedule Optimization (Pluto アルゴリズム) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: canonical loop の body-core に対し、並べ替え可能（pure op）条件下でコスト順スケジューリングを適用する pass を実装。制御骨格（header/jump/step）は保持する。
 - **根拠**: Pluto paper / MLIR affine-loop-opt。多面体スケジューリングの実用実装
 - **難易度**: Very Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-pass-polyhedral-schedule` が loop body の実並べ替えを行う。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-polyhedral-schedule-reorders-loop-body` が命令列変化を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-pass-polyhedral-schedule` が loop body の実並べ替えを行う。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-polyhedral-schedule-reorders-loop-body` が命令列変化を検証する。
 
 #### FR-526: Loop Fusion / Fission (ループ融合・分割) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: adjacent canonical loop の iteration space 同値性と副作用条件を満たす場合のみ fusion を適用。加えて oversized loop body に対しては split label を用いた fission 変換を適用する。
 - **根拠**: LLVM LoopFusion / GCC `-floop-optimize2`。単純なストリーム融合では捉えられないループレベルの最適化
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-pass-loop-fusion-fission` が safety 条件つき fusion と split-label ベース fission を実行する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-loop-fusion-fission-fuses-adjacent-loops` / `optimize-pass-loop-fusion-fission-skips-unsafe-fusion` / `optimize-pass-loop-fusion-fission-splits-oversized-loop` が挙動を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-pass-loop-fusion-fission` が safety 条件つき fusion と split-label ベース fission を実行する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pass-loop-fusion-fission-fuses-adjacent-loops` / `optimize-pass-loop-fusion-fission-skips-unsafe-fusion` / `optimize-pass-loop-fusion-fission-splits-oversized-loop` が挙動を検証する。
 
 ---
 
@@ -431,23 +431,23 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-527: ML-Guided Inlining / MLGO (機械学習によるインライン判定) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: feature 列挙と model version を入力に、決定論的 inline score descriptor を返す planning helper を提供。インライン可否判断に使うスコア入力の正規化を担う。
 - **根拠**: LLVM MLGO (Google 2020) — Inliner/RegAlloc に RL モデルを適用して 0.5〜2% のバイナリサイズ削減。cl-cc では `selfhost` が現実的なトレーニングワークロードとなる
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-ml-inline-score-plan` が feature vector と model version から決定論的スコアを返す。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-ml-inline-score-plan-is-deterministic` が同一入力での再現性を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-ml-inline-score-plan` が feature vector と model version から決定論的スコアを返す。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-ml-inline-score-plan-is-deterministic` が同一入力での再現性を検証する。
 
 #### FR-528: Learned Cost Model for Code Generation (学習型コスト関数) ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: opcode feature 群と target（x86-64/aarch64）から予測コスト descriptor を返す planning helper を提供。ターゲット依存のコスト見積り入力を統一形式で供給する。
 - **根拠**: IREE / TVM の learned cost model / Halide autoscheduler。手書きコスト表は CPU マイクロアーキテクチャ世代ごとに陳腐化するため、測定駆動のアプローチが必要
 - **難易度**: Very Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の `opt-learned-codegen-cost-plan` が opcode features と target を受けて予測コスト計画を生成する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-learned-codegen-cost-plan-is-target-aware` がターゲット依存のコスト差を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の `opt-learned-codegen-cost-plan` が opcode features と target を受けて予測コスト計画を生成する。`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-learned-codegen-cost-plan-is-target-aware` がターゲット依存のコスト差を検証する。
 
 ---
 
@@ -498,7 +498,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM `SROA` / GCC `IPA-SRA`。HotSpot Scalar Replacement。エスケープ解析 (FR-007) の後処理として動作
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` の `opt-pass-cons-slot-forward` が fresh `vm-cons` fact を追跡し、`packages/optimize/src/optimizer-pipeline.lisp` の default convergence pipeline に登録済み。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の `cons-slot-forward-*` テスト群が `car` / `cdr` 置換、alias 伝播、source overwrite、`rplaca` kill、保守的 kill を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-memory-dse.lisp` の `opt-pass-cons-slot-forward` が fresh `vm-cons` fact を追跡し、`packages/optimize/src/optimizer-pipeline.lisp` の default convergence pipeline に登録済み。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` の `cons-slot-forward-*` テスト群が `car` / `cdr` 置換、alias 伝播、source overwrite、`rplaca` kill、保守的 kill を検証する。
 
 #### FR-015: Object Inlining (Allocation Sinking) ✅
 
@@ -522,7 +522,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM `DeadStoreElimination` / GCC `tree-dse`。ローカル変数の初期化→即上書きパターンで頻出
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-memory-passes.lisp` に `opt-pass-dead-store-elim` を実装済み。straight-line な global/slot store 上書き除去を対象とし、`opt-compute-heap-aliases` で保守的な slot alias を扱う。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` と `packages/optimize/tests/optimizer-store-analysis-tests.lisp` に回帰テストがある。
+- **関連実装**: `packages/optimize/src/optimizer-memory-dse.lisp` に `opt-pass-dead-store-elim` を実装済み。straight-line な global/slot store 上書き除去を対象とし、`opt-compute-heap-aliases` で保守的な slot alias を扱う。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` と `packages/optimize/tests/optimizer-store-analysis-tests.lisp` に回帰テストがある。
 
 #### FR-017: Alias Analysis (型ベース別名解析, TBAA) ✅
 
@@ -540,7 +540,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Andersen (1994) / Steensgaard (1996)。ポインタ解析精度は alias analysis・devirtualization の品質を直接左右する
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` に `opt-compute-points-to` / `opt-points-to-root` を追加済み。線形命令列上で fresh heap allocator と `vm-move` を追跡する flow-sensitive helper として運用し、再定義時には facts を kill する安全側契約を採用する。
+- **関連実装**: `packages/optimize/src/optimizer-memory-ssa.lisp` に `opt-compute-points-to` / `opt-points-to-root` を追加済み。線形命令列上で fresh heap allocator と `vm-move` を追跡する flow-sensitive helper として運用し、再定義時には facts を kill する安全側契約を採用する。
 
 ---
 
@@ -806,7 +806,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Pettis & Hansen (1990) Profile-based code positioning / LLVM `MachineBlockPlacementPass`。I キャッシュヒット率向上で 5〜10% 高速化
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-pipeline-speculative.lisp` の PGO layout helper 群が profile edge count に基づく hot-chain / loop rotation 計画を提供し、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pgo-build-hot-chain-prefers-hottest-successors` と `optimize-pgo-rotate-loop-places-preferred-exit-at-bottom` が回帰を検証する。
+- **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の PGO layout helper 群が profile edge count に基づく hot-chain / loop rotation 計画を提供し、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pgo-build-hot-chain-prefers-hottest-successors` と `optimize-pgo-rotate-loop-places-preferred-exit-at-bottom` が回帰を検証する。
 
 #### FR-298: AutoFDO (Sampling-based Profile) ✅
 
@@ -1121,13 +1121,13 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-352: Bit-Width Analysis (ビット幅解析) ✅
 
-- **対象**: `packages/optimize/src/optimizer-memory.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/optimize/src/optimizer-memory-ssa.lisp`, `packages/optimize/src/optimizer-memory-ranges.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: 整数演算の結果の有効ビット幅を追跡。`(logand x #xFF)` の結果は 8 ビットと確定。8-bit 値同士の加算は最大 9-bit。ビット幅が 63 bit 未満であればオーバーフローチェック (FR-303) を省略可能。`(= (logand x 1) 0)` → `(evenp x)` の認識
 - **根拠**: LLVM `computeKnownBits` / GCC VRP。ビット幅解析はオーバーフロー除去・型チェック除去・強度低減の精度向上に貢献
 - **難易度**: Hard
 
-- **関連実装**: `packages/optimize/src/optimizer-memory.lisp` の `opt-interval-logand` / `opt-interval-bit-width` / `opt-interval-known-bits-mask` / `opt-interval-fits-fixnum-width-p` / `opt-pass-elide-proven-overflow-checks` が conservative な bit-width helper と overflow-check elision pass を提供し、`%opt-transfer-interval-inst` が `vm-logand` mask を straight-line / CFG range propagation に流す。`packages/optimize/src/optimizer.lisp` の `%opt-rewrite-logand-low-bit-test` は low-bit equality を `vm-evenp` / `vm-oddp` に落とし、`packages/optimize/tests/optimizer-memory-tests.lisp` と `packages/optimize/tests/optimizer-memory-pass-tests.lisp` が `#xFF`→8-bit、8-bit+8-bit→9-bit、checked add elision、`(= (logand x 1) 0)`→`evenp` rewrite を回帰テストで固定する。
+- **関連実装**: `packages/optimize/src/optimizer-memory-ssa.lisp` の `opt-interval-logand` / `opt-interval-bit-width` / `opt-interval-known-bits-mask` / `opt-interval-fits-fixnum-width-p` / `opt-pass-elide-proven-overflow-checks` が conservative な bit-width helper と overflow-check elision pass を提供し、`%opt-transfer-interval-inst` が `vm-logand` mask を straight-line / CFG range propagation に流す。`packages/optimize/src/optimizer.lisp` の `%opt-rewrite-logand-low-bit-test` は low-bit equality を `vm-evenp` / `vm-oddp` に落とし、`packages/optimize/tests/optimizer-memory-tests.lisp` と `packages/optimize/tests/optimizer-memory-pass-tests.lisp` が `#xFF`→8-bit、8-bit+8-bit→9-bit、checked add elision、`(= (logand x 1) 0)`→`evenp` rewrite を回帰テストで固定する。
 
 ---
 
@@ -1500,7 +1500,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-406: Sea of Nodes IR ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-roadmap-backend.lisp`（設計統合レイヤ）
+- **対象**: `packages/optimize/src/optimizer-roadmap-backend.lisp`（設計統合レイヤ）
 - **内容**: 制御フローとデータフローを単一のグラフで表現する Sea of Nodes IR。各値はグラフノード、依存関係はエッジ。制御フロー順序は `control` エッジで表現（命令の順序は固定せず）。V8 TurboFan / HotSpot C2 が採用。利点: GVN・CSE・コードモーションが自然に統一、欠点: 実装複雑度高・デバッグ困難
 - **根拠**: Click & Paleczny (1995) "A Simple Graph-Based Intermediate Representation" / V8 TurboFan
 - **難易度**: Very Hard
@@ -1803,7 +1803,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-451: Channel / CSP 操作の最適化 ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: Go の `chan` / Erlang の message passing に相当する channel 操作のコンパイル最適化: (1) **Fast path**: バッファあり channel でキューが空でなければロックフリー atomic で送受信、(2) **Synchronous path**: バッファなし channel でのランデブー同期、(3) **select** 文のジャンプテーブル化。`lparallel` / `chanl` の低レベル実装改善
 - **根拠**: Go runtime channel implementation / Erlang BEAM scheduler
@@ -1813,7 +1813,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 #### FR-452: STM（Software Transactional Memory）コンパイル ✅
 
-- **対象**: `packages/optimize/src/optimizer-pipeline-speculative.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
+- **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
 - **内容**: `(atomically ...)` ブロック内のメモリ操作をトランザクションログに記録するコード生成。ログのインライン化（関数呼び出しなし）・ホットセル（高頻度アクセス変数）の TLS キャッシュ。コンパイル時に純粋なブロック（FR-152 で pure と判定）のトランザクション化を省略
 - **根拠**: GHC STM / Clojure refs + dosync。cl-stm ライブラリの基盤

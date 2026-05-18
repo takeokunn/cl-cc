@@ -80,9 +80,9 @@ let
         ${dispatchExport}
         ${extraEnv}
         export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-10}"
-        export CLCC_SUITE_TIMEOUT="''${CLCC_SUITE_TIMEOUT:-1500}"
-        if ! printf '%s' "$CLCC_TEST_TIMEOUT"  | grep -Eq '^[0-9]+$'; then CLCC_TEST_TIMEOUT=10;   fi
-        if ! printf '%s' "$CLCC_SUITE_TIMEOUT" | grep -Eq '^[0-9]+$'; then CLCC_SUITE_TIMEOUT=1500; fi
+        export CLCC_SUITE_TIMEOUT="''${CLCC_SUITE_TIMEOUT:-600}"
+        if ! printf '%s' "$CLCC_TEST_TIMEOUT"  | grep -Eq '^[1-9][0-9]*$'; then CLCC_TEST_TIMEOUT=10;  fi
+        if ! printf '%s' "$CLCC_SUITE_TIMEOUT" | grep -Eq '^[1-9][0-9]*$'; then CLCC_SUITE_TIMEOUT=600; fi
         shell_timeout=$((CLCC_SUITE_TIMEOUT + ${toString extraTimeoutSeconds}))
         ${pkgs.coreutils}/bin/timeout --kill-after=30 "$shell_timeout" ${rlwrapPrefix}${sbclBin} ${sbclFlags} ${lib.concatStringsSep " " extraSbclFlags} \
           --non-interactive \

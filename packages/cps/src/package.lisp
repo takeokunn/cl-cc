@@ -14,5 +14,4 @@
    #:cps-transform-ast*
    #:cps-transform-sequence
    #:cps-transform-eval
-   #:cps-simplify-form
-   #:maybe-cps-transform))
+   #:cps-simplify-form))
