@@ -7,6 +7,37 @@
   "Thresholded inline pass used inside the convergence loop."
   (opt-pass-inline instructions :threshold :adaptive))
 
+(defun %opt-backedge-count (instructions)
+  "Return a simple count of backward jumps in INSTRUCTIONS."
+  (let ((label-pos (make-hash-table :test #'equal)))
+    (loop for inst in instructions
+          for i from 0
+          when (typep inst 'vm-label)
+            do (setf (gethash (vm-name inst) label-pos) i))
+    (loop for inst in instructions
+          for i from 0
+          count (and (typep inst '(or vm-jump vm-jump-zero))
+                     (let ((target (gethash (vm-label-name inst) label-pos)))
+                       (and target (< target i)))))))
+
+(defun opt-adaptive-loop-unroll-factor (instructions &key call-count hotness)
+  "Return adaptive loop-unroll factor and max trip values for INSTRUCTIONS."
+  (let* ((n (length instructions))
+         (score (or hotness (+ (or call-count 0) (* 10 (%opt-backedge-count instructions))))))
+    (cond
+      ((>= score 100) (values 4 16))
+      ((>= score 30) (values 3 12))
+      ((and (> n 800) (zerop score)) (values 1 4))
+      (t (values 2 8)))))
+
+(defun opt-pass-loop-unrolling-adaptive (instructions)
+  "Run loop unrolling with adaptive loop thresholds scoped to this pass."
+  (multiple-value-bind (factor max-trip)
+      (opt-adaptive-loop-unroll-factor instructions)
+    (let ((*opt-loop-unroll-factor* factor)
+          (*opt-loop-unroll-max-trip* max-trip))
+      (opt-pass-loop-unrolling instructions))))
+
 (defun %maybe-apply-prolog-rewrite (instructions)
   "Apply the Prolog rewrite stage when enabled, preserving INSTRUCTIONS otherwise.
 The stage first applies the instruction-level Prolog peephole rules and then runs
@@ -132,6 +163,8 @@ optimizer's pass table wiring.")
     (:egraph                    . ,#'optimize-with-egraph)
     (:call-site-splitting       . ,#'opt-pass-call-site-splitting)
     (:devirtualize              . ,#'opt-pass-devirtualize)
+    (:closure-capture-dedup     . ,#'opt-pass-closure-capture-dedup)
+    (:closure-thunk-sharing     . ,#'opt-pass-closure-thunk-sharing)
       (:inline                    . ,#'opt-pass-inline-iterative)
       (:fold                      . ,#'opt-pass-fold)
        (:overflow-check-elim       . ,#'opt-pass-elide-proven-overflow-checks)
@@ -153,7 +186,7 @@ optimizer's pass table wiring.")
      (:batch-concatenate         . ,#'opt-pass-batch-concatenate)
     (:cse                       . ,#'opt-pass-cse)
     (:jump                      . ,(symbol-function 'opt-pass-jump))
-    (:loop-unrolling            . ,#'opt-pass-loop-unrolling)
+    (:loop-unrolling            . ,#'opt-pass-loop-unrolling-adaptive)
     (:loop-rotation             . ,#'opt-pass-loop-rotation)
       (:loop-peeling              . ,#'opt-pass-loop-peeling)
       (:allocation-sinking        . ,#'opt-pass-allocation-sinking)
@@ -186,7 +219,9 @@ optimizer's pass table wiring.")
   '(:prolog-rewrite
     :call-site-splitting
      :devirtualize
-      :inline
+      :closure-capture-dedup
+      :closure-thunk-sharing
+       :inline
         :overflow-check-elim
         :sccp
        :cons-slot-forward

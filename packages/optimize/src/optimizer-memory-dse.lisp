@@ -117,9 +117,15 @@ metadata without requiring cross-package instruction-shape changes."
 (defun opt-pass-cons-slot-forward (instructions)
   "Forward car/cdr of a fresh vm-cons to moves from the original slot registers.
 
-The pass is intentionally straight-line and conservative: labels/control-flow,
-calls, unknown effects, and heap mutations clear all facts, while overwrites of a
-tracked cell register or slot source kill only the dependent facts."
+Within a single basic block the pass is fully precise: an vm-cons followed by
+vm-car/vm-cdr on the same destination register is replaced by a vm-move from the
+original slot source.  Across control-flow boundaries (labels, jumps, calls,
+unknown effects, and heap mutations) all facts are cleared conservatively.
+Overwrites of a tracked cell register or slot source kill only the dependent facts.
+
+CFG-level join-point forwarding is handled by opt-pass-cons-slot-forward-cfg in
+optimizer-memory-forward.lisp, which runs on the full CFG and requires all
+predecessors to agree on the same slot fact."
   (let ((facts (make-hash-table :test #'eq))
         (result nil))
     (labels ((emit (inst) (push inst result))

@@ -110,10 +110,29 @@ later closure sites become vm-move aliases to the first closure register."
           collect (or (gethash index rewrites) inst))))
 
 (defun opt-pass-closure-thunk-sharing (instructions)
-  "FR-079 VM-stage hook.
+  "FR-079 closure thunk sharing: eliminate redundant closure allocations.
 
-One-shot closure elimination requires AST call-site bodies and is performed in
-the compile package with cl-cc/ast:binding-one-shot-p.  The optimizer keeps a
-registered pass hook so custom pipelines can place the closure stage uniformly
-without reintroducing heap allocations."
-  instructions)
+When two simple closure instructions share both entry-label and capture set, and
+the first closure register + its captured environment registers are not
+overwritten between the two sites, the second allocation is replaced by a
+vm-move to the first closure register.  This is a conservative partial
+implementation; same-code-body-with-different-environments requires VM-level
+support for separate code-pointer + environment-record (FR-079 extension)."
+
+  (let* ((groups (%opt-closure-groups instructions))
+         (rewrites (make-hash-table :test #'eql)))
+    (maphash (lambda (_key group)
+               (declare (ignore _key))
+               (when (>= (length group) 2)
+                 (let ((root-desc (first group)))
+                   (dolist (desc (rest group))
+                     (when (%opt-shareable-closure-use-p instructions root-desc desc)
+                       (let* ((dup-index (getf desc :index))
+                              (dup-dst (vm-dst (nth dup-index instructions)))
+                              (root-dst (vm-dst (getf root-desc :inst)))
+                              (move (make-vm-move :dst dup-dst :src root-dst)))
+                         (setf (gethash dup-index rewrites) move)))))))
+              groups)
+    (loop for inst in instructions
+          for index from 0
+          collect (or (gethash index rewrites) inst))))

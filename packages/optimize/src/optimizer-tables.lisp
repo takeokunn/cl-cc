@@ -163,12 +163,13 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 
 (defparameter *opt-type-pred-fold-table*
   (%alist->eq-hash-table
-   `((vm-null-p     . ,#'null)
-     (vm-cons-p     . ,#'consp)
-     (vm-symbol-p   . ,#'symbolp)
-     (vm-number-p   . ,#'numberp)
-     (vm-integer-p  . ,#'integerp)
-     (vm-function-p . ,(lambda (x) (declare (ignore x)) nil))))
+   `((vm-null-p          . ,#'null)
+     (vm-cons-p          . ,#'consp)
+     (vm-symbol-p        . ,#'symbolp)
+     (vm-number-p        . ,#'numberp)
+     (vm-integer-p       . ,#'integerp)
+     (vm-function-p      . ,(lambda (x) (declare (ignore x)) nil))
+     (vm-simple-vector-p . ,#'simple-vector-p)))
   "Maps type-predicate VM instruction types to their CL predicate functions.
    Predicates fold to 1/0.  vm-function-p always returns 0 for constants.")
 

@@ -3,7 +3,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-vm :cl-cc-prolog :cl-cc-type)
+  :depends-on (:cl-cc-vm :cl-cc-prolog :cl-cc-type :cl-cc-ast)
   :pathname "src"
   :serial t
   :components
@@ -22,8 +22,9 @@
    (:file "egraph-rules-advanced")
    (:file "optimizer-tables")
    (:file "optimizer-algebraic")
-   (:file "optimizer-inline")
-   (:file "optimizer-purity")
+    (:file "optimizer-inline")
+    (:file "optimizer-closure")
+    (:file "optimizer-purity")
    (:file "optimizer-inline-pass")
    (:file "optimizer-inline-cost")
    (:file "optimizer-dataflow")

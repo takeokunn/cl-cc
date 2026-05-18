@@ -130,6 +130,8 @@
     #:opt-known-callee-labels
     #:opt-pass-call-site-splitting
     #:opt-pass-devirtualize
+    #:opt-pass-closure-capture-dedup
+    #:opt-pass-closure-thunk-sharing
 
     ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
     #:opt-pass-fill-recognition
