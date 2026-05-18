@@ -59,14 +59,31 @@
   "T when any instruction in [START, END) writes one of REGS."
   (some (lambda (reg) (%opt-range-has-write-to-reg-p instructions start end reg)) regs))
 
+(defun %opt-range-has-cfg-boundary-p (instructions start end)
+  "T when any instruction in [START, END) is a control-flow boundary."
+  (loop for i from start below end
+        for inst = (nth i instructions)
+        thereis (or (typep inst 'vm-label)
+                    (typep inst 'vm-jump)
+                    (typep inst 'vm-jump-zero)
+                    (typep inst 'vm-ret)
+                    (typep inst 'vm-halt)
+                    (typep inst 'vm-call)
+                    (typep inst 'vm-tail-call)
+                    (typep inst 'vm-apply)
+                    (typep inst 'vm-generic-call))))
+
 (defun %opt-shareable-closure-use-p (instructions root-desc desc)
-  "T when DESC can safely reuse ROOT-DESC's closure register."
+  "T when DESC can safely reuse ROOT-DESC's closure register.
+   Requires ROOT and DESC to be in the same basic block (no CFG boundary
+   between them), and no overwrite of root register or captured env regs."
   (let* ((root-index (getf root-desc :index))
-         (index (getf desc :index))
-         (root-inst (getf root-desc :inst))
-         (env-regs (%opt-closure-env-regs root-inst))
-         (root-reg (vm-dst root-inst)))
+          (index (getf desc :index))
+          (root-inst (getf root-desc :inst))
+          (env-regs (%opt-closure-env-regs root-inst))
+          (root-reg (vm-dst root-inst)))
     (and (< root-index index)
+         (not (%opt-range-has-cfg-boundary-p instructions (1+ root-index) index))
          (not (%opt-range-has-write-to-reg-p instructions (1+ root-index) index root-reg))
          (not (%opt-range-has-write-to-any-reg-p instructions (1+ root-index) index env-regs)))))
 

@@ -80,3 +80,30 @@
                (list c1 kill-env c2))))
     (assert-eq (length out) 3)
     (assert-eq (cl-cc/vm::vm-dst (third out)) :r2)))
+
+(deftest closure-thunk-sharing-noops-across-cfg-boundary
+  "Closures on different control-flow paths are not merged."
+  (let* ((c1 (cl-cc/vm:make-vm-closure
+              :dst :r1 :label "L0" :params () :captured (list (cons 'a :r5))))
+         (jz  (cl-cc/vm:make-vm-jump-zero :reg :r0 :label "skip"))
+         (c2 (cl-cc/vm:make-vm-closure
+              :dst :r2 :label "L0" :params () :captured (list (cons 'a :r5))))
+         (out (cl-cc/optimize::opt-pass-closure-thunk-sharing
+               (list c1 jz c2))))
+    (assert-eq (length out) 3)
+    (assert-true (cl-cc/vm::vm-closure-p (third out)))
+    (assert-eq (cl-cc/vm::vm-dst (third out)) :r2)))
+
+(deftest closure-capture-dedup-noops-across-cfg-boundary
+  "FR-330 dedup respects CFG boundaries: jump-zero blocks sharing."
+  (let* ((c1 (cl-cc/vm:make-vm-closure
+              :dst :r1 :label "L0" :params () :captured (list (cons 'a :r5))))
+         (jmp (cl-cc/vm:make-vm-jump :label "next"))
+         (lbl (cl-cc/vm:make-vm-label :name "next"))
+         (c2 (cl-cc/vm:make-vm-closure
+              :dst :r2 :label "L0" :params () :captured (list (cons 'a :r5))))
+         (out (cl-cc/optimize::opt-pass-closure-capture-dedup
+               (list c1 jmp lbl c2))))
+    (assert-eq (length out) 4)
+    (assert-true (cl-cc/vm::vm-make-closure-p (fourth out)))
+    (assert-eq (cl-cc/vm::vm-dst (fourth out)) :r2)))
