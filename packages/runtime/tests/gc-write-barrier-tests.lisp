@@ -107,7 +107,7 @@
     (cl-cc/runtime:rt-heap-set heap (+ obj slot) 5)
     (setf (cl-cc/runtime:rt-heap-gc-state heap) :major-gc-concurrent)
     (cl-cc/runtime:rt-gc-write-barrier heap obj slot 42)
-    (assert-true (member 5 (cl-cc/runtime:rt-heap-satb-queue heap)))))
+    (assert-true (member 5 (cl-cc/runtime:rt-gc-drain-satb-thread-queues heap)))))
 
 (deftest gc-write-barrier-no-satb-old-value-not-heap-addr
   "During :major-gc, old value that is not a heap address is not snapshotted."

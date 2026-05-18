@@ -184,7 +184,10 @@
    vm-string-left-trim
    vm-string-right-trim
    vm-search-string
-   vm-string-set
+    vm-string-set
+    *rt-string-dedup-table*
+    rt-string-dedup
+    rt-string-intern
    vm-str1
    vm-str2
    vm-string-reg
@@ -195,8 +198,11 @@
    vm-end
    vm-char-bag
    vm-pattern
-   vm-hash-table-object
-   vm-hash-table-internal
+    vm-hash-table-object
+    vm-hash-table-internal
+    vm-hash-table-weakness
+    rt-hash-table-weakness
+    rt-make-hash-table
    vm-make-hash-table
    vm-gethash
    vm-sethash
@@ -210,7 +216,8 @@
    vm-hash-table-size
     vm-hash-table-rehash-size
     vm-hash-table-rehash-threshold
-    vm-hash-test
+     vm-hash-test
+     vm-hash-weakness
     vm-found-dst
     vm-hash-key
     vm-hash-value

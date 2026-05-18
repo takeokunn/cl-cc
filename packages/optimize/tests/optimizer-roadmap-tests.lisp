@@ -288,15 +288,15 @@ resets the current block (used by the backend doc which has ### section separato
     (assert-true (gethash key cl-cc/optimize::*opt-pass-registry*))))
 
 (deftest optimizer-roadmap-code-motion-evidence
-  "Code-motion FRs distinguish conservative partial passes from implemented ones."
-  (let ((partial-evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-167"))
+  "Code-motion FRs point at implemented conservative passes and complete evidence."
+  (let ((tail-dup-evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-167"))
         (implemented-evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-164")))
-    (assert-eq :partial (cl-cc/optimize::opt-roadmap-evidence-status partial-evidence))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status tail-dup-evidence))
     (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status implemented-evidence))
     (assert-true (member 'cl-cc/optimize::opt-pass-tail-duplication
-                         (cl-cc/optimize::opt-roadmap-evidence-api-symbols partial-evidence)))
-    (assert-false (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
-                   partial-evidence))
+                         (cl-cc/optimize::opt-roadmap-evidence-api-symbols tail-dup-evidence)))
+    (assert-true (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
+                  tail-dup-evidence))
     (assert-true (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
                   implemented-evidence))))
 

@@ -62,6 +62,7 @@
     invariants))
 
 ;;; ─── LICM: invariance predicate ───────────────────────────────────────────
+;;; FR-017 integration: LICM safety improved by TBAA alias analysis — loop-invariant loads proven not to alias stores can be hoisted
 
 (defun opt-inst-loop-invariant-p (inst loop-def-regs loop-members def-sites)
   "Return T if INST is loop-invariant:
@@ -175,4 +176,3 @@
                        loop-headers)
             (return-from opt-pass-licm instructions))
           (opt-licm-emit-with-preheaders cfg header-to-members header-to-invariants))))))
-

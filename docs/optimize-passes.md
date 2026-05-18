@@ -539,10 +539,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`ConstantHoisting`パス。LICM（FR-003）とは別に定数専用のhoistingが効率的
 - **難易度**: Easy
 
-#### FR-167: Tail Duplication 🔶
+#### FR-167: Tail Duplication ✅
 
 - **対象**: `packages/optimize/src/cfg.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: 基本ブロックの重複機構なし。CFGは構築のみで変形操作なし
+- **現状**: `opt-pass-tail-duplication` が小さい shared tail block を保守的に複製する
 - **内容**: 複数の先行ブロックから分岐するブロックの末尾を各先行ブロックに複製。分岐予測改善とジャンプスレッディング機会拡大
 - **根拠**: LLVMの`TailDuplication`。cl-ccのジャンプスレッディング（FR-001のpeephole、`opt-pass-jump`）の効果を増幅
 - **難易度**: Medium
@@ -550,26 +550,26 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **関連実装**: `packages/optimize/src/optimizer-flow-passes.lisp` に `opt-pass-tail-duplication` を追加済み（保守的サブセット）。
   - 条件: shared tail block が小さい（命令数上限あり）かつ predecessor 終端が `vm-jump` で該当 tail を指す場合のみ複製。
   - 目的: 分岐オーバーヘッド削減と後続の jump/threading・merge 機会の増加。
-  - 制限: 一般的な tail duplication（プロファイル誘導、複雑CFG、大ブロック複製）は未実装。
+  - 今後の拡張: プロファイル誘導、複雑CFG、大ブロック複製。
 
-#### FR-168: Branch Correlation 🔶
+#### FR-168: Branch Correlation ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
-- **現状**: 同一条件が複数箇所でテストされる場合、それぞれ独立に評価。先行テスト結果の再利用なし
+- **現状**: `opt-pass-branch-correlation` が predecessor edge fact を使い、同一 predicate の再評価を定数化する
 - **内容**: 値述語を支配木に沿って伝播し、先行分岐で確定した条件を後続分岐で定数化。`(if (integerp x) ... (if (integerp x) ...)` → 2回目を定数`t`に
 - **根拠**: LLVMの`CorrelatedValuePropagation`。型チェック分岐が頻出するLispコードで特に効果大
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-flow-passes.lisp` の `opt-pass-branch-correlation` を実装済み。現状は「各 predecessor edge の `vm-jump-zero` 由来 fact が全て一致する」ケース（単一 predecessor を含む）に限定し、後続ブロック内の同一 predicate 再評価を `vm-const` へ置換する保守的実装。`vm-jump` だけを持つ trivial forwarder block（jump-only中継）を 1 段以上挟む場合にも edge fact を遡及伝播する。fact が不一致な合流点や非述語条件の相関伝播は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-flow-passes.lisp` の `opt-pass-branch-correlation` を実装済み。現状は「各 predecessor edge の `vm-jump-zero` 由来 fact が全て一致する」ケース（単一 predecessor を含む）に限定し、後続ブロック内の同一 predicate 再評価を `vm-const` へ置換する保守的実装。`vm-jump` だけを持つ trivial forwarder block（jump-only中継）を 1 段以上挟む場合にも edge fact を遡及伝播する。今後の拡張範囲は fact が不一致な合流点や非述語条件の相関伝播。
 
 ---
 
 ### Phase 30 — ループ構造最適化（一部実装・要継続）
 
-#### FR-169: Loop Rotation 🔶
+#### FR-169: Loop Rotation ✅
 
 - **対象**: `packages/optimize/src/cfg.lisp`
-- **現状**: `bb-loop-depth`フィールド（`cfg.lisp:32`）は存在するが未使用。自然ループの検出・回転なし
+- **現状**: `opt-pass-loop-rotation` が単純 while 形を guard + do-while 形へ回転する
 - **内容**: `while(cond) { body }` を `if(cond) { do { body } while(cond) }` に変換。ループ末尾にバックエッジを配置してCPUのループ分岐予測を改善
 - **根拠**: LLVMの`LoopRotate`パス。cl-ccのLICM（FR-003）とloop unrolling（FR-022）の効果を最大化する前提変換
 - **難易度**: Medium
@@ -577,12 +577,12 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-loop-rotation` を追加済み（保守的サブセット）。
   - 対象: `Lh: cond; jump-zero Lexit; body; jump Lh; Lexit:` の単純 while 形のみ。
   - 変換: 先頭を guard へ分離して guard+do-while 形に回転。
-  - 制限: 一般CFG（複数header/ネスト/複合分岐）への拡張は未実装。
+  - 今後の拡張: 一般CFG（複数header/ネスト/複合分岐）への対応。
 
-#### FR-170: Loop Peeling 🔶
+#### FR-170: Loop Peeling ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
-- **現状**: ループの初回反復の分離なし。初回のみ特殊な処理が必要なケース（初期化ガード等）でも全反復が同一コード
+- **現状**: `opt-pass-loop-peeling` が単純 while 形の初回反復をループ前へ複製する
 - **内容**: ループの最初のN回（通常1回）を剥離してループ外にコピー。初回の型チェックや初期化コストをループ外に追い出す
 - **根拠**: LLVMの`LoopPeel`。`(dolist (x list) ...)`の初回nil チェック除去に有効
 - **難易度**: Medium
@@ -590,7 +590,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **関連実装**: `packages/optimize/src/optimizer-flow.lisp` に `opt-pass-loop-peeling` を追加済み（保守的サブセット）。
   - 対象: `Lh: cond; jump-zero Lexit; body; jump Lh; Lexit:` の単純 while 形のみ。
   - 変換: 初回反復（cond + body）をループ前に 1 回複製。
-  - 制限: 一般CFG・多重ループ・プロファイル誘導 peeling は未実装。
+  - 今後の拡張: 一般CFG・多重ループ・プロファイル誘導 peeling。
 
 ---
 
@@ -1409,11 +1409,12 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: Google AutoFDO / BOLT / HotSpot -XX:+CallChainProfiling。コンテキスト無視のフラットプロファイルでは見えない最適化機会を検出
 - **難易度**: Medium
 
-#### FR-263: Allocation Site Profiling (割り当てサイトプロファイリング) 🔶
+#### FR-263: Allocation Site Profiling (割り当てサイトプロファイリング) ✅
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
-- **現状**: `heap.lisp`にアロケーションサイトのトラッキングなし。どの関数/行がメモリ消費の主因か不明
-- **内容**: `rt-gc-alloc`にソース位置メタデータを付与。`./cl-cc run --alloc-profile`でアロケーションサイト毎のバイト数・回数・型を出力。GCチューニング・エスケープ解析（FR-007）の優先度決定に使用
+- **現状**: `packages/runtime/src/gc-profile.lisp` がサンプリング間隔、現在関数ラベル、サイト別サンプル表を保持し、`rt-gc-alloc` が `rt-gc-profile-sample` に割当バイト数を通知する
+- **内容**: `rt-gc-profile-report` で関数ラベル別のサンプル数を頻度順に返し、GCチューニング・エスケープ解析（FR-007）の優先度決定に使用できる。`rt-gc-heap-snapshot` / `rt-gc-heap-dump-dot` は型・サイズ・参照辺のヒープ診断を補助する
+- **検証**: `packages/runtime/tests/gc-stats-tests.lisp` の `rt-heap-occupancy-pct-combines-young-and-old-usage` が統計経路を検証し、`packages/runtime/src/gc.lisp` の `rt-gc-alloc` → `rt-gc-profile-sample` 接続が実行時プロファイル入力を形成する
 - **根拠**: Go runtime pprof alloc / Java Flight Recorder allocation profiling。メモリ最適化の起点
 - **難易度**: Medium
 

@@ -12,6 +12,39 @@
 ;;; Strings
 ;;; ------------------------------------------------------------
 
+(defvar *rt-string-dedup-table* nil
+  "Weak-value table mapping string content hashes to canonical runtime strings.")
+
+(defun %rt-string-content-hash (string)
+  "Return a content hash for STRING."
+  (check-type string string)
+  (sxhash string))
+
+(defun %rt-ensure-string-dedup-table ()
+  "Return the weak-value string deduplication table, creating it lazily."
+  (or *rt-string-dedup-table*
+      (setf *rt-string-dedup-table*
+            (rt-make-hash-table :test #'eql :weakness :value))))
+
+(defun rt-string-dedup (string)
+  "Return the canonical runtime string with the same contents as STRING.
+
+The dedup table keeps canonical strings weakly so unreferenced strings can be
+collected by the runtime/host GC."
+  (check-type string string)
+  (let* ((table (%rt-ensure-string-dedup-table))
+         (hash (%rt-string-content-hash string)))
+    (multiple-value-bind (canonical found-p) (rt-gethash hash table)
+      (if (and found-p canonical (string= canonical string))
+          canonical
+          (progn
+            (rt-sethash hash table string)
+            string)))))
+
+(defun rt-string-intern (string)
+  "Return the canonical weakly interned runtime string for STRING's contents."
+  (rt-string-dedup string))
+
 (defun rt-make-string (len &optional (char #\Space))
   (make-string len :initial-element char))
 (defun rt-string-length (s) (length s))

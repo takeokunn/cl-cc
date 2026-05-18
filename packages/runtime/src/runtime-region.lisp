@@ -54,6 +54,42 @@ Returns a guarded reference."
                        :generation (rt-region-token-generation region-token)
                        :value value))
 
+(defun arena-alloc (region-token size-words &key (initial-element nil))
+  "Allocate SIZE-WORDS temporary words from REGION-TOKEN's arena.
+
+This is intended for compiler passes that need many short-lived scratch cells:
+
+  (with-arena-region (arena)
+    (let ((work (arena-alloc arena 32)))
+      ...))
+
+Leaving WITH-ARENA-REGION resets the bump pointer in O(1) and invalidates all
+references from the dynamic scope.  The returned value is the arena start index;
+callers may use RT-REGION-TOKEN-ARENA for low-level vector access when needed."
+  (unless (rt-region-active-p region-token)
+    (error "Cannot allocate in inactive arena region ~S" region-token))
+  (check-type size-words (integer 0 *))
+  (let* ((start (rt-region-token-bump-index region-token))
+         (end (+ start size-words))
+         (cap (rt-region-token-arena-size region-token)))
+    (when (> end cap)
+      (error "Arena region out of space: requested=~D used=~D capacity=~D"
+             size-words start cap))
+    (loop for i from start below end do
+      (setf (aref (rt-region-token-arena region-token) i) initial-element))
+    (setf (rt-region-token-bump-index region-token) end)
+    start))
+
+(defun rt-reset-arena-region (region-token &optional (start 0))
+  "Reset REGION-TOKEN's bump pointer to START and clear discarded slots."
+  (unless (rt-region-token-p region-token)
+    (error "rt-reset-arena-region expects rt-region-token, got ~S" region-token))
+  (let ((old (rt-region-token-bump-index region-token)))
+    (when (< start old)
+      (fill (rt-region-token-arena region-token) nil :start start :end old))
+    (setf (rt-region-token-bump-index region-token) start)
+    region-token))
+
 (defun rt-region-ref-valid-p (region-ref)
   "Return T when REGION-REF points to a still-live region generation."
   (and (rt-region-ref-p region-ref)
@@ -73,4 +109,19 @@ Returns a guarded reference."
   `(let ((,name (rt-make-region)))
      (unwind-protect
           (progn ,@body)
-       (rt-close-region ,name))))
+        (rt-close-region ,name))))
+
+(defmacro with-arena-region ((name &key (size 4096)) &body body)
+  "Evaluate BODY with NAME bound to a scoped bump-pointer arena.
+
+Compiler passes should use ARENA-ALLOC for temporary vectors/worklists inside
+this dynamic extent.  Scope exit performs O(1) deallocation by restoring the bump
+pointer, then closes the region so escaped references fail validation."
+  `(let ((,name (%make-rt-region-token
+                 :arena-size ,size
+                 :arena (make-array ,size :initial-element nil))))
+     (let ((start (rt-region-token-bump-index ,name)))
+       (unwind-protect
+            (progn ,@body)
+         (rt-reset-arena-region ,name start)
+         (rt-close-region ,name)))))

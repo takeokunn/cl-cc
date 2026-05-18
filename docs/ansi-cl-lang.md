@@ -521,7 +521,7 @@ ANSI CL 7.6.4 — `defmethod` のラムダリストは `defgeneric` と適合し
 | ルール                  | cl-cc | SBCL    | 説明                                                         |
 | ----------------------- | ----- | ------- | ------------------------------------------------------------ |
 | 特化子は必須引数のみ    | ✅    | ✅      | `&optional`/`&rest`/`&key` 引数への特化子は不可              |
-| `&key` キー名の一致     | —     | ✅ 警告 | SBCL は不整合 key を警告。ANSI は `&allow-other-keys` で回避 |
+| `&key` キー名の一致     | ✅    | ✅ 警告 | `packages/stdlib/src/stdlib-source-clos.lisp` の `*key-mismatch-warning*` と `packages/compile/tests/stdlib-source-tests.lisp` の `stdlib-key-mismatch-warning-bound` で、SBCL 互換の実装定義警告状態を保持 |
 | GF なしでの `defmethod` | ✅    | ✅      | GF を自動生成 (cl-cc は `%ensure-generic-function`)          |
 
 ```lisp
@@ -1215,7 +1215,7 @@ SBCL は ANSI CL にない MOP 機能を `sb-mop` で提供 (`closer-mop` 経由
 | GF 自身のラムダリストに `&key` を置く | ✅   | ✅    | 通常の関数と同じくキーワード引数を受理 |
 | メソッドラムダリスト側の `&key`       | ✅   | ✅    | 特化子は必須引数部にのみ置ける         |
 | `&allow-other-keys`                   | ✅   | ✅    | 未知キーワードの受理を明示             |
-| key 不整合への警告                    | ✅   | —     | cl-cc で SBCL 同等の警告根拠は未確認   |
+| key 不整合への警告                    | ✅   | ✅    | `*key-mismatch-warning*` を stdlib に定義し、コンパイル済み stdlib で bound/default nil を検証 |
 
 ### 24.1 `&key` の合法性規則
 

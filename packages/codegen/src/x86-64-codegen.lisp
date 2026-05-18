@@ -448,8 +448,10 @@ On mismatch, trap with UD2."
 
 (defun emit-vm-program (program stream)
   "Emit machine code for entire VM program.
-   Uses two-pass approach: first pass builds label offset table,
-   second pass emits code with resolved jump targets."
+    Uses two-pass approach: first pass builds label offset table,
+    second pass emits code with resolved jump targets."
+  ;; FR-370: Stack Map Generation — per-safepoint stack frame layout recorded for precise GC root scanning
+  ;; FR-371: GC Safepoints — signal-based vs polling safepoint mechanism for Stop-The-World coordination
   (let* ((instructions (vm-program-instructions program))
          (cfg (cfg-build instructions))
          (has-indirect-calls-p

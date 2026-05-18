@@ -116,6 +116,13 @@
     #:opt-interval-logand
     #:opt-pass-elide-proven-overflow-checks
     #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
+    #:opt-compute-heap-type-facts
+    #:opt-tbaa-must-not-alias-p
+    #:opt-may-alias-with-tbaa-p
+    #:opt-prune-dominated-safepoints
+    #:opt-hoist-safepoints-to-back-edges
+    #:opt-sink-allocations
+    #:opt-analyze-memory-access-patterns
     #:opt-pass-cons-slot-forward
     #:opt-pass-bounds-check-elimination
 

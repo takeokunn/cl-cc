@@ -9,9 +9,13 @@
 
 (defclass vm-hash-table-object ()
   ((table :initarg :table :reader vm-hash-table-internal
-          :documentation "The underlying Common Lisp hash table")
+           :documentation "The underlying Common Lisp hash table")
+   (weakness :initarg :weakness :initform nil :accessor vm-hash-table-weakness
+             :documentation "Weakness mode: NIL, :KEY, :VALUE, :KEY-AND-VALUE, or :KEY-OR-VALUE.")
+   (weak-entries :initarg :weak-entries :initform nil :accessor vm-hash-table-weak-entries
+                 :documentation "Metadata for weak-table entries used by GC/reference processing hooks.")
    (shared-p :initarg :shared-p :initform nil :accessor vm-hash-table-shared-p
-             :documentation "When true, next write performs copy-on-write detach.")
+              :documentation "When true, next write performs copy-on-write detach.")
    (refcount :initarg :refcount :initform 1 :accessor vm-hash-table-refcount
              :documentation "Approximate sharing count used by VM hash COW.")
    (lock :initarg :lock :reader vm-hash-table-lock
@@ -31,6 +35,83 @@
 
 (defparameter *vm-hash-htm-abort-threshold* 8
   "When abort count reaches this value, HTM lock elision is disabled for that table.")
+
+(defparameter +vm-hash-table-weakness-modes+
+  '(nil :key :value :key-and-value :key-or-value)
+  "Supported VM hash-table weakness modes.")
+
+(defstruct (vm-weak-hash-entry (:constructor make-vm-weak-hash-entry))
+  "Metadata for a VM weak hash-table entry."
+  key
+  value
+  key-ephemeron
+  value-ephemeron)
+
+(defstruct (vm-ephemeron (:constructor make-vm-ephemeron))
+  "VM-side ephemeron metadata for weak hash-table entries."
+  key
+  value
+  (marked nil :type boolean))
+
+(defun vm-valid-hash-weakness-p (weakness)
+  (member weakness +vm-hash-table-weakness-modes+ :test #'eq))
+
+(defun rt-hash-table-weakness (table-obj)
+  "Return TABLE-OBJ's weakness mode, or NIL for ordinary strong tables."
+  (etypecase table-obj
+    (vm-hash-table-object (vm-hash-table-weakness table-obj))
+    (hash-table nil)))
+
+(defun vm-make-host-hash-table (&key (test 'eql) weakness)
+  "Create the backing hash table, using host weak tables when available."
+  (unless (vm-valid-hash-weakness-p weakness)
+    (error "Unsupported hash-table weakness mode: ~S" weakness))
+  #+sbcl
+  (if weakness
+      (make-hash-table :test test :weakness weakness)
+      (make-hash-table :test test))
+  #-sbcl
+  (progn
+    (declare (ignore weakness))
+    (make-hash-table :test test)))
+
+(defun rt-make-hash-table (&key (test 'eql) weakness)
+  "Create a VM hash-table object with optional WEAKNESS metadata."
+  (make-instance 'vm-hash-table-object
+                 :table (vm-make-host-hash-table :test test :weakness weakness)
+                 :weakness weakness
+                 :weak-entries (when weakness (make-hash-table :test test))
+                 :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-table-lock")
+                       #-sb-thread nil))
+
+(defun vm-record-weak-hash-entry (table-obj key value)
+  "Attach weak-entry and ephemeron metadata for TABLE-OBJ when it is weak."
+  (when (and (typep table-obj 'vm-hash-table-object)
+             (vm-hash-table-weakness table-obj))
+    (let* ((weakness (vm-hash-table-weakness table-obj))
+           (entry (make-vm-weak-hash-entry
+                   :key key
+                   :value value
+                   :key-ephemeron (when (member weakness '(:key :key-and-value :key-or-value))
+                                    (make-vm-ephemeron :key key :value value))
+                   :value-ephemeron (when (member weakness '(:value :key-and-value :key-or-value))
+                                      (make-vm-ephemeron :key value :value key)))))
+      (setf (gethash key (vm-hash-table-weak-entries table-obj)) entry)
+      entry)))
+
+(defun vm-sweep-weak-hash-table (table-obj)
+  "Remove stale weak-entry metadata after host weak hash-table cleanup."
+  (when (and (typep table-obj 'vm-hash-table-object)
+             (vm-hash-table-weakness table-obj)
+             (vm-hash-table-weak-entries table-obj))
+    (let ((table (vm-hash-table-internal table-obj))
+          (entries (vm-hash-table-weak-entries table-obj)))
+      (maphash (lambda (key entry)
+                 (declare (ignore entry))
+                 (unless (nth-value 1 (gethash key table))
+                   (remhash key entries)))
+               entries)))
+  table-obj)
 
 (defun vm-hash-htm-eligible-p (&optional table-obj)
   "Return T when VM hash operation should attempt HTM lock elision first."
@@ -66,9 +147,13 @@ abort count and retry under table lock fallback path."
              (or (vm-hash-table-shared-p table-obj)
                  (> (vm-hash-table-refcount table-obj) 1)))
     (let* ((src (vm-hash-table-internal table-obj))
-           (copy (make-hash-table :test (hash-table-test src))))
+           (weakness (vm-hash-table-weakness table-obj))
+           (copy (vm-make-host-hash-table :test (hash-table-test src)
+                                          :weakness weakness)))
       (maphash (lambda (k v) (setf (gethash k copy) v)) src)
       (setf (slot-value table-obj 'table) copy
+            (vm-hash-table-weakness table-obj) weakness
+            (vm-hash-table-weak-entries table-obj) (when weakness (make-hash-table :test (hash-table-test src)))
             (vm-hash-table-shared-p table-obj) nil
             (vm-hash-table-refcount table-obj) 1)))
   table-obj)
@@ -81,6 +166,8 @@ abort count and retry under table lock fallback path."
         (incf (vm-hash-table-refcount table-obj))
         (make-instance 'vm-hash-table-object
                        :table (vm-hash-table-internal table-obj)
+                       :weakness (vm-hash-table-weakness table-obj)
+                       :weak-entries (vm-hash-table-weak-entries table-obj)
                        :shared-p t
                        :refcount (vm-hash-table-refcount table-obj)
                        :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-table-lock")
@@ -94,17 +181,25 @@ abort count and retry under table lock fallback path."
 (define-vm-instruction vm-make-hash-table (vm-instruction)
   "Create a new hash table. Default test is EQL."
   (dst nil :reader vm-dst)
-  (test nil :reader vm-hash-test))
+  (test nil :reader vm-hash-test)
+  (weakness nil :reader vm-hash-weakness))
 
 (defmethod instruction->sexp ((inst vm-make-hash-table))
-  (if (vm-hash-test inst)
-      (list :make-hash-table (vm-dst inst) (vm-hash-test inst))
-      (list :make-hash-table (vm-dst inst))))
+  (let ((result (if (vm-hash-test inst)
+                    (list :make-hash-table (vm-dst inst) (vm-hash-test inst))
+                    (list :make-hash-table (vm-dst inst)))))
+    (when (vm-hash-weakness inst)
+      (setf result (append result (list :weakness (vm-hash-weakness inst)))))
+    result))
 
 (setf (gethash :make-hash-table *instruction-constructors*)
       (lambda (sexp)
-        (make-vm-make-hash-table :dst (second sexp)
-                                 :test (third sexp))))
+        (let* ((third-arg (third sexp))
+               (test (unless (keywordp third-arg) third-arg))
+               (plist (if test (nthcdr 3 sexp) (nthcdr 2 sexp))))
+          (make-vm-make-hash-table :dst (second sexp)
+                                   :test test
+                                   :weakness (getf plist :weakness)))))
 
 (define-vm-instruction vm-gethash (vm-instruction)
   "Look up KEY in TABLE. Returns (values VALUE FOUND-P)."

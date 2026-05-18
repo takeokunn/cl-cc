@@ -184,7 +184,37 @@
   "generic-function-method-combination reports STANDARD when no custom combination is set."
   (assert-eq 'standard
              (run-string "(defgeneric describe-combo (x))
-                          (generic-function-method-combination #'describe-combo)")))
+                           (generic-function-method-combination #'describe-combo)")))
+
+(deftest-each clos-custom-metaclass-overrides
+  "Custom metaclasses affect class-of, slot-value-using-class, and make-instance initialization hooks."
+  :cases
+  (("class-of-instance-returns-metaclass"
+    'meta-a
+    "(defclass meta-a () ())
+     (defclass object-a () () (:metaclass meta-a))
+     (class-name (class-of (make-instance 'object-a)))")
+   ("slot-value-using-class-before-method-runs"
+    '(1 42)
+    "(defclass meta-b () ())
+     (defclass object-b () ((x :initarg :x)) (:metaclass meta-b))
+     (defvar *slot-hook-count* 0)
+     (defmethod slot-value-using-class :before ((class meta-b) object slot-name)
+       (declare (ignore class object slot-name))
+       (setq *slot-hook-count* (+ *slot-hook-count* 1)))
+     (let ((obj (make-instance 'object-b :x 42)))
+       (list *slot-hook-count* (slot-value obj 'x)))")
+   ("initialize-instance-after-method-runs"
+    '(1 9)
+    "(defclass meta-c () ())
+     (defclass object-c () ((x :initarg :x)) (:metaclass meta-c))
+     (defvar *init-hook-count* 0)
+     (defmethod initialize-instance :after ((object meta-c))
+       (setq *init-hook-count* (+ *init-hook-count* 1)))
+     (let ((obj (make-instance 'object-c :x 9)))
+       (list *init-hook-count* (gethash 'x obj)))"))
+  (expected form)
+  (assert-equal expected (run-string form)))
 
 ;;; Setf Slot-Value Tests
 

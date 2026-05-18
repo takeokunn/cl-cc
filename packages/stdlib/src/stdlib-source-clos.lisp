@@ -19,12 +19,25 @@
        (declare (ignore initargs))
        instance)"
 
-    "(defgeneric allocate-instance (class &rest initargs))"
-    "(defmethod allocate-instance ((class t) &rest initargs)
-       (declare (ignore initargs))
-       (make-instance class))"
+     "(defgeneric allocate-instance (class &rest initargs))"
+     "(defmethod allocate-instance ((class t) &rest initargs)
+        (declare (ignore initargs))
+        (make-instance class))"
 
-    "(defgeneric slot-unbound (class instance slot-name))"
+     "(defgeneric slot-value-using-class (class object slot-name))"
+     "(defmethod slot-value-using-class ((class t) object slot-name)
+        (let ((class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+          (if (and class-slots (member slot-name class-slots))
+              (gethash slot-name class)
+              (multiple-value-bind (value found-p) (gethash slot-name object)
+                (if found-p
+                    value
+                    (let ((all-slots (and (hash-table-p class) (gethash :__slots__ class))))
+                      (if (and all-slots (member slot-name all-slots))
+                          (slot-unbound class object slot-name)
+                          (slot-missing class object slot-name 'slot-value))))))))"
+
+     "(defgeneric slot-unbound (class instance slot-name))"
     "(defmethod slot-unbound ((class t) (instance t) slot-name)
        (error 'unbound-slot :name slot-name :instance instance))"
 
@@ -108,7 +121,21 @@
                       (when (eq v method)
                         (remhash k methods-ht)))
                     methods-ht))
-         gf))"
+          gf))"
+
+;;; ── copy-instance (shallow copy) ────────────────────────────────────────
+
+    "(defun copy-instance (instance)
+       (let* ((class (gethash :__class__ instance))
+               (copy nil))
+          (unless class
+            (error \"copy-instance: ~A is not a CLOS instance\" instance))
+          (setq copy (make-instance class))
+         (maphash (lambda (key value)
+                    (unless (eq key :__class__)
+                      (setf (gethash key copy) value)))
+                  instance)
+         copy))"
 
 ;;; ── ANSI Condition Type Hierarchy (FR-424) ─────────────────────────────
 
@@ -274,6 +301,10 @@
     "(defvar *print-miser-width* nil)"
     "(defvar *print-lines* nil)"
     "(defvar *print-pprint-dispatch* nil)"
+
+    ;; ── ANSI CL implementation-defined: key mismatch warning ──────────────────
+    "(defvar *key-mismatch-warning* nil)"
+
     ;; ── FR-566: Pathname variables ────────────────────────────────────────────
     "(defvar *default-pathname-defaults* nil)"
     ;; ── FR-574: Load/compile pathname variables ───────────────────────────────

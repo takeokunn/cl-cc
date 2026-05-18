@@ -444,11 +444,8 @@ stay conservative and return T."
     (cond
       ((or (null root-a) (null root-b)) t)
       ((eq root-a root-b) t)
-      (t (let ((kind-a (gethash root-a heap-kinds))
-               (kind-b (gethash root-b heap-kinds)))
-           (if (and kind-a kind-b)
-               (eq kind-a kind-b)
-               t))))))
+      ((opt-tbaa-must-not-alias-p root-a root-b heap-kinds) nil)
+      (t t))))
 
 (defun opt-must-alias-p (reg-a reg-b alias-roots)
   "Return T when REG-A and REG-B definitely alias under ALIAS-ROOTS."
@@ -456,15 +453,17 @@ stay conservative and return T."
     (multiple-value-bind (root-b found-b) (gethash reg-b alias-roots)
       (and found-a found-b (eq root-a root-b)))))
 
-(defun opt-may-alias-p (reg-a reg-b alias-roots)
+(defun opt-may-alias-p (reg-a reg-b alias-roots &optional type-facts)
   "Return T when REG-A and REG-B may alias under ALIAS-ROOTS.
 
 Unknown roots remain conservative and therefore return T."
-  (multiple-value-bind (root-a found-a) (gethash reg-a alias-roots)
-    (multiple-value-bind (root-b found-b) (gethash reg-b alias-roots)
-      (or (not found-a)
-          (not found-b)
-          (eq root-a root-b)))))
+  (if (and type-facts (opt-tbaa-must-not-alias-p reg-a reg-b type-facts))
+      nil
+      (multiple-value-bind (root-a found-a) (gethash reg-a alias-roots)
+        (multiple-value-bind (root-b found-b) (gethash reg-b alias-roots)
+          (or (not found-a)
+              (not found-b)
+              (eq root-a root-b))))))
 
 (defun opt-slot-alias-key (obj-reg slot-name alias-roots)
   "Return a canonical slot key for OBJ-REG/SLOT-NAME using ALIAS-ROOTS."

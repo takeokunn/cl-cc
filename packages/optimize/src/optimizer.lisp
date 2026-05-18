@@ -12,6 +12,7 @@
 ;;;   opt-pass-dce         global-usedness dead code elimination (pure insts only)
 ;;;   opt-pass-jump        jump threading + dead jump elimination
 ;;;   opt-pass-unreachable remove instructions after unconditional transfers
+;;; FR-020: Allocation Sinking — delays heap allocations (cons etc.) as late as possible, moving them into conditional branches to reduce GC pressure on fast paths
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;;; ─── Pass 1: Constant Folding + Algebraic Simplification ─────────────────

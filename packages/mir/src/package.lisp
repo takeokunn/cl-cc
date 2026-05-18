@@ -16,8 +16,13 @@
    #:mirv-id #:mirv-name #:mirv-type #:mirv-def-inst #:mirv-use-count
    #:mir-const #:make-mir-const #:mir-const-p
    #:mirc-value #:mirc-type
-   #:mir-inst #:make-mir-inst #:mir-inst-p
-   #:miri-op #:miri-dst #:miri-srcs #:miri-type #:miri-block #:miri-meta
+    #:mir-inst #:make-mir-inst #:mir-inst-p
+    #:miri-op #:miri-dst #:miri-srcs #:miri-type #:miri-block #:miri-meta
+    #:mir-stack-map-entry #:make-mir-stack-map-entry #:mir-stack-map-entry-p
+    #:mirsme-offset #:mirsme-kind #:mirsme-reg
+    #:mir-stack-map #:make-mir-stack-map #:mir-stack-map-p
+    #:mirsm-entries #:mirsm-frame-size #:mirsm-return-address
+    #:mir-safepoint-stack-map #:mir-compute-gc-roots
    #:mir-block #:make-mir-block #:mir-block-p
    #:mirb-id #:mirb-label #:mirb-insts #:mirb-preds #:mirb-succs
    #:mirb-sealed-p #:mirb-phis #:mirb-incomplete-phis

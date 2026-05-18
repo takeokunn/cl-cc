@@ -119,6 +119,12 @@ optimizer's pass table wiring.")
                (setf (nth (1+ i) result) nil)))
         finally (return (remove nil result))))
 
+(defun opt-pass-allocation-sinking (instructions)
+  "FR-020 wrapper for branch-local allocation sinking."
+  (let ((cfg (cfg-build instructions))
+        (alias-facts (opt-compute-heap-aliases instructions)))
+    (opt-sink-allocations instructions cfg alias-facts)))
+
 ;;; Single source of truth: ordered keyword → function pairs.
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
@@ -149,8 +155,9 @@ optimizer's pass table wiring.")
     (:jump                      . ,#'opt-pass-jump)
     (:loop-unrolling            . ,#'opt-pass-loop-unrolling)
     (:loop-rotation             . ,#'opt-pass-loop-rotation)
-    (:loop-peeling              . ,#'opt-pass-loop-peeling)
-    (:code-sinking              . ,#'opt-pass-code-sinking)
+      (:loop-peeling              . ,#'opt-pass-loop-peeling)
+      (:allocation-sinking        . ,#'opt-pass-allocation-sinking)
+     (:code-sinking              . ,#'opt-pass-code-sinking)
     (:unreachable               . ,#'opt-pass-unreachable)
     (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
     (:store-to-load-forward     . ,#'opt-pass-store-to-load-forward)
@@ -197,10 +204,11 @@ optimizer's pass table wiring.")
      :batch-concatenate
     :cse
     :jump
-    :loop-unrolling
-    :loop-rotation
-    :loop-peeling
-    :code-sinking
+     :loop-unrolling
+     :loop-rotation
+     :loop-peeling
+     :allocation-sinking
+     :code-sinking
     :unreachable
     :dead-basic-blocks
     :store-to-load-forward

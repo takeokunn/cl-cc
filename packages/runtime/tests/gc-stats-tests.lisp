@@ -25,6 +25,7 @@
     (assert-true (member :young-total     stats))
     (assert-true (member :old-used        stats))
     (assert-true (member :old-total       stats))
+    (assert-true (member :heap-occupancy-pct stats))
     (assert-true (member :free-list-count stats))))
 
 (deftest gc-stats-minor-gc-count-increments
@@ -51,3 +52,27 @@
     (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)
     (assert-= 6 (getf (cl-cc/runtime:rt-gc-stats heap) :young-used))))
+
+(deftest rt-heap-occupancy-pct-combines-young-and-old-usage
+  "rt-heap-occupancy-pct reports young+old usage over one young semi-space plus old capacity."
+  (let* ((heap (cl-cc/runtime:make-rt-heap :young-size 40 :old-size 30))
+         (old-base (cl-cc/runtime:rt-heap-old-base heap)))
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 5)
+    (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 10))
+    (assert-= 30.0d0 (cl-cc/runtime:rt-heap-occupancy-pct heap))
+    (assert-= 30.0d0 (getf (cl-cc/runtime:rt-gc-stats heap)
+                           :heap-occupancy-pct))))
+
+(deftest rt-gc-profile-samples-allocation-sites
+  "rt-gc-alloc feeds the runtime allocation profiler when sampling is enabled."
+  (let ((heap (%make-small-heap))
+        (cl-cc/runtime:*gc-profile-enabled* t)
+        (cl-cc/runtime:*gc-profile-interval* 16)
+        (cl-cc/runtime::*gc-profile-bytes-since-sample* 0)
+        (cl-cc/runtime::*gc-profile-samples* (make-hash-table :test #'equal))
+        (cl-cc/runtime::*gc-profile-current-function* :profile-test))
+    (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 2)
+    (let ((report (cl-cc/runtime:rt-gc-profile-report)))
+      (assert-true (getf report :enabled-p))
+      (assert-equal (list (list :function :profile-test :count 1))
+                    (getf report :hot-spots)))))

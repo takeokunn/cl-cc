@@ -69,6 +69,24 @@
           (gethash :__replacement-class__ old-class) replacement-class))
   old-class)
 
+(defun %vm-hashlike-storage (table)
+  "Return TABLE's host hash-table storage for host and VM hash tables."
+  (cond
+    ((hash-table-p table) table)
+    ((typep table 'vm-hash-table-object) (vm-hash-table-internal table))
+    (t nil)))
+
+(defun %vm-hashlike-gethash (key table &optional default)
+  "GETHASH for host hash tables and VM hash-table objects."
+  (let ((storage (%vm-hashlike-storage table)))
+    (if storage (gethash key storage default) default)))
+
+(defun %vm-hashlike-sethash (key table value)
+  "Set KEY in a host hash table or VM hash-table object."
+  (let ((storage (%vm-hashlike-storage table)))
+    (unless storage (error "Expected hash table, got ~S" table))
+    (setf (gethash key storage) value)))
+
 (defun %vm-update-obsolete-instance (obj-ht)
   "Migrate OBJ-HT from an obsolete class descriptor to its replacement, if any."
   (let* ((old-class (and (hash-table-p obj-ht) (gethash :__class__ obj-ht)))
@@ -91,14 +109,14 @@
 
 (defun %vm-obj-class-ht (obj-ht)
   "Return the class hash-table for an instance OBJ-HT, or NIL."
-  (when (hash-table-p obj-ht)
+  (when (%vm-hashlike-storage obj-ht)
     (%vm-update-obsolete-instance obj-ht)
-    (gethash :__class__ obj-ht)))
+    (%vm-hashlike-gethash :__class__ obj-ht)))
 
 (defun %vm-class-slots-of (obj-ht)
   "Return (values class-ht class-slots) for class-allocation routing."
   (let ((class-ht (%vm-obj-class-ht obj-ht)))
-    (values class-ht (when class-ht (gethash :__class-slots__ class-ht)))))
+    (values class-ht (when class-ht (%vm-hashlike-gethash :__class-slots__ class-ht)))))
 
 (defun %vm-apply-initarg (initarg-key value initarg-map class-slots class-ht obj-ht)
   "Write VALUE to the slot for INITARG-KEY, routing class-allocated slots to CLASS-HT."
@@ -107,6 +125,127 @@
       (let* ((slot-name (cdr slot-entry))
              (target (if (member slot-name class-slots :test #'eq) class-ht obj-ht)))
         (setf (gethash slot-name target) value)))))
+
+(defun %vm-standard-metaclass-p (metaclass)
+  "Return T when METACLASS denotes the built-in standard metaclass path."
+  (or (null metaclass)
+      (eq metaclass 'standard-class)
+      (and (hash-table-p metaclass)
+           (eq (gethash :__name__ metaclass) 'standard-class))))
+
+(defun %vm-resolve-class-designator (designator state)
+  "Resolve a class DESIGNATOR (symbol or descriptor) to a class hash table when possible."
+  (cond
+    ((hash-table-p designator) designator)
+    ((symbolp designator) (gethash designator (vm-class-registry state)))
+    (t nil)))
+
+(defun %vm-class-effective-metaclass (class-ht state)
+  "Return the effective metaclass descriptor or symbol for CLASS-HT."
+  (let ((metaclass (and (hash-table-p class-ht)
+                        (gethash :__metaclass__ class-ht))))
+    (or (%vm-resolve-class-designator metaclass state) metaclass)))
+
+(defun %vm-class-nonstandard-metaclass-p (class-ht state)
+  "Return T when CLASS-HT has a custom metaclass."
+  (not (%vm-standard-metaclass-p (%vm-class-effective-metaclass class-ht state))))
+
+(defun %vm-global-generic-function (state name)
+  "Return global generic function NAME, or NIL if it is not available."
+  (let ((value (gethash name (vm-global-vars state))))
+    (when (and (hash-table-p value)
+               (gethash :__methods__ value))
+      value)))
+
+(defun %vm-call-generic-sync (gf-ht state args &key default)
+  "Synchronously call GF-HT with ARGS using the standard method combination.
+DEFAULT is called when no primary method is applicable.  This helper is used by
+VM primitives that need protocol hooks without introducing new instructions."
+  (let* ((primary-methods (vm-get-all-applicable-methods gf-ht state args))
+         (before-methods (%lookup-qualified-methods gf-ht :__BEFORE__ state args))
+         (after-methods (%lookup-qualified-methods gf-ht :__AFTER__ state args))
+         (around-methods (%lookup-qualified-methods gf-ht :__AROUND__ state args)))
+    (cond
+      (around-methods
+       (%vm-call-closure-sync (car around-methods) state args))
+      (t
+       (dolist (method before-methods)
+         (%vm-call-closure-sync method state args))
+       (let ((result (if primary-methods
+                         (%vm-call-closure-sync (car primary-methods) state args)
+                         (and default (funcall default)))))
+         (dolist (method (reverse after-methods))
+           (%vm-call-closure-sync method state args))
+         result)))))
+
+(defun %vm-direct-primary-method-p (gf-ht key)
+  "Return T when GF-HT has a primary method registered exactly for KEY."
+  (let ((methods-ht (and (hash-table-p gf-ht) (gethash :__methods__ gf-ht))))
+    (and methods-ht (gethash key methods-ht) t)))
+
+(defun %vm-raw-allocate-instance (class-ht initarg-regs state)
+  "Allocate and initialize raw storage for CLASS-HT without protocol dispatch."
+  (let* ((obj-ht           (make-hash-table :test #'eq))
+         (slot-names       (gethash :__slots__            class-ht))
+         (initarg-map      (gethash :__initargs__         class-ht))
+         (initform-values  (gethash :__initforms__        class-ht))
+         (default-initargs (gethash :__default-initargs__ class-ht))
+         (class-slots      (gethash :__class-slots__      class-ht))
+         (provided-keys    (remove :allow-other-keys (mapcar #'car initarg-regs) :test #'eq)))
+    (setf (gethash :__class__ obj-ht) class-ht)
+    (%vm-validate-initargs initarg-regs initarg-map state)
+    (dolist (slot-name slot-names)
+      (unless (member slot-name class-slots :test #'eq)
+        (let ((initform-entry (assoc slot-name initform-values)))
+          (setf (gethash slot-name obj-ht) (if initform-entry (cdr initform-entry) nil)))))
+    (loop for (initarg-key . default-value) in default-initargs
+          unless (member initarg-key provided-keys)
+            do (%vm-apply-initarg initarg-key default-value initarg-map class-slots class-ht obj-ht))
+    (loop for (initarg-key . value-reg) in initarg-regs
+          do (%vm-apply-initarg initarg-key (vm-reg-get state value-reg)
+                                initarg-map class-slots class-ht obj-ht))
+    obj-ht))
+
+(defun %vm-initarg-values (initarg-regs state)
+  "Return INITARG-REGS as alternating key/value arguments."
+  (loop for (initarg-key . value-reg) in initarg-regs
+        append (list initarg-key (vm-reg-get state value-reg))))
+
+(defun %vm-call-allocation-protocol (class-ht initarg-regs state)
+  "Allocate CLASS-HT via custom metaclass hooks when present, otherwise raw allocate."
+  (let* ((metaclass (%vm-class-effective-metaclass class-ht state))
+         (metaclass-name (and (hash-table-p metaclass) (gethash :__name__ metaclass)))
+         (initarg-values (%vm-initarg-values initarg-regs state))
+         (allocate-gf (%vm-global-generic-function state 'allocate-instance))
+         (initialize-gf (%vm-global-generic-function state 'initialize-instance))
+         (obj-ht (if (and allocate-gf
+                          metaclass-name
+                          (%vm-direct-primary-method-p allocate-gf metaclass-name))
+                     (%vm-call-generic-sync allocate-gf state
+                                           (append (list class-ht) initarg-values))
+                     (%vm-raw-allocate-instance class-ht initarg-regs state))))
+    (when initialize-gf
+      (%vm-call-generic-sync initialize-gf state
+                             (append (list obj-ht) initarg-values)
+                             :default (lambda () obj-ht)))
+    obj-ht))
+
+(defun %vm-raw-slot-read (class-ht class-slots obj-ht slot-name)
+  "Read SLOT-NAME directly from OBJ-HT/CLASS-HT with standard error behavior."
+  (if (and class-slots (member slot-name class-slots :test #'eq))
+      (%vm-hashlike-gethash slot-name class-ht)
+      (let ((obj-storage (%vm-hashlike-storage obj-ht)))
+        (unless obj-storage
+          (error "The slot ~S is missing from non-object ~S" slot-name obj-ht))
+        (multiple-value-bind (value found-p) (gethash slot-name obj-storage)
+        (if found-p
+            value
+            (let ((all-slots  (when class-ht (%vm-hashlike-gethash :__slots__ class-ht)))
+                  (class-name (when class-ht (%vm-hashlike-gethash :__name__ class-ht))))
+              (if (and all-slots (member slot-name all-slots :test #'eq))
+                  (error (make-condition 'unbound-slot :name slot-name :instance obj-ht))
+                  (error "The slot ~S is missing from the object~@[ of class ~S~]"
+                         slot-name class-name))))))))
 
 (defmethod execute-instruction ((inst vm-class-def) state pc labels)
   (declare (ignore labels))
@@ -137,6 +276,11 @@
           (if (vm-metaclass-reg inst)
               (vm-reg-get state (vm-metaclass-reg inst))
               'standard-class))
+    (let ((metaclass-class (%vm-resolve-class-designator
+                            (gethash :__metaclass__ class-ht) state)))
+      (when (and metaclass-class
+                 (not (%vm-standard-metaclass-p metaclass-class)))
+        (setf (gethash :__class__ class-ht) metaclass-class)))
     (%vm-mark-class-obsolete previous-class class-ht)
     (%vm-cdef-init-class-slots class-ht all-class-slots initform-values)
     (setf (gethash (vm-class-name-sym inst) registry) class-ht
@@ -147,25 +291,10 @@
 
 (defmethod execute-instruction ((inst vm-make-obj) state pc labels)
   (declare (ignore labels))
-  (let* ((class-ht        (vm-reg-get state (vm-class-reg inst)))
-         (obj-ht          (make-hash-table :test #'eq))
-         (slot-names      (gethash :__slots__            class-ht))
-         (initarg-map     (gethash :__initargs__         class-ht))
-         (initform-values (gethash :__initforms__        class-ht))
-         (default-initargs (gethash :__default-initargs__ class-ht))
-         (class-slots     (gethash :__class-slots__      class-ht))
-         (provided-keys   (remove :allow-other-keys (mapcar #'car (vm-initarg-regs inst)) :test #'eq)))
-    (setf (gethash :__class__ obj-ht) class-ht)
-    (%vm-validate-initargs (vm-initarg-regs inst) initarg-map state)
-    (dolist (slot-name slot-names)
-      (unless (member slot-name class-slots :test #'eq)
-        (let ((initform-entry (assoc slot-name initform-values)))
-          (setf (gethash slot-name obj-ht) (if initform-entry (cdr initform-entry) nil)))))
-    (loop for (initarg-key . default-value) in default-initargs
-          unless (member initarg-key provided-keys)
-            do (%vm-apply-initarg initarg-key default-value initarg-map class-slots class-ht obj-ht))
-    (loop for (initarg-key . value-reg) in (vm-initarg-regs inst)
-          do (%vm-apply-initarg initarg-key (vm-reg-get state value-reg) initarg-map class-slots class-ht obj-ht))
+  (let* ((class-ht (vm-reg-get state (vm-class-reg inst)))
+         (obj-ht (if (%vm-class-nonstandard-metaclass-p class-ht state)
+                     (%vm-call-allocation-protocol class-ht (vm-initarg-regs inst) state)
+                     (%vm-raw-allocate-instance class-ht (vm-initarg-regs inst) state))))
     (vm-reg-set state (vm-dst inst) obj-ht)
     (values (1+ pc) nil nil)))
 
@@ -174,17 +303,15 @@
   (let* ((obj-ht    (vm-reg-get state (vm-obj-reg inst)))
          (slot-name (vm-slot-name-sym inst)))
     (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
-      (if (and class-slots (member slot-name class-slots :test #'eq))
-          (vm-reg-set state (vm-dst inst) (gethash slot-name class-ht))
-          (multiple-value-bind (value found-p) (gethash slot-name obj-ht)
-            (if found-p
-                (vm-reg-set state (vm-dst inst) value)
-                (let ((all-slots  (when class-ht (gethash :__slots__ class-ht)))
-                      (class-name (when class-ht (gethash :__name__ class-ht))))
-                  (if (and all-slots (member slot-name all-slots :test #'eq))
-                      (error (make-condition 'unbound-slot :name slot-name :instance obj-ht)) ; FR-384
-                      (error "The slot ~S is missing from the object~@[ of class ~S~]" ; FR-554
-                             slot-name class-name)))))))
+      (let ((raw-reader (lambda () (%vm-raw-slot-read class-ht class-slots obj-ht slot-name))))
+        (vm-reg-set state (vm-dst inst)
+                    (if (and class-ht (%vm-class-nonstandard-metaclass-p class-ht state))
+                        (let ((gf (%vm-global-generic-function state 'slot-value-using-class)))
+                          (if gf
+                              (%vm-call-generic-sync gf state (list class-ht obj-ht slot-name)
+                                                     :default raw-reader)
+                              (funcall raw-reader)))
+                        (funcall raw-reader)))))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-write) state pc labels)
@@ -194,8 +321,8 @@
          (value     (vm-reg-get state (vm-value-reg inst))))
     (multiple-value-bind (class-ht class-slots) (%vm-class-slots-of obj-ht)
       (if (and class-slots (member slot-name class-slots :test #'eq))
-          (setf (gethash slot-name class-ht) value)
-          (setf (gethash slot-name obj-ht) value)))
+          (%vm-hashlike-sethash slot-name class-ht value)
+          (%vm-hashlike-sethash slot-name obj-ht value)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-slot-boundp) state pc labels)
@@ -316,8 +443,8 @@
   (declare (ignore labels))
   (let ((class (vm-reg-get state (vm-src inst))))
     (vm-reg-set state (vm-dst inst)
-                (if (hash-table-p class)
-                    (or (gethash :__name__ class)
+                (if (%vm-hashlike-storage class)
+                    (or (%vm-hashlike-gethash :__name__ class)
                         (error "class-name: not a class object"))
                     (error "class-name: ~A is not a class" class)))
     (values (1+ pc) nil nil)))
@@ -330,8 +457,11 @@
   (let ((obj (vm-reg-get state (vm-src inst))))
     (vm-reg-set state (vm-dst inst)
                 (cond
-                  ((and (hash-table-p obj) (gethash :__class__ obj))
-                   (gethash :__class__ obj))
+                  ((and (%vm-hashlike-storage obj) (%vm-hashlike-gethash :__class__ obj))
+                   (let ((class (%vm-hashlike-gethash :__class__ obj)))
+                     (if (%vm-class-nonstandard-metaclass-p class state)
+                         (%vm-class-effective-metaclass class state)
+                         class)))
                   (t (error "class-of: ~A has no class" obj))))
     (values (1+ pc) nil nil)))
 

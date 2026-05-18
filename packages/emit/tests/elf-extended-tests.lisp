@@ -88,8 +88,8 @@
       (assert-equal 0    (aref result 17))
       (assert-equal #x3E (aref result 18))
       (assert-equal 0    (aref result 19))
-      (assert-equal 7    (aref result 60))
-      (assert-equal 6    (aref result 62)))))
+      (assert-equal 10    (aref result 60))
+      (assert-equal 9    (aref result 62)))))
 
 (deftest elf64-finalize-empty-object-produces-at-least-64-bytes
   "Finalizing an empty ELF64 object produces at least 64 bytes (minimum header size)."
@@ -111,7 +111,7 @@
                    (ash (aref result 41) 8)
                    (ash (aref result 42) 16)
                    (ash (aref result 43) 24)))
-    (setf bss-shoff (+ shoff (* 2 64)))
+    (setf bss-shoff (+ shoff (* 3 64)))
     (assert-equal 8 (aref result (+ bss-shoff 4)))
     (assert-equal 32 (aref result (+ bss-shoff 32)))))
 
@@ -150,7 +150,7 @@
                    (ash (aref result 41) 8)
                    (ash (aref result 42) 16)
                    (ash (aref result 43) 24)))
-         (bss-shoff (+ shoff (* 2 64))))
+          (bss-shoff (+ shoff (* 3 64))))
     (assert-true (typep result '(simple-array (unsigned-byte 8) (*))))
     (assert-equal 8 (aref result (+ bss-shoff 4)))
     (assert-equal 64 (aref result (+ bss-shoff 32)))))

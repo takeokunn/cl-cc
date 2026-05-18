@@ -28,11 +28,17 @@ Values stored as lists are spliced in; scalar values are wrapped in a list."
 
 (defun vm-classify-arg (arg state)
   "Determine the class name of an argument for generic dispatch."
-  (declare (ignore state))
   (if (hash-table-p arg)
       (let ((class-ht (gethash :__class__ arg)))
         (if class-ht
-            (gethash :__name__ class-ht)
+            (let ((metaclass (and state
+                                  (fboundp '%vm-class-effective-metaclass)
+                                  (funcall #'%vm-class-effective-metaclass class-ht state))))
+              (if (and (fboundp '%vm-standard-metaclass-p)
+                       (not (funcall #'%vm-standard-metaclass-p metaclass))
+                       (hash-table-p metaclass))
+                  (gethash :__name__ metaclass)
+                  (gethash :__name__ class-ht)))
             t))
       (typecase arg
         (integer 'integer)

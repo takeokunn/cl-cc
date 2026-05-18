@@ -86,8 +86,20 @@
    vm-rationalize
    vm-numerator
     vm-denominator
-    vm-make-array
-    vm-array-length
+     vm-make-array
+     vm-make-specialized-array
+     vm-specialized-array
+     vm-specialized-array-p
+     vm-specialized-array-header
+     vm-specialized-array-element-type
+     vm-specialized-array-length
+     vm-specialized-array-storage
+     vm-specialized-array-gc-skip-p
+     vm-specialized-array-ref
+     vm-specialized-array-element-pointer-free-p
+     vm-bit-vector-p
+     vm-bit-vector-ref
+     vm-array-length
     vm-array-reg
     vm-index-reg
     vm-val-reg

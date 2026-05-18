@@ -19,6 +19,93 @@
 ;;; ELF64 Serialization
 ;;; ------------------------------------------------------------
 
+(defun elf64-write-uleb128 (buf value)
+  "Write VALUE as unsigned LEB128 to BUF."
+  (loop for v = value then (ash v -7)
+        for byte = (logand v #x7f)
+        do (elf-buf-u8 buf (if (zerop (ash v -7)) byte (logior byte #x80)))
+        until (zerop (ash v -7))))
+
+(defun elf64-write-sleb128 (buf value)
+  "Write VALUE as signed LEB128 to BUF."
+  (loop with more = t
+        with v = value
+        while more do
+          (let* ((byte (logand v #x7f))
+                 (sign-set (not (zerop (logand byte #x40)))))
+            (setf v (ash v -7))
+            (setf more (not (or (and (zerop v) (not sign-set))
+                                (and (= v -1) sign-set))))
+            (elf-buf-u8 buf (if more (logior byte #x80) byte)))))
+
+(defun elf64-pad-to-align (buf alignment)
+  "Pad BUF with DW_CFA_nop bytes to ALIGNMENT."
+  (loop while (not (zerop (mod (length buf) alignment)))
+        do (elf-buf-u8 buf 0)))
+
+(defun elf64-build-eh-frame (text-size)
+  "Build a minimal x86-64 .eh_frame with one CIE and one FDE for .text.
+
+The CIE uses augmentation \"zR\", code alignment 1, data alignment -8,
+return-address register RIP (DWARF register 16), and initial CFA rules for a
+normal call frame: CFA = RSP+8, RIP saved at CFA-8.  The FDE covers the current
+.text range and is intentionally conservative for frameless/RBP-less code."
+  (let ((buf (elf-make-buffer)))
+    ;; CIE
+    (let* ((cie-start (length buf))
+           (cie-body (elf-make-buffer)))
+      (binary-buffer-write-u32le cie-body 0) ; CIE_id
+      (elf-buf-u8 cie-body 1)                ; version
+      (binary-buffer-write-bytes cie-body (map 'vector #'char-code "zR"))
+      (elf-buf-u8 cie-body 0)                ; NUL terminator
+      (elf64-write-uleb128 cie-body 1)       ; code alignment factor
+      (elf64-write-sleb128 cie-body -8)      ; data alignment factor
+      (elf64-write-uleb128 cie-body 16)      ; return address register: RIP
+      (elf64-write-uleb128 cie-body 1)       ; augmentation data length
+      (elf-buf-u8 cie-body #x1b)             ; DW_EH_PE_pcrel | sdata4
+      ;; Initial instructions: DW_CFA_def_cfa rsp,8; DW_CFA_offset rip,1
+      (elf-buf-u8 cie-body #x0c)
+      (elf64-write-uleb128 cie-body 7)
+      (elf64-write-uleb128 cie-body 8)
+      (elf-buf-u8 cie-body #x90)
+      (elf64-write-uleb128 cie-body 1)
+      (elf64-pad-to-align cie-body 8)
+      (binary-buffer-write-u32le buf (length cie-body))
+      (binary-buffer-write-bytes buf (binary-buffer-to-array cie-body))
+      ;; FDE. CIE_pointer is the distance from this field back to CIE start.
+      (let* ((fde-start (length buf))
+             (cie-pointer (- (+ fde-start 4) cie-start))
+             (fde-body (elf-make-buffer)))
+        (binary-buffer-write-u32le fde-body cie-pointer)
+        ;; DW_EH_PE_pcrel|sdata4 payload. Relocatable objects leave the encoded
+        ;; location at zero; the linker can resolve final addresses.
+        (binary-buffer-write-u32le fde-body 0)
+        (binary-buffer-write-u32le fde-body text-size)
+        (elf64-write-uleb128 fde-body 0) ; augmentation data length
+        ;; Conservative frameless prologue state: CFA remains RSP+8.
+        (elf-buf-u8 fde-body #x0c)
+        (elf64-write-uleb128 fde-body 7)
+        (elf64-write-uleb128 fde-body 8)
+        (elf64-pad-to-align fde-body 8)
+        (binary-buffer-write-u32le buf (length fde-body))
+        (binary-buffer-write-bytes buf (binary-buffer-to-array fde-body))))
+    (binary-buffer-to-array buf)))
+
+(defun elf64-build-eh-frame-hdr (eh-frame-offset text-size)
+  "Build a compact .eh_frame_hdr with a single binary-search-table FDE row."
+  (declare (ignore text-size))
+  (let ((buf (elf-make-buffer)))
+    (elf-buf-u8 buf 1)     ; version
+    (elf-buf-u8 buf #x1b)  ; eh_frame_ptr_enc: DW_EH_PE_pcrel | sdata4
+    (elf-buf-u8 buf #x03)  ; fde_count_enc: DW_EH_PE_udata4
+    (elf-buf-u8 buf #x3b)  ; table_enc: DW_EH_PE_datarel | sdata4
+    (binary-buffer-write-u32le buf eh-frame-offset)
+    (binary-buffer-write-u32le buf 1)
+    ;; initial_location (relative to .eh_frame_hdr base) and FDE pointer.
+    (binary-buffer-write-u32le buf 0)
+    (binary-buffer-write-u32le buf 0)
+    (binary-buffer-to-array buf)))
+
 (defun elf64-build-symtab (builder strtab)
   "Build symbol table bytes. Returns (values symtab-bytes local-count).
    Symbol table format: STN_UNDEF first, then locals, then globals.
@@ -82,7 +169,10 @@
          (strtab   (make-strtab))
          ;; Section name offsets in shstrtab
          (sh-text-off     (strtab-add shstrtab ".text"))
+         (sh-rodata-off   (strtab-add shstrtab ".rodata"))
          (sh-bss-off      (strtab-add shstrtab ".bss"))
+         (sh-eh-frame-off (strtab-add shstrtab ".eh_frame"))
+         (sh-eh-frame-hdr-off (strtab-add shstrtab ".eh_frame_hdr"))
          (sh-rela-off     (strtab-add shstrtab ".rela.text"))
          (sh-symtab-off   (strtab-add shstrtab ".symtab"))
          (sh-strtab-off   (strtab-add shstrtab ".strtab"))
@@ -102,18 +192,29 @@
          ;; Finalize string tables
          (strtab-bytes   (strtab-bytes strtab))
          (shstrtab-bytes (strtab-bytes shstrtab))
-         ;; .text bytes
-         (text-bytes (binary-buffer-to-array (elf64-text-buf builder)))
-         (bss-size        (elf64-bss-size builder))
-         ;; Layout: ELF header + sections + section headers
-         ;; Section ordering: NULL, .text, .bss, .rela.text, .symtab, .strtab, .shstrtab
-         ;; Number of sections: 7
-         (n-sections 7)
-         (shstrtab-idx 6)  ; index of .shstrtab
+         ;; .text/.rodata/.eh_frame bytes
+          (text-bytes (binary-buffer-to-array (elf64-text-buf builder)))
+          (rodata-bytes (binary-buffer-to-array (elf64-rodata-buf builder)))
+          (bss-size        (elf64-bss-size builder))
+          (eh-frame-bytes (elf64-build-eh-frame (length text-bytes)))
+          ;; Layout: ELF header + sections + section headers.
+          ;; Section ordering: NULL, .text, .rodata, .bss, .eh_frame,
+          ;; .eh_frame_hdr, .rela.text, .symtab, .strtab, .shstrtab
+          (n-sections 10)
+          (symtab-idx 7)
+          (strtab-idx 8)
+          (shstrtab-idx 9)  ; index of .shstrtab
          ;; Data starts after ELF header, honoring section alignment requirements.
-         (text-offset     (align-up +elf64-ehdr-size+ 16))
-         (text-size       (length text-bytes))
-         (rela-offset     (align-up (+ text-offset text-size) 8))
+          (text-offset     (align-up +elf64-ehdr-size+ 16))
+          (text-size       (length text-bytes))
+          (rodata-offset   (align-up (+ text-offset text-size) 8))
+          (rodata-size     (length rodata-bytes))
+          (eh-frame-offset (align-up (+ rodata-offset rodata-size) 8))
+          (eh-frame-size   (length eh-frame-bytes))
+          (eh-frame-hdr-bytes (elf64-build-eh-frame-hdr eh-frame-offset text-size))
+          (eh-frame-hdr-offset (align-up (+ eh-frame-offset eh-frame-size) 4))
+          (eh-frame-hdr-size (length eh-frame-hdr-bytes))
+          (rela-offset     (align-up (+ eh-frame-hdr-offset eh-frame-hdr-size) 8))
          (rela-size       (length rela-buf))
          (symtab-offset   (align-up (+ rela-offset rela-size) 8))
          (symtab-size     (length sym-buf))
@@ -167,7 +268,13 @@
      ;; ---- Section Data ----
      (binary-buffer-write-pad out (- text-offset (length out)))
      (binary-buffer-write-bytes out text-bytes)
-     (binary-buffer-write-pad out (- rela-offset (length out)))
+      (binary-buffer-write-pad out (- rodata-offset (length out)))
+      (binary-buffer-write-bytes out rodata-bytes)
+      (binary-buffer-write-pad out (- eh-frame-offset (length out)))
+      (binary-buffer-write-bytes out eh-frame-bytes)
+      (binary-buffer-write-pad out (- eh-frame-hdr-offset (length out)))
+      (binary-buffer-write-bytes out eh-frame-hdr-bytes)
+      (binary-buffer-write-pad out (- rela-offset (length out)))
      (binary-buffer-write-bytes out rela-buf)
      (binary-buffer-write-pad out (- symtab-offset (length out)))
      (binary-buffer-write-bytes out sym-buf)
@@ -185,32 +292,47 @@
                       (logior +shf-alloc+ +shf-execinstr+)
                       text-offset text-size
                       0 0 16 0)
-     ;; SHN 2: .bss (NOBITS; no file payload)
-     (elf64-write-shdr out sh-bss-off +sht-nobits+
-                       (logior +shf-alloc+ +shf-write+)
-                       0 bss-size
-                       0 0 8 0)
-     ;; SHN 3: .rela.text  (link=symtab-idx=4, info=text-idx=1)
-     ;; sh_flags must be 0 for relocation sections in relocatable .o files
-     ;; (SHF_ALLOC would incorrectly mark it as occupying memory at runtime)
-     (elf64-write-shdr out sh-rela-off +sht-rela+
-                       0
-                       rela-offset rela-size
-                       4 1  ; link=.symtab idx, info=.text idx
-                       8 +elf64-rela-size+)
-     ;; SHN 4: .symtab  (link=strtab-idx=5, info=first-global-idx)
-     (elf64-write-shdr out sh-symtab-off +sht-symtab+
-                       0
-                       symtab-offset symtab-size
-                       5 sym-local-count  ; link=.strtab, info=first-global
-                       8 +elf64-sym-size+)
-     ;; SHN 5: .strtab
-     (elf64-write-shdr out sh-strtab-off +sht-strtab+
-                       0
-                       strtab-offset strtab-size
-                       0 0 1 0)
-     ;; SHN 6: .shstrtab
-     (elf64-write-shdr out sh-shstrtab-off +sht-strtab+
+      ;; SHN 2: .rodata (allocated, read-only; no SHF_WRITE)
+      (elf64-write-shdr out sh-rodata-off +sht-progbits+
+                        +shf-alloc+
+                        rodata-offset rodata-size
+                        0 0 8 0)
+      ;; SHN 3: .bss (NOBITS; no file payload)
+      (elf64-write-shdr out sh-bss-off +sht-nobits+
+                        (logior +shf-alloc+ +shf-write+)
+                        0 bss-size
+                        0 0 8 0)
+      ;; SHN 4: .eh_frame (allocated unwind table)
+      (elf64-write-shdr out sh-eh-frame-off +sht-progbits+
+                        +shf-alloc+
+                        eh-frame-offset eh-frame-size
+                        0 0 8 0)
+      ;; SHN 5: .eh_frame_hdr (allocated compact FDE lookup table)
+      (elf64-write-shdr out sh-eh-frame-hdr-off +sht-progbits+
+                        +shf-alloc+
+                        eh-frame-hdr-offset eh-frame-hdr-size
+                        0 0 4 0)
+      ;; SHN 6: .rela.text  (link=symtab, info=text-idx=1)
+      ;; sh_flags must be 0 for relocation sections in relocatable .o files
+      ;; (SHF_ALLOC would incorrectly mark it as occupying memory at runtime)
+      (elf64-write-shdr out sh-rela-off +sht-rela+
+                        0
+                        rela-offset rela-size
+                        symtab-idx 1  ; link=.symtab idx, info=.text idx
+                        8 +elf64-rela-size+)
+      ;; SHN 7: .symtab  (link=.strtab, info=first-global-idx)
+      (elf64-write-shdr out sh-symtab-off +sht-symtab+
+                        0
+                        symtab-offset symtab-size
+                        strtab-idx sym-local-count  ; link=.strtab, info=first-global
+                        8 +elf64-sym-size+)
+      ;; SHN 8: .strtab
+      (elf64-write-shdr out sh-strtab-off +sht-strtab+
+                        0
+                        strtab-offset strtab-size
+                        0 0 1 0)
+      ;; SHN 9: .shstrtab
+      (elf64-write-shdr out sh-shstrtab-off +sht-strtab+
                        0
                        shstrtab-offset shstrtab-size
                        0 0 1 0)

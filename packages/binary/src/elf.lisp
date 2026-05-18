@@ -1,7 +1,9 @@
 ;;;; packages/binary/src/elf.lisp - ELF64 Relocatable Object File Builder
 ;;;
 ;;; Builds ELF64 .o files for x86-64 Linux (ET_REL).
-;;; Sections: NULL, .text, .rela.text, .symtab, .strtab, .shstrtab
+;;; FR-247: Unwind Tables / .eh_frame Generation — DWARF CFI-based unwind information for native debuggers and profilers; LSB/System V ABI compliant
+;;; Sections: NULL, .text, .rodata, .bss, .eh_frame, .eh_frame_hdr,
+;;;           .rela.text, .symtab, .strtab, .shstrtab
 ;;;
 ;;; ELF64 reference: System V AMD64 ABI, ELF-64 Object File Format v1.5
 
@@ -140,6 +142,10 @@ FR-291: Extended with program header and entry point support for executables."
   (entry-point 0 :type (unsigned-byte 64))             ; e_entry for executables
   ;; .text section data
   (text-buf    (elf-make-buffer))
+  ;; .rodata section data. Immutable constants are emitted here with SHF_ALLOC
+  ;; and without SHF_WRITE so final linked images may be mapped read-only by
+  ;; the operating system; attempted writes should fault at the OS level.
+  (rodata-buf  (elf-make-buffer))
   ;; .bss section size in bytes (NOBITS, occupies memory only)
   (bss-size 0 :type integer)
   ;; Relocation entries: list of (offset type sym-name addend)
@@ -167,6 +173,16 @@ FR-291: Extended with program header and entry point support for executables."
 (defun elf64-text-size (builder)
   "Return current .text section size in bytes."
   (length (elf64-text-buf builder)))
+
+(defun elf64-add-rodata-bytes (builder bytes)
+  "Append immutable constant BYTES to .rodata and return their section offset.
+
+String literals and constant pools should use this API rather than .data.  The
+serialized ELF section is allocated but not writable (SHF_ALLOC without
+SHF_WRITE), allowing the final OS mapping to protect constants from writes."
+  (let ((offset (length (elf64-rodata-buf builder))))
+    (binary-buffer-write-bytes (elf64-rodata-buf builder) bytes)
+    offset))
 
 (defun elf64-add-bss (builder size)
   "Reserve SIZE bytes in the .bss section."
@@ -207,4 +223,3 @@ Required by Linux kernel for NX (non-executable stack) support."
 ;;; (elf64-build-symtab, elf64-build-rela, elf64-write-shdr, elf64-finalize,
 ;;;  write-elf64-file, and compile-to-elf64 are in elf-emit.lisp
 ;;;  which loads after this file.)
-

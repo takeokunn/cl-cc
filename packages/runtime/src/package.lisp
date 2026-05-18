@@ -64,6 +64,7 @@
    #:rt-get-global #:rt-set-global
    ;; Strings
    #:rt-make-string #:rt-string-length #:rt-string-ref #:rt-string-set
+   #:*rt-string-dedup-table* #:rt-string-dedup #:rt-string-intern
    #:rt-string= #:rt-string< #:rt-string> #:rt-string<= #:rt-string>=
    #:rt-string-equal-ci #:rt-string-lessp #:rt-string-greaterp
    #:rt-string-not-equal #:rt-string-not-greaterp #:rt-string-not-lessp
@@ -93,7 +94,11 @@
    ;; Hash tables
    #:rt-make-hash-table #:rt-gethash #:rt-sethash #:rt-remhash #:rt-clrhash
    #:rt-hash-count #:rt-hash-test #:rt-maphash #:rt-hash-keys #:rt-hash-values
-   #:rt-hash-table-p
+    #:rt-hash-table-p #:rt-hash-table-weakness
+     ;; Weak hash tables (FR-448, FR-449)
+     #:rt-weak-hash-table #:rt-weak-hash-table-p
+     #:rt-weak-hash-entry #:make-rt-weak-hash-entry
+    #:rtwhe-key #:rtwhe-value #:rtwhe-key-ephemeron #:rtwhe-value-ephemeron
    ;; CLOS
    #:rt-defclass #:rt-make-instance #:rt-slot-value #:rt-slot-set
    #:rt-slot-boundp #:rt-slot-makunbound #:rt-slot-exists-p
@@ -193,8 +198,10 @@
    #:rt-heap-words-collected #:rt-heap-words-promoted
    #:rt-heap-card-table #:rt-heap-roots #:rt-heap-satb-queue
    #:rt-heap-free-list #:rt-heap-gc-state
-   ;; Heap word access
-    #:rt-heap-ref #:rt-heap-set
+    ;; Heap word access
+     #:rt-heap-ref #:rt-heap-set
+     ;; Heap ASLR / guard pages (FR-373, FR-376)
+     #:rt-heap-randomize-base #:rt-install-stack-guard
     ;; Sanitizer runtime controls (FR-489..493)
      #:*rt-asan-enabled* #:*rt-msan-enabled* #:*rt-tsan-enabled* #:*rt-hwasan-enabled* #:*rt-ubsan-enabled*
     #:*rt-tsan-thread-id*
@@ -214,7 +221,71 @@
     #:rt-gc-stats
     #:rt-gc-configure-concurrent-mode
     #:rt-gc-concurrent-assist
-    #:*rt-concurrent-gc-enabled-p*
-    #:*rt-concurrent-gc-write-barrier-mode*
-    #:*rt-concurrent-gc-stw-phases*
-    #:*rt-concurrent-gc-mutator-assist-p*))
+     #:*rt-concurrent-gc-enabled-p*
+     #:*rt-concurrent-gc-write-barrier-mode*
+     #:*rt-concurrent-gc-stw-phases*
+      #:*rt-concurrent-gc-mutator-assist-p*
+      ;; Concurrent GC SATB (FR-339)
+      #:rt-gc-satb-enqueue #:rt-gc-drain-satb-thread-queues
+    ;; New GC features (memory-gc.md)
+    ;; Card summary (FR-084)
+    #:rt-card-summary-update #:rt-card-summary-clean-block-p
+    ;; Heap accessors
+    #:rt-heap-num-cards #:rt-heap-card-summary #:rt-heap-barrier-buffer
+    #:rt-heap-total-alloc-words #:rt-heap-age-hist
+    #:rt-heap-large-obj-threshold #:rt-heap-large-obj-base
+    #:rt-heap-large-obj-size #:rt-heap-large-obj-free
+    #:rt-heap-gc-pause-total #:rt-heap-gc-pause-max
+    #:rt-heap-pressure-hooks #:rt-heap-pressure-threshold-high #:rt-heap-pressure-threshold-low
+    #:rt-heap-max-heap-words #:rt-heap-shrink-threshold
+    #:rt-heap-compaction-trigger-fraction
+    #:rt-heap-gc-inhibit #:rt-heap-gc-pending
+     ;; Memory pressure (FR-334)
+     #:rt-heap-occupancy-pct #:rt-heap-register-pressure-hook
+     ;; NUMA-local GC (FR-364)
+     #:rt-gc-numa-affinity
+    ;; Fragmentation (FR-380)
+    #:rt-heap-fragmentation-pct #:rt-heap-should-compact-p
+    ;; GC inhibit (FR-428)
+    #:without-gcing #:rt-gc-inhibit-p
+    ;; Dynamic tenure (FR-085)
+    #:rt-gc-dynamic-tenure
+    ;; GC verification (FR-413)
+    #:rt-gc-verify-heap #:*gc-verify-after-collect*
+     ;; GC stress (FR-414)
+     #:*gc-stress-mode*
+     ;; Immortal objects (FR-377)
+     #:rt-make-immortal #:rt-immortal-p
+     ;; Heap census (FR-446)
+    #:rt-gc-heap-census
+    ;; Barrier batching (FR-453)
+    #:rt-gc-flush-barrier-buffer #:*rt-use-barrier-batching*
+    ;; Lifecycle hooks (FR-447)
+    #:*rt-gc-alloc-hooks* #:*rt-gc-death-hooks*
+    #:rt-gc-register-alloc-hook #:rt-gc-register-death-hook
+    ;; GC policy (FR-424)
+    #:rt-gc-select-policy
+    ;; Reference strength (FR-381-384)
+    #:*rt-reference-registry* #:*rt-reference-queue*
+    #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
+    #:rt-soft-ref-referent #:rt-weak-ref-referent #:%rt-phantom-ref-referent
+    #:rt-ref-get #:rt-ref-clear-p #:rt-reference-queue-process
+    ;; Ephemerons (FR-246)
+    #:rt-ephemeron #:make-rt-ephemeron #:rt-ephemeron-key #:rt-ephemeron-value
+    #:*rt-ephemeron-registry* #:rt-make-ephemeron
+    ;; GC reference processing (FR-381-384, FR-246)
+    #:rt-gc-process-references
+    ;; Finalization (FR-459/460/471)
+    #:rt-register-finalizer #:rt-unregister-finalizer #:rt-register-stream-finalizer
+    #:header-finalized-p #:header-set-finalized #:header-clear-finalized
+    #:*rt-finalizer-registry* #:*rt-finalization-queue*
+    ;; Precise roots (FR-332)
+    #:rt-gc-add-root-typed #:*gc-threads*
+    #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
+    ;; Profiling (FR-366)
+    #:rt-gc-profile-sample #:rt-gc-profile-report #:*gc-profile-enabled*
+    #:*gc-profile-interval*
+    ;; Heap snapshot (FR-368)
+    #:rt-gc-heap-snapshot
+    ;; DOT graph (FR-415)
+    #:rt-gc-heap-dump-dot))

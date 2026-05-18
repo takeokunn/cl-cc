@@ -25,7 +25,8 @@
 (defun %make-trace-heap ()
   "Create a minimal heap for tracing tests.
    young-size=32 → semi-size=16, young-from-base=0, young addresses 0..15.
-   old-size=32  → old-base=32, old addresses 32..63, num-cards=ceiling(32/64)=1."
+   old-size=32  → old-base=32, old addresses 32..63, num-cards=ceiling(32/64)=1.
+   large-obj-size=old-size → large-obj addresses 64..95."
   (cl-cc/runtime:make-rt-heap :young-size 32 :old-size 32))
 
 (defun %write-obj-header (heap addr size tag)
@@ -96,14 +97,16 @@
     (assert-equal expected (not (not (cl-cc/runtime:rt-old-addr-p heap addr))))))
 
 (deftest-each heap-trace-heap-addr-p-cases
-  "rt-heap-addr-p is the union of young and old: true for 0..15 and 32..63."
+  "rt-heap-addr-p is the union of young, old, and large-obj: true for 0..15, 32..63, and 64..95."
   :cases (("young-0"      0  t)
           ("young-15"     15 t)
           ("gap-16"       16 nil)
           ("gap-31"       31 nil)
           ("old-32"       32 t)
           ("old-63"       63 t)
-          ("beyond-64"    64 nil))
+          ("large-obj-64" 64 t)
+          ("large-obj-95" 95 t)
+          ("beyond-96"    96 nil))
   (addr expected)
   (let ((heap (%make-trace-heap)))
     (assert-equal expected (not (not (cl-cc/runtime:rt-heap-addr-p heap addr))))))

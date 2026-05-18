@@ -103,6 +103,110 @@
   (setf (symbol-function name) fn))
 
 ;;; ------------------------------------------------------------
+;;; JIT Code Cache Management (FR-379 / FR-437)
+;;; ------------------------------------------------------------
+
+(defstruct (rt-code-cache-entry (:conc-name rt-code-cache-entry-))
+  function-entry
+  code
+  (size 1 :type integer)
+  (last-used 0 :type integer)
+  class-key
+  reachable-p)
+
+(defstruct (rt-code-cache (:constructor make-rt-code-cache
+                              (&key (capacity 1024)
+                                    (entries (make-hash-table :test #'equal))
+                                    (lru-clock 0)
+                                    (size 0))))
+  (capacity 1024 :type integer)
+  (entries (make-hash-table :test #'equal) :type hash-table)
+  (lru-clock 0 :type integer)
+  (size 0 :type integer))
+
+(defparameter *rt-code-cache* (make-rt-code-cache)
+  "Global runtime JIT code cache.
+
+Evicted compiled code is deliberately removed only from this cache.  Runtime
+callers should fall back to bytecode interpretation or recompilation when a
+function entry no longer has a compiled-code cache entry.")
+
+(defun rt-code-cache-lookup (function-entry &optional (cache *rt-code-cache*))
+  "Return compiled code for FUNCTION-ENTRY and refresh its LRU timestamp."
+  (let ((entry (gethash function-entry (rt-code-cache-entries cache))))
+    (when entry
+      (incf (rt-code-cache-lru-clock cache))
+      (setf (rt-code-cache-entry-last-used entry) (rt-code-cache-lru-clock cache))
+      (rt-code-cache-entry-code entry))))
+
+(defun rt-code-cache-evict (function-entry &optional (cache *rt-code-cache*))
+  "Evict FUNCTION-ENTRY from CACHE and return the evicted entry, if present.
+
+After eviction, callers are expected to fall back to interpretation until the
+function is compiled again."
+  (let ((entry (gethash function-entry (rt-code-cache-entries cache))))
+    (when entry
+      (remhash function-entry (rt-code-cache-entries cache))
+      (decf (rt-code-cache-size cache) (rt-code-cache-entry-size entry))
+      entry)))
+
+(defun %rt-code-cache-lru-entry (cache)
+  (let ((oldest-key nil)
+        (oldest-entry nil))
+    (maphash (lambda (key entry)
+               (when (or (null oldest-entry)
+                         (< (rt-code-cache-entry-last-used entry)
+                            (rt-code-cache-entry-last-used oldest-entry)))
+                 (setf oldest-key key
+                       oldest-entry entry)))
+             (rt-code-cache-entries cache))
+    (values oldest-key oldest-entry)))
+
+(defun %rt-code-cache-evict-until-room (cache requested-size)
+  (loop while (> (+ (rt-code-cache-size cache) requested-size)
+                 (rt-code-cache-capacity cache))
+        do (multiple-value-bind (key entry) (%rt-code-cache-lru-entry cache)
+             (declare (ignore entry))
+             (unless key (return))
+             (rt-code-cache-evict key cache))))
+
+(defun rt-code-cache-store (function-entry code &key (size 1) class-key
+                                          (cache *rt-code-cache*))
+  "Store CODE for FUNCTION-ENTRY, evicting least-recently-used entries as needed."
+  (check-type size (integer 0 *))
+  (let ((old-entry (gethash function-entry (rt-code-cache-entries cache))))
+    (when old-entry
+      (decf (rt-code-cache-size cache) (rt-code-cache-entry-size old-entry)))
+    (%rt-code-cache-evict-until-room cache size)
+    (incf (rt-code-cache-lru-clock cache))
+    (let ((entry (make-rt-code-cache-entry
+                  :function-entry function-entry
+                  :code code
+                  :size size
+                  :last-used (rt-code-cache-lru-clock cache)
+                  :class-key class-key
+                  :reachable-p t)))
+      (setf (gethash function-entry (rt-code-cache-entries cache)) entry)
+      (incf (rt-code-cache-size cache) size)
+      entry)))
+
+(defun rt-gc-unload-code (heap code-addr &optional (cache *rt-code-cache*))
+  "Unload compiled code CODE-ADDR from the JIT cache.
+
+HEAP is accepted for GC integration symmetry and currently not inspected.  The
+evicted function will fall back to interpretation if called later."
+  (declare (ignore heap))
+  (or (rt-code-cache-evict code-addr cache)
+      (let (keys removed)
+        (maphash (lambda (key entry)
+                   (when (eql (rt-code-cache-entry-code entry) code-addr)
+                     (push key keys)))
+                 (rt-code-cache-entries cache))
+        (dolist (key keys)
+          (push (rt-code-cache-evict key cache) removed))
+        (nreverse removed))))
+
+;;; ------------------------------------------------------------
 ;;; Global Bindings
 ;;; ------------------------------------------------------------
 

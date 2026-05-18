@@ -27,15 +27,41 @@
 
 (defun rt-card-mark-dirty (heap old-addr)
   "Mark the card containing OLD-ADDR as dirty (contains old->young pointer)."
-  (setf (aref (rt-heap-card-table heap) (rt-card-index heap old-addr)) 1))
+  (let ((card-idx (rt-card-index heap old-addr)))
+    (setf (aref (rt-heap-card-table heap) card-idx) 1)
+    (rt-card-summary-update heap card-idx)))
 
 (defun rt-card-clear (heap old-addr)
   "Clear the dirty flag for the card containing OLD-ADDR."
-  (setf (aref (rt-heap-card-table heap) (rt-card-index heap old-addr)) 0))
+  (let ((card-idx (rt-card-index heap old-addr)))
+    (setf (aref (rt-heap-card-table heap) card-idx) 0)
+    (rt-card-summary-update heap card-idx)))
 
 (defun rt-card-clear-all (heap)
   "Clear all dirty flags in the card table."
-  (fill (rt-heap-card-table heap) 0))
+  (fill (rt-heap-card-table heap) 0)
+  (fill (rt-heap-card-summary heap) nil))
+
+(defun rt-card-summary-update (heap card-idx)
+  "Update the summary entry that covers CARD-IDX.
+
+Each summary entry is true when any card in its 64-card block is dirty."
+  (let* ((summary (rt-heap-card-summary heap))
+         (card-table (rt-heap-card-table heap))
+         (summary-idx (floor card-idx +gc-card-summary-block-size+)))
+    (when (< summary-idx (length summary))
+      (let* ((start (* summary-idx +gc-card-summary-block-size+))
+             (end (min (length card-table)
+                       (+ start +gc-card-summary-block-size+))))
+        (setf (svref summary summary-idx)
+              (loop for i from start below end
+                    thereis (not (zerop (aref card-table i)))))))))
+
+(defun rt-card-summary-clean-block-p (heap block-idx)
+  "Return true when summary BLOCK-IDX contains no dirty cards."
+  (let ((summary (rt-heap-card-summary heap)))
+    (or (>= block-idx (length summary))
+        (not (svref summary block-idx)))))
 
 ;;; ------------------------------------------------------------
 ;;; Object Pointer Predicate Helpers
@@ -51,16 +77,54 @@
   "Return true if ADDR is within the old space."
   (and (>= addr (rt-heap-old-base heap))
        (< addr (+ (rt-heap-old-base heap)
-                  (rt-heap-old-size heap)))))
+                   (rt-heap-old-size heap)))))
+
+(defun rt-large-obj-addr-p (heap addr)
+  "Return true if ADDR is within the large object space."
+  (and (>= addr (rt-heap-large-obj-base heap))
+       (< addr (+ (rt-heap-large-obj-base heap)
+                  (rt-heap-large-obj-size heap)))))
 
 (defun rt-heap-addr-p (heap addr)
   "Return true if ADDR is within any live region of HEAP."
   (or (rt-young-addr-p heap addr)
-      (rt-old-addr-p heap addr)))
+      (rt-old-addr-p heap addr)
+      (rt-large-obj-addr-p heap addr)))
 
 ;;; ------------------------------------------------------------
 ;;; Tracing: Pointer Slots per Object Type Tag
 ;;; ------------------------------------------------------------
+
+(defun %rt-array-element-type-pointer-free-p (element-type)
+  "Return true when ELEMENT-TYPE is stored unboxed and has no pointer slots."
+  (member element-type '(:fixnum fixnum :integer integer
+                         :double-float double-float :double
+                         :character character :char
+                         :bit bit)
+          :test #'eq))
+
+(defun %rt-array-metadata-element-type (metadata)
+  "Extract array element type from runtime array METADATA.
+
+Current heap arrays use slot 1 as rank/dimension metadata.  Specialized arrays
+may instead store a plist header such as:
+  (:type-tag :specialized-array :element-type :fixnum :gc-skip-p t)
+or a compact pair like (:element-type . :fixnum)."
+  (cond
+    ((and (consp metadata) (keywordp (first metadata)))
+     (or (getf metadata :element-type)
+         (getf metadata :array-element-type)))
+    ((and (consp metadata) (eq (car metadata) :element-type))
+     (cdr metadata))
+    (t nil)))
+
+(defun %rt-array-metadata-gc-skip-p (metadata)
+  "Return true when METADATA marks array payload as pointer-free."
+  (or (and (consp metadata)
+           (keywordp (first metadata))
+           (getf metadata :gc-skip-p))
+      (%rt-array-element-type-pointer-free-p
+       (%rt-array-metadata-element-type metadata))))
 
 (defun rt-object-pointer-slots (heap addr)
   "Return a list of slot indices (relative to ADDR) that contain pointer values.
@@ -86,8 +150,11 @@
        '(1 2 3))
       (3  ; closure: fn-index=slot1 (raw integer, not a pointer), env=slots 2..size-1
        (loop for i from 2 below size collect i))
-      (5  ; array: slots 2..size-1 are elements (slot 1 holds rank/dimensions metadata)
-       (loop for i from 2 below size collect i))
+      (5  ; array: slot 1 holds rank/dimensions or specialized element metadata
+       (let ((metadata (rt-heap-ref heap (1+ addr))))
+         (if (%rt-array-metadata-gc-skip-p metadata)
+             nil
+             (loop for i from 2 below size collect i))))
       (6  ; string: character data packed in words — no pointer slots
        nil)
       (7  ; other heap object: all non-header slots are pointers

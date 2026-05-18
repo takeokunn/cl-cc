@@ -163,5 +163,7 @@
     (assert-true
      (or (cl-cc/runtime:header-marked-p (cl-cc/runtime:rt-heap-object-header heap a))
          (cl-cc/runtime:header-marked-p (cl-cc/runtime:rt-heap-object-header heap b))))
-    (assert-= 1 (length (cl-cc/runtime:rt-heap-satb-queue heap)))
+    ;; SATB queue is fully drained to the grey queue before any budgeted
+    ;; incremental marking occurs; expect the queue to be empty.
+    (assert-= 0 (length (cl-cc/runtime:rt-heap-satb-queue heap)))
     (cl-cc/runtime:rt-gc-configure-concurrent-mode :enabled-p nil)))

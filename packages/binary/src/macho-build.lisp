@@ -112,6 +112,124 @@ BASE-ADDR is the virtual memory address for the segment."
     (push data-segment (mach-o-builder-segments builder))
     builder))
 
+(defun add-data-const-segment (builder const-bytes &key (base-addr #x100002000))
+  "Add a read-only __DATA_CONST segment for immutable constants.
+
+String literals and constant pools should use this segment instead of __DATA.
+It is emitted with read-only max/init protections (r--) so writes to mapped
+constant data are rejected by the operating system."
+  (declare (type mach-o-builder builder)
+           (type (simple-array (unsigned-byte 8) (*)) const-bytes))
+  (let* ((const-size (length const-bytes))
+         (const-section (make-section
+                         :sectname "__const"
+                         :segname "__DATA_CONST"
+                         :addr base-addr
+                         :size const-size
+                         :align 4))
+         (const-segment (make-segment-command
+                         :segname "__DATA_CONST"
+                         :vmaddr base-addr
+                         :vmsize (align-up const-size #x1000)
+                         :payload const-bytes
+                         :nsects 1
+                         :maxprot 4    ; r--
+                         :initprot 4   ; r--
+                         :cmdsize (+ 72 (* 80 1))
+                         :sections (list const-section))))
+    (push const-segment (mach-o-builder-segments builder))
+    builder))
+
+(defun macho-build-unwind-info (code-size &key
+                                            (encoding +compact-unwind-x86-64-mode-stack-immd+)
+                                            (personality 0))
+  "Build a compact __unwind_info payload with one frameless function entry.
+
+The payload starts with a small CL-CC table header followed by a per-function
+entry: start address, function length, compact unwind ENCODING, and
+PERSONALITY.  The default encoding models frameless/RBP-less x86-64 functions.
+This Pure CL backend emits the documented interface without platform mprotect
+or linker-private helpers."
+  (let ((buf (elf-make-buffer)))
+    ;; Signature/version for CL-CC's compact table envelope.
+    (binary-buffer-write-bytes buf (map 'vector #'char-code "CLCU"))
+    (binary-buffer-write-u32le buf 1)         ; version
+    (binary-buffer-write-u32le buf 1)         ; entry count
+    (binary-buffer-write-u32le buf 16)        ; first entry offset
+    ;; Entry: start address (section-relative), length, encoding, personality.
+    (binary-buffer-write-u32le buf 0)
+    (binary-buffer-write-u32le buf code-size)
+    (binary-buffer-write-u32le buf encoding)
+    (binary-buffer-write-u32le buf personality)
+    (binary-buffer-to-array buf)))
+
+(defun %mach-o-ensure-text-and-unwind (user-segments code-bytes)
+  "Return USER-SEGMENTS with __TEXT unwind info and read-only constants support."
+  (let* ((code-size (length code-bytes))
+         (unwind-bytes (macho-build-unwind-info code-size))
+         (unwind-offset (align-up code-size 4))
+         (payload-size (+ unwind-offset (length unwind-bytes)))
+         (payload (make-array payload-size :element-type '(unsigned-byte 8)
+                              :initial-element 0))
+         (text-seg (find "__TEXT" user-segments
+                         :key #'segment-command-segname :test #'string=)))
+    (replace payload code-bytes :start1 0)
+    (replace payload unwind-bytes :start1 unwind-offset)
+    (unless text-seg
+      (setf text-seg (make-segment-command
+                      :segname "__TEXT"
+                      :vmaddr #x100000000
+                      :vmsize (align-up payload-size #x1000)
+                      :nsects 0
+                      :cmdsize 72
+                      :sections nil))
+      (push text-seg user-segments))
+    (let ((text-section (or (find "__text" (segment-command-sections text-seg)
+                                  :key #'section-sectname :test #'string=)
+                            (make-section :sectname "__text"
+                                          :segname "__TEXT"
+                                          :size code-size
+                                          :align 4
+                                          :flags (logior +s-attr-pure-instructions+
+                                                         +s-attr-some-instructions+))))
+          (unwind-section (or (find "__unwind_info" (segment-command-sections text-seg)
+                                    :key #'section-sectname :test #'string=)
+                              (make-section :sectname "__unwind_info"
+                                            :segname "__TEXT"
+                                            :size (length unwind-bytes)
+                                            :align 2))))
+      (setf (section-size text-section) code-size
+            (section-size unwind-section) (length unwind-bytes)
+            (segment-command-payload text-seg) payload
+            (segment-command-nsects text-seg) 2
+            (segment-command-cmdsize text-seg) (+ 72 (* 80 2))
+            (segment-command-maxprot text-seg) 5
+            (segment-command-initprot text-seg) 5
+            (segment-command-sections text-seg) (list text-section unwind-section)))
+    (unless (find "__DATA_CONST" user-segments
+                  :key #'segment-command-segname :test #'string=)
+      ;; Emit an empty read-only constant segment by default. Frontends with
+      ;; string literals/constant pools can call ADD-DATA-CONST-SEGMENT to fill
+      ;; this section; keeping the segment present documents and preserves the
+      ;; protection boundary in every binary.
+      (let* ((const-bytes (make-array 0 :element-type '(unsigned-byte 8)))
+             (const-section (make-section :sectname "__const"
+                                          :segname "__DATA_CONST"
+                                          :addr #x100002000
+                                          :size 0
+                                          :align 4))
+             (const-segment (make-segment-command :segname "__DATA_CONST"
+                                                  :vmaddr #x100002000
+                                                  :vmsize #x1000
+                                                  :payload const-bytes
+                                                  :nsects 1
+                                                  :maxprot 4
+                                                  :initprot 4
+                                                  :cmdsize (+ 72 80)
+                                                  :sections (list const-section))))
+        (push const-segment user-segments)))
+    user-segments))
+
 (defun add-symbol (builder name &key (value 0) (type 0) (sect 1))
   "Add a symbol to the builder's symbol table.
 NAME is the symbol name string.
@@ -153,7 +271,9 @@ __TEXT.fileoff=0 is required by macOS strict validation for code signing."
            (type (simple-array (unsigned-byte 8) (*)) code-bytes))
   (let* ((buffer (make-byte-buffer 65536))
          (header-size 32)
-         (user-segments (nreverse (mach-o-builder-segments builder)))
+          (user-segments (%mach-o-ensure-text-and-unwind
+                          (nreverse (mach-o-builder-segments builder))
+                          code-bytes))
          (symbols (nreverse (mach-o-builder-symbol-table builder)))
          (string-table (subseq (mach-o-builder-string-table builder)
                                0
@@ -205,7 +325,7 @@ __TEXT.fileoff=0 is required by macOS strict validation for code signing."
 
     ;; Update user segments: __TEXT gets fileoff=0 covering header through code;
     ;; other segments get sequential file offsets after code.
-    (let ((next-off (+ code-offset (align-up (length code-bytes) #x1000))))
+    (let ((next-off code-offset))
       (dolist (seg user-segments)
         (let* ((is-text (and (string= (segment-command-segname seg) "__TEXT")
                              (zerop (length (segment-command-payload seg)))))
@@ -213,14 +333,20 @@ __TEXT.fileoff=0 is required by macOS strict validation for code signing."
                (payload-len (length payload)))
           (cond
             ((string= (segment-command-segname seg) "__TEXT")
-             ;; __TEXT: fileoff=0, covers from file start through end of code
-             (setf (segment-command-fileoff seg) 0
-                   (segment-command-filesize seg) (+ code-offset payload-len)
-                   (segment-command-vmsize seg) (align-up (+ code-offset payload-len) #x1000))
-             (dolist (sect (segment-command-sections seg))
-               ;; Absolute file offset of code; vm address = segment base + code-offset
-               (setf (section-offset sect) code-offset
-                     (section-addr sect) (+ (segment-command-vmaddr seg) code-offset))))
+              ;; __TEXT: fileoff=0, covers from file start through end of code
+              ;; and the compact __unwind_info table.
+              (setf (segment-command-fileoff seg) 0
+                    (segment-command-filesize seg) (+ code-offset payload-len)
+                    (segment-command-vmsize seg) (align-up (+ code-offset payload-len) #x1000))
+              (dolist (sect (segment-command-sections seg))
+                (let ((section-delta (if (string= (section-sectname sect) "__unwind_info")
+                                         (align-up (length code-bytes) 4)
+                                         0)))
+                  (setf (section-offset sect) (+ code-offset section-delta)
+                        (section-addr sect) (+ (segment-command-vmaddr seg)
+                                               code-offset
+                                               section-delta))))
+              (setf next-off (+ code-offset (align-up payload-len #x1000))))
             (t
              ;; Other segments (e.g. __DATA): sequential after code
              (setf (segment-command-fileoff seg) next-off

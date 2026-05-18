@@ -58,6 +58,13 @@
 (defconstant +s-attr-some-instructions+ #x400
   "Section contains some instructions.")
 
+;; Compact unwind encodings (x86-64 subset).
+;; FR-247: Unwind Tables — Mach-O __unwind_info (compact unwind) for macOS native debugging and crash reporting
+(defconstant +compact-unwind-encoding-none+ 0
+  "No compact unwind encoding.")
+(defconstant +compact-unwind-x86-64-mode-stack-immd+ #x02000000
+  "Frameless/RBP-less x86-64 compact unwind mode with immediate stack size.")
+
 ;;; Structures
 
 (defstruct mach-header

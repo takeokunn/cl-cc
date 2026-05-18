@@ -32,9 +32,15 @@
     (cl-cc:vm-reg-set s 1 2)
     (exec1 (cl-cc:make-vm-make-array :dst 0 :size-reg 1 :element-type 'character) s)
     (let ((arr (cl-cc:vm-reg-get s 0)))
-      (assert-true (typep arr '(simple-array character (*))))
-      (assert-true (char= #\Nul (aref arr 0)))
-      (assert-true (char= #\Nul (aref arr 1))))))
+      ;; The VM may create a host simple-array or a vm-specialized-array.
+      (assert-true (or (typep arr '(simple-array character (*)))
+                       (cl-cc/vm:vm-specialized-array-p arr)))
+      (assert-true (char= #\Nul (if (cl-cc/vm:vm-specialized-array-p arr)
+                                    (cl-cc/vm:vm-specialized-array-ref arr 0)
+                                    (aref arr 0))))
+      (assert-true (char= #\Nul (if (cl-cc/vm:vm-specialized-array-p arr)
+                                    (cl-cc/vm:vm-specialized-array-ref arr 1)
+                                    (aref arr 1)))))))
 
 (deftest vm-array-aref-and-aset
   "vm-aref and vm-aset read and write array elements."

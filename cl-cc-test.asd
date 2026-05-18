@@ -367,10 +367,11 @@
      (:file "optimizer-copyprop-tests")
      (:file "optimizer-strength-ext-tests")
      (:file "optimizer-cse-gvn-tests")
-     (:file "optimizer-dataflow-tests")
-     (:file "optimizer-memory-tests")
-     (:file "optimizer-memory-pass-tests")
-     (:file "optimizer-flow-tests")
+      (:file "optimizer-dataflow-tests")
+      (:file "optimizer-memory-tests")
+      (:file "optimizer-memory-pass-tests")
+      (:file "optimizer-fr-tests")
+      (:file "optimizer-flow-tests")
      (:file "optimizer-flow-block-tests")
      (:file "optimizer-pipeline-tests")
      (:file "optimizer-roadmap-tests")
@@ -429,21 +430,27 @@
      (:file "x86-64-emit-ops-tests")
       (:file "ebpf-tests")
       (:file "elf-tests")
-     (:file "elf-extended-tests")
-     (:file "macho-tests")
-     (:file "macho-builder-tests")))
-   (:module "runtime-tests"
-    :pathname "packages/runtime/tests"
-    :serial t
+      (:file "elf-extended-tests")
+      (:file "macho-tests")
+      (:file "macho-builder-tests")))
+    (:module "binary-tests"
+     :pathname "packages/binary/tests"
+     :serial t
+     :components
+     ((:file "binary-fr-tests")))
+    (:module "runtime-tests"
+     :pathname "packages/runtime/tests"
+     :serial t
     :components
     ((:file "runtime-tests")
      (:file "runtime-tests-2")
      (:file "runtime-strings-chars-tests")
      (:file "runtime-clos-tests")
      (:file "runtime-advanced-tests")
-     (:file "runtime-io-tests")
-     (:file "gc-tests")
-     (:file "gc-stats-tests")
+      (:file "runtime-io-tests")
+      (:file "gc-tests")
+      (:file "gc-fr-tests")
+      (:file "gc-stats-tests")
      (:file "gc-sweep-major-tests")
      (:file "heap-tests")
       (:file "heap-sanitizer-tests")

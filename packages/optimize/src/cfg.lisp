@@ -44,6 +44,7 @@
   (next-id    0   :type fixnum))
 
 ;;; ─── CFG Construction ────────────────────────────────────────────────────
+;;; FR-017 (dependency): CFG construction provides the control-flow graph needed for alias analysis and memory disambiguation
 
 (defun cfg-new-block (cfg &key label)
   "Allocate a new basic-block in CFG and return it."

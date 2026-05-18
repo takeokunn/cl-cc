@@ -156,7 +156,10 @@
     :values          ; (dst . vals)         — pack multiple values
     :mv-bind         ; (dsts . src)         — unpack multiple values
     ;; GC
-    :safepoint       ; (. gc-roots)         — GC safepoint; attaches stack-map metadata
+    :safepoint       ; ()                   — GC safepoint; META carries
+                     ;                        (:stack-map MIR-STACK-MAP) or
+                     ;                        (:gc-roots ((:offset n :kind k :reg r) ...)
+                     ;                         :frame-size words :return-address pc)
     ;; Misc
      :nop)            ; ()                   — no operation (placeholder)
   "All target-independent MIR operation keywords.")

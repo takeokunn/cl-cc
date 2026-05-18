@@ -16,7 +16,10 @@
   (let ((arr (vm-reg-get state (vm-arr inst)))
         (idx (vm-reg-get state (vm-idx inst))))
     (vm-reg-set state (vm-dst inst)
-                (if (bit-vector-p arr) (bit arr idx) (aref arr idx))))
+                (cond
+                  ((vm-bit-vector-p arr) (vm-bit-vector-ref arr idx))
+                  ((bit-vector-p arr) (bit arr idx))
+                  (t (aref arr idx)))))
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-bit-set (vm-instruction)
@@ -29,9 +32,10 @@
   (let ((arr (vm-reg-get state (vm-arr inst)))
         (idx (vm-reg-get state (vm-idx inst)))
         (v   (vm-reg-get state (vm-val inst))))
-    (if (bit-vector-p arr)
-        (setf (bit arr idx) v)
-        (setf (aref arr idx) v))
+    (cond
+      ((vm-bit-vector-p arr) (setf (vm-bit-vector-ref arr idx) v))
+      ((bit-vector-p arr) (setf (bit arr idx) v))
+      (t (setf (aref arr idx) v)))
     (vm-reg-set state (vm-dst inst) v)
     (values (1+ pc) nil nil)))
 
@@ -66,9 +70,12 @@
   (:sexp-tag :sbit) (:sexp-slots dst arr idx))
 (defmethod execute-instruction ((inst vm-sbit) state pc labels)
   (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (sbit (vm-reg-get state (vm-arr inst))
-                    (vm-reg-get state (vm-idx inst))))
+  (let ((arr (vm-reg-get state (vm-arr inst)))
+        (idx (vm-reg-get state (vm-idx inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (vm-bit-vector-p arr)
+                    (vm-bit-vector-ref arr idx)
+                    (sbit arr idx))))
   (values (1+ pc) nil nil))
 
 ;;; ─── FR-605: adjust-array and array-displacement ─────────────────────────────

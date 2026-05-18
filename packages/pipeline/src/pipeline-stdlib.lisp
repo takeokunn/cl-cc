@@ -134,10 +134,11 @@ identity-sensitive gensym registers and re-introduce the
 OR-UNIQUE-GENSYM-PER-EXPANSION regression.  We assert this explicitly
 below as a tripwire against silent re-introduction of that bug."
   (let ((snapshot (%snapshot-macro-env-table))
-        (success-p nil))
+        (success-p nil)
+        (*package* (or (find-package :cl-cc) *package*)))
     (unwind-protect
          (let ((result (mapcar #'compiler-macroexpand-all
-                               (parse-all-forms *standard-library-source*))))
+                                (parse-all-forms *standard-library-source*))))
            ;; Tripwire: stdlib source is plain text; every entry MUST be a sexp.
            (dolist (form result)
              (when (typep form 'ast-node)

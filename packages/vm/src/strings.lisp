@@ -8,6 +8,53 @@
 
 ;;; String Comparison Instructions
 
+(defvar *rt-string-dedup-table* nil
+  "Weak-value table mapping string content hashes to canonical VM strings.")
+
+(defun %rt-string-content-hash (string)
+  "Return a content hash for STRING."
+  (check-type string string)
+  (sxhash string))
+
+(defun %rt-ensure-string-dedup-table ()
+  "Return the VM string dedup table, creating it lazily."
+  (or *rt-string-dedup-table*
+      (setf *rt-string-dedup-table*
+            (if (fboundp 'rt-make-hash-table)
+                (rt-make-hash-table :test 'eql :weakness :value)
+                (make-hash-table :test 'eql
+                                 #+sbcl :weakness
+                                 #+sbcl :value)))))
+
+(defun %rt-string-table-get (hash table)
+  "Read HASH from TABLE regardless of whether TABLE is a VM hash object or host hash table."
+  (if (typep table 'vm-hash-table-object)
+      (gethash hash (vm-hash-table-internal table))
+      (gethash hash table)))
+
+(defun %rt-string-table-set (hash string table)
+  "Set HASH to STRING in TABLE regardless of table representation."
+  (if (typep table 'vm-hash-table-object)
+      (progn
+        (setf (gethash hash (vm-hash-table-internal table)) string)
+        (vm-record-weak-hash-entry table hash string))
+      (setf (gethash hash table) string))
+  string)
+
+(defun rt-string-dedup (string)
+  "Return the canonical VM string with the same contents as STRING."
+  (check-type string string)
+  (let* ((table (%rt-ensure-string-dedup-table))
+         (hash (%rt-string-content-hash string)))
+    (multiple-value-bind (canonical found-p) (%rt-string-table-get hash table)
+      (if (and found-p canonical (string= canonical string))
+          canonical
+          (%rt-string-table-set hash string table)))))
+
+(defun rt-string-intern (string)
+  "Return the canonical weakly interned VM string for STRING's contents."
+  (rt-string-dedup string))
+
 ;; All binary string comparisons share the same (dst str1 str2) slot structure.
 (defmacro define-vm-string-comparison (name tag docstring)
   `(define-vm-instruction ,name (vm-instruction)

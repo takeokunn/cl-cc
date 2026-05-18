@@ -19,8 +19,10 @@
    #:+mh-noundefs+
    #:+mh-dyldlink+
    #:+mh-pie+
-   #:+s-attr-pure-instructions+
-   #:+s-attr-some-instructions+
+    #:+s-attr-pure-instructions+
+    #:+s-attr-some-instructions+
+    #:+compact-unwind-encoding-none+
+    #:+compact-unwind-x86-64-mode-stack-immd+
 
    ;; Structures
    #:mach-header
@@ -71,9 +73,10 @@
    ;; Builder
    #:mach-o-builder
    #:make-mach-o-builder
-   #:add-text-segment
-   #:add-data-segment
-   #:add-symbol
+    #:add-text-segment
+    #:add-data-segment
+    #:add-data-const-segment
+    #:add-symbol
    #:add-entry-point
    #:build-mach-o
    #:write-mach-o-file
@@ -85,8 +88,9 @@
    #:with-output-to-vector
 
    ;; ELF64 backend
-   #:compile-to-elf64
-   #:compile-to-elf64-exec
+    #:compile-to-elf64
+    #:elf64-add-rodata-bytes
+    #:compile-to-elf64-exec
    #:make-elf64-executable
    #:elf64-add-load-segment
    #:elf64-add-gnu-stack-segment
