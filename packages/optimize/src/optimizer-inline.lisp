@@ -219,13 +219,48 @@
                 :func (vm-func-reg call)
                 :args (copy-list (vm-args call))))
 
+(defun %opt-call-like-p (inst)
+  "Return T when INST is a call shape supported by call-site splitting."
+  (typep inst '(or vm-call vm-tail-call vm-apply)))
+
+(defun %opt-copy-call-like (call)
+  "Return a fresh copy of CALL for predecessor-local call-site splitting."
+  (typecase call
+    (vm-call (%opt-copy-vm-call call))
+    (vm-tail-call (make-vm-tail-call :dst (vm-dst call) :func (vm-func-reg call) :args (copy-list (vm-args call))))
+    (vm-apply (make-vm-apply :dst (vm-dst call) :func (vm-func-reg call) :args (copy-list (vm-args call))))))
+
+(defun %opt-call-site-split-join-labels (instructions call-index)
+  "Return all consecutive labels immediately preceding CALL-INDEX."
+  (loop for i downfrom (1- call-index) downto 0
+        for inst = (nth i instructions)
+        while (typep inst 'vm-label)
+        collect (vm-name inst)))
+
+(defun %opt-callable-type-proof-before-index-p (instructions end-index func-reg)
+  "Return T when the predecessor locally proves FUNC-REG is function-callable."
+  (loop for i downfrom (1- end-index) downto 0
+        for inst = (nth i instructions)
+        do (cond
+             ((or (typep inst 'vm-label) (typep inst 'vm-jump) (typep inst 'vm-ret) (typep inst 'vm-halt))
+              (return nil))
+             ((and (typep inst 'vm-typep)
+                   (eq (vm-src inst) func-reg)
+                   (member (vm-type-name inst) '(function compiled-function) :test #'eq))
+              (return t))
+             ((and (typep inst 'vm-function-p) (eq (vm-src inst) func-reg))
+              (return t)))))
+
+(defun %opt-call-site-split-replacement (call-inst func-reg callee-label after-label)
+  "Build replacement instructions for a predecessor split of CALL-INST."
+  (append (when callee-label (list (make-vm-func-ref :dst func-reg :label callee-label)))
+          (list (%opt-copy-call-like call-inst))
+          (list (make-vm-jump :label after-label))))
+
 (defun opt-pass-call-site-splitting (instructions)
-  "Duplicate simple join-block call sites into predecessors with known callees.
-This conservative subset handles `jump -> join-label -> vm-call` shapes.  When a
-predecessor block assigns the call's function register to a known label before
-jumping to the join, the pass replaces that jump with a direct func-ref, a copy
-of the call, and a jump to a fresh after-call label.  The original join call is
-kept for fall-through/unknown predecessors."
+  "Duplicate join-block call sites into predecessors with known callees.
+Handles consecutive multi-join labels and `vm-call`/`vm-tail-call`/`vm-apply`.
+The original join call remains available for fall-through and unknown preds."
   (let* ((len (length instructions))
          (name-to-label (opt-build-function-name-map instructions))
          (used-labels (make-hash-table :test #'equal))
@@ -235,31 +270,31 @@ kept for fall-through/unknown predecessors."
       (when (typep inst 'vm-label)
         (setf (gethash (vm-name inst) used-labels) t)))
     (loop for call-index from 1 below len
-          for label-inst = (nth (1- call-index) instructions)
           for call-inst = (nth call-index instructions)
-          when (and (typep label-inst 'vm-label)
-                    (typep call-inst 'vm-call))
-            do (let ((join-label (vm-name label-inst))
-                     (func-reg (vm-func-reg call-inst))
+          for join-labels = (%opt-call-site-split-join-labels instructions call-index)
+          when (and join-labels (%opt-call-like-p call-inst))
+            do (let ((func-reg (vm-func-reg call-inst))
                      (split-jumps nil))
-                 (loop for jump-index from 0 below (1- call-index)
-                       for jump-inst = (nth jump-index instructions)
-                       when (and (typep jump-inst 'vm-jump)
-                                 (equal (vm-label-name jump-inst) join-label))
-                         do (let ((callee-label
-                                    (%opt-known-callee-before-index
-                                     instructions jump-index func-reg name-to-label)))
-                              (when callee-label
-                                (push (list jump-index callee-label) split-jumps))))
+                 (dolist (join-label join-labels)
+                   (loop for jump-index from 0 below call-index
+                         for jump-inst = (nth jump-index instructions)
+                         when (and (typep jump-inst 'vm-jump)
+                                   (equal (vm-label-name jump-inst) join-label))
+                           do (let ((callee-label
+                                      (%opt-known-callee-before-index
+                                       instructions jump-index func-reg name-to-label)))
+                                (when (or callee-label
+                                          (%opt-callable-type-proof-before-index-p
+                                           instructions jump-index func-reg))
+                                  (push (list jump-index callee-label) split-jumps)))))
                  (when split-jumps
                    (let ((after-label (%opt-call-site-split-fresh-label used-labels)))
                      (setf (gethash call-index after-labels) after-label)
                      (dolist (split split-jumps)
                        (destructuring-bind (jump-index callee-label) split
                          (setf (gethash jump-index replacements)
-                               (list (make-vm-func-ref :dst func-reg :label callee-label)
-                                     (%opt-copy-vm-call call-inst)
-                                     (make-vm-jump :label after-label)))))))))
+                               (%opt-call-site-split-replacement
+                                call-inst func-reg callee-label after-label))))))))
     (loop for index from 0 below len
           for inst = (nth index instructions)
           append (or (gethash index replacements)

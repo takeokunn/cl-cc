@@ -87,6 +87,15 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (let ((insts nil))  ; empty → smallest budget
     (assert-true (>= (cl-cc/optimize::opt-adaptive-max-iterations insts :min-iterations 6) 6))))
 
+(deftest adaptive-loop-unroll-factor-reacts-to-hotness
+  "opt-adaptive-loop-unroll-factor raises loop budgets for hot functions."
+  (multiple-value-bind (cold-factor cold-trip)
+      (cl-cc/optimize::opt-adaptive-loop-unroll-factor nil :call-count 0)
+    (multiple-value-bind (hot-factor hot-trip)
+        (cl-cc/optimize::opt-adaptive-loop-unroll-factor nil :call-count 100)
+      (assert-true (> hot-factor cold-factor))
+      (assert-true (> hot-trip cold-trip)))))
+
 ;;; ─── opt-verify-instructions ─────────────────────────────────────────────────
 
 (deftest verify-instructions-simple-sequence-passes

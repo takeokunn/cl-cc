@@ -212,4 +212,8 @@
    rotate-right
    bswap
     vm-intern-pkg
-    vm-make-closure-p))
+    vm-make-closure-p
+    vm-closure-optional-params
+    vm-closure-rest-param
+    vm-closure-key-params
+    vm-closure-inst-dispatch-tag))

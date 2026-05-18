@@ -260,6 +260,70 @@
     (assert-equal (mapcar #'instruction->sexp insts)
                   (mapcar #'instruction->sexp out))))
 
+(deftest opt-adaptive-inline-threshold-uses-profile-and-size-hints
+  "opt-adaptive-inline-threshold responds to call count, loop depth, and size hints."
+  (let* ((ci (make-vm-closure :dst :r0 :label "profiled"
+                              :params '(:r1) :captured nil
+                              :optional-params nil :rest-param nil :key-params nil))
+         (body (append (loop repeat 10 collect (make-vm-const :dst :r2 :value 0))
+                       (list (make-vm-ret :reg :r1))))
+         (def (list :closure ci :params '(:r1) :body body))
+         (cold (cl-cc/optimize::opt-adaptive-inline-threshold def :call-count 0 :loop-depth 0 :max-threshold 100))
+         (hot (cl-cc/optimize::opt-adaptive-inline-threshold def :call-count 100 :loop-depth 2 :max-threshold 100))
+         (large (cl-cc/optimize::opt-adaptive-inline-threshold def :call-count 0 :loop-depth 0 :function-size 80 :max-threshold 100)))
+    (assert-true (> hot cold))
+    (assert-true (< large cold))))
+
+(deftest opt-pass-call-site-splitting-handles-multi-join-labels
+  "opt-pass-call-site-splitting splits predecessors that target consecutive join labels."
+  (let* ((insts (list (make-vm-func-ref :dst :fn :label "left-fn")
+                      (make-vm-jump :label "join-a")
+                      (make-vm-label :name "right")
+                      (make-vm-func-ref :dst :fn :label "right-fn")
+                      (make-vm-jump :label "join-b")
+                      (make-vm-label :name "join-a")
+                      (make-vm-label :name "join-b")
+                      (make-vm-call :dst :out :func :fn :args '(:arg))
+                      (make-vm-halt :reg :out)))
+         (out (cl-cc/optimize:opt-pass-call-site-splitting insts))
+         (calls (remove-if-not #'cl-cc:vm-call-p out)))
+    (assert-= 3 (length calls))))
+
+(deftest opt-pass-call-site-splitting-handles-vm-apply
+  "opt-pass-call-site-splitting clones vm-apply join sites into known predecessors."
+  (let* ((insts (list (make-vm-func-ref :dst :fn :label "apply-fn")
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "join")
+                      (cl-cc:make-vm-apply :dst :out :func :fn :args '(:head :rest))
+                      (make-vm-halt :reg :out)))
+         (out (cl-cc/optimize:opt-pass-call-site-splitting insts))
+         (applies (remove-if-not (lambda (inst) (typep inst 'cl-cc/vm::vm-apply)) out)))
+    (assert-= 2 (length applies))))
+
+(deftest opt-pass-call-site-splitting-handles-vm-tail-call
+  "opt-pass-call-site-splitting clones vm-tail-call sites and skips the original join call."
+  (let* ((insts (list (make-vm-func-ref :dst :fn :label "tail-fn")
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "join")
+                      (cl-cc:make-vm-tail-call :dst :out :func :fn :args '(:arg))
+                      (make-vm-halt :reg :out)))
+         (out (cl-cc/optimize:opt-pass-call-site-splitting insts))
+         (tail-calls (remove-if-not (lambda (inst)
+                                      (typep inst 'cl-cc/vm::vm-tail-call))
+                                    out))
+         (after-jump (find-if (lambda (inst)
+                                (and (typep inst 'cl-cc/vm::vm-jump)
+                                     (search "CALL-SITE-SPLIT-AFTER-"
+                                             (cl-cc:vm-label-name inst))))
+                              out)))
+    (assert-= 2 (length tail-calls))
+    (assert-true after-jump)
+    (assert-true (find-if (lambda (inst)
+                            (and (typep inst 'cl-cc/vm::vm-label)
+                                 (equal (cl-cc:vm-label-name after-jump)
+                                        (cl-cc/vm::vm-name inst))))
+                          out))))
+
 ;;; ─── opt-can-safely-rename-p ─────────────────────────────────────────────────
 
 (deftest-each opt-can-safely-rename-p-cases

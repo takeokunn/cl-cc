@@ -19,15 +19,15 @@
     (t nil)))
 
 (defun %opt-simple-closure-inst-p (inst)
-  "T when INST can be represented by vm-make-closure without losing metadata."
+  "T when INST is a closure without extra metadata that would be lost by rewriting."
   (or (vm-make-closure-p inst)
       (and (vm-closure-p inst)
            (vm-captured-vars inst)
+           (null (vm-closure-inline-policy inst))
+           (null (vm-closure-rest-stack-alloc-p inst))
            (null (vm-closure-optional-params inst))
            (null (vm-closure-rest-param inst))
            (null (vm-closure-key-params inst))
-           (null (vm-closure-rest-stack-alloc-p inst))
-           (null (vm-closure-inline-policy inst))
            (null (vm-closure-inst-dispatch-tag inst)))))
 
 (defun %opt-closure-descriptor (inst index)
