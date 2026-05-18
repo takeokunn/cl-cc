@@ -116,7 +116,7 @@ Returns a function that takes a continuation."
   "cps-trampoline-form converts single-body tail-call continuation lambdas into thunk producers."
   (let ((result (cl-cc/cps::cps-trampoline-form '(lambda (v) (funcall k v)))))
     (assert-eq 'lambda (first result))
-    (assert-true (%cps-form-contains-p result 'cl-cc/cps::make-cps-trampoline-thunk))))
+    (assert-true (%cps-form-contains-p result :cps-trampoline-thunk))))
 
 (deftest cps-trampoline-run-forces-tail-thunks
   "cps-trampoline-run repeatedly executes CPS thunks until a plain value is produced."
@@ -154,4 +154,4 @@ Returns a function that takes a continuation."
 (deftest cps-sexp-transform-emits-trampoline-thunk
   "cps-transform emits trampoline thunk construction around generated tail continuations."
   (assert-true (%cps-form-contains-p (cl-cc:cps-transform '(+ 1 2))
-                                     'cl-cc/cps::make-cps-trampoline-thunk)))
+                                     :cps-trampoline-thunk)))

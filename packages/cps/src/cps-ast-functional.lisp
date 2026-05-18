@@ -199,8 +199,7 @@ then call the function with all evaluated arguments."
 Returns a (lambda (k) ...) form ready for evaluation."
   (let ((k (gensym "K")))
     (%cps-lambda (list k)
-                 (list 'cps-trampoline-run
-                       (cps-trampoline-form (cps-transform-ast node k))))))
+                 (cps-transform-ast node k))))
 
 (defun cps-transform* (expr)
   "Transform EXPR to CPS. Dispatches on type:

@@ -26,9 +26,23 @@
 
 (defun %cps-trampoline-tail-form (form)
   "Return FORM wrapped as a trampoline thunk for deferred tail dispatch."
-  (list 'make-cps-trampoline-thunk
-        :function
+  (list 'list
+        :cps-trampoline-thunk
         (list 'lambda nil form)))
+
+(defun %cps-wrap-trampoline-run (form)
+  "Wrap FORM in a self-contained trampoline loop understood by generated CPS code."
+  (list 'labels
+        (list (list 'cps-trampoline-run-internal
+                    (list 'value)
+                    (list 'if
+                          (list 'and
+                                (list 'consp 'value)
+                                (list 'eq (list 'car 'value) :cps-trampoline-thunk))
+                          (list 'cps-trampoline-run-internal
+                                (list 'funcall (list 'cadr 'value)))
+                          'value)))
+        (list 'cps-trampoline-run-internal form)))
 
 (defun cps-trampoline-form (form)
   "Convert continuation lambdas whose body is only a tail call into thunk producers."
@@ -257,4 +271,4 @@ runtime while preserving the data-driven dispatch shape."
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).
 The outer continuation parameter is always named K for inspection and tests."
   (let ((body (cps-trampoline-form (%cps-sexp-node expr 'k))))
-    (cps-simplify-form (list 'lambda '(k) (list 'cps-trampoline-run body)))))
+    (cps-simplify-form (list 'lambda '(k) (%cps-wrap-trampoline-run body)))))

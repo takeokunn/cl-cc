@@ -376,7 +376,7 @@
                   (make-vm-label :name "Lcopy")
                   (make-vm-lt :dst :rcond :lhs :ri :rhs :rlen)
                   (make-vm-jump-zero :reg :rcond :label "Lcopy-exit")
-                  (make-vm-aref :dst :rtmp :array-reg src :index-reg :ri)
+                  (cl-cc/vm::make-vm-aref :dst :rtmp :array-reg src :index-reg :ri)
                   (make-vm-aset :array-reg :rdst :index-reg :ri :val-reg :rtmp)
                   (make-vm-const :dst :rone :value 1)
                   (make-vm-add :dst :rnext :lhs :ri :rhs :rone)
