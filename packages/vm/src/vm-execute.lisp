@@ -26,8 +26,68 @@
   (vm-reg-set state (vm-dst inst) (vm-reg-get state (vm-src inst)))
   (values (1+ pc) nil nil))
 
-(define-simple-instruction vm-add :binary +)
-(define-simple-instruction vm-sub :binary -)
+(defconstant +vm-min-fixnum51+ (- (ash 1 50))
+  "Smallest integer encodable by the VM's 51-bit signed fixnum representation.")
+
+(defconstant +vm-max-fixnum51+ (1- (ash 1 50))
+  "Largest integer encodable by the VM's 51-bit signed fixnum representation.")
+
+(defstruct vm-trampoline-thunk
+  "A VM-level zero-argument thunk for external trampoline dispatch."
+  (function (lambda () nil) :type function))
+
+(defun vm-force-trampoline-result (value)
+  "Force VM trampoline thunks until VALUE is no longer a thunk."
+  (loop for current = value then (funcall (vm-trampoline-thunk-function current))
+        while (vm-trampoline-thunk-p current)
+        finally (return current)))
+
+(defun vm-fixnum51-p (value)
+  "Return T when VALUE fits in the VM 51-bit signed fixnum range."
+  (and (integerp value)
+       (<= +vm-min-fixnum51+ value +vm-max-fixnum51+)))
+
+(defun vm-fixnum51-overflow-p (value)
+  "Return T when integer VALUE cannot be represented as a VM fixnum."
+  (and (integerp value)
+       (not (vm-fixnum51-p value))))
+
+(defun vm-bignum-add-integers (lhs rhs)
+  "Host-backed integer addition fallback for VM fixnum overflow."
+  (+ lhs rhs))
+
+(defun vm-bignum-subtract-integers (lhs rhs)
+  "Host-backed integer subtraction fallback for VM fixnum overflow."
+  (- lhs rhs))
+
+(defun %vm-add-with-overflow-fallback (lhs rhs)
+  (let ((result (+ lhs rhs)))
+    (if (vm-fixnum51-overflow-p result)
+        (vm-bignum-add-integers lhs rhs)
+        result)))
+
+(defun %vm-sub-with-overflow-fallback (lhs rhs)
+  (let ((result (- lhs rhs)))
+    (if (vm-fixnum51-overflow-p result)
+        (vm-bignum-subtract-integers lhs rhs)
+        result)))
+
+(defmethod execute-instruction ((inst vm-add) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-add-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-sub) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-sub-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
 (define-simple-instruction vm-mul :binary *)
 
 ;;; Checked arithmetic (FR-303): in the VM interpreter, these behave identically
@@ -110,6 +170,21 @@ The cl-cc execution model treats both NIL and numeric zero as false."
 (defmethod execute-instruction ((inst vm-tail-call) state pc labels)
   (let ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
     (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) t)))
+
+(defmethod execute-instruction ((inst vm-trampoline) state pc labels)
+  (declare (ignore labels))
+  (let* ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
+         (arg-values (mapcar (lambda (reg) (vm-reg-get state reg)) (vm-args inst))))
+    (vm-reg-set state (vm-dst inst)
+                (make-vm-trampoline-thunk
+                 :function
+                 (lambda ()
+                   (cond
+                     ((functionp func) (apply func arg-values))
+                     ((typep func 'vm-closure-object)
+                      (%vm-call-closure-sync func state arg-values))
+                      (t (error "Cannot trampoline function designator: ~S" func))))))
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-ret) state pc labels)
   (declare (ignore pc))

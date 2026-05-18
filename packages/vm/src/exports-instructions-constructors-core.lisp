@@ -51,9 +51,10 @@
    make-vm-bit-xor
    make-vm-butlast
    make-vm-sbit
-   make-vm-call
-   make-vm-tail-call
-   make-vm-call-next-method
+    make-vm-call
+    make-vm-tail-call
+    make-vm-trampoline
+    make-vm-call-next-method
    make-vm-car
    make-vm-cdr
    make-vm-ceiling-inst

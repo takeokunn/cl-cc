@@ -137,56 +137,83 @@
 
 (defun ssa-sequentialize-copies (parallel-copies)
   "Convert a list of parallel copies (dst . src) to a sequential list of
-   vm-move instructions that produces the same effect.
+    vm-move instructions that produces the same effect.
 
-   Handles the swap problem: if A←B and B←A appear simultaneously, we use
-   a temporary register to break the cycle.
+   Handles the swap problem: if A←B and B←A appear simultaneously and both
+   values are integer registers, emit an XOR-swap instead of using a temp.
+   Larger cycles still use a temporary register to break the cycle.
 
-   Algorithm: topological sort of the copy graph; cycles require a temp."
+   Algorithm: build the copy dependency DAG and repeatedly emit copies whose
+   destination is not read by remaining copies.  Cycles are detected when the
+   DAG has no ready leaf."
   (when (null parallel-copies) (return-from ssa-sequentialize-copies nil))
 
-  (let* ((copies   (copy-list parallel-copies)) ; mutable working set
-         (result   nil)
-         ;; Build: src → dst (reverse map for cycle detection)
-         (src->dst (make-hash-table :test #'eq)))
-
-    (dolist (c copies)
-      (setf (gethash (cdr c) src->dst) (car c)))
-
-    ;; Emit copies that are ready (their dst is not also a src in any copy)
-    (let ((ready-q (loop for c in copies
-                         unless (gethash (car c) src->dst)
-                         collect c)))
-      (loop while (or ready-q copies)
-            do (loop while ready-q
-                     do (let ((c (pop ready-q)))
-                          (push (make-vm-move :dst (car c) :src (cdr c)) result)
-                          (setq copies (remove c copies :test #'equal))
-                          ;; Check if this dst was blocking another copy
-                          (let ((unblocked (find-if (lambda (cc)
-                                                      (eq (cdr cc) (car c)))
-                                                    copies)))
-                            (when unblocked
-                              (push unblocked ready-q)))))
-               ;; If no ready copies remain but copies exist: we have a cycle
-               (when (and (null ready-q) copies)
-                 ;; Break cycle: use a fresh temp for the first copy's dst
-                 (let* ((c    (car copies))
-                        (temp (gensym "SSATMP"))
-                        (tmp-kw (intern (symbol-name temp) :keyword)))
-                   (push (make-vm-move :dst tmp-kw :src (cdr c)) result)
-                   ;; Replace all uses of (cdr c) as a src in copies
-                   (setq copies
-                         (mapcar (lambda (cc)
-                                   (if (eq (cdr cc) (cdr c))
-                                       (cons (car cc) tmp-kw)
-                                       cc))
-                                 copies))
-                   ;; Now (cdr c) is free: put in ready-q with its original dst
-                   (push (cons (car c) tmp-kw) ready-q)
-                   (setq copies (cdr copies))))))
-
-    (nreverse result)))
+  (labels ((copy-dst (copy) (car copy))
+           (copy-src (copy) (cdr copy))
+           (register-copy-p (copy)
+             (and (symbolp (copy-dst copy))
+                  (symbolp (copy-src copy))
+                  (not (eq (copy-dst copy) (copy-src copy)))))
+           (source-counts (copies)
+             (let ((counts (make-hash-table :test #'eq)))
+               (dolist (copy copies counts)
+                 (when (symbolp (copy-src copy))
+                   (incf (gethash (copy-src copy) counts 0))))))
+           (ready-copies (copies)
+             (let ((counts (source-counts copies)))
+               (loop for copy in copies
+                     unless (plusp (gethash (copy-dst copy) counts 0))
+                       collect copy)))
+           (find-two-register-cycle (copies)
+             (when (= (length copies) 2)
+               (destructuring-bind (a b) copies
+                 (when (and (register-copy-p a)
+                            (register-copy-p b)
+                            (eq (copy-dst a) (copy-src b))
+                            (eq (copy-src a) (copy-dst b)))
+                   (values (copy-dst a) (copy-src a))))))
+           (emit-xor-swap (left right result)
+             (push (make-vm-logxor :dst left :lhs left :rhs right) result)
+             (push (make-vm-logxor :dst right :lhs left :rhs right) result)
+             (push (make-vm-logxor :dst left :lhs left :rhs right) result)
+             result)
+           (fresh-temp ()
+             (intern (symbol-name (gensym "SSATMP")) :keyword))
+           (break-cycle (copies result)
+             (let* ((copy (find-if #'register-copy-p copies))
+                    (dst (copy-dst copy))
+                    (temp (fresh-temp)))
+               ;; Preserve the old value of DST, then rewrite all remaining
+               ;; reads of DST to read the temp.  DST is now safe to overwrite,
+               ;; so the normal ready-copy pass will drain the cycle.
+               (push (make-vm-move :dst temp :src dst) result)
+               (values (mapcar (lambda (candidate)
+                                 (if (eq (copy-src candidate) dst)
+                                     (cons (copy-dst candidate) temp)
+                                     candidate))
+                               copies)
+                       result))))
+    (let ((copies (remove-if (lambda (copy)
+                               (eq (copy-dst copy) (copy-src copy)))
+                             (copy-list parallel-copies)))
+          (result nil))
+      (loop while copies
+            do (let ((ready (ready-copies copies)))
+                 (cond
+                   (ready
+                    (dolist (copy ready)
+                      (push (make-vm-move :dst (copy-dst copy) :src (copy-src copy)) result)
+                      (setf copies (remove copy copies :test #'equal))))
+                   (t
+                    (multiple-value-bind (left right)
+                        (find-two-register-cycle copies)
+                      (if left
+                          (progn
+                            (setf result (emit-xor-swap left right result))
+                            (setf copies nil))
+                          (multiple-value-setq (copies result)
+                            (break-cycle copies result))))))))
+      (nreverse result))))
 
 ;;; ─── Round-Trip Utility ──────────────────────────────────────────────────
 

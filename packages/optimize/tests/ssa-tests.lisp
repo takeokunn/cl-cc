@@ -291,17 +291,62 @@
 ;;; ─── Parallel Copy Sequentialization ─────────────────────────────────────
 
 (deftest ssa-seq-copies-behavior
-  "ssa-sequentialize-copies: empty→nil; simple→N vm-move; swap→≥2 vm-move."
+  "ssa-sequentialize-copies: empty→nil; simple→N vm-move; swap→3 vm-logxor."
   ;; empty parallel copies
   (assert-null (cl-cc/optimize:ssa-sequentialize-copies nil))
   ;; simple non-conflicting: 2 copies → 2 moves
   (let* ((result (cl-cc/optimize:ssa-sequentialize-copies '((:r0 . :r1) (:r2 . :r3)))))
     (assert-= 2 (length result))
     (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result)))
-  ;; swap: needs ≥2 moves, all vm-move
+  ;; two-register integer swap: branchless/temp-free XOR-swap
   (let* ((result (cl-cc/optimize:ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
-    (assert-true (>= (length result) 2))
-    (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))))
+    (assert-= 3 (length result))
+    (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-logxor)) result))))
+
+(deftest ssa-seq-copies-xor-swap-shape
+  "A two-register cycle emits a=a^b; b=a^b; a=a^b with no temporary register."
+  (let ((result (cl-cc/optimize:ssa-sequentialize-copies '((:r0 . :r1) (:r1 . :r0)))))
+    (assert-= 3 (length result))
+    (destructuring-bind (first second third) result
+      (assert-eq :r0 (cl-cc/vm::vm-dst first))
+      (assert-eq :r0 (cl-cc/vm::vm-lhs first))
+      (assert-eq :r1 (cl-cc/vm::vm-rhs first))
+      (assert-eq :r1 (cl-cc/vm::vm-dst second))
+      (assert-eq :r0 (cl-cc/vm::vm-lhs second))
+      (assert-eq :r1 (cl-cc/vm::vm-rhs second))
+      (assert-eq :r0 (cl-cc/vm::vm-dst third))
+      (assert-eq :r0 (cl-cc/vm::vm-lhs third))
+      (assert-eq :r1 (cl-cc/vm::vm-rhs third)))))
+
+(deftest ssa-seq-copies-three-cycle-still-uses-temp
+  "Cycles larger than two registers still use one temporary move to preserve semantics."
+  (let* ((result (cl-cc/optimize:ssa-sequentialize-copies
+                  '((:r0 . :r1) (:r1 . :r2) (:r2 . :r0))))
+         (moves (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-move)) result)))
+    (assert-= 4 (length result))
+    (assert-= 4 (length moves))
+    (assert-true (some (lambda (i)
+                         (let ((dst (cl-cc/vm::vm-dst i)))
+                           (and (keywordp dst)
+                                (search "SSATMP" (symbol-name dst)))))
+                       moves))))
+
+(deftest ssa-seq-copies-dag-emits-ready-leaves-first
+  "The dependency DAG lets non-cyclic chains drain without introducing temps."
+  (let ((result (cl-cc/optimize:ssa-sequentialize-copies
+                 '((:r0 . :r1) (:r1 . :r2) (:r3 . :r1)))))
+    (assert-= 3 (length result))
+    (assert-true (every (lambda (i) (typep i 'cl-cc/vm::vm-move)) result))
+    (assert-false (some (lambda (i)
+                          (search "SSATMP" (symbol-name (cl-cc/vm::vm-dst i))))
+                        result))
+    ;; :r0 and :r3 both read the old :r1, so they must precede :r1 <- :r2.
+    (let ((r1-write-pos (position-if (lambda (i) (eq :r1 (cl-cc/vm::vm-dst i))) result)))
+      (assert-true r1-write-pos)
+      (assert-true (every (lambda (i)
+                            (or (eq :r1 (cl-cc/vm::vm-dst i))
+                                (< (position i result) r1-write-pos)))
+                          result)))))
 
 (deftest ssa-destroy-places-phi-copies-before-terminator
   "ssa-destroy emits predecessor phi copies before the branch terminator."

@@ -152,6 +152,13 @@
   (args nil :reader vm-args)
   (:sexp-tag :tail-call))
 
+(define-vm-instruction vm-trampoline (vm-instruction)
+  "Create a zero-argument thunk for an external trampoline loop to execute."
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (args nil :reader vm-args)
+  (:sexp-tag :trampoline))
+
 (define-vm-instruction vm-ret (vm-instruction)
   (reg nil :reader vm-reg)
   (:sexp-tag :ret))

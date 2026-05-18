@@ -9,6 +9,44 @@
 
 (in-package :cl-cc/cps)
 
+(defstruct cps-trampoline-thunk
+  "A zero-argument CPS trampoline thunk returned from a tail continuation."
+  (function (lambda () nil) :type function))
+
+(defun cps-trampoline-run (value)
+  "Force CPS trampoline thunks until VALUE is no longer a thunk."
+  (loop for current = value then (funcall (cps-trampoline-thunk-function current))
+        while (cps-trampoline-thunk-p current)
+        finally (return current)))
+
+(defun %cps-tail-funcall-form-p (form)
+  "Return T when FORM is a direct tail-position FUNCALL form."
+  (and (consp form)
+       (eq (car form) 'funcall)))
+
+(defun %cps-trampoline-tail-form (form)
+  "Return FORM wrapped as a trampoline thunk for deferred tail dispatch."
+  (list 'make-cps-trampoline-thunk
+        :function
+        (list 'lambda nil form)))
+
+(defun cps-trampoline-form (form)
+  "Convert continuation lambdas whose body is only a tail call into thunk producers."
+  (cond
+    ((and (consp form)
+          (eq (car form) 'lambda)
+          (consp (cdr form))
+          (consp (second form))
+          (null (cddr (second form)))
+          (= (length form) 3)
+          (%cps-tail-funcall-form-p (third form)))
+     (list 'lambda
+           (second form)
+           (%cps-trampoline-tail-form (cps-trampoline-form (third form)))))
+    ((consp form)
+     (mapcar #'cps-trampoline-form form))
+    (t form)))
+
 ;;; S-Expression Based CPS Transformation (Minimal Bootstrap)
 ;;;
 ;;; Handles a small subset of CL sufficient for bootstrapping:
@@ -218,5 +256,5 @@ runtime while preserving the data-driven dispatch shape."
 (defun cps-transform (expr)
   "Minimal CPS conversion for bootstrap language. Produces (lambda (k) ...).
 The outer continuation parameter is always named K for inspection and tests."
-  (cps-simplify-form (list 'lambda '(k) (%cps-sexp-node expr 'k))))
-
+  (let ((body (cps-trampoline-form (%cps-sexp-node expr 'k))))
+    (cps-simplify-form (list 'lambda '(k) (list 'cps-trampoline-run body)))))

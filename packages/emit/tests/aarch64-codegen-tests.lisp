@@ -225,6 +225,7 @@ Returns the byte vector, or NIL on error."
           ("tail-call"   4 'cl-cc/vm::vm-tail-call)
           ("min"         8 'cl-cc/vm::vm-min)
           ("max"         8 'cl-cc/vm::vm-max)
+          ("select"      12 'cl-cc/vm::vm-select)
           ("integer-add" 4 'cl-cc/vm::vm-integer-add)
           ("integer-sub" 4 'cl-cc/vm::vm-integer-sub)
           ("integer-mul" 4 'cl-cc/vm::vm-integer-mul)

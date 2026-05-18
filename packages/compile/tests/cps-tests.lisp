@@ -29,6 +29,13 @@ Returns a function that takes a continuation."
   (and (listp result)
        (eq 'lambda (car result))))
 
+(defun %cps-form-contains-p (form sym)
+  "Return T if SYM appears anywhere in FORM."
+  (cond ((eq form sym) t)
+        ((consp form) (or (%cps-form-contains-p (car form) sym)
+                          (%cps-form-contains-p (cdr form) sym)))
+        (t nil)))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Structure predicate tests (extracted for readability)
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -105,6 +112,20 @@ Returns a function that takes a continuation."
          (result (cl-cc/cps::%cps-simplify-walk outer)))
     (assert-equal 99 (first result))))
 
+(deftest cps-trampoline-form-wraps-tail-continuation-lambda
+  "cps-trampoline-form converts single-body tail-call continuation lambdas into thunk producers."
+  (let ((result (cl-cc/cps::cps-trampoline-form '(lambda (v) (funcall k v)))))
+    (assert-eq 'lambda (first result))
+    (assert-true (%cps-form-contains-p result 'cl-cc/cps::make-cps-trampoline-thunk))))
+
+(deftest cps-trampoline-run-forces-tail-thunks
+  "cps-trampoline-run repeatedly executes CPS thunks until a plain value is produced."
+  (let ((thunk (cl-cc/cps::make-cps-trampoline-thunk
+                :function (lambda ()
+                            (cl-cc/cps::make-cps-trampoline-thunk
+                             :function (lambda () 42))))))
+    (assert-= 42 (cl-cc/cps::cps-trampoline-run thunk))))
+
 (deftest-each cps-simplify-form-reductions
   "cps-simplify-form applies beta-reduction and eta-reduction."
   :cases (("beta-reduce" 42    '(funcall (lambda (x) x) 42))
@@ -129,3 +150,8 @@ Returns a function that takes a continuation."
   (expr expected)
   (let ((fn (cl-cc:cps-transform-eval expr)))
     (assert-equal expected (funcall fn #'identity))))
+
+(deftest cps-sexp-transform-emits-trampoline-thunk
+  "cps-transform emits trampoline thunk construction around generated tail continuations."
+  (assert-true (%cps-form-contains-p (cl-cc:cps-transform '(+ 1 2))
+                                     'cl-cc/cps::make-cps-trampoline-thunk)))

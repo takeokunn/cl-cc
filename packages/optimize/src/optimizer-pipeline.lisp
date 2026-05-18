@@ -172,10 +172,11 @@ optimizer's pass table wiring.")
        (:sccp                      . ,#'opt-pass-sccp)
      (:cons-slot-forward         . ,#'opt-pass-cons-slot-forward)
       (:strength-reduce           . ,#'opt-pass-strength-reduce)
-     (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
-     (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
-     (:fill-recognition          . ,#'opt-pass-fill-recognition)
-     (:affine-loop-analysis      . ,#'%maybe-run-fr523-affine-loop-analysis)
+      (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
+      (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
+      (:fill-recognition          . ,#'opt-pass-fill-recognition)
+      (:copy-recognition          . ,#'opt-pass-copy-recognition)
+      (:affine-loop-analysis      . ,#'%maybe-run-fr523-affine-loop-analysis)
      (:loop-interchange          . ,#'%maybe-run-fr524-loop-interchange)
      (:polyhedral-schedule       . ,#'%maybe-run-fr525-polyhedral-schedule)
      (:loop-fusion-fission       . ,#'%maybe-run-fr526-loop-fusion-fission)
@@ -228,6 +229,7 @@ optimizer's pass table wiring.")
       :bswap-recognition
      :rotate-recognition
      :fill-recognition
+     :copy-recognition
      :affine-loop-analysis
      :loop-interchange
      :polyhedral-schedule

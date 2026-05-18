@@ -195,8 +195,8 @@ Used by run-string-repl for incremental REPL execution."
         while (< pc (length instructions))
         do (multiple-value-bind (next-pc halted result)
                (execute-instruction (aref instructions pc) state pc labels)
-             (when halted
-               (return result))
+              (when halted
+                (return (vm-force-trampoline-result result)))
              (setf pc next-pc))
         finally (return nil)))
 
@@ -231,13 +231,14 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                                               pc
                                               next-pc))
                     (when halted
-                      (return result))
+                      (return (vm-force-trampoline-result result)))
                     (when (null next-pc)
                       ;; Some execution paths (notably cross-context returns and
                       ;; top-level RET forms) use NIL to signal "no next pc".
                       ;; Treat that as a graceful stop instead of falling into
                       ;; the next loop iteration and crashing on (< NIL LEN).
-                      (return (or result
-                                  (vm-reg-get state (vm-program-result-register program)))))
+                      (return (vm-force-trampoline-result
+                               (or result
+                                   (vm-reg-get state (vm-program-result-register program))))))
                     (setf pc next-pc)))
              finally (return nil)))))

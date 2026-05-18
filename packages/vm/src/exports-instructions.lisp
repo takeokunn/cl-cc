@@ -48,9 +48,10 @@
    vm-print
    vm-halt
    vm-closure
-   vm-call
-   vm-tail-call
-   vm-ret
+    vm-call
+    vm-tail-call
+    vm-trampoline
+    vm-ret
     vm-func-ref
     vm-push
     vm-pop

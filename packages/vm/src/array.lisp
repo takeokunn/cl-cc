@@ -323,6 +323,33 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
         (fill arr val))
     (values (1+ pc) nil nil)))
 
+(defun %vm-bridge-replace (sequence-1 sequence-2 &key end1 end2)
+  "VM-safe bridge for CL:REPLACE over ordinary, COW, and specialized arrays."
+  (let ((dst (%vm-cow-vector-ensure-writable sequence-1))
+        (src (%vm-cow-vector-materialize sequence-2)))
+    (cond
+      ((or (vm-specialized-array-p dst) (vm-specialized-array-p src))
+       (let ((limit (min (or end1 (if (vm-specialized-array-p dst)
+                                      (vm-specialized-array-length dst)
+                                      (length dst)))
+                         (or end2 (if (vm-specialized-array-p src)
+                                      (vm-specialized-array-length src)
+                                      (length src))))))
+         (loop for i below limit
+               for value = (if (vm-specialized-array-p src)
+                               (vm-specialized-array-ref src i)
+                               (aref src i))
+               do (if (vm-specialized-array-p dst)
+                      (setf (vm-specialized-array-ref dst i) value)
+                      (setf (aref dst i) value)))
+         sequence-1))
+      (t
+       (replace dst src :end1 end1 :end2 end2)
+       sequence-1))))
+
+(eval-when (:load-toplevel :execute)
+  (vm-register-host-bridge 'cl:replace #'%vm-bridge-replace))
+
 (defmethod execute-instruction ((inst vm-vector-push-extend) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-val-reg inst)))

@@ -362,3 +362,58 @@
                  (make-fill-loop-instructions :extra-exit-jump t))))
     (assert-false (some #'fill-inst-p result))
     (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))))
+
+;;; ─── opt-pass-copy-recognition ───────────────────────────────────────────
+
+(defun make-copy-loop-instructions (&key unknown-alias-p same-array-p)
+  (let ((src (if same-array-p :rdst :rsrc)))
+    (append (unless unknown-alias-p
+              (list (make-vm-const :dst :rsize :value 4)
+                    (make-vm-make-array :dst :rdst :size-reg :rsize)
+                    (make-vm-make-array :dst :rsrc :size-reg :rsize)))
+            (list (make-vm-array-length :dst :rlen :src src)
+                  (make-vm-const :dst :ri :value 0)
+                  (make-vm-label :name "Lcopy")
+                  (make-vm-lt :dst :rcond :lhs :ri :rhs :rlen)
+                  (make-vm-jump-zero :reg :rcond :label "Lcopy-exit")
+                  (make-vm-aref :dst :rtmp :array-reg src :index-reg :ri)
+                  (make-vm-aset :array-reg :rdst :index-reg :ri :val-reg :rtmp)
+                  (make-vm-const :dst :rone :value 1)
+                  (make-vm-add :dst :rnext :lhs :ri :rhs :rone)
+                  (make-vm-move :dst :ri :src :rnext)
+                  (make-vm-jump :label "Lcopy")
+                  (make-vm-label :name "Lcopy-exit")
+                  (make-vm-ret :reg :rdst)))))
+
+(defun copy-call-inst-p (inst)
+  (and (typep inst 'cl-cc/vm::vm-call)
+       (equal (cl-cc/vm::vm-args inst)
+              '(:rdst :rsrc :rcond :rlen :rone :rlen))))
+
+(deftest copy-recognition-collapses-canonical-copy-loop
+  "opt-pass-copy-recognition replaces a private aref/aset loop with a bounded bulk copy call."
+  (let ((result (cl-cc/optimize::opt-pass-copy-recognition (make-copy-loop-instructions))))
+    (assert-= 1 (count-if #'copy-call-inst-p result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-aref)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) result))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc/vm::vm-move)
+                              (eq (cl-cc/vm::vm-dst i) :ri)
+                              (eq (cl-cc/vm::vm-src i) :rlen)))
+                       result))))
+
+(deftest copy-recognition-skips-unknown-alias-arrays
+  "opt-pass-copy-recognition leaves a copy loop unchanged without distinct heap-root facts."
+  (let ((result (cl-cc/optimize::opt-pass-copy-recognition
+                 (make-copy-loop-instructions :unknown-alias-p t))))
+    (assert-false (some #'copy-call-inst-p result))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-aref)) result))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))))
+
+(deftest copy-recognition-skips-self-copy-loop
+  "opt-pass-copy-recognition leaves self-copy loops unchanged to avoid alias-sensitive rewrites."
+  (let ((result (cl-cc/optimize::opt-pass-copy-recognition
+                 (make-copy-loop-instructions :same-array-p t))))
+    (assert-false (some #'copy-call-inst-p result))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-aset)) result))))

@@ -26,10 +26,12 @@
                            (make-vm-abs :dst :R0 :src :R1) s))            15)
           ("vm-min"      (lambda (s) (cl-cc/codegen::emit-vm-min
                            (make-vm-min :dst :R0 :lhs :R1 :rhs :R2) s))  10)
-          ("vm-max"      (lambda (s) (cl-cc/codegen::emit-vm-max
-                           (make-vm-max :dst :R0 :lhs :R1 :rhs :R2) s))  10)
-          ("vm-logand"   (lambda (s) (cl-cc/codegen::emit-vm-logand
-                           (make-vm-logand :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
+           ("vm-max"      (lambda (s) (cl-cc/codegen::emit-vm-max
+                            (make-vm-max :dst :R0 :lhs :R1 :rhs :R2) s))  10)
+           ("vm-select"   (lambda (s) (cl-cc/codegen::emit-vm-select
+                            (make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3) s)) 10)
+           ("vm-logand"   (lambda (s) (cl-cc/codegen::emit-vm-logand
+                            (make-vm-logand :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
           ("vm-logior"   (lambda (s) (cl-cc/codegen::emit-vm-logior
                            (make-vm-logior :dst :R0 :lhs :R1 :rhs :R2) s)) 6)
           ("vm-logxor"   (lambda (s) (cl-cc/codegen::emit-vm-logxor
@@ -90,7 +92,7 @@
                 cl-cc/vm::vm-halt cl-cc/vm::vm-label cl-cc/vm::vm-jump cl-cc/vm::vm-jump-zero cl-cc/vm::vm-ret
                 cl-cc/vm::vm-lt cl-cc/vm::vm-gt cl-cc/vm::vm-le cl-cc/vm::vm-ge cl-cc/vm::vm-num-eq cl-cc/vm::vm-eq
                 cl-cc/vm::vm-neg cl-cc/vm::vm-not cl-cc/vm::vm-lognot cl-cc/vm::vm-inc cl-cc/vm::vm-dec
-                cl-cc/vm::vm-abs cl-cc/vm::vm-min cl-cc/vm::vm-max cl-cc/vm::vm-ash
+                cl-cc/vm::vm-abs cl-cc/vm::vm-min cl-cc/vm::vm-max cl-cc/vm::vm-select cl-cc/vm::vm-ash
                 cl-cc/vm::vm-truncate cl-cc/vm::vm-rem cl-cc/vm::vm-div cl-cc/vm::vm-mod
                 cl-cc/vm::vm-and cl-cc/vm::vm-or cl-cc/vm::vm-logand cl-cc/vm::vm-logior cl-cc/vm::vm-logxor
                 cl-cc/vm::vm-logeqv cl-cc/vm::vm-logtest cl-cc/vm::vm-logbitp

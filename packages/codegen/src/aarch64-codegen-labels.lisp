@@ -66,7 +66,7 @@
     (setf (gethash 'vm-atan-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
     (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
-    (setf (gethash 'vm-select ht) 8)        ; encode-cmp + encode-csel
+    (setf (gethash 'vm-select ht) 12)       ; encode-mov-rr + encode-cmp + encode-csel
     (setf (gethash 'vm-bswap ht) 4)         ; encode-rev32
     (setf (gethash 'vm-rotate ht) 8)        ; MOV + RORV
     (setf (gethash 'vm-label ht) 0)         ; no code

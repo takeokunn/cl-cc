@@ -146,6 +146,62 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
   (ctor lhs rhs expected)
   (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
+(deftest prim-add-fixnum51-overflow-uses-bignum-fallback
+  "vm-add branches to host-backed bignum fallback when the 51-bit fixnum range overflows."
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-add-integers
+                             (lambda (lhs rhs)
+                               (setf called t)
+                               (+ lhs rhs)))
+      (assert-= (ash 1 50)
+                (%run-binary-inst #'cl-cc:make-vm-add cl-cc/vm::+vm-max-fixnum51+ 1))
+      (assert-true called))))
+
+(deftest prim-add-fixnum51-fast-path-skips-bignum-fallback
+  "vm-add keeps non-overflowing 51-bit fixnum additions on the fast path."
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-add-integers
+                             (lambda (lhs rhs)
+                               (declare (ignore lhs rhs))
+                               (setf called t)
+                               -1))
+      (assert-= 42 (%run-binary-inst #'cl-cc:make-vm-add 40 2))
+      (assert-null called))))
+
+(deftest prim-sub-fixnum51-overflow-uses-bignum-fallback
+  "vm-sub branches to host-backed bignum fallback when the 51-bit fixnum range underflows."
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-subtract-integers
+                             (lambda (lhs rhs)
+                               (setf called t)
+                               (- lhs rhs)))
+      (assert-= (1- cl-cc/vm::+vm-min-fixnum51+)
+                (%run-binary-inst #'cl-cc:make-vm-sub cl-cc/vm::+vm-min-fixnum51+ 1))
+      (assert-true called))))
+
+(deftest prim-mul-fixnum51-overflow-uses-bignum-fallback
+  "vm-mul branches to bignum multiplication when a 51-bit fixnum product overflows."
+  (let ((called nil))
+    (with-replaced-function (cl-cc/vm::vm-bignum-multiply-integers
+                             (lambda (lhs rhs &key base threshold)
+                               (declare (ignore base threshold))
+                               (setf called t)
+                               (* lhs rhs)))
+      (assert-= (* cl-cc/vm::+vm-max-fixnum51+ 2)
+                (%run-binary-inst #'cl-cc:make-vm-mul cl-cc/vm::+vm-max-fixnum51+ 2))
+      (assert-true called))))
+
+(deftest prim-trampoline-instruction-produces-forceable-thunk
+  "vm-trampoline stores a zero-argument thunk that the VM trampoline loop can force."
+  (let ((state (make-test-vm)))
+    (cl-cc:vm-reg-set state 1 20)
+    (cl-cc:vm-reg-set state 2 22)
+    (cl-cc:vm-reg-set state 9 #'+)
+    (exec1 (cl-cc:make-vm-trampoline :dst 0 :func 9 :args '(1 2)) state)
+    (let ((thunk (cl-cc:vm-reg-get state 0)))
+      (assert-true (cl-cc/vm::vm-trampoline-thunk-p thunk))
+      (assert-= 42 (cl-cc/vm::vm-force-trampoline-result thunk)))))
+
 (deftest-each prim-cl-div-fast-path-selection
   "vm-cl-div runtime selects specialized paths for fixnum and fixnum-rational inputs."
   :cases (("fixnum" 3 4 3/4 :fixnum)
