@@ -211,4 +211,5 @@
    define-vm-char-comparison
    rotate-right
    bswap
-   vm-intern-pkg))
+    vm-intern-pkg
+    vm-make-closure-p))
