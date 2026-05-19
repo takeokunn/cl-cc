@@ -254,6 +254,7 @@ representations may use hash tables with structured metadata."
   "Normalize ENCODING / EXTERNAL-FORMAT into the host designator we support."
   (case (or encoding external-format :utf-8)
     (:utf8 :utf-8)
+    ((:utf-16 :utf16) :utf-16le)
     (otherwise (or encoding external-format :utf-8))))
 
 (defun string-to-octets (string &key encoding external-format)

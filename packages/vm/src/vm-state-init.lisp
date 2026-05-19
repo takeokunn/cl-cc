@@ -25,6 +25,21 @@
     (vm2-state (setf (vm2-state-profile-call-stack state) value))
     (t (setf (vm-profile-call-stack state) value))))
 
+(defun %vm-profile-call-start-times (state)
+  (typecase state
+    (vm2-state nil)
+    (t (vm-profile-call-start-times state))))
+
+(defun %set-vm-profile-call-start-times (state value)
+  (typecase state
+    (vm2-state nil)
+    (t (setf (vm-profile-call-start-times state) value))))
+
+(defun %vm-profile-now-ns ()
+  "Return current internal real time converted to nanoseconds."
+  (floor (* (get-internal-real-time) 1000000000)
+         internal-time-units-per-second))
+
 (defun vm-get-profile-samples (state)
   "Return the profile-samples hash table for STATE, handling both vm-state and vm2-state."
   (typecase state
@@ -37,6 +52,13 @@
     ;; vm2 currently does not expose dedicated bb counters.
     (vm2-state (make-hash-table :test #'eql))
     (t (vm-profile-bb-counts state))))
+
+(defun vm-get-profile-inst-counts (state)
+  "Return VM instruction type frequency counters for STATE."
+  (typecase state
+    ;; vm2 currently does not expose dedicated instruction counters.
+    (vm2-state (make-hash-table :test #'eq))
+    (t (vm-profile-inst-counts state))))
 
 (defun vm-get-profile-branch-counts (state)
   "Return branch edge counters for STATE."
@@ -51,6 +73,18 @@
     (vm2-state (make-hash-table :test #'equal))
     (t (vm-profile-call-counts state))))
 
+(defun vm-get-profile-call-times (state)
+  "Return cumulative function elapsed-time counters for STATE, in nanoseconds."
+  (typecase state
+    (vm2-state (make-hash-table :test #'equal))
+    (t (vm-profile-call-times state))))
+
+(defun %vm-profile-finish-call (state label start-time)
+  "Accumulate elapsed time for LABEL from START-TIME to now."
+  (when (and label start-time)
+    (incf (gethash label (vm-get-profile-call-times state) 0)
+          (max 0 (- (%vm-profile-now-ns) start-time)))))
+
 (defun vm-get-profile-type-feedback (state)
   "Return register/type feedback counters for STATE."
   (typecase state
@@ -61,6 +95,13 @@
   "Increment basic-block/program-counter hit counter for PC."
   (when (%vm-profile-enabled-p state)
     (incf (gethash pc (vm-get-profile-bb-counts state) 0))))
+
+(defun vm-profile-inst-hit (state instruction)
+  "Increment the instruction frequency counter for INSTRUCTION's concrete type."
+  (when (%vm-profile-enabled-p state)
+    (incf (gethash (type-of instruction)
+                   (vm-get-profile-inst-counts state)
+                   0))))
 
 (defun vm-profile-branch-edge (state kind from-pc to-pc)
   "Increment branch edge counter keyed by (KIND FROM-PC TO-PC)."
@@ -74,20 +115,36 @@
 
 When TAIL-P is true, replace the current leaf frame instead of pushing a new one."
   (when (and (%vm-profile-enabled-p state) label)
-    (incf (gethash label (vm-get-profile-call-counts state) 0))
-    (if tail-p
-        (if (%vm-profile-call-stack state)
-            (setf (first (%vm-profile-call-stack state)) label)
-            (%set-vm-profile-call-stack state (list label)))
-        (%set-vm-profile-call-stack state (cons label (%vm-profile-call-stack state))))))
+    (let ((now (%vm-profile-now-ns)))
+      (incf (gethash label (vm-get-profile-call-counts state) 0))
+      (if tail-p
+          (if (%vm-profile-call-stack state)
+              (progn
+                (%vm-profile-finish-call state
+                                         (first (%vm-profile-call-stack state))
+                                         (first (%vm-profile-call-start-times state)))
+                (setf (first (%vm-profile-call-stack state)) label)
+                (if (%vm-profile-call-start-times state)
+                    (setf (first (%vm-profile-call-start-times state)) now)
+                    (%set-vm-profile-call-start-times state (list now))))
+              (progn
+                (%set-vm-profile-call-stack state (list label))
+                (%set-vm-profile-call-start-times state (list now))))
+          (progn
+            (%set-vm-profile-call-stack state (cons label (%vm-profile-call-stack state)))
+            (%set-vm-profile-call-start-times state
+                                              (cons now (%vm-profile-call-start-times state))))))))
 
 (defun vm-profile-return (state)
   "Record return from the current sampled function frame."
-  (let ((stack (%vm-profile-call-stack state)))
+  (let ((stack (%vm-profile-call-stack state))
+        (starts (%vm-profile-call-start-times state)))
     (when (and (%vm-profile-enabled-p state)
-               stack
-               (> (length stack) 1))
-      (%set-vm-profile-call-stack state (rest stack)))))
+                stack
+                (> (length stack) 1))
+      (%vm-profile-finish-call state (first stack) (first starts))
+      (%set-vm-profile-call-stack state (rest stack))
+      (%set-vm-profile-call-start-times state (rest starts)))))
 
 (defun vm-profile-sample (state)
   "Take one lightweight stack sample for STATE."

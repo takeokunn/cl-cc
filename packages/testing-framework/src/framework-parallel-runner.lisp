@@ -275,6 +275,7 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
                        any-fail)))))
       ;; Cleanup: cancel the deadline-killer thread before calling uiop:quit,
       ;; so it exits promptly rather than blocking on the remaining sleep time.
+      (when coverage (disable-coverage))
       (sb-thread:with-mutex (killer-lock) (setf killer-live nil))
       (when killer-sem (sb-thread:signal-semaphore killer-sem))))))
 

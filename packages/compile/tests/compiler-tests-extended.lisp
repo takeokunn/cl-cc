@@ -134,9 +134,17 @@
 (deftest-compile compile-array-integer-results
   "make-array, setf-bit, and search return integer results."
   :cases (("initial-contents" 20 "(let ((a (make-array 3 :initial-contents '(10 20 30)))) (aref a 1))")
-          ("initial-element"   7 "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")
-          ("setf-bit"          1 "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")
-          ("search-vector"     1 "(search '(2 3) '(1 2 3 4))"))
+           ("initial-element"   7 "(let ((a (make-array 4 :initial-element 7))) (aref a 3))")
+           ("setf-bit"          1 "(let ((bv (make-array 4))) (setf (bit bv 2) 1) (bit bv 2))")
+           ("search-vector"     1 "(search #(2 3) #(1 2 3 4))")
+           ("search-vector-from-end" 3 "(search #(2) #(1 2 3 2) :from-end t)"))
+  )
+
+(deftest-compile compile-make-array-keywords
+  "make-array keyword arguments survive codegen and reach vm-make-array."
+  :cases (("dynamic-fill-pointer" 2 "(let ((fp 2)) (let ((v (make-array 5 :fill-pointer fp :adjustable t))) (fill-pointer v)))")
+          ("dynamic-element-type" 0 "(let ((ty 'character)) (let ((a (make-array 2 :element-type ty))) (char-code (aref a 0))))")
+          ("displaced-to"         9 "(let ((base (vector 1 2 3))) (let ((a (make-array 2 :displaced-to base))) (setf (aref a 1) 9) (aref base 1)))"))
   )
 
 (deftest compile-write-to-string-keywords

@@ -456,8 +456,475 @@
             (setf entry-seen-p t)))
         (let ((ret-reg (funcall fresh-reg)))
           (append (nreverse result)
-                  (list (make-vm-label :name *opt-safepoint-label*)
-                        (make-vm-const :dst ret-reg :value 0)
-                        (make-vm-ret :reg ret-reg)))))))
+                   (list (make-vm-label :name *opt-safepoint-label*)
+                         (make-vm-const :dst ret-reg :value 0)
+                          (make-vm-ret :reg ret-reg)))))))
+
+;;;; ─── FR-226: Auto-Vectorization ─────────────────────────────────────────
+
+(defparameter *opt-simd-lane-count* 4
+  "Default SIMD lane count used by conservative strip-mined vector loops.")
+
+(defparameter *opt-autovec-label-prefix* "__clcc_autovec_"
+  "Prefix for generated auto-vectorization remainder labels.")
+
+(defstruct (vm-simd-vector-op
+            (:constructor make-vm-simd-vector-op
+                (&key op dst-array lhs-array rhs-array index-reg lanes)))
+  "Optimizer/backend handoff for one independent vectorized array operation.
+
+Semantics: for LANES elements starting at INDEX-REG, compute
+  DST-ARRAY[i+k] = (OP LHS-ARRAY[i+k] RHS-ARRAY[i+k])
+for k in [0, LANES).  The interpreter does not execute this marker; native
+backends lower it to target SIMD instructions, while the scalar remainder loop
+preserves tail semantics."
+  op dst-array lhs-array rhs-array index-reg lanes)
+
+(defmethod instruction->sexp ((inst vm-simd-vector-op))
+  (list :simd-vector-op
+        (vm-simd-vector-op-op inst)
+        (vm-simd-vector-op-dst-array inst)
+        (vm-simd-vector-op-lhs-array inst)
+        (vm-simd-vector-op-rhs-array inst)
+        (vm-simd-vector-op-index-reg inst)
+        (vm-simd-vector-op-lanes inst)))
+
+(defun %opt-autovec-idempotent-p (instructions)
+  "Return T when auto-vectorization markers are already present."
+  (some (lambda (inst)
+          (or (typep inst 'vm-simd-vector-op)
+              (and (typep inst 'vm-label)
+                   (let ((name (vm-name inst)))
+                     (and (stringp name)
+                          (<= (length *opt-autovec-label-prefix*) (length name))
+                          (string= *opt-autovec-label-prefix* name
+                                   :end2 (length *opt-autovec-label-prefix*)))))))
+        instructions))
+
+(defun %opt-autovec-cmp-inst-p (inst)
+  "T when INST is a supported counted-loop comparison."
+  (typep inst '(or vm-lt vm-le)))
+
+(defun %opt-autovec-clone-cmp (inst dst lhs rhs)
+  "Clone supported comparison INST with new DST/LHS/RHS registers."
+  (typecase inst
+    (vm-lt (make-vm-lt :dst dst :lhs lhs :rhs rhs))
+    (vm-le (make-vm-le :dst dst :lhs lhs :rhs rhs))))
+
+(defun %opt-autovec-op-kind (inst)
+  "Return a backend-neutral SIMD op keyword for scalar binary INST, or NIL."
+  (typecase inst
+    ((or vm-add vm-integer-add vm-add-checked) :add)
+    ((or vm-sub vm-integer-sub vm-sub-checked) :sub)
+    ((or vm-mul vm-integer-mul vm-mul-checked) :mul)
+    (vm-logand :logand)
+    (vm-logior :logior)
+    (vm-logxor :logxor)
+    (vm-min :min)
+    (vm-max :max)))
+
+(defun %opt-autovec-external-jump-to-label-p (vec label-name start end)
+  "Return T when LABEL-NAME has a jump target outside [START,END]."
+  (loop for i from 0 below (length vec)
+        thereis (and (not (and (<= start i) (<= i end)))
+                     (let ((inst (aref vec i)))
+                       (and (typep inst '(or vm-jump vm-jump-zero))
+                            (equal (vm-label-name inst) label-name))))))
+
+(defun %opt-autovec-array-loads (body iv-reg)
+  "Return a table mapping load destination registers to source array registers."
+  (let ((loads (make-hash-table :test #'eq)))
+    (dolist (inst body loads)
+      (when (and (typep inst 'vm-aref)
+                 (eq (vm-index-reg inst) iv-reg))
+        (setf (gethash (vm-dst inst) loads) (vm-array-reg inst))))))
+
+(defun %opt-autovec-find-map-op (body iv-reg)
+  "Detect independent array map scalar ops in BODY and return SIMD markers.
+
+Accepted scalar shape inside one counted loop iteration:
+  (aref t1 a i) (aref t2 b i) (<binop> v t1 t2) (aset c i v)
+Multiple such chains are allowed as long as they use the loop IV only for array
+indices and do not carry values between iterations."
+  (let ((loads (%opt-autovec-array-loads body iv-reg))
+        (producers (make-hash-table :test #'eq))
+        (simd nil))
+    (dolist (inst body)
+      (let ((op (%opt-autovec-op-kind inst)))
+        (when op
+          (multiple-value-bind (lhs-array lhs-ok) (gethash (vm-lhs inst) loads)
+            (multiple-value-bind (rhs-array rhs-ok) (gethash (vm-rhs inst) loads)
+              (when (and lhs-ok rhs-ok)
+                (setf (gethash (vm-dst inst) producers)
+                      (list op lhs-array rhs-array))))))))
+    (dolist (inst body)
+      (when (and (typep inst 'vm-aset)
+                 (eq (vm-index-reg inst) iv-reg))
+        (destructuring-bind (&optional op lhs-array rhs-array)
+            (gethash (vm-val-reg inst) producers)
+          (when op
+            (push (make-vm-simd-vector-op :op op
+                                          :dst-array (vm-array-reg inst)
+                                          :lhs-array lhs-array
+                                          :rhs-array rhs-array
+                                          :index-reg iv-reg
+                                          :lanes *opt-simd-lane-count*)
+                  simd)))))
+    (nreverse simd)))
+
+(defun %opt-autovec-vector-limit (init limit step lanes cmp-inst)
+  "Return strip-mined vector-limit value for compile-time counted loops."
+  (let ((trip (and init limit step
+                   (= step 1)
+                   (%opt-loop-unroll-trip-count cmp-inst init limit step))))
+    (when (and trip (>= trip lanes))
+      (+ init (* lanes (floor trip lanes))))))
+
+(defun %opt-autovec-emit-vector-loop (header cmp-inst jz-inst body step-inst exit-label
+                                             vec-limit-reg lane-reg remainder-label simd-ops result)
+  "Emit vector loop plus scalar remainder loop into reversed RESULT."
+  (push header result)
+  (push (%opt-autovec-clone-cmp cmp-inst (vm-dst cmp-inst) (vm-lhs cmp-inst) vec-limit-reg) result)
+  (push (make-vm-jump-zero :reg (vm-reg jz-inst) :label remainder-label) result)
+  (dolist (op simd-ops) (push op result))
+  (push (make-vm-add :dst (vm-dst step-inst) :lhs (vm-lhs step-inst) :rhs lane-reg) result)
+  (push (make-vm-jump :label (vm-name header)) result)
+  (push (make-vm-label :name remainder-label) result)
+  (push cmp-inst result)
+  (push (make-vm-jump-zero :reg (vm-reg jz-inst) :label exit-label) result)
+  (dolist (inst body) (push inst result))
+  (push (make-vm-jump :label remainder-label) result)
+  result)
+
+(defun opt-pass-auto-vectorization (instructions)
+  "FR-226: vectorize independent scalar array ops in counted loops.
+
+The pass recognizes a conservative one-dimensional array-map loop, emits a SIMD
+vector loop strip-mined by `*opt-simd-lane-count*`, and retains a scalar
+remainder loop for tail iterations.  Dynamic trip-count loops are left unchanged;
+compile-time trip counts make the generated vector-limit constant explicit."
+  (if (%opt-autovec-idempotent-p instructions)
+      instructions
+      (let* ((vec (coerce instructions 'vector))
+             (n (length vec))
+             (fresh-reg (%opt-fresh-register-generator instructions))
+             (result nil)
+             (i 0)
+             (changed nil)
+             (serial 0))
+        (loop while (< i n)
+              do (let ((cur (aref vec i)))
+                   (if (and (typep cur 'vm-label)
+                            (<= (+ i 5) (1- n)))
+                       (let* ((header cur)
+                              (cmp-inst (aref vec (+ i 1)))
+                              (jz-inst (aref vec (+ i 2)))
+                              (header-name (vm-name header)))
+                         (if (and (%opt-autovec-cmp-inst-p cmp-inst)
+                                  (typep jz-inst 'vm-jump-zero)
+                                  (eq (vm-reg jz-inst) (vm-dst cmp-inst)))
+                             (let* ((exit-name (vm-label-name jz-inst))
+                                    (exit-pos (cfg-find-label-position vec n exit-name))
+                                    (back-pos (and exit-pos (1- exit-pos)))
+                                    (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
+                               (if (and exit-pos
+                                        (> exit-pos (+ i 4))
+                                        (typep back-inst 'vm-jump)
+                                        (equal (vm-label-name back-inst) header-name)
+                                        (not (%opt-autovec-external-jump-to-label-p vec header-name i exit-pos)))
+                                   (let* ((body (loop for j from (+ i 3) below back-pos collect (aref vec j)))
+                                          (step-inst (car (last body)))
+                                          (const-env (%opt-build-const-env-up-to vec i)))
+                                     (if (and (typep step-inst 'vm-add)
+                                              (eq (vm-dst step-inst) (vm-lhs step-inst))
+                                              (eq (vm-dst step-inst) (vm-lhs cmp-inst)))
+                                         (let* ((iv-reg (vm-lhs cmp-inst))
+                                                (lim-reg (vm-rhs cmp-inst))
+                                                (step-reg (vm-rhs step-inst))
+                                                (init (gethash iv-reg const-env))
+                                                (limit (gethash lim-reg const-env))
+                                                (step (gethash step-reg const-env))
+                                                (vector-limit (%opt-autovec-vector-limit
+                                                               init limit step *opt-simd-lane-count* cmp-inst))
+                                                (simd-ops (%opt-autovec-find-map-op (butlast body) iv-reg)))
+                                           (if (and vector-limit simd-ops)
+                                               (let ((vec-limit-reg (funcall fresh-reg))
+                                                     (lane-reg (funcall fresh-reg))
+                                                     (remainder-label (format nil "~A~D" *opt-autovec-label-prefix* serial)))
+                                                 (push (make-vm-const :dst vec-limit-reg :value vector-limit) result)
+                                                 (push (make-vm-const :dst lane-reg :value *opt-simd-lane-count*) result)
+                                                 (setf result (%opt-autovec-emit-vector-loop
+                                                               header cmp-inst jz-inst body step-inst exit-name
+                                                               vec-limit-reg lane-reg remainder-label simd-ops result))
+                                                 (setf i exit-pos changed t)
+                                                 (push (aref vec i) result)
+                                                 (incf i)
+                                                 (incf serial))
+                                               (progn (push cur result) (incf i))))
+                                         (progn (push cur result) (incf i))))
+                                   (progn (push cur result) (incf i))))
+                             (progn (push cur result) (incf i))))
+                       (progn (push cur result) (incf i)))))
+        (if changed (nreverse result) instructions))))
+
+;;;; ─── Branch Prediction Weight Analysis ─────────────────────────────────
+
+(defparameter *opt-cold-block-instruction-types*
+  '(vm-signal vm-error-instruction vm-cerror vm-warn)
+  "Instruction types that make their containing basic block cold/unlikely.")
+
+(defstruct (vm-branch-weighted-jump-zero
+            (:include vm-jump-zero)
+            (:constructor make-vm-branch-weighted-jump-zero
+                (&key reg label branch-weight)))
+  "A vm-jump-zero carrying optimizer-only branch prediction metadata."
+  (branch-weight nil))
+
+(defun opt-branch-weight (inst)
+  "Return branch prediction metadata for INST, or NIL when it is unannotated."
+  (when (typep inst 'vm-branch-weighted-jump-zero)
+    (vm-branch-weighted-jump-zero-branch-weight inst)))
+
+(defun %opt-cold-block-inst-p (inst)
+  "Return T when INST identifies an error/diagnostic cold path."
+  (member (type-of inst) *opt-cold-block-instruction-types* :test #'eq))
+
+(defun %opt-label-positions (instructions)
+  "Return a label-name → instruction-index table for INSTRUCTIONS."
+  (let ((positions (make-hash-table :test #'equal)))
+    (loop for inst in instructions
+          for i from 0
+          when (typep inst 'vm-label)
+            do (setf (gethash (vm-name inst) positions) i))
+    positions))
+
+(defun %opt-target-block-has-terminal-p (vec start-index predicate)
+  "Return T when target block starting at START-INDEX contains a matching terminator."
+  (when start-index
+    (loop for i from start-index below (length vec)
+          for inst = (aref vec i)
+          do (cond
+               ((and (> i start-index) (typep inst 'vm-label))
+                (return nil))
+               ((funcall predicate inst)
+                (return t)))
+          finally (return nil))))
+
+(defun %opt-cold-labels (instructions)
+  "Return a table of labels whose basic blocks contain cold instructions."
+  (let ((cold-labels (make-hash-table :test #'equal))
+        (current-label nil)
+        (current-cold-p nil))
+    (labels ((flush-current ()
+               (when (and current-label current-cold-p)
+                 (setf (gethash current-label cold-labels) t))))
+      (dolist (inst instructions cold-labels)
+        (cond
+          ((typep inst 'vm-label)
+           (flush-current)
+           (setf current-label (vm-name inst)
+                 current-cold-p nil))
+          ((%opt-cold-block-inst-p inst)
+           (setf current-cold-p t))))
+      (flush-current))))
+
+(defun %opt-branch-weight-for-jump-zero (inst index vec label-positions cold-labels)
+  "Return static branch metadata for INST at INDEX.
+
+Values:
+  :UNLIKELY     taken target is a cold diagnostics/error block
+  :LIKELY-TAKEN taken target is a loop back-edge
+  :NOT-TAKEN    taken target is a return/exit edge"
+  (let* ((target-label (vm-label-name inst))
+         (target-index (gethash target-label label-positions)))
+    (cond
+      ((gethash target-label cold-labels)
+       :unlikely)
+      ((and target-index (< target-index index))
+       :likely-taken)
+      ((%opt-target-block-has-terminal-p
+        vec target-index
+        (lambda (target-inst)
+          (or (typep target-inst 'vm-ret)
+              (typep target-inst 'vm-halt))))
+       :not-taken)
+      (t nil))))
+
+(defun %opt-annotate-jump-zero (inst weight)
+  "Return INST with BRANCH-WEIGHT metadata when WEIGHT is non-NIL."
+  (if weight
+      (make-vm-branch-weighted-jump-zero :reg (vm-reg inst)
+                                         :label (vm-label-name inst)
+                                         :branch-weight weight)
+      inst))
+
+(defun opt-analyze-branch-weights (instructions)
+  "Annotate conditional branches with static branch-prediction metadata.
+
+The analysis is intentionally non-transforming: instruction order and control-flow
+targets are preserved.  It marks branches to blocks containing VM condition/error
+signaling instructions as cold/unlikely, loop back-edge branches as likely taken,
+and branches directly targeting return/exit blocks as not-taken."
+  (let* ((vec (coerce instructions 'vector))
+         (label-positions (%opt-label-positions instructions))
+         (cold-labels (%opt-cold-labels instructions)))
+    (loop for inst in instructions
+          for i from 0
+          collect (if (typep inst 'vm-jump-zero)
+                      (%opt-annotate-jump-zero
+                       inst
+                       (%opt-branch-weight-for-jump-zero
+                        inst i vec label-positions cold-labels))
+                       inst))))
+
+;;; ─── Software Pipelining (FR-200) ────────────────────────────────────────
+
+(defparameter *opt-software-pipeline-label-prefix* "__clcc_swp_"
+  "Prefix for labels generated by FR-200 software pipelining.")
+
+(defun %opt-swp-loop-cmp-p (inst)
+  "Return T when INST is a comparison supported by software pipelining."
+  (typep inst '(or vm-lt vm-le vm-gt vm-ge vm-eq vm-num-eq)))
+
+(defun %opt-swp-generated-p (instructions)
+  "Return T when INSTRUCTIONS already contain FR-200 generated labels."
+  (%opt-generated-label-present-p instructions *opt-software-pipeline-label-prefix*))
+
+(defun %opt-swp-parse-loop-at (vec i)
+  "Parse the canonical counted-loop shape used by loop optimizers.
+
+Expected shape:
+  Lh: cmp/jz body step jump Lh Lexit:
+The returned value is a plist to avoid depending on later roadmap structs."
+  (when (and (< (+ i 5) (length vec))
+             (typep (aref vec i) 'vm-label)
+             (%opt-swp-loop-cmp-p (aref vec (1+ i)))
+             (typep (aref vec (+ i 2)) 'vm-jump-zero))
+    (let* ((header (aref vec i))
+           (cmp (aref vec (1+ i)))
+           (jz (aref vec (+ i 2)))
+           (header-name (vm-name header))
+           (exit-name (vm-label-name jz))
+           (exit-index (cfg-find-label-position vec (length vec) exit-name)))
+      (when (and exit-index (> exit-index (+ i 4)))
+        (let* ((back-index (1- exit-index))
+               (back (aref vec back-index))
+               (body (loop for k from (+ i 3) below back-index collect (aref vec k)))
+               (step (car (last body))))
+          (when (and (typep back 'vm-jump)
+                     (equal (vm-label-name back) header-name)
+                     (typep step 'vm-add)
+                     (eq (vm-dst step) (vm-lhs step))
+                     (eq (vm-dst step) (vm-lhs cmp))
+                     (eq (vm-reg jz) (vm-dst cmp))
+                     (not (%opt-has-external-jump-to-label-p vec header-name i exit-index)))
+            (list :head-index i
+                  :cmp-index (1+ i)
+                  :jz-index (+ i 2)
+                  :back-index back-index
+                  :exit-index exit-index
+                  :head-label header-name
+                  :exit-label exit-name
+                  :body body)))))))
+
+(defun %opt-swp-safe-core-p (core)
+  "Return T when CORE can be modulo-scheduled without semantic risk."
+  (and (>= (length core) 2)
+       (every (lambda (inst)
+                (and (opt-inst-cse-eligible-p inst)
+                     (member (vm-inst-effect-kind inst) '(:pure :read-only) :test #'eq)
+                     (not (%opt-control-or-label-p inst))))
+              core)))
+
+(defun opt-modulo-schedule-loop-body (body &key (issue-width 1))
+  "Build the DDG for BODY, compute MII, and return a modulo schedule.
+
+Values are (scheduled-core ddg mii).  BODY may include the induction update as
+its final instruction; the scheduler excludes that update and lets callers emit
+it at the end of the kernel."
+  (let ((core (butlast body)))
+    (if (not (%opt-swp-safe-core-p core))
+        (values core (cfg-build-ddg core :latency-fn #'%opt-inst-latency) 1)
+        (let* ((ddg (cfg-build-ddg core :latency-fn #'%opt-inst-latency))
+               (mii (cfg-compute-mii ddg :issue-width issue-width))
+               (scheduled
+                 (sort (loop for node across ddg
+                             collect (list :inst (opt-ddg-node-inst node)
+                                           :index (opt-ddg-node-index node)
+                                           :slot (mod (opt-ddg-node-index node) mii)
+                                           :latency (opt-ddg-node-latency node)))
+                       (lambda (a b)
+                         (or (< (getf a :slot) (getf b :slot))
+                             (and (= (getf a :slot) (getf b :slot))
+                                  (> (getf a :latency) (getf b :latency)))
+                             (and (= (getf a :slot) (getf b :slot))
+                                  (= (getf a :latency) (getf b :latency))
+                                  (< (getf a :index) (getf b :index))))))))
+          (values (mapcar (lambda (entry) (getf entry :inst)) scheduled) ddg mii)))))
+
+(defun %opt-swp-loop-sequence (vec lp)
+  "Return original instruction sequence for LP from VEC."
+  (loop for k from (getf lp :head-index) to (getf lp :exit-index)
+        collect (aref vec k)))
+
+(defun %opt-swp-rewrite-loop (vec lp counter)
+  "Generate prologue/kernel/epilogue layout for one scheduled loop."
+  (let* ((body (getf lp :body))
+         (step (car (last body))))
+    (multiple-value-bind (scheduled-core ddg mii)
+        (opt-modulo-schedule-loop-body body)
+      (declare (ignore ddg mii))
+      (if (or (null scheduled-core)
+              (not (%opt-swp-safe-core-p (butlast body))))
+          (values (%opt-swp-loop-sequence vec lp) nil)
+          (let* ((base (format nil "~A~D" *opt-software-pipeline-label-prefix* counter))
+                 (prologue-label (format nil "~A_prologue" base))
+                 (kernel-label (format nil "~A_kernel" base))
+                 (epilogue-label (format nil "~A_epilogue" base))
+                 (jz (aref vec (getf lp :jz-index))))
+            (values (append (list (aref vec (getf lp :head-index))
+                                  (aref vec (getf lp :cmp-index))
+                                  (make-vm-jump-zero :reg (vm-reg jz) :label epilogue-label)
+                                  (make-vm-label :name prologue-label))
+                            ;; Prime the pipeline for the current iteration.
+                            (subseq scheduled-core 0 1)
+                            (list (make-vm-label :name kernel-label))
+                            ;; Kernel carries the remaining modulo slots, then the IV update.
+                            (append (rest scheduled-core) (list step))
+                            (list (aref vec (getf lp :back-index))
+                                  (make-vm-label :name epilogue-label)
+                                  (aref vec (getf lp :exit-index))))
+                    t))))))
+
+(defun opt-pass-software-pipelining (instructions)
+  "FR-200: modulo-schedule canonical loop bodies.
+
+The pass builds a DDG for each pure counted-loop body, computes MII, and emits a
+prologue/kernel/epilogue layout.  It is intentionally conservative: side-effecting
+or non-canonical loops are preserved, and generated labels make the pass
+idempotent in the convergence pipeline."
+  (if (%opt-swp-generated-p instructions)
+      instructions
+      (let* ((vec (coerce instructions 'vector))
+             (n (length vec))
+             (out nil)
+             (changed nil)
+             (counter 0)
+             (i 0))
+        (loop while (< i n)
+              do (let ((lp (%opt-swp-parse-loop-at vec i)))
+                   (if (null lp)
+                       (progn
+                         (push (aref vec i) out)
+                         (incf i))
+                       (multiple-value-bind (seq rewritten-p)
+                           (%opt-swp-rewrite-loop vec lp counter)
+                         (dolist (inst seq)
+                           (push inst out))
+                         (when rewritten-p
+                           (incf counter)
+                           (setf changed t))
+                         (setf i (1+ (getf lp :exit-index)))))))
+        (if changed (nreverse out) instructions))))
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────

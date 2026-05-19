@@ -5,6 +5,15 @@
 
 #-cl-cc-self-hosting
 (export '(run-tests
+          enable-coverage
+          disable-coverage
+          coverage-enabled-p
+          with-coverage
+          generate-coverage-report
+          write-lcov-report
+          coverage-report-index-path
+          coverage-report-exists-p
+          coverage-report-empty-p
           cl-cc-suite
           cl-cc-unit-suite
           cl-cc-integration-suite
@@ -25,6 +34,9 @@
           assert-type
           assert-signals
           assert-values
+          assert-faster-than
+          assert-no-consing
+          assert-no-allocation
           assert-type-equal
           assert-unifies
           assert-not-unifies
@@ -43,6 +55,11 @@
           deftest-compile
           deftest-codegen
           deftest-vm
+          defbenchmark
+          run-benchmark
+          benchmark-statistics
+          benchmark-result-json
+          write-benchmark-result-json
           testing
           defbefore
           defafter
@@ -51,9 +68,27 @@
           set-suite-test-timeout!
           skip
           pending
-          deftest-fuzz
-          assert-no-crash
-          assert-terminates
+           deftest-fuzz
+           shrink
+           shrink-integer
+           shrink-list
+           shrink-string
+           minimize-failing-input
+           check-property-with-shrinking
+           register-type-generator
+           deftype-generator
+           generator-for-type
+           generate-for-type
+           generate-from-type-annotation
+           make-pbt-command
+           pbt-command-p
+           pbt-command-name
+           pbt-command-precondition
+           pbt-command-run
+           generate-stateful-command-sequence
+           run-stateful-command-sequence
+           assert-no-crash
+           assert-terminates
           defmetamorphic
           definvariant
           run-mutation-test

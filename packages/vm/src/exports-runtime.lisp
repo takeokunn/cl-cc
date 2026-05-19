@@ -20,9 +20,11 @@
    vm-closure-ref-idx
    vm-closure-reg
    vm-closure-index
-   vm-program
-   vm-program-instructions
-   vm-program-result-register
+    vm-program
+    vm-program-instructions
+    vm-program-result-register
+    vm-program-calling-convention
+    vm-program-function-conventions
    vm-state
    vm-state-registers
    vm-state-heap
@@ -35,22 +37,24 @@
    vm-heap-set
    vm-reg-get
    vm-reg-set
-   execute-instruction
-   instruction->sexp
+    execute-instruction
+    vm-print-backtrace
+    instruction->sexp
    sexp->instruction
    build-label-table
    vm-dst
    vm-src
    vm-lhs
    vm-rhs
-   vm-name
-   vm-label-name
-   vm-reg
+    vm-name
+    vm-label-name
+    vm-reg
    vm-value
    vm-captured-vars
-   vm-func-reg
-   vm-args
-   vm-var-name
+    vm-func-reg
+    vm-args
+    vm-tail-p
+    vm-var-name
    vm-null-p
    vm-select-cond-reg
    vm-select-then-reg

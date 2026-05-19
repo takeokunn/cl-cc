@@ -11,6 +11,7 @@ optimize-instructions."
   (list :pass-pipeline      (pipeline-opts-pass-pipeline opts)
         :speed              (pipeline-opts-speed opts)
         :inline-threshold-scale (pipeline-opts-inline-threshold-scale opts)
+        :block-compile      (pipeline-opts-block-compile opts)
         :print-pass-timings (pipeline-opts-print-pass-timings opts)
         :timing-stream      (pipeline-opts-timing-stream opts)
         :print-pass-stats   (pipeline-opts-print-pass-stats opts)
@@ -86,14 +87,20 @@ Each location is a list (source-file source-line source-column)."
         (funcall thunk))
       (funcall thunk)))
 
-(defun %type-check-safe (ast type-check)
-  "Run type inference on AST; on error warn unless TYPE-CHECK is :strict."
+(defun %type-check-safe (ctx ast type-check)
+  "Run type inference on AST; on error record a warning unless TYPE-CHECK is :strict."
   (when type-check
     (handler-case (type-check-ast ast)
       (error (e)
         (if (eq type-check :strict)
             (error e)
-            (progn (warn "Type check warning: ~A" e) nil))))))
+            (progn
+              (push (make-diagnostic :severity :warning
+                                     :message (format nil "Type check warning: ~A" e)
+                                     :span (cons 0 0)
+                                     :error-code "W0002")
+                    (ctx-diagnostics ctx))
+              nil))))))
 
 
 (defun %definition-form-p (form)
@@ -296,11 +303,69 @@ The runtime keys map logical plan IDs onto VM profile keys:
        instructions
        (cl-cc/optimize:opt-pgo-build-counter-plan entry successors)))))
 
+(defun %pgo-type-feedback-rows (profile-data)
+  "Return FR-058 type-feedback rows from PROFILE-DATA."
+  (when (consp profile-data)
+    (getf profile-data :type-feedback)))
+
+(defun %pgo-dominant-types-by-pc (profile-data)
+  "Return an alist of PC -> dominant specializer key for >90% type feedback sites."
+  (let ((by-pc (make-hash-table :test #'eql)))
+    (dolist (row (%pgo-type-feedback-rows profile-data))
+      (destructuring-bind (site-key . count) row
+        (when (and (consp site-key)
+                   (eq (first site-key) :generic-call)
+                   (integerp (second site-key))
+                   (plusp count))
+          (push (cons (third site-key) count)
+                (gethash (second site-key) by-pc)))))
+    (let ((dominant nil))
+      (maphash
+       (lambda (pc rows)
+         (let* ((total (reduce #'+ rows :key #'cdr :initial-value 0))
+                (best (car (sort (copy-list rows) #'> :key #'cdr))))
+           (when (and (plusp total)
+                      best
+                      (> (/ (float (cdr best)) total)
+                         cl-cc/vm::+ic-pgo-dominance-threshold+))
+             (push (cons pc (car best)) dominant))))
+       by-pc)
+      dominant)))
+
+(defun %pgo-apply-type-feedback-to-instructions (instructions profile-data)
+  "Annotate generic-call instructions with PGO-dominant type keys from PROFILE-DATA."
+  (when (and instructions profile-data)
+    (let ((dominant (%pgo-dominant-types-by-pc profile-data)))
+      (loop for inst in instructions
+            for pc from 0
+            for key = (cdr (assoc pc dominant :test #'eql))
+            when (and key (typep inst 'cl-cc/vm:vm-generic-call))
+              do (setf (cl-cc/vm::vm-pgo-specializer inst) key))))
+  instructions)
+
+(defun %pgo-apply-type-feedback-to-result (result opts)
+  "Apply FR-058 type-feedback PGO annotations to RESULT in-place."
+  (let ((profile-data (pipeline-opts-pgo-profile-data opts)))
+    (when profile-data
+      (%pgo-apply-type-feedback-to-instructions
+       (cl-cc/compile:compilation-result-vm-instructions result)
+       profile-data)
+      (%pgo-apply-type-feedback-to-instructions
+       (cl-cc/compile:compilation-result-optimized-instructions result)
+       profile-data)
+      (%pgo-apply-type-feedback-to-instructions
+       (cl-cc/vm:vm-program-instructions
+        (cl-cc/compile:compilation-result-program result))
+       profile-data)))
+  result)
+
 (defun %make-direct-compilation-result (ctx result-reg inferred-type cps ast opts)
   "Build the normal direct-path compilation result from CTX and RESULT-REG." 
   (let* ((instructions (nreverse (ctx-instructions ctx)))
-         (full-instrs  (append instructions (list (make-vm-halt :reg result-reg))))
-         (pgo-counter-plan (%build-pgo-counter-plan-from-instructions full-instrs)))
+          (full-instrs  (append instructions (list (make-vm-halt :reg result-reg))))
+          (pgo-counter-plan (%build-pgo-counter-plan-from-instructions full-instrs)))
+    (%pgo-apply-type-feedback-to-instructions full-instrs
+                                              (pipeline-opts-pgo-profile-data opts))
     (multiple-value-bind (optimized-instrs leaf-p)
         (apply #'optimize-instructions full-instrs (%opts->optimize-kwargs opts))
       (if *repl-capture-label-counter*
@@ -319,10 +384,11 @@ The runtime keys map logical plan IDs onto VM profile keys:
          :type                   result-type
          :type-env               (ctx-type-env ctx)
          :cps                    cps
-         :ast                    ast
-         :vm-instructions        full-instrs
-         :optimized-instructions optimized-instrs
-         :pgo-counter-plan       pgo-counter-plan)))))
+          :ast                    ast
+          :vm-instructions        full-instrs
+          :optimized-instructions optimized-instrs
+          :warnings               (nreverse (ctx-diagnostics ctx))
+          :pgo-counter-plan       pgo-counter-plan)))))
 
 (defun %compile-string-forms (forms opts)
   "Compile already-parsed FORMS through the single-form or top-level path."
@@ -366,12 +432,13 @@ value carries top-level source locations for later AST annotation.
 
 (defun compile-expression (expr &key (target :x86_64) type-check (safety 1)
                                       speed (inline-threshold-scale 1)
-                                       pass-pipeline print-pass-timings timing-stream
+                                      block-compile
+                                       pass-pipeline print-pass-timings timing-stream coverage
                                       print-opt-remarks opt-remarks-stream
                                       (opt-remarks-mode :all)
                                       print-pass-stats stats-stream trace-json-stream
-                                       retpoline spectre-mitigations stack-protector shadow-stack
-                                        asan msan tsan ubsan hwasan)
+                                        retpoline spectre-mitigations stack-protector shadow-stack
+                                         asan msan tsan ubsan hwasan pgo-profile-data)
   "Compile EXPR and return a compilation-result object.
 
 EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
@@ -382,10 +449,12 @@ keywords are forwarded to later pipeline stages. The result contains the VM
 program, emitted assembly text, AST, optional inferred type, instruction
 streams, and PGO counter plan."
   (let* ((opts (%make-pipeline-opts
-                 :target target :type-check type-check :safety safety
-                  :speed speed
-                 :inline-threshold-scale inline-threshold-scale
+                  :target target :type-check type-check :safety safety
+                   :speed speed
+                  :inline-threshold-scale inline-threshold-scale
+                  :block-compile block-compile
                   :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                  :coverage coverage
                   :timing-stream timing-stream :print-pass-stats print-pass-stats
                   :stats-stream stats-stream :trace-json-stream trace-json-stream
                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
@@ -398,28 +467,33 @@ streams, and PGO counter plan."
                    :msan msan
                    :tsan tsan
                    :ubsan ubsan
-                   :hwasan hwasan))
+                   :hwasan hwasan
+                   :pgo-profile-data pgo-profile-data))
          (ctx           (make-instance 'compiler-context :safety safety))
          (ast           (optimize-ast (%prepare-ast expr)))
-         (inferred-type (%type-check-safe ast type-check)))
+         (inferred-type (%type-check-safe ctx ast type-check)))
     (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
     (multiple-value-bind (cps cps-result)
         (%maybe-compile-expression-via-cps ast opts)
-      (if cps-result
-          (make-compilation-result
-           :program                (compilation-result-program cps-result)
-           :assembly               (compilation-result-assembly cps-result)
-           :type                   (or (and type-check inferred-type)
-                                        (compilation-result-type cps-result))
-           :type-env               (compilation-result-type-env cps-result)
-           :cps                    cps
-           :ast                    ast
-           :vm-instructions        (compilation-result-vm-instructions cps-result)
-           :optimized-instructions (compilation-result-optimized-instructions cps-result)
-           :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
-                                    (compilation-result-vm-instructions cps-result)))
-          (let ((result-reg (compile-ast ast ctx)))
-            (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts))))))
+      (%pgo-apply-type-feedback-to-result
+       (if cps-result
+           (make-compilation-result
+            :program                (compilation-result-program cps-result)
+            :assembly               (compilation-result-assembly cps-result)
+            :type                   (or (and type-check inferred-type)
+                                         (compilation-result-type cps-result))
+            :type-env               (compilation-result-type-env cps-result)
+            :cps                    cps
+             :ast                    ast
+             :vm-instructions        (compilation-result-vm-instructions cps-result)
+             :optimized-instructions (compilation-result-optimized-instructions cps-result)
+             :warnings               (append (nreverse (ctx-diagnostics ctx))
+                                             (compilation-result-warnings cps-result))
+             :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
+                                      (compilation-result-vm-instructions cps-result)))
+           (let ((result-reg (compile-ast ast ctx)))
+             (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts)))
+       opts))))
 
 (defun %pipeline-ast-declarations-for-optimize-policy (ast)
   "Return declaration list associated with AST when available."
@@ -444,12 +518,13 @@ Uses max(current-speed, local-speed) when local speed is an integer."
     opts))
 
 (defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1)
-                                    source-file speed (inline-threshold-scale 1)
-                                    pass-pipeline print-pass-timings timing-stream
+                                     source-file speed (inline-threshold-scale 1)
+                                     block-compile
+                                    pass-pipeline print-pass-timings timing-stream coverage
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
                                       retpoline spectre-mitigations stack-protector shadow-stack
-                                      asan msan tsan ubsan hwasan)
+                                      asan msan tsan ubsan hwasan pgo-profile-data)
   "Compile SOURCE text and return a compilation-result object.
 
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -460,9 +535,11 @@ arguments are forwarded to the expression, top-level, and optimization stages."
       (parse-source-for-language source language :source-file source-file)
     (let* ((opts  (%make-pipeline-opts
                     :target target :type-check type-check :safety safety
-                    :speed speed
-                    :inline-threshold-scale inline-threshold-scale
+                     :speed speed
+                     :inline-threshold-scale inline-threshold-scale
+                     :block-compile block-compile
                     :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                    :coverage coverage
                     :timing-stream timing-stream :print-pass-stats print-pass-stats
                     :stats-stream stats-stream :trace-json-stream trace-json-stream
                     :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
@@ -475,26 +552,29 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :msan msan
                     :tsan tsan
                     :ubsan ubsan
-                    :hwasan hwasan))
+                    :hwasan hwasan
+                    :pgo-profile-data pgo-profile-data))
            (result (%call-with-source-file-macro-eval
                     (and (eq language :lisp) source-file)
                     (lambda ()
                       (if (eq language :lisp)
                           (%compile-string-forms forms opts)
                           (apply #'compile-toplevel-forms forms (%opts->compile-kwargs opts)))))))
+      (%pgo-apply-type-feedback-to-result result opts)
       (if (and (eq language :lisp) source-locations)
           (%attach-source-locations-to-result result
                                              (%non-in-package-form-locations forms source-locations))
           result))))
 
 (defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1)
-                                                source-file speed (inline-threshold-scale 1)
-                                                 pass-pipeline print-pass-timings timing-stream
+                                                 source-file speed (inline-threshold-scale 1)
+                                                 block-compile
+                                                  pass-pipeline print-pass-timings timing-stream coverage
                                                  print-opt-remarks opt-remarks-stream
                                                  (opt-remarks-mode :all)
                                                 print-pass-stats stats-stream trace-json-stream
                                                    retpoline spectre-mitigations stack-protector shadow-stack
-                                                  asan msan tsan ubsan hwasan)
+                                                   asan msan tsan ubsan hwasan pgo-profile-data)
   "Compile Lisp SOURCE with the standard library forms prepended.
 
 The standard library is obtained from GET-STDLIB-FORMS, combined with parsed
@@ -507,9 +587,11 @@ compilation-result object shape as COMPILE-STRING."
           (values (parse-all-forms source) nil))
     (let* ((opts (%make-pipeline-opts
                    :target target :type-check type-check :safety safety
-                   :speed speed
-                   :inline-threshold-scale inline-threshold-scale
+                    :speed speed
+                    :inline-threshold-scale inline-threshold-scale
+                    :block-compile block-compile
                    :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                   :coverage coverage
                    :timing-stream timing-stream :print-pass-stats print-pass-stats
                    :stats-stream stats-stream :trace-json-stream trace-json-stream
                    :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
@@ -522,7 +604,8 @@ compilation-result object shape as COMPILE-STRING."
                    :msan msan
                    :tsan tsan
                    :ubsan ubsan
-                   :hwasan hwasan))
+                    :hwasan hwasan
+                    :pgo-profile-data pgo-profile-data))
            (*enable-cps-vm-primary-path* nil)
            (stdlib-forms (get-stdlib-forms))
            (all-forms (append stdlib-forms source-forms))
@@ -535,6 +618,7 @@ compilation-result object shape as COMPILE-STRING."
       (setf (cl-cc/compile:compilation-result-pgo-counter-plan result)
             (%build-pgo-counter-plan-from-instructions
              (cl-cc/compile:compilation-result-vm-instructions result)))
+      (%pgo-apply-type-feedback-to-result result opts)
       (if source-locations
           (%attach-source-locations-to-result
            result

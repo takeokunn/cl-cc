@@ -14,10 +14,11 @@
    ;; --- expander-data.lisp --- constant table + accessor/struct maps -----
    #:*constant-table*
     #:*accessor-slot-map*
-    #:*defstruct-read-only-accessor-map*
-    #:*defstruct-slot-registry*
-    #:*defstruct-type-registry*
-    #:*declaim-inline-registry*
+     #:*defstruct-read-only-accessor-map*
+     #:*defstruct-slot-registry*
+     #:*defstruct-type-registry*
+     #:*setf-compound-place-handlers*
+     #:*declaim-inline-registry*
     #:*declaim-optimize-registry*
     #:with-fresh-defstruct-registries
     #:declaration-optimize-quality

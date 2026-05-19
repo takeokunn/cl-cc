@@ -122,7 +122,47 @@
                        :expected expected-list
                        :actual ,actuals
                        :form ',form))
+          t))))
+
+(defmacro assert-faster-than (max-ns &body body)
+  "Assert BODY completes in no more than MAX-NS nanoseconds.
+
+This assertion intentionally performs a single deterministic measurement and is
+intended for focused smoke tests, not statistical performance claims."
+  (let ((limit (gensym "LIMIT"))
+        (start (gensym "START"))
+        (duration (gensym "DURATION")))
+    `(let ((,limit ,max-ns))
+       (check-type ,limit integer)
+       (let ((,start (%benchmark-now-ns)))
+         ,@body
+         (let ((,duration (- (%benchmark-now-ns) ,start)))
+           (when (> ,duration ,limit)
+             (%fail-test "assert-faster-than failed"
+                         :expected ,limit
+                         :actual ,duration
+                         :form '(assert-faster-than ,max-ns ,@body)))
+           t)))))
+
+(defmacro assert-no-consing (&body body)
+  "Assert BODY does not increase SBCL's bytes-consed counter."
+  (let ((before (gensym "BEFORE"))
+        (after (gensym "AFTER"))
+        (delta (gensym "DELTA")))
+    `(let ((,before (sb-ext:get-bytes-consed)))
+       ,@body
+       (let* ((,after (sb-ext:get-bytes-consed))
+              (,delta (- ,after ,before)))
+         (when (plusp ,delta)
+           (%fail-test "assert-no-consing failed"
+                       :expected 0
+                       :actual ,delta
+                       :form '(assert-no-consing ,@body)))
          t))))
+
+(defmacro assert-no-allocation (&body body)
+  "Alias for ASSERT-NO-CONSING."
+  `(assert-no-consing ,@body))
 
 (defmacro assert-type-equal (expected actual)
   "Assert that two type-nodes are structurally equal via type-equal-p."

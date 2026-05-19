@@ -58,6 +58,26 @@
       (assert-= 1 (length octets))
       (assert-= 233 (aref octets 0)))))
 
+(deftest vm-bridge-string-octets-normalizes-utf-16
+  "string-to-octets and octets-to-string normalize :utf-16 to a host-supported UTF-16 external format."
+  (let ((octets (cl-cc/vm:string-to-octets "A" :encoding :utf-16)))
+    (assert-true (vectorp octets))
+    (assert-= 2 (length octets))
+    (assert-= 65 (aref octets 0))
+    (assert-= 0 (aref octets 1))
+    (assert-string= "A" (cl-cc/vm:octets-to-string octets :encoding :utf-16))))
+
+(deftest vm-bridge-string-octets-utf-16-surrogate-roundtrip
+  "UTF-16 normalization preserves non-BMP Unicode code points via surrogate pairs."
+  (let* ((text (string (code-char #x1f600)))
+         (octets (cl-cc/vm:string-to-octets text :encoding :utf-16)))
+    (assert-= 4 (length octets))
+    (assert-= #x3d (aref octets 0))
+    (assert-= #xd8 (aref octets 1))
+    (assert-= #x00 (aref octets 2))
+    (assert-= #xde (aref octets 3))
+    (assert-string= text (cl-cc/vm:octets-to-string octets :encoding :utf-16))))
+
 (deftest vm-bridge-registers-compile-file-pathname
   "compile-file-pathname is an intentional host bridge entry, not dead pathname surface."
   (let ((callable (gethash 'compile-file-pathname cl-cc/vm::*vm-host-bridge-functions*)))

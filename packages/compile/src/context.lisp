@@ -14,8 +14,12 @@
                :documentation "Alist mapping block names to (exit-label . result-reg)")
    (tagbody-env :initform nil :accessor ctx-tagbody-env
                 :documentation "Alist mapping tags to labels within current tagbody")
-   (global-functions :initform (make-hash-table :test #'eq) :accessor ctx-global-functions
-                     :documentation "Hash table mapping function names to their labels")
+    (global-functions :initform (make-hash-table :test #'eq) :accessor ctx-global-functions
+                      :documentation "Hash table mapping function names to their labels")
+     (global-function-mv-arities :initform (make-hash-table :test #'eq) :accessor ctx-global-function-mv-arities
+                                 :documentation "Hash table mapping function names to statically known small multiple-value arities.")
+     (function-conventions :initform (make-hash-table :test #'equal) :accessor ctx-function-conventions
+                           :documentation "Hash table mapping function labels to :external or :internal calling conventions.")
    (global-variables :initform (make-hash-table :test #'eq) :accessor ctx-global-variables
                      :documentation "Hash table mapping global variable names to their registers")
    (global-classes :initform (make-hash-table :test #'eq) :accessor ctx-global-classes
@@ -44,10 +48,67 @@
                             :documentation "Alist mapping local variable names to (size . element-regs) for conservative non-escaping fixed-size arrays.")
    (noescape-instance-bindings :initform nil :accessor ctx-noescape-instance-bindings
                                :documentation "Alist mapping local variable names to slot-name-string → register alists for conservative non-escaping make-instance bindings.")
-   (noescape-closure-bindings :initform nil :accessor ctx-noescape-closure-bindings
-                              :documentation "Alist mapping local variable names to directly inlinable non-escaping lambda ASTs.")
-   (tail-position :initform nil :accessor ctx-tail-position
-                    :documentation "Whether the current compilation position is a tail position.")))
+    (noescape-closure-bindings :initform nil :accessor ctx-noescape-closure-bindings
+                               :documentation "Alist mapping local variable names to directly inlinable non-escaping lambda ASTs.")
+    (hash-table-test-bindings :initform nil :accessor ctx-hash-table-test-bindings
+                              :documentation "Alist mapping local hash-table variable names to statically known tests for specialized lookup lowering.")
+    (tail-position :initform nil :accessor ctx-tail-position
+                      :documentation "Whether the current compilation position is a tail position.")
+     (diagnostics :initform nil :accessor ctx-diagnostics
+                  :documentation "Structured compiler diagnostics accumulated during code generation.")))
+
+(defun %make-compile-warning (message &key source-file span error-code fix-it)
+  "Create a structured compiler warning diagnostic."
+  (make-diagnostic :severity :warning
+                   :message message
+                   :span (or span (cons 0 0))
+                   :source-file source-file
+                   :error-code error-code
+                   :fix-it fix-it))
+
+(defun %emit-compile-warning (ctx message &key source-file span error-code fix-it)
+  "Record a structured compiler warning in CTX and return it."
+  (let ((diagnostic (%make-compile-warning message
+                                           :source-file source-file
+                                           :span span
+                                           :error-code error-code
+                                           :fix-it fix-it)))
+    (push diagnostic (ctx-diagnostics ctx))
+    diagnostic))
+
+(defun %hash-table-keyword-ast-p (ast keyword)
+  (or (and (typep ast 'ast-var) (eq (ast-var-name ast) keyword))
+      (and (typep ast 'ast-quote) (eq (ast-quote-value ast) keyword))))
+
+(defun %hash-table-test-symbol-p (symbol)
+  (or (eq symbol 'eq)
+      (eq symbol 'eql)
+      (eq symbol 'equal)
+      (eq symbol 'equalp)))
+
+(defun %hash-table-test-symbol-from-ast (ast)
+  (typecase ast
+    (ast-quote
+     (let ((name (ast-quote-value ast)))
+       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))
+    (ast-function
+     (let ((name (ast-function-name ast)))
+       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))))
+
+(defun %hash-table-make-hash-table-call-p (ast)
+  (and (typep ast 'ast-call)
+       (let ((func (ast-call-func ast)))
+         (or (eq func 'make-hash-table)
+             (and (typep func 'ast-var)
+                  (eq (ast-var-name func) 'make-hash-table))))))
+
+(defun %hash-table-static-test-from-make-hash-table-ast (ast)
+  "Return statically known MAKE-HASH-TABLE :TEST from AST, if any."
+  (when (%hash-table-make-hash-table-call-p ast)
+    (loop for kv on (ast-call-args ast) by #'cddr
+          when (and (cdr kv) (%hash-table-keyword-ast-p (car kv) :test))
+            return (%hash-table-test-symbol-from-ast (cadr kv))
+          finally (return 'eql))))
 
 (defun %merge-inline-policies (&rest policies)
   (cond
@@ -116,15 +177,69 @@ When both INLINE and NOTINLINE appear, NOTINLINE wins conservatively."
   (and (symbolp name)
        (gethash name cl-cc/expand:*declaim-inline-registry*)))
 
+(defun %external-symbol-p (name)
+  "Return T when NAME is an external symbol in its home package."
+  (and (symbolp name)
+       (symbol-package name)
+       (multiple-value-bind (symbol status)
+           (find-symbol (symbol-name name) (symbol-package name))
+         (and (eq symbol name) (eq status :external)))))
+
+(defun note-function-calling-convention (ctx label convention)
+  "Record LABEL as using CONVENTION in CTX."
+  (setf (gethash label (ctx-function-conventions ctx)) convention)
+  convention)
+
+(defun function-calling-convention-for-defun (name &key stored-global-p)
+  "Return the conservative calling convention for function NAME."
+  (if (or stored-global-p (%external-symbol-p name))
+      :external
+      :internal))
+
 (defun %callable-inline-policy (declarations &key name pending-policy)
   "Return the merged inline policy for a callable.
 Pending lexical policy, optimize declarations, and explicit declaim/declare
 inline policy are merged with NOTINLINE taking precedence over INLINE."
   (%merge-inline-policies pending-policy
-                          (%global-optimize-inline-policy)
-                          (%local-optimize-inline-policy declarations)
-                          (%global-inline-policy name)
-                          (%declaration-inline-policy declarations name)))
+                           (%global-optimize-inline-policy)
+                           (%local-optimize-inline-policy declarations)
+                           (%global-inline-policy name)
+                           (%declaration-inline-policy declarations name)))
+
+(defun %safe-parse-declaration-type (type-spec)
+  "Parse TYPE-SPEC for declaration processing, returning NIL when unsupported."
+  (handler-case
+      (parse-type-specifier type-spec)
+    (error () nil)))
+
+(defun %declaration-type-bindings (declarations)
+  "Return `(NAME . TYPE-SCHEME)` bindings from local type DECLARATIONS.
+
+Supports the standard `(type TYPE NAME...)` form and the Common Lisp shorthand
+`(TYPE NAME...)` when TYPE looks like a known type specifier. Malformed clauses
+are ignored conservatively, matching existing optimize declaration handling."
+  (let ((bindings nil))
+    (dolist (decl declarations (nreverse bindings))
+      (when (consp decl)
+        (let* ((head (car decl))
+               (explicit-type-p (eq head 'type))
+               (type-spec (if explicit-type-p (second decl) head))
+               (names (if explicit-type-p (cddr decl) (cdr decl))))
+          (when (and names
+                     (or explicit-type-p
+                         (looks-like-type-specifier-p type-spec)))
+            (let ((parsed (%safe-parse-declaration-type type-spec)))
+              (when parsed
+                (dolist (name names)
+                  (when (symbolp name)
+                    (push (cons name (type-to-scheme parsed)) bindings)))))))))))
+
+(defun %extend-type-env-from-declarations (ctx declarations)
+  "Register local type declaration bindings in CTX's type environment."
+  (let ((bindings (%declaration-type-bindings declarations)))
+    (when bindings
+      (setf (ctx-type-env ctx)
+            (type-env-extend* bindings (ctx-type-env ctx))))))
 
 
 
@@ -274,6 +389,12 @@ Used by run-string-repl to persist the label counter across calls.")
     (if entry
         (cdr entry)
         (error "Unbound variable"))))
+
+(defun %capture-candidates-from-env (env)
+  "Return (var . reg) capture candidates from ENV in lookup precedence order."
+  (loop for entry in env
+        when (and (consp entry) (symbolp (car entry)))
+          collect entry))
 
 ;;; ─── CPS Safety Guards ───────────────────────────────────────────────────────
 

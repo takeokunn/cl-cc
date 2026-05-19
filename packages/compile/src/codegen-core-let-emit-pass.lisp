@@ -141,6 +141,7 @@ NIL for untyped arrays."
         (old-noescape-arrays (ctx-noescape-array-bindings ctx))
         (old-noescape-instances (ctx-noescape-instance-bindings ctx))
         (old-noescape-closures (ctx-noescape-closure-bindings ctx))
+        (old-hash-table-tests (ctx-hash-table-test-bindings ctx))
         (old-type-env (ctx-type-env ctx)))
     (unwind-protect
          (let ((bindings (ast-let-bindings node))
@@ -177,13 +178,21 @@ NIL for untyped arrays."
                       (if noescape-array-size
                           (%extract-noescape-array-element-type expr)
                           nil))
-                    (noescape-cons-p
-                     (if (or noescape-closure noescape-instance-slots
-                             noescape-array-size)
-                         nil
-                         (%let-noescape-cons-p name expr declarations mutated captured
-                                               body-forms))))
-               (cond
+                     (noescape-cons-p
+                      (if (or noescape-closure noescape-instance-slots
+                              noescape-array-size)
+                          nil
+                          (%let-noescape-cons-p name expr declarations mutated captured
+                                                body-forms))))
+                (when (and (symbolp name)
+                           (not (%ast-let-binding-ignored-p name declarations))
+                           (not (%binding-mentioned-in-body-p body-forms name))
+                           (not (%member-eq-p name mutated))
+                           (not (%member-eq-p name captured)))
+                  (%emit-compile-warning ctx
+                                         (format nil "Unused lexical variable ~S." name)
+                                         :error-code "W0001"))
+                (cond
                  (noescape-closure
                   (setf (ctx-noescape-closure-bindings ctx)
                         (cons (cons name noescape-closure)
@@ -226,19 +235,33 @@ NIL for untyped arrays."
                     (emit ctx (make-vm-move :dst own-reg :src val-reg))
                     (setq new-bindings
                           (cons (cons name own-reg) new-bindings)))))))
-           (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
-           (setf (ctx-boxed-vars ctx)
-                 (%list-union-eq needs-boxing (ctx-boxed-vars ctx)))
-           (dolist (binding bindings)
-             (let ((binding-type (%ast-proven-type ctx (cdr binding))))
-               (when binding-type
-                 (setf (ctx-type-env ctx)
-                       (type-env-extend (car binding)
-                                        (type-to-scheme binding-type)
-                                        (ctx-type-env ctx))))))
-           (%call-with-declaration-policies
-            ctx
-            declarations
+            (setf (ctx-env ctx) (append (nreverse new-bindings) (ctx-env ctx)))
+            (setf (ctx-hash-table-test-bindings ctx)
+                  (remove-if (lambda (entry)
+                               (member (car entry) binding-names :test #'eq))
+                             (ctx-hash-table-test-bindings ctx)))
+            (dolist (binding bindings)
+              (let* ((name (car binding))
+                     (test-sym (and (not (%member-eq-p name mutated))
+                                    (%hash-table-static-test-from-make-hash-table-ast
+                                     (cdr binding)))))
+                (when test-sym
+                  (setf (ctx-hash-table-test-bindings ctx)
+                        (cons (cons name test-sym)
+                              (ctx-hash-table-test-bindings ctx))))))
+            (setf (ctx-boxed-vars ctx)
+                  (%list-union-eq needs-boxing (ctx-boxed-vars ctx)))
+            (dolist (binding bindings)
+              (let ((binding-type (%ast-proven-type ctx (cdr binding))))
+                (when binding-type
+                  (setf (ctx-type-env ctx)
+                        (type-env-extend (car binding)
+                                         (type-to-scheme binding-type)
+                                         (ctx-type-env ctx))))))
+            (%extend-type-env-from-declarations ctx declarations)
+            (%call-with-declaration-policies
+             ctx
+             declarations
             (lambda ()
               (let ((tail (ctx-tail-position ctx))
                     (last nil))
@@ -256,4 +279,5 @@ NIL for untyped arrays."
       (setf (ctx-noescape-array-bindings ctx) old-noescape-arrays)
       (setf (ctx-noescape-instance-bindings ctx) old-noescape-instances)
       (setf (ctx-noescape-closure-bindings ctx) old-noescape-closures)
+      (setf (ctx-hash-table-test-bindings ctx) old-hash-table-tests)
       (setf (ctx-type-env ctx) old-type-env))))

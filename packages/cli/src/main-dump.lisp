@@ -20,6 +20,23 @@
 (defparameter +ansi-opcode+  (concatenate 'string +ansi-esc+ "[34m"))
 (defparameter +ansi-comment+ (concatenate 'string +ansi-esc+ "[90m"))
 
+(defun %dump-image-and-exit (parsed)
+  "Dump the current SBCL image to --dump-image and exit.
+When --stdlib is also supplied, warm the stdlib cache first so the saved image
+starts with parsed/expanded stdlib forms and the VM snapshot already resident."
+  (let ((path (flag parsed "--dump-image")))
+    (when (flag parsed "--stdlib")
+      (ignore-errors (cl-cc:warm-stdlib-cache)))
+    (format *error-output* "; cl-cc: dumping initialized image to ~A~%" path)
+    (finish-output *error-output*)
+    #+sbcl
+    (sb-ext:save-lisp-and-die path
+                              :toplevel #'main
+                              :executable t
+                              :compression t)
+    #-sbcl
+    (error "--dump-image is only supported on SBCL")))
+
 (defun %dump-ast-phase (result stream annotate-source)
   (let ((asts (%ensure-list (cl-cc:compilation-result-ast result))))
     (when (null asts)
@@ -169,8 +186,10 @@
 (defstruct (compile-opts (:constructor make-compile-opts))
   "Pipeline control and diagnostic flags shared by run / compile / eval."
   (pass-pipeline      nil)
+  (block-compile      nil)
   (print-pass-timings nil)
   (trace-json-path    nil)
+  (coverage           nil)
   (pgo-generate-path  nil)
   (pgo-use-path       nil)
   (spectre-mitigations nil)
@@ -192,10 +211,12 @@
 (defun %parse-compile-opts (parsed)
   "Extract all pipeline/tracing flags from PARSED into a compile-opts struct."
   (make-compile-opts
-   :pass-pipeline      (flag parsed "--pass-pipeline")
-   :print-pass-timings (or (flag parsed "--print-pass-timings")
+    :pass-pipeline      (flag parsed "--pass-pipeline")
+    :block-compile      (flag parsed "--block-compile")
+    :print-pass-timings (or (flag parsed "--print-pass-timings")
                            (flag parsed "--time-passes"))
    :trace-json-path    (flag parsed "--trace-json")
+   :coverage           (flag parsed "--coverage")
     :pgo-generate-path  (flag parsed "--pgo-generate")
      :pgo-use-path       (flag parsed "--pgo-use")
      :spectre-mitigations (flag parsed "--spectre-mitigations")
@@ -241,9 +262,11 @@ STREAM is the resolved trace-json output stream (may be nil)."
       (let* ((profile (safe-read-profile (compile-opts-pgo-use-path opts)))
              (speed (profile-speed profile)))
         (append (list :trace-json-stream  stream
-                      :print-pass-stats   (compile-opts-print-pass-stats opts)
-                      :pass-pipeline      (compile-opts-pass-pipeline opts)
-                      :inline-threshold-scale 1)
+                        :print-pass-stats   (compile-opts-print-pass-stats opts)
+                        :pass-pipeline      (compile-opts-pass-pipeline opts)
+                        :block-compile      (compile-opts-block-compile opts)
+                        :inline-threshold-scale 1
+                        :pgo-profile-data   profile)
                  (if speed (list :speed speed) nil)
                   (if (or (compile-opts-retpoline opts)
                           (compile-opts-spectre-mitigations opts))
@@ -273,6 +296,7 @@ STREAM is the resolved trace-json output stream (may be nil)."
                   (if (compile-opts-hwasan opts)
                       (list :hwasan t)
                       nil)
-                  (list :print-pass-timings (compile-opts-print-pass-timings opts)
-                       :print-opt-remarks  (not (null remarks))
+                   (list :print-pass-timings (compile-opts-print-pass-timings opts)
+                         :coverage           (compile-opts-coverage opts)
+                        :print-opt-remarks  (not (null remarks))
                        :opt-remarks-mode   (or remarks :all)))))))

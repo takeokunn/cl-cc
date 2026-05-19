@@ -159,8 +159,10 @@
     make-vm-typep
     make-vm-unread-char
     make-vm-upper-case-p
-    make-vm-values
-    make-vm-values-typep
+     make-vm-values
+     make-vm-values-regs
+     make-vm-mv-bind-regs
+     make-vm-values-typep
     make-vm-spread-values
    make-vm-values-to-list
    make-vm-vector-pop

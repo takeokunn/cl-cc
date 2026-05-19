@@ -34,6 +34,8 @@
    vm-error
 
    ;; ─── Condition Slots ───────────────────────────────────────────────────────
+   vm-condition-error-code
+   vm-condition-fix-it
    vm-dividend
    vm-restart-name
    vm-handler-type

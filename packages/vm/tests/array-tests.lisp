@@ -39,8 +39,53 @@
                                     (cl-cc/vm:vm-specialized-array-ref arr 0)
                                     (aref arr 0))))
       (assert-true (char= #\Nul (if (cl-cc/vm:vm-specialized-array-p arr)
-                                    (cl-cc/vm:vm-specialized-array-ref arr 1)
-                                    (aref arr 1)))))))
+                                     (cl-cc/vm:vm-specialized-array-ref arr 1)
+                                     (aref arr 1)))))))
+
+(deftest vm-array-make-with-dynamic-keyword-registers
+  "vm-make-array reads dynamic fill-pointer/adjustable/element-type keyword registers."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 4)
+    (cl-cc:vm-reg-set s 2 2)
+    (cl-cc:vm-reg-set s 3 t)
+    (cl-cc:vm-reg-set s 4 t)
+    (exec1 (cl-cc:make-vm-make-array :dst 0 :size-reg 1
+                                     :fill-pointer-reg 2
+                                     :adjustable-reg 3
+                                     :element-type-reg 4)
+           s)
+    (let ((arr (cl-cc:vm-reg-get s 0)))
+      (assert-= 4 (array-total-size arr))
+      (assert-= 2 (fill-pointer arr))
+      (assert-true (adjustable-array-p arr)))))
+
+(deftest vm-array-make-with-displaced-to-register
+  "vm-make-array supports :displaced-to via a value register."
+  (let ((s (make-test-vm))
+        (base (vector 'a 'b 'c 'd)))
+    (cl-cc:vm-reg-set s 1 2)
+    (cl-cc:vm-reg-set s 2 base)
+    (exec1 (cl-cc:make-vm-make-array :dst 0 :size-reg 1 :displaced-to-reg 2) s)
+    (let ((arr (cl-cc:vm-reg-get s 0)))
+      (multiple-value-bind (target offset) (array-displacement arr)
+        (assert-eq base target)
+        (assert-= 0 offset))
+      (assert-eq 'a (aref arr 0))
+      (assert-eq 'b (aref arr 1)))))
+
+(deftest vm-array-make-sexps-read-legacy-slot-order
+  "sexp->instruction keeps the legacy make-array slot order stable."
+  (let ((inst (cl-cc:sexp->instruction '(:make-array 0 1 2 3 t character))))
+    (assert-= 0 (cl-cc:vm-dst inst))
+    (assert-= 1 (cl-cc:vm-size-reg inst))
+    (assert-= 2 (cl-cc:vm-initial-element inst))
+    (assert-= 3 (cl-cc:vm-fill-pointer inst))
+    (assert-eq t (cl-cc:vm-adjustable inst))
+    (assert-eq 'character (cl-cc:vm-element-type inst))
+    (assert-null (cl-cc:vm-fill-pointer-reg inst))
+    (assert-null (cl-cc:vm-adjustable-reg inst))
+    (assert-null (cl-cc:vm-element-type-reg inst))
+    (assert-null (cl-cc:vm-displaced-to-reg inst))))
 
 (deftest vm-array-aref-and-aset
   "vm-aref and vm-aset read and write array elements."

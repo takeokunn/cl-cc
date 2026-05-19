@@ -36,8 +36,9 @@
                  #:type-inference-error
                  #:type-unknown-p
                  #:type-equal-p
-                 #:check
-                 #:reset-type-vars!
+                  #:check
+                  #:looks-like-type-specifier-p
+                  #:reset-type-vars!
                  #:infer
                  #:zonk)
 
@@ -83,15 +84,17 @@
    #:ctx-instructions #:ctx-next-register #:ctx-next-label
    #:ctx-env #:ctx-type-env #:ctx-safety
    #:ctx-block-env #:ctx-tagbody-env
-    #:ctx-global-functions #:ctx-global-variables
+   #:ctx-global-functions #:ctx-global-variables #:ctx-function-conventions
     #:ctx-global-classes #:ctx-global-generics #:ctx-global-generic-params
     #:ctx-current-function-name #:ctx-current-function-label
     #:ctx-current-function-params #:ctx-current-function-simple-p
     #:ctx-pending-inline-policy
-    #:ctx-top-level-p #:ctx-boxed-vars
+     #:ctx-top-level-p #:ctx-boxed-vars
    #:ctx-noescape-cons-bindings #:ctx-noescape-array-bindings
-   #:ctx-noescape-instance-bindings #:ctx-noescape-closure-bindings
-   #:ctx-tail-position
+        #:ctx-noescape-instance-bindings #:ctx-noescape-closure-bindings
+        #:ctx-hash-table-test-bindings
+    #:ctx-tail-position
+    #:ctx-diagnostics
    #:*builtin-special-variables* #:*repl-global-variables*
    #:*repl-label-counter* #:*repl-capture-label-counter*
   #:*labels-boxed-fns* #:*local-tail-jump-fns* #:*compiling-typed-fn*
@@ -126,9 +129,11 @@
    #:compilation-result-type-env
    #:compilation-result-cps
    #:compilation-result-ast
-   #:compilation-result-vm-instructions
-   #:compilation-result-optimized-instructions
-   #:compilation-result-pgo-counter-plan
+    #:compilation-result-vm-instructions
+    #:compilation-result-optimized-instructions
+     #:compilation-result-pgo-counter-plan
+     #:compilation-result-errors
+     #:compilation-result-warnings
 
    ;; ── CPS transformation re-exports ──
    #:cps-transform

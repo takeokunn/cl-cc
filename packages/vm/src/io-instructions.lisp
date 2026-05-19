@@ -27,8 +27,10 @@
   (direction nil :reader vm-file-direction)
   (if-exists :supersede :reader vm-if-exists)
   (if-not-exists nil :reader vm-if-not-exists)
+  (external-format nil :reader vm-open-file-external-format)
+  (external-format-reg nil :reader vm-open-file-external-format-reg)
   (:sexp-tag :open-file)
-  (:sexp-slots dst path direction))
+  (:sexp-slots dst path direction if-exists if-not-exists external-format external-format-reg))
 
 (define-vm-instruction vm-close-file (vm-instruction)
   "Close a file handle."

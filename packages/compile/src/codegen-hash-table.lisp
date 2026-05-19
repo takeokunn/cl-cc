@@ -7,48 +7,51 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ;; make-hash-table: extract :test keyword and convert #'fn → 'fn
-(defun %hash-table-keyword-ast-p (ast keyword)
-  (or (and (typep ast 'ast-var) (eq (ast-var-name ast) keyword))
-      (and (typep ast 'ast-quote) (eq (ast-quote-value ast) keyword))))
+(defun %hash-table-static-test-for-table-ast (ast ctx)
+  "Return a statically known hash-table test for AST in CTX, if available."
+  (or (%hash-table-static-test-from-make-hash-table-ast ast)
+      (and (typep ast 'ast-var)
+           (cdr (%assoc-eq (ast-var-name ast)
+                           (ctx-hash-table-test-bindings ctx))))))
 
-(defun %hash-table-test-symbol-p (symbol)
-  (or (eq symbol 'eq)
-      (eq symbol 'eql)
-      (eq symbol 'equal)
-      (eq symbol 'equalp)))
-
-(defun %hash-table-test-symbol-from-ast (ast)
-  (typecase ast
-    (ast-quote
-     (let ((name (ast-quote-value ast)))
-       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))
-    (ast-var
-     (let ((name (ast-var-name ast)))
-       (when (%hash-table-test-symbol-p name) name)))
-    (ast-function
-     (let ((name (ast-function-name ast)))
-       (when (and (symbolp name) (%hash-table-test-symbol-p name)) name)))))
+(defun %hash-table-gethash-constructor-for-test (test-sym)
+  "Return the specialized GETHASH constructor for TEST-SYM, or NIL."
+  (case test-sym
+    (eq #'make-vm-gethash-eq)
+    (eql #'make-vm-gethash-eql)
+    (equal #'make-vm-gethash-equal)
+    (otherwise nil)))
 
 (setf (gethash "MAKE-HASH-TABLE" *phase2-builtin-handlers*)
       (lambda (args result-reg ctx)
-        (let* ((test-sym (loop for kv on args by #'cddr
-                               when (and (cdr kv) (%hash-table-keyword-ast-p (car kv) :test))
-                                 return (%hash-table-test-symbol-from-ast (cadr kv))))
-               (test-reg (when test-sym
-                           (let ((reg (make-register ctx)))
-                             (emit ctx (make-vm-const :dst reg :value test-sym))
-                             reg))))
+        (let* ((test-ast (loop for kv on args by #'cddr
+                               when (and (cdr kv)
+                                         (%hash-table-keyword-ast-p (car kv) :test))
+                                 return (cadr kv)))
+               (test-sym (and test-ast
+                              (%hash-table-test-symbol-from-ast test-ast)))
+               (test-reg (cond
+                           (test-sym
+                            (let ((reg (make-register ctx)))
+                              (emit ctx (make-vm-const :dst reg :value test-sym))
+                              reg))
+                           (test-ast
+                            (compile-ast test-ast ctx)))))
           (emit ctx (make-vm-make-hash-table :dst result-reg :test test-reg))
           result-reg)))
 
 ;; gethash: 2-arg (key table) or 3-arg (key table default)
 (setf (gethash "GETHASH" *phase2-builtin-handlers*)
       (lambda (args result-reg ctx)
-        (let ((key-reg     (compile-ast (first args)  ctx))
-              (table-reg   (compile-ast (second args) ctx))
-              (default-reg (when (third args) (compile-ast (third args) ctx))))
-          (emit ctx (make-vm-gethash :dst result-reg :found-dst nil
-                                     :key key-reg :table table-reg :default default-reg))
+        (let* ((table-ast (second args))
+               (test-sym (%hash-table-static-test-for-table-ast table-ast ctx))
+               (ctor (or (%hash-table-gethash-constructor-for-test test-sym)
+                         #'make-vm-gethash))
+               (key-reg (compile-ast (first args) ctx))
+               (table-reg (compile-ast table-ast ctx))
+               (default-reg (when (third args) (compile-ast (third args) ctx))))
+          (emit ctx (funcall ctor :dst result-reg :found-dst nil
+                             :key key-reg :table table-reg :default default-reg))
           result-reg)))
 
 ;; maphash: inline loop — keys snapshot → iterate with fn call

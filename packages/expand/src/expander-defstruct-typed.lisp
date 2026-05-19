@@ -26,8 +26,39 @@
                                       (%expander-form 'obj)
                                       (%expander-form 'nth idx 'obj))
                       (%expander-form 'defun acc-name
-                                      (%expander-form 'obj)
-                                      (%expander-form 'aref 'obj idx))))))
+                                       (%expander-form 'obj)
+                                       (%expander-form 'aref 'obj idx))))))
+
+(defun %defstruct-typed-setf-form (struct-type slot-index place value)
+  "Build a typed defstruct accessor SETF expansion."
+  (let ((value-var (gensym "V")))
+    (if (eq struct-type 'list)
+        (%expander-form 'let
+                        (%expander-form (%expander-form value-var value))
+                        (%expander-form 'rplaca
+                                        (%expander-form 'nthcdr slot-index (second place))
+                                        value-var)
+                        value-var)
+        (%expander-form 'let
+                        (%expander-form (%expander-form value-var value))
+                        (%expander-form 'aset (second place) slot-index value-var)
+                        value-var))))
+
+(defun %defstruct-register-typed-accessors (struct-type conc-name all-slots)
+  "Register SETF expansion metadata for typed defstruct accessors."
+  (loop for slot in all-slots
+        for idx from 1
+        for slot-name = (first slot)
+        for read-only-p = (third slot)
+        for accessor = (%defstruct-accessor-name conc-name slot-name)
+        do (if read-only-p
+               (setf (gethash accessor *defstruct-read-only-accessor-map*) t)
+               (let ((slot-index idx)
+                     (slot-struct-type struct-type))
+                 (setf (gethash accessor *setf-compound-place-handlers*)
+                       (lambda (place value)
+                         (%defstruct-typed-setf-form
+                          slot-struct-type slot-index place value)))))))
 
 (defun %defstruct-typed-predicate (pred-name struct-name struct-type slot-count)
   "Generate a predicate for :type list or :type vector defstruct."
@@ -48,25 +79,26 @@
 
 (defun %defstruct-typed-expansion-parts (model)
   "Build ctor/accessor/predicate/copier parts for typed defstruct expansion."
-  (let ((name        (getf model :name))
-        (struct-type (getf model :struct-type))
-        (ctor-name   (getf model :ctor-name))
-        (boa-args    (getf model :boa-args))
+  (let ((name         (getf model :name))
+        (struct-type  (getf model :struct-type))
+        (constructors (getf model :constructors))
         (all-slots   (getf model :all-slots))
         (conc-name   (getf model :conc-name))
         (pred-name   (getf model :pred-name))
         (copier-name (getf model :copier-name)))
-    (let ((ctor-form      (when ctor-name
-                            (%defstruct-typed-constructor ctor-name name struct-type boa-args all-slots)))
+    (%defstruct-register-typed-accessors struct-type conc-name all-slots)
+    (let ((ctor-forms     (loop for ctor in constructors
+                                 collect (%defstruct-typed-constructor
+                                         (first ctor) name struct-type (second ctor) all-slots)))
           (accessor-forms (%defstruct-typed-accessors struct-type conc-name all-slots))
           (pred-form      (when pred-name
                             (%defstruct-typed-predicate pred-name name struct-type (length all-slots))))
           (copier-form    (%defstruct-copier-form copier-name name all-slots struct-type)))
-      (%expander-form name ctor-form accessor-forms pred-form copier-form))))
+      (%expander-form name ctor-forms accessor-forms pred-form copier-form))))
 
-(defun %defstruct-typed-expansion-forms (name ctor-form accessor-forms pred-form copier-form)
+(defun %defstruct-typed-expansion-forms (name ctor-forms accessor-forms pred-form copier-form)
   "Build the ordered PROGN tail forms for typed expansion."
-  (append (when ctor-form   (list ctor-form))
+  (append ctor-forms
           accessor-forms
           (when pred-form   (list pred-form))
           (when copier-form (list copier-form))

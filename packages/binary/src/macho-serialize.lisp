@@ -105,6 +105,64 @@
                        (dysymtab-command-nlocrel dysymtab)))
     (serialize-uint32-le field buffer)))
 
+(defun serialize-dyld-info-command (dyld-info buffer)
+  "Serialize DYLD-INFO-COMMAND to BUFFER."
+  (declare (type dyld-info-command dyld-info)
+           (type byte-buffer buffer))
+  (dolist (field (list (dyld-info-command-cmd dyld-info)
+                       (dyld-info-command-cmdsize dyld-info)
+                       (dyld-info-command-rebase-off dyld-info)
+                       (dyld-info-command-rebase-size dyld-info)
+                       (dyld-info-command-bind-off dyld-info)
+                       (dyld-info-command-bind-size dyld-info)
+                       (dyld-info-command-weak-bind-off dyld-info)
+                       (dyld-info-command-weak-bind-size dyld-info)
+                       (dyld-info-command-lazy-bind-off dyld-info)
+                       (dyld-info-command-lazy-bind-size dyld-info)
+                       (dyld-info-command-export-off dyld-info)
+                       (dyld-info-command-export-size dyld-info)))
+    (serialize-uint32-le field buffer)))
+
+(defun serialize-dylib-command (dylib buffer)
+  "Serialize DYLIB-COMMAND to BUFFER, including its padded path string."
+  (declare (type dylib-command dylib)
+           (type byte-buffer buffer))
+  (let* ((name (dylib-command-name dylib))
+         (name-size (1+ (length name)))
+         (cmdsize (align-up (+ 24 name-size) 8)))
+    (serialize-uint32-le (dylib-command-cmd dylib) buffer)
+    (serialize-uint32-le cmdsize buffer)
+    (serialize-uint32-le (dylib-command-name-offset dylib) buffer)
+    (serialize-uint32-le (dylib-command-timestamp dylib) buffer)
+    (serialize-uint32-le (dylib-command-current-version dylib) buffer)
+    (serialize-uint32-le (dylib-command-compatibility-version dylib) buffer)
+    (loop for c across name
+          do (buffer-write-byte buffer (char-code c)))
+    (loop repeat (- cmdsize (+ 24 (length name)))
+          do (buffer-write-byte buffer 0))))
+
+(defun serialize-linkedit-data-command (command buffer)
+  "Serialize LINKEDIT-DATA-COMMAND to BUFFER."
+  (declare (type linkedit-data-command command)
+           (type byte-buffer buffer))
+  (serialize-uint32-le (linkedit-data-command-cmd command) buffer)
+  (serialize-uint32-le (linkedit-data-command-cmdsize command) buffer)
+  (serialize-uint32-le (linkedit-data-command-dataoff command) buffer)
+  (serialize-uint32-le (linkedit-data-command-datasize command) buffer))
+
+(defun serialize-relocation-info (reloc buffer)
+  "Serialize Mach-O RELOCATION-INFO to BUFFER."
+  (declare (type relocation-info reloc)
+           (type byte-buffer buffer))
+  (serialize-uint32-le (relocation-info-r-address reloc) buffer)
+  (serialize-uint32-le
+   (logior (logand (relocation-info-r-symbolnum reloc) #x00FFFFFF)
+           (ash (logand (relocation-info-r-pcrel reloc) #x1) 24)
+           (ash (logand (relocation-info-r-length reloc) #x3) 25)
+           (ash (logand (relocation-info-r-extern reloc) #x1) 27)
+           (ash (logand (relocation-info-r-type reloc) #xF) 28))
+   buffer))
+
 (defun serialize-nlist (nlist buffer)
   "Serialize NLIST to BUFFER."
   (declare (type nlist nlist)
@@ -140,9 +198,18 @@ cmdsize must be 8-byte aligned for 64-bit Mach-O: 12 header + 13 string + 7 pad 
                                               :fill-pointer 1)
                  :reader mach-o-builder-string-table
                  :documentation "String table for symbols.")
-   (symbol-table :initform nil
-                 :accessor mach-o-builder-symbol-table
-                 :documentation "List of nlist entries."))
+    (symbol-table :initform nil
+                  :accessor mach-o-builder-symbol-table
+                  :documentation "List of nlist entries.")
+    (symbol-index :initform (make-hash-table :test #'equal)
+                  :reader mach-o-builder-symbol-index
+                  :documentation "Map from symbol name to nlist index.")
+    (relocations :initform nil
+                 :accessor mach-o-builder-relocations
+                 :documentation "Pending Mach-O relocation references.")
+    (bind-ordinal-table :initform (make-hash-table :test #'equal)
+                        :reader mach-o-builder-bind-ordinal-table
+                        :documentation "Map from dylib path/name to dyld library ordinal."))
   (:documentation "Builder class for constructing Mach-O executables."))
 
 ;;; (make-mach-o-builder, add-text-segment, add-data-segment,

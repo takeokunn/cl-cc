@@ -284,10 +284,40 @@
     (let* ((exp   (ds-expand '(defstruct (point (:copier clone-point)) x y)))
            (forms (ds-progn-forms exp))
            (copier (find-if (lambda (f) (and (listp f)
-                                              (eq (first f) 'defun)
-                                              (eq (second f) 'clone-point)))
-                            forms)))
+                                               (eq (first f) 'defun)
+                                               (eq (second f) 'clone-point)))
+                             forms)))
       (assert-true (not (null copier))))))
+
+(deftest ds-print-object-generates-print-object-method
+  "(:print-object fn) emits a PRINT-OBJECT method calling FN with object and stream."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (point (:print-object print-point)) x y)))
+           (forms (ds-progn-forms exp))
+           (method (find-if (lambda (f) (and (listp f)
+                                             (eq (first f) 'defmethod)
+                                             (eq (second f) 'print-object)))
+                            forms))
+           (body (fourth method)))
+      (assert-true (not (null method)))
+      (assert-equal 'funcall (first body))
+      (assert-equal '(function print-point) (second body))
+      (assert-equal 4 (length body)))))
+
+(deftest ds-print-function-generates-legacy-print-object-method
+  "(:print-function fn) emits a PRINT-OBJECT bridge calling FN with object, stream, depth."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((exp   (ds-expand '(defstruct (point (:print-function print-point)) x y)))
+           (forms (ds-progn-forms exp))
+           (method (find-if (lambda (f) (and (listp f)
+                                             (eq (first f) 'defmethod)
+                                             (eq (second f) 'print-object)))
+                            forms))
+           (body (fourth method)))
+      (assert-true (not (null method)))
+      (assert-equal 'funcall (first body))
+      (assert-equal '(function print-point) (second body))
+      (assert-equal 0 (fifth body)))))
 
 (deftest ds-build-constructor-keyword-form
   "%defstruct-build-constructor with no BOA args builds (defun ctor (&key ...) body)."

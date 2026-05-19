@@ -16,6 +16,7 @@
                      compile-opts-profile
                       compile-opts-pgo-generate-path
                       compile-opts-pgo-use-path
+                      compile-opts-block-compile
                       compile-opts-spectre-mitigations
                       compile-opts-jit-cache-stats
                       compile-opts-trace-json-path
@@ -221,7 +222,21 @@ around the execution. Returns the value produced by RUN-COMPILED."
           (print-profile vm-state))
         (when (compile-opts-flamegraph-path opts)
          (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                (cl-cc/vm:vm-get-profile-samples vm-state)))))))
+                                 (cl-cc/vm:vm-get-profile-samples vm-state)))))))
+
+(defun %compile-lisp-with-auto-stdlib (source kwargs stdlib no-stdlib)
+  "Compile Lisp SOURCE, lazily falling back to stdlib on first unresolved use.
+--stdlib keeps the old eager behaviour; --no-stdlib disables the fallback."
+  (cond
+    (stdlib
+     (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))
+    (no-stdlib
+     (apply #'compile-string source :target :vm kwargs))
+    (t
+     (handler-case
+         (apply #'compile-string source :target :vm kwargs)
+       (error ()
+         (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
 
 (defun %do-run (parsed)
   "Handle the `cl-cc run' subcommand using PARSED command-line arguments.
@@ -233,10 +248,11 @@ exits with status 0 on success."
          (lang-flag (or (flag parsed "--lang") ""))
          (language (%detect-language file lang-flag))
          (stdlib (flag parsed "--stdlib"))
-         (verbose (flag parsed "--verbose"))
-         (timeout (%get-timeout parsed))
+          (verbose (flag parsed "--verbose"))
+          (timeout (%get-timeout parsed))
          (opts (%parse-compile-opts parsed))
-         (source (%read-command-source file)))
+          (source (%read-command-source file))
+          (no-stdlib (flag parsed "--no-stdlib")))
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
@@ -249,21 +265,21 @@ exits with status 0 on success."
             (let* ((vm-state (%maybe-make-profiled-vm-state opts))
                    (kwargs (%compile-opts-kwargs opts stream)))
               (cond
-                ((and stdlib (eq language :lisp))
-                 (let ((result (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs)))
-                   (let ((ret (%run-compiled-result result vm-state opts)))
-                     (%maybe-write-pgo-profile opts result vm-state)
-                     ret)))
+                ((eq language :lisp)
+                  (let ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib)))
+                    (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%maybe-write-pgo-profile opts result vm-state)
+                      ret)))
                 ((eq language :php)
                  (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
                    (let ((ret (%run-compiled-result result vm-state opts)))
                      (%maybe-write-pgo-profile opts result vm-state)
                      ret)))
-                (t
-                 (let ((result (apply #'compile-string source :target :vm kwargs)))
-                   (let ((ret (%run-compiled-result result vm-state opts)))
-                     (%maybe-write-pgo-profile opts result vm-state)
-                     ret))))
+                 (t
+                  (let ((result (apply #'compile-string source :target :vm kwargs)))
+                    (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%maybe-write-pgo-profile opts result vm-state)
+                      ret))))
               (uiop:quit 0)))))
        "run"))))
 
@@ -284,7 +300,9 @@ and exits with status 0 on success."
          (debug (flag parsed "--debug"))
          (annotate (flag parsed "--annotate-source"))
          (verbose (flag parsed "--verbose"))
-         (timeout (%get-timeout parsed))
+          (compress (and (flag parsed "--compress")
+                         (not (flag parsed "--no-compress"))))
+          (timeout (%get-timeout parsed))
          (opts (%parse-compile-opts parsed)))
     (when verbose
       (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
@@ -335,11 +353,12 @@ and exits with status 0 on success."
                                             (apply #'compile-source source
                                                    :target (%compile-target-keyword arch-str)
                                                    kwargs)))
-                            (result (apply #'compile-file-to-native file
-                                           :arch arch
-                                           :output-file output
-                                           :language language
-                                           kwargs)))
+                             (result (apply #'compile-file-to-native file
+                                            :arch arch
+                                            :output-file output
+                                            :language language
+                                            :compress compress
+                                            kwargs)))
                        (when (and (compile-opts-pgo-generate-path opts)
                                   (null trace-result))
                          (setf trace-result
@@ -354,7 +373,7 @@ and exits with status 0 on success."
                        (uiop:quit 0))))))))
         "compile"))))
 
-(defun %compile-and-run-eval-form (expr stdlib kwargs vm-state opts)
+(defun %compile-and-run-eval-form (expr stdlib no-stdlib kwargs vm-state opts)
   "Compile and run EXPR for the eval command.
 STDLIB selects whether the stdlib-aware compiler may be used. KWARGS are
 forwarded to the compiler, VM-STATE is passed to RUN-COMPILED, and OPTS supply
@@ -368,12 +387,16 @@ compilation-result object used to produce it."
                                (run-compiled (compilation-result-program compiled)
                                              :state vm-state)))))
                 (values result compiled))))
-    (if stdlib
-        (handler-case
-            (compile-and-run #'compile-string)
-          (error ()
-            (compile-and-run #'cl-cc:compile-string-with-stdlib)))
-        (compile-and-run #'compile-string))))
+    (cond
+      (stdlib
+       (compile-and-run #'cl-cc:compile-string-with-stdlib))
+      (no-stdlib
+       (compile-and-run #'compile-string))
+      (t
+       (handler-case
+           (compile-and-run #'compile-string)
+         (error ()
+           (compile-and-run #'cl-cc:compile-string-with-stdlib)))))))
 
 (defun %do-eval (parsed)
   "Handle the `cl-cc eval' subcommand using PARSED arguments.
@@ -387,7 +410,8 @@ status 0 on success or 2 when the expression is missing."
       (%print-help "eval")
       (uiop:quit 2))
     (let* ((stdlib (flag parsed "--stdlib"))
-           (verbose (flag parsed "--verbose"))
+            (verbose (flag parsed "--verbose"))
+            (no-stdlib (flag parsed "--no-stdlib"))
            (timeout (%get-timeout parsed))
            (opts (%parse-compile-opts parsed)))
       (when verbose
@@ -404,7 +428,7 @@ status 0 on success or 2 when the expression is missing."
                      (result nil)
                      (compiled nil))
                 (multiple-value-setq (result compiled)
-                  (%compile-and-run-eval-form expr stdlib kwargs vm-state opts))
+                   (%compile-and-run-eval-form expr stdlib no-stdlib kwargs vm-state opts))
                 (%maybe-write-pgo-profile opts compiled vm-state)
                 (when (compile-opts-profile opts)
                   (print-profile vm-state))
@@ -415,8 +439,8 @@ status 0 on success or 2 when the expression is missing."
                   (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
                                          (cl-cc/vm:vm-get-profile-samples vm-state)))
                 (format t "~S~%" result)
-                (uiop:quit 0))))))
-         "eval"))))
+                (uiop:quit 0)))))
+          "eval")))))
 
 (defun %count-parens (str)
   "Count top-level parentheses in STR while ignoring parentheses in strings.
@@ -445,6 +469,7 @@ Resets persistent REPL state, optionally preloads the standard library, reads
 balanced forms from *STANDARD-INPUT*, evaluates them through RUN-STRING-REPL,
 prints non-NIL results, and exits cleanly on EOF or quit commands."
   (let ((stdlib (flag parsed "--stdlib"))
+        (no-stdlib (flag parsed "--no-stdlib"))
         (timeout (%get-timeout parsed)))
     (cl-cc:reset-repl-state)
     (when stdlib
@@ -453,11 +478,19 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
     (format t "CL-CC ~A  —  ANSI Common Lisp~%" *version*)
     (format t "Type a CL form and press Return. (exit) or Ctrl+D to quit.~%~%")
     (force-output)
-    (flet ((eval-and-print (form)
-             (let ((result (cl-cc:run-string-repl form)))
-               (when (not (null result))
-                 (format t "=> ~S~%" result))
-               (force-output))))
+    (let ((stdlib-loaded-p stdlib))
+      (flet ((eval-and-print (form)
+             (let ((result (handler-case (cl-cc:run-string-repl form)
+                             (error (e)
+                               (if (or no-stdlib stdlib-loaded-p)
+                                   (error e)
+                                   (progn
+                                     (cl-cc:run-string-repl cl-cc:*standard-library-source*)
+                                     (setf stdlib-loaded-p t)
+                                     (cl-cc:run-string-repl form)))))))
+                (when (not (null result))
+                  (format t "=> ~S~%" result))
+                (force-output))))
       (loop
         (format t "* ")
         (force-output)
@@ -468,9 +501,16 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
               (when (null line)
                 (format t "~%Goodbye.~%")
                 (uiop:quit 0))
+              (multiple-value-bind (edited-line candidates edited-p)
+                  (cl-cc:repl-edit-input-line line)
+                (declare (ignore edited-p))
+                (when candidates
+                  (format t "; Completions: ~{~A~^ ~}~%" candidates)
+                  (force-output))
+                (setf line edited-line))
               (setf buffer (if (string= buffer "")
-                               line
-                               (concatenate 'string buffer " " line)))
+                                line
+                                (concatenate 'string buffer " " line)))
               (multiple-value-bind (open close) (%count-parens buffer)
                 (when (>= close open)
                   (return)))))
@@ -483,6 +523,7 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
                (format t "Goodbye.~%")
                (uiop:quit 0))
               (t
+               (cl-cc:%repl-record-history trimmed)
                (handler-case
                    (if timeout
                        (handler-case
@@ -495,7 +536,7 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
                        (eval-and-print trimmed))
                  (error (e)
                    (format t "; Error: ~A~%" e)
-                   (force-output)))))))))))
+                    (force-output))))))))))))
 
 (defun %do-check (parsed)
   "Handle the `cl-cc check' subcommand using PARSED arguments.

@@ -180,12 +180,14 @@ tree emission on NIL."
      (format stream "~%      (br $exit)")
      t)
     (vm-get-global
+     (format stream "~%      ;; global.get globalidx resolved in module global table")
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)
-                            (format nil "(global.get ~A)"
+                             (format nil "(global.get ~A)"
                                     (vm-global-wat-name (vm-global-name inst)))))
      t)
     (vm-set-global
+     (format stream "~%      ;; global.set globalidx resolved in module global table")
      (format stream "~%      (global.set ~A ~A)"
              (vm-global-wat-name (vm-global-name inst))
              (reg-local-ref reg-map (vm-src inst)))
@@ -228,14 +230,21 @@ tree emission on NIL."
      t)
     (vm-closure
      (let* ((label (vm-label-name inst))
-            (table-idx (if (and *wasm-label-to-table-idx* label)
-                           (gethash label *wasm-label-to-table-idx* 0)
-                           0)))
-       (format stream "~%      ~A"
-               (reg-local-set reg-map (vm-dst inst)
-                              (format nil "(struct.new $closure_t (i32.const ~D) (ref.null $env_t))"
-                                      table-idx)))
+             (table-idx (if (and *wasm-label-to-table-idx* label)
+                            (gethash label *wasm-label-to-table-idx* 0)
+                            0)))
+       (format stream "~%      ;; struct.new typeidx ~D; array.new typeidx ~D"
+               +type-idx-closure+ +type-idx-eqref-array+)
+       (emit-wasm-closure-allocation reg-map (vm-dst inst) table-idx
+                                     (vm-captured-vars inst) stream 6)
        t))
+    (vm-closure-ref-idx
+     (format stream "~%      ~A"
+             (reg-local-set reg-map (vm-dst inst)
+                            (wasm-closure-ref-wat reg-map
+                                                  (vm-closure-reg inst)
+                                                  (vm-closure-index inst))))
+     t)
     (vm-call
      (let* ((args (vm-args inst))
             (func-local (reg-local-ref reg-map (vm-func-reg inst)))
@@ -243,11 +252,40 @@ tree emission on NIL."
             (entry-idx-wat (format nil
                                    "(struct.get $closure_t 0 (ref.cast (ref $closure_t) ~A))"
                                    func-local)))
-       (loop for arg in args for i from 0 do
-         (format stream "~%      (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
-       (format stream "~%      (local.set ~D (call_indirect (type $main_func_t) (table $funcref_table) ~A))"
-               dst-idx entry-idx-wat)
-       t))
+        (loop for arg in args for i from 0 do
+          (format stream "~%      (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
+        (format stream "~%      ;; call_indirect typeidx ~D tableidx 0"
+                +type-idx-main-func+)
+        (format stream "~%      (local.set ~D (call_indirect (type $main_func_t) (table $funcref_table) ~A))"
+                dst-idx entry-idx-wat)
+        t))
+    (vm-establish-catch
+     (format stream "~%      ;; establish catch: native EH tag $cl_condition_tag, handler ~S, result local ~D"
+             (vm-catch-handler-label inst)
+             (wasm-reg-to-local reg-map (vm-catch-result-reg inst)))
+     t)
+    (vm-establish-handler
+     (format stream "~%      ;; establish handler: native EH tag $cl_condition_tag, handler ~S, result local ~D"
+             (vm-handler-label inst)
+             (wasm-reg-to-local reg-map (vm-handler-result-reg inst)))
+     t)
+    (vm-remove-handler
+     (format stream "~%      ;; remove handler/catch frame (structured by WASM try/catch)")
+     t)
+    (vm-sync-handler-regs
+     (format stream "~%      ;; sync handler registers (implicit in WASM locals)")
+     t)
+    (vm-signal-error
+     (format stream "~%      (throw $cl_condition_tag (ref.null eq) ~A)"
+             (reg-local-ref reg-map (vm-error-reg inst)))
+     t)
+    (vm-throw
+     (format stream "~%      ;; throw tagidx ~D"
+             +tag-idx-cl-condition+)
+     (format stream "~%      (throw $cl_condition_tag ~A ~A)"
+             (reg-local-ref reg-map (vm-throw-tag-reg inst))
+             (reg-local-ref reg-map (vm-throw-value-reg inst)))
+     t)
     (vm-null-p
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)

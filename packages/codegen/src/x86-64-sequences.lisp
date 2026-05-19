@@ -1,7 +1,7 @@
 ;;;; packages/emit/src/x86-64-sequences.lisp - x86-64 Complex Instruction Sequences
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;;
-;;; Contains: emit-idiv-r11, emit-cqo, emit-idiv-sequence (IDIV with
+;;; Contains: emit-idiv-r11, emit-cdq, emit-cqo, emit-idiv-sequence (IDIV with
 ;;; RAX/RDX save-restore), emit-mul-high-sequence (MUL/IMUL high-half with
 ;;; RAX/RDX save-restore), emit-sal-r64-cl, emit-sar-r64-cl, emit-ror-r64-cl,
 ;;; emit-add-ri8, emit-sub-ri8, emit-and-ri8, emit-jge-short,
@@ -41,9 +41,11 @@
 
 (defun emit-idiv-r11 (stream)
   "IDIV R11 -- 64-bit signed division by R11. REX.W.B + F7 /7 + ModRM"
-  (emit-byte #x49 stream)   ; REX.W=1, REX.B=1 (R11 is R/M field register)
-  (emit-byte #xF7 stream)
-  (emit-byte (modrm 3 7 3) stream)) ; ModRM: mod=11, reg=7(/7=IDIV), rm=3 (R11&7=3)
+  (emit-idiv-rm64 +r11+ stream))
+
+(defun emit-cdq (stream)
+  "CDQ -- sign-extend EAX into EDX:EAX. Encoding: 99"
+  (emit-byte #x99 stream))
 
 (defun emit-cqo (stream)
   "CQO -- sign-extend RAX into RDX:RAX. REX.W + 99"

@@ -143,8 +143,9 @@
 
 The staged x86-64 array layout keeps the length word at offset 0 and eqref/value
 payload words from offset 8."
-  (format nil "[~A + 8 + ~A*8]"
+  (format nil "[~A + ~D + ~A*8]"
           (target-register target array-reg)
+          +x86-64-array-data-offset+
           (target-register target index-reg)))
 
 (defmethod emit-instruction ((target x86-64-target) (inst vm-aref) stream)

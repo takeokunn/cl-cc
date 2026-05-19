@@ -116,9 +116,11 @@ Used by both vm-signal-error and vm-throw."
             (%vm-unwind-to-handler state labels handler-label result-reg
                                    saved-call-stack saved-regs saved-method-call-stack
                                    error-value)))
-        (if (typep error-value 'condition)
-            (error error-value)
-            (error "Unhandled error in VM: ~S" error-value)))))
+        (progn
+          (vm-print-backtrace state :labels labels)
+          (if (typep error-value 'condition)
+              (error error-value)
+              (error "Unhandled error in VM: ~S" error-value))))))
 
 ;;; ── Catch/Throw VM Instructions ────────────────────────────────────────
 
@@ -183,22 +185,86 @@ in per-key buckets keyed by the original label object."
   (let ((labels (make-hash-table :test #'eql)))
     (loop for inst in instructions
           for pc from 0
-          do (when (typep inst 'vm-label)
-               (vm-label-table-store labels (vm-name inst) pc)))
+           do (when (typep inst 'vm-label)
+                (vm-label-table-store labels (vm-name inst) pc)))
     labels))
+
+(defun %vm-label-table-entries (labels)
+  "Return LABELS as a list of (PC . LABEL) entries."
+  (let ((entries nil))
+    (when labels
+      (maphash (lambda (_ bucket)
+                 (declare (ignore _))
+                 (dolist (entry bucket)
+                   (push (cons (cdr entry) (car entry)) entries)))
+               labels))
+    entries))
+
+(defun %vm-label-for-return-pc (labels return-pc)
+  "Resolve RETURN-PC to the nearest preceding function label in LABELS."
+  (let ((best-pc nil)
+        (best-label nil))
+    (dolist (entry (%vm-label-table-entries labels) best-label)
+      (let ((pc (car entry))
+            (label (cdr entry)))
+        (when (and (integerp pc)
+                   (integerp return-pc)
+                   (<= pc return-pc)
+                   (or (null best-pc) (> pc best-pc)))
+          (setf best-pc pc)
+          (setf best-label label))))))
+
+(defun %vm-frame-argument-values (saved-regs)
+  "Return reserved argument-slot values from SAVED-REGS for display."
+  (let ((values nil))
+    (when (hash-table-p saved-regs)
+      (dotimes (index +vm-arg-slot-count+)
+        (let ((slot (vm-arg-slot-name index)))
+          (multiple-value-bind (value found-p)
+              (gethash slot saved-regs)
+            (when found-p
+              (push value values))))))
+    (nreverse values)))
+
+(defun vm-print-backtrace (state &key (labels *vm-exec-labels*) (stream *error-output*))
+  "Print a human-readable VM call stack for STATE to STREAM.
+
+Each frame is derived from `vm-call-stack`, whose frames are
+(return-pc dst-reg old-closure-env saved-regs).  RETURN-PC is resolved to the
+nearest preceding label in LABELS, which identifies the caller function region."
+  (let ((frames (vm-call-stack state)))
+    (format stream "~&VM backtrace:~%")
+    (if frames
+        (loop for frame in frames
+              for index from 0
+              do (destructuring-bind (return-pc dst-reg _old-closure-env saved-regs)
+                     frame
+                   (declare (ignore _old-closure-env))
+                   (let ((function-name (or (%vm-label-for-return-pc labels return-pc)
+                                            :unknown))
+                         (args (%vm-frame-argument-values saved-regs)))
+                     (format stream "  ~D: ~A return-pc=~D dst=~A args=~S~%"
+                             index function-name return-pc dst-reg args))))
+        (format stream "  <empty>~%"))
+    (values)))
 
 (defun run-program-slice (instructions labels start-pc state)
   "Execute INSTRUCTIONS (a vector) from START-PC using LABELS and STATE.
 Returns the halted result value, or NIL if execution falls off the end.
 Used by run-string-repl for incremental REPL execution."
-  (loop with pc = start-pc
-        while (< pc (length instructions))
-        do (multiple-value-bind (next-pc halted result)
-               (execute-instruction (aref instructions pc) state pc labels)
-              (when halted
-                (return (vm-force-trampoline-result result)))
-             (setf pc next-pc))
-        finally (return nil)))
+  (let ((result
+          (loop with pc = start-pc
+                 while (< pc (length instructions))
+                 do (let ((instruction (aref instructions pc)))
+                      (vm-profile-inst-hit state instruction)
+                      (multiple-value-bind (next-pc halted value)
+                          (execute-instruction instruction state pc labels)
+                        (when halted
+                          (return (vm-force-trampoline-result value)))
+                        (setf pc next-pc)))
+                 finally (return nil))))
+    (vm-maybe-dump-type-profile state)
+    result))
 
 (defun run-compiled (program &key (output-stream *standard-output*) state)
   "Run a compiled VM program.
@@ -209,36 +275,41 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
          (flat (coerce instructions 'vector))
          (state (or state (make-vm-state :output-stream output-stream))))
     (when (and (%vm-profile-enabled-p state)
-               (null (%vm-profile-call-stack state)))
-      (%set-vm-profile-call-stack state (list "<toplevel>")))
-    (let ((*vm-exec-flat* flat)
-          (*vm-exec-labels* labels))
-       (loop with pc = 0
-             while (< pc (length flat))
-             do (progn
-                  (vm-profile-bb-hit state pc)
-                  (vm-profile-sample state)
-                  (multiple-value-bind (next-pc halted result)
-                     (execute-instruction (aref flat pc) state pc labels)
-                    (when (and next-pc
-                               (or (typep (aref flat pc) 'vm-jump)
-                                   (typep (aref flat pc) 'vm-jump-zero)
-                                   (typep (aref flat pc) 'vm-call)
-                                   (typep (aref flat pc) 'vm-tail-call)
-                                   (typep (aref flat pc) 'vm-ret)))
-                      (vm-profile-branch-edge state
-                                              (type-of (aref flat pc))
-                                              pc
-                                              next-pc))
-                    (when halted
-                      (return (vm-force-trampoline-result result)))
-                    (when (null next-pc)
-                      ;; Some execution paths (notably cross-context returns and
-                      ;; top-level RET forms) use NIL to signal "no next pc".
-                      ;; Treat that as a graceful stop instead of falling into
-                      ;; the next loop iteration and crashing on (< NIL LEN).
-                      (return (vm-force-trampoline-result
-                               (or result
-                                   (vm-reg-get state (vm-program-result-register program))))))
-                    (setf pc next-pc)))
-             finally (return nil)))))
+                (null (%vm-profile-call-stack state)))
+      (%set-vm-profile-call-stack state (list "<toplevel>"))
+      (%set-vm-profile-call-start-times state (list (%vm-profile-now-ns))))
+    (let ((result
+            (let ((*vm-exec-flat* flat)
+                  (*vm-exec-labels* labels))
+              (loop with pc = 0
+                     while (< pc (length flat))
+                     do (let ((instruction (aref flat pc)))
+                          (vm-profile-bb-hit state pc)
+                          (vm-profile-inst-hit state instruction)
+                          (vm-profile-sample state)
+                          (multiple-value-bind (next-pc halted value)
+                              (execute-instruction instruction state pc labels)
+                            (when (and next-pc
+                                       (or (typep instruction 'vm-jump)
+                                           (typep instruction 'vm-jump-zero)
+                                           (typep instruction 'vm-call)
+                                           (typep instruction 'vm-tail-call)
+                                           (typep instruction 'vm-ret)))
+                              (vm-profile-branch-edge state
+                                                      (type-of instruction)
+                                                      pc
+                                                      next-pc))
+                           (when halted
+                             (return (vm-force-trampoline-result value)))
+                           (when (null next-pc)
+                             ;; Some execution paths (notably cross-context returns and
+                             ;; top-level RET forms) use NIL to signal "no next pc".
+                             ;; Treat that as a graceful stop instead of falling into
+                             ;; the next loop iteration and crashing on (< NIL LEN).
+                             (return (vm-force-trampoline-result
+                                      (or value
+                                          (vm-reg-get state (vm-program-result-register program))))))
+                            (setf pc next-pc)))
+                    finally (return nil)))))
+      (vm-maybe-dump-type-profile state)
+      result)))

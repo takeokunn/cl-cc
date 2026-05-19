@@ -10,7 +10,11 @@
 
 (define-condition vm-condition (condition)
   ((vm-state :initarg :vm-state :reader vm-condition-state
-             :documentation "The VM state when condition was signaled."))
+             :documentation "The VM state when condition was signaled.")
+   (error-code :initarg :error-code :initform nil :reader vm-condition-error-code
+               :documentation "Machine-readable diagnostic code for this VM condition.")
+    (vm-fix-it :initarg :fix-it :initform nil :reader vm-condition-fix-it
+               :documentation "Optional structured fix-it suggestion for this VM condition."))
   (:documentation "Base class for all VM conditions."))
 
 (define-condition vm-error (vm-condition error)

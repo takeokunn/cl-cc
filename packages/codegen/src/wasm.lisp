@@ -56,16 +56,26 @@
           (or num 0)))))
 
 (defun %wasm-function-index-for-label (module label)
-  (let ((func (find label (wasm-module-functions module)
-                    :key (lambda (f)
-                           (let ((wat-name (wasm-func-wat-name f)))
-                             (if (and wat-name (> (length wat-name) 0)
-                                      (char= (char wat-name 0) #\$))
-                                 (subseq wat-name 1)
-                                 wat-name)))
-                    :test #'equal)))
-    (when func
-      (wasm-func-index func))))
+  "Return LABEL's function index using MODULE's function table."
+  (or (and module (wasm-module-function-index-for-label module label))
+      (let ((func (find label (wasm-module-functions module)
+                        :key (lambda (f)
+                               (let ((wat-name (wasm-func-wat-name f)))
+                                 (if (and wat-name (> (length wat-name) 0)
+                                          (char= (char wat-name 0) #\$))
+                                     (subseq wat-name 1)
+                                     wat-name)))
+                        :test #'equal)))
+        (when func
+          (wasm-func-index func)))))
+
+(defun %wasm-main-function-type-index (module)
+  "Return the canonical type index for backend-generated CL functions."
+  (let ((table (and module (wasm-module-type-signature-table module)))
+        (signature '(:params nil :results (:eqref))))
+    (when table
+      (setf (gethash signature table) +type-idx-main-func+))
+    +type-idx-main-func+))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module header: predefined GC type section
@@ -112,8 +122,45 @@
 (defun emit-wat-globals (module stream)
   "Emit WASM global variable declarations to STREAM."
   (dolist (global (wasm-module-globals module))
-    (format stream "~%  (global ~A (mut eqref) (ref.null eq))"
-            (wasm-global-def-wat-name global))))
+    (format stream "~%  (global ~A (mut eqref) (ref.null eq)) ;; globalidx ~D"
+            (wasm-global-def-wat-name global)
+            (wasm-global-def-index global))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; WAT module: exception tags (exception handling proposal)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun ensure-wasm-condition-tag! (module)
+  "Ensure MODULE has the CL condition/catch tag used by throw lowering."
+  (let* ((name "$cl_condition_tag")
+         (table (wasm-module-tag-name-table module)))
+    (or (and table (gethash name table))
+        (wasm-module-add-tag module
+          (make-wasm-tag-def :wat-name name :params '(:eqref :eqref))))))
+
+(defun emit-wat-tags (module stream)
+  "Emit WASM exception tags to STREAM."
+  (ensure-wasm-condition-tag! module)
+  (dolist (tag (reverse (wasm-module-tags module)))
+    (format stream "~%  (tag ~A (param eqref eqref)) ;; tagidx ~D"
+            (wasm-tag-def-wat-name tag)
+            (wasm-tag-def-index tag))))
+
+(defun emit-wat-exception-helper (stream)
+  "Emit a small EH helper so modules declare concrete try/catch/throw forms.
+
+The main trampoline emits throw at VM throw/signal-error sites.  This helper is
+kept separate from the PC-dispatch trampoline to avoid disturbing existing
+control-flow lowering while still materializing the EH proposal instructions in
+the generated module."
+  (format stream "~%  (func $cl_eh_identity (param eqref) (result eqref)")
+  (format stream "~%    (try (result eqref)")
+  (format stream "~%      (do (throw $cl_condition_tag (ref.null eq) (local.get 0)) (ref.null eq))")
+  (format stream "~%      (catch $cl_condition_tag")
+  (format stream "~%        (local.set 0)")
+  (format stream "~%        (drop)")
+  (format stream "~%        (local.get 0)))")
+  (format stream "~%  )"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module: function table (for call_indirect)
@@ -253,6 +300,9 @@
   (emit-wat-type-section stream)
   ;; Imports
   (emit-wat-imports stream)
+  ;; Exception tags for CL conditions and catch/throw payloads
+  (emit-wat-tags module stream)
+  (emit-wat-exception-helper stream)
   ;; Table (size updated by build-all-wasm-functions)
   (emit-wat-table module stream)
   ;; User-defined global variables (from defvar/setq)

@@ -55,6 +55,9 @@
 (defparameter +codegen-float-type+
   (parse-type-specifier 'float))
 
+(defparameter +codegen-symbol-type+
+  (parse-type-specifier 'symbol))
+
 (defun %ast-proven-type (ctx ast)
   "Return the currently proven type for AST, if any."
   (cond
@@ -80,6 +83,10 @@
   "Return T if TY is a proven subtype of float."
   (and ty (is-subtype-p ty +codegen-float-type+)))
 
+(defun %proven-symbol-type-p (ty)
+  "Return T if TY is a proven subtype of symbol."
+  (and ty (is-subtype-p ty +codegen-symbol-type+)))
+
 (defun %float-literal-node-p (node)
   "Return T if NODE is a quoted float literal."
   (and (typep node 'ast-quote) (floatp (ast-quote-value node))))
@@ -96,6 +103,23 @@ Falls back to the generic binop-ctor when no specialization applies."
            (and (%float-literal-node-p lhs) (%float-literal-node-p rhs)))
        (or (%numeric-binop-ctor-function op :float) (binop-ctor op)))
       (t (binop-ctor op)))))
+
+(defun %equality-predicate-constructor (func-sym lhs rhs ctx)
+  "Select a specialized constructor for EQ/EQL/EQUAL when operand types are proven.
+Fixnum pairs lower to direct numeric comparison. Symbol pairs lower to pointer-style
+VM equality. Unknown types preserve each predicate's existing generic path."
+  (let ((lhs-type (%ast-proven-type ctx lhs))
+        (rhs-type (%ast-proven-type ctx rhs)))
+    (cond
+      ((and (%proven-fixnum-type-p lhs-type) (%proven-fixnum-type-p rhs-type))
+       #'make-vm-num-eq)
+      ((and (%proven-symbol-type-p lhs-type) (%proven-symbol-type-p rhs-type))
+       #'make-vm-eq)
+      ((member func-sym '(eq eql) :test #'eq)
+       #'make-vm-eq)
+      ((eq func-sym 'equal)
+       #'make-vm-equal)
+      (t nil))))
 
 ;;; ── Primitive literal forms ──────────────────────────────────────────────
 

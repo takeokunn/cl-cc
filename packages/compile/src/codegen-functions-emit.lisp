@@ -32,22 +32,26 @@
 
 (defmethod compile-ast ((node ast-lambda) ctx)
   (setf (ctx-tail-position ctx) nil)
-  (let ((params (ast-lambda-params node))
-        (body (ast-lambda-body node))
-        (func-label (make-label ctx "lambda"))
-        (end-label (make-label ctx "lambda_end"))
-        (closure-reg (make-register ctx))
-        (inline-policy (%callable-inline-policy
-                        (ast-lambda-declarations node)
-                        :pending-policy (ctx-pending-inline-policy ctx)))
-        (free-vars (find-free-variables node))
-        (captured-vars nil)
-        (param-regs nil)
-        (rest-stack-alloc-p nil))
+  (let* ((raw-params (ast-lambda-params node))
+         (params (%plain-required-params raw-params))
+         (body (ast-lambda-body node))
+         (func-label (make-label ctx "lambda"))
+         (end-label (make-label ctx "lambda_end"))
+         (closure-reg (make-register ctx))
+         (inline-policy (%callable-inline-policy
+                         (ast-lambda-declarations node)
+                         :pending-policy (ctx-pending-inline-policy ctx)))
+         (free-vars (find-free-variables node))
+         (captured-vars nil)
+         (param-regs nil)
+         (rest-stack-alloc-p nil)
+          (type-bindings (append (function-param-type-bindings nil raw-params)
+                                 (%declaration-type-bindings
+                                  (ast-lambda-declarations node)))))
+    (note-function-calling-convention ctx func-label :internal)
     (setq captured-vars
-          (loop for v in free-vars
-                when (%assoc-eq v (ctx-env ctx))
-                  collect (cons v (lookup-var ctx v))))
+          (trim-captured-vars (%capture-candidates-from-env (ctx-env ctx))
+                              free-vars))
     (setq param-regs (loop for _ in params collect (make-register ctx)))
     (setq rest-stack-alloc-p
           (and (ast-lambda-rest-param node)
@@ -80,19 +84,30 @@
       (%call-with-declaration-policies
        ctx
        (ast-lambda-declarations node)
-       (lambda ()
-         (%emit-closure-body ctx func-label end-label params param-regs
-                             opt-bindings rest-binding key-bindings
-                             non-constant-defaults body supplied-p-entries)))
-      closure-reg)))
+        (lambda ()
+          (%emit-closure-body ctx func-label end-label params param-regs
+                              opt-bindings rest-binding key-bindings
+                              non-constant-defaults body supplied-p-entries
+                              type-bindings)))
+       closure-reg)))
+
+(defun %static-values-arity-from-body (body)
+  "Return statically known VALUES arity for BODY's final form, limited to 2-3."
+  (let ((last-form (car (last body))))
+    (when (typep last-form 'ast-values)
+      (let ((count (length (ast-values-forms last-form))))
+        (and (<= 2 count 3) count)))))
 
 (defmethod compile-ast ((node ast-defun) ctx)
   "Compile a top-level function definition."
   (setf (ctx-tail-position ctx) nil)
   (let* ((name (ast-defun-name node))
-         (params (ast-defun-params node))
-         (body (ast-defun-body node))
-         (type-bindings (function-param-type-bindings name params))
+          (raw-params (ast-defun-params node))
+          (params (%plain-required-params raw-params))
+          (body (ast-defun-body node))
+           (type-bindings (append (function-param-type-bindings name raw-params)
+                                  (%declaration-type-bindings
+                                   (ast-defun-declarations node))))
          (func-label (make-label ctx (format nil "DEFUN_~A" name)))
          (end-label (make-label ctx (format nil "DEFUN_~A_END" name)))
          (closure-reg (make-register ctx))
@@ -100,16 +115,13 @@
                          (ast-defun-declarations node)
                          :name name
                          :pending-policy (ctx-pending-inline-policy ctx)))
-         (free-vars (let ((temp-ast (make-ast-lambda :params params
-                                                     :body body)))
-                      (find-free-variables temp-ast)))
+          (free-vars (find-free-variables node))
          (captured-vars nil)
          (param-regs nil)
          (rest-stack-alloc-p nil))
     (setq captured-vars
-          (loop for v in free-vars
-                when (%assoc-eq v (ctx-env ctx))
-                  collect (cons v (lookup-var ctx v))))
+          (trim-captured-vars (%capture-candidates-from-env (ctx-env ctx))
+                              free-vars))
     (setq param-regs (loop for _ in params collect (make-register ctx)))
     (setq rest-stack-alloc-p
           (and (ast-defun-rest-param node)
@@ -122,8 +134,14 @@
                       :args (list (make-ast-quote :value name)
                                   (make-ast-quote :value 'function)
                                   (make-ast-quote :value (ast-defun-documentation node))))
-       ctx))
+        ctx))
     (setf (gethash name (ctx-global-functions ctx)) func-label)
+    (note-function-calling-convention
+     ctx func-label (function-calling-convention-for-defun name :stored-global-p t))
+    (let ((mv-arity (%static-values-arity-from-body body)))
+      (if mv-arity
+          (setf (gethash name (ctx-global-function-mv-arities ctx)) mv-arity)
+          (remhash name (ctx-global-function-mv-arities ctx))))
     (multiple-value-bind (opt-closure-data rest-reg key-closure-data
                           opt-bindings rest-binding key-bindings
                           non-constant-defaults supplied-p-entries)

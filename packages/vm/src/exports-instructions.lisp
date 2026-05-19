@@ -27,10 +27,11 @@
     vm-add-checked
     vm-sub-checked
     vm-mul-checked
-    vm-float-add
-    vm-float-sub
-    vm-float-mul
-    vm-float-div
+     vm-float-add
+     vm-float-sub
+     vm-float-mul
+     vm-fma
+     vm-float-div
      vm-sqrt
      vm-sin-inst
      vm-cos-inst
@@ -55,8 +56,15 @@
     vm-func-ref
     vm-push
     vm-pop
-    vm-values
-    vm-values-typep
+     vm-values
+     vm-values-regs
+     vm-mv-bind-regs
+     vm-vr0
+     vm-vr1
+     vm-vr2
+     vm-vr-count
+     vm-mv-bind-regs-count
+     vm-values-typep
     vm-spread-values
    vm-mv-bind
    vm-dst-regs
@@ -104,9 +112,16 @@
     vm-array-reg
     vm-index-reg
     vm-val-reg
-    vm-aref
-     vm-aset
-     vm-fill
+     vm-aref
+      vm-aset
+      vm-prefetch
+      vm-prefetch-base-reg
+      vm-prefetch-index-reg
+      vm-prefetch-scale
+      vm-prefetch-offset
+      vm-prefetch-locality
+      vm-prefetch-kind
+      vm-fill
      vm-copy-vector
     vm-eq
    vm-num-eq
@@ -188,11 +203,17 @@
    vm-lower-case-p
    vm-upper-case-p
    vm-both-case-p
-   vm-sub-p
-   vm-const-value
+    vm-sub-p
+    vm-a
+    vm-b
+    vm-c
+    vm-const-value
    vm-move-dst
    vm-move-src
    vm-lbl-name
+    vm-gethash-eq
+    vm-gethash-eql
+    vm-gethash-equal
     vm-gethash-default
     vm-make-array-fill-pointer
     vm-make-hash-table-test
@@ -207,10 +228,15 @@
     vm-src-array-reg
     vm-len-reg
    vm-size-reg
-   vm-initial-element
-   vm-fill-pointer
-   vm-adjustable
-   vm-make-array-adjustable
+    vm-initial-element
+    vm-fill-pointer
+    vm-fill-pointer-reg
+    vm-adjustable
+    vm-adjustable-reg
+    vm-element-type
+    vm-element-type-reg
+    vm-displaced-to-reg
+    vm-make-array-adjustable
    define-vm-instruction
    define-simple-instruction
    define-vm-unary-instruction

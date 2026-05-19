@@ -173,19 +173,40 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
 (defun build-all-param-bindings (params param-regs opt-bindings rest-binding key-bindings)
   "Build the combined alist of (name . register) for all lambda list parameters."
   (nconc
-   (loop for p in params for r in param-regs collect (cons p r))
-   opt-bindings
-   (when rest-binding (list rest-binding))
-   key-bindings))
+    (loop for p in params for r in param-regs collect (cons p r))
+    opt-bindings
+    (when rest-binding (list rest-binding))
+    key-bindings))
+
+(defun %required-param-name (param)
+  "Return the symbol name for a required PARAM, accepting typed `(name type)` entries."
+  (if (and (consp param) (= (length param) 2) (symbolp (first param)))
+      (first param)
+      param))
+
+(defun %plain-required-params (params)
+  "Strip required typed-parameter entries to plain symbols for code generation."
+  (mapcar #'%required-param-name params))
+
+(defun %required-param-type-bindings (params)
+  "Return type-env bindings encoded directly in required PARAMS."
+  (loop for param in params
+        append (when (and (consp param) (= (length param) 2) (symbolp (first param)))
+                 (let ((parsed (%safe-parse-declaration-type (second param))))
+                   (when parsed
+                     (list (cons (first param) (type-to-scheme parsed))))))))
 
 (defun function-param-type-bindings (name params)
   "Return an alist of (param . type-scheme) for NAMEs typed parameters."
-  (multiple-value-bind (signature found-p)
-      (gethash name *function-type-registry*)
-    (when found-p
-      (loop for p in params
-            for tp in (car signature)
-            collect (cons p (type-to-scheme tp))))))
+  (let ((direct-bindings (%required-param-type-bindings params))
+        (plain-params (%plain-required-params params)))
+    (multiple-value-bind (signature found-p)
+        (gethash name *function-type-registry*)
+      (append direct-bindings
+              (when found-p
+                (loop for p in plain-params
+                      for tp in (car signature)
+                      collect (cons p (type-to-scheme tp))))))))
 
 (defun compile-function-body (ctx params param-regs opt-bindings rest-binding
                               key-bindings non-constant-defaults body

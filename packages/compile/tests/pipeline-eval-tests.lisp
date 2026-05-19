@@ -33,11 +33,29 @@
           ("mul" "(defun typed-mul ((x fixnum) (y fixnum)) fixnum (* x y))" 'cl-cc/vm::vm-integer-mul)
           ("lt"  "(defun typed-lt  ((x fixnum) (y fixnum)) fixnum (< x y))" 'cl-cc/vm::vm-lt)
           ("gt"  "(defun typed-gt  ((x fixnum) (y fixnum)) fixnum (> x y))" 'cl-cc/vm::vm-gt)
-          ("eq"  "(defun typed-eq  ((x fixnum) (y fixnum)) fixnum (= x y))" 'cl-cc/vm::vm-num-eq))
+          ("eq"  "(defun typed-eq  ((x fixnum) (y fixnum)) fixnum (= x y))" 'cl-cc/vm::vm-num-eq)
+          ("eq-fixnum" "(defun typed-eq-pred ((x fixnum) (y fixnum)) fixnum (eq x y))" 'cl-cc/vm::vm-num-eq)
+          ("eql-fixnum" "(defun typed-eql-pred ((x fixnum) (y fixnum)) fixnum (eql x y))" 'cl-cc/vm::vm-num-eq)
+          ("equal-fixnum" "(defun typed-equal-pred ((x fixnum) (y fixnum)) fixnum (equal x y))" 'cl-cc/vm::vm-num-eq)
+          ("equal-symbol" "(defun typed-equal-symbol ((x symbol) (y symbol)) fixnum (equal x y))" 'cl-cc/vm::vm-eq))
   (code expected-type)
   (let ((instrs (vm-program-instructions
                  (compilation-result-program (compile-string code :target :vm)))))
     (assert-true (some (lambda (i) (typep i expected-type)) instrs))))
+
+(deftest pipeline-equality-predicate-specialization-preserves-generic-equal
+  "Typed fixnum EQUAL specializes to vm-num-eq, but unknown EQUAL keeps vm-equal."
+  (let ((typed-instrs
+          (vm-program-instructions
+           (compilation-result-program
+            (compile-string "(defun typed-equal-pred ((x fixnum) (y fixnum)) fixnum (equal x y))" :target :vm))))
+        (generic-instrs
+          (vm-program-instructions
+           (compilation-result-program
+            (compile-string "(defun generic-equal-pred (x y) (equal x y))" :target :vm)))))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-num-eq)) typed-instrs))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-equal)) typed-instrs))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-equal)) generic-instrs))))
 
 ;;; ─── compile-string / run-string ─────────────────────────────────────────
 

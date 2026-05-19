@@ -44,7 +44,8 @@
   (name-str  ""     :type string)       ; uppercase CL name string
   (convention :unary :type keyword)     ; calling convention tag
   (ctor       nil    :type symbol)      ; make-vm-* constructor symbol
-  (slots      nil    :type list))       ; optional: slot keywords for parametric conventions
+  (slots      nil    :type list)        ; optional: slot keywords for parametric conventions
+  (properties nil    :type list))       ; FR-183: known function attributes/effect tags
 
 ;;; Data tables are in builtin-registry-data.lisp (loaded before this file).
 
@@ -52,7 +53,36 @@
 
 (defparameter *builtin-registry* (make-hash-table :test #'equal)
   "Maps uppercase CL function name strings to builtin-entry structs.
-   Populated at load time from the category alists above.")
+    Populated at load time from the category alists above.")
+
+(defparameter *builtin-convention-default-properties*
+  '((:side-effect . (:io))
+    (:void-side-eff . (:io))
+    (:handle-input . (:io))
+    (:handle-effect . (:io))
+    (:stream-input-opt . (:io))
+    (:stream-void-opt . (:io))
+    (:stream-write-val . (:io))
+    (:binary-move-first . (:write-global :always-returns))
+    (:binary-void . (:write-global :always-returns))
+    (:unary-custom-void . (:control))
+    (:ternary-custom . (:read-only))
+    (:binary-custom . (:read-only))
+    (:table-query . (:read-only))
+    (:string-cmp . (:read-only :foldable))
+    (:char-cmp . (:pure :foldable :always-returns :no-escape))
+    (:zero-compare . (:pure :foldable :no-escape)))
+  "Fallback properties derived from builtin calling conventions.
+The optimizer-level known function DB supplies more precise per-function facts;
+these defaults ensure every registry entry carries useful metadata.")
+
+(defun %builtin-entry-properties (cl-sym convention)
+  "Return FR-183 properties for CL-SYM under CONVENTION."
+  (remove-duplicates
+   (append (known-function-properties cl-sym)
+           (cdr (assoc convention *builtin-convention-default-properties* :test #'eq))
+           (list :registered-builtin))
+   :test #'eq))
 
 (defun %register-builtins (alist convention)
   "Register all entries from ALIST under CONVENTION in *builtin-registry*.
@@ -63,8 +93,9 @@
           (ctor     (cdr pair)))
       (setf (gethash name-str *builtin-registry*)
             (make-builtin-entry :name-str name-str
-                                :convention convention
-                                :ctor ctor))
+                                 :convention convention
+                                 :ctor ctor
+                                 :properties (%builtin-entry-properties cl-sym convention)))
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
         (add-rule pred (make-prolog-rule :head (list pred cl-sym ctor)))))))
 
@@ -79,9 +110,10 @@
            (name-str (symbol-name cl-sym)))
       (setf (gethash name-str *builtin-registry*)
             (make-builtin-entry :name-str name-str
-                                :convention convention
-                                :ctor ctor
-                                :slots slots))
+                                 :convention convention
+                                 :ctor ctor
+                                 :slots slots
+                                 :properties (%builtin-entry-properties cl-sym convention)))
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
         (add-rule pred (make-prolog-rule :head (list* pred cl-sym ctor slots)))))))
 
@@ -120,4 +152,3 @@
 ;;; (Emitter functions, *builtin-emitter-table*, *convention-arity*,
 ;;;  and emit-registered-builtin are in builtin-registry-emitters.lisp
 ;;;  which loads after this file.)
-

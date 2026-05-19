@@ -6,6 +6,69 @@
   '("x0" "x1" "x2" "x3" "x4" "x5" "x6" "x7")
   "AAPCS64 argument registers used for runtime helper calls.")
 
+;; Extended register pool for AArch64 text emission.
+;; Registers are caller-saved (safe for allocation without prologue/epilogue):
+;;   x0-x7: argument/result registers (direct mapping for :R0-:R7)
+;;   x8:    indirect result register
+;;   x9-x15: temporary registers
+;;   x16-x17: intra-procedure-call scratch (IP0/IP1)
+;; Callee-saved registers (x19-x28) are NOT included because the text emitter
+;; does not generate save/restore sequences. Using them would violate the ABI.
+;; When the pool is exhausted, registers must be spilled to the stack frame.
+(defparameter *aarch64-register-pool*
+  '("x0" "x1" "x2" "x3" "x4" "x5" "x6" "x7"
+    "x8" "x9" "x10" "x11" "x12" "x13" "x14" "x15"
+    "x16" "x17")
+  "AArch64 caller-saved register pool (18 registers). Virtual registers beyond
+this pool are spilled to the stack frame.")
+
+;; Scratch registers used temporarily during spill materialization.
+;; x9 and x10 are caller-saved and safe to use as temporaries in all emit methods.
+(defparameter *aarch64-scratch-regs*
+  '("x9" "x10" "x11" "x12")
+  "Scratch registers used to materialize spilled virtual registers.")
+
+(defvar *current-aarch64-spill-base* 0
+  "Next available stack offset for AArch64 text-emission spills.")
+
+(defvar *current-aarch64-spill-home*
+  (make-hash-table :test #'eq)
+  "Hash table mapping virtual register keywords to stack offsets for spills.")
+
+(defun %aarch64-virtual-register-index (virtual-register)
+  "Extract the numeric index from a virtual register keyword like :R0 → 0, :R10 → 10."
+  (or (parse-integer (subseq (symbol-name virtual-register) 1)
+                     :junk-allowed t)
+      0))
+
+(defun %aarch64-register-from-pool (index)
+  "Return the AArch64 register name string for INDEX, or NIL if out of pool."
+  (when (< index (length *aarch64-register-pool*))
+    (nth index *aarch64-register-pool*)))
+
+(defun %aarch64-spill-home-offset (virtual-register)
+  "Return the stack offset for a spilled VIRTUAL-REGISTER.
+Allocates a new spill slot if one doesn't exist yet.
+Offsets are negative, relative to the frame pointer (x29)."
+  (let ((existing (gethash virtual-register *current-aarch64-spill-home*)))
+    (if existing
+        existing
+        (progn
+          (incf *current-aarch64-spill-base* 8)
+          (let ((offset *current-aarch64-spill-base*))
+            (setf (gethash virtual-register *current-aarch64-spill-home*) offset)
+            offset)))))
+
+(defun %aarch64-emit-spill-store (virtual-register scratch-reg stream)
+  "Emit store of SCRATCH-REG into the spill home for VIRTUAL-REGISTER."
+  (let ((offset (%aarch64-spill-home-offset virtual-register)))
+    (format stream "  str ~A, [x29, #-~D]~%" scratch-reg offset)))
+
+(defun %aarch64-emit-spill-load (virtual-register scratch-reg stream)
+  "Emit load of VIRTUAL-REGISTER's spill home into SCRATCH-REG."
+  (let ((offset (%aarch64-spill-home-offset virtual-register)))
+    (format stream "  ldr ~A, [x29, #-~D]~%" scratch-reg offset)))
+
 (defun %aarch64-vm-register-p (x)
   (and (symbolp x) (member x '(:R0 :R1 :R2 :R3 :R4 :R5 :R6 :R7) :test #'eq)))
 
@@ -34,13 +97,18 @@
 
 (defmethod target-register ((target aarch64-target) virtual-register)
   (declare (ignore target))
-  (let* ((index (or (parse-integer (subseq (symbol-name virtual-register) 1)
-                                   :junk-allowed t)
-                    0))
-         (pool '("x0" "x1" "x2" "x3" "x4" "x5" "x6" "x7")))
-    (when (>= index (length pool))
-      (error "Register spilling is not implemented yet (needed: ~A)" virtual-register))
-    (nth index pool)))
+  (let* ((index (%aarch64-virtual-register-index virtual-register))
+         (reg (%aarch64-register-from-pool index)))
+    (if reg
+        reg
+        ;; Register beyond the pool — must be spilled.
+        ;; The caller is responsible for loading/storing around use.
+        (error "AArch64 register spilling needed for ~A (index ~D > pool size ~D).
+This virtual register must be spilled to the stack frame before use.
+Call %aarch64-emit-spill-load / %aarch64-emit-spill-store to materialize."
+               virtual-register
+               index
+               (length *aarch64-register-pool)))))
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-const) stream)
   (format stream "  mov ~A, #~A~%"
@@ -69,6 +137,30 @@
           (target-register target (vm-dst inst))
           (target-register target (vm-lhs inst))
           (target-register target (vm-rhs inst))))
+
+(defmethod emit-instruction ((target aarch64-target) (inst vm-truncate) stream)
+  (format stream "  sdiv ~A, ~A, ~A~%"
+          (target-register target (vm-dst inst))
+          (target-register target (vm-lhs inst))
+          (target-register target (vm-rhs inst))))
+
+(defun %aarch64-fp-register (target virtual-register)
+  "Return the scalar double register name corresponding to VIRTUAL-REGISTER."
+  (let ((name (target-register target virtual-register)))
+    (format nil "d~A" (subseq name 1))))
+
+(defmacro define-aarch64-float-emit-method (inst-type mnemonic)
+  `(defmethod emit-instruction ((target aarch64-target) (inst ,inst-type) stream)
+     (format stream "  ~A ~A, ~A, ~A~%"
+             ,mnemonic
+             (%aarch64-fp-register target (vm-dst inst))
+             (%aarch64-fp-register target (vm-lhs inst))
+             (%aarch64-fp-register target (vm-rhs inst)))))
+
+(define-aarch64-float-emit-method vm-float-add "fadd")
+(define-aarch64-float-emit-method vm-float-sub "fsub")
+(define-aarch64-float-emit-method vm-float-mul "fmul")
+(define-aarch64-float-emit-method vm-float-div "fdiv")
 
 (defmethod emit-instruction ((target aarch64-target) (inst vm-label) stream)
   (declare (ignore target))

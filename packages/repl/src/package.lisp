@@ -19,16 +19,28 @@
         :cl-cc/selfhost)
   (:export
    ;; REPL state — symbols genuinely owned by repl
-   #:*repl-accessor-map*
-   #:*repl-pool-instructions*
-   #:*repl-pool-labels*
-   #:*repl-global-vars-persistent*
-   #:*repl-defstruct-registry*
-   #:*our-load-host-definition-mode*
-   #:with-fresh-repl-state
-   #:run-form-repl
-   ;; Internal helpers exposed to tests via cl-cc:: inheritance.
-   #:%ensure-repl-state
-   #:%whitespace-symbol-p
+    #:*repl-accessor-map*
+    #:*repl-defstruct-read-only-accessor-map*
+    #:*repl-defstruct-type-registry*
+    #:*repl-setf-compound-place-handlers*
+    #:*repl-pool-instructions*
+    #:*repl-pool-labels*
+    #:*repl-global-vars-persistent*
+    #:*repl-history*
+    #:*repl-history-limit*
+    #:*repl-defstruct-registry*
+    #:*our-load-host-definition-mode*
+    #:repl-history
+    #:repl-history-entry
+    #:repl-history-previous
+    #:repl-history-next
+    #:repl-completion-candidates
+    #:repl-edit-input-line
+    #:with-fresh-repl-state
+    #:run-form-repl
+    ;; Internal helpers exposed to tests via cl-cc:: inheritance.
+    #:%ensure-repl-state
+    #:%repl-record-history
+    #:%whitespace-symbol-p
    #:%prescan-in-package
    #:%handle-host-only-top-level-form))

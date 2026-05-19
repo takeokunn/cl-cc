@@ -25,8 +25,11 @@ Uses ast-children for generic traversal."
          (setf captured (union captured (intersection (find-free-variables form) params))))
         (ast-defun
          (let ((pseudo (make-ast-lambda :params (ast-defun-params form)
+                                        :optional-params (ast-defun-optional-params form)
+                                        :rest-param (ast-defun-rest-param form)
+                                        :key-params (ast-defun-key-params form)
                                         :body   (ast-defun-body form))))
-           (setf captured (union captured (intersection (find-free-variables pseudo) params)))))
+            (setf captured (union captured (intersection (find-free-variables pseudo) params)))))
         ;; labels/flet: each binding body is a closure boundary
         (ast-local-fns
          (dolist (binding (ast-local-fns-bindings form))
@@ -65,7 +68,10 @@ Binding forms use ast-bound-names; others fall through to ast-children."
                                 (free-vars-of-defaults (ast-lambda-key-params ast)))))
        (set-difference (union body-free default-free) (ast-bound-names ast))))
     (ast-defun
-     (set-difference (free-vars-of-list (ast-defun-body ast)) (ast-bound-names ast)))
+     (let ((body-free    (free-vars-of-list (ast-defun-body ast)))
+           (default-free (union (free-vars-of-defaults (ast-defun-optional-params ast))
+                                (free-vars-of-defaults (ast-defun-key-params ast)))))
+       (set-difference (union body-free default-free) (ast-bound-names ast))))
     (ast-local-fns
      (let ((binding-free (free-vars-of-list
                           (mapcar (lambda (b)
@@ -185,6 +191,25 @@ captured variable names only, which is enough to detect sibling closures that
 could share one environment record." 
   (sort (remove-duplicates (mapcar #'car captured-vars) :test #'eq)
         #'string< :key #'symbol-name))
+
+(defun trim-captured-vars (captured-vars required-vars)
+  "Return CAPTURED-VARS filtered to variables listed in REQUIRED-VARS.
+
+CAPTURED-VARS is an alist of (var . reg) candidates from the surrounding
+compiler environment. REQUIRED-VARS is the set of variables that the closure
+body actually needs according to free-variable analysis. The first occurrence
+of each variable is kept so shadowing preserves the innermost environment
+binding, and unused environment entries are removed before vm-captured-vars is
+emitted."
+  (let ((required (remove-duplicates required-vars :test #'eq))
+        (seen nil)
+        (trimmed nil))
+    (dolist (entry captured-vars (nreverse trimmed))
+      (let ((var (car entry)))
+        (when (and (member var required :test #'eq)
+                   (not (member var seen :test #'eq)))
+          (push var seen)
+          (push entry trimmed))))))
 
 (defun group-shared-sibling-captures (captured-var-lists)
   "Group sibling closure captures that share the same captured variable set.

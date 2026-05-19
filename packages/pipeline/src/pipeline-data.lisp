@@ -23,12 +23,14 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (safety             1)
   (speed              nil)
   (inline-threshold-scale 1)
+  (block-compile     nil)
   (pass-pipeline      nil)
   (print-pass-timings nil)
   (timing-stream      nil)
   (print-pass-stats   nil)
   (stats-stream       nil)
   (trace-json-stream  nil)
+  (coverage           nil)
   (print-opt-remarks  nil)
   (opt-remarks-stream nil)
   (opt-remarks-mode   :all    :type keyword)
@@ -40,7 +42,9 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (msan               nil)
   (tsan               nil)
   (ubsan              nil)
-  (hwasan             nil))
+  (hwasan             nil)
+  (compress           nil)
+  (pgo-profile-data   nil))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 

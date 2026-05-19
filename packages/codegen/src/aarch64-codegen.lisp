@@ -36,23 +36,25 @@
 
 (defun a64-codegen-target ()
   "Return the AArch64 target descriptor for the active frame-pointer policy."
-  (if *a64-omit-frame-pointer*
-      (make-target-desc
-       :name (target-name *aarch64-target*)
-       :word-size (target-word-size *aarch64-target*)
-       :endianness (target-endianness *aarch64-target*)
-       :gpr-count (target-gpr-count *aarch64-target*)
-       :gpr-names (target-gpr-names *aarch64-target*)
-       :arg-regs (target-arg-regs *aarch64-target*)
-       :ret-reg (target-ret-reg *aarch64-target*)
-       :fp-arg-regs (target-fp-arg-regs *aarch64-target*)
-       :fp-ret-reg (target-fp-ret-reg *aarch64-target*)
-       :callee-saved '(:x19 :x20 :x21 :x22 :x23 :x24 :x25 :x26 :x27 :x28 :x29)
-       :scratch-regs (remove :x29 (target-scratch-regs *aarch64-target*) :test #'eq)
-       :stack-alignment (target-stack-alignment *aarch64-target*)
-       :legal-ops (target-legal-ops *aarch64-target*)
-       :features (target-features *aarch64-target*))
-      *aarch64-target*))
+  (apply-calling-convention-to-target
+   (if *a64-omit-frame-pointer*
+       (make-target-desc
+        :name (target-name *aarch64-target*)
+        :word-size (target-word-size *aarch64-target*)
+        :endianness (target-endianness *aarch64-target*)
+        :gpr-count (target-gpr-count *aarch64-target*)
+        :gpr-names (target-gpr-names *aarch64-target*)
+        :arg-regs (target-arg-regs *aarch64-target*)
+        :ret-reg (target-ret-reg *aarch64-target*)
+        :fp-arg-regs (target-fp-arg-regs *aarch64-target*)
+        :fp-ret-reg (target-fp-ret-reg *aarch64-target*)
+        :callee-saved '(:x19 :x20 :x21 :x22 :x23 :x24 :x25 :x26 :x27 :x28 :x29)
+        :scratch-regs (remove :x29 (target-scratch-regs *aarch64-target*) :test #'eq)
+        :stack-alignment (target-stack-alignment *aarch64-target*)
+        :legal-ops (target-legal-ops *aarch64-target*)
+        :features (target-features *aarch64-target*))
+       *aarch64-target*)
+   *current-calling-convention*))
 
 (defparameter *current-a64-spill-base-reg* +a64-fp+
   "Base register used for AArch64 spill load/store emission in the current function.")
@@ -149,6 +151,10 @@
   "ADD Xd, Xn, Xm (64-bit)."
   (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
+(defenc add-shift #x8B000000 (rd rn rm shift imm6)
+  "ADD Xd, Xn, Xm, LSL #imm6 when SHIFT=0."
+  (rd #x1F 0) (rn #x1F 5) (imm6 #x3F 10) (rm #x1F 16) (shift #x3 22))
+
 ;; ADD Xd, Xn, #imm12{, LSL #12}
 (defenc add-imm #x91000000 (rd rn imm12 &optional (shift12 0))
   "ADD Xd, Xn, #imm12, optionally shifted left by 12 when SHIFT12=1."
@@ -179,6 +185,26 @@
   "MUL Xd, Xn, Xm (via MADD Xd, Xn, Xm, XZR)."
   (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
 
+;; UDIV Xd, Xn, Xm (unsigned integer division)
+(defenc udiv #x9AC00800 (rd rn rm)
+  "UDIV Xd, Xn, Xm (64-bit unsigned integer division)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; UDIV Wd, Wn, Wm (unsigned integer division)
+(defenc udiv32 #x1AC00800 (rd rn rm)
+  "UDIV Wd, Wn, Wm (32-bit unsigned integer division)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; SDIV Xd, Xn, Xm (signed integer division)
+(defenc sdiv #x9AC00C00 (rd rn rm)
+  "SDIV Xd, Xn, Xm (64-bit signed integer division)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; SDIV Wd, Wn, Wm (signed integer division)
+(defenc sdiv32 #x1AC00C00 (rd rn rm)
+  "SDIV Wd, Wn, Wm (32-bit signed integer division)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
 ;; SMULH Xd, Xn, Xm (signed high 64 bits of 128-bit product)
 (defenc smulh #x9B407C00 (rd rn rm)
   "SMULH Xd, Xn, Xm (signed high half of 64x64->128 multiply)."
@@ -198,6 +224,31 @@
 (defenc fmov-dd #x1E604000 (rd rn)
   "FMOV Dd, Dn (scalar double-precision floating-point register-to-register move)."
   (rd #x1F 0) (rn #x1F 5))
+
+;; FADD Dd, Dn, Dm (scalar double-precision floating-point add)
+(defenc fadd #x1E602800 (rd rn rm)
+  "FADD Dd, Dn, Dm (scalar double-precision floating-point add)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; FSUB Dd, Dn, Dm (scalar double-precision floating-point subtract)
+(defenc fsub #x1E603800 (rd rn rm)
+  "FSUB Dd, Dn, Dm (scalar double-precision floating-point subtract)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; FMUL Dd, Dn, Dm (scalar double-precision floating-point multiply)
+(defenc fmul #x1E600800 (rd rn rm)
+  "FMUL Dd, Dn, Dm (scalar double-precision floating-point multiply)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; FDIV Dd, Dn, Dm (scalar double-precision floating-point divide)
+(defenc fdiv #x1E601800 (rd rn rm)
+  "FDIV Dd, Dn, Dm (scalar double-precision floating-point divide)."
+  (rd #x1F 0) (rn #x1F 5) (rm #x1F 16))
+
+;; FMADD Dd, Dn, Dm, Da — Dd = Da + Dn * Dm
+(defenc fmadd #x1F400000 (rd rn rm ra)
+  "FMADD Dd, Dn, Dm, Da (scalar double-precision fused multiply-add)."
+  (rd #x1F 0) (rn #x1F 5) (ra #x1F 10) (rm #x1F 16))
 
 ;; UMULH Xd, Xn, Xm (unsigned high 64 bits of 128-bit product)
 (defenc umulh #x9BC07C00 (rd rn rm)
@@ -262,6 +313,11 @@
   "LDUR Xt, [Xn, #simm9] (unscaled load, supports negative offsets)."
   (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
+;; PRFM <prfop>, [Xn, #pimm] (unsigned immediate, pimm scaled by 8)
+(defenc prfm #xF9800000 (rt rn imm12)
+  "PRFM <prfop>, [Xn, #imm12*8]. RT encodes PLDL1KEEP=0, PLDL1STRM=1."
+  (rt #x1F 0) (rn #x1F 5) (imm12 #xFFF 10))
+
 ;;; --- Memory: Indexed ---
 
 ;; STR Xt, [Xn], #simm9 (post-indexed store)
@@ -269,12 +325,42 @@
   "STR Xt, [Xn], #simm9 (post-indexed store with writeback)."
   (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
+;; STR Xt, [Xn, #simm9]! (pre-indexed store)
+(defenc str-pre #xF8000C00 (rt rn simm9)
+  "STR Xt, [Xn, #simm9]! (pre-indexed store with writeback)."
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
+
+;; LDR Xt, [Xn], #simm9 (post-indexed load)
+(defenc ldr-post #xF8400400 (rt rn simm9)
+  "LDR Xt, [Xn], #simm9 (post-indexed load with writeback)."
+  (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
+
 ;; LDR Xt, [Xn, #simm9]! (pre-indexed load)
 (defenc ldr-pre #xF8400C00 (rt rn simm9)
   "LDR Xt, [Xn, #simm9]! (pre-indexed load with writeback)."
   (rt #x1F 0) (rn #x1F 5) (simm9 #x1FF 12))
 
+;; STR Xt, [Xn, Xm {, extend {amount}}] (register offset)
+(defenc str-reg #xF8200800 (rt rn rm &optional (option #b011) (s 0))
+  "STR Xt, [Xn, Xm {, extend {amount}}] (register-offset store). OPTION encodes extend, S encodes scale-by-size."
+  (rt #x1F 0) (rn #x1F 5) (s 1 12) (option #x7 13) (rm #x1F 16))
+
+;; LDR Xt, [Xn, Xm {, extend {amount}}] (register offset)
+(defenc ldr-reg #xF8600800 (rt rn rm &optional (option #b011) (s 0))
+  "LDR Xt, [Xn, Xm {, extend {amount}}] (register-offset load). OPTION encodes extend, S encodes scale-by-size."
+  (rt #x1F 0) (rn #x1F 5) (s 1 12) (option #x7 13) (rm #x1F 16))
+
 ;;; --- Memory: Pair ---
+
+;; STP Xt1, Xt2, [Xn, #imm7*8] (signed offset store pair)
+(defenc stp #xA9000000 (rt1 rt2 rn imm7)
+  "STP Xt1, Xt2, [Xn, #imm7*8] (signed offset). imm7 can be negative."
+  (rt1 #x1F 0) (rn #x1F 5) (rt2 #x1F 10) (imm7 #x7F 15))
+
+;; LDP Xt1, Xt2, [Xn, #imm7*8] (signed offset load pair)
+(defenc ldp #xA9400000 (rt1 rt2 rn imm7)
+  "LDP Xt1, Xt2, [Xn, #imm7*8] (signed offset). imm7 can be negative."
+  (rt1 #x1F 0) (rn #x1F 5) (rt2 #x1F 10) (imm7 #x7F 15))
 
 ;; STP Xt1, Xt2, [Xn, #imm7*8]! (pre-index store pair)
 (defenc stp-pre #xA9800000 (rt1 rt2 rn imm7)

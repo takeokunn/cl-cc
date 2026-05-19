@@ -26,6 +26,12 @@
     (setf (gethash 'vm-integer-sub ht) #'emit-a64-vm-sub)
     (setf (gethash 'vm-mul ht) #'emit-a64-vm-mul)
     (setf (gethash 'vm-integer-mul ht) #'emit-a64-vm-mul)
+    (setf (gethash 'vm-truncate ht) #'emit-a64-vm-truncate)
+    (setf (gethash 'vm-float-add ht) #'emit-a64-vm-float-add)
+    (setf (gethash 'vm-float-sub ht) #'emit-a64-vm-float-sub)
+    (setf (gethash 'vm-float-mul ht) #'emit-a64-vm-float-mul)
+    (setf (gethash 'vm-float-div ht) #'emit-a64-vm-float-div)
+    (setf (gethash 'vm-fma ht) #'emit-a64-vm-fma)
     (setf (gethash 'vm-integer-mul-high-u ht) #'emit-a64-vm-integer-mul-high-u)
     (setf (gethash 'vm-integer-mul-high-s ht) #'emit-a64-vm-integer-mul-high-s)
     ;; Checked arithmetic (FR-303 overflow detection)
@@ -50,6 +56,7 @@
     (setf (gethash 'vm-ret ht) #'emit-a64-vm-ret)
     (setf (gethash 'vm-spill-store ht) #'emit-a64-vm-spill-store)
     (setf (gethash 'vm-spill-load ht) #'emit-a64-vm-spill-load)
+    (setf (gethash 'vm-prefetch ht) #'emit-a64-vm-prefetch)
     ht)
   "Maps VM instruction type symbols to AArch64 emitter functions (inst stream).")
 
@@ -63,6 +70,8 @@
            (eq tp 'vm-register-function)
            (eq tp 'vm-set-global))
        nil)
+      ((eq tp 'vm-const)
+       (emit-a64-vm-const-at inst stream current-pos))
       ((eq tp 'vm-jump)
        (emit-a64-vm-jump inst stream current-pos label-offsets))
       ((eq tp 'vm-jump-zero)
@@ -71,10 +80,90 @@
        (emit-a64-instr (encode-blr (a64-reg (vm-func-reg inst))) stream))
       ((eq tp 'vm-tail-call)
        (emit-a64-instr (encode-br (a64-reg (vm-func-reg inst))) stream))
+      ((member tp '(vm-sin-inst vm-cos-inst vm-exp-inst vm-log-inst
+                    vm-tan-inst vm-asin-inst vm-acos-inst vm-atan-inst)
+               :test #'eq)
+       (funcall (gethash tp *a64-emitter-table*) inst stream current-pos))
       (t (let ((emitter (gethash tp *a64-emitter-table*)))
-           (if emitter
-               (funcall emitter inst stream)
-                (error "Unsupported AArch64 instruction: ~A" tp)))))))
+            (if emitter
+                (funcall emitter inst stream)
+                 (error "Unsupported AArch64 instruction: ~A" tp)))))))
+
+(defun a64-libm-function-for-instruction (inst)
+  "Return the libm symbol name used by INST, or NIL."
+  (case (type-of inst)
+    (vm-sin-inst "sin")
+    (vm-cos-inst "cos")
+    (vm-exp-inst "exp")
+    (vm-log-inst "log")
+    (vm-tan-inst "tan")
+    (vm-asin-inst "asin")
+    (vm-acos-inst "acos")
+    (vm-atan-inst "atan")
+    (otherwise nil)))
+
+(defun a64-collect-literal-pool (instructions)
+  "Collect all large AArch64 constants and absolute addresses in INSTRUCTIONS."
+  (let ((pool (make-a64-literal-pool)))
+    (dolist (inst instructions pool)
+      (cond
+        ((typep inst 'vm-const)
+         (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+           (when (a64-literal-pool-value-p value)
+             (a64-pool-add pool value))))
+        ((a64-libm-function-for-instruction inst)
+         (a64-pool-add pool (a64-libm-address (a64-libm-function-for-instruction inst))))))))
+
+(defun a64-program-instruction-bytes (instructions)
+  "Return the byte size of encoded INSTRUCTIONS."
+  (loop for inst in instructions sum (a64-instruction-size inst)))
+
+(defun a64-island-size-at (pool pos)
+  "Return byte size of a branch-around constant island at POS."
+  (if (a64-literal-pool-entries pool)
+      (let* ((data-pos (a64-pool-align-offset (+ pos 4)))
+             (pad (- data-pos (+ pos 4))))
+        (+ 4 pad (* 8 (length (a64-literal-pool-entries pool)))))
+      0))
+
+(defun a64-compute-labels-and-islands (instructions prologue-size pool)
+  "Compute label offsets and constant-island insertion points.
+
+For large functions, islands are inserted immediately before basic-block labels
+once the distance from the previous island exceeds the FR-268 threshold.  Each
+island duplicates the function literal pool and is skipped by a short B."
+  (let ((offsets (make-hash-table :test #'equal))
+        (island-sites nil)
+        (island-bases nil)
+        (pos prologue-size)
+        (last-island-pos prologue-size))
+    (dolist (inst instructions)
+      (when (and (a64-literal-pool-entries pool)
+                 (typep inst 'vm-label)
+                 (> (- pos last-island-pos) +a64-literal-island-threshold+))
+        (let ((base (a64-pool-align-offset (+ pos 4))))
+          (push pos island-sites)
+          (push base island-bases)
+          (incf pos (a64-island-size-at pool pos))
+          (setf last-island-pos pos)))
+      (when (typep inst 'vm-label)
+        (setf (gethash (vm-name inst) offsets) pos))
+      (incf pos (a64-instruction-size inst)))
+    (values offsets (nreverse island-sites) (nreverse island-bases) pos)))
+
+(defun a64-constant-island-plan (instructions prologue-size island-bases body-end)
+  "Return conservative constant-island metadata for AArch64 literal pools.
+
+ADRP addresses the literal page directly, so the LDR unsigned immediate is the
+literal's page offset rather than the distance from the load.  The plan still
+tracks the 32 KiB island threshold so future block-local island insertion can
+split this end-of-function pool without changing collection semantics."
+  (declare (ignore instructions))
+  (let ((function-bytes body-end))
+    (list :large-function-p (> (- function-bytes prologue-size) +a64-literal-island-threshold+)
+          :island-count (length island-bases)
+          :threshold +a64-literal-island-threshold+
+          :function-bytes function-bytes)))
 
 (defun aarch64-cfi-plan (&key has-indirect-calls-p)
   "Return AArch64 CFI entry planning metadata.
@@ -170,6 +259,7 @@ Result plist keys:
   "Emit AArch64 machine code for the entire VM program.
    Uses two-pass approach for label resolution."
   (let* ((instructions (vm-program-instructions program))
+         (calling-convention (vm-program-calling-convention-object program))
           (has-indirect-calls-p
             (some (lambda (inst)
                     (typep inst '(or vm-call vm-tail-call vm-generic-call)))
@@ -179,7 +269,8 @@ Result plist keys:
            (leaf-p (vm-program-leaf-p program))
           (spill-count (regalloc-spill-count *current-a64-regalloc*))
           (frame-pointer-p (and (not *a64-omit-frame-pointer*)
-                                (or (not leaf-p)
+                                (not (calling-convention-omit-frame-pointer-p calling-convention))
+                                 (or (not leaf-p)
                                     (plusp spill-count))))
           (spill-frame-size (if (and (not frame-pointer-p)
                                      (plusp spill-count))
@@ -200,31 +291,51 @@ Result plist keys:
                               (* 4 (1+ (length save-pairs)))
                               spill-frame-adjust-size))
           (cfg (cfg-build instructions))
-          (ordered-instructions (if (cfg-entry cfg)
-                                    (progn
-                                      (cfg-compute-dominators cfg)
-                                      (cfg-compute-loop-depths cfg)
-                                      (cfg-flatten-hot-cold cfg))
-                                    instructions))
-          (label-offsets (build-a64-label-offsets ordered-instructions prologue-size)))
+           (ordered-instructions (if (cfg-entry cfg)
+                                     (progn
+                                       (cfg-compute-dominators cfg)
+                                       (cfg-compute-loop-depths cfg)
+                                       (cfg-flatten-hot-cold cfg))
+                                     instructions))
+           (literal-pool (a64-collect-literal-pool ordered-instructions)))
+      (multiple-value-bind (label-offsets island-sites island-bases body-end)
+          (a64-compute-labels-and-islands ordered-instructions prologue-size literal-pool)
+        (let* ((island-plan (a64-constant-island-plan ordered-instructions prologue-size
+                                                      island-bases body-end))
+            (stack-deallocate-size (if (plusp spill-frame-size) 4 0))
+            (epilogue-size (+ (* 4 (length save-pairs)) 20))
+               (pool-input-offset (+ body-end
+                                  stack-deallocate-size epilogue-size)))
+      (declare (ignore island-plan))
+          (a64-finalize-literal-pool-islands literal-pool pool-input-offset island-bases)
       ;; CFI entry marker (FR-315): must be at function entry.
-      (emit-aarch64-cfi-entry stream cfi-plan)
+      (let ((*current-a64-literal-pool* literal-pool))
+        (emit-aarch64-cfi-entry stream cfi-plan)
 
-     ;; Stack probing: touch each guard page before the large frame is used.
-      (emit-a64-stack-probes stream probe-count)
-     ;; Prologue
-     (emit-a64-prologue stream save-pairs)
-     (when (plusp spill-frame-size)
-       (emit-a64-stack-allocate stream spill-frame-size))
-     ;; Second pass: emit instructions
-     (let ((pos prologue-size))
-       (dolist (inst ordered-instructions)
-         (emit-a64-instruction inst stream pos label-offsets)
-         (incf pos (a64-instruction-size inst))))
-     (when (plusp spill-frame-size)
-       (emit-a64-stack-deallocate stream spill-frame-size))
-     ;; Epilogue
-     (emit-a64-epilogue stream save-pairs)))
+        ;; Stack probing: touch each guard page before the large frame is used.
+        (emit-a64-stack-probes stream probe-count)
+        ;; Prologue
+        (emit-a64-prologue stream save-pairs)
+        (when (plusp spill-frame-size)
+          (emit-a64-stack-allocate stream spill-frame-size))
+        ;; Second pass: emit instructions
+            (let ((pos prologue-size)
+                  (remaining-islands island-sites))
+          (dolist (inst ordered-instructions)
+                (when (and remaining-islands (= pos (first remaining-islands)))
+                  (incf pos (a64-emit-constant-island literal-pool stream pos))
+                  (pop remaining-islands))
+            (emit-a64-instruction inst stream pos label-offsets)
+            (incf pos (a64-instruction-size inst))))
+        (when (plusp spill-frame-size)
+          (emit-a64-stack-deallocate stream spill-frame-size))
+        ;; Epilogue
+        (emit-a64-epilogue stream save-pairs)
+        (loop repeat (/ (- (a64-literal-pool-base-offset literal-pool)
+                           pool-input-offset)
+                        4)
+              do (emit-a64-instr 0 stream))
+            (a64-pool-emit literal-pool))))))
 
 ;;; Public API
 
@@ -233,12 +344,16 @@ Result plist keys:
   "Compile VM program to AArch64 machine code bytes.
    Returns: (simple-array (unsigned-byte 8) (*))"
   (declare (ignore retpoline stack-protector shadow-stack asan msan tsan ubsan hwasan))
-  (let* ((instructions (vm-program-instructions program))
-          (ra (allocate-registers instructions (a64-codegen-target)))
+  (let ((*current-calling-convention* (vm-program-calling-convention-object program)))
+  (let* ((instructions (schedule-pre-ra (vm-program-instructions program)))
+            (ra (allocate-registers instructions (a64-codegen-target)))
           (allocated-program (make-vm-program
                               :instructions (regalloc-instructions ra)
                               :result-register (vm-program-result-register program)
-                              :leaf-p (vm-program-leaf-p program))))
+                              :leaf-p (vm-program-leaf-p program)
+                              :calling-convention (vm-program-calling-convention program)
+                              :function-conventions (vm-program-function-conventions program))))
     (let ((*current-a64-regalloc* ra))
-      (with-output-to-vector (stream)
-        (emit-a64-program allocated-program stream)))))
+      (aarch64-peephole-optimize
+       (with-output-to-vector (stream)
+         (emit-a64-program allocated-program stream)))))))

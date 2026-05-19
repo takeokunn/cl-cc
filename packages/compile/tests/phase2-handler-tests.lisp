@@ -38,14 +38,18 @@
                  (assert-true inst)
                  ;; test-reg should be non-nil — a register was allocated for the test sym
                  (assert-true (cl-cc::vm-make-hash-table-test inst))))))
-         ("var-test"
-           (lambda ()
-             (let ((ctx (make-codegen-ctx)))
-               (compile-ast (make-call 'make-hash-table
-                                       (make-var :test)
-                                       (make-var 'equal))
-                            ctx)
-               (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))))
+          ("var-test"
+            (lambda ()
+              (let ((ctx (make-codegen-ctx)))
+                (compile-ast (make-ast-let
+                              :bindings (list (cons 'equal (make-quoted 'equal)))
+                              :body (list (make-call 'make-hash-table
+                                                     (make-var :test)
+                                                     (make-var 'equal))))
+                             ctx)
+                (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
+                  (assert-true inst)
+                  (assert-true (cl-cc::vm-make-hash-table-test inst))))))
          ("function-test"
            (lambda ()
              (let ((ctx (make-codegen-ctx)))

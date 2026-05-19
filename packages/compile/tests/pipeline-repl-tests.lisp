@@ -215,3 +215,68 @@
     (let ((first-state cl-cc::*repl-vm-state*))
       (cl-cc::%ensure-repl-state)
       (assert-eq first-state cl-cc::*repl-vm-state*))))
+
+;;; ─── FR-312: REPL history and completion ────────────────────────────────
+
+(deftest pipeline-repl-history-records-forms
+  "FR-312: REPL history records non-empty commands in insertion order."
+  :tags '(:fr-312)
+  (with-reset-repl-state
+    (cl-cc::%repl-record-history "  (+ 1 2)  ")
+    (cl-cc::%repl-record-history "")
+    (cl-cc::%repl-record-history "(list 1 2)")
+    (assert-equal '("(+ 1 2)" "(list 1 2)")
+                  (cl-cc:repl-history))))
+
+(deftest pipeline-repl-history-arrow-navigation
+  "FR-312: cooked-terminal arrow escape lines navigate REPL history."
+  :tags '(:fr-312)
+  (with-reset-repl-state
+    (cl-cc::%repl-record-history "(+ 1 2)")
+    (cl-cc::%repl-record-history "(+ 3 4)")
+    (multiple-value-bind (line candidates edited-p)
+        (cl-cc:repl-edit-input-line (format nil "~C[A" #\Escape))
+      (assert-equal "(+ 3 4)" line)
+      (assert-null candidates)
+      (assert-true edited-p))
+    (multiple-value-bind (line candidates edited-p)
+        (cl-cc:repl-edit-input-line (format nil "~C[A" #\Escape))
+      (assert-equal "(+ 1 2)" line)
+      (assert-null candidates)
+      (assert-true edited-p))
+    (multiple-value-bind (line candidates edited-p)
+        (cl-cc:repl-edit-input-line (format nil "~C[B" #\Escape))
+      (assert-equal "(+ 3 4)" line)
+      (assert-null candidates)
+      (assert-true edited-p))))
+
+(deftest pipeline-repl-completion-includes-package-symbols
+  "FR-312: completion candidates include package-visible symbols."
+  :tags '(:fr-312)
+  (with-reset-repl-state
+    (let ((*package* (find-package :cl-cc/test)))
+      (intern "FR312-UNIQUE-PACKAGE-CANDIDATE" *package*)
+      (assert-true (member "FR312-UNIQUE-PACKAGE-CANDIDATE"
+                           (cl-cc:repl-completion-candidates "FR312-UNIQUE-PACKAGE")
+                           :test #'string=)))))
+
+(deftest pipeline-repl-completion-includes-function-registry
+  "FR-312: completion candidates include function names defined in the REPL VM state."
+  :tags '(:fr-312)
+  (with-reset-repl-state
+    (run-string-repl "(defun fr312-repl-complete-fn (x) x)")
+    (assert-true (member "FR312-REPL-COMPLETE-FN"
+                         (cl-cc:repl-completion-candidates "FR312-REPL-COMPLETE")
+                         :test #'string=))))
+
+(deftest pipeline-repl-tab-completes-single-candidate
+  "FR-312: TAB completion replaces a unique token candidate."
+  :tags '(:fr-312)
+  (with-reset-repl-state
+    (let ((*package* (find-package :cl-cc/test)))
+      (intern "FR312-TAB-ONLY-CANDIDATE" *package*)
+      (multiple-value-bind (line candidates edited-p)
+          (cl-cc:repl-edit-input-line (concatenate 'string "FR312-TAB-ONLY" (string #\Tab)))
+        (assert-equal "FR312-TAB-ONLY-CANDIDATE" line)
+        (assert-equal '("FR312-TAB-ONLY-CANDIDATE") candidates)
+        (assert-true edited-p)))))

@@ -34,12 +34,18 @@
 (defconstant +sht-symtab+   2)
 (defconstant +sht-strtab+   3)
 (defconstant +sht-rela+     4)
+(defconstant +sht-dynamic+  6)
 (defconstant +sht-nobits+   8)
+(defconstant +sht-dynsym+   11)
 
 ;;; Section header flags
 (defconstant +shf-write+      1)
 (defconstant +shf-alloc+      2)
 (defconstant +shf-execinstr+  4)
+(defconstant +shf-compressed+ #x800)
+
+;;; Compression algorithms for Elf64_Chdr.
+(defconstant +elfcompress-zlib+ 1)
 
 ;;; Symbol binding
 (defconstant +stb-local+  0)
@@ -69,6 +75,21 @@
 (defconstant +pt-note+    4)    ; PT_NOTE
 (defconstant +pt-phdr+    6)    ; PT_PHDR — program header table
 (defconstant +pt-gnu-stack+ #x6474e551)  ; PT_GNU_STACK
+(defconstant +pt-gnu-relro+ #x6474e552)  ; PT_GNU_RELRO
+
+;;; Dynamic section tags
+(defconstant +dt-null+    0)
+(defconstant +dt-needed+  1)
+(defconstant +dt-strtab+  5)
+(defconstant +dt-symtab+  6)
+(defconstant +dt-rela+    7)
+(defconstant +dt-relasz+  8)
+(defconstant +dt-relaent+ 9)
+(defconstant +dt-strsz+   10)
+(defconstant +dt-syment+  11)
+(defconstant +dt-jmprel+  23)
+(defconstant +dt-pltrelsz+ 2)
+(defconstant +dt-pltrel+  20)
 
 ;;; Program header flags
 (defconstant +pf-x+ 1)          ; executable
@@ -77,6 +98,9 @@
 
 ;;; ELF64 program header size
 (defconstant +elf64-phdr-size+ 56)  ; Elf64_Phdr
+(defconstant +elf-page-size+ #x1000)
+(defconstant +elf64-exec-base+ #x400000)
+(defparameter +elf64-default-interpreter+ "/lib64/ld-linux-x86-64.so.2")
 
 ;;; ELF64 structure sizes (bytes)
 (defconstant +elf64-ehdr-size+ 64)   ; ELF header
@@ -146,17 +170,25 @@ FR-291: Extended with program header and entry point support for executables."
   ;; and without SHF_WRITE so final linked images may be mapped read-only by
   ;; the operating system; attempted writes should fault at the OS level.
   (rodata-buf  (elf-make-buffer))
+  ;; .data section data for ET_EXEC/ET_DYN outputs.
+  (data-buf    (elf-make-buffer))
   ;; .bss section size in bytes (NOBITS, occupies memory only)
   (bss-size 0 :type integer)
   ;; Relocation entries: list of (offset type sym-name addend)
   (rela-entries nil)
   ;; Symbol entries: list of (name binding type section-idx value size)
   (symbols nil)
+  ;; Shared object names to place in .dynstr and DT_NEEDED entries.
+  (needed-libraries nil)
+  ;; Program interpreter path for dynamically linked executables.
+  (interpreter +elf64-default-interpreter+ :type string)
   ;; File symbol (index 0 in symtab is always STN_UNDEF)
   (symbol-count 0)
   ;; FR-291: Program headers for executable generation
   ;; List of (type flags offset vaddr paddr filesz memsz align)
-  (phdrs nil))
+  (phdrs nil)
+  ;; FR-406: whether .text should be serialized as an ELF compressed section.
+  (compress-text nil :type boolean))
 
 (defun make-elf64-object (&key (machine +elf-machine-x86-64+))
   "Create a fresh ELF64 builder for ET_REL (.o file)."
@@ -165,6 +197,14 @@ FR-291: Extended with program header and entry point support for executables."
 (defun make-elf64-executable (&key (machine +elf-machine-x86-64+) (entry-point 0))
   "Create an ELF64 builder for ET_EXEC (static executable). FR-291."
   (make-elf64-builder :machine machine :elf-type +elf-type-exec+ :entry-point entry-point))
+
+(defun make-elf64-dynamic (&key (machine +elf-machine-x86-64+) (entry-point 0)
+                                (interpreter +elf64-default-interpreter+))
+  "Create an ELF64 builder for ET_DYN (PIE/shared object). FR-291."
+  (make-elf64-builder :machine machine
+                      :elf-type +elf-type-dyn+
+                      :entry-point entry-point
+                      :interpreter interpreter))
 
 (defun elf64-add-text-bytes (builder bytes)
   "Append BYTES (vector or list of (unsigned-byte 8)) to .text section."
@@ -183,6 +223,17 @@ SHF_WRITE), allowing the final OS mapping to protect constants from writes."
   (let ((offset (length (elf64-rodata-buf builder))))
     (binary-buffer-write-bytes (elf64-rodata-buf builder) bytes)
     offset))
+
+(defun elf64-add-data-bytes (builder bytes)
+  "Append initialized writable BYTES to .data and return their section offset."
+  (let ((offset (length (elf64-data-buf builder))))
+    (binary-buffer-write-bytes (elf64-data-buf builder) bytes)
+    offset))
+
+(defun elf64-add-needed-library (builder soname)
+  "Record SONAME as a DT_NEEDED dependency for ET_DYN output."
+  (pushnew soname (elf64-needed-libraries builder) :test #'string=)
+  soname)
 
 (defun elf64-add-bss (builder size)
   "Reserve SIZE bytes in the .bss section."
@@ -217,6 +268,11 @@ FLAGS default to PF_R | PF_X (readable+executable)."
   "Add PT_GNU_STACK segment with FLAGS (defaults to RW, no exec).
 Required by Linux kernel for NX (non-executable stack) support."
   (push (list +pt-gnu-stack+ flags 0 0 0 0 0 0)
+        (elf64-phdrs builder)))
+
+(defun elf64-add-gnu-relro-segment (builder offset vaddr size &key (align 1))
+  "Add PT_GNU_RELRO segment for read-only-after-relocation data."
+  (push (list +pt-gnu-relro+ +pf-r+ offset vaddr vaddr size size align)
         (elf64-phdrs builder)))
 
 

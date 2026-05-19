@@ -88,8 +88,7 @@ When FUNC-REG is RAX, use RCX as scratch to avoid clobbering the branch target."
    The function designator is already in a register. We perform an indirect
    CALL through that register and then copy the return value from RAX into the
    destination register."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (func (vm-reg-to-x86 (vm-func-reg inst))))
+  (let ((func (vm-reg-to-x86 (vm-func-reg inst))))
     ;; Conservative CFI guard: null indirect target traps immediately.
     (when *x86-64-cfi-enabled*
       (emit-x86-64-cfi-indirect-target-guard func stream))
@@ -123,7 +122,9 @@ When FUNC-REG is RAX, use RCX as scratch to avoid clobbering the branch target."
           (emit-byte #xE8 stream)
           (emit-dword 18 stream)
           ;; after-call
-          (emit-mov-rr64 dst +rax+ stream)
+          (if (x86-64-float-vreg-p (vm-dst inst))
+              (emit-movsd-xx (vm-reg-to-xmm (vm-dst inst)) +xmm0+ stream)
+              (emit-mov-rr64 (vm-reg-to-x86 (vm-dst inst)) +rax+ stream))
           ;; jump over thunk region to end
           (emit-jmp-rel32 15 stream)
           ;; thunk capture loop
@@ -135,7 +136,9 @@ When FUNC-REG is RAX, use RCX as scratch to avoid clobbering the branch target."
           (emit-ret stream))
         (emit-call-r64 func stream))
     (unless *x86-64-use-retpoline*
-      (emit-mov-rr64 dst +rax+ stream))))
+      (if (x86-64-float-vreg-p (vm-dst inst))
+          (emit-movsd-xx (vm-reg-to-xmm (vm-dst inst)) +xmm0+ stream)
+          (emit-mov-rr64 (vm-reg-to-x86 (vm-dst inst)) +rax+ stream)))))
 
 (defun emit-vm-tail-call-inst (inst stream)
   "Emit code for VM TAIL-CALL instruction.
@@ -215,26 +218,55 @@ materializes explicit CET SS instructions under the shadow-stack gate:
         (emit-byte #x66 stream)
         (emit-byte #x90 stream))))
 
+(defun fits-in-rel8-p (offset)
+  "Return T when OFFSET is encodable as a signed 8-bit branch displacement."
+  (typep offset '(signed-byte 8)))
+
+(defun emit-branch-short (kind offset stream)
+  "Emit a two-byte x86-64 short branch KIND with signed rel8 OFFSET."
+  (unless (fits-in-rel8-p offset)
+    (error "Short branch displacement out of range: ~D" offset))
+  (emit-byte (ecase kind
+               (:jmp #xEB)
+               (:je #x74)
+               (:jne #x75)
+               (:jl #x7C)
+               (:jg #x7F)
+               (:jle #x7E)
+               (:jge #x7D))
+             stream)
+  (emit-byte (logand offset #xFF) stream))
+
+(defun emit-branch-relaxed (kind offset inst stream)
+  "Emit branch KIND for INST using its relaxed :SHORT/:NEAR encoding choice."
+  (ecase (x86-64-branch-encoding inst)
+    (:short (emit-branch-short kind offset stream))
+    (:near
+     (ecase kind
+       (:jmp (emit-jmp-rel32 offset stream))
+       (:je (emit-je-rel32 offset stream))))))
+
 (defun emit-vm-jump-inst (inst stream current-pos label-offsets)
   "Emit code for VM JUMP instruction (unconditional jump)."
   (let* ((target-label (vm-label-name inst))
-         (target-pos (gethash target-label label-offsets))
-         ;; JMP rel32 is 5 bytes, offset is relative to end of instruction
-         (offset (- target-pos (+ current-pos 5))))
-    (emit-jmp-rel32 offset stream)))
+          (target-pos (gethash target-label label-offsets))
+          (size (instruction-size inst))
+          (offset (- target-pos (+ current-pos size))))
+    (emit-branch-relaxed :jmp offset inst stream)))
 
 (defun emit-vm-jump-zero-inst (inst stream current-pos label-offsets)
   "Emit code for VM JUMP-ZERO instruction (jump if register is zero).
-   TEST reg, reg + JE rel32"
+   TEST reg, reg + optional static branch hint prefix + JE rel32"
   (let* ((reg (vm-reg-to-x86 (vm-reg inst)))
-         (target-label (vm-label-name inst))
-         (target-pos (gethash target-label label-offsets))
-         ;; TEST is 3 bytes, JE rel32 is 6 bytes, total 9 bytes
-         (offset (- target-pos (+ current-pos 9))))
-    ;; TEST reg, reg (sets ZF if reg is 0)
-    (emit-test-rr64 reg reg stream)
-    ;; JE rel32 (jump if zero flag set)
-    (emit-je-rel32 offset stream)))
+          (target-label (vm-label-name inst))
+          (target-pos (gethash target-label label-offsets))
+           (size (instruction-size inst))
+           (offset (- target-pos (+ current-pos size))))
+     ;; TEST reg, reg (sets ZF if reg is 0)
+     (emit-test-rr64 reg reg stream)
+     (emit-x86-64-unlikely-branch-prefix inst stream)
+      ;; JE (jump if zero flag set), relaxed to rel8 when possible.
+      (emit-branch-relaxed :je offset inst stream)))
 
 (defun emit-vm-ret-inst (inst stream)
   "Emit code for VM RET instruction."
@@ -259,24 +291,45 @@ materializes explicit CET SS instructions under the shadow-stack gate:
 (defun emit-vm-spill-store-inst (inst stream)
   "Emit code for VM SPILL-STORE instruction using the active spill base register."
   (let* ((src-reg (vm-spill-src inst))
-         (src-code (let ((entry (assoc src-reg *phys-reg-to-x86-code*)))
-                     (if entry (cdr entry)
-                           (error "Unknown physical register for spill store: ~A" src-reg))))
-          (offset (x86-64-spill-slot-offset (vm-spill-slot inst))))
-    (emit-mov-mr64 *current-spill-base-reg* offset src-code stream)))
+         (offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
+         (gpr-entry (assoc src-reg *phys-reg-to-x86-code*))
+         (fp-entry (assoc src-reg *phys-fp-reg-to-x86-code*)))
+    (cond
+      (gpr-entry
+       (emit-mov-mr64 *current-spill-base-reg* offset (cdr gpr-entry) stream))
+      (fp-entry
+       (emit-movsd-mx *current-spill-base-reg* offset (cdr fp-entry) stream))
+      (t
+       (error "Unknown physical register for spill store: ~A" src-reg)))))
 
 (defun emit-vm-spill-load-inst (inst stream)
   "Emit code for VM SPILL-LOAD instruction using the active spill base register."
   (let* ((dst-reg (vm-spill-dst inst))
-         (dst-code (let ((entry (assoc dst-reg *phys-reg-to-x86-code*)))
-                     (if entry (cdr entry)
-                           (error "Unknown physical register for spill load: ~A" dst-reg))))
-          (offset (x86-64-spill-slot-offset (vm-spill-slot inst))))
-    (emit-mov-rm64 dst-code *current-spill-base-reg* offset stream)))
+         (offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
+         (gpr-entry (assoc dst-reg *phys-reg-to-x86-code*))
+         (fp-entry (assoc dst-reg *phys-fp-reg-to-x86-code*)))
+    (cond
+      (gpr-entry
+       (emit-mov-rm64 (cdr gpr-entry) *current-spill-base-reg* offset stream))
+      (fp-entry
+       (emit-movsd-xm (cdr fp-entry) *current-spill-base-reg* offset stream))
+      (t
+       (error "Unknown physical register for spill load: ~A" dst-reg)))))
+
+(defun emit-x86-64-lea-address-inst (inst stream)
+  "Emit internal LEA instruction produced by x86-64 peephole lowering."
+  (emit-lea (x86-64-lea-address-dst inst)
+            (x86-64-lea-address-base inst)
+            (x86-64-lea-address-index inst)
+            (x86-64-lea-address-scale inst)
+             (x86-64-lea-address-displacement inst)
+             stream))
 
 (defparameter *x86-64-emitter-entries*
   '(;; Core instructions
     (vm-const        . emit-vm-const)
+    (x86-64-lea-address . emit-x86-64-lea-address-inst)
+    (x86-64-bextr-field . emit-x86-64-bextr-field-inst)
     (vm-move         . emit-vm-move)
     (vm-add          . emit-vm-add)
     ;; FR-171: vm-integer-add uses LEA optimization (active)
@@ -294,6 +347,7 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-sub-checked  . emit-vm-sub-checked)
     (vm-mul-checked  . emit-vm-mul-checked)
     (vm-float-mul    . emit-vm-float-mul)
+    (vm-fma          . emit-vm-fma)
     (vm-float-div    . emit-vm-float-div)
     (vm-sqrt         . emit-vm-sqrt)
     (vm-sin-inst     . emit-vm-sin)
@@ -312,6 +366,10 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-ret          . emit-vm-ret-inst)
     (vm-spill-store  . emit-vm-spill-store-inst)
     (vm-spill-load   . emit-vm-spill-load-inst)
+    ;; Array access: scaled indexed memory operands [base + index*scale + disp]
+    (vm-aref         . emit-vm-aref)
+    (vm-aset         . emit-vm-aset)
+    (vm-prefetch     . emit-vm-prefetch)
     ;; Comparison
     (vm-lt           . emit-vm-lt)
     (vm-gt           . emit-vm-gt)
@@ -374,7 +432,8 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (cl-cc/vm::vm-establish-catch   . emit-vm-shadow-stack-control-inst)
     (cl-cc/vm::vm-throw             . emit-vm-shadow-stack-control-inst)
     ;; FR-073: Multiple values via registers (active)
-    (vm-values-regs  . emit-vm-values-regs))
+    (vm-values-regs   . emit-vm-values-regs)
+    (vm-mv-bind-regs  . emit-vm-mv-bind-regs))
   "Alist mapping VM instruction type symbols to emitter function names.")
 
 (defparameter *x86-64-emitter-table*

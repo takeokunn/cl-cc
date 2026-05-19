@@ -31,14 +31,17 @@
 
 (defun emit-vm-integer-length (inst stream)
   "vm-integer-length: dst = integer-length(src).
-   Zero case returns 0; otherwise 1 + bsr(src)."
+   Zero case returns 0; otherwise 64 - lzcnt(src)."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (src (vm-reg-to-x86 (vm-src inst))))
-    (emit-xor-rr64 dst dst stream)     ; dst = 0 for zero case
+    ;; Test before writing DST so the dst=src allocation case remains correct.
     (emit-test-rr64 src src stream)    ; set ZF when src = 0
-    (emit-je-short 8 stream)           ; skip BSR + ADD when zero
-    (emit-bsr-rr64 dst src stream)
-    (emit-add-ri8 dst 1 stream)))
+    (emit-je-short 14 stream)          ; skip LZCNT/NEG/ADD/JMP when zero
+    (emit-lzcnt-rr64 dst src stream)
+    (emit-neg-r64 dst stream)
+    (emit-add-ri8 dst 64 stream)
+    (emit-jmp-rel8 3 stream)
+    (emit-xor-rr64 dst dst stream)))   ; zero case => 0
 
 (defun emit-vm-bswap (inst stream)
   "vm-bswap: dst = byte-swap(low32(src))  (network-order byte reversal)."

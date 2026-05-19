@@ -28,17 +28,146 @@
   (ast nil)
   (vm-instructions nil)
   (optimized-instructions nil)
-  (pgo-counter-plan nil))
+  (pgo-counter-plan nil)
+  (warnings nil :type list)
+  (errors nil :type list))
 
-(defun %type-check-form (ast type-env type-check)
+(defun %make-toplevel-recovery-error (form-index form condition)
+  "Return a plist describing a recovered top-level compilation CONDITION."
+  (list :form-index form-index
+        :form form
+        :condition condition
+        :message (princ-to-string condition)))
+
+(defun %copy-compiler-hash-table (table)
+  "Return a shallow copy of compiler context hash TABLE."
+  (let ((copy (make-hash-table :test (hash-table-test table)
+                               :rehash-size (hash-table-rehash-size table)
+                               :rehash-threshold (hash-table-rehash-threshold table))))
+    (maphash (lambda (key value)
+               (setf (gethash key copy) value))
+             table)
+    copy))
+
+(defstruct toplevel-compilation-snapshot
+  "Mutable compiler state saved before compiling one top-level form."
+  instructions
+  next-register
+  next-label
+  env
+  type-env
+  safety
+  block-env
+  tagbody-env
+  global-functions
+  global-function-mv-arities
+  function-conventions
+  global-variables
+  global-classes
+  global-generics
+  global-generic-params
+  current-function-name
+  current-function-label
+  current-function-params
+  current-function-simple-p
+  pending-inline-policy
+  top-level-p
+  boxed-vars
+  noescape-cons-bindings
+  noescape-array-bindings
+  noescape-instance-bindings
+  noescape-closure-bindings
+  hash-table-test-bindings
+  tail-position
+  diagnostics
+  compile-time-value-env
+  compile-time-function-env
+  opts)
+
+(defun %snapshot-toplevel-compilation-state (ctx opts)
+  "Snapshot CTX and dynamic top-level compilation state before one FORM."
+  (make-toplevel-compilation-snapshot
+   :instructions (copy-list (ctx-instructions ctx))
+   :next-register (ctx-next-register ctx)
+   :next-label (ctx-next-label ctx)
+   :env (copy-tree (ctx-env ctx))
+   :type-env (ctx-type-env ctx)
+   :safety (ctx-safety ctx)
+   :block-env (copy-tree (ctx-block-env ctx))
+   :tagbody-env (copy-tree (ctx-tagbody-env ctx))
+   :global-functions (%copy-compiler-hash-table (ctx-global-functions ctx))
+   :global-function-mv-arities (%copy-compiler-hash-table (ctx-global-function-mv-arities ctx))
+   :function-conventions (%copy-compiler-hash-table (ctx-function-conventions ctx))
+   :global-variables (%copy-compiler-hash-table (ctx-global-variables ctx))
+   :global-classes (%copy-compiler-hash-table (ctx-global-classes ctx))
+   :global-generics (%copy-compiler-hash-table (ctx-global-generics ctx))
+   :global-generic-params (%copy-compiler-hash-table (ctx-global-generic-params ctx))
+   :current-function-name (ctx-current-function-name ctx)
+   :current-function-label (ctx-current-function-label ctx)
+   :current-function-params (copy-list (ctx-current-function-params ctx))
+   :current-function-simple-p (ctx-current-function-simple-p ctx)
+   :pending-inline-policy (ctx-pending-inline-policy ctx)
+   :top-level-p (ctx-top-level-p ctx)
+   :boxed-vars (copy-list (ctx-boxed-vars ctx))
+   :noescape-cons-bindings (copy-tree (ctx-noescape-cons-bindings ctx))
+   :noescape-array-bindings (copy-tree (ctx-noescape-array-bindings ctx))
+   :noescape-instance-bindings (copy-tree (ctx-noescape-instance-bindings ctx))
+   :noescape-closure-bindings (copy-tree (ctx-noescape-closure-bindings ctx))
+    :hash-table-test-bindings (copy-tree (ctx-hash-table-test-bindings ctx))
+    :tail-position (ctx-tail-position ctx)
+    :diagnostics (copy-list (ctx-diagnostics ctx))
+    :compile-time-value-env (copy-list *compile-time-value-env*)
+   :compile-time-function-env (copy-list *compile-time-function-env*)
+   :opts (copy-list opts)))
+
+(defun %restore-toplevel-compilation-state (ctx snapshot)
+  "Restore CTX and dynamic state from SNAPSHOT. Returns restored compile opts."
+  (setf (ctx-instructions ctx) (copy-list (toplevel-compilation-snapshot-instructions snapshot)))
+  (setf (ctx-next-register ctx) (toplevel-compilation-snapshot-next-register snapshot))
+  (setf (ctx-next-label ctx) (toplevel-compilation-snapshot-next-label snapshot))
+  (setf (ctx-env ctx) (copy-tree (toplevel-compilation-snapshot-env snapshot)))
+  (setf (ctx-type-env ctx) (toplevel-compilation-snapshot-type-env snapshot))
+  (setf (ctx-safety ctx) (toplevel-compilation-snapshot-safety snapshot))
+  (setf (ctx-block-env ctx) (copy-tree (toplevel-compilation-snapshot-block-env snapshot)))
+  (setf (ctx-tagbody-env ctx) (copy-tree (toplevel-compilation-snapshot-tagbody-env snapshot)))
+  (setf (ctx-global-functions ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-functions snapshot)))
+  (setf (ctx-global-function-mv-arities ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-function-mv-arities snapshot)))
+  (setf (ctx-function-conventions ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-function-conventions snapshot)))
+  (setf (ctx-global-variables ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-variables snapshot)))
+  (setf (ctx-global-classes ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-classes snapshot)))
+  (setf (ctx-global-generics ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generics snapshot)))
+  (setf (ctx-global-generic-params ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generic-params snapshot)))
+  (setf (ctx-current-function-name ctx) (toplevel-compilation-snapshot-current-function-name snapshot))
+  (setf (ctx-current-function-label ctx) (toplevel-compilation-snapshot-current-function-label snapshot))
+  (setf (ctx-current-function-params ctx) (copy-list (toplevel-compilation-snapshot-current-function-params snapshot)))
+  (setf (ctx-current-function-simple-p ctx) (toplevel-compilation-snapshot-current-function-simple-p snapshot))
+  (setf (ctx-pending-inline-policy ctx) (toplevel-compilation-snapshot-pending-inline-policy snapshot))
+  (setf (ctx-top-level-p ctx) (toplevel-compilation-snapshot-top-level-p snapshot))
+  (setf (ctx-boxed-vars ctx) (copy-list (toplevel-compilation-snapshot-boxed-vars snapshot)))
+  (setf (ctx-noescape-cons-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-cons-bindings snapshot)))
+  (setf (ctx-noescape-array-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-array-bindings snapshot)))
+  (setf (ctx-noescape-instance-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-instance-bindings snapshot)))
+  (setf (ctx-noescape-closure-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-closure-bindings snapshot)))
+  (setf (ctx-hash-table-test-bindings ctx) (copy-tree (toplevel-compilation-snapshot-hash-table-test-bindings snapshot)))
+  (setf (ctx-tail-position ctx) (toplevel-compilation-snapshot-tail-position snapshot))
+  (setf (ctx-diagnostics ctx) (copy-list (toplevel-compilation-snapshot-diagnostics snapshot)))
+  (setf *compile-time-value-env* (copy-list (toplevel-compilation-snapshot-compile-time-value-env snapshot)))
+  (setf *compile-time-function-env* (copy-list (toplevel-compilation-snapshot-compile-time-function-env snapshot)))
+  (copy-list (toplevel-compilation-snapshot-opts snapshot)))
+
+(defun %type-check-form (ctx ast type-env type-check)
   "Run the type checker on AST in TYPE-ENV, honoring TYPE-CHECK strictness.
-Returns the inferred type, or NIL on failure (warning printed unless :strict)."
+Returns the inferred type, or NIL on failure (structured warning recorded unless :strict)."
   (handler-case
       (type-check-ast ast type-env)
     (error (e)
       (if (eq type-check :strict)
           (error e)
-      (progn (warn "Type check warning: ~A" e) nil)))))
+          (progn
+            (%emit-compile-warning ctx
+                                   (format nil "Type check warning: ~A" e)
+                                   :error-code "W0002")
+            nil)))))
 
 (defun %extend-type-env-for-defvar (ast type-env best-effort-type)
   "If AST is a defvar with an initializer, extend TYPE-ENV with its inferred type."
@@ -71,7 +200,7 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
-(defun %make-compile-opts (&key pass-pipeline speed (inline-threshold-scale 1) print-pass-timings timing-stream
+(defun %make-compile-opts (&key pass-pipeline speed (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                   print-pass-stats stats-stream trace-json-stream)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
@@ -79,6 +208,7 @@ Returns the inferred type, or NIL on failure (warning printed unless :strict)."
   (list :pass-pipeline       pass-pipeline
         :speed               resolved-speed
         :inline-threshold-scale inline-threshold-scale
+        :block-compile       block-compile
         :print-pass-timings  print-pass-timings
         :timing-stream       timing-stream
         :print-opt-remarks   print-opt-remarks
@@ -131,8 +261,14 @@ Returns a compilation-result or NIL when AST should stay on the direct path."
                      (if (typep (car instructions) 'vm-halt)
                          nil
                          (cons (car instructions) nil)))
-                 nil)))
+                  nil)))
     (scan (compilation-result-vm-instructions result))))
+
+(defun %merge-result-warnings-into-context (ctx result)
+  "Merge RESULT warnings back into CTX diagnostic storage."
+  (setf (ctx-diagnostics ctx)
+        (append (reverse (compilation-result-warnings result))
+                (ctx-diagnostics ctx))))
 
 (defun %lower-toplevel-form-to-ast (form)
   "Expand FORM and lower it into an optimized AST node."
@@ -149,13 +285,13 @@ Returns a compilation-result or NIL when AST should stay on the direct path."
   (when (typep ast 'ast-defun)
     (push (cons (ast-defun-name ast) ast) *compile-time-function-env*)))
 
-(defun %update-toplevel-type-state (ast type-env type-check best-effort-type)
+(defun %update-toplevel-type-state (ctx ast type-env type-check best-effort-type)
   "Return updated type metadata after visiting AST as a top-level form.
 Values: inferred-type, updated-type-env."
   (let ((last-type nil)
         (next-type-env type-env))
     (when type-check
-      (setf last-type (%type-check-form ast type-env type-check)))
+      (setf last-type (%type-check-form ctx ast type-env type-check)))
     (setf next-type-env (%extend-type-env-for-defvar ast next-type-env best-effort-type))
     (setf next-type-env (%extend-type-env-for-defun ast next-type-env best-effort-type))
     (values last-type next-type-env)))
@@ -174,6 +310,7 @@ Returns two values: result register and CPS form used for the AST."
           (setf (ctx-instructions ctx)
                 (append (reverse (%result-vm-instructions-without-halt cps-result))
                         (ctx-instructions ctx)))
+          (%merge-result-warnings-into-context ctx cps-result)
           (values (vm-program-result-register
                    (compilation-result-program cps-result))
                   last-cps))
@@ -200,20 +337,31 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
     (%record-toplevel-defun-for-ct-env ast)
     (push ast compiled-asts)
     (multiple-value-setq (last-type type-env)
-      (%update-toplevel-type-state ast type-env type-check #'%best-effort-type-check))
+      (%update-toplevel-type-state ctx ast type-env type-check #'%best-effort-type-check))
     (setf (ctx-type-env ctx) type-env)
      (%maybe-extend-ct-value-env ast)
      (multiple-value-setq (last-reg last-cps)
        (%compile-toplevel-ast-into-context ast ctx target type-check opts))
      (values last-reg last-type last-cps type-env compiled-asts)))
 
-(defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts)
+(defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors)
   "Finalize CTX after all top-level forms have been compiled."
   (when last-reg
     (emit ctx (make-vm-halt :reg last-reg)))
   (when *repl-capture-label-counter*
     (setf *repl-capture-label-counter* (ctx-next-label ctx)))
-  (let* ((instructions (nreverse (ctx-instructions ctx)))
+  (let* ((function-conventions (ctx-function-conventions ctx))
+         (program-convention
+           (let ((has-external-p nil)
+                 (has-internal-p nil))
+             (maphash (lambda (_ convention)
+                        (declare (ignore _))
+                        (case convention
+                          (:external (setf has-external-p t))
+                          (:internal (setf has-internal-p t))))
+                      function-conventions)
+             (if (and has-internal-p (not has-external-p)) :internal :external)))
+         (instructions (nreverse (ctx-instructions ctx)))
          (optimized nil)
          (leaf-p    nil)
          (program   nil))
@@ -222,56 +370,69 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
     (setf program (make-vm-program :instructions (if (or (eq target :vm) (eq target :wasm))
                                                      instructions
                                                      (or optimized instructions))
-                                   :result-register last-reg
-                                   :leaf-p          leaf-p))
+                                    :result-register last-reg
+                                    :leaf-p          leaf-p
+                                    :calling-convention program-convention
+                                    :function-conventions function-conventions))
     (make-compilation-result :program                program
                              :assembly               (emit-assembly program :target target)
                              :globals                (ctx-global-functions ctx)
                              :type                   last-type
                              :type-env               (ctx-type-env ctx)
-                             :cps                    last-cps
-                             :ast                    (nreverse compiled-asts)
-                             :vm-instructions        instructions
-                             :optimized-instructions optimized)))
+                              :cps                    last-cps
+                              :ast                    (nreverse compiled-asts)
+                               :vm-instructions        instructions
+                               :optimized-instructions optimized
+                               :warnings               (nreverse (ctx-diagnostics ctx))
+                               :errors                 (nreverse errors))))
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
-                                        speed (inline-threshold-scale 1)
-                                        pass-pipeline print-pass-timings timing-stream
-                                       print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                       print-pass-stats stats-stream trace-json-stream
-                                       retpoline spectre-mitigations stack-protector shadow-stack
-                                       asan msan tsan ubsan hwasan)
+                                          speed (inline-threshold-scale 1)
+                                          block-compile
+                                         pass-pipeline print-pass-timings timing-stream coverage
+                                        print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                        print-pass-stats stats-stream trace-json-stream
+                                        retpoline spectre-mitigations stack-protector shadow-stack
+                                        asan msan tsan ubsan hwasan)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
+  (declare (ignore coverage retpoline spectre-mitigations stack-protector shadow-stack
+                   asan msan tsan ubsan hwasan))
   (let ((ctx           (make-instance 'compiler-context :safety safety))
         (last-reg      nil)
         (last-type     nil)
         (last-cps      nil)
         (compiled-asts nil)
+        (errors        nil)
          (type-env      (type-env-empty))
          (opts          (%make-compile-opts :pass-pipeline pass-pipeline
-                                             :speed speed
-                                             :inline-threshold-scale inline-threshold-scale
+                                              :speed speed
+                                              :inline-threshold-scale inline-threshold-scale
+                                              :block-compile block-compile
                                             :print-pass-timings print-pass-timings
                                           :timing-stream timing-stream
                                           :print-opt-remarks print-opt-remarks
                                           :opt-remarks-stream opt-remarks-stream
                                            :opt-remarks-mode opt-remarks-mode
-                                           :print-pass-stats print-pass-stats
-                                           :stats-stream stats-stream
-                                           :trace-json-stream trace-json-stream)))
-    (declare (ignore retpoline spectre-mitigations stack-protector shadow-stack
-                      asan msan tsan ubsan hwasan))
+                                            :print-pass-stats print-pass-stats
+                                            :stats-stream stats-stream
+                                            :trace-json-stream trace-json-stream)))
     (let ((*compile-time-value-env*    nil)
           (*compile-time-function-env* nil))
-       (dolist (form forms)
-         (unless (%top-level-in-package-form-p form)
-           (multiple-value-setq (last-reg last-type last-cps type-env compiled-asts)
-             (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))))
+       (loop for form in forms
+             for form-index from 0
+             do (unless (%top-level-in-package-form-p form)
+                  (let ((snapshot (%snapshot-toplevel-compilation-state ctx opts)))
+                    (handler-case
+                        (multiple-value-setq (last-reg last-type last-cps type-env compiled-asts)
+                          (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))
+                      (error (e)
+                        (setf opts (%restore-toplevel-compilation-state ctx snapshot))
+                        (push (%make-toplevel-recovery-error form-index form e) errors))))))
        (setf (ctx-type-env ctx) type-env)
-       (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts))))
+        (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

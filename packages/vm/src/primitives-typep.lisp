@@ -137,6 +137,26 @@ cl-cc/type refinement object, returns NIL for all values."
                 (%vm-call-type-refinement-accessor "TYPE-REFINEMENT-PREDICATE" type-sym))
         (values nil nil nil))))
 
+(defun %vm-typep-clos-class (value)
+  "Return VALUE's VM CLOS class descriptor, or NIL for non-instances."
+  (cond
+    ((and (hash-table-p value) (gethash :__class__ value))
+     (gethash :__class__ value))
+    ((and (vectorp value)
+          (plusp (length value))
+          (hash-table-p (aref value 0)))
+     (aref value 0))
+    (t nil)))
+
+(defun %vm-typep-clos-instance-p (value type-sym)
+  "Return T when VALUE is a VM CLOS instance of TYPE-SYM or its superclasses."
+  (let* ((class-ht   (%vm-typep-clos-class value))
+         (class-name (and (hash-table-p class-ht) (gethash :__name__ class-ht)))
+         (cpl        (and (hash-table-p class-ht) (gethash :__cpl__ class-ht))))
+    (and class-ht
+         (or (eq class-name type-sym)
+             (member type-sym cpl :test #'eq)))))
+
 ;;; Data table: maps compound type-specifier head symbols to handler functions.
 ;;; Each handler is (value type-sym) → boolean.
 ;;; Note: lambdas here call vm-typep-check by symbol — resolved at call time, not load time.
@@ -181,12 +201,11 @@ Used by vm-typep-check for compound forms: (or ...), (and ...), (not ...), etc."
            (refinement-p
             (and (vm-typep-check value base-type)
                  (%vm-typep-call-predicate value predicate)))
-       ;; VM CLOS instances — check class name / CPL
-           ((and (hash-table-p value) (gethash :__class__ value))
-            (let* ((class-ht   (gethash :__class__ value))
-                   (class-name (and (hash-table-p class-ht) (gethash :__name__ class-ht)))
-                   (cpl        (and (hash-table-p class-ht) (gethash :__cpl__ class-ht))))
-              (or (eq class-name type-sym) (member type-sym cpl))))
+        ;; VM CLOS instances — check class name / CPL.
+        ;; Standard instances are vector-backed; custom metaclass instances may
+        ;; still use hash-table storage.
+            ((%vm-typep-clos-class value)
+             (%vm-typep-clos-instance-p value type-sym))
            ;; Fallback to host typep
            (t (ignore-errors (typep value type-sym)))))))))
 

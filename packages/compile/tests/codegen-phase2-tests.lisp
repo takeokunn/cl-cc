@@ -76,26 +76,42 @@
       (assert-true inst)
       (assert-eq 'character (cl-cc/vm::vm-element-type inst)))))
 
-(deftest-each codegen-phase2-make-array-dynamic-keywords-fall-through
-  "MAKE-ARRAY only lowers keyword metadata that is statically known."
-  :cases (("dynamic-fill-pointer"
+(deftest codegen-phase2-make-array-dynamic-keywords-lower
+  "MAKE-ARRAY lowers dynamic keyword metadata into vm-make-array register slots."
+  (let ((ctx (make-ctx-with-vars 'init 'fp 'adj 'etype 'base)))
+    (compile-ast (make-ast-call :func 'make-array
+                                :args (list (make-ast-int :value 5)
+                                            (make-ast-var :name :initial-element)
+                                            (make-ast-var :name 'init)
+                                            (make-ast-var :name :fill-pointer)
+                                            (make-ast-var :name 'fp)
+                                            (make-ast-var :name :adjustable)
+                                            (make-ast-var :name 'adj)
+                                            (make-ast-var :name :element-type)
+                                            (make-ast-var :name 'etype)
+                                            (make-ast-var :name :displaced-to)
+                                            (make-ast-var :name 'base)))
+                 ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))
+      (assert-true inst)
+      (assert-true (cl-cc/vm::vm-initial-element inst))
+      (assert-true (cl-cc/vm::vm-fill-pointer-reg inst))
+      (assert-true (cl-cc/vm::vm-adjustable-reg inst))
+      (assert-true (cl-cc/vm::vm-element-type-reg inst))
+      (assert-true (cl-cc/vm::vm-displaced-to-reg inst)))))
+
+(deftest-each codegen-phase2-make-array-unsupported-keywords-fall-through
+  "MAKE-ARRAY falls through only when the keyword shape cannot be safely lowered."
+  :cases (("unknown-keyword"
            (list (make-ast-int :value 5)
-                 (make-ast-var :name :fill-pointer)
-                 (make-ast-var :name 'fp)))
-          ("dynamic-adjustable"
+                 (make-ast-var :name :unknown-option)
+                 (make-ast-int :value 1)))
+          ("dynamic-initial-contents"
            (list (make-ast-int :value 5)
-                  (make-ast-var :name :adjustable)
-                  (make-ast-var :name 'adj)))
-           ("dynamic-initial-contents"
-            (list (make-ast-int :value 5)
-                  (make-ast-var :name :initial-contents)
-                  (make-ast-var :name 'contents)))
-          ("dynamic-element-type"
-           (list (make-ast-int :value 5)
-                 (make-ast-var :name :element-type)
-                 (make-ast-var :name 'etype))))
+                 (make-ast-var :name :initial-contents)
+                 (make-ast-var :name 'contents))))
   (args)
-  (let ((ctx (make-ctx-with-vars 'fp 'adj 'contents 'etype)))
+  (let ((ctx (make-ctx-with-vars 'contents)))
     (compile-ast (make-ast-call :func 'make-array :args args) ctx)
     (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-make-array)))))
 

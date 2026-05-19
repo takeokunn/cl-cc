@@ -136,6 +136,7 @@
 
 (deftest opt-infer-purity-callee-then-caller
   "When callee is pure, caller that only calls callee is also inferred pure."
+  :tags '(:fr-152)
   (let* ((callee-label "callee")
          (caller-label "caller")
          (insts (list
@@ -153,6 +154,35 @@
     (let ((pure (cl-cc/optimize::opt-infer-transitive-function-purity insts)))
       (assert-true  (gethash callee-label pure))
       (assert-true  (gethash caller-label pure)))))
+
+(deftest fr-152-infer-purity-multi-hop-chain
+  "FR-152: purity propagates transitively across a multi-hop direct-call chain."
+  :tags '(:fr-152)
+  (let* ((leaf-label "fr152-leaf")
+         (middle-label "fr152-middle")
+         (root-label "fr152-root")
+         (insts (list
+                 ;; leaf: pure arithmetic-only body
+                 (make-vm-closure :dst :r9 :label leaf-label :params '(:r0) :captured nil)
+                 (make-vm-label   :name leaf-label)
+                 (make-vm-add     :dst :r1 :lhs :r0 :rhs :r0)
+                 (make-vm-ret     :reg :r1)
+                 ;; middle: only calls leaf, so it becomes pure after leaf
+                 (make-vm-closure :dst :r8 :label middle-label :params '(:r0) :captured nil)
+                 (make-vm-label   :name middle-label)
+                 (make-vm-closure :dst :r2 :label leaf-label :params nil :captured nil)
+                 (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                 (make-vm-ret     :reg :r3)
+                 ;; root: only calls middle, so it becomes pure after middle
+                 (make-vm-closure :dst :r7 :label root-label :params '(:r0) :captured nil)
+                 (make-vm-label   :name root-label)
+                 (make-vm-closure :dst :r4 :label middle-label :params nil :captured nil)
+                 (make-vm-call    :dst :r5 :func :r4 :args '(:r0))
+                 (make-vm-ret     :reg :r5))))
+    (let ((pure (cl-cc/optimize::opt-infer-transitive-function-purity insts)))
+      (assert-true (gethash leaf-label pure))
+      (assert-true (gethash middle-label pure))
+      (assert-true (gethash root-label pure)))))
 
 (deftest opt-infer-purity-mutually-recursive-not-pure
   "Mutually recursive functions are not inferred pure."
@@ -219,6 +249,7 @@
 
 (deftest opt-pass-pure-call-removes-dead-known-direct-call
   "Known-pure direct calls with unused destinations are removed conservatively."
+  :tags '(:fr-152)
   (let* ((callee-label "pure-inc")
          (insts (list (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
                       (make-vm-label   :name callee-label)
@@ -231,9 +262,41 @@
          (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
     (assert-= 0 (%count-inst-type optimized 'vm-call))
     (assert-true
+      (some (lambda (inst)
+              (and (typep inst 'vm-ret)
+                   (eq (vm-reg inst) :r0)))
+            optimized))))
+
+(deftest fr-152-pure-call-pass-reuses-transitively-pure-caller
+  "FR-152: repeated calls to a caller inferred pure through its callee are CSE'd."
+  :tags '(:fr-152)
+  (let* ((callee-label "fr152-pure-callee")
+         (caller-label "fr152-pure-caller")
+         (insts (list
+                 ;; callee: pure leaf
+                 (make-vm-closure :dst :r9 :label callee-label :params '(:r0) :captured nil)
+                 (make-vm-label   :name callee-label)
+                 (make-vm-add     :dst :r1 :lhs :r0 :rhs :r0)
+                 (make-vm-ret     :reg :r1)
+                 ;; caller: pure only because the callee is inferred pure
+                 (make-vm-closure :dst :r8 :label caller-label :params '(:r0) :captured nil)
+                 (make-vm-label   :name caller-label)
+                 (make-vm-closure :dst :r7 :label callee-label :params nil :captured nil)
+                 (make-vm-call    :dst :r6 :func :r7 :args '(:r0))
+                 (make-vm-ret     :reg :r6)
+                 ;; top-level repeated direct calls to the transitively pure caller
+                 (make-vm-closure :dst :r2 :label caller-label :params nil :captured nil)
+                 (make-vm-const   :dst :r0 :value 7)
+                 (make-vm-call    :dst :r3 :func :r2 :args '(:r0))
+                 (make-vm-call    :dst :r4 :func :r2 :args '(:r0))
+                 (make-vm-ret     :reg :r4)))
+         (optimized (cl-cc/optimize::opt-pass-pure-call-optimization insts)))
+    (assert-= 2 (%count-inst-type optimized 'vm-call))
+    (assert-true
      (some (lambda (inst)
-             (and (typep inst 'vm-ret)
-                  (eq (vm-reg inst) :r0)))
+             (and (typep inst 'vm-move)
+                  (eq (vm-dst inst) :r4)
+                  (eq (vm-src inst) :r3)))
            optimized))))
 
 (deftest opt-pass-pure-call-does-not-reuse-when-dst-overwrites-arg-register

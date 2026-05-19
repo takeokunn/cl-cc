@@ -58,12 +58,20 @@
 
 (define-vm-instruction vm-generic-call (vm-instruction)
   "Dispatch and call a generic function method.
-   FR-009: ic-cache slot stores (key method methods gen) for monomorphic inline cache."
+   FR-009: ic-cache stores (specializer-key . method-closure) for the
+   monomorphic inline cache.  FR-058 records cache hit/miss counts, per-type
+   frequencies, and may carry a PGO-selected specializer key for a type-check +
+   direct-call fast path."
   (dst nil :reader vm-dst)
   (gf-reg nil :reader vm-gf-reg)
   (args nil :reader vm-args)
   (ic-cache nil :accessor vm-ic-cache)
-  (:sexp-tag :generic-call))
+  (ic-hit-count 0 :accessor vm-ic-hit-count :type integer)
+  (ic-miss-count 0 :accessor vm-ic-miss-count :type integer)
+  (ic-type-counters nil :accessor vm-ic-type-counters)
+  (pgo-specializer nil :accessor vm-pgo-specializer)
+  (:sexp-tag :generic-call)
+  (:sexp-slots dst gf-reg args))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun vm-ic-cache (inst)
@@ -72,7 +80,39 @@
 
   (defun (setf vm-ic-cache) (value inst)
     "Set the inline-cache payload stored on VM-GENERIC-CALL INST."
-    (setf (vm-generic-call-ic-cache inst) value)))
+    (setf (vm-generic-call-ic-cache inst) value))
+
+  (defun vm-ic-hit-count (inst)
+    "Return the number of inline-cache fast-path hits on VM-GENERIC-CALL INST."
+    (vm-generic-call-ic-hit-count inst))
+
+  (defun (setf vm-ic-hit-count) (value inst)
+    "Set the inline-cache fast-path hit count on VM-GENERIC-CALL INST."
+    (setf (vm-generic-call-ic-hit-count inst) value))
+
+  (defun vm-ic-miss-count (inst)
+    "Return the number of inline-cache misses on VM-GENERIC-CALL INST."
+    (vm-generic-call-ic-miss-count inst))
+
+  (defun (setf vm-ic-miss-count) (value inst)
+    "Set the inline-cache miss count on VM-GENERIC-CALL INST."
+    (setf (vm-generic-call-ic-miss-count inst) value))
+
+  (defun vm-ic-type-counters (inst)
+    "Return the type-frequency table stored on VM-GENERIC-CALL INST."
+    (vm-generic-call-ic-type-counters inst))
+
+  (defun (setf vm-ic-type-counters) (value inst)
+    "Set the type-frequency table stored on VM-GENERIC-CALL INST."
+    (setf (vm-generic-call-ic-type-counters inst) value))
+
+  (defun vm-pgo-specializer (inst)
+    "Return the PGO-selected specializer key stored on VM-GENERIC-CALL INST."
+    (vm-generic-call-pgo-specializer inst))
+
+  (defun (setf vm-pgo-specializer) (value inst)
+    "Set the PGO-selected specializer key stored on VM-GENERIC-CALL INST."
+    (setf (vm-generic-call-pgo-specializer inst) value)))
 
 ;;; ── Slot predicate instructions ──────────────────────────────────────────
 

@@ -174,6 +174,7 @@ through extracted standalone functions."
   (make-wasm-function-def
    :index func-index
    :wat-name (entry-label-to-wat-name label)
+   :type-index +type-idx-main-func+
    :source-instructions body-instructions
    :params nil    ; filled by trampoline builder
    :locals nil    ; filled by trampoline builder
@@ -224,8 +225,9 @@ through extracted standalone functions."
     ;; Create the "$main" function for top-level code
     (let ((main-func (make-wasm-function-def
                       :index func-index
-                      :wat-name "$main"
-                      :source-instructions toplevel-instructions
+                       :wat-name "$main"
+                       :type-index +type-idx-main-func+
+                       :source-instructions toplevel-instructions
                       :exported-p t
                       :export-name "main")))
       (wasm-module-add-function module main-func))
@@ -233,6 +235,8 @@ through extracted standalone functions."
     ;; (wasm-module-add-function pushes to the front)
     (setf (wasm-module-functions module)
           (nreverse (wasm-module-functions module)))
+    (dolist (func (wasm-module-functions module))
+      (wasm-module-record-function-label! module func))
     ;; Enrich each function def with its VM parameter register list.
     ;; The params-map was built from vm-closure instructions in the flat list.
     (let ((params-map (collect-function-params instructions)))

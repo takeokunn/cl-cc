@@ -77,7 +77,9 @@ SHAPE is one of:
 (defstruct vm-program
   (instructions nil :type list)
   (result-register nil)
-  (leaf-p nil :type boolean))
+  (leaf-p nil :type boolean)
+  (calling-convention :external :type keyword)
+  (function-conventions nil))
 
 (defclass vm-state ()
    ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
@@ -123,16 +125,22 @@ Each frame is either NIL (regular call) or (gf-ht methods-list all-args) for gen
 Used by call-next-method and next-method-p.")
    (profile-enabled-p :initform nil :accessor vm-profile-enabled-p
                       :documentation "T when lightweight VM stack sampling is enabled.")
-   (profile-call-stack :initform nil :accessor vm-profile-call-stack
-                       :documentation "Current sampled call stack as a list of function labels, leaf first.")
+    (profile-call-stack :initform nil :accessor vm-profile-call-stack
+                        :documentation "Current sampled call stack as a list of function labels, leaf first.")
+    (profile-call-start-times :initform nil :accessor vm-profile-call-start-times
+                              :documentation "Current sampled call start times in nanoseconds, leaf first.")
    (profile-samples :initform (make-hash-table :test #'equal) :accessor vm-profile-samples
                     :documentation "Collapsed stack string -> sample count for lightweight flamegraphs.")
-    (profile-bb-counts :initform (make-hash-table :test #'eql) :accessor vm-profile-bb-counts
-                       :documentation "Program-counter/basic-block hit counts collected during execution.")
-    (profile-branch-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-branch-counts
-                           :documentation "Branch edge counters keyed by (kind from-pc to-pc).")
+     (profile-bb-counts :initform (make-hash-table :test #'eql) :accessor vm-profile-bb-counts
+                        :documentation "Program-counter/basic-block hit counts collected during execution.")
+     (profile-inst-counts :initform (make-hash-table :test #'eq) :accessor vm-profile-inst-counts
+                          :documentation "VM instruction type frequency counters collected during execution.")
+     (profile-branch-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-branch-counts
+                            :documentation "Branch edge counters keyed by (kind from-pc to-pc).")
     (profile-call-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-call-counts
-                         :documentation "Function label -> dynamic call count collected for PGO.")
+                          :documentation "Function label -> dynamic call count collected for PGO.")
+    (profile-call-times :initform (make-hash-table :test #'equal) :accessor vm-profile-call-times
+                        :documentation "Function label -> cumulative elapsed time in nanoseconds collected for PGO.")
     (profile-type-feedback :initform (make-hash-table :test #'equal) :accessor vm-profile-type-feedback
                            :documentation "Register/type -> observation count collected for PGO."))
   (:documentation "VM execution state with registers, call stack, and heap."))

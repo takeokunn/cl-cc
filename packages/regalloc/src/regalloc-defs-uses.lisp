@@ -25,6 +25,10 @@
 (defmethod instruction-defs ((inst vm-move)) (list (vm-dst inst)))
 (defmethod instruction-uses ((inst vm-move)) (list (vm-src inst)))
 
+(defmethod instruction-uses ((inst vm-prefetch))
+  (remove nil (list (vm-prefetch-base-reg inst)
+                    (vm-prefetch-index-reg inst))))
+
 ;; vm-binop: dst = lhs op rhs (covers add, sub, mul, and all comparison ops)
 (defmethod instruction-defs ((inst vm-binop)) (list (vm-dst inst)))
 (defmethod instruction-uses ((inst vm-binop)) (list (vm-lhs inst) (vm-rhs inst)))
@@ -206,8 +210,14 @@
 (defmethod instruction-uses ((inst vm-values))
   (copy-list (vm-src-regs inst)))
 
+(defmethod instruction-uses ((inst vm-values-regs))
+  (remove nil (list (vm-vr0 inst) (vm-vr1 inst) (vm-vr2 inst))))
+
 ;; vm-mv-bind: defs all dst-regs
 (defmethod instruction-defs ((inst vm-mv-bind))
+  (copy-list (vm-dst-regs inst)))
+
+(defmethod instruction-defs ((inst vm-mv-bind-regs))
   (copy-list (vm-dst-regs inst)))
 
 ;; vm-apply: defs dst, uses func + args

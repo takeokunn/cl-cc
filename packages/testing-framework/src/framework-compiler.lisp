@@ -12,6 +12,178 @@
 ;;;   2. deftest-codegen                         — AST codegen instruction checks
 ;;;   3. deftest-vm                              — VM instruction execute-and-check
 
+;;; ------------------------------------------------------------
+;;; Benchmark support (FR-316)
+;;; ------------------------------------------------------------
+
+(defun %benchmark-now-ns ()
+  "Return the current internal real time converted to nanoseconds."
+  (floor (* (get-internal-real-time) 1000000000)
+         internal-time-units-per-second))
+
+(defun %benchmark-duration-ns (thunk)
+  "Run THUNK once and return its elapsed duration in nanoseconds."
+  (let ((start (%benchmark-now-ns)))
+    (funcall thunk)
+    (- (%benchmark-now-ns) start)))
+
+(defun %benchmark-percentile (sorted-values percentile)
+  "Return the nearest-rank PERCENTILE from SORTED-VALUES."
+  (let ((count (length sorted-values)))
+    (if (zerop count)
+        0
+        (let ((index (max 0 (min (1- count)
+                                 (1- (ceiling (* percentile count)))))))
+          (nth index sorted-values)))))
+
+(defun benchmark-statistics (durations-ns &key (warmup-count 0))
+  "Return a plist of benchmark statistics for DURATIONS-NS.
+
+The result contains stable machine-readable keys: :ITERATION-COUNT,
+:WARMUP-COUNT, :DURATIONS-NS, :MIN-NS, :MAX-NS, :MEAN-NS, :MEDIAN-NS,
+:P99-NS, and :STDDEV-NS."
+  (let* ((durations (copy-list durations-ns))
+         (count (length durations))
+         (sorted (sort (copy-list durations) #'<))
+         (sum (reduce #'+ durations :initial-value 0))
+         (mean (if (zerop count) 0 (/ sum count)))
+         (median (cond
+                   ((zerop count) 0)
+                   ((oddp count) (nth (floor count 2) sorted))
+                   (t (/ (+ (nth (1- (/ count 2)) sorted)
+                           (nth (/ count 2) sorted))
+                         2))))
+         (variance (if (zerop count)
+                       0
+                       (/ (reduce #'+ durations
+                                  :key (lambda (duration)
+                                         (let ((delta (- duration mean)))
+                                           (* delta delta)))
+                                  :initial-value 0)
+                          count))))
+    (list :iteration-count count
+          :warmup-count warmup-count
+          :durations-ns durations
+          :min-ns (if sorted (first sorted) 0)
+          :max-ns (if sorted (car (last sorted)) 0)
+          :mean-ns mean
+          :median-ns median
+          :p99-ns (%benchmark-percentile sorted 0.99)
+          :stddev-ns (sqrt variance))))
+
+(defun run-benchmark (name thunk &key (warmup 1) (iterations 10) output-stream)
+  "Run THUNK as benchmark NAME and return a benchmark result plist.
+
+WARMUP controls unmeasured iterations. ITERATIONS controls measured
+iterations. When OUTPUT-STREAM is non-NIL, a JSON representation is written to
+that stream before the result plist is returned."
+  (check-type warmup (integer 0 *))
+  (check-type iterations (integer 1 *))
+  (dotimes (_ warmup)
+    (declare (ignore _))
+    (funcall thunk))
+  (let* ((durations (loop repeat iterations collect (%benchmark-duration-ns thunk)))
+         (stats (benchmark-statistics durations :warmup-count warmup))
+         (result (list* :name name stats)))
+    (when output-stream
+      (write-benchmark-result-json result output-stream)
+      (terpri output-stream))
+    result))
+
+(defun %parse-defbenchmark-body (forms)
+  "Parse DEFBENCHMARK body into docstring, options, and benchmark forms."
+  (let ((docstring nil)
+        (warmup 1)
+        (iterations 10)
+        (output-stream nil)
+        (rest forms))
+    (when (and rest (stringp (first rest)))
+      (setf docstring (pop rest)))
+    (loop while (and rest (keywordp (first rest)))
+          do (let ((key (pop rest))
+                   (value (pop rest)))
+               (case key
+                 (:warmup (setf warmup value))
+                 (:iterations (setf iterations value))
+                 (:output-stream (setf output-stream value))
+                 (otherwise (error "Unknown DEFBENCHMARK option: ~S" key)))))
+    (values docstring warmup iterations output-stream rest)))
+
+(defmacro defbenchmark (name &body body)
+  "Define a benchmark function.
+
+Syntax:
+  (defbenchmark name
+    \"optional docstring\"
+    :warmup 3
+    :iterations 100
+    body...)
+
+The generated function accepts :WARMUP, :ITERATIONS, and :OUTPUT-STREAM keyword
+overrides and returns the plist produced by RUN-BENCHMARK."
+  (multiple-value-bind (docstring warmup iterations output-stream body-forms)
+      (%parse-defbenchmark-body body)
+    `(defun ,name (&key (warmup ,warmup)
+                         (iterations ,iterations)
+                         (output-stream ,output-stream))
+       ,(or docstring (format nil "Run benchmark ~A." name))
+       (run-benchmark ',name
+                      (lambda () ,@body-forms)
+                      :warmup warmup
+                      :iterations iterations
+                      :output-stream output-stream))))
+
+(defun %json-escape-string (value)
+  "Return VALUE escaped for JSON string output."
+  (with-output-to-string (stream)
+    (loop for char across value
+          do (case char
+               (#\" (write-string "\\\"" stream))
+               (#\\ (write-string "\\\\" stream))
+               (#\Newline (write-string "\\n" stream))
+               (#\Return (write-string "\\r" stream))
+               (#\Tab (write-string "\\t" stream))
+               (otherwise (write-char char stream))))))
+
+(defun %benchmark-json-key (key)
+  "Convert plist KEY to the stable lower-case JSON field name."
+  (string-downcase (substitute #\_ #\- (string key))))
+
+(defun %benchmark-json-value (value stream)
+  "Write VALUE to STREAM as a dependency-free JSON value."
+  (cond
+    ((null value) (write-string "null" stream))
+    ((stringp value) (format stream "\"~A\"" (%json-escape-string value)))
+    ((symbolp value) (format stream "\"~A\"" (%json-escape-string (string value))))
+    ((integerp value) (princ value stream))
+    ((realp value) (format stream "~,12F" value))
+    ((listp value)
+     (write-char #\[ stream)
+     (loop for item in value
+           for first-p = t then nil
+           do (progn
+                (unless first-p (write-char #\, stream))
+                (%benchmark-json-value item stream)))
+     (write-char #\] stream))
+    (t (format stream "\"~A\"" (%json-escape-string (prin1-to-string value))))))
+
+(defun write-benchmark-result-json (result stream)
+  "Write benchmark RESULT plist as a compact JSON object to STREAM."
+  (write-char #\{ stream)
+  (loop for (key value) on result by #'cddr
+        for first-p = t then nil
+        do (progn
+             (unless first-p (write-char #\, stream))
+             (format stream "\"~A\":" (%benchmark-json-key key))
+             (%benchmark-json-value value stream)))
+  (write-char #\} stream)
+  result)
+
+(defun benchmark-result-json (result)
+  "Return benchmark RESULT plist as a compact JSON object string."
+  (with-output-to-string (stream)
+    (write-benchmark-result-json result stream)))
+
 ;;; --- Compile-and-Run ---
 
 (defmacro deftest-compile (name docstring &key cases stdlib)

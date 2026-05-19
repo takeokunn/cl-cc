@@ -12,6 +12,19 @@
   (src nil :reader vm-src)
   (:sexp-tag :move))
 
+(define-vm-instruction vm-prefetch (vm-instruction)
+  "Backend-neutral cache prefetch hint.  BASE-REG plus optional INDEX-REG*SCALE
+and OFFSET denotes the address to prefetch; LOCALITY is :T0/:NTA on x86-64 and
+:KEEP/:STRM on AArch64.  The VM interpreter treats this as a no-op."
+  (base-reg nil :reader vm-prefetch-base-reg)
+  (index-reg nil :reader vm-prefetch-index-reg)
+  (scale 1 :reader vm-prefetch-scale)
+  (offset 0 :reader vm-prefetch-offset)
+  (locality :t0 :reader vm-prefetch-locality)
+  (kind :generic :reader vm-prefetch-kind)
+  (:sexp-tag :prefetch)
+  (:sexp-slots base-reg index-reg scale offset locality kind))
+
 (define-vm-instruction vm-binop (vm-instruction)
   (dst nil :reader vm-dst)
   (lhs nil :reader vm-lhs)
@@ -229,6 +242,15 @@
   (count 0 :reader vm-vr-count)
   (:sexp-tag :values-regs)
   (:sexp-slots reg0 reg1 reg2 count))
+
+(define-vm-instruction vm-mv-bind-regs (vm-instruction)
+  "Bind statically known ≤3 returned values from physical return registers.
+   Native x86-64 reads RAX/RDX/RCX; the interpreter mirrors this via
+   vm-values-list for compatibility with the existing VM protocol."
+  (dst-regs nil :reader vm-dst-regs)
+  (count 0 :reader vm-mv-bind-regs-count)
+  (:sexp-tag :mv-bind-regs)
+  (:sexp-slots dst-regs count))
 
 (define-vm-instruction vm-ensure-values (vm-instruction)
   "If vm-values-list is nil, set it to (list (reg-get SRC)).

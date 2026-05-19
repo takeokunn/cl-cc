@@ -26,9 +26,10 @@
                 #:regalloc-lookup
                 #:instruction-defs
                 #:instruction-uses
-                #:compute-live-intervals
-                #:linear-scan-allocate
-                #:allocate-registers
+                 #:compute-live-intervals
+                 #:linear-scan-allocate
+                 #:color-allocate
+                 #:allocate-registers
                 #:vm-spill-store
                 #:vm-spill-load
                 #:make-vm-spill-store
@@ -54,9 +55,10 @@
    #:regalloc-lookup
    #:instruction-defs
    #:instruction-uses
-   #:compute-live-intervals
-   #:linear-scan-allocate
-   #:allocate-registers
+    #:compute-live-intervals
+    #:linear-scan-allocate
+    #:color-allocate
+    #:allocate-registers
    #:vm-spill-store
    #:vm-spill-load
    #:make-vm-spill-store
@@ -67,8 +69,15 @@
    #:*current-regalloc*
 
    ;; ── x86-64 backend ──
-   #:target-regalloc
-   #:vm-reg-to-x86-with-alloc
+    #:target-regalloc
+    #:calling-convention
+    #:calling-convention-name
+    #:calling-convention-arg-regs
+    #:calling-convention-callee-saved
+    #:calling-convention-omit-frame-pointer-p
+    #:*internal-calling-convention*
+    #:*external-calling-convention*
+    #:vm-reg-to-x86-with-alloc
    #:*phys-reg-to-x86-code*
    #:*phys-reg-to-asm-string*
    #:emit-instruction
@@ -78,8 +87,12 @@
     #:*x86-64-spectre-mitigations-enabled*
 
    ;; ── AArch64 backend ──
-   #:aarch64-target
-   #:compile-to-aarch64-bytes
+    #:aarch64-target
+    #:compile-to-aarch64-bytes
 
-   ;; ── WASM backend ──
+    ;; ── RISC-V backend ──
+    #:riscv64-target
+    #:compile-to-riscv64-bytes
+
+    ;; ── WASM backend ──
    #:compile-to-wasm-wat))

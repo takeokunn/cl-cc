@@ -5,9 +5,17 @@
 (defmethod compile-ast ((node ast-values) ctx)
   (setf (ctx-tail-position ctx) nil)
   (%with-compiled-registers (src-regs (ast-values-forms node) ctx)
-    (let ((dst (make-register ctx)))
-      (emit ctx (make-vm-values :dst dst :src-regs src-regs))
-      dst)))
+    (let ((count (length src-regs)))
+      (if (%small-values-count-p count)
+          (progn
+            (emit ctx (make-vm-values-regs :reg0 (first src-regs)
+                                           :reg1 (second src-regs)
+                                           :reg2 (third src-regs)
+                                           :count count))
+            (first src-regs))
+          (let ((dst (make-register ctx)))
+            (emit ctx (make-vm-values :dst dst :src-regs src-regs))
+            dst)))))
 
 (defmethod compile-ast ((node ast-multiple-value-bind) ctx)
   (setf (ctx-tail-position ctx) nil)
@@ -21,22 +29,29 @@
            (%compile-body/k body ctx #'identity))
       (setf (ctx-env ctx) old-env))))
 
+(defun %compile-apply-flat-call (arg-forms func-reg result-reg tail ctx)
+  "Compile APPLY as a direct CALL with already-flattened ARG-FORMS."
+  (%with-compiled-registers (arg-regs arg-forms ctx)
+    (emit ctx (if tail
+                  (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs)
+                  (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
+  result-reg)
+
 (defun %compile-apply-literal-spread (leading-args spread-values func-reg result-reg tail ctx)
   "Compile APPLY as a direct CALL when the final spread arg is a literal list."
-  (%with-compiled-registers (leading-regs leading-args ctx)
-    (%with-compiled-registers (spread-regs (%quoted-value-forms spread-values) ctx)
-      (emit ctx (if tail
-                    (make-vm-tail-call :dst result-reg
-                                       :func func-reg
-                                       :args (append leading-regs spread-regs))
-                    (make-vm-call :dst result-reg
-                                  :func func-reg
-                                  :args (append leading-regs spread-regs)))))))
+  (%compile-apply-flat-call (append leading-args (%quoted-value-forms spread-values))
+                            func-reg result-reg tail ctx))
+
+(defun %compile-apply-list-call-spread (leading-args spread-forms func-reg result-reg tail ctx)
+  "Compile APPLY as a direct CALL when the final spread arg is a (LIST ...) call."
+  (%compile-apply-flat-call (append leading-args spread-forms)
+                            func-reg result-reg tail ctx))
 
 (defun %compile-apply-dynamic-spread (args func-reg result-reg tail ctx)
   "Compile APPLY with a runtime spread argument."
   (%with-compiled-registers (arg-regs args ctx)
-    (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs :tail-p tail))))
+    (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs :tail-p tail)))
+  result-reg)
 
 (defmethod compile-ast ((node ast-apply) ctx)
   (let* ((tail (ctx-tail-position ctx))
@@ -48,16 +63,27 @@
     (emit ctx (make-vm-move :dst func-reg
                              :src (%resolve-apply-function-register
                                    (ast-apply-func node) ctx)))
-    (multiple-value-bind (literal-spread-p spread-values)
-        (%literal-apply-spread-values (getf plan :spread))
-      (if literal-spread-p
-          (%compile-apply-literal-spread (getf plan :leading)
-                                          spread-values
-                                          func-reg
-                                          result-reg
-                                          tail
-                                          ctx)
-          (%compile-apply-dynamic-spread args func-reg result-reg tail ctx)))
+    (let ((leading-args (getf plan :leading))
+          (spread-arg (getf plan :spread)))
+      (multiple-value-bind (literal-spread-p spread-values)
+          (%literal-apply-spread-values spread-arg)
+        (if literal-spread-p
+            (%compile-apply-literal-spread leading-args
+                                           spread-values
+                                           func-reg
+                                           result-reg
+                                           tail
+                                           ctx)
+             (multiple-value-bind (list-spread-p spread-forms)
+                 (%list-call-apply-spread-forms spread-arg ctx)
+               (if list-spread-p
+                   (%compile-apply-list-call-spread leading-args
+                                                    spread-forms
+                                                   func-reg
+                                                   result-reg
+                                                   tail
+                                                   ctx)
+                  (%compile-apply-dynamic-spread args func-reg result-reg tail ctx))))))
     result-reg))
 
 (defun %compile-flat-multiple-value-call (args func-reg result-reg ctx)

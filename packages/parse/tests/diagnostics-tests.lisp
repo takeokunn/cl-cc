@@ -63,6 +63,17 @@
     (assert-equal 1 (length (cl-cc/parse::diagnostic-hints d)))
     (assert-equal 1 (length (cl-cc/parse::diagnostic-notes d)))))
 
+(deftest diag-structured-fields
+  "FR-317: diagnostics carry machine-readable error codes and fix-it suggestions."
+  (let* ((fix-it (cl-cc/parse:make-fix-it :text "insert )" :span '(5 . 5)))
+         (d (cl-cc/parse:make-parse-error "missing )" '(5 . 5)
+              :error-code "E0001"
+              :fix-it fix-it)))
+    (assert-equal "E0001" (cl-cc/parse:diagnostic-error-code d))
+    (assert-eq fix-it (cl-cc/parse:diagnostic-fix-it d))
+    (assert-equal "insert )" (cl-cc/parse:fix-it-text fix-it))
+    (assert-equal '(5 . 5) (cl-cc/parse:fix-it-span fix-it))))
+
 ;;; ─── format-diagnostic ────────────────────────────────────────────────────────
 
 (deftest diag-format-diagnostic-content
@@ -91,10 +102,19 @@
               (cl-cc/parse:format-diagnostic d "x" out))))
     (assert-true (search "hint: try this" s)))
   (let* ((d (cl-cc/parse:make-parse-error "err" '(0 . 1)
-             :notes '("see documentation")))
+              :notes '("see documentation")))
          (s (with-output-to-string (out)
-              (cl-cc/parse:format-diagnostic d "x" out))))
-    (assert-true (search "note: see documentation" s))))
+               (cl-cc/parse:format-diagnostic d "x" out))))
+    (assert-true (search "note: see documentation" s)))
+  (let* ((fix-it (cl-cc/parse:make-fix-it :text "insert )" :span '(5 . 5)))
+         (d (cl-cc/parse:make-parse-error "missing )" '(5 . 5)
+              :error-code "E0001"
+              :fix-it fix-it))
+         (s (with-output-to-string (out)
+              (cl-cc/parse:format-diagnostic d "(foo" out))))
+    (assert-true (search "code: E0001" s))
+    (assert-true (search "fix-it: replace" s))
+    (assert-true (search "insert )" s))))
 
 ;;; ─── format-diagnostic-list ───────────────────────────────────────────────────
 

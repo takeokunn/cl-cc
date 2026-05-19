@@ -115,8 +115,9 @@
    #:free-vars-of-defaults
    #:find-free-variables
    #:binding-escape-kinds-in-body
-   #:binding-escapes-in-body-p
-   #:closure-capture-key
+    #:binding-escapes-in-body-p
+    #:trim-captured-vars
+    #:closure-capture-key
    #:group-shared-sibling-captures
    #:binding-direct-call-count-in-body
    #:binding-one-shot-p

@@ -41,13 +41,39 @@
   (setf (ctx-env ctx)
         (nconc (mapcar #'cons vars regs) (ctx-env ctx))))
 
+(defun %small-values-count-p (count)
+  "Return T when COUNT is eligible for FR-073 register multiple values."
+  (and (integerp count) (<= 2 count 3)))
+
+(defun %call-function-symbol (call-node ctx)
+  "Return the statically named function of CALL-NODE, or NIL for dynamic calls."
+  (declare (ignore ctx))
+  (let ((func (ast-call-func call-node)))
+    (and (symbolp func) func)))
+
+(defun %static-small-values-arity (values-form ctx)
+  "Return a known 2-3 value arity for VALUES-FORM, or NIL when unknown."
+  (cond
+    ((typep values-form 'ast-values)
+     (let ((count (length (ast-values-forms values-form))))
+       (and (%small-values-count-p count) count)))
+    ((typep values-form 'ast-call)
+     (let ((name (%call-function-symbol values-form ctx)))
+       (and name (gethash name (ctx-global-function-mv-arities ctx)))))
+    (t nil)))
+
 (defun %compile-mvb-value-registers (vars values-form ctx)
   "Compile a multiple-value source and return destination registers for VARS."
   (if (typep values-form 'ast-values)
       (%with-compiled-registers (source-regs (ast-values-forms values-form) ctx)
         (%registers-for-vars vars source-regs ctx))
       (progn
-        (compile-ast values-form ctx)
+        (let ((known-count (%static-small-values-arity values-form ctx)))
+          (compile-ast values-form ctx)
+          (when (and known-count (= known-count (length vars)))
+            (let ((var-regs (%allocate-registers-for-vars vars ctx)))
+              (emit ctx (make-vm-mv-bind-regs :dst-regs var-regs :count known-count))
+              (return-from %compile-mvb-value-registers var-regs))))
         (let ((var-regs (%allocate-registers-for-vars vars ctx)))
           (emit ctx (make-vm-mv-bind :dst-regs var-regs))
           var-regs))))
@@ -94,10 +120,34 @@ Reject dotted and circular lists so APPLY literal lowering stays conservative."
 (defun %literal-apply-spread-values (spread-arg)
   "Return (values T VALUES) when SPREAD-ARG is a quoted finite proper list."
   (if (and spread-arg
-            (typep spread-arg 'ast-quote)
-            (%proper-list-p (ast-quote-value spread-arg)))
+             (typep spread-arg 'ast-quote)
+             (%proper-list-p (ast-quote-value spread-arg)))
        (values t (ast-quote-value spread-arg))
        (values nil nil)))
+
+(defun %list-call-spread-function-name (spread-arg)
+  "Return SPREAD-ARG's function name for a direct call node, or NIL."
+  (when (typep spread-arg 'ast-call)
+    (let ((func (ast-call-func spread-arg)))
+      (cond
+        ((symbolp func) func)
+        ((typep func 'ast-var) (ast-var-name func))
+        (t nil)))))
+
+(defun %list-call-apply-spread-forms (spread-arg ctx)
+  "Return (values T FORMS) when SPREAD-ARG is a direct (LIST ...) call.
+
+This is FR-044's known-arity APPLY case: the final spread list has a statically
+known element count, so callers may compile its element forms directly as flat
+call arguments and skip constructing then spreading a runtime list.  The
+optimization is valid only for the global CL:LIST meaning; local function
+bindings named LIST must continue through the dynamic apply path."
+  (if (and spread-arg
+            (typep spread-arg 'ast-call)
+            (eq (%list-call-spread-function-name spread-arg) 'list)
+            (not (%codegen-call-assoc 'list (ctx-env ctx))))
+      (values t (ast-call-args spread-arg))
+      (values nil nil)))
 
 (defun %quoted-value-forms (values)
   "Convert literal VALUES into AST quote forms."

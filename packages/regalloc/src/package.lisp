@@ -18,15 +18,21 @@
     #:interval-remat-inst
     #:regalloc-result
    #:regalloc-assignment
-   #:regalloc-spill-map
-   #:regalloc-spill-count
-   #:regalloc-instructions
+    #:regalloc-spill-map
+    #:regalloc-spill-count
+    #:regalloc-gpr-pressure
+    #:regalloc-fp-pressure
+    #:regalloc-instructions
    #:regalloc-lookup
    #:instruction-defs
    #:instruction-uses
-   #:compute-live-intervals
-   #:linear-scan-allocate
-   #:allocate-registers
+     #:compute-live-intervals
+     #:split-live-interval
+      #:color-spill-slots
+      #:linear-scan-allocate
+      #:color-allocate
+      #:*regalloc-allocation-strategy*
+    #:allocate-registers
 
    ;; ─── regalloc-allocate.lisp — spill instructions ──────────────────
    #:vm-spill-store

@@ -114,18 +114,15 @@
     (assert-eq 'unwind-protect (car body))))
 
 (deftest sort-with-key-structure
-  "SORT with :key: 2 bindings (pred + keyfn); labels has 3 helpers; mmerge accepts 2 params."
+  "SORT with :key: binds sequence, predicate, key, length, and temp vector."
   (let* ((result      (our-macroexpand-1 '(sort lst pred :key #'car)))
-         (bindings    (second result))
-         (labels-form (caddr result))
-         (fns         (cadr labels-form))
-         (mmerge-def  (second fns))
-         (params      (second mmerge-def)))
-    (assert-eq (car result)      'let)
-    (assert-=  (length bindings) 2)
-    (assert-eq (car labels-form) 'labels)
-    (assert-=  (length fns)      3)
-    (assert-=  (length params)   2)))
+          (bindings    (second result))
+          (body        (cddr result)))
+    (assert-eq (car result) 'let*)
+    (assert-= (length bindings) 5)
+    (assert-true (some (lambda (form)
+                         (and (consp form) (eq (car form) 'loop)))
+                       body))))
 
 (deftest stable-sort-with-key-delegates-to-sort-with-key
   "(stable-sort lst pred :key fn) → (sort lst pred :key fn)"

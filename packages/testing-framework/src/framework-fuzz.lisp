@@ -107,6 +107,189 @@
     expr))
 
 ;;; ------------------------------------------------------------
+;;; Shrinking and Counterexample Minimization (FR-353)
+;;; ------------------------------------------------------------
+
+(defun shrink-integer (n)
+  "Return smaller integer candidates moving N toward zero."
+  (cond
+    ((zerop n) nil)
+    ((> (abs n) 1) (remove-duplicates (list 0 (truncate n 2)) :test #'eql))
+    (t (list 0))))
+
+(defun shrink-list (list)
+  "Return smaller list candidates by deletion and element shrinking."
+  (when list
+    (let ((candidates '()))
+      (push nil candidates)
+      (when (cdr list)
+        (push (cdr list) candidates)
+        (push (butlast list) candidates))
+      (when (> (length list) 2)
+        (push (subseq list 0 (floor (length list) 2)) candidates))
+      (loop for index from 0
+            for item in list
+            do (dolist (shrunk (shrink item))
+                 (let ((copy (copy-list list)))
+                   (setf (nth index copy) shrunk)
+                   (push copy candidates))))
+      (remove-duplicates (nreverse candidates) :test #'equal))))
+
+(defun shrink-string (string)
+  "Return shorter string candidates."
+  (let ((length (length string)))
+    (cond
+      ((zerop length) nil)
+      ((= length 1) (list ""))
+      (t (remove-duplicates
+          (list ""
+                (subseq string 0 (floor length 2))
+                (subseq string 1))
+          :test #'string=)))))
+
+(defun shrink (value)
+  "Return deterministic smaller candidates for VALUE.
+Integers shrink toward zero, strings shrink toward empty strings, and lists shrink
+by deleting chunks or recursively shrinking elements."
+  (typecase value
+    (integer (shrink-integer value))
+    (string (shrink-string value))
+    (list (shrink-list value))
+    (t nil)))
+
+(defun minimize-failing-input (value failing-p &key (shrinker #'shrink) (max-rounds 100))
+  "Shrink VALUE while FAILING-P continues to return true.
+Returns the smallest found counterexample according to SHRINKER's deterministic
+candidate order. FAILING-P should return true when the candidate still
+reproduces the property failure."
+  (let ((current value)
+        (round 0)
+        (changed t))
+    (loop while (and changed (< round max-rounds))
+          do (progn
+               (incf round)
+               (setf changed nil)
+               (dolist (candidate (funcall shrinker current))
+                 (when (funcall failing-p candidate)
+                   (setf current candidate
+                         changed t)
+                   (return)))))
+    current))
+
+(defun check-property-with-shrinking (generator predicate
+                                      &key (trials 100) (shrinker #'shrink))
+  "Run PREDICATE against generated values and shrink the first failure.
+Returns a plist with :STATUS :PASS, or :STATUS :FAIL plus :VALUE and
+:MINIMIZED-VALUE. This function is intentionally non-signaling so tests can
+inspect the minimized counterexample."
+  (dotimes (i trials (list :status :pass :trials trials))
+    (let ((value (funcall generator)))
+      (unless (funcall predicate value)
+        (return
+          (list :status :fail
+                :trial i
+                :value value
+                :minimized-value
+                (minimize-failing-input value
+                                        (lambda (candidate)
+                                          (not (funcall predicate candidate)))
+                                        :shrinker shrinker)))))))
+
+;;; ------------------------------------------------------------
+;;; Type-Annotation Based Generators (FR-353)
+;;; ------------------------------------------------------------
+
+(defvar *type-generator-registry* (make-hash-table :test #'equal)
+  "Registry mapping type annotations to zero-argument generator functions.")
+
+(defun register-type-generator (type generator)
+  "Register GENERATOR as the value generator for TYPE annotation."
+  (check-type generator function)
+  (setf (gethash type *type-generator-registry*) generator))
+
+(defmacro deftype-generator (type &body body)
+  "Define a zero-argument generator for TYPE annotation."
+  `(register-type-generator ',type (lambda () ,@body)))
+
+(defun generator-for-type (type)
+  "Return the generator function registered for TYPE, or NIL."
+  (gethash type *type-generator-registry*))
+
+(defun generate-for-type (type)
+  "Generate one value using the generator registered for TYPE annotation."
+  (let ((generator (generator-for-type type)))
+    (unless generator
+      (error "No property-test generator registered for type annotation ~S" type))
+    (funcall generator)))
+
+(defun generate-from-type-annotation (type)
+  "Alias for GENERATE-FOR-TYPE used by type-annotation driven tests."
+  (generate-for-type type))
+
+(deftype-generator integer
+  (%random-int))
+
+(deftype-generator fixnum
+  (%random-int))
+
+(deftype-generator boolean
+  (zerop (random 2 *fuzz-random-state*)))
+
+(deftype-generator symbol
+  (%random-symbol "SYM"))
+
+(deftype-generator string
+  (format nil "s~D" (random 1000 *fuzz-random-state*)))
+
+(deftype-generator list
+  (loop repeat (random 4 *fuzz-random-state*)
+        collect (%random-int)))
+
+;;; ------------------------------------------------------------
+;;; Stateful Property-Based Testing (FR-353)
+;;; ------------------------------------------------------------
+
+(defstruct (pbt-command
+            (:constructor make-pbt-command (&key name precondition run)))
+  "A stateful PBT command with a precondition and state transition function."
+  name
+  (precondition (lambda (state) (declare (ignore state)) t) :type function)
+  (run (lambda (state) state) :type function))
+
+(defun %applicable-pbt-commands (commands state)
+  "Return commands whose preconditions accept STATE."
+  (remove-if-not (lambda (command)
+                   (funcall (pbt-command-precondition command) state))
+                 commands))
+
+(defun generate-stateful-command-sequence (commands initial-state &key (length 10))
+  "Generate an executable command sequence from COMMANDS.
+The generator simulates state while choosing commands, so every generated command
+is valid at the point where it appears in the sequence."
+  (let ((state initial-state)
+        (sequence '()))
+    (dotimes (i length (nreverse sequence))
+      (let ((applicable (%applicable-pbt-commands commands state)))
+        (when (null applicable)
+          (return))
+        (let ((command (%random-elt applicable)))
+          (push command sequence)
+          (setf state (funcall (pbt-command-run command) state)))))))
+
+(defun run-stateful-command-sequence (commands initial-state)
+  "Run COMMANDS from INITIAL-STATE.
+Returns two values: final state and a trace of command names. A violated
+precondition signals an error because generated sequences should be executable."
+  (let ((state initial-state)
+        (trace '()))
+    (dolist (command commands (values state (nreverse trace)))
+      (unless (funcall (pbt-command-precondition command) state)
+        (error "PBT command precondition failed for ~S in state ~S"
+               (pbt-command-name command) state))
+      (push (pbt-command-name command) trace)
+      (setf state (funcall (pbt-command-run command) state)))))
+
+;;; ------------------------------------------------------------
 ;;; Compilability Check
 ;;; ------------------------------------------------------------
 

@@ -17,26 +17,155 @@
 ;;; Coverage Helpers (FR-035) — sb-cover integration
 ;;; ------------------------------------------------------------
 
+(defvar *coverage-enabled* nil
+  "True while CL-CC test coverage instrumentation is enabled.")
+
+(defvar *coverage-report-directory* nil
+  "Optional override for the default coverage report directory.")
+
 (defun enable-coverage ()
-  "Instrument code for coverage tracking."
-  (proclaim '(optimize (sb-cover:store-coverage-data 3))))
+  "Enable host coverage instrumentation for subsequently compiled code.
+The operation is idempotent and uses SBCL's sb-cover as the low-level engine."
+  (proclaim '(optimize (sb-cover:store-coverage-data 3)))
+  (setf *coverage-enabled* t))
 
 (defun disable-coverage ()
-  "Disable coverage instrumentation."
-  (proclaim '(optimize (sb-cover:store-coverage-data 0))))
+  "Disable host coverage instrumentation.  The operation is idempotent."
+  (proclaim '(optimize (sb-cover:store-coverage-data 0)))
+  (setf *coverage-enabled* nil))
+
+(defun coverage-enabled-p ()
+  "Return true when CL-CC coverage mode is currently enabled."
+  *coverage-enabled*)
 
 (defun %coverage-report-directory ()
   "Return a writable directory for the sb-cover HTML report."
-  (uiop:merge-pathnames* #P"cl-cc-coverage/" (uiop:temporary-directory)))
+  (or *coverage-report-directory*
+      (uiop:merge-pathnames* #P"cl-cc-coverage/" (uiop:temporary-directory))))
+
+(defun coverage-report-index-path (&optional (directory (%coverage-report-directory)))
+  "Return the expected sb-cover HTML index path for DIRECTORY."
+  (merge-pathnames #P"cover-index.html" directory))
+
+(defun coverage-report-exists-p (&optional (directory (%coverage-report-directory)))
+  "Return true when DIRECTORY contains an sb-cover HTML index."
+  (not (null (probe-file (coverage-report-index-path directory)))))
 
 (defun %coverage-report-empty-p (directory)
   "Return T when sb-cover produced an empty HTML index for DIRECTORY."
-  (let ((index (merge-pathnames #P"cover-index.html" directory)))
+  (let ((index (coverage-report-index-path directory)))
     (and (probe-file index)
          (with-open-file (stream index :direction :input)
            (let ((contents (make-string (file-length stream))))
              (read-sequence contents stream)
              (not (null (search "No code coverage data found" contents))))))))
+
+(defun coverage-report-empty-p (&optional (directory (%coverage-report-directory)))
+  "Return true when DIRECTORY contains an empty/no-data coverage report."
+  (%coverage-report-empty-p directory))
+
+(defun %write-simple-coverage-html-index (directory entries)
+  "Write a minimal dependency-free HTML coverage index for ENTRIES.
+This helper is intentionally small and stable for tests and non-sb-cover callers;
+the normal runner still uses sb-cover:report for instrumented code."
+  (ensure-directories-exist directory)
+  (let ((index (coverage-report-index-path directory)))
+    (with-open-file (stream index
+                            :direction :output
+                            :if-exists :supersede
+                            :if-does-not-exist :create)
+      (format stream "<!doctype html><html><head><title>CL-CC Coverage</title></head><body>~%")
+      (format stream "<h1>CL-CC Coverage</h1>~%")
+      (if entries
+          (progn
+            (format stream "<table><thead><tr><th>Source</th><th>Lines</th><th>Branches</th></tr></thead><tbody>~%")
+            (dolist (entry entries)
+              (format stream "<tr><td>~A</td><td>~D</td><td>~D</td></tr>~%"
+                      (getf entry :source-file)
+                      (length (getf entry :lines))
+                      (length (getf entry :branches))))
+            (format stream "</tbody></table>~%"))
+          (format stream "<p>No code coverage data found</p>~%"))
+      (format stream "</body></html>~%"))
+    index))
+
+(defun %branch-hit-count (branch)
+  (cond
+    ((consp branch)
+     (or (getf branch :hits)
+         (fourth branch)
+         0))
+    (t 0)))
+
+(defun %write-lcov-line (stream line)
+  (destructuring-bind (line-number . hits) line
+    (format stream "DA:~D,~D~%" line-number (or hits 0))))
+
+(defun %write-lcov-branch (stream branch)
+  (if (and (consp branch) (keywordp (first branch)))
+      (format stream "BRDA:~D,~D,~D,~A~%"
+              (getf branch :line 0)
+              (getf branch :block 0)
+              (getf branch :branch 0)
+              (or (getf branch :hits) "-"))
+      (destructuring-bind (line block branch-id &optional hits) branch
+        (format stream "BRDA:~D,~D,~D,~A~%" line block branch-id (or hits "-")))))
+
+(defun write-lcov-report (entries output-path &key (test-name "cl-cc"))
+  "Write ENTRIES to OUTPUT-PATH using LCOV tracefile syntax.
+Each entry is a plist with :SOURCE-FILE, optional :LINES as (LINE . HITS)
+pairs, and optional :BRANCHES as (LINE BLOCK BRANCH HITS) lists or plists."
+  (ensure-directories-exist output-path)
+  (with-open-file (stream output-path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (dolist (entry entries)
+      (let* ((lines (copy-list (getf entry :lines)))
+             (branches (copy-list (getf entry :branches)))
+             (line-count (length lines))
+             (line-hit-count (count-if (lambda (line) (plusp (or (cdr line) 0))) lines))
+             (branch-count (length branches))
+             (branch-hit-count (count-if (lambda (branch) (plusp (%branch-hit-count branch))) branches)))
+        (format stream "TN:~A~%" test-name)
+        (format stream "SF:~A~%" (getf entry :source-file))
+        (dolist (line lines) (%write-lcov-line stream line))
+        (format stream "LF:~D~%LH:~D~%" line-count line-hit-count)
+        (dolist (branch branches) (%write-lcov-branch stream branch))
+        (format stream "BRF:~D~%BRH:~D~%end_of_record~%" branch-count branch-hit-count))))
+  output-path)
+
+(defun generate-coverage-report (&key
+                                   (directory (%coverage-report-directory))
+                                   entries
+                                   lcov-path
+                                   (html t))
+  "Generate stable CL-CC coverage artifacts from ENTRIES.
+When HTML is true, writes a small cover-index.html.  When LCOV-PATH is supplied,
+writes an LCOV tracefile.  Returns DIRECTORY."
+  (when html
+    (%write-simple-coverage-html-index directory entries))
+  (when lcov-path
+    (write-lcov-report entries lcov-path))
+  directory)
+
+(defmacro with-coverage (options &body body)
+  "Run BODY with coverage enabled and always disable it afterward.
+OPTIONS is a plist accepting :REPORT-DIRECTORY, :LCOV-PATH and :ENTRIES for
+stable CL-CC report artifact generation around the covered body."
+  (let ((report-directory (getf options :report-directory))
+        (lcov-path (getf options :lcov-path))
+        (entries (getf options :entries)))
+    `(unwind-protect
+          (progn
+            (enable-coverage)
+            (multiple-value-prog1
+                (progn ,@body)
+              (when (or ,report-directory ,lcov-path ,entries)
+                (generate-coverage-report :directory (or ,report-directory (%coverage-report-directory))
+                                          :entries ,entries
+                                          :lcov-path ,lcov-path))))
+       (disable-coverage))))
 
 (defun %print-coverage-report (covered-modules)
   "Print sb-cover coverage report for covered modules."

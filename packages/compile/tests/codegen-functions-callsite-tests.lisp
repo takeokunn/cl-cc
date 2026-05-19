@@ -23,14 +23,64 @@
 (deftest codegen-apply-quoted-nil-compilation
   "Quoted NIL spread lowers APPLY to a direct vm-call with no vm-apply fallback."
   (let* ((ctx (make-codegen-ctx))
-         (reg (compile-ast (cl-cc/ast:make-ast-apply
+          (reg (compile-ast (cl-cc/ast:make-ast-apply
                                :func (make-ast-function :name 'list)
                                :args (list (make-ast-int :value 1)
                                            (make-ast-int :value 2)
                                            (make-ast-quote :value nil)))
                              ctx)))
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+     (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+     (assert-true (keywordp reg))))
+
+(deftest codegen-apply-list-call-spread-emits-direct-call
+  "FR-044: (apply fn ... (list ...)) lowers to vm-call with flattened arguments."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc/ast:make-ast-apply
+                             :func (make-ast-function :name '+)
+                             :args (list (make-ast-int :value 1)
+                                         (make-ast-call :func (make-ast-var :name 'list)
+                                                        :args (list (make-ast-int :value 2)
+                                                                    (make-ast-int :value 3)))))
+                           ctx))
+         (call-inst (codegen-find-inst ctx 'cl-cc/vm::vm-call)))
+    (assert-true call-inst)
     (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+    (assert-= 3 (length (cl-cc/vm::vm-args call-inst)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-apply-local-list-call-spread-keeps-dynamic-apply
+  "FR-044: local LIST bindings keep APPLY on the dynamic vm-apply path."
+  (let* ((ctx (make-codegen-ctx))
+         (list-reg (cl-cc/compile:make-register ctx))
+         (reg (progn
+                (setf (cl-cc/compile:ctx-env ctx) (list (cons 'list list-reg)))
+                (compile-ast (cl-cc/ast:make-ast-apply
+                              :func (make-ast-function :name '+)
+                              :args (list (make-ast-int :value 1)
+                                          (make-ast-call :func (make-ast-var :name 'list)
+                                                         :args (list (make-ast-int :value 2)
+                                                                     (make-ast-int :value 3)))))
+                             ctx))))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-apply-tail-list-call-spread-emits-tail-call
+  "FR-044: tail-position (apply fn ... (list ...)) lowers to vm-tail-call."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (progn
+                (setf (cl-cc/compile:ctx-tail-position ctx) t)
+                (compile-ast (cl-cc/ast:make-ast-apply
+                               :func (make-ast-function :name '+)
+                               :args (list (make-ast-int :value 1)
+                                           (make-ast-call :func (make-ast-var :name 'list)
+                                                          :args (list (make-ast-int :value 2)
+                                                                      (make-ast-int :value 3)))))
+                             ctx)))
+         (tail-call-inst (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call)))
+    (assert-true tail-call-inst)
+    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+    (assert-= 3 (length (cl-cc/vm::vm-args tail-call-inst)))
     (assert-true (keywordp reg))))
 
 (deftest codegen-apply-improper-quoted-list-falls-back-to-vm-apply
@@ -60,10 +110,12 @@
 (deftest codegen-apply-tail-dynamic-spread-emits-tail-apply
   "Tail-position ast-apply with a dynamic spread list marks vm-apply as tail-p."
   (let* ((ctx (make-codegen-ctx))
-         (reg (progn
-                (setf (cl-cc/compile:ctx-tail-position ctx) t)
-                (compile-ast (cl-cc/ast:make-ast-apply
-                              :func (make-ast-function :name '+)
+         (xs-reg (cl-cc/compile:make-register ctx))
+          (reg (progn
+                 (setf (cl-cc/compile:ctx-env ctx) (list (cons 'xs xs-reg)))
+                 (setf (cl-cc/compile:ctx-tail-position ctx) t)
+                 (compile-ast (cl-cc/ast:make-ast-apply
+                               :func (make-ast-function :name '+)
                               :args (list (make-ast-var :name 'xs)))
                              ctx)))
          (apply-inst (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
@@ -74,8 +126,10 @@
 (deftest-each codegen-apply-run
   "apply spreads list arguments to a function."
   :cases (("list-only"     6  "(apply #'+ '(1 2 3))")
-          ("leading-args"  10 "(apply #'+ 1 2 '(3 4))")
-          ("quoted-nil"     3 "(apply #'+ 1 2 nil)"))
+           ("leading-args"  10 "(apply #'+ 1 2 '(3 4))")
+           ("quoted-nil"     3 "(apply #'+ 1 2 nil)")
+           ("list-call"     10 "(let ((c 3) (d 4)) (apply #'+ 1 2 (list c d)))")
+           ("local-list-call" 36 "(flet ((list (a b) (cons 12 (cons 23 nil)))) (apply #'+ 1 (list 2 3)))"))
   (expected code)
   (assert-run= expected code))
 
@@ -198,15 +252,16 @@
                  (assert-eq expected-val result))))))
 
 (deftest compile-closure-body
-  "%compile-closure-body emits vm-ret and binds params in ctx-env."
+  "%compile-closure-body emits vm-ret and restores ctx-env after compiling params."
   (let* ((ctx       (make-codegen-ctx))
          (base-env  (list (cons 'outer :r0)))
          (param-reg (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-env ctx) base-env)
     (cl-cc/compile::%compile-closure-body ctx '(p) (list param-reg)
-                                  (list (make-ast-int :value 1)) base-env)
+                                   (list (make-ast-int :value 1)) base-env)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-ret))
-    (assert-true (assoc 'p (cl-cc/compile:ctx-env ctx)))))
+    (assert-equal base-env (cl-cc/compile:ctx-env ctx))
+    (assert-null (assoc 'p (cl-cc/compile:ctx-env ctx)))))
 
 ;;; ─── flet ─────────────────────────────────────────────────────────────────
 

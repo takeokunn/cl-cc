@@ -185,18 +185,29 @@
     "(defun complement (fn) (lambda (&rest args) (not (apply fn args))))"
 
      "(defun sort-impl (sequence predicate key)
-   (if (null sequence) nil
-      (let ((pivot (car sequence))
-            (less nil)
-            (greater nil))
-        (dolist (x (cdr sequence))
-          (let ((a (if key (funcall key x) x))
-                (b (if key (funcall key pivot) pivot)))
-            (if (%stdlib-truthy-p (funcall predicate a b))
-                (push x less)
-                (push x greater))))
-        (append (sort-impl less predicate key)
-                (cons pivot (sort-impl greater predicate key))))))"
+   (let* ((len (length sequence))
+          (vec (if (vectorp sequence) sequence (make-array len))))
+     (unless (vectorp sequence)
+       (let ((i 0))
+         (dolist (x sequence)
+           (aset vec i x)
+           (setq i (+ i 1)))))
+     (loop for i from 0 below len
+           do (loop for j from 0 below (- len 1)
+                    do (let ((a (aref vec j))
+                             (b (aref vec (+ j 1))))
+                         (when (%stdlib-truthy-p
+                                (funcall predicate
+                                         (if key (funcall key b) b)
+                                         (if key (funcall key a) a)))
+                           (aset vec j b)
+                           (aset vec (+ j 1) a)))))
+     (if (vectorp sequence)
+         sequence
+         (let ((result nil))
+           (loop for i from 0 below len
+                 do (setq result (cons (aref vec i) result)))
+           (reverse result)))))"
 
     "(defun sort (sequence predicate &key key)
    (sort-impl sequence predicate key))"

@@ -59,6 +59,20 @@
          (msg (format nil "~A" cond)))
     (assert-true (stringp msg))))
 
+(deftest vm-conditions-carry-structured-diagnostics
+  "FR-317: VM conditions expose optional error-code and fix-it fields."
+  (let* ((state (make-instance 'cl-cc/vm::vm-io-state))
+         (fix-it (cl-cc/parse:make-fix-it :text "bind x" :span '(0 . 1)))
+         (cond (cl-cc/vm::make-vm-type-error state 'fixnum "hello"
+                                             :error-code "E1001"
+                                             :fix-it fix-it)))
+    (assert-equal "E1001" (cl-cc:vm-condition-error-code cond))
+    (assert-eq fix-it (cl-cc:vm-condition-fix-it cond)))
+  (let* ((state (make-instance 'cl-cc/vm::vm-io-state))
+         (cond (cl-cc/vm::make-vm-unbound-variable state 'x)))
+    (assert-null (cl-cc:vm-condition-error-code cond))
+    (assert-null (cl-cc:vm-condition-fix-it cond))))
+
 ;;; ─── Handler Stack ────────────────────────────────────────────────────────
 
 (deftest handler-stack-fresh-state-is-empty

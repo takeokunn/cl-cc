@@ -48,6 +48,24 @@
 (defconstant +xmm14+ 14)
 (defconstant +xmm15+ 15)
 
+;; YMM register encodings share the same low 4-bit register ids as XMM.
+(defconstant +ymm0+ 0)
+(defconstant +ymm1+ 1)
+(defconstant +ymm2+ 2)
+(defconstant +ymm3+ 3)
+(defconstant +ymm4+ 4)
+(defconstant +ymm5+ 5)
+(defconstant +ymm6+ 6)
+(defconstant +ymm7+ 7)
+(defconstant +ymm8+ 8)
+(defconstant +ymm9+ 9)
+(defconstant +ymm10+ 10)
+(defconstant +ymm11+ 11)
+(defconstant +ymm12+ 12)
+(defconstant +ymm13+ 13)
+(defconstant +ymm14+ 14)
+(defconstant +ymm15+ 15)
+
 ;; Calling convention (System V AMD64 ABI)
 ;; Arguments: RDI, RSI, RDX, RCX, R8, R9
 ;; Return: RAX
@@ -115,6 +133,18 @@
   (or (cdr (assoc scale *sib-scale-table*))
       (error "Unsupported x86-64 scale factor ~A" scale)))
 
+(defun encode-sib (scale index-reg base-reg)
+  "Return a SIB byte for [BASE-REG + INDEX-REG*SCALE].
+
+SCALE is the addressing scale factor, not the encoded bit field, and must be
+one of 1, 2, 4, or 8.  INDEX-REG and BASE-REG are x86-64 register codes; their
+low three bits are encoded in the SIB byte while REX.X/REX.B are emitted by the
+instruction emitter.  RSP/R12 are not encodable as SIB index registers."
+  (let ((index-rm (logand index-reg #x7)))
+    (when (= index-rm 4)
+      (error "RSP/R12 cannot be used as SIB index register"))
+    (sib (scale->sib-bits scale) index-rm (logand base-reg #x7))))
+
 (defun x86-64-memory-mod (base offset)
   "Return the ModR/M MOD field for [BASE + OFFSET].
 
@@ -140,17 +170,94 @@
       (1 (emit-byte (logand offset #xFF) stream))
       (2 (emit-dword offset stream)))))
 
+(defun %emit-modrm-rip-relative (reg disp32 stream)
+  "Emit ModR/M + disp32 for RIP-relative [RIP + DISP32].
+
+   RIP-relative memory operands use MOD=00 and R/M=101.  The displacement is
+   relative to the next instruction, so callers must pass a precomputed disp32."
+  (emit-byte (modrm 0 reg 5) stream)
+  (emit-dword disp32 stream))
+
 (defun %emit-modrm-indexed-address (mod reg base index scale offset stream)
   "Emit ModR/M+SIB for [BASE + INDEX*SCALE + OFFSET]."
-  (let ((base-rm (logand base #x7))
-        (index-rm (logand index #x7)))
-    (when (= index-rm 4)
-      (error "RSP/R12 cannot be used as SIB index register"))
+  (let ((base-rm (logand base #x7)))
     (emit-byte (modrm mod reg 4) stream)
-    (emit-byte (sib (scale->sib-bits scale) index-rm base-rm) stream)
+    (emit-byte (encode-sib scale index base-rm) stream)
     (case mod
       (1 (emit-byte (logand offset #xFF) stream))
       (2 (emit-dword offset stream)))))
+
+(defun x86-64-memory-address-byte-size (base offset &key index)
+  "Return byte count for ModR/M (+ optional SIB/displacement) memory operand."
+  (let* ((mod (x86-64-memory-mod base offset))
+         (sib-p (or index (= (logand base #x7) 4))))
+    (+ 1
+       (if sib-p 1 0)
+       (ecase mod
+         (0 0)
+          (1 1)
+          (2 4)))))
+
+(defun x86-64-rip-relative-address-byte-size ()
+  "Return byte count for RIP-relative ModR/M + disp32 addressing."
+  5)
+
+(defun emit-x86-64-address-rex-if-needed (reg base index stream)
+  "Emit an address-only REX prefix when high registers appear in REG/BASE/INDEX."
+  (let ((r (if (>= reg 8) 1 0))
+        (x (if (and index (>= index 8)) 1 0))
+        (b (if (>= base 8) 1 0)))
+    (when (or (= r 1) (= x 1) (= b 1))
+      (emit-byte (rex-prefix :r r :x x :b b) stream))))
+
+;;; VEX Prefix
+
+(defconstant +vex-map-0f+ #b00001
+  "VEX opcode-map selector for 0F opcodes.")
+
+(defconstant +vex-map-0f38+ #b00010
+  "VEX opcode-map selector for 0F 38 opcodes.")
+
+(defconstant +vex-pp-none+ #b00
+  "VEX mandatory-prefix selector: none.")
+
+(defconstant +vex-pp-66+ #b01
+  "VEX mandatory-prefix selector: 66.")
+
+(defconstant +vex-pp-f3+ #b10
+  "VEX mandatory-prefix selector: F3.")
+
+(defconstant +vex-pp-f2+ #b11
+  "VEX mandatory-prefix selector: F2.")
+
+(defun emit-vex-prefix (stream &key (map +vex-map-0f+) (w 0) (vvvv #xF)
+                               (l 0) (pp +vex-pp-none+) (r 0) (x 0) (b 0))
+  "Emit a shortest valid VEX prefix.
+
+R/X/B are non-inverted extension bits. VVVV is the non-inverted first source
+register id; the VEX prefix stores its one's-complement low 4 bits. The 2-byte
+form is used for VEX.0F.W0 encodings that do not need X/B extensions."
+  (let ((vvvv* (logand (logxor vvvv #xF) #xF)))
+    (if (and (= map +vex-map-0f+) (zerop w) (zerop x) (zerop b))
+        (progn
+          (emit-byte #xC5 stream)
+          (emit-byte (logior (ash (logxor (logand r 1) 1) 7)
+                             (ash vvvv* 3)
+                             (ash (logand l 1) 2)
+                             (logand pp #x3))
+                     stream))
+        (progn
+          (emit-byte #xC4 stream)
+          (emit-byte (logior (ash (logxor (logand r 1) 1) 7)
+                             (ash (logxor (logand x 1) 1) 6)
+                             (ash (logxor (logand b 1) 1) 5)
+                             (logand map #x1F))
+                     stream)
+          (emit-byte (logior (ash (logand w 1) 7)
+                             (ash vvvv* 3)
+                             (ash (logand l 1) 2)
+                             (logand pp #x3))
+                     stream)))))
 
 ;;; Instruction emitters (emit-mov-*, emit-add-*, emit-cmp-*, etc.) are in
 ;;; x86-64-encoding-instrs.lisp (loaded immediately after this file).

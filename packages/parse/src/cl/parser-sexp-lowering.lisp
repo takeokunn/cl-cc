@@ -100,7 +100,8 @@ in the stripped forms and declarations are extracted after it."
                    (>= (length spec) 3))
               (let ((type-spec (second spec)))
                 (dolist (var (cddr spec))
-                  (setf bindings (acons var type-spec bindings))))
+                  (setf bindings (acons var type-spec bindings)))
+                (push spec preserved-specs))
               (push spec preserved-specs)))
         (when preserved-specs
           (push `(declare ,@(nreverse preserved-specs)) prefix)))

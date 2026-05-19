@@ -4,6 +4,9 @@
 
 (defvar *let-binding-expansion-stack* nil)
 
+(defvar *compiler-local-function-names* nil
+  "Function names shadowed by local FLET/LABELS bindings during expansion.")
+
 (defun %list-contains-equal (needle haystack)
   "Return T when NEEDLE is EQUAL to an element of HAYSTACK."
   (and (member needle haystack :test #'equal) t))
@@ -65,6 +68,38 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
                    (mapcar #'compiler-macroexpand-all rest))))
       binding))
 
+(defun %flet-labels-binding-names (bindings)
+  "Return local function names from FLET/LABELS BINDINGS."
+  (loop for binding in bindings
+        when (and (consp binding) (symbolp (first binding)))
+          collect (first binding)))
+
+(defun %with-local-function-expansion-shadows (names thunk)
+  "Call THUNK while preventing compiler macros for local function NAMES."
+  (let ((*compiler-local-function-names*
+          (append names *compiler-local-function-names*)))
+    (funcall thunk)))
+
+(defun %apply-final-list-form-p (form)
+  "Return T when FORM is a source-level (LIST ...) spread for APPLY."
+  (and (consp form)
+       (symbolp (car form))
+       (eq (car form) 'list)))
+
+(defun %expand-apply-form (form)
+  "Expand APPLY while preserving final (LIST ...) spreads for FR-044 codegen."
+  (if (cdr form)
+      (let* ((operands (cdr form))
+             (leading (butlast operands))
+             (spread (car (last operands))))
+        (append (list 'apply)
+                (mapcar #'compiler-macroexpand-all leading)
+                (list (if (%apply-final-list-form-p spread)
+                          (cons (car spread)
+                                (mapcar #'compiler-macroexpand-all (cdr spread)))
+                          (compiler-macroexpand-all spread)))))
+      form))
+
 (defun %any-destructuring-let-binding-p (bindings)
   "Return T when BINDINGS contains a destructuring LET binding."
   (some (lambda (b) (and (consp b) (>= (length b) 2) (consp (first b))))
@@ -104,9 +139,17 @@ Uninterned symbols (gensyms) are canonicalized so alpha-variant forms share a ke
   (if (and (>= (length form) 3) (listp (second form)))
       (if (null (second form))
           (cons 'progn (mapcar #'compiler-macroexpand-all (cddr form)))
-          (list* head
-                 (mapcar #'expand-flet-labels-binding (second form))
-                 (mapcar #'compiler-macroexpand-all (cddr form))))
+          (let* ((bindings (second form))
+                 (names (%flet-labels-binding-names bindings))
+                 (body-expander (lambda ()
+                                  (mapcar #'compiler-macroexpand-all (cddr form))))
+                 (binding-expander (lambda ()
+                                     (mapcar #'expand-flet-labels-binding bindings))))
+            (list* head
+                   (if (eq head 'labels)
+                       (%with-local-function-expansion-shadows names binding-expander)
+                       (funcall binding-expander))
+                   (%with-local-function-expansion-shadows names body-expander))))
       (cons head (mapcar #'compiler-macroexpand-all (cdr form)))))
 
 (defun %expand-handler-case-form (form)

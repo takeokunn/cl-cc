@@ -18,16 +18,26 @@
   (declare (ignore labels))
   (handler-case
       (let* ((path-str (vm-reg-get state (vm-path inst)))
-             (direction (vm-file-direction inst))
+              (direction (vm-file-direction inst))
              ;; Use user-specified if-exists/if-not-exists, falling back to defaults
-             (if-exists (or (vm-if-exists inst) :supersede))
-             (if-not-exists (or (vm-if-not-exists inst)
-                                (if (eq direction :output) :create :error)))
-             (handle (vm-allocate-file-handle state))
-             (stream (open path-str
-                          :direction direction
-                          :if-exists if-exists
-                          :if-does-not-exist if-not-exists)))
+              (if-exists (or (vm-if-exists inst) :supersede))
+              (if-not-exists (or (vm-if-not-exists inst)
+                                 (if (eq direction :output) :create :error)))
+              (external-format-designator
+                (if (vm-open-file-external-format-reg inst)
+                    (vm-reg-get state (vm-open-file-external-format-reg inst))
+                    (vm-open-file-external-format inst)))
+              (normalized-external-format
+                (when external-format-designator
+                  (%normalize-text-encoding nil external-format-designator)))
+              (handle (vm-allocate-file-handle state))
+              (open-args (append (list path-str
+                                       :direction direction
+                                       :if-exists if-exists
+                                       :if-does-not-exist if-not-exists)
+                                 (when normalized-external-format
+                                   (list :external-format normalized-external-format))))
+              (stream (apply #'open open-args)))
         (setf (gethash handle (vm-open-files state)) stream)
         (vm-reg-set state (vm-dst inst) handle)
         (values (1+ pc) nil nil))

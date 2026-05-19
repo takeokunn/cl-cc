@@ -248,9 +248,27 @@
   (let ((octets (run-string "(string-to-octets \"é\" :external-format :latin-1)")))
     (assert-= 1 (length octets))
     (assert-= 233 (aref octets 0)))
+  (let ((octets (run-string "(string-to-octets \"A\" :encoding :utf-16)")))
+    (assert-true (vectorp octets))
+    (assert-= 2 (length octets))
+    (assert-= 65 (aref octets 0))
+    (assert-= 0 (aref octets 1)))
+  (let ((octets (run-string "(string-to-octets (string (code-char 128512)) :encoding :utf-16)")))
+    (assert-true (vectorp octets))
+    (assert-= 4 (length octets))
+    (assert-= #x3d (aref octets 0))
+    (assert-= #xd8 (aref octets 1))
+    (assert-= #x00 (aref octets 2))
+    (assert-= #xde (aref octets 3)))
   (assert-string=
    "hé"
-   (run-string "(octets-to-string (string-to-octets \"hé\" :external-format :utf-8) :encoding :utf-8)")))
+   (run-string "(octets-to-string (string-to-octets \"hé\" :external-format :utf-8) :encoding :utf-8)"))
+  (assert-string=
+   "A"
+   (run-string "(octets-to-string (string-to-octets \"A\" :encoding :utf-16) :encoding :utf-16)"))
+  (assert-=
+   128512
+   (run-string "(char-code (aref (octets-to-string (string-to-octets (string (code-char 128512)) :encoding :utf-16) :encoding :utf-16) 0))")))
 
 ;;; ─── FR-604: float 2-arg prototype form ──────────────────────────────────────
 

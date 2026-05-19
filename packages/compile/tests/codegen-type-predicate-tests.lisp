@@ -10,7 +10,9 @@
   :cases (("fixnum-proven"   #'cl-cc/compile::%proven-fixnum-type-p 'fixnum t)
           ("fixnum-nil"      #'cl-cc/compile::%proven-fixnum-type-p nil     nil)
           ("float-proven"    #'cl-cc/compile::%proven-float-type-p  'float  t)
-          ("float-not-fixnum"#'cl-cc/compile::%proven-float-type-p  'fixnum nil))
+          ("float-not-fixnum"#'cl-cc/compile::%proven-float-type-p  'fixnum nil)
+          ("symbol-proven"   #'cl-cc/compile::%proven-symbol-type-p 'symbol t)
+          ("symbol-not-fixnum"#'cl-cc/compile::%proven-symbol-type-p 'fixnum nil))
   (pred-fn spec expected)
   (let ((ty (when spec (cl-cc/type:parse-type-specifier spec))))
     (if expected

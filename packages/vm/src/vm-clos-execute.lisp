@@ -503,7 +503,7 @@ VM primitives that need protocol hooks without introducing new instructions."
           (gethash :__methods__          class-ht) (make-hash-table :test #'equal)
           (gethash :__eql-index__        class-ht) (make-hash-table :test #'equal)
           (gethash :__satiated__         class-ht) nil
-          (gethash '__ic-gen__           class-ht) 0
+          (gethash :__ic-sites__         class-ht) nil
           (gethash :__initforms__        class-ht) all-initform-values
           (gethash :__default-initargs__ class-ht) all-default-initargs
           (gethash :__slot-types__       class-ht) all-slot-types
@@ -654,52 +654,15 @@ VM primitives that need protocol hooks without introducing new instructions."
                 (if (eq qualifier :around)
                     (setf (gethash specializer qual-ht) desc)
                     (push desc (gethash specializer qual-ht))))))))
-    ;; FR-009: Invalidate all IC caches for this GF
-    (incf (gethash '__ic-gen__ gf-ht 0))
+    ;; FR-009: Method registration invalidates monomorphic IC entries.
+    (%ic-clear-all-generic-caches state)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-generic-call) state pc labels)
   (let* ((gf-ht (vm-reg-get state (vm-gf-reg inst)))
-         (arg-regs (vm-args inst))
-         (dst-reg (vm-dst inst)))
-    ;; FR-009: Check monomorphic inline cache before full dispatch.
-    ;; Skip IC when GF has qualified methods or custom method-combination,
-    ;; as those require full dispatch to handle :before/:after/:around ordering.
-    (let ((cache (vm-ic-cache inst))
-          (gf-gen (gethash '__ic-gen__ gf-ht 0))
-          (cacheable-p (%ic-cacheable-gf-p gf-ht))
-          (key (%ic-specializer-key arg-regs state)))
-      (when (and cache (consp cache) (>= (length cache) 4)
-                 cacheable-p
-                 (or (gethash :__satiated__ gf-ht)
-                     (eql (nth 3 cache) gf-gen))
-                 (equal (nth 0 cache) key))
-        (return-from execute-instruction
-          (let* ((method (nth 1 cache))
-                 (method-fn (%vm-method-function method))
-                 (methods (nth 2 cache))
-                 (vals (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
-            (vm-push-call-frame state (1+ pc) dst-reg)
-            (push (list gf-ht methods vals) (vm-method-call-stack state))
-            (vm-profile-enter-call state (vm-closure-entry-label method-fn))
-            (vm-bind-closure-args method-fn state vals)
-            (values (vm-label-table-lookup labels (vm-closure-entry-label method-fn))
-                    nil nil)))))
-    ;; Full dispatch + update cache
-    (multiple-value-bind (next-pc halt-p result)
-        (vm-dispatch-generic-call gf-ht state pc arg-regs dst-reg labels)
-      (when (%ic-cacheable-gf-p gf-ht)
-        (let* ((vals (mapcar (lambda (r) (vm-reg-get state r)) arg-regs))
-               (methods (vm-get-all-applicable-methods gf-ht state vals))
-               (primary (car methods)))
-          (when primary
-            (setf (vm-ic-cache inst)
-                  (list
-                   (%ic-specializer-key arg-regs state)
-                   primary
-                   methods                     ; store full applicable methods for call-next-method
-                   (gethash '__ic-gen__ gf-ht 0))))))
-      (values next-pc halt-p result))))
+          (arg-regs (vm-args inst))
+          (dst-reg (vm-dst inst)))
+    (%ic-lookup-or-dispatch gf-ht state pc arg-regs dst-reg labels inst)))
 
 ;;; FR-677: class-name and class-of
 

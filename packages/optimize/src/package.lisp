@@ -21,17 +21,25 @@
    #:vm-inst-effect-kind
    #:opt-inst-pure-p
    #:opt-inst-dce-eligible-p
-   #:opt-inst-cse-eligible-p
-   #:effect-row->effect-kind
+    #:opt-inst-cse-eligible-p
+    #:effect-row->effect-kind
+    #:*known-function-property-table*
+    #:register-known-function-properties
+    #:known-function-properties
+    #:known-function-property-p
+    #:known-function-effect-kind
 
-   ;; ─── cfg.lisp — basic blocks and CFG ───────────────────────────────
+    ;; ─── cfg.lisp — basic blocks and CFG ───────────────────────────────
    #:basic-block #:make-basic-block #:basic-block-p
    #:bb-id #:bb-label #:bb-instructions
    #:bb-predecessors #:bb-successors
    #:bb-idom #:bb-dom-children #:bb-dom-frontier
    #:bb-post-idom #:bb-post-children
-   #:bb-loop-depth #:bb-rpo-index
-   #:cfg #:make-cfg #:cfg-p
+    #:bb-loop-depth #:bb-rpo-index
+    #:opt-ddg-node #:make-opt-ddg-node #:opt-ddg-node-p
+    #:opt-ddg-node-index #:opt-ddg-node-inst #:opt-ddg-node-latency
+    #:opt-ddg-node-predecessors #:opt-ddg-node-successors
+    #:cfg #:make-cfg #:cfg-p
    #:cfg-blocks #:cfg-entry #:cfg-exit
    #:cfg-label->block #:cfg-next-id
    #:cfg-build #:cfg-block-count
@@ -41,7 +49,8 @@
    #:cfg-compute-dominance-frontiers
    #:cfg-dominates-p #:cfg-post-dominates-p #:cfg-idf
    #:cfg-flatten
-   #:cfg-split-critical-edges
+    #:cfg-split-critical-edges
+    #:cfg-build-ddg #:cfg-ddg-add-edge #:cfg-ddg-edges #:cfg-compute-mii
 
    ;; ─── ssa.lisp — SSA data structures + phi placement ────────────────
    #:ssa-rename-state #:make-ssa-rename-state #:ssa-rename-state-p
@@ -137,20 +146,31 @@
     #:opt-pass-closure-thunk-sharing
 
      ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
-     #:opt-pass-fill-recognition
-     #:opt-pass-copy-recognition
-     #:opt-pass-function-outlining
-     #:opt-pass-safepoint-polling
+      #:opt-pass-fill-recognition
+      #:opt-pass-copy-recognition
+      #:opt-pass-auto-vectorization
+      #:vm-simd-vector-op
+      #:make-vm-simd-vector-op
+      #:vm-simd-vector-op-p
+      #:opt-pass-function-outlining
+      #:opt-pass-safepoint-polling
+      #:opt-pass-software-pipelining
+      #:opt-modulo-schedule-loop-body
+      #:opt-analyze-branch-weights
+      #:opt-branch-weight
 
      ;; ─── optimizer-flow-core.lisp ───────────────────────────────────────────
     #:opt-pass-dominated-type-check-elim
+    #:opt-pass-prefetch-insertion
 
     ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-     #:optimize-instructions
-     #:*skip-optimizer-passes*
+      #:optimize-instructions
+      #:*block-compile*
+      #:*skip-optimizer-passes*
      #:*verify-optimizer-instructions*
      #:*opt-enable-pure-call-optimization*
      #:*opt-enable-sealed-gf-devirtualization*
+     #:opt-pass-schedule-local
      #:opt-configure-optimization-policy
     #:optimize-roadmap-doc-features
     #:optimize-roadmap-doc-fr-ids
@@ -355,4 +375,5 @@
      #:opt-cow-object-refcount
     #:opt-cow-copy
     #:opt-cow-write
+    #:schedule-pre-ra
     #:opt-verify-instructions))

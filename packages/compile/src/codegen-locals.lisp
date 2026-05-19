@@ -91,11 +91,17 @@ Falls through to an oob error when no index matches."
   "Emit the body of a local function (flet/labels closure).
    Binds PARAMS to PARAM-REGS in CTX-ENV under base ENV, compiles BODY-FORMS
    in tail position, emits vm-ret with the last result register.
-   Restores CTX-ENV to ENV on exit."
-  (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
-  (let ((last-reg (%compile-body-with-tail body-forms t ctx)))
-    (setf (ctx-tail-position ctx) nil)
-    (emit ctx (make-vm-ret :reg last-reg))))
+   Restores CTX-ENV on exit."
+  (let ((old-env (ctx-env ctx))
+        (old-tail (ctx-tail-position ctx)))
+    (unwind-protect
+         (progn
+           (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
+           (let ((last-reg (%compile-body-with-tail body-forms t ctx)))
+             (setf (ctx-tail-position ctx) nil)
+             (emit ctx (make-vm-ret :reg last-reg))))
+      (setf (ctx-env ctx) old-env)
+      (setf (ctx-tail-position ctx) old-tail))))
 
 (defmethod compile-ast ((node ast-function) ctx)
   "Compile #'name — look up function by name, returning a closure reference."
@@ -133,9 +139,8 @@ Falls through to an oob error when no index matches."
          (closure-reg (make-register ctx))
          (free-vars   (remove-if (lambda (v) (member v params :test #'eq))
                                  (free-vars-of-list body-forms)))
-         (captured    (loop for var in free-vars
-                            when (assoc var old-env :test #'eq)
-                              collect (cons var (lookup-var ctx var))))
+          (captured    (trim-captured-vars (%capture-candidates-from-env old-env)
+                                           free-vars))
          (param-regs  (loop repeat (length params) collect (make-register ctx)))
          (skip-label  (make-label ctx "flet_skip")))
     (setf captured (%canonical-shared-captures captured shared-captures))
@@ -157,9 +162,8 @@ Falls through to an oob error when no index matches."
                 for body-forms = (cddr binding)
                 for free-vars = (remove-if (lambda (v) (member v params :test #'eq))
                                            (free-vars-of-list body-forms))
-                collect (loop for var in free-vars
-                              when (assoc var env :test #'eq)
-                                collect (cons var (lookup-var ctx var))))))
+                 collect (trim-captured-vars (%capture-candidates-from-env env)
+                                             free-vars))))
     (let ((groups (group-shared-sibling-captures captures)))
       (loop for captures in captures
             when (gethash (closure-capture-key captures) groups)
@@ -396,9 +400,8 @@ Returns (func-infos forward-env) where each info is (name label closure-reg box-
          (body-forms  (cddr binding-data))
          (free-vars   (remove-if (lambda (v) (member v params :test #'eq))
                                  (free-vars-of-list body-forms)))
-         (captured    (loop for var in free-vars
-                            when (assoc var (ctx-env ctx) :test #'eq)
-                              collect (cons var (lookup-var ctx var))))
+          (captured    (trim-captured-vars (%capture-candidates-from-env (ctx-env ctx))
+                                           free-vars))
          (param-regs  (loop repeat (length params) collect (make-register ctx)))
          (skip-label  (make-label ctx "labels_skip")))
     (setf captured (%canonical-shared-captures captured shared-captures))

@@ -63,6 +63,23 @@
     (vm-exec (cl-cc:make-vm-gethash :dst :R3 :key :R1 :table :R0) state)
     (assert-equal nil (cl-cc/vm::vm-reg-get state :R3))))
 
+(deftest-each specialized-gethash-roundtrip
+  "Specialized gethash instructions preserve generic gethash value/found semantics."
+  :cases (("eq" #'cl-cc:make-vm-gethash-eq 'eq 'key)
+          ("eql" #'cl-cc:make-vm-gethash-eql 'eql 42)
+          ("equal" #'cl-cc:make-vm-gethash-equal 'equal "key"))
+  (ctor test-sym key)
+  (let ((state (make-test-vm)))
+    (cl-cc/vm::vm-reg-set state :TEST test-sym)
+    (vm-exec (cl-cc:make-vm-make-hash-table :dst :R0 :test :TEST) state)
+    (cl-cc/vm::vm-reg-set state :R1 key)
+    (cl-cc/vm::vm-reg-set state :R2 99)
+    (vm-exec (cl-cc:make-vm-sethash :key :R1 :value :R2 :table :R0) state)
+    (vm-exec (funcall ctor :dst :R3 :found-dst :R4 :key :R1 :table :R0) state)
+    (assert-equal 99 (cl-cc/vm::vm-reg-get state :R3))
+    (assert-equal 1 (cl-cc/vm::vm-reg-get state :R4))
+    (assert-equal (list 99 1) (cl-cc/vm::vm-values-list state))))
+
 ;;; ─── Hash Table Remove ────────────────────────────────────────────────────
 
 (deftest remhash-removes-entry

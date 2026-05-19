@@ -44,6 +44,24 @@
   (emit-byte #x89 stream)
   (%emit-modrm-address (x86-64-memory-mod base offset) src base offset stream))
 
+(defun emit-mov-rm64-rip (dst disp32 stream)
+  "MOV dst, [RIP + disp32] (RIP-relative load).
+
+   Encoding: REX.W + 8B /r with MOD=00, R/M=101, followed by disp32.
+   DISP32 is relative to the address immediately after this instruction."
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3)) stream)
+  (emit-byte #x8B stream)
+  (%emit-modrm-rip-relative dst disp32 stream))
+
+(defun emit-mov-mr64-rip (disp32 src stream)
+  "MOV [RIP + disp32], src (RIP-relative store).
+
+   Encoding: REX.W + 89 /r with MOD=00, R/M=101, followed by disp32.
+   DISP32 is relative to the address immediately after this instruction."
+  (emit-byte (rex-prefix :w 1 :r (ash src -3)) stream)
+  (emit-byte #x89 stream)
+  (%emit-modrm-rip-relative src disp32 stream))
+
 (defun emit-mov-rm64-fs-disp32 (dst disp32 stream)
   "MOV dst, FS:[disp32] using absolute disp32 addressing.
 
@@ -78,7 +96,29 @@
   (emit-byte (rex-prefix :w 1 :r (ash src -3) :x (ash index -3) :b (ash base -3)) stream)
   (emit-byte #x89 stream)
   (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
-                               src base index scale offset stream))
+                                src base index scale offset stream))
+
+(defun emit-prefetch-mem (locality base offset stream)
+  "Emit PREFETCHT0/PREFETCHNTA [BASE+OFFSET].  LOCALITY is :T0 or :NTA."
+  (let ((opcode-ext (ecase locality
+                      (:nta 0)
+                      (:t0 1))))
+    (emit-x86-64-address-rex-if-needed opcode-ext base nil stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x18 stream)
+    (%emit-modrm-address (x86-64-memory-mod base offset)
+                         opcode-ext base offset stream)))
+
+(defun emit-prefetch-mem-indexed (locality base index scale offset stream)
+  "Emit PREFETCHT0/PREFETCHNTA [BASE+INDEX*SCALE+OFFSET]."
+  (let ((opcode-ext (ecase locality
+                      (:nta 0)
+                      (:t0 1))))
+    (emit-x86-64-address-rex-if-needed opcode-ext base index stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x18 stream)
+    (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
+                                 opcode-ext base index scale offset stream)))
 
 ;;; ── LEA instruction (FR-171) ─────────────────────────────────────────────────
 
@@ -100,8 +140,14 @@ avoids RBP/R13/RSP/R12 for LEA operands."
 OFFSET must fit in signed 32 bits.  No index register or scale."
   (let ((mod (x86-64-memory-mod base offset)))
     (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash base -3)) stream)
-    (emit-byte #x8D stream)
-    (%emit-modrm-address mod dst base offset stream)))
+     (emit-byte #x8D stream)
+     (%emit-modrm-address mod dst base offset stream)))
+
+(defun emit-lea-rip-relative (dst disp32 stream)
+  "LEA dst, [RIP + disp32] — materialize a RIP-relative address."
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3)) stream)
+  (emit-byte #x8D stream)
+  (%emit-modrm-rip-relative dst disp32 stream))
 
 (defun emit-lea-indexed (dst base index scale offset stream)
   "LEA dst, [base + index*SCALE + OFFSET] — full indexed LEA.
@@ -109,9 +155,174 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte (rex-prefix :w 1 :r (ash dst -3) :x (ash index -3) :b (ash base -3)) stream)
   (emit-byte #x8D stream)
   (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
-                                dst base index scale offset stream))
+                                 dst base index scale offset stream))
+
+(defun emit-lea (dst base index scale offset stream)
+  "LEA dst, [base + optional index*SCALE + OFFSET].
+
+Encodes REX.W + 8D /r with ModR/M, optional SIB, and disp8/disp32.
+SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
+  (if index
+      (emit-lea-indexed dst base index scale offset stream)
+      (emit-lea-rr64-offset dst base offset stream)))
 
 ;;; ── XMM / scalar-double instructions ─────────────────────────────────────────
+
+(defun emit-sse-prefix-rex-if-needed (reg rm stream &optional index)
+  "Emit an SSE REX prefix when REG/RM/INDEX use high architectural registers."
+  (let ((r (if (>= reg 8) 1 0))
+        (x (if (and index (>= index 8)) 1 0))
+        (b (if (>= rm 8) 1 0)))
+    (when (or (= r 1) (= x 1) (= b 1))
+      (emit-byte (rex-prefix :r r :x x :b b) stream))))
+
+(defun emit-sse66-0f-xx (opcode dst-xmm src-xmm stream)
+  "Emit a 66 0F /r XMM register instruction."
+  (emit-byte #x66 stream)
+  (emit-sse-prefix-rex-if-needed dst-xmm src-xmm stream)
+  (emit-byte #x0F stream)
+  (emit-byte opcode stream)
+  (emit-byte (modrm 3 dst-xmm src-xmm) stream))
+
+(defun emit-sse66-0f-xm (opcode dst-xmm base offset stream)
+  "Emit a 66 0F /r XMM load-like instruction with a memory source."
+  (emit-byte #x66 stream)
+  (emit-sse-prefix-rex-if-needed dst-xmm base stream)
+  (emit-byte #x0F stream)
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-xmm base offset stream))
+
+(defun emit-sse66-0f-mx (opcode base offset src-xmm stream)
+  "Emit a 66 0F /r XMM store-like instruction with a memory destination."
+  (emit-byte #x66 stream)
+  (emit-sse-prefix-rex-if-needed src-xmm base stream)
+  (emit-byte #x0F stream)
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) src-xmm base offset stream))
+
+(defun emit-sse66-0f38-xx (opcode dst-xmm src-xmm stream)
+  "Emit a 66 0F 38 /r XMM register instruction."
+  (emit-byte #x66 stream)
+  (emit-sse-prefix-rex-if-needed dst-xmm src-xmm stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x38 stream)
+  (emit-byte opcode stream)
+  (emit-byte (modrm 3 dst-xmm src-xmm) stream))
+
+(defun emit-sse66-0f38-xm (opcode dst-xmm base offset stream)
+  "Emit a 66 0F 38 /r XMM instruction with a memory source."
+  (emit-byte #x66 stream)
+  (emit-sse-prefix-rex-if-needed dst-xmm base stream)
+  (emit-byte #x0F stream)
+  (emit-byte #x38 stream)
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-xmm base offset stream))
+
+(defmacro define-sse66-0f-xmm-op (name opcode description)
+  "Define register and memory-source forms for a 66 0F XMM operation."
+  (let ((rr-name (intern (format nil "EMIT-~A-XX" name)))
+        (rm-name (intern (format nil "EMIT-~A-XM" name))))
+    `(progn
+       (defun ,rr-name (dst-xmm src-xmm stream)
+         ,description
+         (emit-sse66-0f-xx ,opcode dst-xmm src-xmm stream))
+       (defun ,rm-name (dst-xmm base offset stream)
+         ,description
+         (emit-sse66-0f-xm ,opcode dst-xmm base offset stream)))))
+
+(defmacro define-sse66-0f38-xmm-op (name opcode description)
+  "Define register and memory-source forms for a 66 0F 38 XMM operation."
+  (let ((rr-name (intern (format nil "EMIT-~A-XX" name)))
+        (rm-name (intern (format nil "EMIT-~A-XM" name))))
+    `(progn
+       (defun ,rr-name (dst-xmm src-xmm stream)
+         ,description
+         (emit-sse66-0f38-xx ,opcode dst-xmm src-xmm stream))
+       (defun ,rm-name (dst-xmm base offset stream)
+         ,description
+         (emit-sse66-0f38-xm ,opcode dst-xmm base offset stream)))))
+
+(defun emit-movdqa-xx (dst-xmm src-xmm stream)
+  "MOVDQA xmm, xmm (aligned packed 128-bit copy)."
+  (emit-sse66-0f-xx #x6F dst-xmm src-xmm stream))
+
+(defun emit-movdqa-xm (dst-xmm base offset stream)
+  "MOVDQA xmm, [base + offset] (aligned packed 128-bit load)."
+  (emit-sse66-0f-xm #x6F dst-xmm base offset stream))
+
+(defun emit-movdqa-mx (base offset src-xmm stream)
+  "MOVDQA [base + offset], xmm (aligned packed 128-bit store)."
+  (emit-sse66-0f-mx #x7F base offset src-xmm stream))
+
+(define-sse66-0f-xmm-op paddd #xFE
+  "PADDD xmm, xmm/m128 (packed signed/unsigned dword add).")
+(define-sse66-0f-xmm-op psubd #xFA
+  "PSUBD xmm, xmm/m128 (packed dword subtract).")
+(define-sse66-0f-xmm-op pxor #xEF
+  "PXOR xmm, xmm/m128 (packed bitwise xor).")
+(define-sse66-0f-xmm-op pand #xDB
+  "PAND xmm, xmm/m128 (packed bitwise and).")
+(define-sse66-0f-xmm-op por #xEB
+  "POR xmm, xmm/m128 (packed bitwise or).")
+
+(define-sse66-0f38-xmm-op pmulld #x40
+  "PMULLD xmm, xmm/m128 (SSE4.1 packed signed dword multiply).")
+(define-sse66-0f38-xmm-op pblendvb #x10
+  "PBLENDVB xmm, xmm/m128 (SSE4.1 variable byte blend using XMM0 mask).")
+(define-sse66-0f38-xmm-op pminsd #x39
+  "PMINSD xmm, xmm/m128 (SSE4.1 packed signed dword minimum).")
+(define-sse66-0f38-xmm-op pmaxsd #x3D
+  "PMAXSD xmm, xmm/m128 (SSE4.1 packed signed dword maximum).")
+
+(defun emit-avx2-vex-yyy (opcode map dst-ymm src1-ymm src2-ymm stream)
+  "Emit an AVX2 VEX.256.66 MAP.W0 register instruction."
+  (emit-vex-prefix stream
+                   :map map
+                   :w 0
+                   :vvvv src1-ymm
+                   :l 1
+                   :pp +vex-pp-66+
+                   :r (ash dst-ymm -3)
+                   :b (ash src2-ymm -3))
+  (emit-byte opcode stream)
+  (emit-byte (modrm 3 dst-ymm src2-ymm) stream))
+
+(defun emit-avx2-vex-yym (opcode map dst-ymm src1-ymm base offset stream)
+  "Emit an AVX2 VEX.256.66 MAP.W0 instruction with a memory source."
+  (emit-vex-prefix stream
+                   :map map
+                   :w 0
+                   :vvvv src1-ymm
+                   :l 1
+                   :pp +vex-pp-66+
+                   :r (ash dst-ymm -3)
+                   :b (ash base -3))
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-ymm base offset stream))
+
+(defun emit-vpaddd-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPADDD ymm, ymm, ymm (AVX2 packed dword add)."
+  (emit-avx2-vex-yyy #xFE +vex-map-0f+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpaddd-yym (dst-ymm src1-ymm base offset stream)
+  "VPADDD ymm, ymm, [base + offset] (AVX2 packed dword add)."
+  (emit-avx2-vex-yym #xFE +vex-map-0f+ dst-ymm src1-ymm base offset stream))
+
+(defun emit-vpmulld-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPMULLD ymm, ymm, ymm (AVX2 packed signed dword multiply)."
+  (emit-avx2-vex-yyy #x40 +vex-map-0f38+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpmulld-yym (dst-ymm src1-ymm base offset stream)
+  "VPMULLD ymm, ymm, [base + offset] (AVX2 packed signed dword multiply)."
+  (emit-avx2-vex-yym #x40 +vex-map-0f38+ dst-ymm src1-ymm base offset stream))
+
+(defun emit-vpermd-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPERMD ymm, ymm, ymm (AVX2 permute dwords)."
+  (emit-avx2-vex-yyy #x36 +vex-map-0f38+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpermd-yym (dst-ymm src1-ymm base offset stream)
+  "VPERMD ymm, ymm, [base + offset] (AVX2 permute dwords)."
+  (emit-avx2-vex-yym #x36 +vex-map-0f38+ dst-ymm src1-ymm base offset stream))
 
 (defun emit-movq-xmm-r64 (dst-xmm src-gpr stream)
   "MOVQ xmm, r64 (copy raw 64 bits from GPR to XMM low lane)."
@@ -129,6 +340,24 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte #x0F stream)
   (emit-byte #x10 stream)
   (emit-byte (modrm 3 dst-xmm src-xmm) stream))
+
+(defun emit-movsd-xm (dst-xmm base offset stream)
+  "MOVSD xmm, [base + offset] (scalar double load)."
+  (emit-byte #xF2 stream)
+  (when (or (>= dst-xmm 8) (>= base 8))
+    (emit-byte (rex-prefix :r (ash dst-xmm -3) :b (ash base -3)) stream))
+  (emit-byte #x0F stream)
+  (emit-byte #x10 stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-xmm base offset stream))
+
+(defun emit-movsd-mx (base offset src-xmm stream)
+  "MOVSD [base + offset], xmm (scalar double store)."
+  (emit-byte #xF2 stream)
+  (when (or (>= src-xmm 8) (>= base 8))
+    (emit-byte (rex-prefix :r (ash src-xmm -3) :b (ash base -3)) stream))
+  (emit-byte #x0F stream)
+  (emit-byte #x11 stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) src-xmm base offset stream))
 
 (defun emit-addsd-xx (dst-xmm src-xmm stream)
   "ADDSD xmm, xmm (scalar double add)."
@@ -156,6 +385,22 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte #x0F stream)
   (emit-byte #x59 stream)
   (emit-byte (modrm 3 dst-xmm src-xmm) stream))
+
+(defun emit-vfmadd132sd-xxx (dst-xmm add-xmm mul-xmm stream)
+  "VFMADD132SD dst, add, mul: dst = dst * mul + add."
+  (let* ((r (logand (ash dst-xmm -3) 1))
+         (b (logand (ash mul-xmm -3) 1))
+         (vvvv (logxor add-xmm #xF)))
+    ;; VEX.DDS.LIG.66.0F38.W1 99 /r
+    (emit-byte #xC4 stream)
+    (emit-byte (logior (ash (logxor r 1) 7)
+                       #x40
+                       (ash (logxor b 1) 5)
+                       #x02)
+               stream)
+    (emit-byte (logior #x80 (ash vvvv 3) #x01) stream)
+    (emit-byte #x99 stream)
+    (emit-byte (modrm 3 dst-xmm mul-xmm) stream)))
 
 (defun emit-divsd-xx (dst-xmm src-xmm stream)
   "DIVSD xmm, xmm (scalar double divide)."
@@ -232,6 +477,22 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte #xF7 stream)
   (emit-byte (modrm 3 5 src) stream))
 
+(defun emit-div-rm64 (src stream)
+  "DIV r/m64 (unsigned 64-bit divide RDX:RAX by SRC).
+
+   Encoding: REX.W + F7 /6. Quotient is written to RAX, remainder to RDX."
+  (emit-byte (rex-prefix :w 1 :b (ash src -3)) stream)
+  (emit-byte #xF7 stream)
+  (emit-byte (modrm 3 6 src) stream))
+
+(defun emit-idiv-rm64 (src stream)
+  "IDIV r/m64 (signed 64-bit divide RDX:RAX by SRC).
+
+   Encoding: REX.W + F7 /7. Quotient is written to RAX, remainder to RDX."
+  (emit-byte (rex-prefix :w 1 :b (ash src -3)) stream)
+  (emit-byte #xF7 stream)
+  (emit-byte (modrm 3 7 src) stream))
+
 (defun emit-cmp-rr64 (op1 op2 stream)
   "CMP op1, op2 (64-bit compare).
 
@@ -257,6 +518,12 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (when (>= reg 8)
     (emit-byte #x41 stream))
   (emit-byte (+ #x58 (logand reg #x7)) stream))
+
+(defun emit-leave (stream)
+  "LEAVE (restore frame pointer): equivalent to MOV RSP,RBP; POP RBP.
+
+   Encoding: C9"
+  (emit-byte #xC9 stream))
 
 (defun emit-ret (stream)
   "RET (return).
@@ -391,6 +658,54 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte #x0F stream)
   (emit-byte #xB8 stream)
   (emit-byte (modrm 3 dst src) stream))
+
+(defun emit-lzcnt-rr64 (dst src stream)
+  "LZCNT dst, src (64-bit leading-zero count).
+
+   Encoding: F3 REX.W 0F BD /r.  This opcode is BSR with an F3 prefix on
+   processors without LZCNT support."
+  (emit-byte #xF3 stream)
+  (emit-byte (rex-prefix :w 1 :r (ash dst -3) :b (ash src -3)) stream)
+  (emit-byte #x0F stream)
+  (emit-byte #xBD stream)
+  (emit-byte (modrm 3 dst src) stream))
+
+(defun emit-vex-0f38-rvm64 (opcode pp dst src1 src2 stream)
+  "Emit a VEX.NDS.LZ.0F38.W1 three-register GPR instruction.
+
+   DST is encoded in ModR/M.reg, SRC1 in inverted VEX.vvvv, and SRC2 in
+   ModR/M.r/m.  PP is the mandatory-prefix field: 0=none, 2=F3, 3=F2."
+  (let* ((r (logand (ash dst -3) 1))
+         (b (logand (ash src2 -3) 1))
+         (vvvv (logxor src1 #xF)))
+    (emit-byte #xC4 stream)
+    (emit-byte (logior (ash (logxor r 1) 7)
+                       #x40
+                       (ash (logxor b 1) 5)
+                       #x02)
+               stream)
+    (emit-byte (logior #x80 (ash (logand vvvv #xF) 3) pp) stream)
+    (emit-byte opcode stream)
+    (emit-byte (modrm 3 dst src2) stream)))
+
+(defun emit-bextr-rrr64 (dst src control stream)
+  "BEXTR dst, src, control (64-bit bit-field extract).
+
+   Encoding: VEX.NDS.LZ.0F38.W1 F7 /r.  CONTROL encodes START in bits 7:0 and
+   LENGTH in bits 15:8."
+  (emit-vex-0f38-rvm64 #xF7 0 dst control src stream))
+
+(defun emit-pext-rrr64 (dst src mask stream)
+  "PEXT dst, src, mask (64-bit parallel bit extract).
+
+   Encoding: VEX.NDS.LZ.F3.0F38.W1 F5 /r."
+  (emit-vex-0f38-rvm64 #xF5 2 dst src mask stream))
+
+(defun emit-pdep-rrr64 (dst src mask stream)
+  "PDEP dst, src, mask (64-bit parallel bit deposit).
+
+   Encoding: VEX.NDS.LZ.F2.0F38.W1 F5 /r."
+  (emit-vex-0f38-rvm64 #xF5 3 dst src mask stream))
 
 (defun emit-bsr-rr64 (dst src stream)
   "BSR dst, src (64-bit bit-scan reverse).

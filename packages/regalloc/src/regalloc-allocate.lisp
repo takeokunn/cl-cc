@@ -20,6 +20,7 @@
   (assignment   (make-hash-table :test 'eq) :type hash-table)
   (spill-map    (make-hash-table :test 'eq) :type hash-table)
   (spill-count  0                           :type integer)
+  (spill-offset 0                           :type integer)
   (free-regs    nil                         :type list)
   (free-fp-regs nil                         :type list)
   (active       nil                         :type list)
@@ -30,6 +31,13 @@
 Recognized keys:
   :prefer-callee-saved-p
   :prefer-caller-saved-p")
+
+(defparameter *regalloc-allocation-strategy* :linear-scan
+  "Default register allocation strategy.
+
+Valid values are :LINEAR-SCAN and :COLOR.  Linear scan remains the default;
+graph coloring can be selected by binding this variable or by passing
+:ALLOCATOR :COLOR in ALLOCATION-POLICY to ALLOCATE-REGISTERS.")
 
 (defun %lsa-interval-pool (state interval)
   "Return the free-register pool for INTERVAL's register class."
@@ -53,10 +61,11 @@ Recognized keys:
                    (lsa-active state))))
 
 (defun %lsa-spill-current (state interval)
-  "Assign the next spill slot to INTERVAL and record it in spill-map."
+  "Assign a provisional spill slot to INTERVAL and record it in spill-map."
   (incf (lsa-spill-count state))
-  (setf (interval-spill-slot interval) (lsa-spill-count state))
-  (setf (gethash (interval-vreg interval) (lsa-spill-map state)) (lsa-spill-count state)))
+  (let ((slot (+ (lsa-spill-offset state) (lsa-spill-count state))))
+    (setf (interval-spill-slot interval) slot)
+    (setf (gethash (interval-vreg interval) (lsa-spill-map state)) slot)))
 
 (defun %lsa-best-spill-candidate (state interval)
   "Return the active interval (or INTERVAL itself) with the farthest next use."
@@ -158,6 +167,21 @@ Safety guard: do not force caller-saved for call-crossing intervals."
         #'%param-preferred-reg)
   "Ordered list of preferred-register strategies tried left-to-right; first truthy result wins.")
 
+(defun regalloc-target-fp-registers (cc)
+  "Return the allocatable floating-point register pool for CC."
+  (case (target-name cc)
+    (:x86-64 '(:xmm0 :xmm1 :xmm2 :xmm3 :xmm4 :xmm5 :xmm6 :xmm7
+               :xmm8 :xmm9 :xmm10 :xmm11 :xmm12 :xmm13 :xmm14 :xmm15))
+    (:aarch64 '(:v0 :v1 :v2 :v3 :v4 :v5 :v6 :v7
+                :v8 :v9 :v10 :v11 :v12 :v13 :v14 :v15
+                :v16 :v17 :v18 :v19 :v20 :v21 :v22 :v23
+                :v24 :v25 :v26 :v27 :v28 :v29 :v30 :v31))
+    (otherwise
+     (remove-duplicates
+      (append (copy-list (target-fp-arg-regs cc))
+              (list (target-fp-ret-reg cc)))
+      :test #'eq))))
+
 (defun %derive-single-function-policy (instructions)
   "Best-effort default policy derivation for single-function instruction streams."
   (let* ((bodies (regalloc-collect-linear-functions instructions))
@@ -169,24 +193,28 @@ Safety guard: do not force caller-saved for call-crossing intervals."
     (when (= (length labels) 1)
       (let* ((label (first labels))
              (hints (regalloc-compute-interprocedural-hints instructions)))
-        (regalloc-build-allocation-policy-from-hints hints label)))))
+         (regalloc-build-allocation-policy-from-hints hints label)))))
+
+(defun %allocation-strategy (allocation-policy)
+  "Return the requested allocation strategy, defaulting to linear scan."
+  (or (getf allocation-policy :allocator)
+      (getf allocation-policy :register-allocator)
+      *regalloc-allocation-strategy*))
 
 (defun %preferred-register-for-interval (interval cc free-regs)
   "Return a preferred free physical register for INTERVAL, or NIL."
   (some (lambda (strategy) (funcall strategy interval cc free-regs))
         *preferred-register-strategies*))
 
-(defun linear-scan-allocate (intervals cc)
+(defun linear-scan-allocate (intervals cc &optional (spill-slot-offset 0))
   "Perform linear scan register allocation.
    INTERVALS: sorted list of live-interval objects.
    CC: target-desc object.
    Returns (values assignment-ht spill-ht spill-count)."
   (let ((state (make-lsa-state
+                :spill-offset spill-slot-offset
                 :free-regs (remove (first (target-scratch-regs cc)) (copy-list (target-allocatable-regs cc)))
-                :free-fp-regs (remove-duplicates
-                               (append (copy-list (target-fp-arg-regs cc))
-                                       (list (target-fp-ret-reg cc)))
-                               :test #'eq))))
+                :free-fp-regs (regalloc-target-fp-registers cc))))
     (dolist (int intervals)
       (setf (gethash (interval-vreg int) (lsa-interval-map state)) int))
     (dolist (interval intervals)
@@ -198,15 +226,207 @@ Safety guard: do not force caller-saved for call-crossing intervals."
               (%lsa-evict-and-assign state interval)))))
     ;; FR-199: Apply spill slot sharing / stack coloring.
     ;; Compute the actual spill count from the colored map's max slot index.
-    (let ((colored-map (%maybe-color-spill-slots intervals (lsa-spill-map state)))
-          (max-slot 0))
+    (let ((colored-map (%maybe-color-spill-slots intervals (lsa-spill-map state) spill-slot-offset))
+          (max-slot spill-slot-offset))
+      (maphash (lambda (vreg slot)
+                  (declare (ignore vreg))
+                  (setf max-slot (max max-slot slot)))
+                colored-map)
+       ;; Slots are 1-indexed, so the maximum assigned slot is the frame slot count.
+       (values (lsa-assignment state) colored-map max-slot))))
+
+;;; FR-061: Graph Coloring Allocation (Chaitin-Briggs)
+;;;
+;;; This allocator builds an interval interference graph, runs Briggs-style
+;;; optimistic simplification with K physical colors, then selects colors in
+;;; reverse removal order.  Nodes that cannot be colored after optimistic
+;;; simplification are real spills and receive stack slots through the existing
+;;; spill-slot coloring path.
+
+(defun %intervals-overlap-p (a b)
+  "Return T when live intervals A and B interfere."
+  (and (<= (interval-start a) (interval-end b))
+       (<= (interval-start b) (interval-end a))))
+
+(defun %vreg< (a b)
+  "Deterministic ordering predicate for virtual-register symbols."
+  (string< (symbol-name a) (symbol-name b)))
+
+(defun %color-build-interference-graph (intervals)
+  "Build a vreg -> neighbor-vregs interference graph for INTERVALS."
+  (let ((graph (make-hash-table :test #'eq)))
+    (dolist (interval intervals)
+      (when (interval-vreg interval)
+        (setf (gethash (interval-vreg interval) graph) nil)))
+    (loop for rest on intervals
+          for a = (car rest)
+          do (dolist (b (cdr rest))
+               (when (and (interval-vreg a)
+                          (interval-vreg b)
+                          (%intervals-overlap-p a b))
+                 (pushnew (interval-vreg b) (gethash (interval-vreg a) graph) :test #'eq)
+                 (pushnew (interval-vreg a) (gethash (interval-vreg b) graph) :test #'eq))))
+    graph))
+
+(defun %copy-interference-graph (graph)
+  "Return a shallow mutable copy of GRAPH with copied neighbor lists."
+  (let ((copy (make-hash-table :test #'eq)))
+    (maphash (lambda (vreg neighbors)
+               (setf (gethash vreg copy) (copy-list neighbors)))
+             graph)
+    copy))
+
+(defun %graph-nodes (graph)
+  "Return GRAPH nodes in deterministic order."
+  (let ((nodes nil))
+    (maphash (lambda (vreg neighbors)
+               (declare (ignore neighbors))
+               (push vreg nodes))
+             graph)
+    (sort nodes #'%vreg<)))
+
+(defun %graph-degree (graph vreg)
+  "Return VREG degree within mutable GRAPH."
+  (length (gethash vreg graph)))
+
+(defun %graph-remove-node (graph vreg)
+  "Remove VREG and incident edges from mutable GRAPH."
+  (dolist (neighbor (copy-list (gethash vreg graph)))
+    (setf (gethash neighbor graph)
+          (remove vreg (gethash neighbor graph) :test #'eq)))
+  (remhash vreg graph))
+
+(defun %color-spill-priority (interval)
+  "Return lower-is-better optimistic spill priority for INTERVAL."
+  (let ((length (max 1 (- (interval-end interval) (interval-start interval))))
+        (uses (length (interval-use-positions interval))))
+    (+ (/ uses length)
+       (if (interval-crosses-call-p interval) 1 0)
+       (if (interval-return-value-p interval) 1 0))))
+
+(defun %color-spill-candidate (graph interval-map)
+  "Pick a deterministic optimistic spill candidate from GRAPH."
+  (let ((best nil)
+        (best-score nil))
+    (dolist (vreg (%graph-nodes graph) best)
+      (let* ((interval (gethash vreg interval-map))
+             (score (if interval (%color-spill-priority interval) 0)))
+        (when (or (null best)
+                  (< score best-score)
+                  (and (= score best-score) (%vreg< vreg best)))
+          (setf best vreg
+                best-score score))))))
+
+(defun %color-simplify (graph interval-map color-count)
+  "Return Chaitin-Briggs simplification stack for GRAPH."
+  (let ((work (%copy-interference-graph graph))
+        (stack nil))
+    (loop while (plusp (hash-table-count work))
+          do (let ((node (find-if (lambda (vreg)
+                                    (< (%graph-degree work vreg) color-count))
+                                  (%graph-nodes work))))
+               (unless node
+                 (setf node (%color-spill-candidate work interval-map)))
+               (push (cons node (>= (%graph-degree work node) color-count)) stack)
+               (%graph-remove-node work node)))
+    stack))
+
+(defun %color-ordered-registers-for-interval (interval cc available-regs)
+  "Return AVAILABLE-REGS with INTERVAL's preferred register first when possible."
+  (let ((preferred (and cc interval
+                        (%preferred-register-for-interval interval cc available-regs))))
+    (if preferred
+        (cons preferred (remove preferred available-regs :test #'eq :count 1))
+        available-regs)))
+
+(defun %color-select-register (vreg graph assignment available-regs)
+  "Return the first register available for VREG, excluding colored neighbors."
+  (let ((used nil))
+    (dolist (neighbor (gethash vreg graph))
+      (let ((phys (gethash neighbor assignment)))
+        (when phys
+          (pushnew phys used :test #'eq))))
+    (find-if (lambda (reg) (not (member reg used :test #'eq)))
+             available-regs)))
+
+(defun %color-assign-spill-slots (spilled spill-slot-offset)
+  "Assign stack slots to SPILLED intervals and return spill-map and max slot."
+  (let ((raw-map (make-hash-table :test #'eq)))
+    (loop for interval in spilled
+          for slot from (1+ spill-slot-offset)
+          do (setf (gethash (interval-vreg interval) raw-map) slot
+                   (interval-spill-slot interval) slot))
+    (let ((colored-map (%maybe-color-spill-slots spilled raw-map spill-slot-offset))
+          (max-slot spill-slot-offset))
       (maphash (lambda (vreg slot)
                  (declare (ignore vreg))
                  (setf max-slot (max max-slot slot)))
                colored-map)
-      ;; colored-count = max-slot (non-inclusive, slots are 1-indexed)
-      (values (lsa-assignment state) colored-map
-              (max (lsa-spill-count state) max-slot)))))
+      (values colored-map max-slot))))
+
+(defun %interval-map (intervals)
+  "Return vreg -> interval map for INTERVALS."
+  (let ((map (make-hash-table :test #'eq)))
+    (dolist (interval intervals map)
+      (when (interval-vreg interval)
+        (setf (gethash (interval-vreg interval) map) interval)))))
+
+(defun color-allocate (intervals available-regs &optional (spill-slot-offset 0) cc)
+  "Perform Chaitin-Briggs graph-coloring allocation.
+
+INTERVALS is a list of live-interval objects from one register class.
+AVAILABLE-REGS is the physical color set.  Returns three values:
+assignment hash-table, spill-map hash-table, and the maximum spill slot."
+  (let* ((assignment (make-hash-table :test #'eq))
+         (interval-map (%interval-map intervals))
+         (graph (%color-build-interference-graph intervals))
+         (stack (%color-simplify graph interval-map (length available-regs)))
+         (spilled nil))
+    (dolist (entry stack)
+      (let* ((vreg (car entry))
+             (interval (gethash vreg interval-map))
+             (ordered-regs (%color-ordered-registers-for-interval interval cc available-regs))
+             (phys (%color-select-register vreg graph assignment ordered-regs)))
+        (if phys
+            (progn
+              (setf (gethash vreg assignment) phys)
+              (when interval
+                (setf (interval-phys-reg interval) phys)))
+            (when interval
+              (push interval spilled)))))
+    (multiple-value-bind (spill-map spill-count)
+        (%color-assign-spill-slots (nreverse spilled) spill-slot-offset)
+      (values assignment spill-map spill-count))))
+
+(defun %copy-hash-into (from to)
+  "Copy all entries from hash-table FROM into TO."
+  (maphash (lambda (key value)
+             (setf (gethash key to) value))
+           from)
+  to)
+
+(defun color-allocate-for-target (intervals cc &optional (spill-slot-offset 0))
+  "Perform graph-coloring allocation for CC, preserving FP/GPR register classes."
+  (let ((gpr-intervals (remove-if #'interval-fp-p intervals))
+        (fp-intervals (remove-if-not #'interval-fp-p intervals))
+        (assignment (make-hash-table :test #'eq))
+        (spill-map (make-hash-table :test #'eq))
+        (spill-count spill-slot-offset))
+    (multiple-value-bind (gpr-assignment gpr-spills gpr-count)
+        (color-allocate gpr-intervals
+                        (remove (first (target-scratch-regs cc))
+                                 (copy-list (target-allocatable-regs cc)))
+                        spill-slot-offset
+                        cc)
+      (%copy-hash-into gpr-assignment assignment)
+      (%copy-hash-into gpr-spills spill-map)
+      (setf spill-count gpr-count))
+    (multiple-value-bind (fp-assignment fp-spills fp-count)
+        (color-allocate fp-intervals (regalloc-target-fp-registers cc) spill-count cc)
+      (%copy-hash-into fp-assignment assignment)
+      (%copy-hash-into fp-spills spill-map)
+      (setf spill-count fp-count))
+    (values assignment spill-map spill-count)))
 
 ;;; FR-199: Spill Slot Sharing / Stack Coloring
 ;;;
@@ -215,52 +435,76 @@ Safety guard: do not force caller-saved for call-crossing intervals."
 ;;; stack slots to O(χ(G)), where χ(G) is the chromatic number of the interference
 ;;; graph of spilled intervals.
 
-(defun regalloc-color-spill-slots (intervals spill-map)
-  "Assign shared spill slots to non-overlapping spilled vregs using greedy coloring.
-   Two spilled vregs interfere (cannot share a slot) if their live intervals overlap.
+(defun %spill-intervals-overlap-p (a b)
+  "Return T when live intervals A and B interfere for stack-slot sharing."
+  (and (<= (interval-start a) (interval-end b))
+       (<= (interval-start b) (interval-end a))))
 
-   Returns an updated spill-map hash-table mapping vreg → shared slot number."
-  (let* ((spilled (remove-if-not (lambda (int)
-                                   (gethash (interval-vreg int) spill-map))
-                                 intervals))
-         ;; Build color assignment: vreg → shared slot number
-         (color-map (make-hash-table :test #'eq))
-         (n (length spilled)))
-    (when (< n 2)
-      (return-from regalloc-color-spill-slots spill-map))
-    ;; Sort intervals by start position for deterministic coloring
-    (setf spilled (sort (copy-list spilled) #'< :key #'interval-start))
-    ;; Greedy coloring
-    (dolist (int spilled)
-      (let* ((vreg (interval-vreg int))
-             (used-slots nil))
-        ;; Collect slots already assigned to overlapping intervals
-        (dolist (other spilled)
-          (when (and (not (eq (interval-vreg other) vreg))
-                     (gethash (interval-vreg other) color-map))
-            ;; Check interval overlap
-            (when (and (<= (interval-start int) (interval-end other))
-                       (<= (interval-start other) (interval-end int)))
-              (push (gethash (interval-vreg other) color-map) used-slots))))
-        ;; Find the smallest unused slot number (1-origin to match existing spill convention)
-        (loop for slot from 1
-              when (not (member slot used-slots))
-              do (setf (gethash vreg color-map) slot)
-                 (return))))
-    ;; Rebuild spill-map with shared slot numbers
-    (let ((new-map (make-hash-table :test #'eq)))
-      (maphash (lambda (vreg old-slot)
-                 (declare (ignore old-slot))
-                 (let ((shared (gethash vreg color-map)))
-                   (setf (gethash vreg new-map) shared)))
-               spill-map)
-      new-map)))
+(defun %spill-weight (interval)
+  "Return a deterministic greedy-coloring priority for spilled INTERVAL."
+  (+ (length (interval-use-positions interval))
+     (if (interval-crosses-call-p interval) 1 0)
+     (if (interval-return-value-p interval) 1 0)))
 
-(defun %maybe-color-spill-slots (intervals spill-map)
+(defun %build-spill-interference-matrix (spilled)
+  "Build vreg → neighbor-vregs matrix for spilled live intervals."
+  (let ((matrix (make-hash-table :test #'eq)))
+    (dolist (interval spilled)
+      (setf (gethash (interval-vreg interval) matrix) nil))
+    (loop for rest on spilled
+          for a = (car rest)
+          do (dolist (b (cdr rest))
+               (when (%spill-intervals-overlap-p a b)
+                 (pushnew (interval-vreg b) (gethash (interval-vreg a) matrix) :test #'eq)
+                 (pushnew (interval-vreg a) (gethash (interval-vreg b) matrix) :test #'eq))))
+    matrix))
+
+(defun color-spill-slots (spilled &optional (spill-slot-offset 0))
+  "Color SPILLED live intervals and return a vreg → shared slot hash-table.
+
+Two spilled virtual registers interfere when their live ranges overlap.  The
+greedy coloring order prioritizes higher spill weight, then longer intervals,
+then earlier starts for deterministic output.  Slot numbers are 1-origin to keep
+the existing [RBP - slot*8] spill/restore instruction format unchanged."
+  (let* ((ordered (sort (copy-list spilled)
+                        (lambda (a b)
+                          (let ((aw (%spill-weight a))
+                                (bw (%spill-weight b)))
+                            (cond ((/= aw bw) (> aw bw))
+                                  ((/= (- (interval-end a) (interval-start a))
+                                       (- (interval-end b) (interval-start b)))
+                                   (> (- (interval-end a) (interval-start a))
+                                      (- (interval-end b) (interval-start b))))
+                                  (t (< (interval-start a) (interval-start b))))))))
+         (matrix (%build-spill-interference-matrix ordered))
+         (color-map (make-hash-table :test #'eq)))
+    (dolist (interval ordered color-map)
+      (let ((used-slots nil))
+        (dolist (neighbor (gethash (interval-vreg interval) matrix))
+          (let ((slot (gethash neighbor color-map)))
+            (when slot
+              (pushnew slot used-slots))))
+        (loop for color from 1
+              for slot = (+ spill-slot-offset color)
+              unless (member slot used-slots)
+                do (setf (gethash (interval-vreg interval) color-map) slot
+                         (interval-spill-slot interval) slot)
+                   (return))))))
+
+(defun regalloc-color-spill-slots (intervals spill-map &optional (spill-slot-offset 0))
+  "Return a spill-map with shared slots for non-overlapping spilled vregs."
+  (let ((spilled (remove-if-not (lambda (interval)
+                                  (gethash (interval-vreg interval) spill-map))
+                                intervals)))
+    (if spilled
+        (color-spill-slots spilled spill-slot-offset)
+        spill-map)))
+
+(defun %maybe-color-spill-slots (intervals spill-map &optional (spill-slot-offset 0))
   "Wrapper that optionally applies spill slot coloring.  Controlled by a special
    variable for safety during testing."
   (if (and spill-map intervals)
-      (regalloc-color-spill-slots intervals spill-map)
+      (regalloc-color-spill-slots intervals spill-map spill-slot-offset)
       spill-map))
 
 ;;; Spill Code Insertion
@@ -275,6 +519,109 @@ Safety guard: do not force caller-saved for call-crossing intervals."
   (dst-reg nil :reader vm-spill-dst)
   (slot nil :reader vm-spill-slot))
 
+(defparameter *live-range-split-minimum-hole-size* 8
+  "Minimum instruction-position gap that triggers live range splitting.")
+
+(defmethod instruction-uses ((inst vm-spill-store))
+  (list (vm-spill-src inst)))
+
+(defmethod instruction-defs ((inst vm-spill-load))
+  (list (vm-spill-dst inst)))
+
+(defun %split-vreg-at-position (children position)
+  "Return the child vreg live at POSITION, or NIL."
+  (let ((match (find-if (lambda (child)
+                          (and (<= (interval-start child) position)
+                               (<= position (interval-end child))))
+                        children)))
+    (and match (interval-vreg match))))
+
+(defun %copy-float-vreg-map-with-splits (float-vregs child-groups)
+  "Copy FLOAT-VREGS and mark split child virtual registers."
+  (let ((result (make-hash-table :test #'eq)))
+    (when float-vregs
+      (maphash (lambda (vreg value)
+                 (setf (gethash vreg result) value))
+               float-vregs))
+    (dolist (group child-groups result)
+      (dolist (child (cdr group))
+        (when (interval-fp-p child)
+          (setf (gethash (interval-vreg child) result) t))))))
+
+(defun %split-live-range-rewrite-map (child-groups position)
+  "Build an original-vreg -> child-vreg map for POSITION."
+  (let ((map (make-hash-table :test #'eq)))
+    (dolist (group child-groups map)
+      (destructuring-bind (original-vreg . children) group
+        (let ((child-vreg (%split-vreg-at-position children position)))
+          (when (and child-vreg (not (eq child-vreg original-vreg)))
+            (setf (gethash original-vreg map) child-vreg)))))))
+
+(defun %rewrite-inst-for-split-position (inst child-groups position)
+  "Rewrite INST virtual registers to the split children live at POSITION."
+  (let ((reg-map (%split-live-range-rewrite-map child-groups position)))
+    (if (zerop (hash-table-count reg-map))
+        inst
+        (%regalloc-rewrite-inst inst reg-map))))
+
+(defun %collect-live-range-splits (intervals minimum-hole-size)
+  "Return child interval groups and split boundaries for INTERVALS."
+  (let ((child-groups nil)
+        (boundaries nil))
+    (dolist (interval intervals)
+      (multiple-value-bind (children interval-boundaries)
+          (split-live-interval interval minimum-hole-size)
+        (push (cons (interval-vreg interval) children) child-groups)
+        (setf boundaries (append boundaries interval-boundaries))))
+    (values (nreverse child-groups)
+            (sort boundaries #'< :key #'split-boundary-before-position))))
+
+(defun %assign-live-range-split-slots (boundaries)
+  "Assign fixed stack slots to split BOUNDARIES."
+  (loop for boundary in boundaries
+        for slot from 1
+        do (setf (split-boundary-slot boundary) slot)
+        finally (return (1- slot))))
+
+(defun %boundaries-by-position (boundaries keyfn)
+  "Index BOUNDARIES by position returned by KEYFN."
+  (let ((table (make-hash-table :test #'eql)))
+    (dolist (boundary boundaries table)
+      (push boundary (gethash (funcall keyfn boundary) table)))))
+
+(defun split-live-ranges (instructions intervals float-vregs &optional
+                          (minimum-hole-size *live-range-split-minimum-hole-size*))
+  "Rewrite INSTRUCTIONS and intervals by splitting long live-range holes.
+
+Returns four values: rewritten instructions, recomputed child intervals, the
+number of fixed split spill slots reserved at the bottom of the frame, and the
+float-vreg map updated with split children."
+  (multiple-value-bind (child-groups boundaries)
+      (%collect-live-range-splits intervals minimum-hole-size)
+    (let ((split-slot-count (%assign-live-range-split-slots boundaries)))
+      (if (zerop split-slot-count)
+          (values instructions intervals 0 float-vregs)
+          (let ((loads-by-position (%boundaries-by-position boundaries #'split-boundary-before-position))
+                (stores-by-position (%boundaries-by-position boundaries #'split-boundary-after-position))
+                (rewritten nil))
+            (loop for inst in instructions
+                  for position from 0
+                  do (dolist (boundary (reverse (gethash position loads-by-position)))
+                       (push (make-vm-spill-load :dst-reg (split-boundary-to-vreg boundary)
+                                                 :slot (split-boundary-slot boundary))
+                             rewritten))
+                     (push (%rewrite-inst-for-split-position inst child-groups position) rewritten)
+                     (dolist (boundary (reverse (gethash position stores-by-position)))
+                       (push (make-vm-spill-store :src-reg (split-boundary-from-vreg boundary)
+                                                  :slot (split-boundary-slot boundary))
+                             rewritten)))
+            (let* ((split-instructions (nreverse rewritten))
+                   (split-float-vregs (%copy-float-vreg-map-with-splits float-vregs child-groups)))
+              (values split-instructions
+                      (%compute-live-intervals-raw split-instructions split-float-vregs)
+                      split-slot-count
+                      split-float-vregs)))))))
+
 (defun %regalloc-map-tree (fn tree)
   (if (consp tree)
       (cons (%regalloc-map-tree fn (car tree))
@@ -283,14 +630,22 @@ Safety guard: do not force caller-saved for call-crossing intervals."
 
 (defun %regalloc-rewrite-inst (inst reg-map)
   "Return INST with register keywords substituted per REG-MAP."
-  (handler-case
-      (sexp->instruction
-       (%regalloc-map-tree (lambda (x)
-                             (if (and (keywordp x) (gethash x reg-map))
-                                 (gethash x reg-map)
-                                 x))
-                            (instruction->sexp inst)))
-    (error () inst)))
+  (flet ((rewrite-reg (reg)
+           (if (and (keywordp reg) (gethash reg reg-map))
+               (gethash reg reg-map)
+               reg)))
+    (cond
+      ((typep inst 'vm-spill-store)
+       (make-vm-spill-store :src-reg (rewrite-reg (vm-spill-src inst))
+                            :slot (vm-spill-slot inst)))
+      ((typep inst 'vm-spill-load)
+       (make-vm-spill-load :dst-reg (rewrite-reg (vm-spill-dst inst))
+                           :slot (vm-spill-slot inst)))
+      (t
+       (handler-case
+           (sexp->instruction
+            (%regalloc-map-tree #'rewrite-reg (instruction->sexp inst)))
+         (error () inst))))))
 
 (defun %regalloc-rewrite-inst-dst (inst dst)
   "Return INST cloned with its single destination rewritten to DST."
@@ -320,20 +675,23 @@ Safety guard: do not force caller-saved for call-crossing intervals."
                  (typep inst 'vm-mod)))
     (list (first (target-scratch-regs cc)))))
 
-(defun %regalloc-scratch-candidates (cc used-phys &optional inst)
+(defun %regalloc-scratch-candidates (cc used-phys &optional inst fp-p)
   (let ((reserved (remove nil (%regalloc-reserved-scratch-regs inst cc))))
-    (remove-if (lambda (reg)
-                 (or (null reg)
-                     (member reg used-phys :test #'eq)
-                     (member reg reserved :test #'eq)))
-              (remove-duplicates
-               (append (list (first (target-scratch-regs cc))
-                             (target-ret-reg cc))
-                       (target-caller-saved cc)
-                       (target-allocatable-regs cc))
-               :test #'eq))))
+    (remove-if
+     (lambda (reg)
+       (or (null reg)
+           (member reg used-phys :test #'eq)
+           (member reg reserved :test #'eq)))
+     (if fp-p
+         (regalloc-target-fp-registers cc)
+         (remove-duplicates
+          (append (list (first (target-scratch-regs cc))
+                        (target-ret-reg cc))
+                  (target-caller-saved cc)
+                  (target-allocatable-regs cc))
+          :test #'eq)))))
 
-(defun insert-spill-code (instructions assignment spill-map cc &optional remat-map)
+(defun insert-spill-code (instructions assignment spill-map cc &optional remat-map float-vregs)
   "Insert spill loads/stores around instructions that use spilled registers.
    Returns a new instruction list with spill code inserted."
   (let ((result nil))
@@ -345,14 +703,18 @@ Safety guard: do not force caller-saved for call-crossing intervals."
                                                (gethash vreg assignment)))
                                          (append (instruction-uses inst)
                                                  (instruction-defs inst)))))
-             (available (%regalloc-scratch-candidates cc used-phys inst))
+             (available-gpr (%regalloc-scratch-candidates cc used-phys inst nil))
+             (available-fp (%regalloc-scratch-candidates cc used-phys inst t))
              (reg-map (make-hash-table :test #'eq)))
-        (flet ((alloc-scratch ()
-                 (or (pop available)
+        (flet ((float-vreg-p (vreg)
+                 (and float-vregs (gethash vreg float-vregs)))
+               (alloc-scratch (fp-p)
+                 (or (if fp-p (pop available-fp) (pop available-gpr))
                      (error "insert-spill-code: no scratch register available for ~S" inst))))
           (flet ((ensure-scratch (vreg)
                    (or (gethash vreg reg-map)
-                       (setf (gethash vreg reg-map) (alloc-scratch)))))
+                       (setf (gethash vreg reg-map)
+                             (alloc-scratch (float-vreg-p vreg))))))
           ;; Load spilled uses before the instruction.
           (dolist (vreg (instruction-uses inst))
             (when (and vreg (gethash vreg spill-map))
@@ -391,6 +753,23 @@ Safety guard: do not force caller-saved for call-crossing intervals."
                     result)))))))
     (nreverse result)))
 
+(defun %finalize-split-spill-registers (instructions assignment)
+  "Rewrite split spill helper instructions from allocated vregs to physical regs."
+  (mapcar (lambda (inst)
+            (cond
+              ((typep inst 'vm-spill-store)
+               (let ((phys (gethash (vm-spill-src inst) assignment)))
+                 (if phys
+                     (make-vm-spill-store :src-reg phys :slot (vm-spill-slot inst))
+                     inst)))
+              ((typep inst 'vm-spill-load)
+               (let ((phys (gethash (vm-spill-dst inst) assignment)))
+                 (if phys
+                     (make-vm-spill-load :dst-reg phys :slot (vm-spill-slot inst))
+                     inst)))
+              (t inst)))
+          instructions))
+
 ;;; Public API
 
 (defun allocate-registers (instructions cc &optional float-vregs allocation-policy)
@@ -399,14 +778,22 @@ Safety guard: do not force caller-saved for call-crossing intervals."
    ALLOCATION-POLICY is an optional plist (e.g. from
    REGALLOC-BUILD-ALLOCATION-POLICY-FROM-HINTS) used to bias preferred registers.
    Returns a regalloc-result."
-  (let* ((intervals (compute-live-intervals instructions float-vregs))
-         (effective-policy (or allocation-policy
-                               (%derive-single-function-policy instructions)))
-         (*current-allocation-policy* effective-policy))
+  (let* ((raw-intervals (compute-live-intervals instructions float-vregs))
+         (split-instructions instructions)
+         (split-slot-count 0)
+         (intervals raw-intervals)
+          (effective-policy (or allocation-policy
+                                (%derive-single-function-policy instructions)))
+          (*current-allocation-policy* effective-policy))
+    (multiple-value-setq (split-instructions intervals split-slot-count float-vregs)
+      (split-live-ranges instructions raw-intervals float-vregs))
     (multiple-value-bind (assignment spill-map spill-count)
-        (linear-scan-allocate intervals cc)
+        (case (%allocation-strategy effective-policy)
+          (:color (color-allocate-for-target intervals cc split-slot-count))
+          (:linear-scan (linear-scan-allocate intervals cc split-slot-count))
+          (otherwise (linear-scan-allocate intervals cc split-slot-count)))
       (let* ((remat-map (let ((ht (make-hash-table :test #'eq)))
-                          (dolist (interval intervals ht)
+                           (dolist (interval intervals ht)
                              (cond
                                ((interval-remat-const interval)
                                 (setf (gethash (interval-vreg interval) ht)
@@ -414,15 +801,19 @@ Safety guard: do not force caller-saved for call-crossing intervals."
                                ((interval-remat-inst interval)
                                 (setf (gethash (interval-vreg interval) ht)
                                       (list :inst (interval-remat-inst interval))))))))
-             (final-instructions
-              (if (> spill-count 0)
-                  (insert-spill-code instructions assignment spill-map cc remat-map)
-                  instructions)))
+              (final-instructions
+               (%finalize-split-spill-registers
+                (if (plusp (hash-table-count spill-map))
+                    (insert-spill-code split-instructions assignment spill-map cc remat-map float-vregs)
+                    split-instructions)
+                assignment)))
         (make-regalloc-result
-                        :assignment assignment
-                       :spill-map spill-map
-                       :spill-count spill-count
-                       :instructions final-instructions)))))
+         :assignment assignment
+         :spill-map spill-map
+         :spill-count spill-count
+         :gpr-pressure (regalloc-register-pressure intervals :fp-p nil)
+         :fp-pressure (regalloc-register-pressure intervals :fp-p t)
+         :instructions final-instructions)))))
 
 (defun regalloc-lookup (result vreg)
   "Look up physical register for VREG in allocation result.

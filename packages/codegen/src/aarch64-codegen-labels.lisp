@@ -49,6 +49,12 @@
     (setf (gethash 'vm-integer-sub ht) 4)   ; encode-sub
     (setf (gethash 'vm-mul ht) 4)           ; encode-mul
     (setf (gethash 'vm-integer-mul ht) 4)   ; encode-mul
+    (setf (gethash 'vm-truncate ht) 4)      ; encode-sdiv
+    (setf (gethash 'vm-float-add ht) 4)     ; encode-fadd
+    (setf (gethash 'vm-float-sub ht) 4)     ; encode-fsub
+    (setf (gethash 'vm-float-mul ht) 4)     ; encode-fmul
+    (setf (gethash 'vm-float-div ht) 4)     ; encode-fdiv
+    (setf (gethash 'vm-fma ht) 4)           ; encode-fmadd
     ;; Checked arithmetic (FR-303): flag-setting ALU + B.cond + BRK
     (setf (gethash 'vm-add-checked ht) 12)  ; ADDS + B.cond VC + BRK (3 instrs)
     (setf (gethash 'vm-sub-checked ht) 12)  ; SUBS + B.cond VC + BRK (3 instrs)
@@ -56,14 +62,14 @@
     (setf (gethash 'vm-integer-mul-high-u ht) 4) ; encode-umulh
     (setf (gethash 'vm-integer-mul-high-s ht) 4) ; encode-smulh
     (setf (gethash 'vm-sqrt ht) 4)          ; encode-fsqrt
-    (setf (gethash 'vm-sin-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-cos-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-exp-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-log-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-tan-inst ht) 36)     ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-asin-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-acos-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
-    (setf (gethash 'vm-atan-inst ht) 36)    ; FMOV+STP+MOVimm+BLR+LDP+FMOV
+    (setf (gethash 'vm-sin-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-cos-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-exp-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-log-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-tan-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-asin-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-acos-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-atan-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
     (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-select ht) 12)       ; encode-mov-rr + encode-cmp + encode-csel
@@ -81,6 +87,7 @@
     (setf (gethash 'vm-tail-call ht) 4)     ; encode-br
     (setf (gethash 'vm-spill-store ht) 4)   ; STUR
     (setf (gethash 'vm-spill-load ht) 4)    ; LDUR
+    (setf (gethash 'vm-prefetch ht) 4)      ; PRFM
     (setf (gethash 'vm-print ht) 0)
     ht)
   "Maps VM instruction type symbols to their AArch64 encoded byte sizes.")
@@ -90,11 +97,16 @@
   (let ((tp (type-of inst)))
     (cond
       ((eq tp 'vm-const)
-       (* 4 (a64-imm64-size (logand (vm-value inst) #xFFFFFFFFFFFFFFFF))))
+       (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+         (if (a64-literal-pool-value-p value)
+             8
+             (* 4 (a64-imm64-size value)))))
       ((eq tp 'vm-move)
        (let ((rd (a64-reg (vm-dst inst)))
              (rn (a64-reg (vm-src inst))))
          (if (= rd rn) 0 4)))
+      ((eq tp 'vm-prefetch)
+       (if (vm-prefetch-index-reg inst) 8 4))
       (t
        (or (gethash tp *a64-instruction-sizes*) 0)))))
 

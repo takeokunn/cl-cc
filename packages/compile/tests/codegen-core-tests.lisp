@@ -387,3 +387,60 @@ sink/fold paths."
                   :vm-instructions (list move halt))))
     (assert-equal (list move)
                   (cl-cc/compile::%result-vm-instructions-without-halt result))))
+
+(deftest compile-toplevel-forms-recovers-from-form-error
+  "FR-506: one bad top-level form is recorded and later forms still compile."
+  (let* ((forms '((+ 1 1) (if 1) (+ 2 3)))
+         (result (cl-cc/compile:compile-toplevel-forms forms :target :vm))
+         (errors (cl-cc/compile:compilation-result-errors result))
+         (asts (cl-cc/compile:compilation-result-ast result)))
+    (assert-true (typep result 'cl-cc/compile:compilation-result))
+    (assert-= 1 (length errors))
+    (assert-= 2 (length asts))
+    (assert-= 1 (getf (first errors) :form-index))
+    (assert-equal '(if 1) (getf (first errors) :form))
+    (assert-true (typep (getf (first errors) :condition) 'error))
+    (assert-true (stringp (getf (first errors) :message)))
+    (assert-true (cl-cc/compile:compilation-result-program result))
+    (assert-true (> (length (cl-cc/compile:compilation-result-vm-instructions result)) 0))))
+
+(deftest compile-toplevel-forms-records-multiple-form-errors
+  "FR-506: multiple failed top-level forms are recorded in source order."
+  (let* ((forms '((if 1) (+ 10 20) (if 2) (+ 30 40)))
+         (result (cl-cc/compile:compile-toplevel-forms forms :target :vm))
+         (errors (cl-cc/compile:compilation-result-errors result)))
+    (assert-= 2 (length errors))
+    (assert-equal '(0 2) (mapcar (lambda (entry) (getf entry :form-index)) errors))
+    (assert-equal '((if 1) (if 2)) (mapcar (lambda (entry) (getf entry :form)) errors))
+    (assert-= 2 (length (cl-cc/compile:compilation-result-ast result)))))
+
+(deftest compile-toplevel-forms-all-good-forms-have-no-recovery-errors
+  "FR-506: successful top-level compilation keeps the errors slot empty."
+  (let ((result (cl-cc/compile:compile-toplevel-forms '((+ 1 2) (+ 3 4)) :target :vm)))
+    (assert-null (cl-cc/compile:compilation-result-errors result))
+    (assert-= 2 (length (cl-cc/compile:compilation-result-ast result)))))
+
+(deftest compile-toplevel-forms-rolls-back-partial-if-emit-on-error
+  "FR-506: failed forms do not leave partially emitted jumps or labels behind."
+  (let* ((forms '((if t 1 missing-var) (+ 2 3)))
+          (result (cl-cc/compile:compile-toplevel-forms forms :target :vm))
+          (instructions (cl-cc/compile:compilation-result-vm-instructions result))
+          (const-values (mapcar #'cl-cc/vm:vm-const-value
+                                (remove-if-not (lambda (inst)
+                                                 (typep inst 'cl-cc/vm::vm-const))
+                                               instructions))))
+    (assert-= 1 (length (cl-cc/compile:compilation-result-errors result)))
+    (assert-= 1 (length (cl-cc/compile:compilation-result-ast result)))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-jump-zero)) instructions))
+    (assert-false (member 1 const-values :test #'eql))
+    (assert-true (member 5 const-values :test #'eql))))
+
+(deftest compile-toplevel-forms-rolls-back-partial-defvar-emit-on-error
+  "FR-506: failed defvar initializers do not leave global setup fragments behind."
+  (let* ((forms '((defvar *fr506-partial* (if t 1 missing-var)) (+ 4 5)))
+         (result (cl-cc/compile:compile-toplevel-forms forms :target :vm))
+         (instructions (cl-cc/compile:compilation-result-vm-instructions result)))
+    (assert-= 1 (length (cl-cc/compile:compilation-result-errors result)))
+    (assert-= 1 (length (cl-cc/compile:compilation-result-ast result)))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-boundp)) instructions))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm::vm-set-global)) instructions))))

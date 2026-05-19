@@ -20,10 +20,11 @@
    make-vm-integer-mul
    make-vm-integer-mul-high-u
    make-vm-integer-mul-high-s
-   make-vm-float-add
-   make-vm-float-sub
-   make-vm-float-mul
-   make-vm-float-div
+    make-vm-float-add
+    make-vm-float-sub
+    make-vm-float-mul
+    make-vm-fma
+    make-vm-float-div
    make-vm-alphanumericp
    make-vm-and
    make-vm-append
@@ -33,8 +34,9 @@
    make-vm-aref-multi
    vm-aref-multi
    make-vm-array-length
-   make-vm-aset
-   make-vm-assoc
+    make-vm-aset
+    make-vm-prefetch
+    make-vm-assoc
    make-vm-array-adjustable-p
    make-vm-array-dimension
    make-vm-array-dimensions
@@ -182,9 +184,12 @@
    make-vm-software-version
    make-vm-short-site-name
    make-vm-long-site-name
-   make-vm-gcd
-   make-vm-gethash
-   make-vm-gt
+    make-vm-gcd
+    make-vm-gethash
+    make-vm-gethash-eq
+    make-vm-gethash-eql
+    make-vm-gethash-equal
+    make-vm-gt
    make-vm-halt
    make-vm-hash-table-count
    make-vm-hash-table-keys

@@ -6,6 +6,25 @@
 
 (in-package :cl-cc/codegen)
 
+(defstruct x86-64-lea-address
+  "Internal x86-64 peephole instruction for LEA address/arithmetic computation.
+
+This is deliberately codegen-local and does not change the VM instruction
+format.  Register slots contain physical x86-64 register numbers, not VM
+virtual registers."
+  dst
+  base
+  index
+  (scale 1)
+  (displacement 0))
+
+(defstruct x86-64-bextr-field
+  "Internal x86-64 BMI1 BEXTR lowering for constant-width bit-field extract."
+  dst
+  src
+  (start 0)
+  (width 0))
+
 ;;; Two-Pass Code Generation (Labels + Jumps)
 
 ;;; ============================================================
@@ -42,17 +61,23 @@
     (vm-print                           16)
     (vm-closure                          0)
     (vm-call                            6)
-    (vm-tail-call                       3)
-    ;; Register spilling
+     (vm-tail-call                       3)
+     ;; FR-073 register multiple-values: up to three MOV rr64 instructions.
+     ((vm-values-regs vm-mv-bind-regs)    9)
+     ;; Register spilling
     (vm-spill-store                     4)  ; MOV [rbp-disp8], reg
     (vm-spill-load                      4)  ; MOV reg, [rbp-disp8]
+    ;; Array element access: MOV r/m64 with SIB [array + index*8 + data-offset]
+    ((vm-aref vm-aset)                  5)
+    ;; Cache hint: 0F 18 /r with ModR/M memory operand
+    (vm-prefetch                        4)
     ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 12 max
     ((vm-lt vm-gt vm-le vm-ge vm-num-eq vm-eq) 12)
     ;; Logical NOT / bitwise NOT
     (vm-not                            12)  ; TEST+SETE+MOVZX
     (vm-lognot                          7)  ; MOV+NOT
     (vm-logcount                        5)
-    (vm-integer-length                 16)
+    (vm-integer-length                 22)
     (vm-bswap                           6)
     ;; Unary arithmetic: MOV(3) + op(3-4) = 7
     ((vm-neg vm-inc vm-dec)             7)
@@ -74,6 +99,8 @@
     ((vm-logand vm-logior vm-logxor)    6)
     ;; Scalar float ops: MOVSD + op = 8
     ((vm-float-add vm-float-sub vm-float-mul vm-float-div vm-sqrt) 8)
+    ;; Scalar FMA: MOVSD + VFMADD132SD = 9
+    (vm-fma                            9)
     ;; Libm-call transcendental ops (FR-286): MOVSD + MOV+addr + CALL + MOVSD = 21
     ((vm-sin-inst vm-cos-inst vm-exp-inst vm-log-inst
       vm-tan-inst vm-asin-inst vm-acos-inst vm-atan-inst) 21)
@@ -109,3 +136,6 @@
 
 (defconstant +x86-64-tls-canary-disp32+ #x28
   "Linux/x86-64 TLS canary offset in FS segment.")
+
+(defconstant +x86-64-array-data-offset+ 8
+  "Byte offset from the staged native array base to the first payload word.")

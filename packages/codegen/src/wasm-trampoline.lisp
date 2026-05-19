@@ -96,6 +96,44 @@
   (format nil "(if (result eqref) ~A (then (ref.i31 (i32.const 1))) (else (ref.null eq)))"
           cond-wat))
 
+(defun %wasm-captured-value-reg (capture)
+  "Return the VM register carrying CAPTURE's value."
+  (if (consp capture) (cdr capture) capture))
+
+(defun emit-wasm-closure-allocation (reg-map dst entry-index captured stream indent)
+  "Emit closure allocation using $closure_t and $env_t GC structs.
+
+Captured values are materialized into a mutable $eqref_array_t with array.new and
+array.set before the closure struct is created."
+  (let ((prefix (make-string indent :initial-element #\Space)))
+    (if captured
+        (let ((tmp (wasm-reg-map-tmp-index reg-map)))
+          (format stream "~%~A(local.set ~D (array.new $eqref_array_t (ref.null eq) (i32.const ~D)))"
+                  prefix tmp (length captured))
+          (loop for capture in captured
+                for idx from 0
+                for reg = (%wasm-captured-value-reg capture)
+                do (format stream "~%~A(array.set $eqref_array_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (i32.const ~D) ~A)"
+                           prefix tmp idx (reg-local-ref reg-map reg)))
+          (format stream "~%~A~A"
+                  prefix
+                  (reg-local-set
+                   reg-map dst
+                   (format nil "(struct.new $closure_t (i32.const ~D) (struct.new $env_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (ref.null $env_t)))"
+                           entry-index tmp))))
+        (format stream "~%~A~A"
+                prefix
+                (reg-local-set
+                 reg-map dst
+                 (format nil "(struct.new $closure_t (i32.const ~D) (ref.null $env_t))"
+                         entry-index))))))
+
+(defun wasm-closure-ref-wat (reg-map closure-reg index)
+  "Return WAT for reading captured INDEX from CLOSURE-REG."
+  (format nil "(array.get $eqref_array_t (struct.get $env_t 0 (ref.cast (ref $env_t) (struct.get $closure_t 1 (ref.cast (ref $closure_t) ~A)))) (i32.const ~D))"
+          (reg-local-ref reg-map closure-reg)
+          index))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Fixnum operation helpers (used by emit-trampoline-instruction)
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -124,4 +162,3 @@
                 (wasm-reg-map-pc-index reg-map) pc-idx)
         (format stream "~%      ;; WARNING: unknown label ~S" label-name))
     (format stream "~%      (br $dispatch)")))
-

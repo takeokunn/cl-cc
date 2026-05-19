@@ -51,6 +51,21 @@ Compared by EQ to detect when the source has been rebound.")
 Compared by EQ to detect when the evaluator has been swapped
 (e.g. self-hosting bootstrap flipping from host eval to our-eval).")
 
+(defparameter *stdlib-cache-directory*
+  (merge-pathnames #P".cache/cl-cc/" (user-homedir-pathname))
+  "Directory for the readable stdlib expanded-form cache.
+The cache stores parse + macro-expanded stdlib sexps so repeated invocations do
+not re-read and re-expand the bundled stdlib source unless the stdlib source
+files are newer than the cache file.")
+
+(defparameter *stdlib-cache-file-name* "stdlib-expanded-cache.sexp"
+  "File name, relative to *STDLIB-CACHE-DIRECTORY*, for the stdlib form cache.")
+
+(defparameter *stdlib-symbol-index* nil
+  "Hash table mapping symbols defined by the stdlib to the stdlib source chunk.
+Used by lazy auto-require callers to know whether an unresolved reference may be
+satisfied by loading the stdlib.")
+
 (defparameter *stdlib-vm-snapshot* nil
   "vm-io-state after compiling and executing *standard-library-source*.
 Cloned per run-string call that uses :stdlib t so each test gets an
@@ -61,10 +76,117 @@ isolated VM with stdlib functions pre-loaded.")
 Copied into each run-string :stdlib t call so defstruct accessors
 defined by the stdlib are available during user-form compilation.")
 
+(defparameter *stdlib-defstruct-read-only-accessor-map* nil
+  "Snapshot of *defstruct-read-only-accessor-map* after stdlib compilation.
+Copied into each run-string :stdlib t call so read-only defstruct accessors
+defined by the stdlib are rejected during user-form macro expansion.")
+
 (defparameter *stdlib-defstruct-slot-registry* nil
   "Snapshot of *defstruct-slot-registry* after stdlib compilation.
 Copied into each run-string :stdlib t call so struct slot inheritance
 defined by the stdlib is available during user-form compilation.")
+
+(defparameter *stdlib-defstruct-type-registry* nil
+  "Snapshot of *defstruct-type-registry* after stdlib compilation.
+Copied into each run-string :stdlib t call so copy-structure and typed
+defstruct metadata remain available during user-form compilation.")
+
+(defparameter *stdlib-setf-compound-place-handlers* nil
+  "Snapshot of *setf-compound-place-handlers* after stdlib compilation.
+Copied into each run-string :stdlib t call to preserve built-in and stdlib
+SETF places while isolating per-source typed defstruct accessors.")
+
+(defun %stdlib-cache-path ()
+  "Return the cache file pathname for the serialized stdlib forms."
+  (merge-pathnames *stdlib-cache-file-name* *stdlib-cache-directory*))
+
+(defun %stdlib-source-file-paths ()
+  "Return known source files that contribute to *STANDARD-LIBRARY-SOURCE*."
+  (let ((base (ignore-errors
+                (asdf:system-relative-pathname :cl-cc-stdlib #P"src/"))))
+    (remove-if-not #'probe-file
+                   (when base
+                     (mapcar (lambda (name) (merge-pathnames name base))
+                             '("stdlib-source-core.lisp"
+                               "stdlib-source.lisp"
+                               "stdlib-source-ext.lisp"
+                               "stdlib-source-clos.lisp"))))))
+
+(defun %stdlib-source-newest-write-date ()
+  "Return the newest write date among stdlib source files, or 0 if unknown."
+  (loop for path in (%stdlib-source-file-paths)
+        for date = (ignore-errors (file-write-date path))
+        when date maximize date into newest
+        finally (return (or newest 0))))
+
+(defun %stdlib-cache-fresh-p (cache-path)
+  "Return T when CACHE-PATH exists and is newer than all stdlib source files."
+  (let ((cache-date (and (probe-file cache-path)
+                         (ignore-errors (file-write-date cache-path)))))
+    (and cache-date
+         (>= cache-date (%stdlib-source-newest-write-date)))))
+
+(defun %stdlib-cache-payload-valid-p (payload)
+  "Return T when PAYLOAD is a readable stdlib cache payload."
+  (and (consp payload)
+       (eq (getf payload :format) :cl-cc-stdlib-expanded-cache-v1)
+       (listp (getf payload :forms))))
+
+(defun %read-stdlib-expanded-cache-from-disk ()
+  "Read cached stdlib expanded forms from disk if the cache is fresh.
+Returns NIL on any cache miss or malformed cache."
+  (let ((path (%stdlib-cache-path)))
+    (when (%stdlib-cache-fresh-p path)
+      (ignore-errors
+        (with-open-file (in path :direction :input)
+          (let* ((serialized (read-line in nil nil))
+                 (payload (and serialized (read-from-string serialized))))
+            (when (%stdlib-cache-payload-valid-p payload)
+              (copy-tree (getf payload :forms)))))))))
+
+(defun %write-stdlib-expanded-cache-to-disk (forms)
+  "Serialize FORMS to the stdlib disk cache using WRITE-TO-STRING."
+  (let ((path (%stdlib-cache-path)))
+    (handler-case
+        (progn
+          (ensure-directories-exist path)
+          (with-open-file (out path
+                               :direction :output
+                               :if-exists :supersede
+                               :if-does-not-exist :create)
+            (write-line
+             (write-to-string
+              (list :format :cl-cc-stdlib-expanded-cache-v1
+                    :source-newest-write-date (%stdlib-source-newest-write-date)
+                    :forms forms)
+              :readably t
+              :circle t)
+             out)))
+      (error (c)
+        (warn "Cannot persist stdlib cache (~A): ~A" path c)))))
+
+(defun %stdlib-definition-symbol (form)
+  "Return the primary symbol defined by top-level stdlib FORM, if any."
+  (when (and (consp form) (symbolp (car form)))
+    (case (car form)
+      ((defun defmacro defclass defgeneric defstruct defvar defparameter defconstant)
+       (and (symbolp (second form)) (second form)))
+      (otherwise nil))))
+
+(defun %rebuild-stdlib-symbol-index (forms)
+  "Rebuild *STDLIB-SYMBOL-INDEX* from parsed/expanded stdlib FORMS."
+  (let ((index (make-hash-table :test #'eq)))
+    (dolist (form forms)
+      (let ((symbol (%stdlib-definition-symbol form)))
+        (when symbol
+          (setf (gethash symbol index) :standard-library))))
+    (setf *stdlib-symbol-index* index)))
+
+(defun stdlib-symbol-defined-p (symbol)
+  "Return T when SYMBOL is known to be provided by the stdlib."
+  (and *stdlib-symbol-index*
+       (gethash symbol *stdlib-symbol-index*)
+       t))
 
 (defun %snapshot-macro-env-table ()
   "Return a shallow copy of the current macro environment hash table.
@@ -162,7 +284,11 @@ reuse sublists while compiling stdlib-heavy forms."
     (let ((src-at-entry     *standard-library-source*)
           (eval-fn-at-entry *macro-eval-fn*))
       (setf *stdlib-vm-snapshot* nil)
-      (setf *stdlib-expanded-cache*         (%build-stdlib-expanded-cache)
+      (setf *stdlib-expanded-cache*         (or (%read-stdlib-expanded-cache-from-disk)
+                                                (let ((forms (%build-stdlib-expanded-cache)))
+                                                  (%write-stdlib-expanded-cache-to-disk forms)
+                                                  forms))
             *stdlib-expanded-cache-source*  src-at-entry
-            *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)))
+            *stdlib-expanded-cache-eval-fn* eval-fn-at-entry)
+      (%rebuild-stdlib-symbol-index *stdlib-expanded-cache*)))
   (copy-tree *stdlib-expanded-cache*))

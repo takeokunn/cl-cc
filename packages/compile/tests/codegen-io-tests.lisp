@@ -24,7 +24,8 @@
                             (make-quoted "~A")
                             (make-int 42))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-princ-to-string-inst)))
   (let ((ctx (make-codegen-ctx)))
     (compile-ast (make-call 'format
                             (make-var 'nil)
@@ -38,7 +39,7 @@
                             (make-quoted "~A")
                             (make-int 1))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-princ)))
   (let ((ctx (make-ctx-with-vars 'out-stream)))
     (compile-ast (make-call 'format
@@ -46,8 +47,46 @@
                             (make-quoted "hello")
                             (make-int 1))
                  ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-stream-write-string-inst))))
+
+(deftest phase2-format-static-string-lowering
+  "static format strings lower supported directives without vm-format-inst."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "~A ~S~~~%")
+                            (make-quoted "x")
+                            (make-quoted "y"))
+                 ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-princ-to-string-inst))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-write-to-string-inst))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-concatenate))))
+
+(deftest phase2-format-static-fallbacks
+  "dynamic format strings and unsupported static directives still use vm-format-inst."
+  (let ((ctx (make-ctx-with-vars 'fmt)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-var 'fmt)
+                            (make-int 1))
+                 ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "~{~A~}")
+                            (make-quoted '(1 2)))
+                 ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "~A ~A")
+                            (make-int 1))
+                 ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))))
 
 (deftest phase2-format-requires-two-args
   "(format nil) with only 1 arg falls through (handler guard: >= 2 args)"

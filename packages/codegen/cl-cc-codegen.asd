@@ -9,6 +9,7 @@
   :serial t
   :components
   ((:file "package")
+   (:file "calling-convention")
    ;; x86-64 backend
    (:file "x86-64")
    (:file "x86-64-encoding")
@@ -18,18 +19,24 @@
    (:file "x86-64-emit-ops")
    (:file "x86-64-emit-ops-bits")
    (:file "x86-64-emit-ops-logical")
-     (:file "x86-64-codegen-helpers")
-     (:file "x86-64-codegen-data")
-     (:file "x86-64-codegen-core")
-    (:file "x86-64-codegen-emitters")
-   (:file "x86-64-codegen-dispatch")
-   ;; AArch64 backend
+      (:file "x86-64-codegen-helpers")
+      (:file "x86-64-codegen-data")
+       (:file "x86-64-codegen-core")
+      (:file "x86-64-codegen-emitters")
+    (:file "x86-64-codegen-dispatch")
+    (:file "x86-64-peephole")
+    ;; isel rules
+    (:file "isel/x86-64-rules")
+    (:file "isel/aarch64-rules")
+    ;; AArch64 backend
    (:file "aarch64")
    (:file "aarch64-codegen")
-   (:file "aarch64-codegen-labels")
-   (:file "aarch64-emitters")
-   (:file "aarch64-program")
-   ;; WASM backend
+    (:file "aarch64-codegen-labels")
+    (:file "aarch64-emitters")
+    (:file "aarch64-program")
+    ;; RISC-V backend
+    (:file "riscv64-codegen")
+    ;; WASM backend
    (:file "wasm-types")
    (:file "wasm-ir")
    (:file "wasm-extract")

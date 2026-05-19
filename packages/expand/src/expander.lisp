@@ -60,6 +60,9 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
     ((and (symbolp (car form))
           (string= (symbol-name (car form)) "QUOTE"))
      form)
+    ((and (symbolp (car form))
+          (member (car form) *compiler-local-function-names* :test #'eq))
+     (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
     (t
      (let ((handler (or (gethash (car form) *expander-head-table*)
                          (and (symbolp (car form))

@@ -98,11 +98,70 @@
         (unless (= dst src)
           (emit-mov-rr64 dst src stream)))))
 
+(defun x86-64-array-element-scale (inst)
+  "Return the native addressing scale for array element access INST.
+
+VM-AREF/VM-ASET currently lower to the staged native vector layout whose data
+payload is word-addressed.  Fixnum and general value arrays therefore use an
+8-byte scale, allowing [array + index*8 + data-offset] to be encoded as one
+memory operand."
+  (declare (ignore inst))
+  8)
+
+(defun x86-64-sib-index-register (index stream)
+  "Return an index register legal for SIB addressing, preserving INDEX if needed."
+  (if (= (logand index #x7) 4)
+      (progn
+        (emit-mov-rr64 +r11+ index stream)
+        +r11+)
+      index))
+
+(defun emit-vm-aref (inst stream)
+  "Emit VM-AREF as one scaled indexed memory load when bounds checks allow it."
+  (let* ((dst (vm-reg-to-x86 (vm-dst inst)))
+         (base (vm-reg-to-x86 (vm-array-reg inst)))
+         (index (x86-64-sib-index-register (vm-reg-to-x86 (vm-index-reg inst)) stream)))
+    (emit-mov-rm64-indexed dst base index (x86-64-array-element-scale inst)
+                           +x86-64-array-data-offset+ stream)))
+
+(defun emit-vm-aset (inst stream)
+  "Emit VM-ASET as one scaled indexed memory store when bounds checks allow it."
+  (let* ((src (vm-reg-to-x86 (vm-val-reg inst)))
+         (base (vm-reg-to-x86 (vm-array-reg inst)))
+         (index (x86-64-sib-index-register (vm-reg-to-x86 (vm-index-reg inst)) stream)))
+    (emit-mov-mr64-indexed base index (x86-64-array-element-scale inst)
+                           +x86-64-array-data-offset+ src stream)))
+
+(defun emit-vm-prefetch (inst stream)
+  "Emit x86-64 PREFETCHT0/PREFETCHNTA for VM-PREFETCH."
+  (let* ((base (vm-reg-to-x86 (vm-prefetch-base-reg inst)))
+         (index-reg (vm-prefetch-index-reg inst))
+         (index (and index-reg
+                     (x86-64-sib-index-register (vm-reg-to-x86 index-reg) stream)))
+         (scale (vm-prefetch-scale inst))
+         (offset (vm-prefetch-offset inst))
+         (locality (ecase (vm-prefetch-locality inst)
+                     ((:t0 :keep) :t0)
+                     ((:nta :strm) :nta))))
+    (if index
+        (emit-prefetch-mem-indexed locality base index scale offset stream)
+        (emit-prefetch-mem locality base offset stream))))
+
 (define-float-binary-emitter emit-vm-float-add emit-addsd-xx)
 (define-float-binary-emitter emit-vm-float-sub emit-subsd-xx)
 (define-float-binary-emitter emit-vm-float-mul emit-mulsd-xx)
 (define-float-binary-emitter emit-vm-float-div emit-divsd-xx)
 (define-float-unary-emitter emit-vm-sqrt emit-sqrtsd-xx)
+
+(defun emit-vm-fma (inst stream)
+  "Emit scalar double FMA: dst = lhs * rhs + acc."
+  (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+        (lhs (vm-reg-to-xmm (vm-a inst)))
+        (rhs (vm-reg-to-xmm (vm-b inst)))
+        (acc (vm-reg-to-xmm (vm-c inst))))
+    ;; Keep fixed 9-byte size for label accounting: MOVSD + VFMADD132SD.
+    (emit-movsd-xx dst lhs stream)
+    (emit-vfmadd132sd-xxx dst acc rhs stream)))
 
 ;;; Libm-call transcendental emitters (FR-286)
 ;;;
@@ -182,6 +241,16 @@
       (let ((r2 (vm-reg-to-x86 (vm-vr2 inst))))
         (unless (= r2 +rcx+)
           (emit-mov-rr64 +rcx+ r2 stream))))))
+
+(defun emit-vm-mv-bind-regs (inst stream)
+  "Emit VM-MV-BIND-REGS: copy RAX/RDX/RCX return registers into VM registers."
+  (let ((return-regs (list +rax+ +rdx+ +rcx+)))
+    (loop for dst-reg in (vm-dst-regs inst)
+          for src-phys in return-regs
+          for i below (vm-mv-bind-regs-count inst)
+          for dst-phys = (vm-reg-to-x86 dst-reg)
+          do (unless (= dst-phys src-phys)
+               (emit-mov-rr64 dst-phys src-phys stream)))))
 
 (define-binary-alu-emitter emit-vm-add    emit-add-rr64  "vm-add: dst = lhs + rhs.")
 

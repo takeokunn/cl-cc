@@ -37,10 +37,12 @@
    #:make-lexer #:lex-all #:lexer-read-token
    ;; CL parser
    #:parse-cl-source #:parse-cl-source-single
-   ;; Diagnostics
-   #:diagnostic #:make-diagnostic
-   #:diagnostic-severity #:diagnostic-message #:diagnostic-span
-   #:make-parse-error #:make-parse-warning
+    ;; Diagnostics
+    #:fix-it #:make-fix-it #:fix-it-text #:fix-it-span
+    #:diagnostic #:make-diagnostic
+    #:diagnostic-severity #:diagnostic-message #:diagnostic-span
+    #:diagnostic-error-code #:diagnostic-fix-it
+    #:make-parse-error #:make-parse-warning
    #:parse-failure
    #:byte-offset-to-line-col #:source-line-at
    #:format-diagnostic #:format-diagnostic-list

@@ -76,33 +76,77 @@ unknown so callers can fall through instead of silently changing semantics."
                                      :index-reg idx-reg :val-reg val-reg))))
   array-reg)
 
+(defun %phase2-keyword-args-lowerable-p (tail)
+  "Return true when MAKE-ARRAY keyword TAIL can be lowered by Phase 2."
+  (loop for kv on tail by #'cddr
+        for key = (%phase2-keyword-name (car kv))
+        always (and (cdr kv)
+                    (member key '(:initial-element :initial-contents :element-type
+                                  :fill-pointer :adjustable :displaced-to)
+                            :test #'eq)
+                    (or (not (eq key :initial-contents))
+                        (typep (cadr kv) 'ast-quote)))))
+
+(defun %phase2-static-or-register-value (node ctx)
+  "Return NODE's static value or compile NODE and return its value register."
+  (multiple-value-bind (value known-p) (%phase2-static-value node)
+    (if known-p
+        (values value nil)
+        (values nil (compile-ast node ctx)))))
+
 ;;; ── Handler registrations ──────────────────────────────────────────────────
 
 ;; make-array: fixed-size array
 (define-phase2-handler "MAKE-ARRAY" (args result-reg ctx)
   (let* ((tail (rest args))
-          (init-ast (%phase2-find-keyword-arg tail :initial-element))
           (contents-ast (%phase2-find-keyword-arg tail :initial-contents)))
-    (multiple-value-bind (fill-pointer fill-pointer-known-p)
-        (%phase2-static-keyword-value tail :fill-pointer nil)
-      (multiple-value-bind (adjustable adjustable-known-p)
-          (%phase2-static-keyword-value tail :adjustable nil)
-        (multiple-value-bind (element-type element-type-known-p)
-            (%phase2-static-keyword-value tail :element-type nil)
-          (when (and fill-pointer-known-p adjustable-known-p element-type-known-p
-                     (or (null contents-ast) (typep contents-ast 'ast-quote)))
-            (let ((contents (and contents-ast (ast-quote-value contents-ast))))
-              (when (or (null contents-ast) (listp contents))
-                (let ((size-reg (compile-ast (first args) ctx))
-                      (init-reg (and init-ast (compile-ast init-ast ctx))))
-                  (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
-                                                :initial-element init-reg
-                                                :fill-pointer fill-pointer
-                                                :adjustable adjustable
-                                                :element-type element-type))
-                  (when contents-ast
-                    (%phase2-emit-initial-contents ctx result-reg contents))
-                  result-reg)))))))))
+    (when (%phase2-keyword-args-lowerable-p tail)
+      (let ((contents (and contents-ast (ast-quote-value contents-ast))))
+        (when (or (null contents-ast) (listp contents))
+          (let ((size-reg (compile-ast (first args) ctx))
+                init-reg
+                fill-pointer
+                fill-pointer-reg
+                adjustable
+                adjustable-reg
+                element-type
+                element-type-reg
+                displaced-to-reg)
+            (loop for kv on tail by #'cddr
+                  for key = (%phase2-keyword-name (car kv))
+                  for value-ast = (cadr kv)
+                  do (case key
+                       (:initial-element
+                        (setf init-reg (compile-ast value-ast ctx)))
+                       (:fill-pointer
+                        (multiple-value-bind (value reg)
+                            (%phase2-static-or-register-value value-ast ctx)
+                          (setf fill-pointer value
+                                fill-pointer-reg reg)))
+                       (:adjustable
+                        (multiple-value-bind (value reg)
+                            (%phase2-static-or-register-value value-ast ctx)
+                          (setf adjustable value
+                                adjustable-reg reg)))
+                       (:element-type
+                        (multiple-value-bind (value reg)
+                            (%phase2-static-or-register-value value-ast ctx)
+                          (setf element-type value
+                                element-type-reg reg)))
+                       (:displaced-to
+                        (setf displaced-to-reg (compile-ast value-ast ctx)))))
+            (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
+                                          :initial-element init-reg
+                                          :fill-pointer fill-pointer
+                                          :fill-pointer-reg fill-pointer-reg
+                                          :adjustable adjustable
+                                          :adjustable-reg adjustable-reg
+                                          :element-type element-type
+                                          :element-type-reg element-type-reg
+                                          :displaced-to-reg displaced-to-reg))
+            (when contents-ast
+              (%phase2-emit-initial-contents ctx result-reg contents))
+            result-reg))))))
 
 ;; make-adjustable-vector: array with fill-pointer
 (define-phase2-handler "MAKE-ADJUSTABLE-VECTOR" (args result-reg ctx)

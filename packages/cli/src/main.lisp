@@ -39,11 +39,15 @@ Options:
   --jit-cache-stats       Print JIT code-cache hit/eviction statistics
   --stack-protector       Enable stack canary checks in native prologue/epilogue
   --shadow-stack          Enable CET shadow-stack planning/integration path
-  --stdlib                Prepend standard library (run/eval only)
+  --compress              Add compressed code payload sections when supported
+  --no-compress           Disable code payload compression (default)
+  --stdlib                Eagerly prepend standard library (run/eval/repl)
+  --no-stdlib             Disable lazy stdlib auto-require
   --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
   --verbose               Show compilation details on stderr
-  --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
-  --print-pass-timings    Print per-pass optimizer timings
+   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+   --block-compile       Enable file-level cross-function inlining
+   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
   --pgo-generate <file>   Write lightweight optimizer profile data
@@ -54,6 +58,7 @@ Options:
   --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
   --timeout <seconds>     Maximum execution time (run/compile/eval/repl)
+  --dump-image <file>     Dump an initialized SBCL image/executable
 
 Version: ~A~%" *version*))
 
@@ -66,10 +71,12 @@ Options:
   --lang lisp|php   Source language (auto-detect from .php extension)
   --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source  Add source-location comments when available
-  --stdlib          Prepend standard library
+  --stdlib          Eagerly prepend standard library
+  --no-stdlib       Disable lazy stdlib auto-require
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose         Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --block-compile       Enable file-level cross-function inlining
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -96,9 +103,12 @@ Options:
   --jit-cache-stats     Print JIT code-cache hit/eviction statistics
   --stack-protector     Enable stack canary checks in native prologue/epilogue
   --shadow-stack        Enable CET shadow-stack planning/integration path
+  --compress            Add compressed code payload sections when supported
+  --no-compress         Disable code payload compression (default)
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose             Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --block-compile         Enable file-level cross-function inlining
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -114,10 +124,12 @@ Options:
   Evaluate a CL-CC expression and print the result.
 
 Options:
-  --stdlib   Prepend standard library
+  --stdlib   Eagerly prepend standard library
+  --no-stdlib Disable lazy stdlib auto-require
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --verbose  Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
+  --block-compile         Enable file-level cross-function inlining
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -135,6 +147,7 @@ Options:
 
 Options:
   --stdlib   Prepend standard library on startup
+  --no-stdlib Disable lazy stdlib auto-require
 
 Examples:
   * (defun square (x) (* x x))
@@ -195,6 +208,9 @@ subcommands, then dispatches to the appropriate handler."
       (%print-help (or (parsed-args-command parsed)
                        (car (parsed-args-positional parsed))))
       (uiop:quit 0))
+
+    (when (flag parsed "--dump-image")
+      (%dump-image-and-exit parsed))
 
     (let ((command (parsed-args-command parsed)))
       (cond

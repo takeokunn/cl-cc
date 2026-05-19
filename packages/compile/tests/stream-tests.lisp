@@ -307,7 +307,23 @@
            (format nil "(let ((h (open ~S :direction :output :if-exists :supersede :if-does-not-exist :create)))
   (prog1 (file-string-length h \"hé\")
     (close h)))"
-                   tmpfile)))
+                    tmpfile)))
+      (ignore-errors (delete-file tmpfile)))))
+
+(deftest open-external-format-utf-16-roundtrip
+  "open preserves :external-format so UTF-16 file streams can round-trip Unicode characters."
+  (let ((tmpfile (format nil "/tmp/cl-cc-utf16-stream-~A.txt" (get-universal-time))))
+    (unwind-protect
+         (assert-=
+          128512
+          (run-string
+           (format nil "(let ((out (open ~S :direction :output :if-exists :supersede :if-does-not-exist :create :external-format :utf-16)))
+  (write-char (code-char 128512) out)
+  (close out)
+  (let ((in (open ~S :direction :input :external-format :utf-16)))
+    (prog1 (char-code (read-char in))
+      (close in))))"
+                   tmpfile tmpfile)))
       (ignore-errors (delete-file tmpfile)))))
 
 ;;; ─── Peek-char ──────────────────────────────────────────────────────────

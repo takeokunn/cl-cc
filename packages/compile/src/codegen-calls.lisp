@@ -122,13 +122,14 @@ first-class function values here."
         (%emit-call-like-instruction tail result-reg func-reg arg-regs ctx)))))
 
 (defun %try-compile-apply (func-sym args result-reg tail ctx)
-  "Handle (apply FN ARG...) — emit vm-apply, preserving tail-position metadata."
+  "Handle (apply FN ARG...) — use flat calls when the spread arity is known."
   (when (and func-sym (eq func-sym 'apply) args)
     (let* ((func-arg (first args))
+           (apply-args (rest args))
            (local-func-name (and (typep func-arg 'ast-var) (ast-var-name func-arg)))
            (raw-func-reg (cond
-                           ((typep func-arg 'ast-function)
-                            (compile-ast func-arg ctx))
+                            ((typep func-arg 'ast-function)
+                             (compile-ast func-arg ctx))
                            ((typep func-arg 'ast-var)
                             (compile-ast func-arg ctx))
                            ((symbolp func-arg)
@@ -139,12 +140,21 @@ first-class function values here."
                           (let ((unboxed (make-register ctx)))
                             (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                             unboxed)
-                          raw-func-reg))
-           (func-reg (make-register ctx)))
+                           raw-func-reg))
+            (func-reg (make-register ctx)))
       (emit ctx (make-vm-move :dst func-reg :src func-reg0))
-      (let ((arg-regs (%compile-call-arg-registers (rest args) ctx)))
-        (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs :tail-p tail))
-        result-reg))))
+      (let* ((plan (%apply-argument-plan apply-args))
+             (leading-args (getf plan :leading))
+             (spread-arg (getf plan :spread)))
+        (multiple-value-bind (literal-spread-p spread-values)
+            (%literal-apply-spread-values spread-arg)
+          (if literal-spread-p
+               (%compile-apply-literal-spread leading-args spread-values func-reg result-reg tail ctx)
+               (multiple-value-bind (list-spread-p spread-forms)
+                   (%list-call-apply-spread-forms spread-arg ctx)
+                 (if list-spread-p
+                     (%compile-apply-list-call-spread leading-args spread-forms func-reg result-reg tail ctx)
+                    (%compile-apply-dynamic-spread apply-args func-reg result-reg tail ctx)))))))))
 
 (defun %try-compile-noescape-closure (func-expr args tail ctx)
   "Inline a noescape lambda closure — no vm-closure emitted."
@@ -236,12 +246,26 @@ first-class function values here."
           (when (= (length args) (length params))
             (let ((arg-regs (%compile-call-arg-registers args ctx)))
               (%emit-argument-rebinds-and-jump arg-regs params param-regs target-label ctx)
-              result-reg)))))))
+               result-reg)))))))
+
+(defun %try-compile-equality-predicate (func-sym args result-reg ctx)
+  "Lower EQ/EQL/EQUAL through a type-specialized equality constructor when possible."
+  (when (and (= (length args) 2)
+             (member func-sym '(eq eql equal) :test #'eq))
+    (let ((ctor (%equality-predicate-constructor func-sym (first args) (second args) ctx)))
+      (when ctor
+        (let ((lhs-reg (compile-ast (first args) ctx))
+              (rhs-reg (compile-ast (second args) ctx)))
+          (emit ctx (funcall ctor :dst result-reg :lhs lhs-reg :rhs rhs-reg))
+          result-reg)))))
 
 (defun %try-compile-builtin (func-sym args result-reg ctx)
   "Phase-1 (table-driven) + Phase-2 (Prolog-style) builtin dispatch."
-  (when func-sym
+  (when (and func-sym
+             (not (%ast-var-function-value-p func-sym ctx)))
     (let ((sname (symbol-name func-sym)))
+      (let ((result (%try-compile-equality-predicate func-sym args result-reg ctx)))
+        (when result (return-from %try-compile-builtin result)))
       ;; Phase 1: ~160 calling conventions via registry hash-table
       (let ((entry (gethash sname *builtin-registry*)))
         (when entry

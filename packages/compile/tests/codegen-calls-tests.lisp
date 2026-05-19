@@ -121,15 +121,74 @@
       (assert-eq result-reg ret)
       (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))))
 
-(deftest try-compile-apply-tail-position-marks-vm-apply-tail-p
-  "%try-compile-apply marks vm-apply tail-p when tail is T."
+(deftest try-compile-apply-list-call-spread-emits-vm-call
+  "FR-044: %try-compile-apply lowers a final (LIST ...) spread to vm-call."
   (let* ((ctx (make-codegen-ctx))
          (fn-reg (cl-cc/compile:make-register ctx))
          (result-reg (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg)))
     (let ((ret (cl-cc/compile::%try-compile-apply
                 'apply
-                (list (make-ast-var :name 'f) (make-ast-var :name 'xs))
+                (list (make-ast-var :name 'f)
+                      (make-ast-int :value 1)
+                      (make-ast-call :func (make-ast-var :name 'list)
+                                     :args (list (make-ast-int :value 2)
+                                                 (make-ast-int :value 3))))
+                result-reg nil ctx)))
+      (assert-eq result-reg ret)
+      (let ((call-inst (codegen-find-inst ctx 'cl-cc/vm::vm-call)))
+        (assert-true call-inst)
+        (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
+        (assert-= 3 (length (cl-cc/vm::vm-args call-inst)))))))
+
+(deftest try-compile-apply-list-call-spread-tail-emits-vm-tail-call
+  "FR-044: %try-compile-apply lowers finite list spreads to vm-tail-call in tail position."
+  (let* ((ctx (make-codegen-ctx))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg)))
+    (let ((ret (cl-cc/compile::%try-compile-apply
+                'apply
+                (list (make-ast-var :name 'f)
+                      (make-ast-int :value 1)
+                      (make-ast-call :func (make-ast-var :name 'list)
+                                     :args (list (make-ast-int :value 2)
+                                                 (make-ast-int :value 3))))
+                result-reg t ctx)))
+      (assert-eq result-reg ret)
+      (let ((tail-call-inst (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call)))
+        (assert-true tail-call-inst)
+        (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call))
+        (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
+        (assert-= 3 (length (cl-cc/vm::vm-args tail-call-inst)))))))
+
+(deftest try-compile-apply-local-list-call-spread-keeps-vm-apply
+  "FR-044: %try-compile-apply preserves dynamic APPLY when LIST is locally bound."
+  (let* ((ctx (make-codegen-ctx))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (list-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg) (cons 'list list-reg)))
+    (let ((ret (cl-cc/compile::%try-compile-apply
+                'apply
+                (list (make-ast-var :name 'f)
+                      (make-ast-call :func (make-ast-var :name 'list)
+                                     :args (list (make-ast-int :value 2)
+                                                 (make-ast-int :value 3))))
+                result-reg nil ctx)))
+      (assert-eq result-reg ret)
+      (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))))
+
+(deftest try-compile-apply-tail-position-marks-vm-apply-tail-p
+  "%try-compile-apply marks vm-apply tail-p when tail is T."
+  (let* ((ctx (make-codegen-ctx))
+          (fn-reg (cl-cc/compile:make-register ctx))
+          (xs-reg (cl-cc/compile:make-register ctx))
+          (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg) (cons 'xs xs-reg)))
+    (let ((ret (cl-cc/compile::%try-compile-apply
+                 'apply
+                 (list (make-ast-var :name 'f) (make-ast-var :name 'xs))
                 result-reg t ctx)))
       (assert-eq result-reg ret)
       (let ((apply-inst (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))

@@ -230,6 +230,8 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
       (setf (gethash tp ht) (lambda (inst) (cons (vm-func-reg inst) (vm-args inst)))))
     (setf (gethash 'vm-generic-call ht)
           (lambda (inst) (cons (vm-gf-reg inst) (vm-args inst))))
+    (setf (gethash 'vm-fma ht)
+          (lambda (inst) (list (vm-a inst) (vm-b inst) (vm-c inst))))
     ;; Multiple values
     (setf (gethash 'vm-values ht)       (lambda (inst) (vm-src-regs inst)))
     ;; Variadic-ish concatenation packed by optimizer
@@ -259,7 +261,8 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
                                 (cl-cc/vm:vm-local-nickname-target inst))))))
     (setf (gethash 'vm-make-array ht)
           (lambda (inst) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
-                                            (vm-fill-pointer inst) (vm-adjustable inst)))))
+                                            (vm-fill-pointer-reg inst) (vm-adjustable-reg inst)
+                                            (vm-element-type-reg inst) (vm-displaced-to-reg inst)))))
     (setf (gethash 'vm-fill ht)
           (lambda (inst) (list (vm-array-reg inst) (vm-val-reg inst))))
     (setf (gethash 'vm-copy-vector ht)

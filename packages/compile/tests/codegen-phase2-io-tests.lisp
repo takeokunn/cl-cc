@@ -40,6 +40,19 @@
       (assert-true inst)
       (assert-eq expected-dir (cl-cc::vm-open-file-direction inst)))))
 
+(deftest codegen-phase2-open-external-format
+  "open preserves static :external-format on vm-open-file instructions."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-ast-call :func 'open
+                                :args (list (make-ast-quote :value "/tmp/utf16.txt")
+                                            (make-ast-var :name :external-format)
+                                            (make-ast-var :name :utf-16)))
+                 ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-open-file)))
+      (assert-true inst)
+      (assert-eq :utf-16 (cl-cc/vm::vm-open-file-external-format inst))
+      (assert-null (cl-cc/vm::vm-open-file-external-format-reg inst)))))
+
 ;;; ─── Section 11: PEEK-CHAR ──────────────────────────────────────────────────
 
 (deftest-each codegen-phase2-peek-char-emits-vm-peek-char

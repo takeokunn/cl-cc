@@ -129,6 +129,17 @@
     (setf (vm-values-list state) (nreverse vals)))
   (values (1+ pc) nil nil))
 
+(defmethod execute-instruction ((inst vm-mv-bind-regs) state pc labels)
+  "Interpreter compatibility for register-return multiple-value binding."
+  (declare (ignore labels))
+  (let ((vals (vm-values-list state)))
+    (loop for reg in (vm-dst-regs inst)
+          for i below (vm-mv-bind-regs-count inst)
+          do (vm-reg-set state reg (if (< i (length vals))
+                                       (nth i vals)
+                                       nil))))
+  (values (1+ pc) nil nil))
+
 (defmethod execute-instruction ((inst vm-ensure-values) state pc labels)
   (declare (ignore labels))
   (unless (vm-values-list state)

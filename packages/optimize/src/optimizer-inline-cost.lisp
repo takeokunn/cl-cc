@@ -15,6 +15,12 @@
   "PGO-guided multiplier for adaptive inline thresholds.
 1 means no change; values >1 make inlining more aggressive for hot profiles.")
 
+(defvar *block-compile* nil
+  "When non-NIL, optimize a source file as one block-compilation unit.
+This permits module-local function bodies with lexical captures to be inlined at
+known direct call sites, while recursive callees remain protected by the normal
+call-graph guard.")
+
 (defparameter *opt-enable-ml-inline-score* t
   "When non-NIL, adaptive inlining also consults ML-guided score helpers.")
 
@@ -199,14 +205,35 @@ does not weaken any structural safety checks."
          (body (getf def :body)))
     (and (typep ci '(or vm-closure vm-func-ref))
          (not (eq (vm-closure-inline-policy ci) :notinline))
-         (null (%opt-inline-captured-vars ci))
+          (or *block-compile*
+              (null (%opt-inline-captured-vars ci)))
          (null (vm-closure-optional-params ci))
          (null (vm-closure-rest-param ci))
          (null (vm-closure-key-params ci))
          (or (eq (vm-closure-inline-policy ci) :inline)
              (<= (opt-inline-body-cost body) threshold))
-         (opt-can-safely-rename-p body)
-         (not (opt-body-has-global-refs-p body (vm-closure-params ci))))))
+          (opt-can-safely-rename-p body)
+          (or *block-compile*
+              (not (opt-body-has-global-refs-p body (vm-closure-params ci)))))))
+
+(defun opt-make-inline-renaming (body-instructions params base-index)
+  "Build a register renaming table for inlining BODY-INSTRUCTIONS.
+PARAMS and registers defined inside the callee receive fresh registers. Registers
+that are only read by the callee are treated as block-compilation captures and
+left untouched, preserving references to the enclosing compilation unit."
+  (let ((counter base-index)
+        (renaming (make-hash-table :test #'eq)))
+    (labels ((add (reg)
+               (when (and reg (opt-register-keyword-p reg)
+                          (not (gethash reg renaming)))
+                 (setf (gethash reg renaming)
+                       (intern (format nil "R~A" counter) :keyword))
+                 (incf counter))))
+      (dolist (param params)
+        (add param))
+      (dolist (inst body-instructions)
+        (add (opt-inst-dst inst))))
+    renaming))
 
 (defun opt-pass-inline (instructions &key (threshold 15))
   "Replace vm-call of a known small function with the inlined body.
@@ -217,8 +244,9 @@ The function must be: captured-var-free, linear, and have body cost
          (recursive-labels (opt-call-graph-recursive-labels
                             (opt-build-call-graph instructions func-defs name-to-label)))
          (base-idx  (1+ (opt-max-reg-index instructions)))
-         (reg-track (make-hash-table :test #'eq))
-          (const-track (make-hash-table :test #'eq))
+          (reg-track (make-hash-table :test #'eq))
+          (box-track (make-hash-table :test #'eq))
+           (const-track (make-hash-table :test #'eq))
           (profile-data (opt-inline-profile-data instructions))
           (result nil))
     (dolist (inst instructions)
@@ -230,21 +258,44 @@ The function must be: captured-var-free, linear, and have body cost
          (let ((dst (opt-inst-dst inst)))
            (when dst (remhash dst const-track)))
          (push inst result))
-        (vm-const
-         (let* ((val (vm-value inst))
-                (label (when (symbolp val) (gethash val name-to-label))))
-           (when (and label (gethash label func-defs))
-             (setf (gethash (vm-dst inst) reg-track) label)))
-          (setf (gethash (vm-dst inst) const-track) (vm-value inst))
+         (vm-const
+          (let* ((val (vm-value inst))
+                 (label (when (symbolp val) (gethash val name-to-label))))
+            (if (and label (gethash label func-defs))
+                (setf (gethash (vm-dst inst) reg-track) label)
+                (remhash (vm-dst inst) reg-track)))
+           (setf (gethash (vm-dst inst) const-track) (vm-value inst))
           (push inst result))
-        (vm-move
-         (multiple-value-bind (src-const present-p)
-             (gethash (vm-src inst) const-track)
-           (if present-p
-               (setf (gethash (vm-dst inst) const-track) src-const)
-               (remhash (vm-dst inst) const-track)))
-         (push inst result))
-        (vm-call
+         (vm-move
+          (multiple-value-bind (label label-present-p)
+              (gethash (vm-src inst) reg-track)
+            (if label-present-p
+                (setf (gethash (vm-dst inst) reg-track) label)
+                (remhash (vm-dst inst) reg-track)))
+          (multiple-value-bind (boxed-label box-present-p)
+              (gethash (vm-src inst) box-track)
+            (if box-present-p
+                (setf (gethash (vm-dst inst) box-track) boxed-label)
+                (remhash (vm-dst inst) box-track)))
+          (multiple-value-bind (src-const present-p)
+              (gethash (vm-src inst) const-track)
+            (if present-p
+                (setf (gethash (vm-dst inst) const-track) src-const)
+                (remhash (vm-dst inst) const-track)))
+          (push inst result))
+         (vm-rplaca
+          (let ((label (gethash (vm-val-reg inst) reg-track)))
+            (when label
+              (setf (gethash (vm-cons-reg inst) box-track) label)))
+          (push inst result))
+         (vm-car
+          (let ((label (gethash (vm-src inst) box-track)))
+            (if label
+                (setf (gethash (vm-dst inst) reg-track) label)
+                (remhash (vm-dst inst) reg-track)))
+          (remhash (vm-dst inst) const-track)
+          (push inst result))
+         (vm-call
          (let* ((label (gethash (vm-func-reg inst) reg-track))
                 (def   (and label (gethash label func-defs)))
                 (effective-threshold (if (and def (eq threshold :adaptive))
@@ -256,7 +307,9 @@ The function must be: captured-var-free, linear, and have body cost
                (let* ((body   (getf def :body))
                       (ci     (getf def :closure))
                       (params (vm-closure-params ci))
-                      (rename (opt-make-renaming body base-idx)))
+                       (rename (if *block-compile*
+                                   (opt-make-inline-renaming body params base-idx)
+                                   (opt-make-renaming body base-idx))))
                  (incf base-idx (hash-table-count rename))
                  (loop for param in params
                        for arg in (vm-args inst)
@@ -279,7 +332,8 @@ The function must be: captured-var-free, linear, and have body cost
         (t
          (let ((dst (opt-inst-dst inst)))
            (when dst
-             (remhash dst reg-track)
-             (remhash dst const-track)))
+              (remhash dst reg-track)
+              (remhash dst box-track)
+              (remhash dst const-track)))
          (push inst result))))
     (nreverse result)))

@@ -25,12 +25,18 @@
                         ; pipeline-runtime can call it as bare symbol
    #:pipeline-opts
    ;; Stdlib cache state
-   #:*stdlib-vm-snapshot*
-   #:*stdlib-accessor-slot-map*
-   #:*stdlib-defstruct-slot-registry*
-   #:*stdlib-expanded-cache*
-   #:*stdlib-expanded-cache-source*
-   #:*stdlib-expanded-cache-eval-fn*
+    #:*stdlib-vm-snapshot*
+    #:*stdlib-accessor-slot-map*
+    #:*stdlib-defstruct-read-only-accessor-map*
+    #:*stdlib-defstruct-slot-registry*
+    #:*stdlib-defstruct-type-registry*
+    #:*stdlib-setf-compound-place-handlers*
+     #:*stdlib-expanded-cache*
+    #:*stdlib-expanded-cache-source*
+    #:*stdlib-expanded-cache-eval-fn*
+    #:*stdlib-cache-directory*
+    #:*stdlib-symbol-index*
+    #:stdlib-symbol-defined-p
    ;; Native cache parameters
    #:*compile-cache-root*
    #:*native-command-timeout-seconds*
@@ -64,8 +70,9 @@
    #:%compile-native-source
    #:%compile-native-string
    #:%compile-native-toplevel-forms
-   #:%compile-native-lisp-forms
-   #:%maybe-compile-native-via-cps
+    #:%compile-native-lisp-forms
+    #:pipeline-reorder-functions
+    #:%maybe-compile-native-via-cps
    #:%make-native-opts
    #:%non-package-top-level-forms
    #:%run-short-native-command

@@ -102,8 +102,24 @@
 (deftest typed-expansion-forms-ctor-is-first-when-present
   "%defstruct-typed-expansion-forms places ctor-form first when non-nil."
   (let* ((ctor  '(defun make-pt (&key x y) (list 'pt x y)))
-         (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt ctor '() nil nil)))
+          (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt (list ctor) '() nil nil)))
     (assert-equal ctor (first forms))))
+
+(deftest typed-register-accessors-adds-setf-handler
+  "%defstruct-register-typed-accessors installs writable typed SETF handlers."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((slots '((x 0 nil nil)))
+           (accessor (cl-cc/expand::%defstruct-accessor-name 'pt- 'x)))
+      (cl-cc/expand::%defstruct-register-typed-accessors 'vector 'pt- slots)
+      (assert-true (gethash accessor cl-cc/expand::*setf-compound-place-handlers*)))))
+
+(deftest typed-register-accessors-read-only-map
+  "%defstruct-register-typed-accessors records read-only typed accessors."
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let* ((slots '((x 0 t nil)))
+           (accessor (cl-cc/expand::%defstruct-accessor-name 'pt- 'x)))
+      (cl-cc/expand::%defstruct-register-typed-accessors 'list 'pt- slots)
+      (assert-true (gethash accessor cl-cc/expand:*defstruct-read-only-accessor-map*)))))
 
 (deftest typed-expansion-forms-pred-precedes-quote
   "%defstruct-typed-expansion-forms places predicate before the trailing quote."

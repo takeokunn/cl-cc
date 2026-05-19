@@ -19,6 +19,12 @@
         (lambda (form)
           (%expand-flet-or-labels 'labels form))))
 
+;; apply — preserve final (list ...) spread so FR-044 codegen can lower it.
+(progn
+  (setf (gethash 'apply *expander-head-table*)
+        (lambda (form)
+          (%expand-apply-form form))))
+
 ;; FR-585: handler-case :no-error clause
 ;; (handler-case form (type (v) ...) (:no-error (x) success-body))
 ;; → (block #:tag

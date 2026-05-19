@@ -39,6 +39,64 @@
     (assert-= 0 (cl-cc/vm::vm-label-table-lookup labels "entry"))
     (assert-= 2 (cl-cc/vm::vm-label-table-lookup labels :done))))
 
+(deftest vm-print-backtrace-resolves-return-pc-to-nearest-label
+  "FR-313: vm-print-backtrace prints frames with return-pc resolved through labels."
+  (let* ((instructions (list (cl-cc:make-vm-label :name "caller")
+                             (cl-cc:make-vm-const :dst :r0 :value 1)
+                             (cl-cc:make-vm-call :dst :r1 :func :r2 :args '(:r0))
+                             (cl-cc:make-vm-const :dst :r3 :value 2)
+                             (cl-cc:make-vm-label :name "callee")
+                             (cl-cc:make-vm-ret :reg :r1)))
+         (labels (cl-cc/vm::build-label-table instructions))
+         (state (make-test-vm))
+         (stream (make-string-output-stream)))
+    (cl-cc:vm-reg-set state :arg0 42)
+    (cl-cc/vm::vm-push-call-frame state 3 :r1)
+    (cl-cc:vm-print-backtrace state :labels labels :stream stream)
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (search "VM backtrace:" output))
+      (assert-true (search "0: caller" output))
+      (assert-true (search "return-pc=3" output))
+      (assert-true (search "dst=R1" output))
+      (assert-true (search "args=(42)" output)))))
+
+(deftest vm-print-backtrace-handles-empty-call-stack
+  "FR-313: an empty VM call stack is rendered explicitly."
+  (let ((stream (make-string-output-stream)))
+    (cl-cc:vm-print-backtrace (make-test-vm) :labels nil :stream stream)
+    (assert-true (search "<empty>" (get-output-stream-string stream)))))
+
+(deftest vm-signal-error-prints-backtrace-before-unhandled-host-error
+  "FR-313: unhandled VM errors print a backtrace before signaling to the host."
+  (let* ((instructions (list (cl-cc:make-vm-label :name "caller")
+                             (cl-cc:make-vm-call :dst :r1 :func :r2 :args '(:arg0))
+                             (cl-cc:make-vm-const :dst :r3 :value 2)
+                             (cl-cc:make-vm-label :name "callee")
+                             (cl-cc:make-vm-signal-error :error-reg :err)))
+         (labels (cl-cc/vm::build-label-table instructions))
+         (state (make-test-vm))
+         (stream (make-string-output-stream)))
+    (cl-cc:vm-reg-set state :arg0 42)
+    (cl-cc:vm-reg-set state :err "boom")
+    (cl-cc/vm::vm-push-call-frame state 2 :r1)
+    (let ((*error-output* stream)
+          (signaled-p nil))
+      (handler-case
+          (cl-cc:execute-instruction
+           (cl-cc:make-vm-signal-error :error-reg :err)
+           state
+           4
+           labels)
+        (error ()
+          (setf signaled-p t)))
+      (assert-true signaled-p))
+    (let ((output (get-output-stream-string stream)))
+      (assert-true (search "VM backtrace:" output))
+      (assert-true (search "0: caller" output))
+      (assert-true (search "return-pc=2" output))
+      (assert-true (search "dst=R1" output))
+      (assert-true (search "args=(42)" output)))))
+
 (deftest vm-jump-uses-label-table-lookup
   "vm-jump resolves labels through the integer-keyed table produced by build-label-table."
   (let* ((instructions (list (cl-cc:make-vm-jump :label "target")

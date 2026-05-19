@@ -28,23 +28,25 @@
 
 (defun x86-64-codegen-target ()
   "Return the x86-64 target descriptor for the active frame-pointer policy."
-  (if *x86-64-omit-frame-pointer*
-      (make-target-desc
-       :name (target-name *x86-64-target*)
-       :word-size (target-word-size *x86-64-target*)
-       :endianness (target-endianness *x86-64-target*)
-       :gpr-count (target-gpr-count *x86-64-target*)
-       :gpr-names (target-gpr-names *x86-64-target*)
-       :arg-regs (target-arg-regs *x86-64-target*)
-       :ret-reg (target-ret-reg *x86-64-target*)
-       :fp-arg-regs (target-fp-arg-regs *x86-64-target*)
-       :fp-ret-reg (target-fp-ret-reg *x86-64-target*)
-       :callee-saved '(:rbx :rbp :r12 :r13 :r14 :r15)
-       :scratch-regs (remove :rbp (target-scratch-regs *x86-64-target*) :test #'eq)
-       :stack-alignment (target-stack-alignment *x86-64-target*)
-       :legal-ops (target-legal-ops *x86-64-target*)
-       :features (target-features *x86-64-target*))
-      *x86-64-target*))
+  (apply-calling-convention-to-target
+   (if *x86-64-omit-frame-pointer*
+       (make-target-desc
+        :name (target-name *x86-64-target*)
+        :word-size (target-word-size *x86-64-target*)
+        :endianness (target-endianness *x86-64-target*)
+        :gpr-count (target-gpr-count *x86-64-target*)
+        :gpr-names (target-gpr-names *x86-64-target*)
+        :arg-regs (target-arg-regs *x86-64-target*)
+        :ret-reg (target-ret-reg *x86-64-target*)
+        :fp-arg-regs (target-fp-arg-regs *x86-64-target*)
+        :fp-ret-reg (target-fp-ret-reg *x86-64-target*)
+        :callee-saved '(:rbx :rbp :r12 :r13 :r14 :r15)
+        :scratch-regs (remove :rbp (target-scratch-regs *x86-64-target*) :test #'eq)
+        :stack-alignment (target-stack-alignment *x86-64-target*)
+        :legal-ops (target-legal-ops *x86-64-target*)
+        :features (target-features *x86-64-target*))
+       *x86-64-target*)
+   *current-calling-convention*))
 
 (defparameter *current-spill-base-reg* +rbp+
   "Base register used for spill load/store emission in the current function.")
@@ -87,7 +89,8 @@
     (:R7 . ,+xmm7+))
   "Naive mapping from VM keyword registers to XMM register codes.")
 
-(declaim (special *phys-reg-to-x86-code* *phys-fp-reg-to-x86-code*))
+(declaim (special *phys-reg-to-x86-code* *phys-fp-reg-to-x86-code*
+                  *phys-vector-reg-to-x86-code*))
 
 (defun vm-reg-to-x86 (vm-reg)
   "Map VM register to x86-64 register code.
@@ -110,6 +113,17 @@
     (:xmm12 . 12) (:xmm13 . 13) (:xmm14 . 14) (:xmm15 . 15))
   "Mapping from physical FP register keywords to XMM register codes.")
 
+(defparameter *phys-vector-reg-to-x86-code*
+  '((:xmm0 . 0) (:xmm1 . 1) (:xmm2 . 2) (:xmm3 . 3)
+    (:xmm4 . 4) (:xmm5 . 5) (:xmm6 . 6) (:xmm7 . 7)
+    (:xmm8 . 8) (:xmm9 . 9) (:xmm10 . 10) (:xmm11 . 11)
+    (:xmm12 . 12) (:xmm13 . 13) (:xmm14 . 14) (:xmm15 . 15)
+    (:ymm0 . 0) (:ymm1 . 1) (:ymm2 . 2) (:ymm3 . 3)
+    (:ymm4 . 4) (:ymm5 . 5) (:ymm6 . 6) (:ymm7 . 7)
+    (:ymm8 . 8) (:ymm9 . 9) (:ymm10 . 10) (:ymm11 . 11)
+    (:ymm12 . 12) (:ymm13 . 13) (:ymm14 . 14) (:ymm15 . 15))
+  "Mapping from physical SIMD register keywords to XMM/YMM register codes.")
+
 (defun vm-reg-to-xmm (vm-reg)
   "Map VM register to XMM register code for native float operations.
 Falls back to the naive R0..R7 -> XMM0..XMM7 mapping when regalloc has not
@@ -129,7 +143,22 @@ assigned dedicated FP registers yet."
             (let ((entry (assoc vm-reg *vm-fp-reg-map*)))
               (unless entry
                 (error "VM register ~A has no XMM mapping" vm-reg))
-              (cdr entry))))))
+               (cdr entry))))))
+
+(defun vm-reg-to-ymm (vm-reg)
+  "Map VM register to YMM register code for AVX vector operations.
+YMM registers share physical ids with XMM registers; this function accepts both
+YMM physical names and the existing XMM allocation class used for SIMD values."
+  (let ((phys-entry (assoc vm-reg *phys-vector-reg-to-x86-code*)))
+    (if phys-entry
+        (cdr phys-entry)
+        (if *current-regalloc*
+            (let* ((phys (gethash vm-reg (regalloc-assignment *current-regalloc*)))
+                   (entry (and phys (assoc phys *phys-vector-reg-to-x86-code*))))
+              (if entry
+                  (cdr entry)
+                  (vm-reg-to-xmm vm-reg)))
+            (vm-reg-to-xmm vm-reg)))))
 
 (defun x86-64-float-vreg-p (vreg)
   (and *current-float-vregs* (gethash vreg *current-float-vregs*)))
@@ -146,9 +175,14 @@ assigned dedicated FP registers yet."
            (when (floatp (vm-value inst))
              (mark (vm-dst inst))))
           ((or vm-float-add vm-float-sub vm-float-mul vm-float-div)
-            (mark (vm-dst inst))
-            (mark (vm-lhs inst))
-            (mark (vm-rhs inst)))
+             (mark (vm-dst inst))
+             (mark (vm-lhs inst))
+             (mark (vm-rhs inst)))
+          (vm-fma
+           (mark (vm-dst inst))
+           (mark (vm-a inst))
+           (mark (vm-b inst))
+           (mark (vm-c inst)))
           (vm-sqrt
            (mark (vm-dst inst))
            (mark (vm-src inst)))

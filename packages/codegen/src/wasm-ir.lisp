@@ -78,6 +78,16 @@
   (init-value nil))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Exception tag descriptors
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defstruct (wasm-tag-def (:conc-name wasm-tag-def-))
+  "A WASM exception tag definition."
+  (index nil)
+  (wat-name nil)
+  (params nil :type list))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Local variable descriptor (for function locals)
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
@@ -134,12 +144,41 @@
   ;; counter for assigning global indices
   (next-global-index 0 :type integer)
   ;; map from lisp name (symbol) to wasm-global-def, for global variable lookup
-  (global-name-table nil))
+  (global-name-table nil)
+  ;; map from WAT/VM function label name to wasm-function-def
+  (function-label-table nil)
+  ;; map from normalized function signatures to type indices
+  (type-signature-table nil)
+  ;; exception tag definitions (EH proposal)
+  (tags nil :type list)
+  ;; counter for assigning tag indices
+  (next-tag-index 0 :type integer)
+  ;; map from WAT tag name to wasm-tag-def
+  (tag-name-table nil))
 
 (defun make-empty-wasm-module ()
   "Create an empty wasm-module-ir with an initialized global-name-table."
   (make-wasm-module-ir
-   :global-name-table (make-hash-table :test #'equal)))
+   :global-name-table (make-hash-table :test #'equal)
+   :function-label-table (make-hash-table :test #'equal)
+   :type-signature-table (make-hash-table :test #'equal)
+   :tag-name-table (make-hash-table :test #'equal)))
+
+(defun %wasm-normalize-wat-name (name)
+  "Return NAME without a leading '$' when present."
+  (let ((s (if (symbolp name) (symbol-name name) (string name))))
+    (if (and (> (length s) 0) (char= (char s 0) #\$))
+        (subseq s 1)
+        s)))
+
+(defun wasm-module-record-function-label! (module func)
+  "Record FUNC in MODULE's function-label-table by WAT and VM label names."
+  (let ((table (wasm-module-function-label-table module))
+        (wat-name (wasm-func-wat-name func)))
+    (when (and table wat-name)
+      (setf (gethash wat-name table) func)
+      (setf (gethash (%wasm-normalize-wat-name wat-name) table) func)))
+  func)
 
 ;;; Helper: add a function to the module and assign its index
 (defun wasm-module-add-function (module func)
@@ -147,7 +186,16 @@
   (setf (wasm-func-index func) (wasm-module-next-func-index module))
   (incf (wasm-module-next-func-index module))
   (push func (wasm-module-functions module))
+  (wasm-module-record-function-label! module func)
   func)
+
+(defun wasm-module-function-index-for-label (module label)
+  "Return the function index for LABEL from MODULE, or NIL when unknown."
+  (let* ((table (and module (wasm-module-function-label-table module)))
+         (func (and table
+                    (or (gethash label table)
+                        (gethash (%wasm-normalize-wat-name label) table)))))
+    (and func (wasm-func-index func))))
 
 ;;; Helper: add a global to the module and assign its index
 (defun wasm-module-add-global (module global-def)
@@ -158,8 +206,26 @@
   (when (wasm-global-def-wat-name global-def)
     (setf (gethash (wasm-global-def-wat-name global-def)
                    (wasm-module-global-name-table module))
-          global-def))
+           global-def))
   global-def)
+
+(defun wasm-module-global-index-for-name (module name)
+  "Return the global index for Lisp global NAME from MODULE, or NIL."
+  (let* ((wat-name (vm-global-wat-name name))
+         (table (and module (wasm-module-global-name-table module)))
+         (global (and table (gethash wat-name table))))
+    (and global (wasm-global-def-index global))))
+
+(defun wasm-module-add-tag (module tag-def)
+  "Add TAG-DEF to MODULE, assigning the next exception tag index."
+  (setf (wasm-tag-def-index tag-def) (wasm-module-next-tag-index module))
+  (incf (wasm-module-next-tag-index module))
+  (push tag-def (wasm-module-tags module))
+  (when (wasm-tag-def-wat-name tag-def)
+    (setf (gethash (wasm-tag-def-wat-name tag-def)
+                   (wasm-module-tag-name-table module))
+          tag-def))
+  tag-def)
 
 ;;; Helper: convert a Lisp global variable name to a WAT identifier
 (defun wasm-lisp-name-to-wat-id (name)

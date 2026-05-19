@@ -9,16 +9,38 @@
                      (wasm-fixnum-box (format nil "(i64.const ~D)" val)))
                     (null "(ref.null eq)")
                     ((eql t) "(ref.i31 (i32.const 1))")
-                    (t "(ref.null eq)"))))
+                    ;; FR-297: String literals — emit as staged string objects
+                    (string
+                     (%wasm-string-literal-eqref val))
+                    ;; FR-297: Symbol literals — emit staged symbol objects
+                    (symbol
+                     (%wasm-symbol-literal-eqref val))
+                    ;; FR-297: Character literals — emit as char-code i31 ref
+                    (character
+                     (format nil "(ref.i31 (i32.const ~D))" (char-code val)))
+                    ;; FR-297: Float literals — emit as f64.const + struct
+                    (float
+                     (%wasm-float-literal-eqref val))
+                    (t
+                     ;; Fallback for unsupported literal types
+                     "(ref.null eq)"))))
     (format stream "~%    (local.set ~D ~A)"
             (wasm-reg-to-local reg-map dst)
             wat-val)))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-move) stream)
   (let ((reg-map (wasm-target-reg-map target)))
+    (let ((known-label (gethash (vm-src inst) (wasm-target-known-func-labels target))))
+      (if known-label
+          (setf (gethash (vm-dst inst) (wasm-target-known-func-labels target)) known-label)
+          (remhash (vm-dst inst) (wasm-target-known-func-labels target))))
     (format stream "~%    (local.tee ~D (local.get ~D))"
             (wasm-reg-to-local reg-map (vm-dst inst))
             (wasm-reg-to-local reg-map (vm-src inst)))))
+
+(defun %wasm-direct-call (label)
+  "Return a direct call expression for LABEL."
+  (format nil "(call $~A)" label))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-add) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -88,18 +110,29 @@
             (reg-local-ref reg-map (vm-reg inst)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-print) stream)
-  (declare (ignore stream))
-  ;; Actual print goes via $host_write_string import in the trampoline path.
-  )
+  "Emit WASM code for vm-print: call the host runtime print function with the register value.
+The host import $host_print_val takes a single eqref parameter."
+  (let ((reg-map (wasm-target-reg-map target))
+        (val-reg (vm-reg inst)))
+    (format stream "~%    (call $host_print_val ~A)"
+            (reg-local-ref reg-map val-reg))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-set-global) stream)
-  (let ((reg-map (wasm-target-reg-map target)))
+  (let ((reg-map (wasm-target-reg-map target))
+        (globalidx (wasm-module-global-index-for-name (wasm-target-module target)
+                                                      (vm-global-name inst))))
+    (format stream "~%    ;; global.set globalidx ~D"
+            (or globalidx 0))
     (format stream "~%    (global.set ~A ~A)"
             (vm-global-wat-name (vm-global-name inst))
             (reg-local-ref reg-map (vm-src inst)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-get-global) stream)
-  (let ((reg-map (wasm-target-reg-map target)))
+  (let ((reg-map (wasm-target-reg-map target))
+        (globalidx (wasm-module-global-index-for-name (wasm-target-module target)
+                                                      (vm-global-name inst))))
+    (format stream "~%    ;; global.get globalidx ~D"
+            (or globalidx 0))
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(global.get ~A)"
@@ -107,16 +140,25 @@
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-call) stream)
   (let ((reg-map (wasm-target-reg-map target)))
-    (let* ((func-ref (reg-local-ref reg-map (vm-func-reg inst))))
+    (let* ((func-reg (vm-func-reg inst))
+          (func-ref (reg-local-ref reg-map func-reg))
+          (known-label (gethash func-reg (wasm-target-known-func-labels target)))
+          (typeidx (%wasm-main-function-type-index (wasm-target-module target))))
       (loop for arg in (vm-args inst) for i from 0 do
         (format stream "~%    (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
+      (format stream "~%    ;; ~A"
+              (if known-label
+                  (format nil "call funcidx ~D" (or (%wasm-function-index-for-label (wasm-target-module target) known-label) 0))
+                  (format nil "call_indirect typeidx ~D tableidx 0" typeidx)))
       (format stream "~%    ~A"
               (reg-local-set reg-map (vm-dst inst)
-                              (format nil "(call_indirect (type $main_func_t) (table $funcref_table) ~A)"
-                                      func-ref))))))
+                              (if known-label
+                                  (%wasm-direct-call known-label)
+                                  (format nil "(call_indirect (type $main_func_t) (table $funcref_table) ~A)"
+                                          func-ref)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-func-ref) stream)
-  "Materialize function table index in DST and track direct-call label hint." 
+  "Materialize function table index in DST and track typed call_ref label hint."
   (let* ((reg-map (wasm-target-reg-map target))
          (module (wasm-target-module target))
          (idx (or (and module (%wasm-function-index-for-label module (vm-label-name inst))) 0))
@@ -181,12 +223,22 @@ tail-position indirect call sites."
 (defmethod emit-instruction ((target wasm-target) (inst vm-closure) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (let ((entry-idx (or (%wasm-function-index-for-label (wasm-target-module target)
-                                                         (vm-label-name inst))
-                         0)))
-      (format stream "~%    ~A"
-              (reg-local-set reg-map (vm-dst inst)
-                             (format nil "(struct.new $closure_t (i32.const ~D) (ref.null $env_t))"
-                                     entry-idx))))))
+                                                          (vm-label-name inst))
+                          0)))
+      (setf (gethash (vm-dst inst) (wasm-target-known-func-labels target))
+            (vm-label-name inst))
+      (format stream "~%    ;; struct.new typeidx ~D; array.new typeidx ~D"
+              +type-idx-closure+ +type-idx-eqref-array+)
+      (emit-wasm-closure-allocation reg-map (vm-dst inst) entry-idx
+                                    (vm-captured-vars inst) stream 4))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-closure-ref-idx) stream)
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-closure-ref-wat reg-map
+                                                 (vm-closure-reg inst)
+                                                 (vm-closure-index inst))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-cons) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -235,6 +287,29 @@ Uses $eqref_array_t as the canonical mutable eqref array representation."
     (when (opt-bounds-check-eliminable-marked-p inst)
       (format stream "~%    ;; BCE: explicit bounds check eliminated; array.set remains spec-checked"))
     (format stream "~%    (array.set $eqref_array_t ~A ~A ~A)" arr idx val)))
+
+(defun %wasm-string-literal-eqref (str)
+  "Return wasm-gc eqref construction for a string literal STR.
+Builds a $string_t struct with a $bytes_array_t containing the UTF-8 bytes."
+  (let* ((bytes (map 'list #'char-code str))
+         (byte-elems (format nil "~{~A~^ ~}" 
+                              (mapcar (lambda (b) (format nil "(i32.const ~D)" b)) bytes))))
+    (format nil "(struct.new $string_t (array.new_fixed $bytes_array_t ~D ~A))"
+            (length bytes)
+            byte-elems)))
+
+(defun %wasm-symbol-literal-eqref (sym)
+  "Return wasm-gc eqref for a symbol literal SYM.
+Builds a staged symbol object: $symbol_t with the symbol's name string
+and null value cell."
+  (let ((name-str (string sym)))
+    (format nil "(struct.new $symbol_t ~A (ref.null eq))"
+            (%wasm-string-literal-eqref name-str))))
+
+(defun %wasm-float-literal-eqref (val)
+  "Return wasm-gc eqref for a float literal VAL.
+Wraps the f64.const in a boxed heap float struct."
+  (format nil "(struct.new $float_t (f64.const ~F))" val))
 
 (defun %wasm-empty-symbol-eqref ()
   "Return a staged symbol eqref literal.

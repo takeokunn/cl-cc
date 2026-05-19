@@ -12,10 +12,10 @@
                               (lambda (&rest args)
                                 (declare (ignore args))
                                 :builder))
-       (with-replaced-function (cl-cc::%write-native-binary
-                                (lambda (builder code-bytes output-path)
-                                  (declare (ignore builder code-bytes))
-                                  output-path))
+        (with-replaced-function (cl-cc::%write-native-binary
+                                 (lambda (builder code-bytes output-path &key &allow-other-keys)
+                                   (declare (ignore builder code-bytes))
+                                   output-path))
          ,(if cache-path
               `(with-replaced-function (cl-cc::%compile-cache-path
                                         (lambda (&rest args)

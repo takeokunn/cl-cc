@@ -87,7 +87,13 @@
 (deftest-compile compile-search
   "search returns the position of the pattern or nil when not found (ANSI CL)."
   :cases (("found"     2   "(search \"ll\" \"hello\")")
-          ("not-found" nil "(search \"xyz\" \"hello\")"))
+          ("not-found" nil "(search \"xyz\" \"hello\")")
+          ("from-end"  3   "(search '(2 3) '(1 2 3 2 3) :from-end t)")
+          ("test-not"  0   "(search '(1) '(2 1) :test-not #'=)")
+          ("bounds"    3   "(search '(2 3) '(0 2 3 2 3) :start2 2)")
+          ("key"       1   "(search '(\"bb\" \"ccc\") '(\"a\" \"bb\" \"ccc\") :key #'length)")
+          ("dynamic-nil-key" 1 "(let ((k nil)) (search '(2) '(1 2 3) :key k))")
+          ("dynamic-nil-end" 1 "(let ((e nil)) (search '(2 3) '(1 2 3) :end1 e :end2 e))"))
   )
 
 ;;; I/O and Format Tests
@@ -96,10 +102,22 @@
   "write-to-string and format nil return the expected string representations."
   :cases (("write-integer"   "42"          "(write-to-string 42)")
           ("write-symbol"    "HELLO"       "(write-to-string 'hello)")
-          ("format-string"   "hello world" "(format nil \"hello ~A\" \"world\")")
-          ("format-number"   "x=42"        "(format nil \"x=~A\" 42)")
-          ("format-no-args"  "hello"       "(format nil \"hello\")")
-          ("format-multi"    "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)"))
+           ("format-string"   "hello world" "(format nil \"hello ~A\" \"world\")")
+           ("format-number"   "x=42"        "(format nil \"x=~A\" 42)")
+           ("format-no-args"  "hello"       "(format nil \"hello\")")
+           ("format-multi"    "1 + 2 = 3"   "(format nil \"~A + ~A = ~A\" 1 2 3)")
+           ("format-write"    "\"x\""      "(format nil \"~S\" \"x\")")
+           ("format-tilde"    "cost ~ 5"    "(format nil \"cost ~~ ~A\" 5)")
+           ("format-newline"  (format nil "line~%next") "(format nil \"line~%next\")"))
+  )
+
+(deftest-compile io-format-evaluation-order
+  "format evaluates destination/control/arguments left-to-right even when static lowering is used."
+  :cases (("extra-args-evaluated" 2 "(let ((x 0)) (format nil \"~A\" (setq x (+ x 1)) (setq x (+ x 1))) x)")
+          ("stream-before-static-arg" (list "arg" "dest")
+           "(let ((order nil) (s (make-string-output-stream))) (format (progn (setq order (cons \"dest\" order)) s) \"~A\" (progn (setq order (cons \"arg\" order)) \"x\")) order)")
+          ("control-before-dynamic-arg" (list "arg" "control")
+           "(let ((order nil)) (format nil (progn (setq order (cons \"control\" order)) \"~A\") (progn (setq order (cons \"arg\" order)) \"x\")) order)"))
   )
 
 (deftest-each io-print-returns-value
@@ -201,6 +219,33 @@
            ("descending" '(5 3 1)            "(sort (list 3 1 5) (lambda (a b) (> a b)))")
            ("single"     '(42)               "(sort (list 42) (lambda (a b) (< a b)))")
            ("empty"      nil                 "(sort nil (lambda (a b) (< a b)))"))
+  :stdlib t)
+
+(deftest-compile compile-sort-vector
+  "sort and stable-sort handle vectors destructively and return the sorted vector."
+  :cases (("ascending"
+            '(1 1 3 4 5)
+            "(let ((v (vector 3 1 4 1 5)))
+               (let ((r (sort v (lambda (a b) (< a b)))))
+                 (list (aref r 0) (aref r 1) (aref r 2) (aref r 3) (aref r 4))))")
+          ("descending"
+            '(5 4 3 1 1)
+            "(let ((v (vector 3 1 4 1 5)))
+               (sort v (lambda (a b) (> a b)))
+               (list (aref v 0) (aref v 1) (aref v 2) (aref v 3) (aref v 4)))")
+          ("identity"
+            t
+            "(let ((v (vector 2 1)))
+               (not (eql 0 (eq v (sort v (lambda (a b) (< a b)))))))")
+          ("empty"
+            0
+            "(let ((v (vector)))
+               (length (sort v (lambda (a b) (< a b)))))")
+          ("stable-key"
+            '(:b :d :a :c)
+            "(let ((v (vector (cons 2 :a) (cons 1 :b) (cons 2 :c) (cons 1 :d))))
+               (stable-sort v (lambda (a b) (< a b)) :key #'car)
+               (list (cdr (aref v 0)) (cdr (aref v 1)) (cdr (aref v 2)) (cdr (aref v 3))))"))
   :stdlib t)
 
 ;;; Coerce Tests

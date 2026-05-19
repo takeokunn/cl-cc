@@ -39,10 +39,42 @@
   "Symbol table load command (LC_SYMTAB). #x03 is the obsolete LC_SYMSEG.")
 (defconstant +lc-dysymtab+ #x0B
   "Dynamic symbol table load command.")
+(defconstant +lc-load-dylib+ #x0C
+  "Load dynamic library command.")
 (defconstant +lc-load-dylinker+ #x0E
   "Dynamic linker load command.")
+(defconstant +lc-code-signature+ #x1D
+  "Code signature link-edit data command.")
+(defconstant +lc-dyld-info-only+ #x80000022
+  "Compressed dyld rebase/bind/export information command (LC_DYLD_INFO_ONLY).")
 (defconstant +lc-main+ #x80000028
   "Main entry point load command (LC_MAIN | LC_REQ_DYLD).")
+
+;; Symbol flags
+(defconstant +n-undef+ #x00
+  "Undefined nlist symbol type.")
+(defconstant +n-ext+ #x01
+  "External nlist symbol flag.")
+
+;; Mach-O x86-64 relocation types
+(defconstant +x86-64-reloc-unsigned+ 0
+  "X86_64_RELOC_UNSIGNED relocation type.")
+(defconstant +x86-64-reloc-signed+ 1
+  "X86_64_RELOC_SIGNED relocation type.")
+(defconstant +x86-64-reloc-branch+ 2
+  "X86_64_RELOC_BRANCH relocation type.")
+(defconstant +x86-64-reloc-got-load+ 3
+  "X86_64_RELOC_GOT_LOAD relocation type.")
+
+;; Mach-O ARM64 relocation types
+(defconstant +arm64-reloc-unsigned+ 0
+  "ARM64_RELOC_UNSIGNED relocation type.")
+(defconstant +arm64-reloc-branch26+ 2
+  "ARM64_RELOC_BRANCH26 relocation type.")
+(defconstant +arm64-reloc-page21+ 3
+  "ARM64_RELOC_PAGE21 relocation type.")
+(defconstant +arm64-reloc-pageoff12+ 4
+  "ARM64_RELOC_PAGEOFF12 relocation type.")
 
 ;; Header Flags
 (defconstant +mh-noundefs+ 1
@@ -110,6 +142,19 @@
   (reserved2 0 :type (unsigned-byte 32))
   (reserved3 0 :type (unsigned-byte 32)))
 
+(defstruct relocation-info
+  "Mach-O relocation_info entry.
+
+R-ADDRESS is section-relative.  R-SYMBOLNUM is either a symbol-table index for
+external relocations or a section ordinal for local relocations.  R-LENGTH uses
+Mach-O's log2 width encoding (2 means 4 bytes, 3 means 8 bytes)."
+  (r-address 0 :type (unsigned-byte 32))
+  (r-symbolnum 0 :type (unsigned-byte 32))
+  (r-pcrel 0 :type (unsigned-byte 8))
+  (r-length 2 :type (unsigned-byte 8))
+  (r-extern 1 :type (unsigned-byte 8))
+  (r-type 0 :type (unsigned-byte 8)))
+
 (defstruct symtab-command
   "Symbol table load command."
   (cmd +lc-symtab+ :type (unsigned-byte 32))
@@ -141,6 +186,38 @@
   (nextrel 0 :type (unsigned-byte 32))
   (locreloff 0 :type (unsigned-byte 32))
   (nlocrel 0 :type (unsigned-byte 32)))
+
+(defstruct dyld-info-command
+  "LC_DYLD_INFO_ONLY command containing link-edit rebase/bind/export ranges."
+  (cmd +lc-dyld-info-only+ :type (unsigned-byte 32))
+  (cmdsize 48 :type (unsigned-byte 32))
+  (rebase-off 0 :type (unsigned-byte 32))
+  (rebase-size 0 :type (unsigned-byte 32))
+  (bind-off 0 :type (unsigned-byte 32))
+  (bind-size 0 :type (unsigned-byte 32))
+  (weak-bind-off 0 :type (unsigned-byte 32))
+  (weak-bind-size 0 :type (unsigned-byte 32))
+  (lazy-bind-off 0 :type (unsigned-byte 32))
+  (lazy-bind-size 0 :type (unsigned-byte 32))
+  (export-off 0 :type (unsigned-byte 32))
+  (export-size 0 :type (unsigned-byte 32)))
+
+(defstruct dylib-command
+  "LC_LOAD_DYLIB command for a dependent dynamic library."
+  (cmd +lc-load-dylib+ :type (unsigned-byte 32))
+  (cmdsize 56 :type (unsigned-byte 32))
+  (name-offset 24 :type (unsigned-byte 32))
+  (timestamp 2 :type (unsigned-byte 32))
+  (current-version #x00010000 :type (unsigned-byte 32))
+  (compatibility-version #x00010000 :type (unsigned-byte 32))
+  (name "/usr/lib/libSystem.B.dylib" :type string))
+
+(defstruct linkedit-data-command
+  "LC_CODE_SIGNATURE and other link-edit data command payload ranges."
+  (cmd +lc-code-signature+ :type (unsigned-byte 32))
+  (cmdsize 16 :type (unsigned-byte 32))
+  (dataoff 0 :type (unsigned-byte 32))
+  (datasize 0 :type (unsigned-byte 32)))
 
 (defstruct entry-point-command
   "LC_MAIN entry point command."

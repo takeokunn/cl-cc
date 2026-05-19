@@ -21,9 +21,10 @@
    #:regalloc-lookup
    #:instruction-defs
    #:instruction-uses
-   #:compute-live-intervals
-   #:linear-scan-allocate
-   #:allocate-registers
+    #:compute-live-intervals
+    #:linear-scan-allocate
+    #:color-allocate
+    #:allocate-registers
    #:vm-spill-store
    #:vm-spill-load
    #:make-vm-spill-store

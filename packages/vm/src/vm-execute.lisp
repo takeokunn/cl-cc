@@ -26,6 +26,11 @@
   (vm-reg-set state (vm-dst inst) (vm-reg-get state (vm-src inst)))
   (values (1+ pc) nil nil))
 
+(defmethod execute-instruction ((inst vm-prefetch) state pc labels)
+  "Execute a cache prefetch hint as a semantic no-op in the VM interpreter."
+  (declare (ignore inst state labels))
+  (values (1+ pc) nil nil))
+
 (defconstant +vm-min-fixnum51+ (- (ash 1 50))
   "Smallest integer encodable by the VM's 51-bit signed fixnum representation.")
 

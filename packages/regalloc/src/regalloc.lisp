@@ -35,10 +35,20 @@
   (phys-reg nil)
   (spill-slot nil))
 
+(defstruct (live-range-split-boundary (:conc-name split-boundary-))
+  "Internal edge connecting two child intervals across a live-range hole."
+  (after-position nil)
+  (before-position nil)
+  (from-vreg nil)
+  (to-vreg nil)
+  (slot nil))
+
 (defstruct (regalloc-result (:conc-name regalloc-))
   (assignment nil)
   (spill-map nil)
   (spill-count 0 :type fixnum)
+  (gpr-pressure 0 :type fixnum)
+  (fp-pressure 0 :type fixnum)
   (instructions nil :type list))
 
 ;;; Instruction Def/Use Analysis
@@ -167,9 +177,8 @@ entry points without changing interval semantics."
     (list :prefer-callee-saved-p (not leaf-callee-chain-p)
           :prefer-caller-saved-p (and leaf-p leaf-callee-chain-p))))
 
-(defun compute-live-intervals (instructions &optional float-vregs)
-  "Compute live intervals for all virtual registers.
-   Returns a list of live-interval objects sorted by start point."
+(defun %compute-live-intervals-raw (instructions &optional float-vregs)
+  "Compute unsplit live intervals for all virtual registers."
   (let ((intervals (make-hash-table :test #'eq))
         (label-map (build-label-map instructions))
         (inst-vec (coerce instructions 'vector))
@@ -266,3 +275,98 @@ entry points without changing interval semantics."
                   (push interval result))
                 intervals)
       (sort result #'< :key #'interval-start))))
+
+(defun %split-vreg-name (vreg child-index)
+  "Return a deterministic keyword for child CHILD-INDEX of VREG."
+  (intern (format nil "~A/SPLIT~D" (symbol-name vreg) child-index) :keyword))
+
+(defun %copy-live-interval-segment (interval vreg start end uses)
+  "Copy INTERVAL metadata into a child segment for VREG."
+  (make-live-interval
+   :vreg vreg
+   :start start
+   :end end
+   :use-positions uses
+   :parameter-index (and (= start (interval-start interval))
+                         (interval-parameter-index interval))
+   :coalesce-with (and (= start (interval-start interval))
+                       (interval-coalesce-with interval))
+   :crosses-call-p (interval-crosses-call-p interval)
+   :fp-p (interval-fp-p interval)
+   :remat-const (and (= start (interval-start interval))
+                     (interval-remat-const interval))
+   :remat-inst (and (= start (interval-start interval))
+                    (interval-remat-inst interval))
+   :return-value-p (and (= end (interval-end interval))
+                        (interval-return-value-p interval))))
+
+(defun split-live-interval (interval minimum-hole-size)
+  "Split INTERVAL at use-position holes larger than MINIMUM-HOLE-SIZE.
+
+Returns the child live intervals as the primary value.  A secondary value carries
+internal split-boundary records used by the allocator to insert fixed spill
+stores/loads at split edges.  The live-interval structure itself stays unchanged
+for external callers."
+  (let ((uses (sort (copy-list (interval-use-positions interval)) #'<)))
+    (if (or (null uses) (null (cdr uses)))
+        (values (list interval) nil)
+        (let ((segments nil)
+              (boundaries nil)
+              (segment-start (interval-start interval))
+              (segment-uses nil)
+              (child-index 0)
+              (previous-child-vreg (interval-vreg interval)))
+          (labels ((child-vreg (index)
+                     (if (zerop index)
+                         (interval-vreg interval)
+                         (%split-vreg-name (interval-vreg interval) index)))
+                   (finish-segment (end)
+                     (let ((vreg (child-vreg child-index)))
+                       (push (%copy-live-interval-segment
+                              interval vreg segment-start end
+                              (sort (copy-list segment-uses) #'<))
+                             segments)
+                       (setf previous-child-vreg vreg))))
+            (loop for rest on uses
+                  for use = (car rest)
+                  for next-use = (cadr rest)
+                  do (push use segment-uses)
+                     (when (and next-use
+                                (> (- next-use use) minimum-hole-size))
+                       (finish-segment use)
+                       (incf child-index)
+                       (let ((next-vreg (child-vreg child-index)))
+                         (push (make-live-range-split-boundary
+                                :after-position use
+                                :before-position next-use
+                                :from-vreg previous-child-vreg
+                                :to-vreg next-vreg)
+                               boundaries))
+                       (setf segment-start next-use
+                             segment-uses nil)))
+            (finish-segment (interval-end interval))
+            (values (nreverse segments) (nreverse boundaries)))))))
+
+(defun compute-live-intervals (instructions &optional float-vregs)
+  "Compute live intervals for all virtual registers.
+   Returns a list of live-interval objects sorted by start point."
+  (%compute-live-intervals-raw instructions float-vregs))
+
+(defun regalloc-register-pressure (intervals &key fp-p)
+  "Return the peak number of simultaneously live intervals in one register class."
+  (let ((events nil))
+    (dolist (interval intervals)
+      (when (eq (and (interval-fp-p interval) t) (and fp-p t))
+        ;; End events sort before start events at the same position, matching the
+        ;; linear-scan expiry rule where a register ending at I is reusable at I.
+        (push (cons (interval-start interval) 1) events)
+        (push (cons (1+ (interval-end interval)) -1) events)))
+    (let ((live 0)
+          (peak 0))
+      (dolist (event (sort events (lambda (a b)
+                                   (if (= (car a) (car b))
+                                       (< (cdr a) (cdr b))
+                                       (< (car a) (car b))))))
+        (incf live (cdr event))
+        (setf peak (max peak live)))
+      peak)))

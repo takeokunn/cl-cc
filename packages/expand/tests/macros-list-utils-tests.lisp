@@ -9,8 +9,8 @@
 (in-suite macros-list-utils-suite)
 
 (deftest macros-list-utils-sort-expands
-  "SORT expands to a merge-sort labels form."
-  (assert-eq 'let (car (our-macroexpand-1 '(sort lst #'<)))))
+  "SORT expands to a sequence-sorting LET* form."
+  (assert-eq 'let* (car (our-macroexpand-1 '(sort lst #'<)))))
 
 (deftest macros-list-utils-list*-and-pushnew
   "LIST* and PUSHNEW expand to the expected core forms."

@@ -207,27 +207,35 @@ Returns (values handler-found-p handler-info) or signals error."
 
 ;;; ─── Condition Construction Helpers ──────────────────────────────────────────
 
-(defun make-vm-type-error (vm-state expected-type datum)
+(defun make-vm-type-error (vm-state expected-type datum &key error-code ((:fix-it vm-fix-it)))
   "Construct a vm-type-error condition."
   (make-condition 'vm-type-error
                   :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
                   :expected-type expected-type
                   :datum datum))
 
-(defun make-vm-unbound-variable (vm-state variable-name)
+(defun make-vm-unbound-variable (vm-state variable-name &key error-code ((:fix-it vm-fix-it)))
   "Construct a vm-unbound-variable condition."
   (make-condition 'vm-unbound-variable
                   :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
                   :name variable-name))
 
-(defun make-vm-undefined-function (vm-state function-name)
+(defun make-vm-undefined-function (vm-state function-name &key error-code ((:fix-it vm-fix-it)))
   "Construct a vm-undefined-function condition."
   (make-condition 'vm-undefined-function
                   :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
                   :name function-name))
 
-(defun make-vm-division-by-zero (vm-state dividend)
+(defun make-vm-division-by-zero (vm-state dividend &key error-code ((:fix-it vm-fix-it)))
   "Construct a vm-division-by-zero condition."
   (make-condition 'vm-division-by-zero
                   :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
                   :dividend dividend))

@@ -2,7 +2,12 @@
 
 (in-package :cl-cc/parse)
 
-;;; Diagnostic struct
+;;; Diagnostic structs
+
+(defstruct fix-it
+  "A suggested source edit associated with a diagnostic."
+  (text "" :type string)              ; replacement / suggestion text
+  (span (cons 0 0)))                  ; (start-byte . end-byte)
 
 (defstruct diagnostic
   "A diagnostic message with source location."
@@ -11,7 +16,9 @@
   (source-file nil)
   (message     "" :type string)
   (hints       nil :type list)       ; ((label . (start . end)) ...)
-  (notes       nil :type list))      ; list of strings
+  (notes       nil :type list)       ; list of strings
+  (error-code  nil)                  ; machine-readable code, e.g. "E0001"
+  (fix-it      nil))                 ; optional FIX-IT suggestion
 
 (defstruct diag-source-location
   "A resolved source location for diagnostics."
@@ -65,7 +72,15 @@
       (format stream "   = hint: ~A~%" (car h)))
     ;; notes
     (dolist (n (diagnostic-notes diag))
-      (format stream "   = note: ~A~%" n))))
+      (format stream "   = note: ~A~%" n))
+    ;; structured fields
+    (when (diagnostic-error-code diag)
+      (format stream "   = code: ~A~%" (diagnostic-error-code diag)))
+    (when (diagnostic-fix-it diag)
+      (let ((fix-it (diagnostic-fix-it diag)))
+        (format stream "   = fix-it: replace ~S with ~S~%"
+                (fix-it-span fix-it)
+                (fix-it-text fix-it))))))
 
 (defun format-diagnostic-list (diags source &optional (stream *standard-output*))
   "Format a list of diagnostics with summary."
@@ -78,13 +93,15 @@
 
 ;;; Convenience constructors
 
-(defun make-parse-error (message span &key source-file hints notes)
+(defun make-parse-error (message span &key source-file hints notes error-code fix-it)
   (make-diagnostic :severity :error :message message :span span
-                   :source-file source-file :hints hints :notes notes))
+                   :source-file source-file :hints hints :notes notes
+                   :error-code error-code :fix-it fix-it))
 
-(defun make-parse-warning (message span &key source-file hints notes)
+(defun make-parse-warning (message span &key source-file hints notes error-code fix-it)
   (make-diagnostic :severity :warning :message message :span span
-                   :source-file source-file :hints hints :notes notes))
+                   :source-file source-file :hints hints :notes notes
+                   :error-code error-code :fix-it fix-it))
 
 ;;; Condition
 

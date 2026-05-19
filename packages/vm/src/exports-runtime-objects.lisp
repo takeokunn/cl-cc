@@ -116,18 +116,31 @@
    vm2-state-global-vars
    vm-output-stream
    vm-global-vars
-   vm-profile-enabled-p
-    vm-profile-call-stack
-    vm-profile-samples
-  vm-get-profile-samples
-  vm-get-profile-bb-counts
-  vm-get-profile-branch-counts
-  vm-get-profile-call-counts
-  vm-get-profile-type-feedback
-    *instruction-constructors*
-   vm-falsep
-   vm-program-leaf-p
-   vm-error-type-matches-p
+    vm-profile-enabled-p
+      vm-profile-call-stack
+      vm-profile-call-start-times
+      vm-profile-samples
+   vm-get-profile-samples
+   vm-get-profile-bb-counts
+    vm-profile-inst-counts
+    vm-get-profile-inst-counts
+    vm-profile-inst-hit
+    vm-get-profile-branch-counts
+    vm-get-profile-call-counts
+    vm-profile-call-times
+    vm-get-profile-call-times
+    vm-get-profile-type-feedback
+   *collect-profile*
+   *profile-output*
+   vm-type-profile-alist
+   vm-dump-type-profile
+   vm-maybe-dump-type-profile
+     *instruction-constructors*
+    vm-falsep
+    vm-program-leaf-p
+    vm-program-calling-convention
+    vm-program-function-conventions
+    vm-error-type-matches-p
    clone-vm-state
    %documentation-table*
    *documentation-table*
