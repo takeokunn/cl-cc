@@ -13,7 +13,7 @@
 
 ## Optimization
 
-- [optimize-passes.md](optimize-passes.md) — Core Passes, CPS/SSA & Speculative JIT (175 FR)
+- [optimize-passes.md](optimize-passes.md) — Core Passes, CPS/SSA & Speculative JIT (175 FR) — ✅ COMPLETE (175 / 175 FR, 0 🔶)
 - [optimize-backend.md](optimize-backend.md) — Analysis & Backend: partial eval, PGO, LTO, JIT, ABI (232 FR) — ✅ COMPLETE (232 / 232 FR)
 
 ## Native Backend
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: 1677/1798 tracked FRs complete (93%) | Self-hosting verified explicitly by `selfhost-suite` via `:cl-cc-test/e2e` | Test counts vary by entrypoint and should be verified from the current run artifacts**
+**Status: 1730/1798 tracked FRs complete (96%) | optimize-passes 175/175 FRs verified ✅ by Oracle review | Self-hosting verified explicitly by `selfhost-suite` via `:cl-cc-test/e2e` | Test counts vary by entrypoint and should be verified from the current run artifacts**
