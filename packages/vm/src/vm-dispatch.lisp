@@ -23,7 +23,7 @@ Used by custom method combination to do synchronous sub-calls.")
 (defvar *vm-exec-labels* nil
   "When non-nil, the label table of the currently executing VM program.")
 
-(defun %vm-call-closure-sync (closure state args)
+(defun %vm-call-closure-sync (closure state args &key method-context)
   "Call a VM closure synchronously, returning its result value.
 Requires *vm-exec-flat* and *vm-exec-labels* to be bound.
 Saves and restores call stack around the sub-invocation." 
@@ -39,7 +39,7 @@ Saves and restores call stack around the sub-invocation."
         (error "Cannot resolve entry label ~A" (vm-closure-entry-label closure)))
       ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
       (vm-push-call-frame state 0 result-reg)
-      (push nil (vm-method-call-stack state))
+      (push method-context (vm-method-call-stack state))
       (vm-profile-enter-call state (vm-closure-entry-label closure))
       (vm-bind-closure-args closure state args)
       (let ((*vm-exec-flat* flat)
@@ -120,6 +120,7 @@ check the host bridge whitelist."
 Missing registers are omitted from the returned table. This is a conservative
 helper for known-call snapshot trimming experiments." 
   (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
+    (setf (gethash :__subset-snapshot__ copy) t)
     (dolist (reg regs copy)
       (multiple-value-bind (value found-p)
           (gethash reg (vm-state-registers state))
@@ -129,19 +130,27 @@ helper for known-call snapshot trimming experiments."
 (defun vm-restore-registers (state saved-regs)
   "Replace the current register file with the SAVED-REGS snapshot."
   (when saved-regs
-    (clrhash (vm-state-registers state))
-    (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
-             saved-regs)))
+    (if (gethash :__subset-snapshot__ saved-regs)
+        (vm-restore-registers-subset state saved-regs)
+        (progn
+          (clrhash (vm-state-registers state))
+          (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+                   saved-regs)))))
 
 (defun vm-restore-registers-subset (state saved-regs)
   "Restore only the bindings present in SAVED-REGS into STATE." 
   (when saved-regs
-    (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+    (maphash (lambda (k v)
+               (unless (eq k :__subset-snapshot__)
+                 (setf (gethash k (vm-state-registers state)) v)))
              saved-regs)))
 
-(defun vm-push-call-frame (state return-pc dst-reg)
+(defun vm-push-call-frame (state return-pc dst-reg &optional live-regs)
   "Save current environment and push a call frame onto the call stack."
-  (push (list return-pc dst-reg (vm-closure-env state) (vm-save-registers state))
+  (push (list return-pc dst-reg (vm-closure-env state)
+              (if live-regs
+                  (vm-save-registers-subset state live-regs)
+                  (vm-save-registers state)))
         (vm-call-stack state)))
 
 (defun vm-bind-closure-args (closure state arg-values)
@@ -152,21 +161,28 @@ Restores captured environment, then handles required, &optional, &rest, and &key
         (rest-param (vm-closure-rest-param closure))
         (key-params (vm-closure-key-params closure))
         (captured   (vm-closure-captured-values closure)))
-    ;; Reserved argument slots for fast-path experiments / known-call helpers.
-    (vm-bind-arg-slots state arg-values)
     ;; Restore captured environment into registers
     (map nil (lambda (binding)
                (vm-reg-set state (car binding) (cdr binding)))
-         captured)
-    ;; Required parameters
-    (loop for param in params
-          for val in arg-values
-          do (vm-reg-set state param val))
-    ;; &optional, &rest, and &key parameters
+          captured)
     (let* ((n-req (length params))
            (n-opt (length opt-params))
-           (after-req (nthcdr n-req arg-values))
-           (post-opt-args (nthcdr (+ n-req n-opt) arg-values)))
+           (fixed-fast-p (and (null opt-params)
+                              (null rest-param)
+                              (null key-params)
+                              (<= n-req +vm-arg-slot-count+)))
+           (arg-slots (vm-bind-arg-slots state arg-values)))
+      ;; Required parameters
+      (if fixed-fast-p
+          (loop for param in params
+                for slot in arg-slots
+                do (vm-reg-set state param (vm-reg-get state slot)))
+          (loop for param in params
+                for val in arg-values
+                do (vm-reg-set state param val)))
+      ;; &optional, &rest, and &key parameters
+      (let* ((after-req (nthcdr n-req arg-values))
+             (post-opt-args (nthcdr (+ n-req n-opt) arg-values)))
       (when opt-params
         (loop for (reg default) in opt-params
               for i from 0
@@ -197,11 +213,11 @@ Restores captured environment, then handles required, &optional, &rest, and &key
                     (vm-reg-set state reg
                                 (if foundp value default))))))
             (loop for (keyword reg default) in key-params
-                  do (let ((pos (position keyword post-opt-args)))
-                       (vm-reg-set state reg
-                                   (if pos
-                                       (nth (1+ pos) post-opt-args)
-                                       default))))))
+                   do (let ((pos (position keyword post-opt-args)))
+                        (vm-reg-set state reg
+                                    (if pos
+                                        (nth (1+ pos) post-opt-args)
+                                        default)))))))
     ;; Activate closure environment for nested closures
     (when captured
       (setf (vm-closure-env state) captured)))))

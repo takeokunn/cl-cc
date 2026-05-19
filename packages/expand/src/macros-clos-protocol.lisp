@@ -112,8 +112,21 @@
     (let* ((name (second form))
            (options (cddr form))
            (direct-superclasses (or (getf options :direct-superclasses) '()))
-           (direct-slots (or (getf options :direct-slots) '())))
+            (direct-slots (or (getf options :direct-slots) '())))
       (list 'defclass name direct-superclasses direct-slots))))
+
+;;; F7a: define-sealed-type — defclass sugar that marks class descriptors sealed.
+
+(register-macro 'define-sealed-type
+  (lambda (form env)
+    (declare (ignore env))
+    (let ((name (second form))
+          (direct-superclasses (third form))
+          (direct-slots (fourth form))
+          (options (cddddr form)))
+      (append (list 'defclass name direct-superclasses direct-slots)
+              options
+              (list '(:sealed t))))))
 
 ;;; FR-1003: change-class — change the class of a CLOS instance
 
@@ -154,8 +167,82 @@
 ;;; Registers the combination name so defgeneric can reference it.
 ;;; The actual dispatch is handled by the VM in vm-dispatch-generic-call.
 ;;; Supported short-form: (define-method-combination name &key operator identity-with-one-argument)
+;;;
+;;; Long-form: (define-method-combination name lambda-list (method-group-spec*)
+;;;              form*)
+;;;   lambda-list       = (variable*) — each variable receives applicable methods
+;;;   method-group-spec = (variable {qualifier-pattern}*)
+;;;   qualifier-pattern = qualifier | ()
+
+(defun %method-comb-register-short-form (name options)
+  "Return a load-time registration form for a short-form method combination."
+  (let ((operator (getf options :operator))
+        (identity-one (getf options :identity-with-one-argument)))
+    (if operator
+        `(eval-when (:load-toplevel :execute)
+           (pushnew (cons ',name
+                          ,(if identity-one
+                               `(lambda (results)
+                                  (if (= (length results) 1)
+                                      (car results)
+                                      (apply (function ,operator) results)))
+                               `(lambda (results)
+                                  (apply (function ,operator) results))))
+                    cl-cc/vm::*method-combination-operators*
+                    :key #'car :test #'eq))
+        `(eval-when (:load-toplevel :execute)
+           (pushnew (cons ',name (lambda (results) (car (last results))))
+                    cl-cc/vm::*method-combination-operators*
+                    :key #'car :test #'eq)))))
+
+(defun %method-comb-register-long-form (name lambda-list method-group-specs body-forms)
+  "Return a load-time registration form for a long-form method combination."
+  (let* ((fname (intern (format nil "COMBINE-~A" (symbol-name name)) :cl-cc/vm))
+         (group-bindings
+           (loop for spec in method-group-specs
+                 for var = (car spec)
+                 for rest = (cdr spec)
+                 for qual-pats = (loop for x in rest
+                                       until (member x '(:required :description :order) :test #'eq)
+                                       collect x)
+                 collect (list var qual-pats)))
+         (combiner-body
+           `(progn
+              ,@(loop for (var qual-pats) in group-bindings
+                      for pred = (if (null qual-pats)
+                                     `(constantly t)
+                                     (if (and (= (length qual-pats) 1) (null (car qual-pats)))
+                                         `(lambda (m) (null (method-qualifiers m)))
+                                         `(lambda (m)
+                                            (let ((mq (method-qualifiers m)))
+                                              (some (lambda (pat)
+                                                      (if (listp pat)
+                                                          (equal mq pat)
+                                                          (member pat mq :test #'eq)))
+                                                    ',qual-pats)))))
+                      collect `(,var (remove-if-not ,pred all-methods))
+                      collect `(declare (ignorable ,var)))
+              ,@body-forms)))
+    `(eval-when (:load-toplevel :execute)
+       (let ((fn (lambda (all-methods all-args)
+                   (declare (ignorable all-methods all-args))
+                   ,combiner-body)))
+         (setf (fdefinition ',fname) fn)
+         (import ',fname (find-package :cl-cc/vm))
+         (pushnew (cons ',name (cons :long-form fn))
+                  cl-cc/vm::*method-combination-operators*
+                  :key #'car :test #'eq)))))
 
 (register-macro 'define-method-combination
   (lambda (form env)
     (declare (ignore env))
-    (list 'quote (second form))))
+    (let ((name (second form))
+          (rest (cddr form)))
+      (cond
+        ((and rest (keywordp (car rest)))
+         `(progn ,(%method-comb-register-short-form name rest) ',name))
+        (t
+         (destructuring-bind (lambda-list method-group-specs . body-forms) rest
+           `(progn ,(%method-comb-register-long-form name lambda-list
+                      method-group-specs body-forms)
+                   ',name)))))))

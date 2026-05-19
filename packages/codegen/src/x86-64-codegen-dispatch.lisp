@@ -42,6 +42,35 @@ When FUNC-REG is RAX, use RCX as scratch to avoid clobbering the branch target."
 
 ;;; VM Instruction Emitters (with label support)
 
+(defun x86-64-bce-eliminable-inst-p (inst)
+  "Return T when BCE metadata proves INST's array bounds check redundant."
+  (let ((metadata (opt-bounds-check-eliminable-metadata inst)))
+    (or (getf metadata :bce-eliminable)
+        (getf metadata :bounds-check-eliminable))))
+
+(defun emit-vm-array-bounds-check-if-needed (inst stream &optional reg-name-fn)
+  "Emit an array bounds check for INST unless BCE proved it redundant.
+
+  Returns true when a check was emitted and NIL when BCE metadata allowed the
+  caller to use the unchecked access path.  Textual x86-64 lowering consumes this
+  hook directly; encoded native lowering must use the same predicate before
+  emitting any compare/jump guard sequence."
+  (flet ((reg-name (reg)
+           (if reg-name-fn
+               (funcall reg-name-fn reg)
+               (string-downcase (symbol-name reg)))))
+    (if (x86-64-bce-eliminable-inst-p inst)
+        nil
+        (progn
+          (when *x86-64-spectre-mitigations-enabled*
+            ;; LFENCE serializes before the bounds-dependent load/store path.
+            (format stream "  lfence~%"))
+          (format stream "  cmp ~A, [~A + 0]~%"
+                  (reg-name (vm-index-reg inst))
+                  (reg-name (vm-array-reg inst)))
+          (format stream "  jae clcc_array_bounds_trap~%")
+          t))))
+
 (defun emit-vm-halt-inst (inst stream)
   "Emit code for VM HALT instruction.
    Moves the result register to RAX for the return value."

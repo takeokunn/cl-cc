@@ -15,16 +15,68 @@
 ;;; Step 1: Collect all function entry labels
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defun %wasm-dense-case-entry-labels (instructions)
+  "Return closure labels that belong to a dense CASE table dispatch.
+
+Those lambda bodies must stay in the enclosing trampoline function so the later
+br_table lowering can branch to their VM labels instead of call_indirect-ing
+through extracted standalone functions."
+  (let ((const-values (make-hash-table :test #'eq))
+        (closure-labels (make-hash-table :test #'eq))
+        (list-labels (make-hash-table :test #'eq))
+        (vector-labels (make-hash-table :test #'eq))
+        (index-info (make-hash-table :test #'eq))
+        (case-labels (make-hash-table :test #'equal)))
+    (labels ((dense-labels-p (labels)
+               (and labels (>= (length labels) 4)))
+             (remember (label-list)
+               (when (dense-labels-p label-list)
+                 (dolist (label label-list)
+                   (setf (gethash label case-labels) t)))))
+      (dolist (inst instructions case-labels)
+        (cond
+          ((typep inst 'vm-const)
+           (setf (gethash (vm-dst inst) const-values) (vm-value inst)))
+          ((typep inst 'vm-closure)
+           (setf (gethash (vm-dst inst) closure-labels) (vm-label-name inst)))
+          ((typep inst 'vm-cons)
+           (let ((car-label (gethash (vm-car-reg inst) closure-labels))
+                 (cdr-labels (gethash (vm-cdr-reg inst) list-labels)))
+             (multiple-value-bind (cdr-value cdr-const-p)
+                 (gethash (vm-cdr-reg inst) const-values)
+               (when (and car-label (or (and cdr-const-p (null cdr-value)) cdr-labels))
+                 (setf (gethash (vm-dst inst) list-labels)
+                       (cons car-label cdr-labels))))))
+          ((typep inst 'cl-cc/vm::vm-coerce-to-vector)
+           (let ((labels (gethash (vm-src inst) list-labels)))
+             (when labels
+               (setf (gethash (vm-dst inst) vector-labels) labels))))
+          ((typep inst 'vm-sub)
+           (let ((min-key (gethash (vm-rhs inst) const-values)))
+             (when (integerp min-key)
+               (setf (gethash (vm-dst inst) index-info)
+                     (cons (vm-lhs inst) min-key)))))
+          ((typep inst 'vm-move)
+           (dolist (table (list vector-labels index-info))
+             (let ((value (gethash (vm-src inst) table)))
+               (when value
+                 (setf (gethash (vm-dst inst) table) value)))))
+          ((typep inst 'cl-cc/vm::vm-svref)
+           (when (gethash (vm-rhs inst) index-info)
+             (remember (gethash (vm-lhs inst) vector-labels)))))))))
+
 (defun collect-entry-labels (instructions)
   "Scan INSTRUCTIONS and return a hash-set of all function entry label names.
    An entry label appears as (vm-label-name inst) on vm-closure and vm-func-ref."
-  (let ((entry-labels (make-hash-table :test #'equal)))
+  (let ((entry-labels (make-hash-table :test #'equal))
+        (case-entry-labels (%wasm-dense-case-entry-labels instructions)))
     (%scan-instructions
      instructions
      (lambda (inst)
        (typecase inst
-         (vm-closure
-          (setf (gethash (vm-label-name inst) entry-labels) t))
+          (vm-closure
+           (unless (gethash (vm-label-name inst) case-entry-labels)
+             (setf (gethash (vm-label-name inst) entry-labels) t)))
          (vm-func-ref
           (setf (gethash (vm-label-name inst) entry-labels) t))
          (vm-register-function

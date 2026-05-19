@@ -26,10 +26,15 @@
            '(:rplaca 0 1))
           ("vm-rplacd"       (make-vm-rplacd :cons 0 :val 1)
            '(:rplacd 0 1))
-          ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2))
-           '(:make-closure 0 :func (:x :y) 1 2))
-          ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 2)
-           '(:closure-ref-idx 0 1 2)))
+           ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2))
+            '(:make-closure 0 :func (:x :y) 1 2))
+           ("vm-func-ref"     (make-vm-func-ref :dst 0 :label :func :params '(:x :y)
+                                                 :optional-params nil :rest-param nil
+                                                 :key-params nil :rest-stack-alloc-p nil
+                                                 :inline-policy nil :dispatch-tag '(:anonymous))
+            '(:func-ref 0 :func (:x :y) nil nil nil nil nil (:anonymous)))
+           ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 2)
+            '(:closure-ref-idx 0 1 2)))
   (inst expected)
   (assert-equal expected (instruction->sexp inst)))
 
@@ -70,6 +75,15 @@
     (assert-equal (vm-make-closure-params inst) '(:x))
     (assert-equal (vm-env-regs inst) '(1))))
 
+(deftest sexp->instruction-vm-func-ref
+  "Test sexp->instruction for vm-func-ref."
+  (let ((inst (sexp->instruction '(:func-ref 0 :func (:x) nil nil nil nil nil (:anonymous)))))
+    (assert-type vm-func-ref inst)
+    (assert-eq (vm-dst inst) 0)
+    (assert-eq (vm-label-name inst) :func)
+    (assert-equal (vm-closure-params inst) '(:x))
+    (assert-equal (vm-func-ref-dispatch-tag inst) '(:anonymous))))
+
 (deftest sexp->instruction-vm-closure-ref-idx
   "Test sexp->instruction for vm-closure-ref-idx."
   (let ((inst (sexp->instruction '(:closure-ref-idx 0 1 3))))
@@ -85,10 +99,14 @@
   :cases (("vm-cons"         (make-vm-cons :dst 0 :car-src 1 :cdr-src 2))
           ("vm-car"          (make-vm-car :dst 0 :src 1))
           ("vm-cdr"          (make-vm-cdr :dst 0 :src 1))
-          ("vm-rplaca"       (make-vm-rplaca :cons 0 :val 1))
-          ("vm-rplacd"       (make-vm-rplacd :cons 0 :val 1))
-          ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2)))
-          ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 5)))
+           ("vm-rplaca"       (make-vm-rplaca :cons 0 :val 1))
+           ("vm-rplacd"       (make-vm-rplacd :cons 0 :val 1))
+           ("vm-make-closure" (make-vm-make-closure :dst 0 :label :func :params '(:x :y) :env-regs '(1 2)))
+           ("vm-func-ref"     (make-vm-func-ref :dst 0 :label :func :params '(:x :y)
+                                                 :optional-params nil :rest-param nil
+                                                 :key-params nil :rest-stack-alloc-p nil
+                                                 :inline-policy nil :dispatch-tag '(:anonymous)))
+           ("vm-closure-ref"  (make-vm-closure-ref-idx :dst 0 :closure 1 :index 5)))
   (original)
   (let* ((sexp     (instruction->sexp original))
          (restored (sexp->instruction sexp)))

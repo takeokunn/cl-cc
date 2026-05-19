@@ -303,6 +303,33 @@
       (assert-true ok)
       (assert-= 5 value))))
 
+(deftest compile-time-eval-call-intern-folds-explicit-package
+  "%compile-time-eval-call resolves INTERN when name and package are literal constants."
+  (%with-clean-ct-env
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast:make-ast-var :name 'intern) (list "CAR" :cl) 10)
+      (assert-true ok)
+      (assert-eq 'cl:car value))))
+
+(deftest compile-time-eval-call-intern-folds-string-package
+  "%compile-time-eval-call accepts string package designators for INTERN folding."
+  (%with-clean-ct-env
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast:make-ast-var :name 'intern) (list "CDR" "CL") 10)
+      (assert-true ok)
+      (assert-eq 'cl:cdr value))))
+
+(deftest compile-time-eval-call-intern-rejects-implicit-package
+  "%compile-time-eval-call does not fold one-argument INTERN because *PACKAGE* is dynamic."
+  (%with-clean-ct-env
+    (multiple-value-bind (value ok)
+        (cl-cc/compile::%compile-time-eval-call
+         (cl-cc/ast:make-ast-var :name 'intern) (list "CAR") 10)
+      (assert-null ok)
+      (assert-null value))))
+
 (deftest compile-time-eval-call-builtin-not-folds
   "%compile-time-eval-call evaluates the built-in NOT function at compile time."
   (%with-clean-ct-env

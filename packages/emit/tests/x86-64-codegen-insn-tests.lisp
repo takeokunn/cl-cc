@@ -46,6 +46,8 @@
                   (cl-cc/codegen::emit-vm-select
                    (cl-cc:make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
                    s)))))
+    (assert-eq #'cl-cc/codegen::emit-vm-select
+               (gethash 'cl-cc/vm::vm-select cl-cc/codegen::*x86-64-emitter-table*))
     (assert-= 10 (length bytes))
     (assert-= #x48 (nth 0 bytes))
     (assert-= #x89 (nth 1 bytes))
@@ -53,7 +55,11 @@
     (assert-= #x85 (nth 4 bytes))
     (assert-= #x48 (nth 6 bytes))
     (assert-= #x0F (nth 7 bytes))
-    (assert-= #x45 (nth 8 bytes))))
+    (assert-= #x45 (nth 8 bytes))
+    (dolist (branch-opcode '(#x70 #x71 #x72 #x73 #x74 #x75 #x76 #x77
+                             #x78 #x79 #x7A #x7B #x7C #x7D #x7E #x7F
+                             #xE9 #xEB))
+      (assert-false (member branch-opcode bytes :test #'=)))))
 
 (deftest x86-64-jump-zero-test-je-adjacent
   "emit-vm-jump-zero-inst emits TEST immediately followed by JE rel32."

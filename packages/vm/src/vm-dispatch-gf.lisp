@@ -28,23 +28,26 @@ Values stored as lists are spliced in; scalar values are wrapped in a list."
 
 (defun vm-classify-arg (arg state)
   "Determine the class name of an argument for generic dispatch."
-  (if (hash-table-p arg)
-      (let ((class-ht (gethash :__class__ arg)))
-        (if class-ht
-            (let ((metaclass (and state
-                                  (fboundp '%vm-class-effective-metaclass)
-                                  (funcall #'%vm-class-effective-metaclass class-ht state))))
-              (if (and (fboundp '%vm-standard-metaclass-p)
-                       (not (funcall #'%vm-standard-metaclass-p metaclass))
-                       (hash-table-p metaclass))
-                  (gethash :__name__ metaclass)
-                  (gethash :__name__ class-ht)))
-            t))
-      (typecase arg
-        (integer 'integer)
-        (string 'string)
-        (symbol 'symbol)
-        (t t))))
+  (let ((class-ht (cond
+                    ((hash-table-p arg) (gethash :__class__ arg))
+                    ((and (vectorp arg)
+                          (plusp (length arg))
+                          (hash-table-p (aref arg 0)))
+                     (aref arg 0)))))
+    (if class-ht
+        (let ((metaclass (and state
+                              (fboundp '%vm-class-effective-metaclass)
+                              (funcall #'%vm-class-effective-metaclass class-ht state))))
+          (if (and (fboundp '%vm-standard-metaclass-p)
+                   (not (funcall #'%vm-standard-metaclass-p metaclass))
+                   (hash-table-p metaclass))
+              (gethash :__name__ metaclass)
+              (gethash :__name__ class-ht)))
+        (typecase arg
+          (integer 'integer)
+          (string 'string)
+          (symbol 'symbol)
+          (t t)))))
 
 (defun %eql-specializer-p (key)
   "Return T if KEY is an eql specializer form (eql value)."
@@ -137,7 +140,16 @@ Only single-argument eql specializers are indexed for fast lookup."
   (cond
     ((null value) nil)
     ((listp value) (copy-list value))
-    (t (list value))))
+    ((hash-table-p value) (list value))
+    ((functionp value) (list value))
+    (t (values nil))))
+
+(defun %vm-method-function (method)
+  "Extract the callable closure from METHOD (which may be a descriptor hash-table)."
+  (if (hash-table-p method)
+      (or (gethash :function method)
+          (error "Method descriptor missing :function"))
+      method))
 
 (defun %vm-collect-applicable-methods (methods-ht state all-args)
   "Collect applicable methods from METHODS-HT in most-specific-first order." 
@@ -181,22 +193,35 @@ Returns methods most-specific-first using the canonical specializer key shape."
       (%vm-collect-applicable-methods qual-ht state all-arg-values))))
 
 (defparameter *method-combination-operators*
-  `((+      . ,#'+)
-    (*      . ,#'*)
-    (list   . ,#'list)
-    (append . ,#'append)
-    (nconc  . ,#'nconc)
-    (max    . ,#'max)
-    (min    . ,#'min)
-    (and    . ,(lambda (&rest args) (every #'identity args)))
-    (or     . ,(lambda (&rest args) (some  #'identity args)))
-    (progn  . ,(lambda (&rest args) (car (last args)))))
-  "Alist mapping method combination names to their combining operator functions.
-Add entries here to support new combination types without touching dispatch logic.")
+  `((+      . ,(lambda (&rest results) (apply #'+ (%combination-results results))))
+    (*      . ,(lambda (&rest results) (apply #'* (%combination-results results))))
+    (list   . ,(lambda (&rest results) (%combination-results results)))
+    (append . ,(lambda (&rest results) (apply #'append (%combination-results results))))
+    (nconc  . ,(lambda (&rest results) (apply #'nconc (%combination-results results))))
+    (max    . ,(lambda (&rest results) (apply #'max (%combination-results results))))
+    (min    . ,(lambda (&rest results) (apply #'min (%combination-results results))))
+    (and    . ,(lambda (&rest results) (every #'identity (%combination-results results))))
+    (or     . ,(lambda (&rest results) (some  #'identity (%combination-results results))))
+    (progn  . ,(lambda (&rest results) (car (last (%combination-results results))))))
+  "Alist mapping method combination names to fold functions (results→result).")
+
+(defun %combination-results (results)
+  "Normalize method-combination arguments for direct and list-based callers."
+  (if (and (= (length results) 1) (listp (first results)))
+      (first results)
+      results))
 
 (defun %resolve-combination-operator (combination)
   "Return the operator function for COMBINATION, or signal an error."
+  (cdr (%resolve-combination-operator-entry combination)))
+
+(defun %resolve-combination-operator-entry (combination)
+  "Return (TAG . FUNCTION) for COMBINATION in *method-combination-operators*.
+TAG is :long-form or NIL (short-form). Signals error if not found."
   (let ((entry (assoc combination *method-combination-operators*)))
     (if entry
-        (cdr entry)
+        (let ((val (cdr entry)))
+          (if (and (consp val) (eq (car val) :long-form))
+              val     ;; (:long-form . function)
+              (cons nil val)))  ;; short-form: (nil . function)
         (error "Unknown method combination operator: ~S" combination))))

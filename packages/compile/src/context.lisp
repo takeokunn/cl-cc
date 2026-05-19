@@ -236,6 +236,9 @@ Used by run-string-repl to persist the label counter across calls.")
 (defvar *labels-boxed-fns* nil
   "Alist mapping labels function names to their box registers for mutual recursion.")
 
+(defvar *local-tail-jump-fns* nil
+  "Alist mapping non-escaping local tail functions to (label params param-regs).")
+
 (defvar *compiling-typed-fn* nil
   "When non-NIL, the name (or T for anonymous lambdas) of the typed function currently
    being compiled. Activates strict compile-time type checking at ast-the nodes.")

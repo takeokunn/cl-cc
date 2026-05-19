@@ -34,8 +34,9 @@ Returns the register holding the GF dispatch table."
     (emit ctx (make-vm-jump-zero :reg check-reg :label skip-label))
     ;; Not found — create new generic function dispatch table
     (emit ctx (make-vm-class-def
-               :dst dst :class-name name :superclasses nil
-               :slot-names nil :slot-initargs nil))
+                :dst dst :class-name name :superclasses nil
+                :slot-names nil :slot-initargs nil
+                :sealed nil))
     (emit ctx (make-vm-set-global :name name :src dst))
     (emit ctx (make-vm-jump :label end-label))
     ;; Found — load existing

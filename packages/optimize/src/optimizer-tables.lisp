@@ -100,13 +100,16 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 (defparameter *opt-binary-fold-table*
   (%alist->eq-hash-table
    `((vm-add         . ,#'+)
-     (vm-integer-add . ,#'+)
+      (vm-integer-add . ,#'+)
+      (vm-add-checked . ,#'+)
      (vm-float-add   . ,#'+)
      (vm-sub         . ,#'-)
-     (vm-integer-sub . ,#'-)
+      (vm-integer-sub . ,#'-)
+      (vm-sub-checked . ,#'-)
      (vm-float-sub   . ,#'-)
      (vm-mul         . ,#'*)
-     (vm-integer-mul . ,#'*)
+      (vm-integer-mul . ,#'*)
+      (vm-mul-checked . ,#'*)
      (vm-float-mul   . ,#'*)
      (vm-mod         . ,#'mod)
      (vm-rem         . ,#'rem)
@@ -206,8 +209,8 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
    Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
 
 (defparameter *opt-commutative-inst-types*
-  '(vm-add vm-integer-add vm-float-add
-    vm-mul vm-integer-mul vm-float-mul
+  '(vm-add vm-integer-add vm-add-checked vm-float-add
+    vm-mul vm-integer-mul vm-mul-checked vm-float-mul
     vm-logand vm-logior vm-logxor vm-logeqv
     vm-num-eq vm-eq vm-min vm-max)
   "VM binary instruction struct-type symbols where operand order is irrelevant.
@@ -248,11 +251,21 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
     (setf (gethash 'vm-intern-symbol ht)
           (lambda (inst)
             (remove nil (list (vm-src inst) (cl-cc/vm:vm-intern-pkg inst)))))
+    (dolist (tp '(vm-add-package-local-nickname vm-remove-package-local-nickname))
+      (setf (gethash tp ht)
+            (lambda (inst)
+              (remove nil (list (cl-cc/vm:vm-local-nickname-pkg inst)
+                                (cl-cc/vm:vm-local-nickname-nick inst)
+                                (cl-cc/vm:vm-local-nickname-target inst))))))
     (setf (gethash 'vm-make-array ht)
           (lambda (inst) (remove nil (list (vm-size-reg inst) (vm-initial-element inst)
                                             (vm-fill-pointer inst) (vm-adjustable inst)))))
     (setf (gethash 'vm-fill ht)
           (lambda (inst) (list (vm-array-reg inst) (vm-val-reg inst))))
+    (setf (gethash 'vm-copy-vector ht)
+          (lambda (inst) (list (vm-dst-array-reg inst)
+                               (vm-src-array-reg inst)
+                               (vm-len-reg inst))))
     ht)
   "Maps VM instruction type symbols to (lambda (inst) ...) read-reg extractors.
    Used by opt-inst-read-regs for types not covered by the bulk tables.")

@@ -236,7 +236,7 @@
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-typep))))
 
 (deftest-each codegen-let-optimize-inline-policy-propagates-to-lambda-closure
-  "Let-local optimize qualities map onto existing closure inline policy metadata."
+  "Let-local optimize qualities map onto callable inline policy metadata."
   :cases (("speed-three" '((optimize (speed 3))) :inline)
           ("debug-three" '((optimize (debug 3))) :notinline)
           ("space-two" '((optimize (space 2))) :notinline))
@@ -248,6 +248,7 @@
                :declarations declarations
                :body (list (make-ast-var :name 'f)))))
     (compile-ast ast ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+    (let ((inst (or (codegen-find-inst ctx 'cl-cc/vm::vm-closure)
+                    (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))))
       (assert-true inst)
       (assert-eq expected-policy (cl-cc/vm:vm-closure-inline-policy inst)))))

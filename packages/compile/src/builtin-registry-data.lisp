@@ -235,6 +235,8 @@
     (set              . make-vm-set-symbol-value)
     (nconc            . make-vm-nconc)
     (nreconc          . make-vm-nreconc)
+    ;; CLOS MOP
+    (compute-effective-slot-definition . make-vm-compute-effective-slot-definition)
     ;; Equality (both map to vm-eq)
     (eq               . make-vm-eq)
     (eql              . make-vm-eq)

@@ -54,9 +54,11 @@
    #:rt-realpart #:rt-imagpart #:rt-conjugate #:rt-phase #:rt-complex
    #:rt-gcd #:rt-lcm
    #:rt-evenp #:rt-oddp #:rt-zerop #:rt-plusp #:rt-minusp
-   ;; Closures/functions
-   #:rt-make-closure #:rt-closure-ref #:rt-call-fn #:rt-apply-fn
-   #:rt-call-next-method #:rt-next-method-p #:rt-register-function
+    ;; Closures/functions
+    #:rt-make-closure #:rt-closure-ref #:rt-call-fn #:rt-apply-fn
+    #:rt-call-next-method #:rt-next-method-p #:rt-register-function
+    #:rt-code-cache-lookup #:rt-code-cache-store #:rt-code-cache-evict
+    #:rt-code-cache-stats #:*rt-code-cache*
    ;; Multiple values
    #:rt-values-clear #:rt-values-push #:rt-values-count
    #:rt-values-ref #:rt-values-to-list #:rt-spread-values #:rt-ensure-values

@@ -143,14 +143,14 @@ never shrinks below its initial size or below currently used old/large words."
   "Hash table of immortal objects, keyed by handle.")
 
 (defparameter *rt-immortal-space-base* nil
-  "Logical cursor retained for compatibility with earlier address-style callers.")
+  "Logical cursor into the immortal object space.")
 
 (defun rt-make-immortal (value &optional size-words)
   "Create an immortal object that will never be GC'd.
 
-VALUE is stored under a fresh handle.  For compatibility with earlier runtime
-tests, callers may pass (TYPE-TAG SIZE-WORDS); in that case the stored value is
-a plist describing the logical permanent object rather than a native address."
+VALUE is stored under a fresh handle. Callers may pass (TYPE-TAG SIZE-WORDS);
+in that case the stored value is a plist describing the logical permanent object
+rather than a native address."
   (let ((handle (gensym "IMMORTAL-")))
     (setf (gethash handle *rt-immortal-registry*)
           (if size-words

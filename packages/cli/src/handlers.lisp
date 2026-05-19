@@ -13,9 +13,12 @@
 ;; `compile-opts` is defined in main-dump.lisp, which loads after this file.
 ;; Prevent premature inlining warnings for its accessors during compile-file.
 (declaim (notinline compile-opts-flamegraph-path
-                     compile-opts-pgo-generate-path
-                     compile-opts-pgo-use-path
-                     compile-opts-trace-json-path
+                     compile-opts-profile
+                      compile-opts-pgo-generate-path
+                      compile-opts-pgo-use-path
+                      compile-opts-spectre-mitigations
+                      compile-opts-jit-cache-stats
+                      compile-opts-trace-json-path
                      compile-opts-trace-emit
                      compile-opts-retpoline
                      compile-opts-stack-protector
@@ -49,9 +52,11 @@ when provided, contributes runtime basic-block, branch, and counter counts.
 The file is written as a readable plist-like form and PATH's parent directory
 is created as needed."
   (let ((counts (make-hash-table :test #'equal))
-        (insts (%pgo-profile-instructions result))
-        (bb (and vm-state (cl-cc/vm:vm-get-profile-bb-counts vm-state)))
-        (branches (and vm-state (cl-cc/vm:vm-get-profile-branch-counts vm-state)))
+         (insts (%pgo-profile-instructions result))
+         (bb (and vm-state (cl-cc/vm:vm-get-profile-bb-counts vm-state)))
+         (branches (and vm-state (cl-cc/vm:vm-get-profile-branch-counts vm-state)))
+         (calls (and vm-state (cl-cc/vm:vm-get-profile-call-counts vm-state)))
+         (type-feedback (and vm-state (cl-cc/vm:vm-get-profile-type-feedback vm-state)))
         (counter-plan (cl-cc/compile:compilation-result-pgo-counter-plan result))
         (counter-template nil)
         (bb-counter-counts nil)
@@ -88,8 +93,20 @@ is created as needed."
       (format out " :branch-counts (~%")
       (when branches
         (maphash (lambda (k v)
+                    (format out "   (~S . ~D)~%" k v))
+                  branches))
+      (format out " )~%")
+      (format out " :function-call-counts (~%")
+      (when calls
+        (maphash (lambda (k v)
                    (format out "   (~S . ~D)~%" k v))
-                 branches))
+                 calls))
+      (format out " )~%")
+      (format out " :type-feedback (~%")
+      (when type-feedback
+        (maphash (lambda (k v)
+                   (format out "   (~S . ~D)~%" k v))
+                 type-feedback))
       (format out " )~%")
       (when counter-plan
         (format out " :counter-plan ~S~%" counter-plan))
@@ -101,11 +118,38 @@ is created as needed."
         (format out " :edge-counter-counts ~S~%" edge-counter-counts))
       (format out " )~%"))))
 
+(defun %print-jit-cache-stats (&optional (stream *standard-output*))
+  "Print runtime JIT code-cache statistics when requested by the CLI."
+  (let ((stats (cl-cc/runtime:rt-code-cache-stats)))
+    (format stream "JIT code cache: size=~D capacity=~D entries=~D hits=~D misses=~D hit-rate=~,2F%% evictions=~D~%"
+            (getf stats :size)
+            (getf stats :capacity)
+            (getf stats :entries)
+            (getf stats :hits)
+            (getf stats :misses)
+            (* 100.0 (getf stats :hit-rate))
+            (getf stats :evictions))))
+
+(defun %maybe-print-jit-cache-stats (opts)
+  "Print JIT cache stats when --jit-cache-stats is set."
+  (when (compile-opts-jit-cache-stats opts)
+    (%print-jit-cache-stats)))
+
 (defun %maybe-write-pgo-profile (opts result &optional vm-state)
   "Emit a profile file when --pgo-generate is set."
   (let ((path (compile-opts-pgo-generate-path opts)))
     (when path
       (%write-pgo-profile path result vm-state))))
+
+(defun print-profile (vm-state &optional (stream *standard-output*))
+  "Print a simple collapsed-stack profile report for VM-STATE."
+  (let ((samples (and vm-state (cl-cc/vm:vm-get-profile-samples vm-state))))
+    (when samples
+      (format stream "~&Profile samples:~%")
+      (let ((rows nil))
+        (maphash (lambda (stack count) (push (cons stack count) rows)) samples)
+        (dolist (row (sort rows #'> :key #'cdr))
+          (format stream "~D ~A~%" (cdr row) (car row)))))))
 
 (defmacro %with-cli-error-handler (&body body)
   "Evaluate BODY and convert unhandled errors into CLI diagnostics.
@@ -170,9 +214,12 @@ around the execution. Returns the value produced by RUN-COMPILED."
     (%trace-emit-stages result *standard-output*))
   (%call-with-runtime-sanitizer-flags
    opts
-   (lambda ()
-     (prog1 (run-compiled (compilation-result-program result) :state vm-state)
-       (when (compile-opts-flamegraph-path opts)
+         (lambda ()
+      (prog1 (run-compiled (compilation-result-program result) :state vm-state)
+        (%maybe-print-jit-cache-stats opts)
+        (when (compile-opts-profile opts)
+          (print-profile vm-state))
+        (when (compile-opts-flamegraph-path opts)
          (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
                                 (cl-cc/vm:vm-get-profile-samples vm-state)))))))
 
@@ -187,34 +234,38 @@ exits with status 0 on success."
          (language (%detect-language file lang-flag))
          (stdlib (flag parsed "--stdlib"))
          (verbose (flag parsed "--verbose"))
+         (timeout (%get-timeout parsed))
          (opts (%parse-compile-opts parsed))
          (source (%read-command-source file)))
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
     (%with-cli-error-handler
-      (%call-with-optional-output-file
-       (compile-opts-trace-json-path opts)
-       (lambda (stream)
-         (let* ((vm-state (%maybe-make-profiled-vm-state opts))
-                (kwargs (%compile-opts-kwargs opts stream)))
-           (cond
-             ((and stdlib (eq language :lisp))
-               (let ((result (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs)))
-                 (let ((ret (%run-compiled-result result vm-state opts)))
-                   (%maybe-write-pgo-profile opts result vm-state)
-                   ret)))
-             ((eq language :php)
-               (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
-                 (let ((ret (%run-compiled-result result vm-state opts)))
-                   (%maybe-write-pgo-profile opts result vm-state)
-                   ret)))
-              (t
-               (let ((result (apply #'compile-string source :target :vm kwargs)))
-                 (let ((ret (%run-compiled-result result vm-state opts)))
-                   (%maybe-write-pgo-profile opts result vm-state)
-                   ret))))
-            (uiop:quit 0)))))))
+      (%call-with-cli-timeout timeout
+       (lambda ()
+         (%call-with-optional-output-file
+          (compile-opts-trace-json-path opts)
+          (lambda (stream)
+            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+                   (kwargs (%compile-opts-kwargs opts stream)))
+              (cond
+                ((and stdlib (eq language :lisp))
+                 (let ((result (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs)))
+                   (let ((ret (%run-compiled-result result vm-state opts)))
+                     (%maybe-write-pgo-profile opts result vm-state)
+                     ret)))
+                ((eq language :php)
+                 (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
+                   (let ((ret (%run-compiled-result result vm-state opts)))
+                     (%maybe-write-pgo-profile opts result vm-state)
+                     ret)))
+                (t
+                 (let ((result (apply #'compile-string source :target :vm kwargs)))
+                   (let ((ret (%run-compiled-result result vm-state opts)))
+                     (%maybe-write-pgo-profile opts result vm-state)
+                     ret))))
+              (uiop:quit 0)))))
+       "run"))))
 
 (defun %do-compile (parsed)
   "Handle the `cl-cc compile' subcommand using PARSED arguments.
@@ -233,64 +284,75 @@ and exits with status 0 on success."
          (debug (flag parsed "--debug"))
          (annotate (flag parsed "--annotate-source"))
          (verbose (flag parsed "--verbose"))
-          (opts (%parse-compile-opts parsed)))
+         (timeout (%get-timeout parsed))
+         (opts (%parse-compile-opts parsed)))
     (when verbose
       (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
               file arch-str (or output "(auto)")))
      (%with-cli-error-handler
-       (flet ((compile-source (source &rest kwargs)
-                (if (eq (or language :lisp) :lisp)
-                    (apply #'compile-string source :source-file file :language :lisp kwargs)
-                    (apply #'compile-string source :language (or language :lisp) kwargs))))
-        (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
-                (if (or debug (compile-opts-stack-protector opts))
-                    nil
-                    cl-cc/codegen::*x86-64-omit-frame-pointer*))
-              (cl-cc/codegen::*x86-64-use-retpoline*
-                (if (compile-opts-retpoline opts) t cl-cc/codegen::*x86-64-use-retpoline*))
-              (cl-cc/codegen::*x86-64-stack-protector-enabled*
-                (if (compile-opts-stack-protector opts) t cl-cc/codegen::*x86-64-stack-protector-enabled*))
-              (cl-cc/codegen::*x86-64-shadow-stack-enabled*
-                (if (compile-opts-shadow-stack opts) t cl-cc/codegen::*x86-64-shadow-stack-enabled*))
-              (cl-cc/codegen::*a64-omit-frame-pointer*
-                (if debug nil cl-cc/codegen::*a64-omit-frame-pointer*)))
-         (if dump-ir
-             (let ((phase (%parse-ir-phase dump-ir)))
-              (unless phase
-                (format *error-output* "Error: unknown IR phase ~A~%" dump-ir)
-                (uiop:quit 2))
-               (let* ((source (%read-command-source file))
-                      (result (apply #'compile-source source
-                                     :target (%compile-target-keyword arch-str)
-                                     (%compile-opts-kwargs opts nil))))
-                 (%dump-ir-phase phase result *standard-output* annotate)
-                 (uiop:quit 0)))
-             (%call-with-optional-output-file
-              (compile-opts-trace-json-path opts)
-              (lambda (stream)
-                (let* ((source (%read-command-source file))
-                       (kwargs (%compile-opts-kwargs opts stream))
-                       (trace-result (when (compile-opts-trace-emit opts)
-                                       (apply #'compile-source source
-                                              :target (%compile-target-keyword arch-str)
-                                              kwargs)))
-                       (result (apply #'compile-file-to-native file
-                                       :arch arch
-                                       :output-file output
-                                      :language language
+       (%call-with-cli-timeout timeout
+        (lambda ()
+          (flet ((compile-source (source &rest kwargs)
+                   (if (eq (or language :lisp) :lisp)
+                       (apply #'compile-string source :source-file file :language :lisp kwargs)
+                       (apply #'compile-string source :language (or language :lisp) kwargs))))
+            (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
+                    (if (or debug (compile-opts-stack-protector opts))
+                        nil
+                        cl-cc/codegen::*x86-64-omit-frame-pointer*))
+                   (cl-cc/codegen::*x86-64-use-retpoline*
+                    (if (or (compile-opts-retpoline opts)
+                            (compile-opts-spectre-mitigations opts))
+                        t
+                        cl-cc/codegen::*x86-64-use-retpoline*))
+                   (cl-cc/codegen::*x86-64-spectre-mitigations-enabled*
+                    (if (compile-opts-spectre-mitigations opts)
+                        t
+                        cl-cc/codegen::*x86-64-spectre-mitigations-enabled*))
+                  (cl-cc/codegen::*x86-64-stack-protector-enabled*
+                    (if (compile-opts-stack-protector opts) t cl-cc/codegen::*x86-64-stack-protector-enabled*))
+                  (cl-cc/codegen::*x86-64-shadow-stack-enabled*
+                    (if (compile-opts-shadow-stack opts) t cl-cc/codegen::*x86-64-shadow-stack-enabled*))
+                  (cl-cc/codegen::*a64-omit-frame-pointer*
+                    (if debug nil cl-cc/codegen::*a64-omit-frame-pointer*)))
+              (if dump-ir
+                  (let ((phase (%parse-ir-phase dump-ir)))
+                    (unless phase
+                      (format *error-output* "Error: unknown IR phase ~A~%" dump-ir)
+                      (uiop:quit 2))
+                    (let* ((source (%read-command-source file))
+                           (result (apply #'compile-source source
+                                          :target (%compile-target-keyword arch-str)
+                                          (%compile-opts-kwargs opts nil))))
+                      (%dump-ir-phase phase result *standard-output* annotate)
+                      (uiop:quit 0)))
+                  (%call-with-optional-output-file
+                   (compile-opts-trace-json-path opts)
+                   (lambda (stream)
+                     (let* ((source (%read-command-source file))
+                            (kwargs (%compile-opts-kwargs opts stream))
+                            (trace-result (when (compile-opts-trace-emit opts)
+                                            (apply #'compile-source source
+                                                   :target (%compile-target-keyword arch-str)
+                                                   kwargs)))
+                            (result (apply #'compile-file-to-native file
+                                           :arch arch
+                                           :output-file output
+                                           :language language
+                                           kwargs)))
+                       (when (and (compile-opts-pgo-generate-path opts)
+                                  (null trace-result))
+                         (setf trace-result
+                               (apply #'compile-source source
+                                      :target (%compile-target-keyword arch-str)
                                       kwargs)))
-                   (when (and (compile-opts-pgo-generate-path opts)
-                              (null trace-result))
-                     (setf trace-result
-                           (apply #'compile-source source
-                                  :target (%compile-target-keyword arch-str)
-                                  kwargs)))
-                   (when trace-result
-                     (%maybe-write-pgo-profile opts trace-result))
-                   (when trace-result
-                     (%trace-emit-stages trace-result *standard-output* :annotate-source annotate))
-                   (format t "~A~%" result)
-                   (uiop:quit 0))))))))))
+                       (when trace-result
+                         (%maybe-write-pgo-profile opts trace-result))
+                       (when trace-result
+                         (%trace-emit-stages trace-result *standard-output* :annotate-source annotate))
+                       (format t "~A~%" result)
+                       (uiop:quit 0))))))))
+        "compile"))))
 
 (defun %compile-and-run-eval-form (expr stdlib kwargs vm-state opts)
   "Compile and run EXPR for the eval command.
@@ -326,27 +388,35 @@ status 0 on success or 2 when the expression is missing."
       (uiop:quit 2))
     (let* ((stdlib (flag parsed "--stdlib"))
            (verbose (flag parsed "--verbose"))
+           (timeout (%get-timeout parsed))
            (opts (%parse-compile-opts parsed)))
       (when verbose
         (format *error-output* "; cl-cc eval: ~S~%" expr))
       (%with-cli-error-handler
-        (%call-with-optional-output-file
-         (compile-opts-trace-json-path opts)
-         (lambda (stream)
-            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
-                   (kwargs (%compile-opts-kwargs opts stream))
-                   (result nil)
-                   (compiled nil))
-                 (multiple-value-setq (result compiled)
+        (%call-with-cli-timeout
+         timeout
+         (lambda ()
+           (%call-with-optional-output-file
+            (compile-opts-trace-json-path opts)
+            (lambda (stream)
+              (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+                     (kwargs (%compile-opts-kwargs opts stream))
+                     (result nil)
+                     (compiled nil))
+                (multiple-value-setq (result compiled)
                   (%compile-and-run-eval-form expr stdlib kwargs vm-state opts))
-               (%maybe-write-pgo-profile opts compiled vm-state)
-               (when (compile-opts-trace-emit opts)
-                 (%trace-emit-stages compiled *standard-output*))
-              (when (compile-opts-flamegraph-path opts)
-                (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                       (cl-cc/vm:vm-get-profile-samples vm-state)))
-              (format t "~S~%" result)
-              (uiop:quit 0))))))))
+                (%maybe-write-pgo-profile opts compiled vm-state)
+                (when (compile-opts-profile opts)
+                  (print-profile vm-state))
+                (%maybe-print-jit-cache-stats opts)
+                (when (compile-opts-trace-emit opts)
+                  (%trace-emit-stages compiled *standard-output*))
+                (when (compile-opts-flamegraph-path opts)
+                  (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
+                                         (cl-cc/vm:vm-get-profile-samples vm-state)))
+                (format t "~S~%" result)
+                (uiop:quit 0))))))
+         "eval"))))
 
 (defun %count-parens (str)
   "Count top-level parentheses in STR while ignoring parentheses in strings.
@@ -374,7 +444,8 @@ inside strings for REPL input balancing."
 Resets persistent REPL state, optionally preloads the standard library, reads
 balanced forms from *STANDARD-INPUT*, evaluates them through RUN-STRING-REPL,
 prints non-NIL results, and exits cleanly on EOF or quit commands."
-  (let ((stdlib (flag parsed "--stdlib")))
+  (let ((stdlib (flag parsed "--stdlib"))
+        (timeout (%get-timeout parsed)))
     (cl-cc:reset-repl-state)
     (when stdlib
       (handler-case (cl-cc:run-string-repl cl-cc:*standard-library-source*)
@@ -382,39 +453,49 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
     (format t "CL-CC ~A  —  ANSI Common Lisp~%" *version*)
     (format t "Type a CL form and press Return. (exit) or Ctrl+D to quit.~%~%")
     (force-output)
-    (loop
-      (format t "* ")
-      (force-output)
-      (let ((buffer ""))
-        (loop
-          (let ((line (handler-case (read-line *standard-input* nil nil)
-                        (error () nil))))
-            (when (null line)
-              (format t "~%Goodbye.~%")
-              (uiop:quit 0))
-            (setf buffer (if (string= buffer "")
-                             line
-                             (concatenate 'string buffer " " line)))
-            (multiple-value-bind (open close) (%count-parens buffer)
-              (when (>= close open)
-                (return)))))
-        (let ((trimmed (string-trim '(#\Space #\Tab #\Newline) buffer)))
-          (cond
-            ((string= trimmed "") nil)
-            ((or (string= trimmed "(exit)")
-                 (string= trimmed ":quit")
-                 (string= trimmed ":q"))
-             (format t "Goodbye.~%")
-             (uiop:quit 0))
-            (t
-             (handler-case
-                 (let ((result (cl-cc:run-string-repl trimmed)))
-                   (when (not (null result))
-                     (format t "=> ~S~%" result))
-                   (force-output))
-               (error (e)
-                 (format t "; Error: ~A~%" e)
-                 (force-output))))))))))
+    (flet ((eval-and-print (form)
+             (let ((result (cl-cc:run-string-repl form)))
+               (when (not (null result))
+                 (format t "=> ~S~%" result))
+               (force-output))))
+      (loop
+        (format t "* ")
+        (force-output)
+        (let ((buffer ""))
+          (loop
+            (let ((line (handler-case (read-line *standard-input* nil nil)
+                          (error () nil))))
+              (when (null line)
+                (format t "~%Goodbye.~%")
+                (uiop:quit 0))
+              (setf buffer (if (string= buffer "")
+                               line
+                               (concatenate 'string buffer " " line)))
+              (multiple-value-bind (open close) (%count-parens buffer)
+                (when (>= close open)
+                  (return)))))
+          (let ((trimmed (string-trim '(#\Space #\Tab #\Newline) buffer)))
+            (cond
+              ((string= trimmed "") nil)
+              ((or (string= trimmed "(exit)")
+                   (string= trimmed ":quit")
+                   (string= trimmed ":q"))
+               (format t "Goodbye.~%")
+               (uiop:quit 0))
+              (t
+               (handler-case
+                   (if timeout
+                       (handler-case
+                           (sb-ext:with-timeout timeout
+                             (eval-and-print trimmed))
+                         (sb-ext:timeout (c)
+                           (declare (ignore c))
+                           (format t "; Timeout after ~A second~:P~%" timeout)
+                           (force-output)))
+                       (eval-and-print trimmed))
+                 (error (e)
+                   (format t "; Error: ~A~%" e)
+                   (force-output)))))))))))
 
 (defun %do-check (parsed)
   "Handle the `cl-cc check' subcommand using PARSED arguments.

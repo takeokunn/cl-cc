@@ -542,6 +542,58 @@ vm-jump-zero does NOT jump when condition is non-zero/true, so fallthrough gets 
     (assert-true
      (cl-cc/optimize:opt-array-bounds-check-eliminable-p :idx :len ranges fallthrough-block))))
 
+(deftest path-sensitive-ranges-expose-block-local-query-api
+  "opt-block-reg-range exposes branch-local facts after path-sensitive analysis."
+  (let* ((cfg (%test-path-sensitive-branch-cfg))
+         (entry (cl-cc/optimize:cfg-entry cfg))
+         (false-block (cl-cc/optimize:cfg-get-block-by-label cfg "then"))
+         (true-block (find-if (lambda (succ) (not (eq succ false-block)))
+                              (cl-cc/optimize:bb-successors entry))))
+    (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg)
+    (let ((true-range (cl-cc/optimize:opt-block-reg-range true-block :idx))
+          (false-range (cl-cc/optimize:opt-block-reg-range false-block :idx)))
+      (assert-equal '(0 . 9) true-range)
+      (assert-equal '(10 . 255) false-range))))
+
+(deftest interval-widen-expands-moving-bound-to-sentinel
+  "Interval widening sends monotone upper-bound growth to the configured top bound."
+  (let ((widened (cl-cc/optimize:opt-interval-widen
+                  (cl-cc/optimize::opt-make-interval 0 0)
+                  (cl-cc/optimize::opt-make-interval 0 1))))
+    (assert-= 0 (cl-cc/optimize::opt-interval-lo widened))
+    (assert-= most-positive-fixnum (cl-cc/optimize::opt-interval-hi widened))))
+
+(defun %test-path-sensitive-counted-loop-cfg ()
+  (cl-cc/optimize:cfg-build
+   (list (make-vm-const :dst :i :value 0)
+         (make-vm-const :dst :one :value 1)
+         (make-vm-const :dst :n :value 4)
+         (make-vm-label :name "loop")
+         (make-vm-lt :dst :cmp :lhs :i :rhs :n)
+         (make-vm-jump-zero :reg :cmp :label "exit")
+         (make-vm-add :dst :j :lhs :i :rhs :one)
+         (make-vm-move :dst :i :src :j)
+         (make-vm-jump :label "loop")
+         (make-vm-label :name "exit")
+         (make-vm-ret :reg :i))))
+
+(deftest path-sensitive-ranges-widen-loop-header-and-converge
+  "Loop-header widening reaches a fixed point while branch edges keep local facts."
+  (let* ((cfg (%test-path-sensitive-counted-loop-cfg))
+         (loop-block (cl-cc/optimize:cfg-get-block-by-label cfg "loop"))
+         (exit-block (cl-cc/optimize:cfg-get-block-by-label cfg "exit"))
+         (body-block (find-if (lambda (succ) (not (eq succ exit-block)))
+                              (cl-cc/optimize:bb-successors loop-block))))
+    (cl-cc/optimize:opt-compute-path-sensitive-ranges cfg)
+    (assert-equal
+     (cons 0 cl-cc/optimize::+opt-range-positive-infinity+)
+     (cl-cc/optimize:opt-block-reg-range loop-block :i))
+    (assert-equal '(0 . 3)
+                  (cl-cc/optimize:opt-block-reg-range body-block :i))
+    (assert-equal
+     (cons 4 cl-cc/optimize::+opt-range-positive-infinity+)
+     (cl-cc/optimize:opt-block-reg-range exit-block :i))))
+
 (deftest simple-induction-detects-affine-update
   "opt-compute-simple-inductions records init and step for affine self updates."
   (let* ((insts (list (make-vm-const :dst :i :value 0)

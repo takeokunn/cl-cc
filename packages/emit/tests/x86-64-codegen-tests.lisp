@@ -345,6 +345,21 @@
    (cl-cc/codegen::x86-64-program-has-stack-buffer-p
     (list (cl-cc:make-vm-const :dst :R0 :value 1)))))
 
+(deftest x86-64-array-bce-metadata-skips-explicit-guard
+  "x86-64 array lowering consumes BCE metadata and omits compare/jump guard text."
+  (let* ((target (make-instance 'cl-cc/codegen::x86-64-target))
+         (inst (cl-cc:make-vm-aref :dst :r0 :array-reg :r1 :index-reg :r2))
+         (checked (with-output-to-string (s)
+                    (cl-cc/codegen::emit-instruction target inst s))))
+    (cl-cc/optimize:opt-mark-bounds-check-eliminable inst)
+    (let ((unchecked (with-output-to-string (s)
+                       (cl-cc/codegen::emit-instruction target inst s))))
+      (assert-output-contains checked "cmp")
+      (assert-output-contains checked "jae clcc_array_bounds_trap")
+      (assert-false (search "cmp" unchecked))
+      (assert-false (search "jae clcc_array_bounds_trap" unchecked))
+      (assert-output-contains unchecked "mov"))))
+
 (deftest x86-64-program-has-nonlocal-control-p-detects-condition-handlers
   "Shadow-stack nonlocal detector turns true for condition/restart VM ops."
   (assert-true

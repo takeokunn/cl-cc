@@ -45,6 +45,18 @@
     (vm2-state (make-hash-table :test #'equal))
     (t (vm-profile-branch-counts state))))
 
+(defun vm-get-profile-call-counts (state)
+  "Return function-call counters for STATE."
+  (typecase state
+    (vm2-state (make-hash-table :test #'equal))
+    (t (vm-profile-call-counts state))))
+
+(defun vm-get-profile-type-feedback (state)
+  "Return register/type feedback counters for STATE."
+  (typecase state
+    (vm2-state (make-hash-table :test #'equal))
+    (t (vm-profile-type-feedback state))))
+
 (defun vm-profile-bb-hit (state pc)
   "Increment basic-block/program-counter hit counter for PC."
   (when (%vm-profile-enabled-p state)
@@ -62,6 +74,7 @@
 
 When TAIL-P is true, replace the current leaf frame instead of pushing a new one."
   (when (and (%vm-profile-enabled-p state) label)
+    (incf (gethash label (vm-get-profile-call-counts state) 0))
     (if tail-p
         (if (%vm-profile-call-stack state)
             (setf (first (%vm-profile-call-stack state)) label)

@@ -60,17 +60,83 @@
   "Host-backed integer subtraction fallback for VM fixnum overflow."
   (- lhs rhs))
 
+(defun %vm-fixnum-rational-p (value)
+  "Return T when VALUE is a rational with fixnum numerator and denominator."
+  (and (rationalp value)
+       (typep (numerator value) 'fixnum)
+       (typep (denominator value) 'fixnum)))
+
+(defun %vm-rational-add (lhs rhs)
+  "Fast path for rational addition with fixnum numerators and denominators."
+  (let* ((a (numerator lhs))
+         (b (denominator lhs))
+         (c (numerator rhs))
+         (d (denominator rhs))
+         (g (gcd b d))
+         (d/g (/ d g)))
+    (/ (+ (* a d/g) (* c (/ b g)))
+       (* b d/g))))
+
+(defun %vm-rational-sub (lhs rhs)
+  "Fast path for rational subtraction with fixnum numerators and denominators."
+  (let* ((a (numerator lhs))
+         (b (denominator lhs))
+         (c (numerator rhs))
+         (d (denominator rhs))
+         (g (gcd b d))
+         (d/g (/ d g)))
+    (/ (- (* a d/g) (* c (/ b g)))
+       (* b d/g))))
+
+(defun %vm-rational-mul (lhs rhs)
+  "Fast path for rational multiplication with cross-cancellation."
+  (let* ((a (numerator lhs))
+         (b (denominator lhs))
+         (c (numerator rhs))
+         (d (denominator rhs))
+         (g1 (gcd (abs a) d))
+         (g2 (gcd (abs c) b)))
+    (/ (* (/ a g1) (/ c g2))
+       (* (/ b g2) (/ d g1)))))
+
 (defun %vm-add-with-overflow-fallback (lhs rhs)
-  (let ((result (+ lhs rhs)))
-    (if (vm-fixnum51-overflow-p result)
-        (vm-bignum-add-integers lhs rhs)
-        result)))
+  (cond
+    ((and (typep lhs 'fixnum) (typep rhs 'fixnum))
+     (let ((result (+ lhs rhs)))
+       (if (vm-fixnum51-overflow-p result)
+           (vm-bignum-add-integers lhs rhs)
+           result)))
+    ((and (%vm-fixnum-rational-p lhs) (%vm-fixnum-rational-p rhs))
+     (%vm-rational-add lhs rhs))
+    (t
+     (+ lhs rhs))))
 
 (defun %vm-sub-with-overflow-fallback (lhs rhs)
-  (let ((result (- lhs rhs)))
-    (if (vm-fixnum51-overflow-p result)
-        (vm-bignum-subtract-integers lhs rhs)
-        result)))
+  (cond
+    ((and (typep lhs 'fixnum) (typep rhs 'fixnum))
+     (let ((result (- lhs rhs)))
+       (if (vm-fixnum51-overflow-p result)
+           (vm-bignum-subtract-integers lhs rhs)
+           result)))
+    ((and (%vm-fixnum-rational-p lhs) (%vm-fixnum-rational-p rhs))
+     (%vm-rational-sub lhs rhs))
+    (t
+     (- lhs rhs))))
+
+(defun %vm-mul-with-overflow-fallback (lhs rhs)
+  (cond
+    ((and (typep lhs 'fixnum) (typep rhs 'fixnum))
+     (let ((result (* lhs rhs)))
+       (if (vm-fixnum51-overflow-p result)
+           (vm-bignum-multiply-integers lhs rhs)
+           result)))
+    ((and (integerp lhs) (integerp rhs)
+          (or (typep lhs 'bignum) (typep rhs 'bignum)))
+     (vm-bignum-multiply-integers lhs rhs))
+    ((and (%vm-fixnum-rational-p lhs) (%vm-fixnum-rational-p rhs))
+     (%vm-rational-mul lhs rhs))
+    (t
+     (* lhs rhs))))
 
 (defmethod execute-instruction ((inst vm-add) state pc labels)
   (declare (ignore labels))
@@ -88,14 +154,39 @@
                (vm-reg-get state (vm-rhs inst))))
   (values (1+ pc) nil nil))
 
-(define-simple-instruction vm-mul :binary *)
+(defmethod execute-instruction ((inst vm-mul) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-mul-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
 
-;;; Checked arithmetic (FR-303): in the VM interpreter, these behave identically
-;;; to the unchecked versions since CL arithmetic auto-promotes to bignum.
-;;; The overflow detection only matters in the native codegen backends.
-(define-simple-instruction vm-add-checked :binary +)
-(define-simple-instruction vm-sub-checked :binary -)
-(define-simple-instruction vm-mul-checked :binary *)
+;;; Checked arithmetic (FR-149): detect VM fixnum overflow and use the bignum
+;;; fallback path. Native backends lower these to hardware overflow checks.
+(defmethod execute-instruction ((inst vm-add-checked) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-add-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-sub-checked) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-sub-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-mul-checked) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-mul-with-overflow-fallback
+               (vm-reg-get state (vm-lhs inst))
+               (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-label) state pc labels)
   (declare (ignore state labels))
@@ -165,11 +256,13 @@ The cl-cc execution model treats both NIL and numeric zero as false."
 
 (defmethod execute-instruction ((inst vm-call) state pc labels)
   (let ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
-    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) nil)))
+    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) nil
+                       (vm-call-live-regs inst))))
 
 (defmethod execute-instruction ((inst vm-tail-call) state pc labels)
   (let ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
-    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) t)))
+    (%vm-dispatch-call func state pc labels (vm-args inst) (vm-dst inst) t
+                       (vm-tail-call-live-regs inst))))
 
 (defmethod execute-instruction ((inst vm-trampoline) state pc labels)
   (declare (ignore labels))
@@ -225,11 +318,15 @@ The cl-cc execution model treats both NIL and numeric zero as false."
       (vm-reg-set state (vm-dst inst)
                   (or registered
                       (and sym (vm-bridge-callable sym))
-            (make-instance 'vm-closure-object
-                           :entry-label label-str
-                           :params nil
-                          :rest-stack-alloc-p nil
-                          :captured-values nil))))
+             (make-instance 'vm-closure-object
+                            :entry-label label-str
+                            :params (vm-closure-params inst)
+                            :optional-params (vm-closure-optional-params inst)
+                            :rest-param (vm-closure-rest-param inst)
+                            :key-params (vm-closure-key-params inst)
+                            :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
+                            :dispatch-tag (vm-func-ref-dispatch-tag inst)
+                            :captured-values nil))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-make-closure) state pc labels)

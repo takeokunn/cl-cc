@@ -256,6 +256,55 @@
     (let ((invs (cl-cc/optimize::%licm-collect-invariants members def-sites)))
       (assert-true (member c42 invs :test #'eq)))))
 
+(deftest licm-does-not-hoist-slot-read-across-aliased-slot-write
+  "LICM keeps a loop slot read in place when an aliased slot write is in the loop."
+  (let* ((start (make-vm-label :name "start"))
+         (obj   (make-vm-cons :dst :obj :car-src :r0 :cdr-src :r1))
+         (jmp   (make-vm-jump :label "loop"))
+         (loop  (make-vm-label :name "loop"))
+         (read  (cl-cc:make-vm-slot-read :dst :v :obj-reg :obj :slot-name 'x))
+         (write (cl-cc:make-vm-slot-write :obj-reg :obj :slot-name 'x :value-reg :r2))
+         (back  (make-vm-jump :label "loop"))
+         (ret   (make-vm-ret :reg :v))
+         (out   (cl-cc/optimize::opt-pass-licm (list start obj jmp loop read write back ret))))
+    (assert-true (member read out :test #'eq))
+    (assert-true (> (position read out :test #'eq)
+                    (position loop out :test #'eq)))))
+
+(deftest licm-hoists-slot-read-across-tbaa-disjoint-slot-write
+  "LICM uses TBAA facts to hoist a slot read across a disjoint-kind slot write."
+  (let* ((start (make-vm-label :name "start"))
+         (size  (make-vm-const :dst :n :value 4))
+         (obj   (make-vm-cons :dst :obj :car-src :r0 :cdr-src :r1))
+         (arr   (cl-cc:make-vm-make-array :dst :arr :size-reg :n
+                                          :initial-element nil :fill-pointer nil
+                                          :adjustable nil :element-type nil))
+         (jmp   (make-vm-jump :label "loop"))
+         (loop  (make-vm-label :name "loop"))
+         (read  (cl-cc:make-vm-slot-read :dst :v :obj-reg :obj :slot-name 'x))
+         (write (cl-cc:make-vm-slot-write :obj-reg :arr :slot-name 'x :value-reg :r2))
+         (back  (make-vm-jump :label "loop"))
+         (ret   (make-vm-ret :reg :v))
+         (out   (cl-cc/optimize::opt-pass-licm (list start size obj arr jmp loop read write back ret))))
+    (assert-true (member read out :test #'eq))
+    (assert-true (< (position read out :test #'eq)
+                    (position loop out :test #'eq)))))
+
+(deftest licm-unknown-call-invalidates-slot-read-hoist
+  "Unknown calls in the loop conservatively invalidate alias facts for load hoisting."
+  (let* ((start (make-vm-label :name "start"))
+         (obj   (make-vm-cons :dst :obj :car-src :r0 :cdr-src :r1))
+         (jmp   (make-vm-jump :label "loop"))
+         (loop  (make-vm-label :name "loop"))
+         (read  (cl-cc:make-vm-slot-read :dst :v :obj-reg :obj :slot-name 'x))
+         (call  (cl-cc:make-vm-call :dst :ignored :func :fn :args nil))
+         (back  (make-vm-jump :label "loop"))
+         (ret   (make-vm-ret :reg :v))
+         (out   (cl-cc/optimize::opt-pass-licm (list start obj jmp loop read call back ret))))
+    (assert-true (member read out :test #'eq))
+    (assert-true (> (position read out :test #'eq)
+                    (position loop out :test #'eq)))))
+
 ;;; ─── %opt-pre-block-out-env ──────────────────────────────────────────────
 
 (deftest pre-block-out-env-maps-key-to-defining-register

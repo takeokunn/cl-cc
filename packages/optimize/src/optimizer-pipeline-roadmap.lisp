@@ -272,6 +272,19 @@ Evidence anchors include functions and special variables."
      (opt-ic-transition opt-profile-record-edge
       opt-profile-record-value)
      (optimizer-roadmap-pic-evidence-is-runtime-backed))
+    (38 38
+     ("packages/optimize/src/optimizer-memory-ranges.lisp"
+      "packages/optimize/src/optimizer-memory-interval.lisp"
+      "packages/optimize/tests/optimizer-memory-tests.lisp")
+     (opt-compute-path-sensitive-ranges
+      opt-block-reg-range
+      opt-interval-widen)
+     (path-sensitive-ranges-narrow-jump-target-branch-from-lt
+      path-sensitive-ranges-narrow-fallthrough-branch-from-lt
+      path-sensitive-ranges-join-unions-narrowed-predecessors
+      path-sensitive-ranges-expose-block-local-query-api
+      interval-widen-expands-moving-bound-to-sentinel
+      path-sensitive-ranges-widen-loop-header-and-converge))
     (329 329
      ("packages/codegen/src/x86-64-codegen-core.lisp"
       "packages/codegen/src/x86-64-codegen-dispatch.lisp"
@@ -280,6 +293,21 @@ Evidence anchors include functions and special variables."
      (("CL-CC/CODEGEN" . "X86-64-USED-CALLEE-SAVED-REGS")
       ("CL-CC/REGALLOC" . "COMPUTE-LIVE-INTERVALS"))
      (optimizer-roadmap-callee-saved-evidence-is-native-backed))
+    (34 34
+     ("packages/optimize/src/optimizer-flow-passes.lisp"
+      "packages/optimize/src/optimizer-pipeline.lisp"
+      "packages/codegen/src/x86-64-emit-ops-bits.lisp"
+      "packages/codegen/src/aarch64-emitters.lisp"
+      "packages/optimize/tests/optimizer-flow-tests.lisp"
+      "packages/emit/tests/x86-64-codegen-insn-tests.lisp"
+      "packages/emit/tests/aarch64-codegen-tests.lisp")
+     (opt-pass-if-conversion
+      ("CL-CC/CODEGEN" . "EMIT-VM-SELECT")
+      ("CL-CC/CODEGEN" . "EMIT-A64-VM-SELECT"))
+     (if-conversion-simple-diamond-emits-vm-select
+      if-conversion-skips-externally-referenced-diamond-label
+      x86-64-select-emitter-encoding
+      aarch64-select-emitter-encoding))
     (1 22
      ("packages/optimize/src/optimizer.lisp"
       "packages/optimize/src/optimizer-licm.lisp"
@@ -301,10 +329,32 @@ Evidence anchors include functions and special variables."
      (opt-known-callee-labels opt-pass-call-site-splitting
       opt-pass-devirtualize opt-pass-global-dce
       opt-array-bounds-check-eliminable-p opt-pass-fill-recognition)
-     (optimizer-roadmap-inline-and-memory-evidence))
+     (optimizer-roadmap-inline-and-memory-evidence
+      ;; FR-037 call-site-splitting specific tests
+      opt-pass-call-site-splitting-duplicates-known-predecessor-call
+      opt-pass-call-site-splitting-noops-without-known-callee
+      opt-pass-call-site-splitting-handles-multi-join-labels
+      opt-pass-call-site-splitting-handles-vm-apply
+      opt-pass-call-site-splitting-handles-vm-tail-call))
+    (115 115
+     ("packages/optimize/src/optimizer-memory-alias.lisp"
+      "packages/optimize/src/optimizer-licm.lisp"
+      "packages/optimize/src/optimizer-flow-loop.lisp"
+      "packages/optimize/tests/optimizer-licm-tests.lisp"
+      "packages/optimize/tests/optimizer-flow-tests.lisp")
+     (opt-compute-heap-aliases opt-must-alias-p opt-may-alias-p
+      opt-compute-heap-type-facts opt-tbaa-must-not-alias-p
+      opt-memory-accesses-may-alias-p opt-pass-licm opt-pass-code-sinking)
+     (licm-does-not-hoist-slot-read-across-aliased-slot-write
+      licm-hoists-slot-read-across-tbaa-disjoint-slot-write
+      licm-unknown-call-invalidates-slot-read-hoist
+      code-sinking-does-not-sink-slot-read-across-aliased-write
+      code-sinking-sinks-slot-read-across-tbaa-disjoint-write))
     (74 118
      ("packages/optimize/src/optimizer-flow-core.lisp"
       "packages/optimize/src/optimizer-flow-passes.lisp"
+      "packages/optimize/src/optimizer-flow-loop.lisp"
+      "packages/optimize/src/optimizer-closure.lisp"
       "packages/optimize/src/optimizer-strength.lisp"
       "packages/optimize/src/cfg.lisp"
       "packages/optimize/src/ssa.lisp"
@@ -312,18 +362,54 @@ Evidence anchors include functions and special variables."
      (opt-pass-loop-rotation opt-pass-loop-peeling
       opt-pass-loop-unrolling opt-pass-branch-correlation
       opt-pass-tail-duplication cfg-split-critical-edges
-      ssa-eliminate-trivial-phis)
-     (optimizer-roadmap-flow-and-ssa-evidence))
+      ssa-eliminate-trivial-phis
+      opt-pass-closure-capture-dedup opt-pass-closure-thunk-sharing)
+     (optimizer-roadmap-flow-and-ssa-evidence
+      ;; FR-022 loop-unrolling specific tests
+      loop-unrolling-fully-unrolls-small-counted-loop
+      loop-unrolling-supports-generalized-comparisons
+      loop-unrolling-partially-unrolls-when-trip-count-too-large
+      loop-unrolling-partially-unrolls-unknown-trip-with-remainder
+      loop-unrolling-supports-additional-comparisons
+      loop-unrolling-partial-keeps-remainder-loop
+      ;; FR-079 closure-thunk-sharing specific tests
+      closure-thunk-sharing-deduplicates-safe-siblings
+      closure-thunk-sharing-noops-on-register-overwrite
+      closure-thunk-sharing-preserves-different-capture
+      closure-thunk-sharing-noops-on-env-reg-write
+      closure-thunk-sharing-noops-across-cfg-boundary
+      ;; FR-080 cons-slot-forward tests (covered here)
+      closure-capture-dedup-shares-duplicate-environments
+      closure-capture-dedup-preserves-non-shareable
+      closure-capture-dedup-noops-across-cfg-boundary))
     (148 170
      ("packages/optimize/src/optimizer-pipeline.lisp"
       "packages/optimize/src/optimizer-flow-core.lisp"
       "packages/optimize/src/optimizer-flow-passes.lisp"
+      "packages/optimize/src/optimizer-flow-loop.lisp"
+      "packages/optimize/src/optimizer-inline-cost.lisp"
       "packages/optimize/tests/optimizer-flow-tests.lisp"
-      "packages/optimize/tests/optimizer-pipeline-tests.lisp")
+      "packages/optimize/tests/optimizer-pipeline-tests.lisp"
+      "packages/optimize/tests/optimizer-inline-tests.lisp"
+      "packages/optimize/tests/optimizer-inline-pass-tests-2.lisp"
+      "packages/optimize/tests/optimizer-strength-inline-tests.lisp")
      (opt-adaptive-inline-threshold opt-adaptive-max-iterations
       opt-pass-code-sinking opt-pass-tail-duplication
       opt-pass-branch-correlation)
-     (optimizer-roadmap-code-motion-evidence))
+     (optimizer-roadmap-code-motion-evidence
+      ;; FR-150 adaptive-inline-threshold tests
+      opt-adaptive-inline-threshold-uses-profile-and-size-hints
+      opt-adaptive-inline-threshold-cases
+      opt-adaptive-inline-threshold-respects-pgo-scale
+      opt-adaptive-inline-threshold-ml-bonus-is-applied
+      ;; FR-163 code-sinking specific tests
+      code-sinking-moves-const-into-target-block
+      code-sinking-noop-when-value-is-read-multiple-times
+      code-sinking-moves-cons-into-target-block
+      code-sinking-does-not-sink-impure-random
+      code-sinking-duplicates-cheap-const-into-conditional-targets
+      code-sinking-noop-for-cons-read-multiple-times
+      code-sinking-moves-arithmetic-and-move-into-target-block))
     (287 287
      ("packages/optimize/src/optimizer-licm.lisp"
       "packages/optimize/src/optimizer-pipeline.lisp"
@@ -349,6 +435,20 @@ Evidence anchors include functions and special variables."
       opt-clear-speculation-log opt-save-speculation-log
       opt-load-speculation-log)
      (optimizer-roadmap-speculation-log-gating-and-persistence-behavior))
+    (271 271
+     ("packages/optimize/src/ssa-phi-elim.lisp"
+      "packages/optimize/src/ssa.lisp"
+      "packages/optimize/src/ssa-construction.lisp"
+      "packages/optimize/tests/ssa-tests.lisp")
+     (ssa-eliminate-trivial-phis)
+     (optimizer-roadmap-ssa-phi-elim-evidence
+      ssa-phi-elim-all-same-arg-multi-pred
+      ssa-phi-elim-phi-of-phi-chain-deep
+      ssa-phi-elim-unused-phi
+      ssa-phi-elim-idempotent
+      ssa-trivial-phi-elimination-rewrites-uses
+      ssa-trivial-phi-elimination-shortcuts-phi-of-phi-chain
+      ssa-trivial-phi-elimination-runs-all-passes-together))
     (223 305
      ("packages/optimize/src/optimizer-pipeline.lisp"
       "packages/optimize/tests/optimizer-pipeline-tests.lisp")

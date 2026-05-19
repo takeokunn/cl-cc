@@ -15,13 +15,17 @@
           ("add"          (cl-cc:make-vm-add :dst :r0 :lhs :r1 :rhs :r2) :add)
           ("slot-boundp"  (cl-cc:make-vm-slot-boundp :dst :r0 :obj-reg :r1 :slot-name-sym 'field)
                            :slot-boundp)
-          ("closure"      (cl-cc:make-vm-closure :dst :r0 :label 'L :params '(x)
-                                                  :optional-params nil :rest-param nil
-                                                  :key-params nil :captured '(:r1))
-                           :closure)
-          ("make-closure" (cl-cc:make-vm-make-closure :dst :r0 :label 'L :params '(x)
-                                                      :env-regs '(:r1))
-                           :make-closure))
+           ("closure"      (cl-cc:make-vm-closure :dst :r0 :label 'L :params '(x)
+                                                   :optional-params nil :rest-param nil
+                                                   :key-params nil :captured '(:r1))
+                            :closure)
+           ("func-ref"     (cl-cc:make-vm-func-ref :dst :r0 :label 'L :params '(x)
+                                                    :optional-params nil :rest-param nil
+                                                    :key-params nil)
+                            :func-ref)
+           ("make-closure" (cl-cc:make-vm-make-closure :dst :r0 :label 'L :params '(x)
+                                                       :env-regs '(:r1))
+                            :make-closure))
   (inst expected-tag)
   (assert-eq expected-tag (first (cl-cc:instruction->sexp inst))))
 

@@ -210,3 +210,64 @@
     (assert-true (search cond-wat result))
     (assert-true (search "(then" result))
     (assert-true (search "(else" result))))
+
+;;; ─── User-level dense CASE br_table lowering ──────────────────────────────
+
+(defun %test-label-pc-map (&rest entries)
+  "Build an EQUAL label->pc map for trampoline case-lowering tests."
+  (let ((map (make-hash-table :test #'equal)))
+    (dolist (entry entries map)
+      (setf (gethash (car entry) map) (cdr entry)))))
+
+(deftest wasm-dense-case-targets-detects-density
+  "Dense integer case targets satisfy the br_table density predicate."
+  (assert-true
+   (cl-cc/codegen::wasm-dense-integer-case-targets-p
+    '((10 . "case10") (11 . "case11") (12 . "case12") (13 . "case13")))))
+
+(deftest wasm-sparse-case-targets-do-not-use-br-table
+  "Sparse integer case targets stay on the fallback if-chain/binary-tree path."
+  (assert-false
+   (cl-cc/codegen::wasm-dense-integer-case-targets-p
+    '((1 . "case1") (100 . "case100") (200 . "case200") (300 . "case300")))))
+
+(deftest wasm-dense-case-emits-user-br-table
+  "Dense integer case dispatch emits a user-level br_table with default target."
+  (let* ((reg-map (cl-cc/codegen::make-wasm-reg-map-for-function 0))
+         (label-pc-map (%test-label-pc-map '("case10" . 10)
+                                           '("case11" . 11)
+                                           '("case12" . 12)
+                                           '("case13" . 13)
+                                           '("otherwise" . 99)))
+         (out (make-string-output-stream)))
+    (cl-cc/codegen::wasm-reg-to-local reg-map :R0)
+    (assert-true
+     (cl-cc/codegen::maybe-emit-wasm-dense-case-br-table
+      :R0
+      '((10 . "case10") (11 . "case11") (12 . "case12") (13 . "case13"))
+      "otherwise"
+      label-pc-map reg-map out))
+    (let ((wat (get-output-stream-string out)))
+      (assert-output-contains wat "dense integer CASE lowered to WASM br_table")
+      (assert-output-contains wat "br_table")
+      (assert-output-contains wat "$case_default")
+      (assert-output-contains wat "(i64.const 10)")
+      (assert-output-contains wat "(i32.const 99)"))))
+
+(deftest wasm-sparse-case-emits-no-user-br-table
+  "Sparse integer case dispatch returns NIL and emits no user-level br_table."
+  (let* ((reg-map (cl-cc/codegen::make-wasm-reg-map-for-function 0))
+         (label-pc-map (%test-label-pc-map '("case1" . 1)
+                                           '("case100" . 100)
+                                           '("case200" . 200)
+                                           '("case300" . 300)
+                                           '("otherwise" . 99)))
+         (out (make-string-output-stream)))
+    (cl-cc/codegen::wasm-reg-to-local reg-map :R0)
+    (assert-false
+     (cl-cc/codegen::maybe-emit-wasm-dense-case-br-table
+      :R0
+      '((1 . "case1") (100 . "case100") (200 . "case200") (300 . "case300"))
+      "otherwise"
+      label-pc-map reg-map out))
+    (assert-false (search "br_table" (get-output-stream-string out) :test #'char=))))

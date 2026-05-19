@@ -76,8 +76,9 @@
    ;; ─── cfg.lisp — additional CFG utilities ─────────────────────────────
    #:cfg-compute-loop-depths
 
-   ;; ─── cfg-layout.lisp — code layout ────────────────────────────────
-   #:cfg-flatten-hot-cold
+    ;; ─── cfg-layout.lisp — code layout ────────────────────────────────
+    #:cfg-flatten-hot-cold
+    #:opt-pass-hot-cold-layout
 
     ;; ─── optimizer-tables.lisp — instruction introspection ──────────────
     #:opt-inst-dst #:opt-inst-read-regs #:opt-falsep
@@ -101,9 +102,10 @@
      #:opt-compute-loop-inductions
      #:opt-induction-trip-count
      #:opt-iv-reg #:opt-iv-init #:opt-iv-step #:opt-iv-update-inst
-     #:opt-compute-cfg-value-ranges
-     #:opt-compute-path-sensitive-ranges
-     #:opt-compute-value-ranges
+      #:opt-compute-cfg-value-ranges
+      #:opt-compute-path-sensitive-ranges
+      #:opt-block-reg-range
+      #:opt-compute-value-ranges
     #:opt-array-bounds-check-eliminable-p
     #:opt-mark-bounds-check-eliminable
     #:opt-bounds-check-eliminable-metadata
@@ -113,6 +115,7 @@
     #:opt-interval-known-bits-mask
     #:opt-interval-fits-fixnum-width-p
     #:opt-interval-fits-fixnum-p
+    #:opt-interval-widen
     #:opt-interval-logand
     #:opt-pass-elide-proven-overflow-checks
     #:opt-may-alias-by-type-p  #:opt-may-alias-p  #:opt-must-alias-p
@@ -133,18 +136,22 @@
     #:opt-pass-closure-capture-dedup
     #:opt-pass-closure-thunk-sharing
 
-    ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
-    #:opt-pass-fill-recognition
+     ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
+     #:opt-pass-fill-recognition
+     #:opt-pass-copy-recognition
+     #:opt-pass-function-outlining
+     #:opt-pass-safepoint-polling
 
-    ;; ─── optimizer-flow-core.lisp ───────────────────────────────────────────
+     ;; ─── optimizer-flow-core.lisp ───────────────────────────────────────────
     #:opt-pass-dominated-type-check-elim
 
     ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-    #:optimize-instructions
-    #:*skip-optimizer-passes*
-    #:*verify-optimizer-instructions*
-    #:*opt-enable-pure-call-optimization*
-    #:opt-configure-optimization-policy
+     #:optimize-instructions
+     #:*skip-optimizer-passes*
+     #:*verify-optimizer-instructions*
+     #:*opt-enable-pure-call-optimization*
+     #:*opt-enable-sealed-gf-devirtualization*
+     #:opt-configure-optimization-policy
     #:optimize-roadmap-doc-features
     #:optimize-roadmap-doc-fr-ids
     #:optimize-roadmap-register-doc-evidence

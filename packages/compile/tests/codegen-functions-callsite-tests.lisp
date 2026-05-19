@@ -43,6 +43,34 @@
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply))
     (assert-true (keywordp reg))))
 
+(deftest codegen-apply-tail-literal-spread-emits-tail-call
+  "Tail-position ast-apply with a literal spread list emits vm-tail-call."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (progn
+                (setf (cl-cc/compile:ctx-tail-position ctx) t)
+                (compile-ast (cl-cc/ast:make-ast-apply
+                              :func (make-ast-function :name '+)
+                              :args (list (make-ast-quote :value '(1 2 3))))
+                             ctx))))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call))
+    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-call)))
+    (assert-true (null (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-apply-tail-dynamic-spread-emits-tail-apply
+  "Tail-position ast-apply with a dynamic spread list marks vm-apply as tail-p."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (progn
+                (setf (cl-cc/compile:ctx-tail-position ctx) t)
+                (compile-ast (cl-cc/ast:make-ast-apply
+                              :func (make-ast-function :name '+)
+                              :args (list (make-ast-var :name 'xs)))
+                             ctx)))
+         (apply-inst (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+    (assert-true apply-inst)
+    (assert-true (cl-cc/vm::vm-tail-p apply-inst))
+    (assert-true (keywordp reg))))
+
 (deftest-each codegen-apply-run
   "apply spreads list arguments to a function."
   :cases (("list-only"     6  "(apply #'+ '(1 2 3))")
@@ -122,7 +150,8 @@
           (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
           (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call)))
         (progn
-          (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
+          (assert-true (or (codegen-find-inst ctx 'cl-cc/vm::vm-closure)
+                           (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref)))
           (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-call))))))
 
 ;;; ─── call ─────────────────────────────────────────────────────────────────
@@ -232,7 +261,8 @@
                 :declarations declarations
                 :body body)))
     (compile-ast ast ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+    (let ((inst (or (codegen-find-inst ctx 'cl-cc/vm::vm-closure)
+                    (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))))
       (assert-true inst)
       (if expected
           (assert-true (cl-cc/vm::vm-closure-rest-stack-alloc-p inst))

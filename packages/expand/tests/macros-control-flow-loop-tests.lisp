@@ -88,6 +88,7 @@
     (let ((printed (string-downcase (format nil "~S" result))))
       (assert-true (search "svref" printed))
       (assert-true (search "vector" printed))
+      (assert-true (search "br-table" printed))
       (assert-true (search "(if (integerp" printed))
       (assert-true (search "default-body" printed)))))
 

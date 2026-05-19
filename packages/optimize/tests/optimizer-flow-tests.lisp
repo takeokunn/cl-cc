@@ -12,15 +12,29 @@
 ;;; ─── Test helpers ────────────────────────────────────────────────────────
 
 (defun %make-test-basic-block (&key (successors nil) (predecessors nil)
-                                    (loop-depth 0) (rpo-index 0)
-                                    (instructions nil))
+                                     (loop-depth 0) (rpo-index 0)
+                                     (instructions nil))
   "Build a minimal basic-block for testing."
   (cl-cc/optimize::make-basic-block
    :successors successors
    :predecessors predecessors
    :loop-depth loop-depth
-   :rpo-index rpo-index
-   :instructions instructions))
+    :rpo-index rpo-index
+    :instructions instructions))
+
+(defun %test-label-position (instructions label-name)
+  "Return LABEL-NAME's position in INSTRUCTIONS, or NIL."
+  (position-if (lambda (inst)
+                 (and (typep inst 'cl-cc/vm::vm-label)
+                      (equal (cl-cc/vm::vm-name inst) label-name)))
+               instructions))
+
+(defun %test-jump-zero-position (instructions target-label)
+  "Return the position of a vm-jump-zero targeting TARGET-LABEL, or NIL."
+  (position-if (lambda (inst)
+                 (and (typep inst 'cl-cc/vm::vm-jump-zero)
+                      (equal (cl-cc/vm::vm-label-name inst) target-label)))
+               instructions))
 
 ;;; ─── opt-pass-dce / opt-build-label-index / opt-thread-label ────────────
 
@@ -50,10 +64,41 @@
                          (and (typep i 'cl-cc/vm::vm-const)
                               (eq (cl-cc/vm::vm-dst i) :r0)))
                        result))
-    (assert-true (some (lambda (i)
-                         (and (typep i 'cl-cc/vm::vm-const)
-                              (eq (cl-cc/vm::vm-dst i) :r1)))
-                       result))))
+     (assert-true (some (lambda (i)
+                          (and (typep i 'cl-cc/vm::vm-const)
+                               (eq (cl-cc/vm::vm-dst i) :r1)))
+                        result))))
+
+(deftest function-outlining-outlines-duplicate-sequences
+  "opt-pass-function-outlining replaces duplicate pure straight-line sequences with helper calls."
+  (let* ((seq (list (make-vm-const :dst :r0 :value 1)
+                    (make-vm-const :dst :r1 :value 2)
+                    (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
+         (insts (append seq seq (list (make-vm-ret :reg :r2))))
+         (out (cl-cc/optimize::opt-pass-function-outlining insts)))
+    (assert-= 2 (count-if (lambda (i) (typep i 'cl-cc/vm::vm-call)) out))
+    (assert-true
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-label)
+                  (search cl-cc/optimize::*opt-outlined-label-prefix*
+                          (cl-cc/vm::vm-name i))))
+           out))))
+
+(deftest function-outlining-leaves-nonduplicate-sequences-unchanged
+  "opt-pass-function-outlining does not add helper labels when no duplicate sequence exists."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-const :dst :r1 :value 2)
+                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                      (make-vm-ret :reg :r2)))
+         (out (cl-cc/optimize::opt-pass-function-outlining insts)))
+    (assert-equal (mapcar #'cl-cc/vm::instruction->sexp insts)
+                  (mapcar #'cl-cc/vm::instruction->sexp out))
+    (assert-false
+     (some (lambda (i)
+             (and (typep i 'cl-cc/vm::vm-label)
+                  (search cl-cc/optimize::*opt-outlined-label-prefix*
+                          (cl-cc/vm::vm-name i))))
+           out))))
 
 (deftest dce-eliminates-unread-move
   "opt-pass-dce removes a vm-move whose destination register is never subsequently read."
@@ -227,9 +272,46 @@
     (assert-true
      (some (lambda (i)
              (and (typep i 'cl-cc/vm::vm-const)
-                  (eq (cl-cc/vm::vm-dst i) :c2)
-                  (eql (cl-cc/vm::vm-value i) 0)))
-           out))))
+                   (eq (cl-cc/vm::vm-dst i) :c2)
+                   (eql (cl-cc/vm::vm-value i) 0)))
+            out))))
+
+(deftest if-conversion-simple-diamond-emits-vm-select
+  "opt-pass-if-conversion converts a simple if diamond into one vm-select."
+  (let* ((insts (list (make-vm-lt :dst :c :lhs :r0 :rhs :r1)
+                      (make-vm-jump-zero :reg :c :label "else")
+                      (make-vm-move :dst :out :src :then)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-move :dst :out :src :else)
+                      (make-vm-label :name "join")
+                      (make-vm-ret :reg :out)))
+         (out (cl-cc/optimize::opt-pass-if-conversion insts))
+         (selects (remove-if-not (lambda (i) (typep i 'cl-cc/vm::vm-select)) out)))
+    (assert-= 1 (length selects))
+    (let ((sel (first selects)))
+      (assert-eq :out (cl-cc/vm::vm-dst sel))
+      (assert-eq :c (cl-cc/vm::vm-select-cond-reg sel))
+      (assert-eq :then (cl-cc/vm::vm-select-then-reg sel))
+      (assert-eq :else (cl-cc/vm::vm-select-else-reg sel)))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-lt)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-jump)) out))))
+
+(deftest if-conversion-skips-externally-referenced-diamond-label
+  "opt-pass-if-conversion preserves diamonds whose internal labels have outside references."
+  (let* ((insts (list (make-vm-jump :label "else")
+                      (make-vm-lt :dst :c :lhs :r0 :rhs :r1)
+                      (make-vm-jump-zero :reg :c :label "else")
+                      (make-vm-move :dst :out :src :then)
+                      (make-vm-jump :label "join")
+                      (make-vm-label :name "else")
+                      (make-vm-move :dst :out :src :else)
+                      (make-vm-label :name "join")
+                      (make-vm-ret :reg :out)))
+         (out (cl-cc/optimize::opt-pass-if-conversion insts)))
+    (assert-false (some (lambda (i) (typep i 'cl-cc/vm::vm-select)) out))
+    (assert-true (some (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))))
 
 (deftest jump-pass-kills-comparison-fact-on-source-redefinition
   "opt-pass-jump does not rewrite after a comparison source register is redefined."
@@ -293,13 +375,77 @@
      (some (lambda (i)
              (and (typep i 'cl-cc/vm::vm-jump-zero)
                   (equal (cl-cc/vm::vm-label-name i) "final")))
-           out))
-    (assert-true
-     (some (lambda (i)
+            out))
+     (assert-true
+      (some (lambda (i)
              (and (typep i 'cl-cc/vm::vm-const)
                   (eq (cl-cc/vm::vm-dst i) :c2)
-                  (eql (cl-cc/vm::vm-value i) 1)))
-           out))))
+                   (eql (cl-cc/vm::vm-value i) 1)))
+            out))))
+
+;;; ─── opt-pass-hot-cold-layout ─────────────────────────────────────────────
+
+(deftest hot-cold-layout-registers-before-dce
+  "The hot/cold layout pass is registered in the convergence pipeline before DCE."
+  (let ((layout-pos (position :hot-cold-layout cl-cc/optimize::*opt-default-convergence-pass-keys*))
+        (dce-pos    (position :dce cl-cc/optimize::*opt-default-convergence-pass-keys*)))
+    (assert-true (assoc :hot-cold-layout cl-cc/optimize::*opt-pass-table*))
+    (assert-true layout-pos)
+    (assert-true dce-pos)
+    (assert-true (< layout-pos dce-pos))))
+
+(deftest hot-cold-layout-keeps-conditional-fallthrough-contiguous
+  "opt-pass-hot-cold-layout places the vm-jump-zero fall-through hot block immediately next."
+  (let* ((insts (list (make-vm-const :dst :cond :value 1)
+                      (make-vm-jump-zero :reg :cond :label "cold")
+                      (make-vm-label :name "hot")
+                      (make-vm-const :dst :r0 :value 42)
+                      (make-vm-jump :label "end")
+                      (make-vm-label :name "cold")
+                      (make-vm-signal-error :error-reg :r0)
+                      (make-vm-label :name "end")
+                      (make-vm-ret :reg :r0)))
+         (out      (cl-cc/optimize::opt-pass-hot-cold-layout insts))
+         (jz-pos   (%test-jump-zero-position out "cold"))
+         (hot-pos  (%test-label-position out "hot"))
+         (cold-pos (%test-label-position out "cold")))
+    (assert-true jz-pos)
+    (assert-true hot-pos)
+    (assert-true cold-pos)
+    (assert-= (1+ jz-pos) hot-pos)
+    (assert-true (< hot-pos cold-pos))))
+
+(deftest hot-cold-layout-moves-signal-block-to-tail
+  "opt-pass-hot-cold-layout moves error/signalling cold blocks behind ordinary blocks."
+  (let* ((insts (list (make-vm-const :dst :cond :value 1)
+                      (make-vm-jump-zero :reg :cond :label "cold")
+                      (make-vm-label :name "hot")
+                      (make-vm-const :dst :r0 :value 7)
+                      (make-vm-jump :label "end")
+                      (make-vm-label :name "cold")
+                      (make-vm-signal-error :error-reg :r0)
+                      (make-vm-label :name "end")
+                      (make-vm-ret :reg :r0)))
+         (out      (cl-cc/optimize::opt-pass-hot-cold-layout insts))
+         (end-pos  (%test-label-position out "end"))
+         (cold-pos (%test-label-position out "cold")))
+    (assert-true end-pos)
+    (assert-true cold-pos)
+    (assert-true (< end-pos cold-pos))))
+
+(deftest hot-cold-layout-preserves-conditional-jump-target
+  "opt-pass-hot-cold-layout preserves vm-jump-zero target labels after reordering."
+  (let* ((insts (list (make-vm-const :dst :cond :value 1)
+                      (make-vm-jump-zero :reg :cond :label "cold")
+                      (make-vm-label :name "hot")
+                      (make-vm-ret :reg :cond)
+                      (make-vm-label :name "cold")
+                      (make-vm-signal-error :error-reg :cond)))
+         (out   (cl-cc/optimize::opt-pass-hot-cold-layout insts))
+         (jz    (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-jump-zero)) out)))
+    (assert-true jz)
+    (assert-equal "cold" (cl-cc/vm::vm-label-name jz))
+    (assert-true (%test-label-position out "cold"))))
 
 (deftest loop-rotation-rotates-simple-while-shape
   "opt-pass-loop-rotation rewrites a simple while-shape into guard+body form."
@@ -738,6 +884,42 @@
     (assert-true pair-cons-pos)
     (assert-true jump-pos)
     (assert-true (< pair-cons-pos jump-pos))))
+
+(deftest code-sinking-does-not-sink-slot-read-across-aliased-write
+  "opt-pass-code-sinking does not move a slot read below an aliased slot write."
+  (let* ((read  (cl-cc:make-vm-slot-read :dst :v :obj-reg :obj :slot-name 'x))
+         (write (cl-cc:make-vm-slot-write :obj-reg :obj :slot-name 'x :value-reg :new))
+         (insts (list (make-vm-cons :dst :obj :car-src :r0 :cdr-src :r1)
+                      read
+                      write
+                      (make-vm-jump :label "Luse")
+                      (make-vm-label :name "Luse")
+                      (make-vm-ret :reg :v)))
+         (out (cl-cc/optimize::opt-pass-code-sinking insts)))
+    (assert-true (member read out :test #'eq))
+    (assert-true (member write out :test #'eq))
+    (assert-true (< (position read out :test #'eq)
+                    (position write out :test #'eq)))))
+
+(deftest code-sinking-sinks-slot-read-across-tbaa-disjoint-write
+  "opt-pass-code-sinking uses TBAA to move a slot read across a disjoint-kind write."
+  (let* ((read  (cl-cc:make-vm-slot-read :dst :v :obj-reg :obj :slot-name 'x))
+         (write (cl-cc:make-vm-slot-write :obj-reg :arr :slot-name 'x :value-reg :new))
+         (insts (list (make-vm-const :dst :n :value 4)
+                      (make-vm-cons :dst :obj :car-src :r0 :cdr-src :r1)
+                      (cl-cc:make-vm-make-array :dst :arr :size-reg :n
+                                                :initial-element nil :fill-pointer nil
+                                                :adjustable nil :element-type nil)
+                      read
+                      write
+                      (make-vm-jump :label "Luse")
+                      (make-vm-label :name "Luse")
+                      (make-vm-ret :reg :v)))
+         (out (cl-cc/optimize::opt-pass-code-sinking insts)))
+    (assert-true (member read out :test #'eq))
+    (assert-true (member write out :test #'eq))
+    (assert-true (> (position read out :test #'eq)
+                    (position write out :test #'eq)))))
 
 (deftest-each unreachable-removes-dead-code-cases
   "opt-pass-unreachable drops instructions between vm-ret/vm-jump and next label."

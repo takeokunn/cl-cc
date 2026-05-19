@@ -30,6 +30,7 @@
   (crosses-call-p nil)
   (fp-p nil)
   (remat-const nil)
+  (remat-inst nil)
   (return-value-p nil)
   (phys-reg nil)
   (spill-slot nil))
@@ -240,6 +241,21 @@ entry points without changing interval semantics."
                                    (> (interval-end interval) i))
                           (setf (interval-crosses-call-p interval) t)))
                       intervals))
+
+    ;; FR-296: mark cheap rematerializable definitions. Constants can be
+    ;; recreated directly; single pure no-input computations can be cloned at
+    ;; reload points when spilling would otherwise force memory traffic.
+    (loop for inst in instructions
+          for dst = (first (instruction-defs inst))
+          when (and dst (gethash dst intervals))
+            do (let ((interval (gethash dst intervals)))
+                 (cond
+                   ((typep inst 'vm-const)
+                    (setf (interval-remat-const interval) (vm-value inst)))
+                   ((and (opt-inst-pure-p inst)
+                         (null (instruction-uses inst))
+                         (= (length (instruction-defs inst)) 1))
+                    (setf (interval-remat-inst interval) inst)))))
 
     ;; Sort by start point
     (let ((result nil))

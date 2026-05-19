@@ -127,10 +127,14 @@ Used by call-next-method and next-method-p.")
                        :documentation "Current sampled call stack as a list of function labels, leaf first.")
    (profile-samples :initform (make-hash-table :test #'equal) :accessor vm-profile-samples
                     :documentation "Collapsed stack string -> sample count for lightweight flamegraphs.")
-   (profile-bb-counts :initform (make-hash-table :test #'eql) :accessor vm-profile-bb-counts
-                      :documentation "Program-counter/basic-block hit counts collected during execution.")
-   (profile-branch-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-branch-counts
-                          :documentation "Branch edge counters keyed by (kind from-pc to-pc)."))
+    (profile-bb-counts :initform (make-hash-table :test #'eql) :accessor vm-profile-bb-counts
+                       :documentation "Program-counter/basic-block hit counts collected during execution.")
+    (profile-branch-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-branch-counts
+                           :documentation "Branch edge counters keyed by (kind from-pc to-pc).")
+    (profile-call-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-call-counts
+                         :documentation "Function label -> dynamic call count collected for PGO.")
+    (profile-type-feedback :initform (make-hash-table :test #'equal) :accessor vm-profile-type-feedback
+                           :documentation "Register/type -> observation count collected for PGO."))
   (:documentation "VM execution state with registers, call stack, and heap."))
 
 ;;; VM state initialization, profiling, heap ops, and execute-instruction generic

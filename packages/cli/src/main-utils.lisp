@@ -109,6 +109,7 @@ Returns :lisp or :php."
 (defun %maybe-make-profiled-vm-state (opts)
   "Create a profiled VM state when profiling outputs are requested."
   (when (or (compile-opts-flamegraph-path opts)
+            (compile-opts-profile opts)
             (compile-opts-pgo-generate-path opts))
     (let ((vm-state (cl-cc/vm:make-vm-state
                                     :output-stream *standard-output*)))
@@ -207,3 +208,37 @@ Returns :lisp or :php."
 ;; %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode,
 ;; compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
 ;; are in main-dump.lisp (loaded next).
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Timeout support
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %parse-timeout-seconds (timeout-str)
+  "Parse TIMEOUT-STR as a positive integer number of seconds."
+  (let ((seconds (handler-case
+                     (let ((n (parse-integer timeout-str :junk-allowed nil)))
+                       (unless n
+                         (error 'arg-parse-error
+                                :message (format nil "Timeout must be a positive integer, got: ~S" timeout-str)))
+                       n)
+                   (error (c)
+                     (if (typep c 'arg-parse-error)
+                         (error c)
+                         (error 'arg-parse-error
+                                :message (format nil "Timeout must be a positive integer, got: ~S" timeout-str)))))))
+    (unless (and (typep seconds 'integer) (plusp seconds))
+      (error 'arg-parse-error
+             :message (format nil "Timeout must be a positive integer, got: ~S" timeout-str)))
+    seconds))
+
+(defun %get-timeout (parsed)
+  (let ((raw (flag parsed "--timeout")))
+    (when raw (%parse-timeout-seconds raw))))
+
+(defun %call-with-cli-timeout (seconds thunk command-name)
+  (if seconds
+      (handler-case (sb-ext:with-timeout seconds (funcall thunk))
+        (sb-ext:timeout (c) (declare (ignore c))
+          (format *error-output* "~&Error: ~A timed out after ~A second~:P~%" command-name seconds)
+          (uiop:quit 124)))
+      (funcall thunk)))

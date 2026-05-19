@@ -12,9 +12,11 @@
    #:interval-vreg
    #:interval-start
    #:interval-end
-   #:interval-phys-reg
-   #:interval-spill-slot
-   #:regalloc-result
+    #:interval-phys-reg
+    #:interval-spill-slot
+    #:interval-remat-const
+    #:interval-remat-inst
+    #:regalloc-result
    #:regalloc-assignment
    #:regalloc-spill-map
    #:regalloc-spill-count

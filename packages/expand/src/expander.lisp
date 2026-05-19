@@ -71,25 +71,31 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
             (if (equal expanded form)
                 form
                 expanded)))
-         ((and (symbolp (car form))
-               (lookup-compiler-macro (car form)))
-           (let ((expanded (invoke-registered-expander
-                            (lookup-compiler-macro (car form))
-                            form nil)))
-             (if (equal expanded form)
-                 form
-                 (compiler-macroexpand-all expanded))))
-          ((%list-contains-eq (car form) *compiler-special-forms*)
-           (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
-         (t
-          (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
-            (if expanded-p
-                (compiler-macroexpand-all exp)
-                ;; FR-120: accessor read inlining — (accessor obj) → (slot-value obj 'slot)
-                (let ((mapping (when (and (symbolp (car form))
-                                          (= (length (cdr form)) 1))
-                                 (gethash (car form) *accessor-slot-map*))))
-                  (if mapping
-                      (compiler-macroexpand-all
-                        (list 'slot-value (second form) (list 'quote (cdr mapping))))
-                      (mapcar #'compiler-macroexpand-all form)))))))))))
+          ((and (symbolp (car form))
+                (lookup-compiler-macro (car form)))
+            (let ((expanded (invoke-registered-expander
+                             (lookup-compiler-macro (car form))
+                             form nil)))
+              (if (equal expanded form)
+                  form
+                  (compiler-macroexpand-all expanded))))
+          (t
+           (multiple-value-bind (transformed transformed-p)
+               (deftransform-expand-1 form nil)
+             (cond
+               (transformed-p
+                (compiler-macroexpand-all transformed))
+               ((%list-contains-eq (car form) *compiler-special-forms*)
+                (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+               (t
+                (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
+                  (if expanded-p
+                      (compiler-macroexpand-all exp)
+                      ;; FR-120: accessor read inlining — (accessor obj) → (slot-value obj 'slot)
+                      (let ((mapping (when (and (symbolp (car form))
+                                                (= (length (cdr form)) 1))
+                                       (gethash (car form) *accessor-slot-map*))))
+                        (if mapping
+                            (compiler-macroexpand-all
+                              (list 'slot-value (second form) (list 'quote (cdr mapping))))
+                            (mapcar #'compiler-macroexpand-all form))))))))))))))

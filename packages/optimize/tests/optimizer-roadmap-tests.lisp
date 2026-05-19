@@ -325,4 +325,29 @@ resets the current block (used by the backend doc which has ### section separato
       (assert-true (function-present-p :cl-cc/codegen "X86-64-USED-CALLEE-SAVED-REGS"))
       (assert-true (function-present-p :cl-cc/regalloc "COMPUTE-LIVE-INTERVALS"))
       (assert-true (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
-                    evidence)))))
+                     evidence)))))
+
+(deftest optimizer-roadmap-ssa-phi-elim-evidence
+  "FR-271 (Trivial Phi Elimination) points at ssa-phi-elim.lisp and has test coverage."
+  (let ((evidence (cl-cc/optimize::lookup-opt-roadmap-evidence "FR-271")))
+    (assert-eq :implemented (cl-cc/optimize::opt-roadmap-evidence-status evidence))
+    (assert-true (member "packages/optimize/src/ssa-phi-elim.lisp"
+                         (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
+                         :test #'string=))
+    (assert-true (member "packages/optimize/tests/ssa-tests.lisp"
+                         (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
+                         :test #'string=))
+    (assert-true (member 'cl-cc/optimize::ssa-eliminate-trivial-phis
+                         (cl-cc/optimize::opt-roadmap-evidence-api-symbols evidence)))
+    ;; Verify individual test anchors by name (they're CL-CC/OPTIMIZE package symbols)
+    (assert-true (member 'cl-cc/optimize::ssa-phi-elim-all-same-arg-multi-pred
+                         (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)))
+    (assert-true (member 'cl-cc/optimize::ssa-phi-elim-phi-of-phi-chain-deep
+                         (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)))
+    (assert-true (member 'cl-cc/optimize::ssa-phi-elim-unused-phi
+                         (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)))
+    (assert-true (member 'cl-cc/optimize::ssa-phi-elim-idempotent
+                         (cl-cc/optimize::opt-roadmap-evidence-test-anchors evidence)))
+    (assert-true (cl-cc/optimize::optimize-roadmap-implementation-evidence-complete-p
+                  evidence))))
+

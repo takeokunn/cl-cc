@@ -78,30 +78,56 @@
 
 ;;; ── Let binding ──────────────────────────────────────────────────────────────
 
+(defun %lower-let-binding-pair (binding)
+  "Normalize one LET binding into (name . lowered-init-ast)."
+  (cond
+    ((symbolp binding)
+     (cons binding (make-ast-quote :value nil)))
+    ((and (consp binding) (= (length binding) 2)
+          (symbolp (first binding)))
+     (cons (first binding) (lower-sexp-to-ast (second binding))))
+    ((and (consp binding) (= (length binding) 1)
+          (symbolp (first binding)))
+     (cons (first binding) (make-ast-quote :value nil)))
+    (t (error "Invalid let binding: ~S" binding))))
+
+(defun %lower-named-let (node sf sl sc)
+  "Lower Scheme-style named LET into LABELS plus an initial call."
+  (unless (>= (length node) 4)
+    (error "named let requires name, bindings and body"))
+  (let ((name (second node))
+        (bindings (third node))
+        (body-forms (cdddr node)))
+    (unless (symbolp name)
+      (error "named let name must be a symbol"))
+    (unless (listp bindings)
+      (error "named let bindings must be a list"))
+    (let* ((pairs (mapcar #'%lower-let-binding-pair bindings))
+           (params (mapcar #'car pairs))
+           (init-asts (mapcar #'cdr pairs)))
+      (make-ast-labels
+       :bindings (list (list* name params (mapcar #'lower-sexp-to-ast body-forms)))
+       :body (list (make-ast-call :func (make-ast-var :name name)
+                                  :args init-asts
+                                  :source-file sf :source-line sl :source-column sc))
+       :source-file sf :source-line sl :source-column sc))))
+
 (define-list-lowerer (let) (node sf sl sc)
   (unless (>= (length node) 3)
     (error "let requires bindings and body"))
   (let ((bindings (second node)))
-    (unless (listp bindings)
-      (error "let bindings must be a list"))
-    (multiple-value-bind (declarations body-forms)
-        (%extract-leading-declarations (cddr node))
-      (make-ast-let
-       :bindings (mapcar (lambda (binding)
-                           (cond
-                             ((symbolp binding)
-                              (cons binding (make-ast-quote :value nil)))
-                             ((and (consp binding) (= (length binding) 2)
-                                   (symbolp (first binding)))
-                              (cons (first binding) (lower-sexp-to-ast (second binding))))
-                             ((and (consp binding) (= (length binding) 1)
-                                   (symbolp (first binding)))
-                              (cons (first binding) (make-ast-quote :value nil)))
-                             (t (error "Invalid let binding: ~S" binding))))
-                         bindings)
-       :declarations declarations
-       :body (mapcar #'lower-sexp-to-ast body-forms)
-       :source-file sf :source-line sl :source-column sc))))
+    (if (symbolp bindings)
+        (%lower-named-let node sf sl sc)
+        (progn
+          (unless (listp bindings)
+            (error "let bindings must be a list"))
+          (multiple-value-bind (declarations body-forms)
+              (%extract-leading-declarations (cddr node))
+            (make-ast-let
+             :bindings (mapcar #'%lower-let-binding-pair bindings)
+             :declarations declarations
+             :body (mapcar #'lower-sexp-to-ast body-forms)
+             :source-file sf :source-line sl :source-column sc))))))
 
 ;;; ── Lambda expression ────────────────────────────────────────────────────────
 

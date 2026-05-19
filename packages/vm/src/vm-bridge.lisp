@@ -4,7 +4,8 @@
 ;;;
 ;;; Contains: *vm-host-bridge-functions*, vm-register-host-bridge,
 ;;; hash-table-values, %class-slot-initargs-for-slot, %class-slot-metadata,
-;;; %class-slot-definitions, slot-definition-name, slot-definition-initargs,
+;;; %class-slot-definitions, slot-definition-name, slot-definition-location,
+;;; slot-definition-initargs,
 ;;; slot-definition-initform, slot-definition-allocation,
 ;;; slot-definition-type (and any other slot-def helpers),
 ;;; and the bootstrap vm-register-host-bridge calls for whitelisted symbols.
@@ -130,6 +131,13 @@ Accepts symbols/functions for EQ/EQL/EQUAL/EQUALP and falls back to EQL."
         (push (car entry) result)))
     (nreverse result)))
 
+(defun %class-slot-location (class slot-name)
+  "Return SLOT-NAME's zero-based effective slot location in CLASS, or NIL."
+  (cdr (assoc slot-name
+              (and (hash-table-p class)
+                   (gethash :__slot-locations__ class))
+              :test #'eq)))
+
 (defun %class-slot-metadata (class slot-name)
   "Build a lightweight slot-definition object for SLOT-NAME in CLASS."
   (let ((slot (make-hash-table :test #'eq))
@@ -144,6 +152,9 @@ Accepts symbols/functions for EQ/EQL/EQUAL/EQUALP and falls back to EQL."
     (setf (gethash :type slot) (or (cdr (assoc slot-name slot-types)) t))
     (setf (gethash :allocation slot)
           (if (member slot-name class-slots :test #'eq) :class :instance))
+    (let ((location (%class-slot-location class slot-name)))
+      (when location
+        (setf (gethash :location slot) location)))
     slot))
 
 (defun %class-slot-definitions-from-key (class key)
@@ -170,6 +181,12 @@ representations may use hash tables with structured metadata."
     ((symbolp slot) slot)
     ((hash-table-p slot) (gethash :name slot))
     (t nil)))
+
+(defun slot-definition-location (slot)
+  "Return the zero-based effective slot location for SLOT when available."
+  (if (hash-table-p slot)
+      (gethash :location slot)
+      nil))
 
 (defun slot-definition-initform (slot)
   "Return the initform metadata for SLOT when available."
@@ -322,4 +339,3 @@ For VM integer handles we ignore STREAM and compute the UTF-8 byte width."
          (push (car items) arg-types)
          (push (cadr items) arg-values)
          (setf items (cddr items)))))))
-

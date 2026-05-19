@@ -240,7 +240,7 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                         pass-pipeline print-pass-timings timing-stream
                                        print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                        print-pass-stats stats-stream trace-json-stream
-                                       retpoline stack-protector shadow-stack
+                                       retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
@@ -262,8 +262,8 @@ Returns a compilation-result struct with program, assembly, and globals."
                                            :print-pass-stats print-pass-stats
                                            :stats-stream stats-stream
                                            :trace-json-stream trace-json-stream)))
-    (declare (ignore retpoline stack-protector shadow-stack
-                     asan msan tsan ubsan hwasan))
+    (declare (ignore retpoline spectre-mitigations stack-protector shadow-stack
+                      asan msan tsan ubsan hwasan))
     (let ((*compile-time-value-env*    nil)
           (*compile-time-function-env* nil))
        (dolist (form forms)

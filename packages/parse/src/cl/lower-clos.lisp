@@ -25,8 +25,10 @@
           (class-options (nthcdr 4 node))
           (default-initargs-opt (find :default-initargs class-options
                                       :key (lambda (o) (when (listp o) (first o)))))
-          (metaclass-opt (find :metaclass class-options
-                               :key (lambda (o) (when (listp o) (first o)))))
+           (metaclass-opt (find :metaclass class-options
+                                :key (lambda (o) (when (listp o) (first o)))))
+           (sealed-opt (find :sealed class-options
+                             :key (lambda (o) (when (listp o) (first o)))))
           (default-initargs (when default-initargs-opt
                               (loop for (k v) on (rest default-initargs-opt) by #'cddr
                                     collect (cons k (lower-sexp-to-ast v)))))
@@ -40,10 +42,11 @@
     (unless (listp slot-specs)   (error "defclass slots must be a list"))
     (make-ast-defclass :name name
                         :superclasses superclasses
-                        :slots (mapcar #'parse-slot-spec slot-specs)
-                        :default-initargs default-initargs
-                        :metaclass metaclass
-                        :source-file sf :source-line sl :source-column sc)))
+                         :slots (mapcar #'parse-slot-spec slot-specs)
+                         :default-initargs default-initargs
+                         :metaclass metaclass
+                         :sealed (if sealed-opt (second sealed-opt) nil)
+                         :source-file sf :source-line sl :source-column sc)))
 
 ;;; ── Defgeneric ───────────────────────────────────────────────────────────────
 
@@ -54,7 +57,9 @@
          (lambda-list (third node))
          (options (cdddr node))
          (inline-methods nil))
-    (unless (symbolp name) (error "defgeneric name must be a symbol"))
+    (unless (or (symbolp name)
+                (and (listp name) (eql 2 (length name)) (eql 'setf (first name)) (symbolp (second name))))
+      (error "defgeneric name must be a symbol or (setf symbol), got: ~S" name))
     ;; Parse options: extract (:method ...) forms, :method-combination, accept and ignore others
     (let ((combination nil))
       (dolist (opt options)
@@ -95,7 +100,9 @@
          (raw-params (car rest-after-name))
          (body-forms (cdr rest-after-name))
          (specializers nil) (param-names nil))
-    (unless (symbolp name)    (error "defmethod name must be a symbol"))
+    (unless (or (symbolp name)
+                (and (listp name) (eql 2 (length name)) (eql 'setf (first name)) (symbolp (second name))))
+      (error "defmethod name must be a symbol or (setf symbol), got: ~S" name))
     (unless (listp raw-params) (error "defmethod parameters must be a list"))
     (dolist (p raw-params)
       (if (listp p)
@@ -103,13 +110,15 @@
                  (push (first p) param-names))
           (progn (push nil specializers)
                  (push p param-names))))
-    (make-ast-defmethod
-     :name name
-     :qualifier qualifier
-     :specializers (nreverse specializers)
-     :params       (nreverse param-names)
-     :body         (list (lower-sexp-to-ast (list* 'block name body-forms)))
-     :source-file sf :source-line sl :source-column sc)))
+     (make-ast-defmethod
+      :name name
+      :qualifier qualifier
+      :specializers (nreverse specializers)
+      :params       (nreverse param-names)
+      :body         (list (lower-sexp-to-ast (list* 'block 
+                                                     (if (listp name) (second name) name)
+                                                     body-forms)))
+      :source-file sf :source-line sl :source-column sc)))
 
 ;;; ── Make-instance ────────────────────────────────────────────────────────────
 

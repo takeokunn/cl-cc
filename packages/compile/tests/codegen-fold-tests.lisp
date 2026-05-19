@@ -156,3 +156,14 @@
          (rhs  (cl-cc/ast:make-ast-int :value 5))
          (result (cl-cc/compile::%fold-ast-binop node lhs rhs)))
     (assert-true (typep result 'cl-cc::ast-binop))))
+
+(deftest optimize-ast-folds-literal-intern-call-to-quote
+  "optimize-ast folds literal (intern \"CAR\" :cl) into an AST quote constant."
+  (%with-clean-ct-env
+    (let* ((node (cl-cc/ast:make-ast-call
+                  :func (cl-cc/ast:make-ast-var :name 'intern)
+                  :args (list (cl-cc/ast:make-ast-quote :value "CAR")
+                              (cl-cc/ast:make-ast-quote :value :cl))))
+           (result (cl-cc/compile::optimize-ast node)))
+      (assert-true (typep result 'cl-cc::ast-quote))
+      (assert-eq 'cl:car (cl-cc/ast:ast-quote-value result)))))

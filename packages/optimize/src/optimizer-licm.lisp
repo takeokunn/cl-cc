@@ -50,26 +50,57 @@
 
 ;;; ─── LICM helper: collect invariant instructions ─────────────────────────
 
-(defun %licm-collect-invariants (members def-sites)
+(defun %licm-loop-instructions (members)
+  "Return all instructions contained in loop MEMBERS."
+  (let ((instructions nil))
+    (maphash (lambda (member _)
+               (declare (ignore _))
+               (setf instructions (append instructions (bb-instructions member))))
+             members)
+    instructions))
+
+(defun %licm-memory-read-hoist-safe-p (inst loop-insts alias-roots type-facts)
+  "Return T when read-only INST can be hoisted out of LOOP-INSTS safely."
+  (and (opt-memory-read-inst-p inst)
+       (notany (lambda (loop-inst)
+                 (and (not (eq loop-inst inst))
+                      (opt-memory-write-inst-p loop-inst)
+                      (opt-memory-accesses-may-alias-p inst loop-inst alias-roots type-facts)))
+               loop-insts)))
+
+(defun %licm-motion-safe-p (inst loop-insts alias-roots type-facts)
+  "Return T when INST's effect kind permits LICM code motion."
+  (case (vm-inst-effect-kind inst)
+    (:pure t)
+    (:read-only (%licm-memory-read-hoist-safe-p inst loop-insts alias-roots type-facts))
+    (otherwise nil)))
+
+(defun %licm-collect-invariants (members def-sites &optional alias-roots type-facts)
   "Return list of loop-invariant instructions across all MEMBERS blocks."
   (let ((loop-def-regs (%licm-loop-def-regs members))
+        (loop-insts (%licm-loop-instructions members))
         (invariants nil))
     (maphash (lambda (member _)
-               (dolist (inst (bb-instructions member))
-                 (when (opt-inst-loop-invariant-p inst loop-def-regs members def-sites)
-                   (pushnew inst invariants :test #'eq))))
-             members)
+                (dolist (inst (bb-instructions member))
+                  (when (opt-inst-loop-invariant-p inst loop-def-regs members def-sites
+                                                   loop-insts alias-roots type-facts)
+                    (pushnew inst invariants :test #'eq))))
+              members)
     invariants))
 
 ;;; ─── LICM: invariance predicate ───────────────────────────────────────────
 ;;; FR-017 integration: LICM safety improved by TBAA alias analysis — loop-invariant loads proven not to alias stores can be hoisted
 
-(defun opt-inst-loop-invariant-p (inst loop-def-regs loop-members def-sites)
+(defun opt-inst-loop-invariant-p (inst loop-def-regs loop-members def-sites
+                                  &optional loop-insts alias-roots type-facts)
   "Return T if INST is loop-invariant:
-     1. Pure (no observable side effects)
+     1. Pure, or read-only with no aliased loop writes
      2. All read registers are defined outside the loop"
-  ;; Must be pure to be safely hoisted
-  (unless (opt-inst-pure-p inst)
+  ;; Must be movable to be safely hoisted.
+  (unless (%licm-motion-safe-p inst
+                               (or loop-insts (list inst))
+                               (or alias-roots (make-hash-table :test #'eq))
+                               type-facts)
     (return-from opt-inst-loop-invariant-p nil))
 
   ;; Check all read registers
@@ -161,16 +192,18 @@
                                   (coerce (cfg-blocks cfg) 'list))))
       (when (null loop-blocks)
         (return-from opt-pass-licm instructions))
-      (let* ((def-sites (%licm-collect-def-sites cfg))
-             (header-to-members (make-hash-table :test #'eq))
-             (header-to-invariants (make-hash-table :test #'eq)))
+        (let* ((def-sites (%licm-collect-def-sites cfg))
+               (alias-roots (opt-compute-heap-aliases instructions))
+               (type-facts (opt-compute-heap-type-facts instructions alias-roots))
+               (header-to-members (make-hash-table :test #'eq))
+               (header-to-invariants (make-hash-table :test #'eq)))
         (multiple-value-bind (loop-headers header-to-tails)
             (%licm-find-loop-headers cfg)
           (dolist (header loop-headers)
             (let ((members (%licm-collect-members header (gethash header header-to-tails))))
               (setf (gethash header header-to-members) members
-                    (gethash header header-to-invariants)
-                    (%licm-collect-invariants members def-sites))))
+                     (gethash header header-to-invariants)
+                     (%licm-collect-invariants members def-sites alias-roots type-facts))))
           (when (every (lambda (header)
                          (null (gethash header header-to-invariants)))
                        loop-headers)

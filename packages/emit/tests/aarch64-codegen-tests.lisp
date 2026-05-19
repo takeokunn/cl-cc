@@ -343,12 +343,17 @@ Returns the byte vector, or NIL on error."
                   (cl-cc/codegen::emit-a64-vm-select
                    (cl-cc:make-vm-select :dst :R0 :cond-reg :R1 :then-reg :R2 :else-reg :R3)
                    s)))))
+    (assert-eq #'cl-cc/codegen::emit-a64-vm-select
+               (gethash 'cl-cc/vm::vm-select cl-cc/codegen::*a64-emitter-table*))
     (assert-= 12 (length bytes))
     ;; First instruction is MOV X0, X3; second is CMP X1, XZR; third is CSEL
     (assert-= #xE0 (nth 0 bytes))
     (assert-= #x03 (nth 1 bytes))
     (assert-= #x1F (nth 6 bytes))
-    (assert-= #x9A (nth 11 bytes))))
+    (assert-= #x9A (nth 11 bytes))
+    ;; The high opcode byte of each 32-bit word is neither B/B.cond nor CBZ.
+    (dolist (high-op (list (nth 3 bytes) (nth 7 bytes) (nth 11 bytes)))
+      (assert-false (member high-op '(#x14 #x54 #xB4 #xB5) :test #'=)))))
 
 (deftest aarch64-jump-zero-uses-cbz
   "emit-a64-vm-jump-zero emits a single CBZ instruction."

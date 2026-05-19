@@ -23,9 +23,9 @@
     vm-const vm-move
     ;; Integer arithmetic (may signal zero-division for div/mod/rem,
     ;; but optimizer already handles folding — kept pure for DCE/CSE)
-    vm-add vm-integer-add vm-float-add
-    vm-sub vm-integer-sub vm-float-sub
-    vm-mul vm-integer-mul vm-float-mul
+    vm-add vm-integer-add vm-add-checked vm-float-add
+    vm-sub vm-integer-sub vm-sub-checked vm-float-sub
+    vm-mul vm-integer-mul vm-mul-checked vm-float-mul
     vm-neg vm-abs vm-inc vm-dec
     vm-div vm-cl-div vm-mod vm-rem
     vm-concatenate
@@ -110,13 +110,14 @@
 
 (defparameter *opt-write-global-inst-types*
   '(;; Global state mutation
-    vm-set-global vm-register-function vm-register-method
-    vm-makunbound
-    vm-progv-enter vm-progv-exit
+     vm-set-global vm-register-function vm-register-method
+     vm-makunbound
+     vm-add-package-local-nickname vm-remove-package-local-nickname
+     vm-progv-enter vm-progv-exit
     vm-symbol-set vm-remprop vm-set-symbol-plist
     ;; Heap mutation
     vm-rplaca vm-rplacd vm-slot-write
-    vm-aset vm-fill vm-svset vm-set-fill-pointer vm-vector-push vm-vector-pop
+    vm-aset vm-fill vm-copy-vector vm-svset vm-set-fill-pointer vm-vector-push vm-vector-pop
     vm-vector-push-extend vm-adjust-array vm-array-displacement
     vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not
     vm-push vm-pop vm-nconc vm-nreverse

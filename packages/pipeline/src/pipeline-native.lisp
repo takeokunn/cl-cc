@@ -47,8 +47,9 @@ and apply an ad-hoc code signature (required by macOS kernel for unsigned execut
   "Return the native compile options that can change cached artifact bytes."
   (list :pass-pipeline (getf opts :pass-pipeline)
         :inline-threshold-scale (getf opts :inline-threshold-scale)
-        :speed (getf opts :speed)
-        :retpoline (getf opts :retpoline)
+         :speed (getf opts :speed)
+         :retpoline (getf opts :retpoline)
+         :spectre-mitigations (getf opts :spectre-mitigations)
         :stack-protector (getf opts :stack-protector)
         :shadow-stack (getf opts :shadow-stack)
         :asan (getf opts :asan)
@@ -91,7 +92,7 @@ and apply an ad-hoc code signature (required by macOS kernel for unsigned execut
                                  print-pass-timings timing-stream
                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                  print-pass-stats stats-stream trace-json-stream
-                                 retpoline stack-protector shadow-stack
+                                  retpoline spectre-mitigations stack-protector shadow-stack
                                  asan msan tsan ubsan hwasan)
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
   (append (list :pass-pipeline pass-pipeline)
@@ -104,9 +105,10 @@ and apply an ad-hoc code signature (required by macOS kernel for unsigned execut
                 :opt-remarks-mode    opt-remarks-mode
                 :print-pass-stats    print-pass-stats
                 :stats-stream        stats-stream
-                :trace-json-stream   trace-json-stream
-                :retpoline          retpoline
-                :stack-protector    stack-protector
+                 :trace-json-stream   trace-json-stream
+                 :retpoline          retpoline
+                 :spectre-mitigations spectre-mitigations
+                 :stack-protector    stack-protector
                 :shadow-stack       shadow-stack
                 :asan               asan
                 :msan               msan
@@ -176,8 +178,9 @@ Returns two values: the compilation result and whether the CPS-native path was u
       (apply #'compile-to-x86-64-bytes
              program
              (if opts
-                 (list :retpoline (getf opts :retpoline)
-                       :stack-protector (getf opts :stack-protector)
+                  (list :retpoline (getf opts :retpoline)
+                        :spectre-mitigations (getf opts :spectre-mitigations)
+                        :stack-protector (getf opts :stack-protector)
                        :shadow-stack (getf opts :shadow-stack)
                        :asan (getf opts :asan)
                        :msan (getf opts :msan)
@@ -205,7 +208,7 @@ Returns two values: the compilation result and whether the CPS-native path was u
                                    print-pass-timings timing-stream
                                    print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                    print-pass-stats stats-stream trace-json-stream
-                                   retpoline stack-protector shadow-stack
+                                   retpoline spectre-mitigations stack-protector shadow-stack
                                    asan msan tsan ubsan hwasan)
   "Compile SOURCE to a native Mach-O executable.
 SOURCE can be a string (single expression) or a list of forms.
@@ -226,8 +229,9 @@ Returns the output file path on success."
                                      :print-pass-stats print-pass-stats
                                      :stats-stream stats-stream
                                       :trace-json-stream trace-json-stream
-                                      :retpoline retpoline
-                                      :stack-protector stack-protector
+                                       :retpoline retpoline
+                                       :spectre-mitigations spectre-mitigations
+                                       :stack-protector stack-protector
                                       :shadow-stack shadow-stack
                                       :asan asan
                                       :msan msan
@@ -237,7 +241,12 @@ Returns the output file path on success."
          (result (%compile-native-source source native-target language opts))
          (program (compilation-result-program result))
          (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
-                            (or (getf opts :retpoline) cl-cc/codegen::*x86-64-use-retpoline*))
+                             (or (getf opts :retpoline)
+                                 (getf opts :spectre-mitigations)
+                                 cl-cc/codegen::*x86-64-use-retpoline*))
+                            (cl-cc/codegen::*x86-64-spectre-mitigations-enabled*
+                             (or (getf opts :spectre-mitigations)
+                                 cl-cc/codegen::*x86-64-spectre-mitigations-enabled*))
                             (cl-cc/codegen::*x86-64-stack-protector-enabled*
                              (or (getf opts :stack-protector)
                                  cl-cc/codegen::*x86-64-stack-protector-enabled*))
@@ -313,7 +322,7 @@ Returns the output file path on success."
                                             print-pass-timings timing-stream
                                             print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                             print-pass-stats stats-stream trace-json-stream
-                                             retpoline stack-protector shadow-stack
+                                              retpoline spectre-mitigations stack-protector shadow-stack
                                              asan msan tsan ubsan hwasan)
   "Compile a CL-CC source file to a native Mach-O executable.
 INPUT-FILE is the path to the source file.
@@ -333,8 +342,9 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                                     :print-pass-stats print-pass-stats
                                     :stats-stream stats-stream
                                      :trace-json-stream trace-json-stream
-                                     :retpoline retpoline
-                                     :stack-protector stack-protector
+                                      :retpoline retpoline
+                                      :spectre-mitigations spectre-mitigations
+                                      :stack-protector stack-protector
                                      :shadow-stack shadow-stack
                                      :asan asan
                                      :msan msan
@@ -354,7 +364,12 @@ LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension."
                (result (%compile-native-file-source source native-target effective-language opts))
                (program (compilation-result-program result))
                 (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
-                                   (or (getf opts :retpoline) cl-cc/codegen::*x86-64-use-retpoline*))
+                                    (or (getf opts :retpoline)
+                                        (getf opts :spectre-mitigations)
+                                        cl-cc/codegen::*x86-64-use-retpoline*))
+                                   (cl-cc/codegen::*x86-64-spectre-mitigations-enabled*
+                                    (or (getf opts :spectre-mitigations)
+                                        cl-cc/codegen::*x86-64-spectre-mitigations-enabled*))
                                   (cl-cc/codegen::*x86-64-stack-protector-enabled*
                                    (or (getf opts :stack-protector)
                                        cl-cc/codegen::*x86-64-stack-protector-enabled*))

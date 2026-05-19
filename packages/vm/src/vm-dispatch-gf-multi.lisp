@@ -36,11 +36,13 @@ Returns (values new-pc halt-p halt-result)."
         (values return-pc nil nil))
       (values nil t result)))
 
-(defun %vm-jump-to-next-method (state labels method-closure arg-values)
-  "Tail-call METHOD-CLOSURE with ARG-VALUES and return the new PC triple."
-  (vm-profile-enter-call state (vm-closure-entry-label method-closure) :tail-p t)
-  (vm-bind-closure-args method-closure state arg-values)
-  (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))
+(defun %vm-jump-to-next-method (state labels method arg-values)
+  "Tail-call METHOD with ARG-VALUES and return the new PC triple.
+METHOD may be a method descriptor hash-table; extracts :function."
+  (let ((method-closure (%vm-method-function method)))
+    (vm-profile-enter-call state (vm-closure-entry-label method-closure) :tail-p t)
+    (vm-bind-closure-args method-closure state arg-values)
+    (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil)))
 
 (defun %vm-ret-qualified-dispatch (state result labels method-entry)
   "Handle return from a qualified method using standard method combination:

@@ -248,7 +248,9 @@ KEY slots may include a fourth explicit keyword-name element."
             (when (ast-defclass-metaclass node)
               (list (list :metaclass
                           (%ast-defclass-option-value-to-sexp
-                           (ast-defclass-metaclass node))))))))
+                           (ast-defclass-metaclass node)))))
+            (when (ast-defclass-sealed node)
+              (list (list :sealed t))))))
 
 (defmethod ast-to-sexp ((node ast-defgeneric))
   (list 'defgeneric

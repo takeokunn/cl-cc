@@ -1,13 +1,129 @@
 ;;;; packages/optimize/src/optimizer-flow-passes.lisp — Advanced CFG optimization passes
 ;;;
 ;;; Extracted from optimizer-flow-core.lisp.
-;;; Contains: branch-correlation, block-merge, tail-merge.
+;;; Contains: if-conversion, branch-correlation, block-merge, tail-merge.
 ;;;
 ;;; Depends on optimizer-flow-core.lisp (opt-pass-dominated-type-check-elim,
 ;;;   opt-foldable-type-pred-p, opt-inst-dst, cfg-build, cfg-flatten, bb-*).
 ;;; Load order: immediately after optimizer-flow-core.lisp.
 
 (in-package :cl-cc/optimize)
+
+;;; ─── If-conversion: simple diamond → vm-select ───────────────────────────
+
+(defun %opt-label-reference-counts (instructions)
+  "Return a label-name → branch-reference-count table for INSTRUCTIONS."
+  (let ((counts (make-hash-table :test #'equal)))
+    (dolist (inst instructions counts)
+      (when (or (typep inst 'vm-jump)
+                (typep inst 'vm-jump-zero))
+        (incf (gethash (vm-label-name inst) counts 0))))))
+
+(defun %opt-label-ref-count (counts label-name)
+  "Return the recorded branch-reference count for LABEL-NAME."
+  (gethash label-name counts 0))
+
+(defun %opt-label-position (vec label-name)
+  "Return the position of LABEL-NAME in VEC, or NIL when absent."
+  (loop for i from 0 below (length vec)
+        for inst = (aref vec i)
+        when (and (vm-label-p inst)
+                  (equal (vm-name inst) label-name))
+          return i))
+
+(defun %opt-insts-contain-control-or-label-p (insts)
+  "Return T when INSTS contain labels or control transfers."
+  (some (lambda (inst)
+          (or (vm-label-p inst)
+              (typep inst 'vm-jump)
+              (typep inst 'vm-jump-zero)
+              (vm-ret-p inst)))
+        insts))
+
+(defun %opt-simple-select-arm-source (insts dst)
+  "Return the source register when INSTS is exactly `(vm-move DST SRC)'."
+  (when (and (= (length insts) 1)
+             (typep (first insts) 'vm-move)
+             (eq (vm-dst (first insts)) dst))
+    (vm-src (first insts))))
+
+(defun %opt-if-conversion-candidate (vec i label-counts)
+  "Return a vm-select candidate plist starting at VEC[I], or NIL.
+
+Recognized shape:
+  <cond-inst> (vm-jump-zero cond Lelse)
+  (vm-move dst then-reg) (vm-jump Ljoin)
+  Lelse: (vm-move dst else-reg)
+  Ljoin:
+
+The transform is intentionally conservative: only register-to-register arms are
+converted, and both internal labels must be referenced solely by the diamond."
+  (let* ((n (length vec))
+         (cond-inst (and (< i n) (aref vec i)))
+         (jz-pos (1+ i))
+         (jz-inst (and (< jz-pos n) (aref vec jz-pos)))
+         (cond-reg (and (typep jz-inst 'vm-jump-zero) (vm-reg jz-inst))))
+    (when (and cond-inst
+               cond-reg
+               (not (vm-label-p cond-inst))
+               (not (typep cond-inst 'vm-jump))
+               (not (typep cond-inst 'vm-jump-zero))
+               (eq (opt-inst-dst cond-inst) cond-reg))
+      (let* ((else-name (vm-label-name jz-inst))
+             (else-pos (%opt-label-position vec else-name))
+             (then-jump-pos (and else-pos (1- else-pos)))
+             (then-jump (and then-jump-pos (> then-jump-pos jz-pos)
+                             (aref vec then-jump-pos))))
+        (when (and else-pos
+                   (typep then-jump 'vm-jump)
+                   (= (%opt-label-ref-count label-counts else-name) 1))
+          (let* ((join-name (vm-label-name then-jump))
+                 (join-pos (%opt-label-position vec join-name)))
+            (when (and join-pos
+                       (> join-pos else-pos)
+                       (= (%opt-label-ref-count label-counts join-name) 1))
+              (let* ((then-insts (loop for j from (+ i 2) below then-jump-pos
+                                       collect (aref vec j)))
+                     (else-insts (loop for j from (1+ else-pos) below join-pos
+                                       collect (aref vec j)))
+                     (then-dst (and then-insts (opt-inst-dst (first then-insts))))
+                     (then-src (%opt-simple-select-arm-source then-insts then-dst))
+                     (else-src (%opt-simple-select-arm-source else-insts then-dst)))
+                (when (and then-dst then-src else-src
+                           (not (%opt-insts-contain-control-or-label-p then-insts))
+                           (not (%opt-insts-contain-control-or-label-p else-insts)))
+                  (list :end join-pos
+                        :cond-inst cond-inst
+                        :select (make-vm-select :dst then-dst
+                                                :cond-reg cond-reg
+                                                :then-reg then-src
+                                                :else-reg else-src)))))))))))
+
+(defun opt-pass-if-conversion (instructions)
+  "Convert simple if-diamond control flow into branchless `vm-select`.
+
+This FR-034 pass lowers only the safe single-move diamond shape, preserving the
+condition producer and replacing the conditional/unconditional branch pair with
+one select. Later dead-label cleanup can remove the now-unreferenced join label."
+  (let* ((vec (coerce instructions 'vector))
+         (n (length vec))
+         (label-counts (%opt-label-reference-counts instructions))
+         (result nil)
+         (i 0))
+    (loop while (< i n)
+          do (let ((candidate (%opt-if-conversion-candidate vec i label-counts)))
+               (if candidate
+                   (progn
+                     (push (getf candidate :cond-inst) result)
+                     (push (getf candidate :select) result)
+                     ;; Keep the join label in-place. It is harmless if dead and
+                     ;; preserves layout for diagnostics until dead-label cleanup.
+                     (push (aref vec (getf candidate :end)) result)
+                     (setf i (1+ (getf candidate :end))))
+                   (progn
+                     (push (aref vec i) result)
+                     (incf i)))))
+    (nreverse result)))
 
 (defun %opt-branch-correlation-forwarder-block-p (block)
   "Return T when BLOCK is a trivial forwarder (single unconditional jump)."
@@ -557,6 +673,37 @@ successors."
                                      :lhs (vm-lhs inst)
                                      :rhs (vm-rhs inst)))))))))))))
 
+(defun %opt-jump-constant-facts (fact)
+  (copy-list (getf fact :constants)))
+
+(defun %opt-jump-known-constant (reg constants)
+  (let ((cell (assoc reg constants :test #'eq)))
+    (if cell (values (cdr cell) t) (values nil nil))))
+
+(defun %opt-jump-put-constant (reg value constants)
+  (acons reg value (remove reg constants :key #'car :test #'eq)))
+
+(defun %opt-jump-kill-constant (reg constants)
+  (remove reg constants :key #'car :test #'eq))
+
+(defun %opt-jump-evaluate-comparison (inst constants)
+  "Return (values INTEGER-BOOLEAN T) when INST's predicate is constant."
+  (multiple-value-bind (lhs lfound) (%opt-jump-known-constant (vm-lhs inst) constants)
+    (multiple-value-bind (rhs rfound) (%opt-jump-known-constant (vm-rhs inst) constants)
+      (if (and lfound rfound)
+          (values (if (typecase inst
+                        (vm-lt (and (numberp lhs) (numberp rhs) (< lhs rhs)))
+                        (vm-le (and (numberp lhs) (numberp rhs) (<= lhs rhs)))
+                        (vm-gt (and (numberp lhs) (numberp rhs) (> lhs rhs)))
+                        (vm-ge (and (numberp lhs) (numberp rhs) (>= lhs rhs)))
+                        (vm-eq (eql lhs rhs))
+                        (vm-num-eq (and (numberp lhs) (numberp rhs) (= lhs rhs)))
+                        (t nil))
+                      1
+                      0)
+                  t)
+          (values nil nil)))))
+
 (defun %opt-jump-back-edge-p (pred succ)
   "Return T when PRED -> SUCC is a CFG back-edge."
   (and (bb-idom pred)
@@ -569,28 +716,54 @@ successors."
     (return-from %opt-jump-edge-fact nil))
   (let* ((term (car (last (bb-instructions pred))))
          (branch-fact (%opt-jump-branch-comparison-fact pred)))
-    (if (and branch-fact (typep term 'vm-jump-zero))
-        (let ((target (cfg-get-block-by-label cfg (vm-label-name term))))
-          (append branch-fact (list :value (if (eq succ target) 0 1))))
+    (if (typep term 'vm-jump-zero)
+        (let* ((target (cfg-get-block-by-label cfg (vm-label-name term)))
+               (value (if (eq succ target) 0 1))
+               (constants (%opt-jump-put-constant
+                           (vm-reg term) value
+                           (%opt-jump-constant-facts live-fact))))
+          (append branch-fact (list :value value :constants constants)))
         live-fact)))
 
 (defun %opt-jump-rewrite-block-with-fact (block fact)
   "Rewrite redundant comparisons in BLOCK using incoming FACT.
 Returns the still-live fact after scanning the block."
   (let ((live-fact fact)
+        (constants (%opt-jump-constant-facts fact))
         (new-insts nil))
     (dolist (inst (bb-instructions block))
       (let ((dst (opt-inst-dst inst)))
         (when (%opt-jump-fact-killed-p live-fact dst)
           (setf live-fact nil))
+        (when dst
+          (setf constants (%opt-jump-kill-constant dst constants)))
         (cond
+          ((and (typep inst 'vm-const) dst)
+           (setf constants (%opt-jump-put-constant dst (vm-value inst) constants))
+           (push inst new-insts))
           ((%opt-jump-same-comparison-p inst live-fact)
-           (push (make-vm-const :dst dst :value (getf live-fact :value))
-                 new-insts))
+           (let ((value (getf live-fact :value)))
+             (setf constants (%opt-jump-put-constant dst value constants))
+             (push (make-vm-const :dst dst :value value) new-insts)))
+          ((and (%opt-jump-comparison-p inst) dst)
+           (multiple-value-bind (value ok) (%opt-jump-evaluate-comparison inst constants)
+             (if ok
+                 (progn
+                   (setf constants (%opt-jump-put-constant dst value constants))
+                   (push (make-vm-const :dst dst :value value) new-insts))
+                 (push inst new-insts))))
+          ((and (typep inst 'vm-move) dst)
+           (multiple-value-bind (value ok) (%opt-jump-known-constant (vm-src inst) constants)
+             (if ok
+                 (progn
+                   (setf constants (%opt-jump-put-constant dst value constants))
+                   (push (make-vm-const :dst dst :value value) new-insts))
+                 (push inst new-insts))))
           (t
            (push inst new-insts)))))
     (setf (bb-instructions block) (nreverse new-insts))
-    live-fact))
+    (when (or live-fact constants)
+      (append live-fact (list :constants constants)))))
 
 (defun %opt-pass-jump-propagate-edge-values (instructions)
   "Propagate known comparison values from conditional CFG edges."

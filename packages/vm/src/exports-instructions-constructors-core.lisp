@@ -9,8 +9,10 @@
     make-vm-abs
     make-vm-acons
     make-vm-add
-    make-vm-add-checked
-    make-vm-sub-checked
+     make-vm-add-checked
+     make-vm-add-package-local-nickname
+     make-vm-remove-package-local-nickname
+     make-vm-sub-checked
     make-vm-mul-checked
     make-vm-alpha-char-p
    make-vm-integer-add
@@ -113,13 +115,15 @@
    vm-macroexpand-inst
    make-vm-sxhash
    vm-sxhash
-   make-vm-class-name-fn
-   make-vm-class-of-fn
-   make-vm-find-class
-   vm-class-name-fn
-   vm-class-of-fn
-   vm-find-class
-   make-vm-evenp
+    make-vm-class-name-fn
+    make-vm-class-of-fn
+    make-vm-find-class
+    make-vm-compute-effective-slot-definition
+    vm-class-name-fn
+    vm-class-of-fn
+    vm-find-class
+    vm-compute-effective-slot-definition
+    make-vm-evenp
    make-vm-fceiling
    make-vm-ffloor
    make-vm-fifth
@@ -130,9 +134,10 @@
    make-vm-tenth
    make-vm-file-length
    make-vm-fill-pointer-inst
-    make-vm-file-position
-    make-vm-fill
-    make-vm-first
+     make-vm-file-position
+     make-vm-fill
+     make-vm-copy-vector
+     make-vm-first
    make-vm-floor-inst
    make-vm-fdefinition
    make-vm-format-inst

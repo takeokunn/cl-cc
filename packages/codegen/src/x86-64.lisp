@@ -138,6 +138,31 @@
   (format stream "  jmp ~A~%"
           (target-register target (vm-func-reg inst))))
 
+(defun %x86-64-array-data-ref (target array-reg index-reg)
+  "Return the staged native array element address for ARRAY-REG[INDEX-REG].
+
+The staged x86-64 array layout keeps the length word at offset 0 and eqref/value
+payload words from offset 8."
+  (format nil "[~A + 8 + ~A*8]"
+          (target-register target array-reg)
+          (target-register target index-reg)))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-aref) stream)
+  "Emit native array read, consuming BCE metadata to skip the explicit guard."
+  (emit-vm-array-bounds-check-if-needed
+   inst stream (lambda (reg) (target-register target reg)))
+  (format stream "  mov ~A, ~A~%"
+          (target-register target (vm-dst inst))
+          (%x86-64-array-data-ref target (vm-array-reg inst) (vm-index-reg inst))))
+
+(defmethod emit-instruction ((target x86-64-target) (inst vm-aset) stream)
+  "Emit native array write, consuming BCE metadata to skip the explicit guard."
+  (emit-vm-array-bounds-check-if-needed
+   inst stream (lambda (reg) (target-register target reg)))
+  (format stream "  mov ~A, ~A~%"
+          (%x86-64-array-data-ref target (vm-array-reg inst) (vm-index-reg inst))
+          (target-register target (vm-val-reg inst))))
+
 (defmethod emit-instruction ((target x86-64-target) (inst vm-class-def) stream)
   (%x86-64-emit-runtime-call target stream
                              "rt-defclass"

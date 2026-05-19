@@ -93,6 +93,21 @@
         (expected (read-from-string expected-str)))
     (assert-equal expected result)))
 
+;;; ─── merge :key (FR-452) ─────────────────────────────────────────────────
+
+(deftest-each merge-with-key
+  "merge supports :key for sorting by transformed values."
+  :cases (("car-key"    "((1 . :a) (2 . :c) (3 . :b) (4 . :d))"
+                        "(merge 'list '((1 . :a) (3 . :b)) '((2 . :c) (4 . :d)) #'< :key #'car)")
+          ("cdr-key"    "((:a . 1) (:c . 2) (:b . 3) (:d . 4))"
+                        "(merge 'list '((:a . 1) (:b . 3)) '((:c . 2) (:d . 4)) #'< :key #'cdr)")
+          ("nil-key"    "(1 2 3 4 5 6)"
+                        "(merge 'list '(1 3 5) '(2 4 6) #'< :key nil)"))
+  (expected-str form)
+  (let ((result (run-string form :stdlib t))
+        (expected (read-from-string expected-str)))
+    (assert-equal expected result)))
+
 ;;; ─── search ─────────────────────────────────────────────────────────────────
 
 (deftest-each search-finds-subsequence
@@ -111,7 +126,15 @@
 (deftest-each map-into-behavior
   "map-into applies fn to each element and fills the destination in place."
   :cases (("fills-dest"   '(2 4 6) "(let ((dest (list 0 0 0)))
-                                       (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))")
-          ("returns-dest" '(2 3)   "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)"))
+                                        (map-into dest #'(lambda (x) (* x 2)) '(1 2 3)))")
+          ("returns-dest" '(2 3)   "(let ((d (list 0 0))) (map-into d #'1+ '(1 2)) d)")
+          ("two-sources"  '(11 22 33) "(let ((d (list 0 0 0)))
+                                          (map-into d #'+ '(1 2 3) '(10 20 30)))")
+          ("shortest-source" '(11 22 0 0) "(let ((d (list 0 0 0 0)))
+                                             (map-into d #'+ '(1 2 3) '(10 20))
+                                             d)")
+          ("zero-sources" '(:filled :filled) "(let ((d (list 0 0)))
+                                                (map-into d #'(lambda () :filled))
+                                                d)"))
   (expected form)
   (assert-equal expected (run-string form :stdlib t)))

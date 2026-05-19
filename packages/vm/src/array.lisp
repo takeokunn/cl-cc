@@ -221,6 +221,14 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (:sexp-tag :fill)
   (:sexp-slots array-reg val-reg))
 
+(define-vm-instruction vm-copy-vector (vm-instruction)
+  "Copy LEN elements from SRC-ARRAY to DST-ARRAY."
+  (dst-array-reg nil :reader vm-dst-array-reg)
+  (src-array-reg nil :reader vm-src-array-reg)
+  (len-reg nil :reader vm-len-reg)
+  (:sexp-tag :copy-vector)
+  (:sexp-slots dst-array-reg src-array-reg len-reg))
+
 (define-vm-instruction vm-vector-push-extend (vm-instruction)
   "Push VAL onto adjustable ARRAY, extending if needed. Store new index in DST."
   (dst nil :reader vm-dst)
@@ -321,6 +329,24 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
         (loop for i below (vm-specialized-array-length arr)
               do (setf (vm-specialized-array-ref arr i) val))
         (fill arr val))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-copy-vector) state pc labels)
+  (declare (ignore labels))
+  (let ((dst (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-dst-array-reg inst))))
+        (src (%vm-cow-vector-materialize (vm-reg-get state (vm-src-array-reg inst))))
+        (len (vm-reg-get state (vm-len-reg inst))))
+    (cond
+      ((or (vm-specialized-array-p dst) (vm-specialized-array-p src))
+       (loop for i below len
+             for value = (if (vm-specialized-array-p src)
+                             (vm-specialized-array-ref src i)
+                             (aref src i))
+             do (if (vm-specialized-array-p dst)
+                    (setf (vm-specialized-array-ref dst i) value)
+                    (setf (aref dst i) value))))
+      (t
+       (replace dst src :end1 len :end2 len)))
     (values (1+ pc) nil nil)))
 
 (defun %vm-bridge-replace (sequence-1 sequence-2 &key end1 end2)

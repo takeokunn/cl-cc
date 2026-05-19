@@ -64,6 +64,43 @@ first-class function values here."
       (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs)))
   result-reg)
 
+(defun %known-call-live-regs (ctx func-reg arg-regs)
+  "Return caller registers that must survive a known non-tail call."
+  (let* ((prefix (nreverse (copy-list (ctx-instructions ctx))))
+         (call-index (length prefix))
+         (synthetic-call (make-vm-call :dst :%known-call-result
+                                       :func func-reg
+                                       :args arg-regs))
+         (intervals (or (ignore-errors
+                          (compute-live-intervals (append prefix (list synthetic-call))))
+                        nil))
+         (env-regs (loop for binding in (ctx-env ctx)
+                         for reg = (cdr binding)
+                         when (keywordp reg)
+                           collect reg))
+         (noescape-regs
+           (append
+            (loop for binding in (ctx-noescape-cons-bindings ctx)
+                  append (list (cadr binding) (cddr binding)))
+            (loop for binding in (ctx-noescape-array-bindings ctx)
+                  append (cddr binding))
+            (loop for binding in (ctx-noescape-instance-bindings ctx)
+                  append (loop for slot in (cdr binding) collect (cdr slot))))))
+    (flet ((interval-live-p (reg)
+             (some (lambda (interval)
+                     (and (eq (interval-vreg interval) reg)
+                          (<= (interval-start interval) call-index)
+                          (>= (interval-end interval) call-index)))
+                   intervals)))
+      (remove-duplicates
+       (remove-if-not (lambda (reg)
+                        (and (keywordp reg)
+                             (or (member reg env-regs :test #'eq)
+                                 (member reg noescape-regs :test #'eq)
+                                 (interval-live-p reg))))
+                      (append env-regs noescape-regs (list func-reg) arg-regs))
+       :test #'eq))))
+
 ;;; ── ast-call fast-path helpers ──────────────────────────────────────────────
 ;;; Each returns RESULT-REG on success, NIL to fall through to the next handler.
 ;;; This "try-each" pattern is the Lisp equivalent of Prolog's clause selection.
@@ -84,8 +121,8 @@ first-class function values here."
       (let ((arg-regs (%compile-call-arg-registers (rest args) ctx)))
         (%emit-call-like-instruction tail result-reg func-reg arg-regs ctx)))))
 
-(defun %try-compile-apply (func-sym args result-reg ctx)
-  "Handle (apply FN ARG...) — emit vm-apply."
+(defun %try-compile-apply (func-sym args result-reg tail ctx)
+  "Handle (apply FN ARG...) — emit vm-apply, preserving tail-position metadata."
   (when (and func-sym (eq func-sym 'apply) args)
     (let* ((func-arg (first args))
            (local-func-name (and (typep func-arg 'ast-var) (ast-var-name func-arg)))
@@ -106,7 +143,7 @@ first-class function values here."
            (func-reg (make-register ctx)))
       (emit ctx (make-vm-move :dst func-reg :src func-reg0))
       (let ((arg-regs (%compile-call-arg-registers (rest args) ctx)))
-        (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs))
+        (emit ctx (make-vm-apply :dst result-reg :func func-reg :args arg-regs :tail-p tail))
         result-reg))))
 
 (defun %try-compile-noescape-closure (func-expr args tail ctx)
@@ -175,7 +212,31 @@ first-class function values here."
                         (setf (nth index (%noescape-array-entry-element-regs entry)) val-reg)
                          (emit ctx (make-vm-move :dst result-reg :src val-reg)))))
                    (%emit-noescape-array-write entry (second args) (third args) result-reg ctx))
-               result-reg)))))))
+                result-reg)))))))
+
+(defun %emit-argument-rebinds-and-jump (arg-regs params param-regs target-label ctx)
+  "Snapshot ARG-REGS, move them into PARAM-REGS/PARAMS, then jump to TARGET-LABEL."
+  (let ((temps (loop for reg in arg-regs
+                     collect (let ((t-reg (make-register ctx)))
+                               (emit ctx (make-vm-move :dst t-reg :src reg))
+                               t-reg))))
+    (loop for param in params
+          for temp in temps
+          for param-reg = (and param-regs (pop param-regs))
+          do (emit ctx (make-vm-move :dst (or param-reg (lookup-var ctx param))
+                                     :src temp))))
+  (emit ctx (make-vm-jump :label target-label)))
+
+(defun %try-compile-local-tail-jump (func-sym args result-reg tail ctx)
+  "Lower a tail call to an eligible local labels/flet binding into param moves + vm-jump."
+  (when (and tail func-sym)
+    (let ((entry (%codegen-call-assoc func-sym *local-tail-jump-fns*)))
+      (when entry
+        (destructuring-bind (target-label params param-regs) (cdr entry)
+          (when (= (length args) (length params))
+            (let ((arg-regs (%compile-call-arg-registers args ctx)))
+              (%emit-argument-rebinds-and-jump arg-regs params param-regs target-label ctx)
+              result-reg)))))))
 
 (defun %try-compile-builtin (func-sym args result-reg ctx)
   "Phase-1 (table-driven) + Phase-2 (Prolog-style) builtin dispatch."
@@ -219,23 +280,23 @@ first-class function values here."
              (symbolp func-expr)
              (eq func-sym (ctx-current-function-name ctx))
              (= (length args) (length (ctx-current-function-params ctx))))
-        (let ((temps (loop for reg in arg-regs
-                           collect (let ((t-reg (make-register ctx)))
-                                     (emit ctx (make-vm-move :dst t-reg :src reg))
-                                     t-reg))))
-          (loop for param in (ctx-current-function-params ctx)
-                for temp  in temps
-                do (emit ctx (make-vm-move :dst (lookup-var ctx param) :src temp))))
-        (emit ctx (make-vm-jump :label (ctx-current-function-label ctx))))
+        (%emit-argument-rebinds-and-jump arg-regs
+                                         (ctx-current-function-params ctx)
+                                         nil
+                                         (ctx-current-function-label ctx)
+                                         ctx))
       ;; Generic function dispatch
       ((and func-sym (gethash func-sym (ctx-global-generics ctx)))
        (emit ctx (make-vm-generic-call :dst result-reg :gf-reg func-reg :args arg-regs)))
       ;; Tail call
-      (tail
-       (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs)))
-       ;; Regular call
-       (t
-        (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
+       (tail
+        (emit ctx (make-vm-tail-call :dst result-reg :func func-reg :args arg-regs)))
+        ;; Regular call
+        (t
+         (emit ctx (if (or func-sym local-func-name)
+                       (make-vm-call :dst result-reg :func func-reg :args arg-regs
+                                     :live-regs (%known-call-live-regs ctx func-reg arg-regs))
+                       (make-vm-call :dst result-reg :func func-reg :args arg-regs)))))
       result-reg)))
 
 (defmacro %define-call-fast-path-dispatcher (name lambda-list &body handler-forms)
@@ -248,10 +309,11 @@ Each handler form must return RESULT-REG on success or NIL to continue."
 (%define-call-fast-path-dispatcher %try-compile-call-fast-paths
     (func-expr func-sym args result-reg tail ctx)
   (%try-compile-funcall          func-sym  args result-reg tail ctx)
-  (%try-compile-apply            func-sym  args result-reg      ctx)
+  (%try-compile-apply            func-sym  args result-reg tail ctx)
   (%try-compile-noescape-closure func-expr args             tail ctx)
   (%try-compile-noescape-cons    func-sym  args result-reg      ctx)
   (%try-compile-noescape-array   func-sym  args result-reg      ctx)
+  (%try-compile-local-tail-jump  func-sym  args result-reg tail ctx)
   (%try-compile-builtin          func-sym  args result-reg      ctx))
 
 (defmethod compile-ast ((node ast-call) ctx)

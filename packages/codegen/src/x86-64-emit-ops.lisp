@@ -204,46 +204,45 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
 (define-binary-alu-emitter emit-vm-sub    emit-sub-rr64  "vm-sub: dst = lhs - rhs.")
 (define-binary-alu-emitter emit-vm-mul    emit-imul-rr64 "vm-mul: dst = lhs * rhs.")
 
-;;; Checked arithmetic emitters (FR-303 overflow detection)
+;;; Checked arithmetic emitters (FR-303 overflow detection, FR-149 bignum fallback)
 ;;;;
-;;;; Pattern: MOV dst,lhs + ALU dst,rhs + JO +2 (skip UD2) + UD2 (trap)
+;;;; Pattern: MOV dst,lhs + ALU dst,rhs + JNO +2 (skip UD2) + UD2 (trap on overflow)
 ;;;; On overflow, execution falls into UD2 which signals an error.
-;;;; JO rel32 is 6 bytes; UD2 is 2 bytes; JO offset = +2 (skip past UD2).
-;;;
-;;; vm-add-checked: 3 (MOV) + 3 (ADD) + 6 (JO) + 2 (UD2) = 14 bytes
-;;; vm-sub-checked: 3 (MOV) + 3 (SUB) + 6 (JO) + 2 (UD2) = 14 bytes
-;;; vm-mul-checked: 3 (MOV) + 4 (IMUL) + 6 (JO) + 2 (UD2) = 15 bytes
+;;;; JNO rel32 is 6 bytes; UD2 is 2 bytes; JNO offset = +2 (skip past UD2).
 
 (defun emit-vm-add-checked (inst stream)
-  "vm-add-checked: dst = lhs + rhs with hardware overflow trap (FR-303)."
+  "vm-add-checked: dst = lhs + rhs with overflow bignum fallback (FR-149/303)."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (lhs (vm-reg-to-x86 (vm-lhs inst)))
         (rhs (vm-reg-to-x86 (vm-rhs inst))))
     (emit-mov-rr64 dst lhs stream)
     (emit-add-rr64 dst rhs stream)
-    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
-    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2 (undefined opcode trap)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-sub-checked (inst stream)
-  "vm-sub-checked: dst = lhs - rhs with hardware overflow trap (FR-303)."
+  "vm-sub-checked: dst = lhs - rhs with hardware overflow trap (FR-149/303)."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (lhs (vm-reg-to-x86 (vm-lhs inst)))
         (rhs (vm-reg-to-x86 (vm-rhs inst))))
     (emit-mov-rr64 dst lhs stream)
     (emit-sub-rr64 dst rhs stream)
-    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
-    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-mul-checked (inst stream)
-  "vm-mul-checked: dst = lhs * rhs with hardware overflow trap (FR-303).
+  "vm-mul-checked: dst = lhs * rhs with hardware overflow trap (FR-149/303).
    IMUL sets OF on overflow when the full result does not fit in the destination."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (lhs (vm-reg-to-x86 (vm-lhs inst)))
         (rhs (vm-reg-to-x86 (vm-rhs inst))))
     (emit-mov-rr64 dst lhs stream)
     (emit-imul-rr64 dst rhs stream)
-    (emit-jo-rel32 2 stream)                    ; JO +2 → skip UD2
-    (emit-byte #x0F stream) (emit-byte #x0B stream))) ; UD2
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-integer-mul-high-u (inst stream)
   "vm-integer-mul-high-u: dst = unsigned high 64 bits of lhs*rhs."

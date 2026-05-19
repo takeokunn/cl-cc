@@ -35,6 +35,8 @@ Options:
   --annotate-source       Add source-location comments when available
   --debug                 Keep frame pointers for native compile debugging
   --retpoline             Enable retpoline mitigation for indirect branches
+  --spectre-mitigations   Enable x86-64 LFENCE + retpoline hardening
+  --jit-cache-stats       Print JIT code-cache hit/eviction statistics
   --stack-protector       Enable stack canary checks in native prologue/epilogue
   --shadow-stack          Enable CET shadow-stack planning/integration path
   --stdlib                Prepend standard library (run/eval only)
@@ -46,10 +48,12 @@ Options:
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
   --pgo-generate <file>   Write lightweight optimizer profile data
   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+  --profile               Print a sampled VM frame report after run/eval
   --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
+  --timeout <seconds>     Maximum execution time (run/compile/eval/repl)
 
 Version: ~A~%" *version*))
 
@@ -70,8 +74,9 @@ Options:
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
    --pgo-generate <file>   Write lightweight optimizer profile data
-   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
-   --flamegraph <file>     Write a sampled VM flame graph SVG
+    --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --profile               Print a sampled VM frame report
+    --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")
@@ -87,6 +92,8 @@ Options:
   --annotate-source     Add source-location comments when available
   --debug               Keep frame pointers for native compile debugging
   --retpoline           Enable retpoline mitigation for indirect branches
+  --spectre-mitigations Enable x86-64 LFENCE + retpoline hardening
+  --jit-cache-stats     Print JIT code-cache hit/eviction statistics
   --stack-protector     Enable stack canary checks in native prologue/epilogue
   --shadow-stack        Enable CET shadow-stack planning/integration path
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
@@ -96,8 +103,9 @@ Options:
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
    --pgo-generate <file>   Write lightweight optimizer profile data
-   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
-   --flamegraph <file>     Write a sampled VM flame graph SVG
+    --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --profile               Print a sampled VM frame report
+    --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")
@@ -114,8 +122,9 @@ Options:
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
    --pgo-generate <file>   Write lightweight optimizer profile data
-   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
-   --flamegraph <file>     Write a sampled VM flame graph SVG
+    --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+   --profile               Print a sampled VM frame report
+    --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
  ")

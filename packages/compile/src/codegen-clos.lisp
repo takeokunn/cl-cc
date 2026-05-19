@@ -53,10 +53,11 @@
                :slot-names slot-names
                :slot-initargs initarg-map
                :slot-initform-regs initform-regs
-               :slot-types slot-types
-               :default-initarg-regs default-initarg-regs
-               :class-slots class-slot-names
-               :metaclass-reg metaclass-reg))
+                :slot-types slot-types
+                :default-initarg-regs default-initarg-regs
+                :class-slots class-slot-names
+                :metaclass-reg metaclass-reg
+                :sealed (ast-defclass-sealed node)))
     (setf (gethash name (ctx-global-classes ctx)) dst)
     (setf (ctx-env ctx) (cons (cons name dst) (ctx-env ctx)))
     (emit ctx (make-vm-set-global :name name :src dst))

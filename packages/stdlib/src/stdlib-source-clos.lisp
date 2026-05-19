@@ -14,15 +14,40 @@
        (declare (ignore options))
        name)"
 
+    "(defgeneric shared-initialize (instance slot-names &rest initargs))"
+    "(defmethod shared-initialize ((instance t) slot-names &rest initargs)
+       (declare (ignore slot-names))
+       (let* ((class (and (hash-table-p instance) (gethash :__class__ instance)))
+              (initarg-map (and (hash-table-p class) (gethash :__initargs__ class)))
+              (class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+         (loop for rest on initargs by #'cddr
+               while (cdr rest)
+               do (let ((slot-entry (assoc (car rest) initarg-map)))
+                    (when slot-entry
+                      (let ((slot-name (cdr slot-entry)))
+                        (if (member slot-name class-slots)
+                            (setf (gethash slot-name class) (cadr rest))
+                            (setf (gethash slot-name instance) (cadr rest)))))))
+         instance))"
+
     "(defgeneric initialize-instance (instance &rest initargs))"
     "(defmethod initialize-instance ((instance t) &rest initargs)
-       (declare (ignore initargs))
-       instance)"
+       (apply #'shared-initialize instance t initargs))"
 
      "(defgeneric allocate-instance (class &rest initargs))"
      "(defmethod allocate-instance ((class t) &rest initargs)
-        (declare (ignore initargs))
-        (make-instance class))"
+         (declare (ignore initargs))
+         (let ((object (make-hash-table :test 'eq)))
+           (setf (gethash :__class__ object) class)
+           (when (hash-table-p class)
+             (let ((class-slots (gethash :__class-slots__ class))
+                   (initforms (gethash :__initforms__ class)))
+               (dolist (slot-name (gethash :__slots__ class))
+                 (unless (member slot-name class-slots)
+                   (let ((initform-entry (assoc slot-name initforms)))
+                     (setf (gethash slot-name object)
+                           (if initform-entry (cdr initform-entry) nil)))))))
+           object))"
 
      "(defgeneric slot-value-using-class (class object slot-name))"
      "(defmethod slot-value-using-class ((class t) object slot-name)
@@ -37,6 +62,35 @@
                           (slot-unbound class object slot-name)
                           (slot-missing class object slot-name 'slot-value))))))))"
 
+     "(defgeneric (setf slot-value-using-class) (new-value class object slot-name))"
+     "(defmethod (setf slot-value-using-class) (new-value (class t) object slot-name)
+        (let ((class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+          (if (and class-slots (member slot-name class-slots))
+              (setf (gethash slot-name class) new-value)
+              (setf (gethash slot-name object) new-value))))"
+
+     "(defgeneric slot-boundp-using-class (class object slot-name))"
+     "(defmethod slot-boundp-using-class ((class t) object slot-name)
+        (let ((class-slots (and (hash-table-p class) (gethash :__class-slots__ class)))
+              (all-slots (and (hash-table-p class) (gethash :__slots__ class))))
+          (if (and all-slots (not (member slot-name all-slots)))
+              (slot-missing class object slot-name 'slot-boundp)
+              (if (and class-slots (member slot-name class-slots))
+                  (multiple-value-bind (value found-p) (gethash slot-name class)
+                    (declare (ignore value))
+                    (if found-p t nil))
+                  (multiple-value-bind (value found-p) (gethash slot-name object)
+                    (declare (ignore value))
+                    (if found-p t nil))))))"
+
+     "(defgeneric slot-makunbound-using-class (class object slot-name))"
+     "(defmethod slot-makunbound-using-class ((class t) object slot-name)
+        (let ((class-slots (and (hash-table-p class) (gethash :__class-slots__ class))))
+          (if (and class-slots (member slot-name class-slots))
+              (remhash slot-name class)
+              (remhash slot-name object))
+          object))"
+        
      "(defgeneric slot-unbound (class instance slot-name))"
     "(defmethod slot-unbound ((class t) (instance t) slot-name)
        (error 'unbound-slot :name slot-name :instance instance))"
@@ -56,13 +110,49 @@
        (declare (ignore method))
        (error (format nil \"There is no next method for ~A when called with ~A\" gf args)))"
 
-    "(defgeneric print-object (object stream))"
-    "(defmethod print-object ((object t) stream)
-       (prin1 object stream))"
+     "(defgeneric print-object (object stream))"
+     "(defmethod print-object ((object t) stream)
+        (prin1 object stream))"
 
-    "(defgeneric update-instance-for-different-class (previous current &rest initargs))"
-    "(defmethod update-instance-for-different-class ((previous t) current &rest initargs)
-       (declare (ignore previous))
+     "(defgeneric compute-effective-slot-definition (class slot-name &optional direct-slots))"
+     "(defmethod compute-effective-slot-definition ((class t) slot-name &optional direct-slots)
+        (declare (ignore direct-slots))
+        (let ((slot (make-hash-table :test 'eq))
+              (initforms (and (hash-table-p class) (gethash :__initforms__ class)))
+              (slot-types (and (hash-table-p class) (gethash :__slot-types__ class)))
+              (class-slots (and (hash-table-p class) (gethash :__class-slots__ class)))
+              (initargs nil))
+          (setf (gethash :name slot) slot-name)
+          (let ((entry (assoc slot-name initforms)))
+            (when entry
+              (setf (gethash :initform slot) (cdr entry))))
+          (dolist (entry (and (hash-table-p class) (gethash :__initargs__ class)))
+            (when (eq (cdr entry) slot-name)
+              (push (car entry) initargs)))
+          (setf (gethash :initargs slot) (nreverse initargs))
+          (setf (gethash :type slot) (or (cdr (assoc slot-name slot-types)) t))
+          (setf (gethash :allocation slot)
+                (if (member slot-name class-slots) :class :instance))
+          (setf (gethash :initfunction slot)
+                (let ((value (gethash :initform slot)))
+                  (lambda () value)))
+          (setf (gethash :readers slot) nil)
+          (setf (gethash :writers slot) nil)
+          (setf (gethash :location slot)
+                (cdr (assoc slot-name
+                            (and (hash-table-p class)
+                                 (gethash :__slot-locations__ class)))))
+          slot))"
+
+     "(defgeneric slot-definition-location (slot))"
+     "(defmethod slot-definition-location ((slot t))
+        (if (hash-table-p slot)
+            (gethash :location slot)
+            nil))"
+
+     "(defgeneric update-instance-for-different-class (previous current &rest initargs))"
+     "(defmethod update-instance-for-different-class ((previous t) current &rest initargs)
+        (declare (ignore previous))
        (apply #'reinitialize-instance current initargs))"
 
      "(defgeneric update-instance-for-changed-class (instance added-slots discarded-slots plist &rest initargs))"
@@ -106,14 +196,23 @@
                                 gf qualifiers specializers))
                  nil))))"
 
-    "(defgeneric add-method (gf method))"
-    "(defmethod add-method ((gf t) method)
-       (let ((methods-ht (gethash :__methods__ gf)))
-         (when methods-ht
-           (setf (gethash (if (functionp method) \"T\" \"T\") methods-ht) method))
-         gf))"
+     "(defgeneric add-method (gf method))"
+      "(defmethod add-method ((gf t) method)
+         (let ((methods-ht (gethash :__methods__ gf)))
+          (when methods-ht
+            (setf (gethash (if (functionp method) \"T\" \"T\") methods-ht) method))
+           gf))"
 
-    "(defgeneric remove-method (gf method))"
+      "(defun sealed-class-p (class)
+         (if (and (hash-table-p class) (gethash :__sealed__ class)) t nil))"
+
+      "(defgeneric satiated-generic-function-p (gf))"
+     "(defmethod satiated-generic-function-p ((gf t))
+        (if (and (hash-table-p gf) (gethash :__satiated__ gf))
+            t
+            nil))"
+
+     "(defgeneric remove-method (gf method))"
     "(defmethod remove-method ((gf t) method)
        (let ((methods-ht (gethash :__methods__ gf)))
          (when methods-ht
@@ -123,19 +222,59 @@
                     methods-ht))
           gf))"
 
+;;; ── MOP Method Protocol ────────────────────────────────────────────────
+
+    "(defun method-qualifiers (method)
+       (if (hash-table-p method)
+           (gethash :qualifiers method)
+           nil))"
+
+    "(defclass standard-method ()
+       ((qualifiers :initarg :qualifiers :reader method-qualifiers)
+        (specializers :initarg :specializers :reader method-specializers)
+        (function :initarg :function :reader method-function)
+        (generic-function :initarg :generic-function :reader method-generic-function)
+        (lambda-list :initarg :lambda-list :reader method-lambda-list)))"
+
+    "(defclass standard-accessor-method (standard-method) ())"
+    "(defclass standard-reader-method (standard-accessor-method) ())"
+    "(defclass standard-writer-method (standard-accessor-method) ())"
+
+;;; ── Long-form method combination helpers ─────────────────────────────────
+
+    "(defun call-method (method &rest next-methods)
+       (declare (ignore next-methods))
+       (let ((fn (if (hash-table-p method)
+                     (gethash :function method)
+                     method)))
+         (unless fn (error \"call-method: not a valid method descriptor\"))
+         (funcall fn)))"
+
+    "(defun make-method (form)
+       (eval `(lambda () ,form)))"
+
 ;;; ── copy-instance (shallow copy) ────────────────────────────────────────
 
     "(defun copy-instance (instance)
-       (let* ((class (gethash :__class__ instance))
-               (copy nil))
-          (unless class
-            (error \"copy-instance: ~A is not a CLOS instance\" instance))
-          (setq copy (make-instance class))
-         (maphash (lambda (key value)
-                    (unless (eq key :__class__)
-                      (setf (gethash key copy) value)))
-                  instance)
-         copy))"
+       (cond
+         ((hash-table-p instance)
+          (let ((class (gethash :__class__ instance))
+                (copy (make-hash-table :test 'eq)))
+            (unless class
+              (error \"copy-instance: ~A is not a CLOS instance\" instance))
+            (maphash (lambda (key value)
+                       (setf (gethash key copy) value))
+                     instance)
+            copy))
+         ((and (vectorp instance)
+               (> (length instance) 0)
+               (hash-table-p (aref instance 0)))
+          (let ((copy (make-array (length instance))))
+            (dotimes (i (length instance))
+              (setf (aref copy i) (aref instance i)))
+            copy))
+         (t
+          (error \"copy-instance: ~A is not a CLOS instance\" instance))))"
 
 ;;; ── ANSI Condition Type Hierarchy (FR-424) ─────────────────────────────
 

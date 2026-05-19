@@ -73,8 +73,9 @@
    #:*phys-reg-to-asm-string*
    #:emit-instruction
    #:x86-64-target #:target-spill-base-reg
-   #:x86-64-red-zone-spill-p
-   #:compile-to-x86-64-bytes
+    #:x86-64-red-zone-spill-p
+    #:compile-to-x86-64-bytes
+    #:*x86-64-spectre-mitigations-enabled*
 
    ;; ── AArch64 backend ──
    #:aarch64-target

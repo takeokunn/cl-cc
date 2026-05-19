@@ -105,8 +105,9 @@
     vm-index-reg
     vm-val-reg
     vm-aref
-    vm-aset
-    vm-fill
+     vm-aset
+     vm-fill
+     vm-copy-vector
     vm-eq
    vm-num-eq
    vm-lt
@@ -127,8 +128,10 @@
    vm-number-p
    vm-integer-p
    vm-function-p
-   vm-apply
-   vm-register-function
+    vm-apply
+    vm-add-package-local-nickname
+    vm-remove-package-local-nickname
+    vm-register-function
    vm-function-registry
    vm-resolve-function
    vm-register-host-bridge
@@ -199,7 +202,10 @@
    vm-closure-rest-stack-alloc-p
    vm-closure-inline-policy
    vm-func-name
-   vm-parts
+    vm-parts
+    vm-dst-array-reg
+    vm-src-array-reg
+    vm-len-reg
    vm-size-reg
    vm-initial-element
    vm-fill-pointer
@@ -212,8 +218,11 @@
    define-vm-char-comparison
    rotate-right
    bswap
-    vm-intern-pkg
-    vm-make-closure-p
+     vm-intern-pkg
+     vm-local-nickname-pkg
+     vm-local-nickname-nick
+     vm-local-nickname-target
+     vm-make-closure-p
     vm-closure-optional-params
     vm-closure-rest-param
     vm-closure-key-params

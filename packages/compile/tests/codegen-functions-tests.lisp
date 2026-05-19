@@ -26,27 +26,36 @@
     (assert-true (keywordp reg))))
 
 (deftest-each codegen-closure-form-emits-vm-closure
-  "Closure-creating forms (defun, lambda, labels) emit vm-closure.
+  "Captured closure-creating forms emit vm-closure; non-capturing defun/lambda use vm-func-ref.
 NOTE: flet is omitted because the noescape-closure optimizer inlines
 flet-bound functions even when #'f is used in the body — the optimizer's
 escape analysis treats (function f) as a direct reference to the known
 in-scope binding rather than a true escape. Forcing vm-closure emission
 from flet would require disabling the optimization specifically for this
 test, which isn't worth the test-quality tradeoff."
-  :cases (("defun"  (cl-cc/ast:make-ast-defun
-                      :name 'my-fn :params '(x)
-                      :body (list (make-ast-var :name 'x))))
-          ("lambda" (make-ast-lambda
-                      :params '(x)
-                      :body (list (make-ast-var :name 'x))))
-          ("labels" (cl-cc/ast:make-ast-labels
-                      :bindings (list (list 'g '(x) (make-ast-var :name 'x)))
-                      :body (list (make-ast-call :func 'g
-                                                  :args (list (make-ast-int :value 2)))))))
-  (ast)
+  :cases (("defun"  :func-ref (cl-cc/ast:make-ast-defun
+                                :name 'my-fn :params '(x)
+                                :body (list (make-ast-var :name 'x))))
+          ("lambda" :func-ref (make-ast-lambda
+                                :params '(x)
+                                :body (list (make-ast-var :name 'x))))
+          ("capturing-lambda" :closure (make-ast-lambda
+                                         :params '(x)
+                                         :body (list (make-ast-var :name 'y))))
+          ("labels" :closure (cl-cc/ast:make-ast-labels
+                               :bindings (list (list 'g '(x) (make-ast-var :name 'x)))
+                               :body (list (make-ast-call :func 'g
+                                                           :args (list (make-ast-int :value 2)))))))
+  (expected ast)
   (let ((ctx (make-codegen-ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'y (cl-cc/compile:make-register ctx))))
     (compile-ast ast ctx)
-    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))
+    (ecase expected
+      (:closure
+       (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+      (:func-ref
+       (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))
+       (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))))
 
 (deftest codegen-labels-gensym-binding-name-compiles
   "Labels binding lookup handles compiler-generated function names such as stdlib MAPCAR helpers."
@@ -85,7 +94,7 @@ test, which isn't worth the test-quality tradeoff."
                                                        :pending-policy pending-policy))))
 
 (deftest codegen-let-inline-declaration-propagates-to-lambda-closure
-  "(declare (inline f)) on a let-bound lambda annotates the emitted vm-closure."
+  "(declare (inline f)) on a let-bound lambda annotates the emitted callable reference."
   (let* ((ctx (make-codegen-ctx))
          (ast (make-ast-let
                :bindings (list (cons 'f (make-ast-lambda
@@ -94,12 +103,13 @@ test, which isn't worth the test-quality tradeoff."
                :declarations '((inline f))
                :body (list (make-ast-var :name 'f)))))
     (compile-ast ast ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+    (let ((inst (or (codegen-find-inst ctx 'cl-cc/vm::vm-closure)
+                    (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))))
       (assert-true inst)
       (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy inst)))))
 
 (deftest codegen-defun-global-inline-policy-propagates-to-closure
-  "Global declaim inline policy is attached to the emitted defun closure metadata."
+  "Global declaim inline policy is attached to the emitted defun callable metadata."
   (let ((ctx (make-codegen-ctx))
         (cl-cc/expand:*declaim-inline-registry* (make-hash-table :test #'eq)))
     (setf (gethash 'my-fn cl-cc/expand:*declaim-inline-registry*) :inline)
@@ -107,7 +117,8 @@ test, which isn't worth the test-quality tradeoff."
                                            :params '(x)
                                            :body (list (make-ast-var :name 'x)))
                  ctx)
-    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-closure)))
+    (let ((inst (or (codegen-find-inst ctx 'cl-cc/vm::vm-closure)
+                    (codegen-find-inst ctx 'cl-cc/vm::vm-func-ref))))
       (assert-true inst)
       (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy inst)))))
 

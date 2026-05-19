@@ -316,6 +316,14 @@ SCALE must be 1, 2, 4, or 8.  OFFSET must fit in signed 32 bits."
   (emit-byte #x80 stream)
   (emit-dword offset stream))
 
+(defun emit-jno-rel32 (offset stream)
+  "JNO rel32 (jump if not overflow).
+
+   Encoding: 0F 81 cd"
+  (emit-byte #x0F stream)
+  (emit-byte #x81 stream)
+  (emit-dword offset stream))
+
 ;;; ── Immediate compare and test ───────────────────────────────────────────────
 
 (defun emit-cmp-ri64 (reg imm stream)

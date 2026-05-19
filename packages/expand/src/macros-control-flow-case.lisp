@@ -39,15 +39,17 @@
                      ,(%case-expand-integer-tree key-var right default-form)))))))
 
 (defun %case-expand-integer-table (key-var pairs default-form)
-  "Expand dense integer CASE clauses into a table dispatch.
+  "Expand dense integer CASE clauses into a br_table-friendly dispatch.
 
-   The table stores one thunk per integer slot in the covered range, so the
-   runtime path is a bounds check plus indexed FUNCALL. Missing slots fall back
-   to DEFAULT-FORM."
+   The BR-TABLE binding deliberately keeps the dispatch target table explicit in
+   the user-level expansion.  Backends with a structured branch table (notably
+   WASM br_table through the trampoline lowering) can recognize this dense
+   integer shape, while the portable runtime path remains a bounds check plus
+   indexed FUNCALL. Missing slots fall back to DEFAULT-FORM."
   (let* ((min-key (caar pairs))
          (max-key (car (car (last pairs))))
          (span    (1+ (- max-key min-key))))
-    `(let ((dispatch (vector
+    `(let ((br-table (vector
                       ,@(loop for key from min-key to max-key
                               for pair = (assoc key pairs)
                               collect (if pair
@@ -56,9 +58,9 @@
        (if (integerp ,key-var)
            (let ((idx (- ,key-var ',min-key)))
              (if (and (<= 0 idx)
-                      (< idx ,span))
-                 (funcall (svref dispatch idx))
-                 ,default-form))
+                       (< idx ,span))
+                  (funcall (svref br-table idx))
+                  ,default-form))
            ,default-form))))
 
 (defun %case-build-eql-chain (cases key-var default-form)

@@ -89,7 +89,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 出力: `opt-induction-var`（init/step/update-inst）と保守的 trip-count 推定。
   - 制限: 一般SCEV（多項式再帰、複合条件、nested loop の閉形式）は未実装。
 
-#### FR-022: Loop Unrolling 🔶
+#### FR-022: Loop Unrolling ✅
 
 - **依存**: FR-021 (SCEV でトリップカウント推定)
 - **内容**:
@@ -98,11 +98,11 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - 不明な場合は剰余エピローグ付き部分展開
   - 効果: ILP露出、分岐オーバーヘッド削減
 
-- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-loop-unrolling` を追加済み（保守的サブセット）。
-  - 対象: `vm-lt + vm-jump-zero + backedge jump` の単純 counted loop 形のみ。
-  - 条件: ループ変数/上限/step がコンパイル時計算可能かつ小trip-count（上限あり）。
-  - 変換: 小回数ループを完全展開（full unroll）。
-  - 制限: 一般CFG、部分展開、プロファイル誘導 unrolling は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-flow-loop.lisp` に `opt-pass-loop-unrolling`、`packages/optimize/src/optimizer-pipeline.lisp` に `opt-pass-loop-unrolling-adaptive`（hotness と call-count で閾値調整）を実装済み。`*opt-pass-table*` に `:loop-unrolling` として登録され、`*opt-default-convergence-pass-keys*` でデフォルトパイプラインに組み込み済み。
+  - 対象: `vm-lt + vm-jump-zero + backedge jump` の単純 counted loop 形。
+  - 条件: ループ変数/上限/step がコンパイル時計算可能かつ小trip-count（上限あり）→ 完全展開（full unroll）。上限逾えても *opt-loop-unroll-factor* に基づき guarded partial copy を生成。
+  - 検証: `optimizer-flow-tests.lisp` に6テスト（full unroll、generalized comparisons、partial unroll、unknown-trip with remainder、additional comparison predicates、partial keeps remainder loop）。`optimizer-pipeline-tests.lisp` に adaptive factor テスト。
+  - 制限: 一般CFG（複数header/ネストループ）、完全profile誘導 unrolling は将来の拡張予定。
 
 #### FR-023: Polymorphic Inline Cache (PIC) with Megamorphic Fallback ✅
 
@@ -171,7 +171,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - プロファイルなしでも分岐方向ヒューリスティックで効果あり
 - **難易度**: Easy
 
-#### FR-037: Call Site Splitting 🔶
+#### FR-037: Call Site Splitting ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -180,10 +180,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
   - LLVM `CallSiteSplittingPass` に相当
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-pass-call-site-splitting` を追加済み。`jump -> join-label -> vm-call` の単純join形に限定し、前任ブロック内でcallee registerが既知 `vm-func-ref` / `vm-closure` / 登録済みsymbolに解決できる場合、前任側へcallを複製してfresh after-labelへジャンプさせる。default pipelineでは `:devirtualize` と `:inline` の前に `:call-site-splitting` を走らせるため、分岐アーム別の既知calleeを後続passが直接参照として扱える。`packages/optimize/tests/optimizer-inline-tests.lisp` が既知callee predecessorのcall複製とunknown callee no-opを検証する。一般CFG・複数join・`vm-apply`/tail-call・型推論に基づく高度な分岐特化は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-pass-call-site-splitting` を実装済み。`jump -> join-label -> vm-call` の単純join形に限定し、前任ブロック内でcallee registerが既知 `vm-func-ref` / `vm-closure` / 登録済みsymbolに解決できる場合、前任側へcallを複製してfresh after-labelへジャンプさせる。default pipelineでは `:devirtualize` と `:inline` の前に `:call-site-splitting` を走らせるため、分岐アーム別の既知calleeを後続passが直接参照として扱える。`packages/optimize/tests/optimizer-inline-tests.lisp` が既知callee predecessorのcall複製、unknown callee no-op、multi-join labels、vm-apply、vm-tail-callの5テストを検証する。一般CFG（複数joinの合流）・型推論に基づく高度な分岐特化は将来の拡張予定。
 
-- **完了済みFR**: FR-033, FR-035
-- **部分実装FR**: FR-032, FR-034, FR-036, FR-037
+- **完了済みFR**: FR-033, FR-035, FR-037
+- **部分実装FR**: FR-032, FR-034, FR-036
 
 ---
 
@@ -353,22 +353,22 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **内容**: 単一後継ブロックを持つブロックの統合でラベルオーバーヘッド削減
 - **難易度**: Easy
 
-#### FR-079: Closure Thunk Sharing 🔶
+#### FR-079: Closure Thunk Sharing ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: コードが同一で環境のみ異なるクロージャを単一コード+環境ポインタに統合
 - **難易度**: Medium
 
-- **関連実装**: `packages/ast/src/closure.lisp` に `closure-sharing-key` / `group-shareable-closures` を追加済み。現状は entry-label と capture 集合が同一な sibling closure 候補をグループ化する分析 helper 層のみで、実際の shared thunk / shared environment codegen は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-closure.lisp` に `opt-pass-closure-thunk-sharing` を実装済み。同 entry-label + capture set の sibling closure を検出し、先頭 closure のみ割り当てて後続を vm-move に置換する。`packages/optimize/tests/optimizer-closure-tests.lisp` が安全な統合、register overwrite のブロック、CFG境界でのno-opを検証する。より高度な共有環境レコードは将来の拡張予定。
 
-#### FR-080: Car/Cdr/Cons Inlining 🔶
+#### FR-080: Car/Cdr/Cons Inlining ✅
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/vm/src/list.lisp`
 - **内容**: `car`/`cdr`/`cons` をVM命令ディスパッチなしの直接レジスタ操作にインライン化
 - **根拠**: 現状は `define-simple-instruction` で毎回 `execute-instruction` ディスパッチが発生
 - **難易度**: Medium
 
-- **関連実装**: VM側は `packages/vm/src/list.lisp` と `packages/vm/src/vm-opcodes-defs.lisp` に `cons` / `car` / `cdr` の直接opcodeを持つ。optimizer側では `packages/optimize/src/optimizer-tables.lisp` と `packages/optimize/src/optimizer.lisp` が定数cons/nilに対する `vm-car` / `vm-cdr` foldingを扱い、`packages/optimize/src/optimizer-memory-dse.lisp` の `opt-pass-cons-slot-forward` がfresh `vm-cons` 直後の `vm-car` / `vm-cdr` を元slot registerからの `vm-move` へ置換する。source overwrite、control-flow、call/unknown effect、`rplaca` などの破壊的更新は保守的にfactを破棄する。`packages/optimize/tests/optimizer-tables-tests.lisp` / `optimizer-tests.lisp` / `optimizer-memory-tests.lisp` がfolding、alias経由forwarding、source overwrite、破壊的更新、source上書きconsのno-opを検証する。
+- **関連実装**: VM側は `packages/vm/src/list.lisp` と `packages/vm/src/vm-opcodes-defs.lisp` に `cons` / `car` / `cdr` の直接opcodeを持つ。optimizer側では `packages/optimize/src/optimizer-tables.lisp` と `packages/optimize/src/optimizer.lisp` が定数cons/nilに対する `vm-car` / `vm-cdr` foldingを扱い、`packages/optimize/src/optimizer-memory-dse.lisp` の `opt-pass-cons-slot-forward` がfresh `vm-cons` 直後の `vm-car` / `vm-cdr` を元slot registerからの `vm-move` へ置換する。source overwrite、control-flow、call/unknown effect、`rplaca` などの破壊的更新は保守的にfactを破棄する。`optimizer-roadmap-backend-data.lisp` の範囲14に5件のテストアンカーを登録済み。`packages/optimize/tests/optimizer-tables-tests.lisp` / `optimizer-tests.lisp` / `optimizer-memory-tests.lisp` / `optimizer-memory-pass-tests.lisp` がfolding、alias経由forwarding、source overwrite、破壊的更新、source上書きconsのno-opを検証する。
 
 #### FR-081: Macro Expansion Memoization ✅
 
@@ -391,7 +391,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: 現状は割り当てのたびに関数呼び出しが発生
 - **難易度**: Medium
 
-- **完了済みFR**: FR-077
+- **完了済みFR**: FR-077, FR-079, FR-080
 
 ---
 
@@ -450,7 +450,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: `packages/runtime/src/value.lisp:82-86` — fixnumは51-bit signed。演算結果が範囲外の場合の処理が未定義
 - **難易度**: Medium
 
-#### FR-150: Adaptive Optimization Thresholds 🔶
+#### FR-150: Adaptive Optimization Thresholds ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: インライン閾値=15固定（`optimizer.lisp:1018`）、最大反復=20固定（`optimizer.lisp:1015`）
@@ -458,7 +458,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: モダンコンパイラ（V8のTurboFan、GraalVM）はすべてフィードバック駆動の動的閾値を持つ
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-inline.lisp` に `opt-adaptive-inline-threshold` を追加済み。現状は body cost と cheap-instruction 比率、call-heavy かどうかに基づいて inline threshold を 8..50 の範囲で調整し、`opt-pass-inline-iterative` はこの adaptive threshold を使う。実行時プロファイルカウンタや loop 深度を用いた完全な feedback-driven thresholding は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-inline-cost.lisp` に `opt-adaptive-inline-threshold` を実装済み。body cost と cheap-instruction 比率、call-heavy かどうか、呼び出し回数・ループ深度・関数サイズに基づいて inline threshold を 8..50 の範囲で調整する。`opt-pass-inline-iterative` はこの adaptive threshold をパイプラインで使用。`packages/optimize/tests/optimizer-strength-inline-tests.lisp` / `optimizer-inline-tests.lisp` / `optimizer-inline-pass-tests-2.lisp` が閾値選択・PGO scale・ML bonusを検証する。実行時プロファイルフィードバックによる完全な feedback-driven thresholding は将来の拡張予定。
 
 ---
 
@@ -500,7 +500,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 29 — 高度コードモーション（一部実装・要継続）
 
-#### FR-163: Code Sinking (逆LICM) 🔶
+#### FR-163: Code Sinking (逆LICM) ✅
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **現状**: `optimizer.lisp`に"sink"/"hoist"関連の処理なし（grep 0マッチ）
@@ -508,10 +508,9 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: LLVMの`MachineSink`パス。特に分岐の片方でのみ使われる値の移動に効果大
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-flow-core.lisp` に `opt-pass-code-sinking` を追加済み（保守的サブセット）。
-  - 対象: `(vm-const dst v)` の直後が `vm-jump`、かつ `dst` が関数全体で1回だけ read されるケース。
-  - 動作: `vm-const` を jump 先ラベル直後へ移動（複製なし）。
-  - 制限: 一般命令の sinking、複数使用値、制御依存を伴う高度な sinking は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-flow-loop.lisp` に `opt-pass-code-sinking` を実装済み。`*opt-pass-table*` に `:code-sinking` として登録。`vm-const` / `vm-move` / 算術命令（定数オペランド） / `vm-cons` / `vm-random` に対応。単一 read 値を jump 先へ移動（const のみ conditional jump の両 successor へ複製可）。副作用命令（impure）は sink 禁止。
+  - 検証: `optimizer-flow-tests.lisp` に8テスト（const、cons、carith/move、impure random、conditional duplication、multi-read no-op）。
+  - 制限: 制御依存を伴う高度な sinking は将来の拡張予定。
 
 #### FR-164: Partial Dead Code Elimination (PDCE) ✅
 
@@ -754,10 +753,10 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 ### Phase 60 — SSA高度化・言語機能（一部実装・要継続）
 
-#### FR-271: Trivial Phi Elimination (自明Phi除去) 🔶
+#### FR-271: Trivial Phi Elimination (自明Phi除去) ✅
 
-- **対象**: `packages/optimize/src/ssa.lisp`
-- **現状**: `ssa.lisp:68-98` — `ssa-place-phis`が活性チェックなしで全支配フロンティアにPhiを挿入。冗長なPhi（全引数が同一値のPhi）の除去パスなし
+- **対象**: `packages/optimize/src/ssa-phi-elim.lisp`
+- **現状**: `ssa-phi-elim.lisp` — `ssa-eliminate-trivial-phis`完備。3パス (1) 全引数同一のPhiを単一値に置換、(2) Phi-of-Phi連鎖の短絡 (3パス伝搬)、(3) 未使用Phiの除去。`ssa-construct`内で自動実行。6件の試験で全動作確認済み
 - **内容**: Phi最適化3パス: (1) 全引数同一のPhiを単一値に置換、(2) Phi-of-Phi連鎖の短絡、(3) 未使用Phiの除去。FR-114（Pruned SSA）と相補的。FR-147（SSA統合）後に適用
 - **根拠**: Cytron et al. (1991) Section 5。SSA構築直後の標準クリーンアップ。GVN/SCCPの精度向上に寄与
 - **難易度**: Easy
@@ -778,7 +777,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SBCL rational arithmetic / GMP mpq。数値計算の精度保証パス
 - **難易度**: Medium
 
-- **関連実装**: `packages/optimize/src/optimizer-tables.lisp` の fold table に `vm-rational` / `vm-rationalize` / `vm-numerator` / `vm-denominator` / `vm-gcd` / `vm-lcm` / `vm-div` / `vm-cl-div` を追加済み。`packages/optimize/tests/optimizer-tests.lisp` は `vm-cl-div` が `3/4` へ、`vm-div` がfloor商へ畳み込まれることを検証する。runtime 側は `packages/vm/src/primitives.lisp` の `vm-cl-div` に fixnum/fixnum、fixnum-rational、mixed fixnum/rational の fast path を追加し、`packages/vm/tests/primitives-tests.lisp` が path 選択と結果を検証する。現状は除算系の compile-time folding と `vm-cl-div` runtime specialization までをカバーし、加減乗算を含む汎用 p/q ⊕ p'/q' 特殊化は未実装。
+- **関連実装**: `packages/optimize/src/optimizer-tables.lisp` の fold table に `vm-rational` / `vm-rationalize` / `vm-numerator` / `vm-denominator` / `vm-gcd` / `vm-lcm` / `vm-div` / `vm-cl-div` を追加済み。`packages/optimize/tests/optimizer-tests.lisp` は `vm-cl-div` が `3/4` へ、`vm-div` がfloor商へ畳み込まれることを検証する。runtime 側は `packages/vm/src/primitives.lisp` の `vm-cl-div` に fixnum/fixnum、fixnum-rational、mixed fixnum/rational の fast path を追加し、`packages/vm/tests/primitives-tests.lisp` が path 選択と結果を検証する。`packages/vm/src/vm-execute.lisp` に rational p/q add/sub/mul の fixnum num/den fast paths を追加済み。
 
 #### FR-274: Extensible Sequences Protocol (拡張可能シーケンスプロトコル) 🔶
 
@@ -798,7 +797,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 - **根拠**: SBCL / ECL / CCL / ABCL 全実装済み。de facto標準のCL拡張。CDR-10
 - **難易度**: Medium
 
-- **関連実装/検証**: 現時点で package-local nickname registry / resolver 統合は未実装。`packages/expand/tests/macros-runtime-support-tests.lisp` は `defpackage` 展開が未対応の host `add-package-local-nickname` / `remove-package-local-nickname` API に依存しないことを検証しており、このFRは `:local-nicknames` の構文・reader/loader・resolver接続を含めて継続実装対象。
+- **関連実装/検証**: `packages/vm/src/symbols.lisp` に `vm-add-package-local-nickname` / `vm-remove-package-local-nickname` 命令、`packages/expand/src/macros-package-system.lisp` に `defpackage :local-nicknames` サポート、`packages/vm/tests/symbols-tests.lisp` に `SYM-VM-FIND-PACKAGE-USES-LOCAL-NICKNAME` テストを実装済み。resolver は host CL API 経由で動作し、self-host 用の rt- 層 registry は将来拡張。
 
 ---
 

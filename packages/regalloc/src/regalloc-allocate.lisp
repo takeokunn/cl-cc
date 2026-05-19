@@ -292,6 +292,23 @@ Safety guard: do not force caller-saved for call-crossing intervals."
                             (instruction->sexp inst)))
     (error () inst)))
 
+(defun %regalloc-rewrite-inst-dst (inst dst)
+  "Return INST cloned with its single destination rewritten to DST."
+  (let ((old-dst (opt-inst-dst inst))
+        (reg-map (make-hash-table :test #'eq)))
+    (when old-dst
+      (setf (gethash old-dst reg-map) dst))
+    (%regalloc-rewrite-inst inst reg-map)))
+
+(defun %regalloc-rematerialize-inst (remat scratch)
+  "Return instruction(s) that rematerialize REMAT into SCRATCH."
+  (cond
+    ((and (consp remat) (eq (car remat) :const))
+     (list (make-vm-const :dst scratch :value (cadr remat))))
+    ((and (consp remat) (eq (car remat) :inst))
+     (list (%regalloc-rewrite-inst-dst (cadr remat) scratch)))
+    (t nil)))
+
 (defun %regalloc-reserved-scratch-regs (inst cc)
   "Return scratch registers reserved internally by INST on CC, if any."
   (when (and (eq (target-name cc) :x86-64)
@@ -341,25 +358,36 @@ Safety guard: do not force caller-saved for call-crossing intervals."
             (when (and vreg (gethash vreg spill-map))
               (let ((scratch (ensure-scratch vreg)))
                 (let ((remat (and remat-map (gethash vreg remat-map))))
-                  (push (if remat
-                            (make-vm-const :dst scratch :value remat)
-                            (make-vm-spill-load :dst-reg scratch
-                                                :slot (gethash vreg spill-map)))
-                        result)))))
-          ;; Ensure spilled defs have scratch registers (completes reg-map before rewrite).
+                  (if remat
+                      (dolist (remat-inst (reverse (%regalloc-rematerialize-inst remat scratch)))
+                        (push remat-inst result))
+                      (push (make-vm-spill-load :dst-reg scratch
+                                                :slot (gethash vreg spill-map))
+                            result))))))
+          ;; Ensure spilled defs have scratch registers unless the definition is
+          ;; rematerializable and can be dropped instead of stored.
           (dolist (vreg (instruction-defs inst))
-            (when (and vreg (gethash vreg spill-map))
+            (when (and vreg (gethash vreg spill-map)
+                       (not (and remat-map (gethash vreg remat-map))))
               (ensure-scratch vreg)))
           ;; Rewrite instruction once with complete reg-map, then push.
-          (push (if (zerop (hash-table-count reg-map))
-                    inst
-                    (%regalloc-rewrite-inst inst reg-map))
-                result)
+          (unless (and (instruction-defs inst)
+                       (every (lambda (vreg)
+                                (and vreg
+                                     (gethash vreg spill-map)
+                                     remat-map
+                                     (gethash vreg remat-map)))
+                              (instruction-defs inst)))
+            (push (if (zerop (hash-table-count reg-map))
+                      inst
+                      (%regalloc-rewrite-inst inst reg-map))
+                  result))
           ;; Store spilled defs after the instruction.
           (dolist (vreg (instruction-defs inst))
-            (when (and vreg (gethash vreg spill-map))
+            (when (and vreg (gethash vreg spill-map)
+                       (not (and remat-map (gethash vreg remat-map))))
               (push (make-vm-spill-store :src-reg (gethash vreg reg-map)
-                                         :slot (gethash vreg spill-map))
+                                          :slot (gethash vreg spill-map))
                     result)))))))
     (nreverse result)))
 
@@ -379,9 +407,13 @@ Safety guard: do not force caller-saved for call-crossing intervals."
         (linear-scan-allocate intervals cc)
       (let* ((remat-map (let ((ht (make-hash-table :test #'eq)))
                           (dolist (interval intervals ht)
-                            (when (interval-remat-const interval)
-                              (setf (gethash (interval-vreg interval) ht)
-                                    (interval-remat-const interval))))))
+                             (cond
+                               ((interval-remat-const interval)
+                                (setf (gethash (interval-vreg interval) ht)
+                                      (list :const (interval-remat-const interval))))
+                               ((interval-remat-inst interval)
+                                (setf (gethash (interval-vreg interval) ht)
+                                      (list :inst (interval-remat-inst interval))))))))
              (final-instructions
               (if (> spill-count 0)
                   (insert-spill-code instructions assignment spill-map cc remat-map)

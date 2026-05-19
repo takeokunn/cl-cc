@@ -179,7 +179,8 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
     :metaclass        (let ((metaclass (ast-defclass-metaclass node)))
                         (if metaclass
                             (optimize-ast metaclass lexical-bound)
-                            nil))))
+                            nil))
+    :sealed           (ast-defclass-sealed node)))
 
 (defun %optimize-ast-defvar-node (node &optional lexical-bound)
   (%clone-source node #'make-ast-defvar

@@ -14,6 +14,9 @@
 (defparameter *x86-64-use-retpoline* nil
   "When true, lower indirect call/jump sites through retpoline sequences.")
 
+(defparameter *x86-64-spectre-mitigations-enabled* nil
+  "When true, emit x86-64 Spectre hardening sequences at sensitive sites.")
+
 (defparameter *x86-64-stack-protector-enabled* nil
   "When true, emit stack protector checks for x86-64 functions.")
 

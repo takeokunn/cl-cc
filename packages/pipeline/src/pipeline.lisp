@@ -18,23 +18,28 @@ optimize-instructions."
         :trace-json-stream  (pipeline-opts-trace-json-stream opts)
         :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
         :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
-        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
-        :retpoline          (pipeline-opts-retpoline opts)
-        :stack-protector    (pipeline-opts-stack-protector opts)
-        :shadow-stack       (pipeline-opts-shadow-stack opts)
-        :asan               (pipeline-opts-asan opts)
-        :msan               (pipeline-opts-msan opts)
-        :tsan               (pipeline-opts-tsan opts)
-        :ubsan              (pipeline-opts-ubsan opts)
-        :hwasan             (pipeline-opts-hwasan opts)))
+        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)))
+
+(defun %opts->codegen-kwargs (opts)
+  "Extract backend hardening/sanitizer options from OPTS."
+  (list :retpoline           (pipeline-opts-retpoline opts)
+        :spectre-mitigations (pipeline-opts-spectre-mitigations opts)
+        :stack-protector     (pipeline-opts-stack-protector opts)
+        :shadow-stack        (pipeline-opts-shadow-stack opts)
+        :asan                (pipeline-opts-asan opts)
+        :msan                (pipeline-opts-msan opts)
+        :tsan                (pipeline-opts-tsan opts)
+        :ubsan               (pipeline-opts-ubsan opts)
+        :hwasan              (pipeline-opts-hwasan opts)))
 
 (defun %opts->compile-kwargs (opts)
   "Spread all OPTS fields into a keyword plist for compile-expression /
 compile-toplevel-forms."
-  (list* :target     (pipeline-opts-target opts)
-         :type-check (pipeline-opts-type-check opts)
-         :safety     (pipeline-opts-safety opts)
-         (%opts->optimize-kwargs opts)))
+  (append (list :target     (pipeline-opts-target opts)
+                :type-check (pipeline-opts-type-check opts)
+                :safety     (pipeline-opts-safety opts))
+          (%opts->optimize-kwargs opts)
+          (%opts->codegen-kwargs opts)))
 
 (defun %prepare-ast (expr)
   "Macro-expand EXPR (if not already an AST node), then lower to an AST node."
@@ -365,7 +370,7 @@ value carries top-level source locations for later AST annotation.
                                       print-opt-remarks opt-remarks-stream
                                       (opt-remarks-mode :all)
                                       print-pass-stats stats-stream trace-json-stream
-                                       retpoline stack-protector shadow-stack
+                                       retpoline spectre-mitigations stack-protector shadow-stack
                                         asan msan tsan ubsan hwasan)
   "Compile EXPR and return a compilation-result object.
 
@@ -386,6 +391,7 @@ streams, and PGO counter plan."
                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
                   :opt-remarks-mode opt-remarks-mode
                    :retpoline retpoline
+                   :spectre-mitigations spectre-mitigations
                    :stack-protector stack-protector
                    :shadow-stack shadow-stack
                    :asan asan
@@ -442,7 +448,7 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                     pass-pipeline print-pass-timings timing-stream
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
-                                      retpoline stack-protector shadow-stack
+                                      retpoline spectre-mitigations stack-protector shadow-stack
                                       asan msan tsan ubsan hwasan)
   "Compile SOURCE text and return a compilation-result object.
 
@@ -462,6 +468,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
                     :opt-remarks-mode opt-remarks-mode
                     :retpoline retpoline
+                    :spectre-mitigations spectre-mitigations
                     :stack-protector stack-protector
                     :shadow-stack shadow-stack
                     :asan asan
@@ -486,7 +493,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                                  print-opt-remarks opt-remarks-stream
                                                  (opt-remarks-mode :all)
                                                 print-pass-stats stats-stream trace-json-stream
-                                                  retpoline stack-protector shadow-stack
+                                                   retpoline spectre-mitigations stack-protector shadow-stack
                                                   asan msan tsan ubsan hwasan)
   "Compile Lisp SOURCE with the standard library forms prepended.
 
@@ -507,7 +514,8 @@ compilation-result object shape as COMPILE-STRING."
                    :stats-stream stats-stream :trace-json-stream trace-json-stream
                    :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
                    :opt-remarks-mode opt-remarks-mode
-                   :retpoline retpoline
+                    :retpoline retpoline
+                    :spectre-mitigations spectre-mitigations
                    :stack-protector stack-protector
                    :shadow-stack shadow-stack
                    :asan asan

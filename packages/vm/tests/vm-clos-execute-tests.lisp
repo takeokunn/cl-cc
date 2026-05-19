@@ -39,6 +39,34 @@
    :slot-names '() :slot-initargs '() :slot-initform-regs nil
    :default-initarg-regs default-initarg-regs :class-slots class-slots))
 
+(defun test-instance-class (instance)
+  "Return INSTANCE's class descriptor for either supported instance layout."
+  (cond
+    ((hash-table-p instance) (gethash :__class__ instance))
+    ((and (vectorp instance) (> (length instance) 0)) (aref instance 0))))
+
+(defun test-slot-index (class slot-name)
+  "Return SLOT-NAME's vector index in CLASS."
+  (let ((location (cdr (assoc slot-name (gethash :__slot-locations__ class) :test #'eq))))
+    (and location (1+ location))))
+
+(defun test-instance-slot-value (instance slot-name)
+  "Return SLOT-NAME from INSTANCE using the active raw layout."
+  (let ((class (test-instance-class instance)))
+    (if (hash-table-p instance)
+        (gethash slot-name instance)
+        (aref instance (test-slot-index class slot-name)))))
+
+(defun test-instance-slot-bound-p (instance slot-name)
+  "Return whether SLOT-NAME is bound in INSTANCE using VM raw slot logic."
+  (multiple-value-bind (class class-slots) (cl-cc/vm::%vm-class-slots-of instance)
+    (cl-cc/vm::%vm-raw-slot-boundp class class-slots instance slot-name)))
+
+(defun test-instance-makunbound (instance slot-name)
+  "Make SLOT-NAME unbound in INSTANCE using VM raw slot logic."
+  (multiple-value-bind (class class-slots) (cl-cc/vm::%vm-class-slots-of instance)
+    (cl-cc/vm::%vm-raw-slot-makunbound class class-slots instance slot-name)))
+
 ;;; ─── vm-class-def / vm-make-obj ──────────────────────────────────────────
 
 (deftest vm-class-def-registers-in-class-registry
@@ -84,7 +112,7 @@
       (assert-true (member 'base  cpl)))))
 
 (deftest vm-make-obj-stores-class-ref
-  "vm-make-obj creates a hash-table instance with :__class__ pointing to the class HT."
+  "vm-make-obj creates an instance pointing to the class HT."
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'animal :slots '(name))
     (let ((class-ht (cl-cc:vm-reg-get s :R0)))
@@ -92,8 +120,8 @@
        (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
        s 0 nil)
       (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
-        (assert-true (hash-table-p obj-ht))
-        (assert-eq class-ht (gethash :__class__ obj-ht))))))
+        (assert-true (vectorp obj-ht))
+        (assert-eq class-ht (test-instance-class obj-ht))))))
 
 (deftest vm-make-obj-initializes-slots-to-nil
   "vm-make-obj creates entries for all declared slots, initialized to NIL."
@@ -103,8 +131,8 @@
      (cl-cc:make-vm-make-obj :dst :R1 :class-reg :R0 :initarg-regs nil)
      s 0 nil)
     (let ((obj-ht (cl-cc:vm-reg-get s :R1)))
-      (assert-null (gethash 'x obj-ht))
-      (assert-null (gethash 'y obj-ht)))))
+      (assert-null (test-instance-slot-value obj-ht 'x))
+      (assert-null (test-instance-slot-value obj-ht 'y)))))
 
 ;;; ─── vm-slot-read / vm-slot-write / vm-slot-boundp / vm-slot-makunbound ─
 
@@ -132,7 +160,7 @@
   "vm-slot-read signals an error when the slot key has been removed from the instance HT."
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'thing '(val))
-    (remhash 'val (cl-cc:vm-reg-get s :R1))
+    (test-instance-makunbound (cl-cc:vm-reg-get s :R1) 'val)
     (assert-signals error
       (cl-cc/vm::execute-instruction
        (cl-cc:make-vm-slot-read :dst :R2 :obj-reg :R1 :slot-name 'val)
@@ -156,7 +184,7 @@
   (remove-p)
   (let ((s (make-clos-vm)))
     (make-test-instance s :R0 :R1 'car '(model))
-    (when remove-p (remhash 'model (cl-cc:vm-reg-get s :R1)))
+    (when remove-p (test-instance-makunbound (cl-cc:vm-reg-get s :R1) 'model))
     (cl-cc/vm::execute-instruction
      (cl-cc:make-vm-slot-boundp :dst :R2 :obj-reg :R1 :slot-name-sym 'model)
      s 0 nil)
@@ -205,7 +233,7 @@
     (cl-cc/vm::execute-instruction
      (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'data)
      s 0 nil)
-    (assert-false (nth-value 1 (gethash 'data (cl-cc:vm-reg-get s :R1))))
+    (assert-false (test-instance-slot-bound-p (cl-cc:vm-reg-get s :R1) 'data))
     (assert-eq (cl-cc:vm-reg-get s :R1)
                (cl-cc:vm-reg-get s :R2))))
 
@@ -220,7 +248,7 @@
      (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'shared)
      s 0 nil)
     (assert-false (nth-value 1 (gethash 'shared (cl-cc:vm-reg-get s :R0))))
-    (assert-false (nth-value 1 (gethash 'shared (cl-cc:vm-reg-get s :R1))))
+    (assert-false (test-instance-slot-bound-p (cl-cc:vm-reg-get s :R1) 'shared))
     (assert-eq (cl-cc:vm-reg-get s :R1)
                (cl-cc:vm-reg-get s :R2))))
 
@@ -236,8 +264,8 @@
      (cl-cc:make-vm-slot-makunbound :dst :R2 :obj-reg :R1 :slot-name-sym 'y)
      s 0 nil)
     (assert-eq (cl-cc:vm-reg-get s :R3)
-               (gethash :__class__ (cl-cc:vm-reg-get s :R1)))
-    (assert-false (nth-value 1 (gethash 'y (cl-cc:vm-reg-get s :R1))))))
+               (test-instance-class (cl-cc:vm-reg-get s :R1)))
+    (assert-false (test-instance-slot-bound-p (cl-cc:vm-reg-get s :R1) 'y))))
 
 ;;; ─── vm-class-def helper functions ──────────────────────────────────────
 
@@ -373,6 +401,88 @@
     (assert-= 5 (gethash 'count class-ht))
     (assert-null (gethash 'count obj-ht))))
 
+;;; ─── copy-instance layout coverage ───────────────────────────────────────
+
+(deftest vm-copy-instance-vector-backed-standard-instance
+  "copy-instance creates a distinct vector-backed object with the same class and shallow-copied slots."
+  (assert-evaluates-to
+   "(progn
+      (defclass vm-copy-vector () ((items :initarg :items) (flag :initarg :flag)))
+      (let* ((items (list 1 2 3))
+             (obj (make-instance 'vm-copy-vector :items items :flag :original))
+             (copy (copy-instance obj)))
+        (setf (slot-value copy 'flag) :changed)
+        (if (and (vectorp obj)
+                 (vectorp copy)
+                 (not (eq obj copy))
+                 (eq (class-of obj) (class-of copy))
+                 (eq (slot-value copy 'items) items)
+                 (eq (slot-value obj 'flag) :original)
+                 (eq (slot-value copy 'flag) :changed))
+            :ok
+            :bad)))"
+   :ok
+   :stdlib t))
+
+(deftest vm-copy-instance-vector-backed-preserves-unbound-slot
+  "copy-instance preserves the vector unbound-slot marker for unbound slots."
+  (assert-evaluates-to
+   "(progn
+      (defclass vm-copy-vector-unbound () ((x :initarg :x) (y :initarg :y)))
+      (let* ((obj (make-instance 'vm-copy-vector-unbound :x 10 :y 20)))
+        (slot-makunbound obj 'y)
+        (let ((copy (copy-instance obj)))
+          (if (and (slot-boundp copy 'x)
+                   (= (slot-value copy 'x) 10)
+                   (not (slot-boundp copy 'y)))
+              :ok
+              :bad))))"
+   :ok
+   :stdlib t))
+
+(deftest vm-copy-instance-hash-table-backed-standard-instance
+  "copy-instance creates a distinct hash-table-backed object with the same class and shallow-copied slots."
+  (assert-evaluates-to
+   "(progn
+      (defclass vm-copy-hash-meta (standard-class) ())
+      (defclass vm-copy-hash ()
+        ((items :initarg :items) (flag :initarg :flag))
+        (:metaclass vm-copy-hash-meta))
+      (let* ((items (list :a :b))
+             (obj (make-instance 'vm-copy-hash :items items :flag :original))
+             (copy (copy-instance obj)))
+        (setf (slot-value copy 'flag) :changed)
+        (if (and (hash-table-p obj)
+                 (hash-table-p copy)
+                 (not (eq obj copy))
+                 (eq (gethash :__class__ obj) (gethash :__class__ copy))
+                 (eq (slot-value copy 'items) items)
+                 (eq (slot-value obj 'flag) :original)
+                 (eq (slot-value copy 'flag) :changed))
+            :ok
+            :bad)))"
+   :ok
+   :stdlib t))
+
+(deftest vm-copy-instance-hash-table-backed-preserves-unbound-slot
+  "copy-instance preserves absent hash-table slot bindings for unbound slots."
+  (assert-evaluates-to
+   "(progn
+      (defclass vm-copy-hash-unbound-meta (standard-class) ())
+      (defclass vm-copy-hash-unbound ()
+        ((x :initarg :x) (y :initarg :y))
+        (:metaclass vm-copy-hash-unbound-meta))
+      (let ((obj (make-instance 'vm-copy-hash-unbound :x 10 :y 20)))
+        (slot-makunbound obj 'y)
+        (let ((copy (copy-instance obj)))
+          (if (and (slot-boundp copy 'x)
+                   (= (slot-value copy 'x) 10)
+                   (not (slot-boundp copy 'y)))
+              :ok
+              :bad))))"
+   :ok
+   :stdlib t))
+
 ;;; ─── vm-slot-exists-p / vm-class-name-fn / vm-class-of-fn / vm-find-class
 
 (deftest-each vm-slot-exists-p-declared-and-undeclared
@@ -433,7 +543,54 @@
      s 0 nil)
     (let ((found (cl-cc:vm-reg-get s :R2)))
       (if register-p
-          (progn
-            (assert-true (hash-table-p found))
-            (assert-eq class-sym (gethash :__name__ found)))
-          (assert-null found)))))
+           (progn
+             (assert-true (hash-table-p found))
+             (assert-eq class-sym (gethash :__name__ found)))
+           (assert-null found)))))
+
+;;; ─── vm-generic-call inline cache ─────────────────────────────────────────
+
+(deftest vm-generic-call-caches-multi-dispatch-tuple-key
+  "A 2-argument GF caches by class tuple, hits on the second call, and misses after generation invalidation."
+  (let* ((s (make-clos-vm))
+         (labels (make-hash-table :test #'eql))
+         (gf-ht (make-hash-table :test #'equal))
+         (methods-ht (make-hash-table :test #'equal))
+         (method-fn (make-instance 'cl-cc/vm::vm-closure-object
+                                   :entry-label 'multi-method
+                                   :params '(:X :Y)))
+         (method-desc (make-hash-table :test #'eq))
+         (inst (cl-cc:make-vm-generic-call :dst :OUT :gf-reg :GF :args '(:A :B))))
+    (exec-class-def s :C0 'left)
+    (exec-class-def s :C1 'right)
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :A :class-reg :C0 :initarg-regs nil)
+     s 0 labels)
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-make-obj :dst :B :class-reg :C1 :initarg-regs nil)
+     s 0 labels)
+    (cl-cc/vm::vm-label-table-store labels 'multi-method 77)
+    (setf (gethash :function method-desc) method-fn
+          (gethash :qualifiers method-desc) nil
+          (gethash :specializer method-desc) '(left right)
+          (gethash :gf method-desc) gf-ht
+          (gethash '(left right) methods-ht) method-desc
+          (gethash :__methods__ gf-ht) methods-ht
+          (gethash :__name__ gf-ht) 'multi-ic-gf
+          (gethash '__ic-gen__ gf-ht) 0)
+    (cl-cc:vm-reg-set s :GF gf-ht)
+
+    ;; First call resolves through full multi-dispatch and writes a tuple-key cache.
+    (assert-= 77 (first (multiple-value-list
+                         (cl-cc/vm::execute-instruction inst s 10 labels))))
+    (assert-equal '(left right) (first (cl-cc/vm::vm-ic-cache inst)))
+
+    ;; Remove the method table entry; the second call can only succeed via IC hit.
+    (remhash '(left right) methods-ht)
+    (assert-= 77 (first (multiple-value-list
+                         (cl-cc/vm::execute-instruction inst s 20 labels))))
+
+    ;; Generation changes invalidate the cached tuple entry.
+    (incf (gethash '__ic-gen__ gf-ht))
+    (assert-signals error
+      (cl-cc/vm::execute-instruction inst s 30 labels))))

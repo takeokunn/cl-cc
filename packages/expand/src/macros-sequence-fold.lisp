@@ -91,34 +91,41 @@
       (append (list 'substitute-if-not new pred seq)
               (when key (list :key key))))))
 
-;;; MAP-INTO (FR-503): fill sequence with mapped results
+;;; MAP-INTO (FR-503, FR-453): fill sequence with mapped results
 
 (register-macro 'map-into
   (lambda (form env)
     (declare (ignore env))
     (let* ((dest (second form))
-           (fn (third form))
-           (seqs (cdddr form)))
-      (if (= (length seqs) 1)
-          (let ((d (gensym "DEST"))
-                (src (gensym "SRC"))
-                (dp (gensym "DP"))
-                (sp (gensym "SP"))
-                (fn-var (gensym "FN"))
-                (loop-fn (gensym "MAP-INTO-LOOP")))
-            (list 'let (list (list d dest)
-                             (list src (first seqs))
-                             (list fn-var fn))
-                  (list 'labels
-                        (list (list loop-fn (list dp sp)
-                                    (list 'when (list 'and dp sp)
-                                           (list 'rplaca dp (list 'funcall fn-var (list 'car sp)))
-                                          (list loop-fn (list 'cdr dp) (list 'cdr sp)))))
-                        (list loop-fn d src))
-                  d))
-          (list 'progn dest)))))
+            (fn (third form))
+            (seqs (cdddr form))
+            (d (gensym "DEST"))
+            (fn-var (gensym "FN"))
+            (src-vars (loop for seq in seqs collect (gensym "SRC")))
+            (dp (gensym "DP"))
+            (sp-vars (loop for seq in seqs collect (gensym "SP")))
+            (loop-fn (gensym "MAP-INTO-LOOP")))
+       (list 'let (append (list (list d dest)
+                                (list fn-var fn))
+                          (loop for var in src-vars
+                                for seq in seqs
+                                collect (list var seq)))
+             (list 'labels
+                   (list (list loop-fn (cons dp sp-vars)
+                               (list 'when (cons 'and (cons dp sp-vars))
+                                     (list 'rplaca dp
+                                           (cons 'funcall
+                                                 (cons fn-var
+                                                       (loop for sp in sp-vars
+                                                             collect (list 'car sp)))))
+                                     (cons loop-fn
+                                           (cons (list 'cdr dp)
+                                                 (loop for sp in sp-vars
+                                                       collect (list 'cdr sp)))))))
+                   (cons loop-fn (cons d src-vars)))
+             d))))
 
-;;; MERGE (FR-504): merge two sorted sequences using predicate
+;;; MERGE (FR-504, FR-452): merge two sorted sequences using predicate with :key support
 
 (register-macro 'merge
   (lambda (form env)
@@ -127,25 +134,29 @@
           (seq1 (third form))
           (seq2 (fourth form))
           (pred (fifth form))
-          (keys (cddddr form))
+          (key  (getf (cdr (cddddr form)) :key))
           (l1 (gensym "L1"))
           (l2 (gensym "L2"))
           (fn-var (gensym "PRED"))
+          (kfn-var (gensym "KEY"))
           (loop-fn (gensym "MERGE-LOOP")))
-      (declare (ignore result-type keys))
-      (list 'let (list (list l1 seq1)
-                       (list l2 seq2)
-                       (list fn-var pred))
-            (list 'labels
-                  (list (list loop-fn '(a b)
-                              (list 'cond
-                                    '((null a) b)
-                                    '((null b) a)
-                                    (list (list 'funcall fn-var '(car a) '(car b))
-                                          (list 'cons '(car a) (list loop-fn '(cdr a) 'b)))
-                                    (list 't
-                                          (list 'cons '(car b) (list loop-fn 'a '(cdr b)))))))
-                  (list loop-fn l1 l2))))))
+      (declare (ignore result-type))
+      (let ((a-val (if key `(funcall ,kfn-var (car a)) '(car a)))
+            (b-val (if key `(funcall ,kfn-var (car b)) '(car b))))
+        (list 'let (list* (list l1 seq1)
+                          (list l2 seq2)
+                          (list fn-var pred)
+                          (when key (list (list kfn-var key))))
+              (list 'labels
+                    (list (list loop-fn '(a b)
+                                (list 'cond
+                                      '((null a) b)
+                                      '((null b) a)
+                                      (list (list 'funcall fn-var a-val b-val)
+                                            (list 'cons '(car a) (list loop-fn '(cdr a) 'b)))
+                                      (list 't
+                                            (list 'cons '(car b) (list loop-fn 'a '(cdr b)))))))
+                    (list loop-fn l1 l2)))))))
 
 ;;; LAST/BUTLAST/SEARCH (FR-500 adjacent): sequence tail and subsequence helpers
 

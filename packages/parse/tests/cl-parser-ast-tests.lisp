@@ -37,6 +37,19 @@
   (input expected-head)
   (assert-eq expected-head (first (ast-roundtrip input))))
 
+(deftest lower-named-let-form
+  "lower-sexp-to-ast: named LET lowers to LABELS plus an initial recursive call."
+  (let ((node (lower '(let loop ((i 0) (acc 1))
+                       (if (= i 3)
+                           acc
+                           (loop (+ i 1) (* acc 2)))))))
+    (assert-true (cl-cc/ast:ast-labels-p node))
+    (let ((binding (first (cl-cc/ast:ast-labels-bindings node)))
+          (body (cl-cc/ast:ast-labels-body node)))
+      (assert-eq 'loop (first binding))
+      (assert-equal '(i acc) (second binding))
+      (assert-true (cl-cc/ast:ast-call-p (first body))))))
+
 (deftest-each ast-roundtrip-exact-forms
   "ast-roundtrip preserves the complete sexp for self-roundtripping forms."
   :cases (("setq"  '(setq x 42))

@@ -33,6 +33,7 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (opt-remarks-stream nil)
   (opt-remarks-mode   :all    :type keyword)
   (retpoline          nil)
+  (spectre-mitigations nil)
   (stack-protector    nil)
   (shadow-stack       nil)
   (asan               nil)

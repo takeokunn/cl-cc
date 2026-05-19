@@ -108,6 +108,25 @@ that lookup can't find."
      (cl-cc:make-vm-tail-call :dst :R0 :func :R1 :args '(:R2)) s 0 (%labels))
     (assert-= 42 (cl-cc:vm-reg-get s :R0))))
 
+(deftest vm-apply-tail-p-closure-skips-frame-push
+  "vm-apply with tail-p on a closure spreads args and reuses the current frame."
+  (let* ((s (make-test-vm))
+         (cl (%make-test-closure "fn_apply_tail" '(:R2 :R3)))
+         (lbl (%labels "fn_apply_tail" 33)))
+    (cl-cc:vm-reg-set s :R1 cl)
+    (cl-cc:vm-reg-set s :R2 10)
+    (cl-cc:vm-reg-set s :R4 '(20))
+    (multiple-value-bind (new-pc sig ret)
+        (cl-cc:execute-instruction
+         (cl-cc:make-vm-apply :dst :R0 :func :R1 :args '(:R2 :R4) :tail-p t)
+         s 5 lbl)
+      (assert-= 33 new-pc)
+      (assert-null sig)
+      (assert-null ret))
+    (assert-null (cl-cc:vm-call-stack s))
+    (assert-= 10 (cl-cc:vm-reg-get s :R2))
+    (assert-= 20 (cl-cc:vm-reg-get s :R3))))
+
 (deftest vm-ret-behavior
   "vm-ret: empty stack signals halt; non-empty stack returns to saved pc, writes result, pops frame."
   (let ((s (make-test-vm)))

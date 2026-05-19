@@ -11,7 +11,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-bootstrap :cl-cc-type)
+  :depends-on (:cl-cc-bootstrap :cl-cc-type :cl-cc-vm)
   :pathname "src"
   :serial t
   :components
@@ -47,8 +47,9 @@
    (:file "macros-runtime-support") ; declarations, IO/hash/coerce/LTV/feature runtime macros
    (:file "macros-clos-protocol")  ; CLOS protocol: print-unreadable-object, describe, change-class
    (:file "macros-mop-support")   ; MOP introspection macros + parse-float + reinitialize-instance
-    (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
-    (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
+     (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
+     (:file "deftransform")        ; deftransform: type-specialized compile-time transforms
+     (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
     (:file "expander-defstruct-copy") ; expander: COPY-STRUCTURE expansion
      (:file "expander-defstruct-boa")  ; expander: BOA constructors for defstruct
      (:file "expander-defstruct-typed") ; expander: :TYPE list/vector defstruct forms

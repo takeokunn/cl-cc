@@ -46,6 +46,30 @@ Self-updating destinations are killed conservatively to guarantee termination."
          (gethash exit (opt-dataflow-result-out result)))
         (make-hash-table :test #'eq))))
 
+(defvar *opt-block-local-range-table* (make-hash-table :test #'eq)
+  "Latest block-local interval facts keyed by BASIC-BLOCK, populated by
+OPT-COMPUTE-PATH-SENSITIVE-RANGES for OPT-BLOCK-REG-RANGE queries.")
+
+(defun %opt-record-block-local-ranges (in-table)
+  "Snapshot path-sensitive block entry ranges for public block-local queries."
+  (clrhash *opt-block-local-range-table*)
+  (maphash (lambda (block state)
+             (setf (gethash block *opt-block-local-range-table*)
+                   (%opt-copy-interval-state state)))
+           in-table)
+  *opt-block-local-range-table*)
+
+(defun opt-block-reg-range (block reg)
+  "Return the latest path-sensitive entry interval for REG at BLOCK as (LO . HI).
+
+The table is populated by OPT-COMPUTE-PATH-SENSITIVE-RANGES.  NIL is returned
+when BLOCK has no recorded fact for REG."
+  (let* ((state (gethash block *opt-block-local-range-table*))
+         (interval (and state (gethash reg state))))
+    (and interval
+         (opt-make-interval (opt-interval-lo interval)
+                            (opt-interval-hi interval)))))
+
 (defun opt-compute-value-ranges (instructions)
   "Compute conservative integer value ranges.
 
@@ -174,6 +198,25 @@ is the non-zero/true branch."
         when edge-state
           collect edge-state))
 
+(defun %opt-loop-header-p (block)
+  "Return T when BLOCK has a natural-loop backedge predecessor."
+  (some (lambda (pred)
+          (cfg-dominates-p block pred))
+        (bb-predecessors block)))
+
+(defun %opt-widen-interval-states (old new)
+  "Widen OLD interval state toward NEW, preserving CFG meet key semantics."
+  (let ((widened (make-hash-table :test #'eq)))
+    (when new
+      (maphash (lambda (reg new-interval)
+                 (let ((old-interval (and old (gethash reg old))))
+                   (setf (gethash reg widened)
+                         (opt-interval-widen old-interval new-interval
+                                             :negative-infinity +opt-range-negative-infinity+
+                                             :positive-infinity +opt-range-positive-infinity+))))
+               new))
+    widened))
+
 (defun %opt-path-sensitive-entry-table (in-table)
   "Flatten block entry states to a (BLOCK . REG) -> interval hash-table."
   (let ((ranges (make-hash-table :test #'equal)))
@@ -200,19 +243,23 @@ Returns a hash-table mapping (block . reg) to (lo . hi) interval."
       (loop while changed
             do (setf changed nil)
                (dolist (block rpo)
-                 (let* ((incoming (if (eq block (cfg-entry cfg))
-                                      (or (gethash block in-table) empty-state)
-                                      (%opt-merge-interval-states
-                                       (%opt-predecessor-path-states block out-table))))
-                        (old-in (gethash block in-table))
-                        (out (%opt-cfg-value-ranges-transfer block incoming))
-                        (old-out (gethash block out-table)))
+                  (let* ((raw-incoming (if (eq block (cfg-entry cfg))
+                                           (or (gethash block in-table) empty-state)
+                                           (%opt-merge-interval-states
+                                            (%opt-predecessor-path-states block out-table))))
+                         (old-in (gethash block in-table))
+                         (incoming (if (and old-in (%opt-loop-header-p block))
+                                       (%opt-widen-interval-states old-in raw-incoming)
+                                       raw-incoming))
+                         (out (%opt-cfg-value-ranges-transfer block incoming))
+                         (old-out (gethash block out-table)))
                    (unless (and old-in (%opt-interval-state-equal-p old-in incoming))
                      (setf (gethash block in-table) (%opt-copy-interval-state incoming)
                            changed t))
-                   (unless (and old-out (%opt-interval-state-equal-p old-out out))
-                     (setf (gethash block out-table) out
-                           changed t))))))
+                    (unless (and old-out (%opt-interval-state-equal-p old-out out))
+                      (setf (gethash block out-table) out
+                            changed t))))))
+    (%opt-record-block-local-ranges in-table)
     (%opt-path-sensitive-entry-table in-table)))
 
 (defun opt-compute-constant-intervals (instructions)
@@ -239,7 +286,11 @@ when BLOCK is supplied."
   reg
   init
   step
-  update-inst)
+  update-inst
+  (kind :affine)
+  multiplier
+  offset
+  base-reg)
 
 (defun %opt-constant-reg-value (reg constants)
   "Return (values VALUE T) when REG has a known integer constant in CONSTANTS."
@@ -268,6 +319,42 @@ when BLOCK is supplied."
       ((and dst (typep inst 'vm-dec) (eq dst (vm-src inst)))
        (values dst -1 t)))))
 
+(defun %opt-simple-scaled-expr (inst constants)
+  "Return (values BASE MULTIPLIER T) when INST computes BASE * constant."
+  (when (typep inst 'vm-mul)
+    (let ((dst (opt-inst-dst inst)))
+      (when dst
+        (cond
+          ((eq dst (vm-lhs inst))
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-rhs inst) constants)
+             (when (and ok (not (zerop c))) (values dst c t))))
+          ((eq dst (vm-rhs inst))
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-lhs inst) constants)
+             (when (and ok (not (zerop c))) (values dst c t))))
+          (t
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-rhs inst) constants)
+             (when (and ok (not (zerop c)))
+               (return-from %opt-simple-scaled-expr (values (vm-lhs inst) c t))))
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-lhs inst) constants)
+             (when (and ok (not (zerop c)))
+               (values (vm-rhs inst) c t)))))))))
+
+(defun %opt-simple-add-expr (inst constants)
+  "Return (values BASE OFFSET T) when INST computes BASE + integer constant."
+  (when (typep inst '(or vm-add vm-sub))
+    (let ((dst (opt-inst-dst inst)))
+      (when dst
+        (cond
+          ((typep inst 'vm-add)
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-rhs inst) constants)
+             (if ok
+                 (values (vm-lhs inst) c t)
+                 (multiple-value-bind (c2 ok2) (%opt-constant-reg-value (vm-lhs inst) constants)
+                   (when ok2 (values (vm-rhs inst) c2 t))))))
+          ((typep inst 'vm-sub)
+           (multiple-value-bind (c ok) (%opt-constant-reg-value (vm-rhs inst) constants)
+             (when ok (values (vm-lhs inst) (- c) t)))))))))
+
 (defun %opt-copy-constant-fact (inst constants)
   "Propagate a constant fact through a vm-move, or kill the destination fact."
   (multiple-value-bind (value found-p) (gethash (vm-src inst) constants)
@@ -278,43 +365,113 @@ when BLOCK is supplied."
 (defun %opt-compute-simple-inductions-with-constants (instructions constants)
   "Return simple induction summaries for INSTRUCTIONS seeded by CONSTANTS."
   (let ((constants (%opt-copy-constant-table constants))
-        (inductions (make-hash-table :test #'eq)))
+        (inductions (make-hash-table :test #'eq))
+        (exprs (make-hash-table :test #'eq)))
     (dolist (inst instructions inductions)
       (cond
         ((typep inst 'vm-const)
          (remhash (vm-dst inst) inductions)
+         (remhash (vm-dst inst) exprs)
          (if (integerp (vm-value inst))
              (setf (gethash (vm-dst inst) constants) (vm-value inst))
              (remhash (vm-dst inst) constants)))
         ((typep inst 'vm-move)
          (remhash (vm-dst inst) inductions)
+         (remhash (vm-dst inst) exprs)
          (%opt-copy-constant-fact inst constants))
         (t
-         (multiple-value-bind (reg step ok)
-             (%opt-simple-induction-step inst constants)
-           (if ok
+         (let ((dst (opt-inst-dst inst))
+               (handled nil))
+           (multiple-value-bind (reg step ok)
+               (%opt-simple-induction-step inst constants)
+             (when ok
+               (setf handled t)
                (multiple-value-bind (init found-p) (gethash reg constants)
                  (if found-p
                      (setf (gethash reg inductions)
                            (make-opt-induction-var :reg reg
                                                    :init init
                                                    :step step
-                                                   :update-inst inst))
+                                                   :update-inst inst
+                                                   :kind :affine
+                                                   :offset step))
                      (remhash reg inductions))
-                 (remhash reg constants))
-               (let ((dst (opt-inst-dst inst)))
-                 (when dst
-                   (remhash dst constants)
-                   (remhash dst inductions))))))))))
+                 (remhash reg constants)
+                 (remhash reg exprs))))
+           (unless handled
+             (multiple-value-bind (base multiplier ok)
+                 (%opt-simple-scaled-expr inst constants)
+               (when ok
+                 (setf handled t)
+                 (if (eq dst base)
+                     (multiple-value-bind (init found-p) (gethash base constants)
+                       (if found-p
+                           (setf (gethash base inductions)
+                                 (make-opt-induction-var :reg base
+                                                         :init init
+                                                         :step nil
+                                                         :update-inst inst
+                                                         :kind :geometric
+                                                         :multiplier multiplier))
+                           (remhash base inductions))
+                       (remhash base constants)
+                       (remhash base exprs))
+                     (progn
+                       (setf (gethash dst exprs) (list :mul base multiplier))
+                       (remhash dst constants)
+                       (remhash dst inductions))))))
+           (unless handled
+             (multiple-value-bind (base offset ok)
+                 (%opt-simple-add-expr inst constants)
+               (when ok
+                 (let ((base-iv (gethash base inductions))
+                       (base-expr (gethash base exprs)))
+                   (cond
+                     (base-iv
+                      (setf handled t)
+                      (setf (gethash dst inductions)
+                            (make-opt-induction-var :reg dst
+                                                    :init (+ (opt-iv-init base-iv) offset)
+                                                    :step (opt-iv-step base-iv)
+                                                    :update-inst inst
+                                                    :kind :derived
+                                                    :offset offset
+                                                    :base-reg base))
+                      (remhash dst constants)
+                      (remhash dst exprs))
+                     ((and base-expr (eq (second base-expr) dst))
+                      (setf handled t)
+                      (multiple-value-bind (init found-p) (gethash dst constants)
+                        (if found-p
+                            (setf (gethash dst inductions)
+                                  (make-opt-induction-var :reg dst
+                                                          :init init
+                                                          :step nil
+                                                          :update-inst inst
+                                                          :kind :affine-recurrence
+                                                          :multiplier (third base-expr)
+                                                          :offset offset))
+                            (remhash dst inductions))
+                        (remhash dst constants)
+                        (remhash dst exprs)))
+                     ((and dst (not (eq dst base)))
+                      (setf handled t)
+                      (setf (gethash dst exprs) (list :add base offset))
+                      (remhash dst constants)
+                      (remhash dst inductions)))))))
+           (unless handled
+             (when dst
+               (remhash dst constants)
+               (remhash dst inductions)
+               (remhash dst exprs)))))))))
 
 (defun opt-compute-simple-inductions (instructions)
   "Return reg -> opt-induction-var summaries for simple affine updates.
 
-  Recognized patterns are intentionally conservative: a register must first hold a
-  known integer constant, then be updated by `(add dst dst const)`,
-`(add dst const dst)`, `(sub dst dst const)`, `vm-inc`, or `vm-dec`. This
-supplies the small SCEV facts needed by loop unrolling, peeling, and
-bounds-check reasoning without changing program instructions."
+  Recognized patterns are intentionally conservative: affine self-updates,
+geometric self-updates `(mul dst dst const)`, two-instruction affine recurrences
+`dst = dst * c + d`, and derived variables `j = i + c` where `i` is already an
+induction variable. Existing affine callers continue to read OPT-IV-STEP."
   (%opt-compute-simple-inductions-with-constants
    instructions
    (make-hash-table :test #'eq)))

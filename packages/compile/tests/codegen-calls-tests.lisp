@@ -105,7 +105,7 @@
   (sym)
   (let* ((ctx (make-codegen-ctx))
          (result-reg (cl-cc/compile:make-register ctx))
-         (ret (cl-cc/compile::%try-compile-apply sym (list (make-ast-int :value 1)) result-reg ctx)))
+         (ret (cl-cc/compile::%try-compile-apply sym (list (make-ast-int :value 1)) result-reg nil ctx)))
     (assert-null ret)))
 
 (deftest try-compile-apply-emits-vm-apply-and-returns-result-reg
@@ -115,11 +115,26 @@
          (result-reg (cl-cc/compile:make-register ctx)))
     (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg)))
     (let ((ret (cl-cc/compile::%try-compile-apply
-                'apply
-                (list (make-ast-var :name 'f) (make-ast-int :value 1))
-                result-reg ctx)))
+                 'apply
+                 (list (make-ast-var :name 'f) (make-ast-int :value 1))
+                 result-reg nil ctx)))
       (assert-eq result-reg ret)
       (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))))
+
+(deftest try-compile-apply-tail-position-marks-vm-apply-tail-p
+  "%try-compile-apply marks vm-apply tail-p when tail is T."
+  (let* ((ctx (make-codegen-ctx))
+         (fn-reg (cl-cc/compile:make-register ctx))
+         (result-reg (cl-cc/compile:make-register ctx)))
+    (setf (cl-cc/compile:ctx-env ctx) (list (cons 'f fn-reg)))
+    (let ((ret (cl-cc/compile::%try-compile-apply
+                'apply
+                (list (make-ast-var :name 'f) (make-ast-var :name 'xs))
+                result-reg t ctx)))
+      (assert-eq result-reg ret)
+      (let ((apply-inst (codegen-find-inst ctx 'cl-cc/vm::vm-apply)))
+        (assert-true apply-inst)
+        (assert-true (cl-cc/vm::vm-tail-p apply-inst))))))
 
 ;;; ─── %try-compile-noescape-cons ──────────────────────────────────────────
 

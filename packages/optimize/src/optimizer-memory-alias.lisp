@@ -131,3 +131,62 @@ field-sensitive object graphs remain out of scope for this helper."
                                       alias-roots))
     (vm-cons (list :alloc (vm-dst inst)))
     (t nil)))
+
+(defun opt-memory-unknown-write-inst-p (inst)
+  "Return T when INST may write arbitrary memory and invalidate alias facts."
+  (or (typep inst '(or vm-call vm-tail-call vm-generic-call vm-apply))
+      (eq (vm-inst-effect-kind inst) :unknown)))
+
+(defun opt-memory-write-inst-p (inst)
+  "Return T when INST may modify memory relevant to load motion safety."
+  (or (typep inst '(or vm-set-global vm-slot-write
+                    vm-rplaca vm-rplacd vm-aset vm-fill vm-svset
+                    vm-set-fill-pointer vm-vector-push vm-vector-pop
+                    vm-vector-push-extend vm-adjust-array
+                    vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not))
+      (opt-memory-unknown-write-inst-p inst)))
+
+(defun opt-memory-read-inst-p (inst)
+  "Return T when INST reads memory and needs alias checks before code motion."
+  (typep inst '(or vm-get-global vm-slot-read vm-car vm-cdr
+                vm-aref vm-svref vm-row-major-aref vm-bit-access vm-sbit)))
+
+(defun opt-memory-accesses-may-alias-p (read-inst write-inst alias-roots type-facts)
+  "Return T when READ-INST may observe WRITE-INST.
+
+The check is conservative for unknown calls/writes and uses heap alias roots plus
+TBAA facts for modeled slot accesses.  Disjoint heap kinds are treated as
+non-aliasing while unknown roots remain conservative."
+  (cond
+    ((opt-memory-unknown-write-inst-p write-inst) t)
+    ((and (typep read-inst 'vm-get-global)
+          (typep write-inst 'vm-set-global))
+     (eql (cl-cc/vm::vm-get-global-name read-inst)
+          (cl-cc/vm::vm-set-global-name write-inst)))
+    ((and (typep read-inst 'vm-slot-read)
+          (typep write-inst 'vm-slot-write))
+     (and (eql (cl-cc/vm::vm-slot-read-slot-name read-inst)
+               (cl-cc/vm::vm-slot-write-slot-name write-inst))
+          (opt-may-alias-p (cl-cc/vm::vm-slot-read-obj-reg read-inst)
+                           (cl-cc/vm::vm-slot-write-obj-reg write-inst)
+                           alias-roots
+                           type-facts)))
+    ;; Cons field readers can be invalidated by rplaca/rplacd on the same object.
+    ((and (typep read-inst 'vm-car)
+          (typep write-inst 'vm-rplaca))
+     (opt-may-alias-p (vm-src read-inst) (vm-cons-reg write-inst) alias-roots type-facts))
+    ((and (typep read-inst 'vm-cdr)
+          (typep write-inst 'vm-rplacd))
+     (opt-may-alias-p (vm-src read-inst) (vm-cons-reg write-inst) alias-roots type-facts))
+    ;; Array accesses are modeled by object identity but not by index here.
+    ((and (typep read-inst 'vm-aref)
+          (typep write-inst 'vm-aset))
+     (opt-may-alias-p (vm-array-reg read-inst) (vm-array-reg write-inst) alias-roots type-facts))
+    ((and (typep read-inst '(or vm-svref vm-row-major-aref))
+          (typep write-inst 'vm-svset))
+     (opt-may-alias-p (vm-lhs read-inst) (vm-array-reg write-inst) alias-roots type-facts))
+    ;; A modeled write of another family cannot affect this modeled read.
+    ((and (opt-memory-read-inst-p read-inst)
+          (opt-memory-write-inst-p write-inst))
+     nil)
+    (t nil)))

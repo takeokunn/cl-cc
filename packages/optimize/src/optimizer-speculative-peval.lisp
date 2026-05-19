@@ -593,6 +593,9 @@ the plan as a cache hit instead of requesting a new clone."
     ((typep inst 'vm-tail-call)
      (make-vm-tail-call :dst (vm-dst inst) :func func-reg :args args))
     ((typep inst 'vm-apply)
-     (make-vm-apply :dst (vm-dst inst) :func func-reg :args args))
+     (make-vm-apply :dst (vm-dst inst)
+                    :func func-reg
+                    :args args
+                    :tail-p (cl-cc/vm::vm-tail-p inst)))
     (t
      (make-vm-call :dst (vm-dst inst) :func func-reg :args args))))

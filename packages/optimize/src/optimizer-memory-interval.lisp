@@ -86,7 +86,8 @@ constant index registers, and simple loop induction summaries."
                               (index-value (gethash index-reg constants))
                               (iv-step (loop for ivs being the hash-values of inductions
                                              for iv = (gethash index-reg ivs)
-                                             when iv return (opt-iv-step iv)))
+                                             when (and iv (numberp (opt-iv-step iv)))
+                                               return (opt-iv-step iv)))
                               (stride (cond
                                         (iv-step iv-step)
                                         ((and index-value last (getf last :index-value))
@@ -381,6 +382,26 @@ shifted directly."
   (and inner outer
        (<= (opt-interval-lo outer) (opt-interval-lo inner))
        (<= (opt-interval-hi inner) (opt-interval-hi outer))))
+
+(defun opt-interval-widen (old new &key
+                                 (negative-infinity most-negative-fixnum)
+                                 (positive-infinity most-positive-fixnum))
+  "Widen OLD toward NEW for monotone interval fixpoint convergence.
+
+When NEW extends below OLD, the lower bound becomes NEGATIVE-INFINITY.  When
+NEW extends above OLD, the upper bound becomes POSITIVE-INFINITY.  Bounds that
+do not move remain unchanged.  NIL OLD is treated as bottom and returns NEW."
+  (cond
+    ((null old) new)
+    ((null new) nil)
+    (t
+     (opt-make-interval
+      (if (< (opt-interval-lo new) (opt-interval-lo old))
+          negative-infinity
+          (opt-interval-lo old))
+      (if (> (opt-interval-hi new) (opt-interval-hi old))
+          positive-infinity
+          (opt-interval-hi old))))))
 
 (defun opt-interval-valid-index-p (index-interval length-interval)
   "Return T when INDEX-INTERVAL is proven valid for any length in LENGTH-INTERVAL.

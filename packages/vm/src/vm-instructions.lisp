@@ -143,14 +143,18 @@
   (dst nil :reader vm-dst)
   (func nil :reader vm-func-reg)
   (args nil :reader vm-args)
-  (:sexp-tag :call))
+  (live-regs nil :reader vm-call-live-regs)
+  (:sexp-tag :call)
+  (:sexp-slots dst func args))
 
 (define-vm-instruction vm-tail-call (vm-instruction)
   "Tail call: reuses current call frame instead of pushing a new one."
   (dst nil :reader vm-dst)
   (func nil :reader vm-func-reg)
   (args nil :reader vm-args)
-  (:sexp-tag :tail-call))
+  (live-regs nil :reader vm-tail-call-live-regs)
+  (:sexp-tag :tail-call)
+  (:sexp-slots dst func args))
 
 (define-vm-instruction vm-trampoline (vm-instruction)
   "Create a zero-argument thunk for an external trampoline loop to execute."
@@ -166,7 +170,15 @@
 (define-vm-instruction vm-func-ref (vm-instruction)
   (dst nil :reader vm-dst)
   (label nil :reader vm-label-name)
-  (:sexp-tag :func-ref))
+  (params nil :reader vm-closure-params)
+  (optional-params nil :reader vm-closure-optional-params)
+  (rest-param nil :reader vm-closure-rest-param)
+  (key-params nil :reader vm-closure-key-params)
+  (rest-stack-alloc-p nil :reader vm-closure-rest-stack-alloc-p)
+  (inline-policy nil :reader vm-closure-inline-policy)
+  (dispatch-tag nil :reader vm-func-ref-dispatch-tag)
+  (:sexp-tag :func-ref)
+  (:sexp-slots dst label params optional-params rest-param key-params rest-stack-alloc-p inline-policy dispatch-tag))
 
 ;;; Multiple values and apply instructions
 (define-vm-instruction vm-values (vm-instruction)
@@ -243,7 +255,9 @@
   (dst nil :reader vm-dst)
   (func nil :reader vm-func-reg)
   (args nil :reader vm-args)
-  (:sexp-tag :apply))
+  (tail-p nil :reader vm-tail-p)
+  (:sexp-tag :apply)
+  (:sexp-slots dst func args tail-p))
 
 (define-vm-instruction vm-register-function (vm-instruction)
   "Register a closure in the global function registry by name."

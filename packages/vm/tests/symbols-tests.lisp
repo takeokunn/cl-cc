@@ -73,3 +73,105 @@
     (cl-cc/vm::vm-reg-set s :R1 value)
     (str-exec (cl-cc:make-vm-keywordp :dst :R0 :src :R1) s)
     (assert-equal expected (cl-cc/vm::vm-reg-get s :R0))))
+
+;;; ─── Package-Local Nicknames (FR-275) ─────────────────────────────────────
+
+(defun str-delete-package-if-exists (designator)
+  "Delete DESIGNATOR's package when it exists."
+  (let ((package (find-package designator)))
+    (when package
+      (delete-package package))))
+
+(defun str-vm-constructor (name)
+  "Return exported VM constructor NAME from CL-CC, or skip until FR-275 exists."
+  (multiple-value-bind (symbol status)
+      (find-symbol name :cl-cc)
+    (unless (and symbol (eq status :external) (fboundp symbol))
+      (skip (format nil "FR-275 constructor ~A is not available yet" name)))
+    (symbol-function symbol)))
+
+(defvar *str-package-lock*
+  (sb-thread:make-mutex :name "cl-cc symbol test package lock"))
+
+(defun str-with-local-nickname-packages (target-name user-name thunk)
+  "Run THUNK with fresh TARGET-NAME and USER-NAME packages, then clean up."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (str-delete-package-if-exists user-name)
+    (str-delete-package-if-exists target-name)
+    (let ((target (make-package target-name :use nil))
+          (user (make-package user-name :use nil)))
+      (unwind-protect
+           (funcall thunk target user)
+        (str-delete-package-if-exists user-name)
+        (str-delete-package-if-exists target-name)))))
+
+(deftest sym-defpackage-local-nicknames-expands
+  "defpackage accepts :local-nicknames and installs the requested local nickname."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (str-delete-package-if-exists :fr275-defpackage-local-user)
+    (str-delete-package-if-exists :fr275-defpackage-local-target)
+    (unwind-protect
+         (progn
+           (assert-true
+            (macroexpand-1
+             '(defpackage #:fr275-defpackage-local-user
+                (:use #:cl)
+                (:local-nicknames (#:ln #:fr275-defpackage-local-target)))))
+           (eval '(defpackage #:fr275-defpackage-local-target (:use #:cl)))
+           (eval '(defpackage #:fr275-defpackage-local-user
+                   (:use #:cl)
+                   (:local-nicknames (#:ln #:fr275-defpackage-local-target))))
+           (let ((*package* (find-package :fr275-defpackage-local-user)))
+             (assert-eq (find-package :fr275-defpackage-local-target)
+                        (find-package :ln))))
+      (str-delete-package-if-exists :fr275-defpackage-local-user)
+      (str-delete-package-if-exists :fr275-defpackage-local-target))))
+
+(deftest sym-vm-add-package-local-nickname
+  "vm-add-package-local-nickname creates a package-local nickname mapping."
+  (str-with-local-nickname-packages
+   "FR275-VM-ADD-TARGET"
+   "FR275-VM-ADD-USER"
+   (lambda (target user)
+     (let ((s (str-vm))
+           (ctor (str-vm-constructor "MAKE-VM-ADD-PACKAGE-LOCAL-NICKNAME")))
+       (cl-cc/vm::vm-reg-set s :R1 "LN")
+       (cl-cc/vm::vm-reg-set s :R2 target)
+       (cl-cc/vm::vm-reg-set s :R3 user)
+       (str-exec (funcall ctor :dst :R0 :pkg :R3 :nick :R1 :target :R2) s)
+       (let ((*package* user))
+         (assert-eq target (find-package "LN")))))))
+
+(deftest sym-vm-remove-package-local-nickname
+  "vm-remove-package-local-nickname removes a package-local nickname mapping."
+  (str-with-local-nickname-packages
+   "FR275-VM-REMOVE-TARGET"
+   "FR275-VM-REMOVE-USER"
+   (lambda (target user)
+     (let ((s (str-vm))
+           (add-ctor (str-vm-constructor "MAKE-VM-ADD-PACKAGE-LOCAL-NICKNAME"))
+           (remove-ctor (str-vm-constructor "MAKE-VM-REMOVE-PACKAGE-LOCAL-NICKNAME")))
+       (cl-cc/vm::vm-reg-set s :R1 "LN")
+       (cl-cc/vm::vm-reg-set s :R2 target)
+       (cl-cc/vm::vm-reg-set s :R3 user)
+       (str-exec (funcall add-ctor :dst :R0 :pkg :R3 :nick :R1 :target :R2) s)
+       (str-exec (funcall remove-ctor :dst :R0 :pkg :R3 :nick :R1 :target nil) s)
+       (let ((*package* user))
+         (assert-null (find-package "LN")))))))
+
+(deftest sym-vm-find-package-uses-local-nickname
+  "vm-find-package resolves package-local nicknames relative to the VM current package."
+  (str-with-local-nickname-packages
+   "FR275-VM-RESOLVE-TARGET"
+   "FR275-VM-RESOLVE-USER"
+   (lambda (target user)
+     (let ((s (str-vm))
+           (add-ctor (str-vm-constructor "MAKE-VM-ADD-PACKAGE-LOCAL-NICKNAME")))
+       (cl-cc/vm::vm-reg-set s :R1 "LN")
+       (cl-cc/vm::vm-reg-set s :R2 target)
+       (cl-cc/vm::vm-reg-set s :R3 user)
+       (str-exec (funcall add-ctor :dst :R0 :pkg :R3 :nick :R1 :target :R2) s)
+       (setf (gethash '*package* (cl-cc/vm::vm-global-vars s)) user)
+       (let ((*package* user))
+         (str-exec (cl-cc:make-vm-find-package :dst :R0 :src :R1) s))
+       (assert-eq target (cl-cc/vm::vm-reg-get s :R0))))))

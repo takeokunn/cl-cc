@@ -69,13 +69,28 @@
                (null (ast-defun-key-params node)))
       node)))
 
+(defun %compile-time-eval-intern (args)
+  "Resolve (INTERN name package) at compile time when both arguments are literal.
+Returns only INTERN's primary value, matching ordinary single-value call context."
+  (if (= (length args) 2)
+      (destructuring-bind (name package-designator) args
+        (if (stringp name)
+            (let ((package (find-package package-designator)))
+              (if package
+                  (values (intern name package) t)
+                  (values nil nil)))
+            (values nil nil)))
+      (values nil nil)))
+
 (defun %compile-time-eval-var-call (func-name args depth)
   "Try compile-time evaluation of a call to named function FUNC-NAME."
   (cond
     ((and (= (length args) 1)
-          (string= (symbol-name func-name) "STRING-LENGTH")
-          (stringp (car args)))
+           (string= (symbol-name func-name) "STRING-LENGTH")
+           (stringp (car args)))
      (values (length (car args)) t))
+    ((string= (symbol-name func-name) "INTERN")
+     (%compile-time-eval-intern args))
     (t
      (multiple-value-bind (known-value known-ok)
          (%compile-time-eval-known-call func-name args)

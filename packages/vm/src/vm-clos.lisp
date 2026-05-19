@@ -24,6 +24,7 @@
   (default-initarg-regs nil :reader vm-default-initarg-regs)
   (class-slots nil :reader vm-class-slots)
   (metaclass-reg nil :reader vm-metaclass-reg)
+  (sealed nil :reader vm-sealed-p)
   (:sexp-tag :class-def))
 
 (define-vm-instruction vm-make-obj (vm-instruction)
@@ -57,12 +58,21 @@
 
 (define-vm-instruction vm-generic-call (vm-instruction)
   "Dispatch and call a generic function method.
-   FR-009: ic-cache slot stores (key method gen) for monomorphic inline cache."
+   FR-009: ic-cache slot stores (key method methods gen) for monomorphic inline cache."
   (dst nil :reader vm-dst)
   (gf-reg nil :reader vm-gf-reg)
   (args nil :reader vm-args)
   (ic-cache nil :accessor vm-ic-cache)
   (:sexp-tag :generic-call))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun vm-ic-cache (inst)
+    "Return the inline-cache payload stored on VM-GENERIC-CALL INST."
+    (vm-generic-call-ic-cache inst))
+
+  (defun (setf vm-ic-cache) (value inst)
+    "Set the inline-cache payload stored on VM-GENERIC-CALL INST."
+    (setf (vm-generic-call-ic-cache inst) value)))
 
 ;;; ── Slot predicate instructions ──────────────────────────────────────────
 
@@ -89,6 +99,10 @@
   (slot-name-sym nil :reader vm-slot-name-sym)
   (:sexp-tag :slot-exists-p)
   (:sexp-slots dst obj-reg slot-name-sym))
+
+(define-vm-binary-instruction vm-compute-effective-slot-definition
+  :compute-effective-slot-definition
+  "Compute an effective slot-definition metadata hash table for CLASS and SLOT-NAME.")
 
 ;;; ── MRO and inheritance helpers ──────────────────────────────────────────
 
@@ -118,11 +132,11 @@ Returns a list of slot names without duplicates, preserving order."
       (when super-ht
         (%cia-walk (gethash :__superclasses__ super-ht) registry result-cell)
         (dolist (entry (gethash :__initargs__ super-ht))
-          (unless (assoc (car entry) (car result-cell))
+          (unless (assoc (car entry) (car result-cell) :test #'eq)
             (push entry (car result-cell))))))))
 
 (defun collect-inherited-initargs (superclasses registry)
-  "Collect initarg mappings from superclasses. Later entries override earlier ones."
+  "Collect initarg mappings from all superclasses, preserving first specificity."
   (let ((result-cell (list nil)))
     (%cia-walk superclasses registry result-cell)
     (nreverse (car result-cell))))

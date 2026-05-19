@@ -199,11 +199,8 @@
                                    next-reg cond-reg one-reg func-reg)
   "Build a bulk COPY-SEQ/REPLACE-style replacement for a full array copy loop.
 
-The VM has no dedicated copy-array instruction in this tree, so this uses the
-existing function-reference/call instructions to invoke the whitelisted CL
-REPLACE bridge with explicit :END1/:END2 bounds.  The final induction, compare,
-and increment temporaries are restored to the values produced by the original
-loop on normal exit."
+The final induction, compare, and increment temporaries are restored to the
+values produced by the original loop on normal exit."
   (list (make-vm-func-ref :dst func-reg :label "REPLACE")
         (make-vm-const :dst cond-reg :value :end1)
         (make-vm-const :dst one-reg :value :end2)
@@ -309,7 +306,9 @@ loop on normal exit."
    ARRAY-LENGTH immediately precedes the zero initialization, the guard is
    `idx < length`, the body is exactly `(aset dst idx (aref src idx))`, the
    increment is by one, and the loop/exit labels are private.  Source and
-   destination must be proved distinct by the existing heap-root alias oracle."
+   destination must be proved distinct by the existing heap-root alias oracle.
+   The bound may come from ARRAY-LENGTH of either vector or from an already
+   computed length register used by the loop guard."
   (let ((end (+ pos 11)))
     (when (and (> pos 0)
                (<= end (length instructions)))
@@ -325,8 +324,7 @@ loop on normal exit."
              (step       (nth (+ pos 8) instructions))
              (back-jump  (nth (+ pos 9) instructions))
              (exit-label (nth (+ pos 10) instructions)))
-        (when (and (typep len-inst 'vm-array-length)
-                   (typep init 'vm-const)
+        (when (and (typep init 'vm-const)
                    (eql (vm-value init) 0)
                    (typep header 'vm-label)
                    (typep cmp 'vm-lt)
@@ -341,7 +339,7 @@ loop on normal exit."
                    (typep exit-label 'vm-label))
           (let* ((src-array-reg (vm-array-reg load))
                  (dst-array-reg (vm-array-reg store))
-                 (len-reg       (vm-dst len-inst))
+                  (len-reg       (vm-rhs cmp))
                  (idx-reg       (vm-dst init))
                  (cond-reg      (vm-dst cmp))
                  (one-reg       (vm-dst one))
@@ -350,8 +348,12 @@ loop on normal exit."
                  (header-name   (vm-name header))
                  (exit-name     (vm-name exit-label))
                  (target-counts (%opt-branch-target-counts instructions)))
-            (when (and (eq (vm-src len-inst) src-array-reg)
-                       (eq (vm-lhs cmp) idx-reg)
+             (when (and (or (not (typep len-inst 'vm-array-length))
+                            (and (eq (vm-dst len-inst) len-reg)
+                                 (member (vm-src len-inst)
+                                         (list src-array-reg dst-array-reg)
+                                         :test #'eq)))
+                        (eq (vm-lhs cmp) idx-reg)
                        (eq (vm-rhs cmp) len-reg)
                        (eq (vm-reg exit-jump) cond-reg)
                        (equal (vm-label-name exit-jump) exit-name)

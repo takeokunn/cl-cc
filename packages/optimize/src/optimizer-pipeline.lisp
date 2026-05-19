@@ -55,6 +55,13 @@ This hook is used as an optimization-policy gate so frontends can couple the
 pass to `(optimize (speed 3))`-style policy decisions without changing the
 optimizer's pass table wiring.")
 
+(defvar *opt-enable-sealed-gf-devirtualization* t
+  "When NIL, keep sealed generic calls as dynamic `vm-generic-call` instructions.
+
+This optimization is policy-gated because it trades compilation effort and a
+closed-world proof for direct method invocation.  `opt-configure-optimization-policy`
+enables it for SPEED >= 2.")
+
 (defun %maybe-run-pure-call-optimization (instructions)
   "Run pure-call optimization only when policy gate permits it."
   (if *opt-enable-pure-call-optimization*
@@ -163,6 +170,7 @@ optimizer's pass table wiring.")
     (:egraph                    . ,#'optimize-with-egraph)
     (:call-site-splitting       . ,#'opt-pass-call-site-splitting)
     (:devirtualize              . ,#'opt-pass-devirtualize)
+    (:if-conversion             . ,#'opt-pass-if-conversion)
     (:closure-capture-dedup     . ,#'opt-pass-closure-capture-dedup)
     (:closure-thunk-sharing     . ,#'opt-pass-closure-thunk-sharing)
       (:inline                    . ,#'opt-pass-inline-iterative)
@@ -176,6 +184,8 @@ optimizer's pass table wiring.")
       (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
       (:fill-recognition          . ,#'opt-pass-fill-recognition)
       (:copy-recognition          . ,#'opt-pass-copy-recognition)
+      (:function-outlining        . ,#'opt-pass-function-outlining)
+      (:safepoint-polling         . ,#'opt-pass-safepoint-polling)
       (:affine-loop-analysis      . ,#'%maybe-run-fr523-affine-loop-analysis)
      (:loop-interchange          . ,#'%maybe-run-fr524-loop-interchange)
      (:polyhedral-schedule       . ,#'%maybe-run-fr525-polyhedral-schedule)
@@ -206,6 +216,7 @@ optimizer's pass table wiring.")
     (:constant-hoist            . ,#'opt-pass-licm)
     (:global-dce                . ,#'opt-pass-global-dce)
     (:dead-labels               . ,#'opt-pass-dead-labels)
+    (:hot-cold-layout           . ,#'opt-pass-hot-cold-layout)
     (:dce                       . ,#'opt-pass-dce))
   "Ordered (keyword . function) pairs — single source for pipeline and registry.")
 
@@ -218,9 +229,10 @@ optimizer's pass table wiring.")
 
 (defparameter *opt-default-convergence-pass-keys*
   '(:prolog-rewrite
-    :call-site-splitting
-     :devirtualize
-      :closure-capture-dedup
+     :call-site-splitting
+      :devirtualize
+      :if-conversion
+       :closure-capture-dedup
       :closure-thunk-sharing
        :inline
         :overflow-check-elim
@@ -230,7 +242,9 @@ optimizer's pass table wiring.")
      :rotate-recognition
      :fill-recognition
      :copy-recognition
-     :affine-loop-analysis
+      :function-outlining
+      :safepoint-polling
+      :affine-loop-analysis
      :loop-interchange
      :polyhedral-schedule
      :loop-fusion-fission
@@ -257,10 +271,11 @@ optimizer's pass table wiring.")
     :block-merge
     :tail-merge
     :pre
-    :constant-hoist
-    :global-dce
-    :dead-labels
-    :dce)
+     :constant-hoist
+     :global-dce
+     :dead-labels
+     :hot-cold-layout
+     :dce)
   "Default convergence pipeline keys.
 `:egraph` remains available as an explicit pass, but the default rewrite stage is
 `:prolog-rewrite`, which already composes both the Prolog peephole backend and
@@ -433,11 +448,13 @@ catch ill-formed sequences (duplicate labels, unknown jump targets, use-before-d
   "Configure optimizer feature gates from a coarse optimization SPEED level.
 
 Current policy:
+- SPEED >= 2: enable sealed+satiated generic-function devirtualization
 - SPEED >= 3: enable pure-call optimization gate
 - SPEED <= 2: disable pure-call optimization gate
 
 Returns the resulting gate value for convenience."
   (when speed
+    (setf *opt-enable-sealed-gf-devirtualization* (>= speed 2))
     (setf *opt-enable-pure-call-optimization* (>= speed 3)))
   *opt-enable-pure-call-optimization*)
 
@@ -449,14 +466,14 @@ Returns the resulting gate value for convenience."
                                                   speed
                                                   (inline-threshold-scale 1)
                                                   trace-json-stream
-                                                  retpoline
+                                          retpoline spectre-mitigations
                                                   stack-protector
                                                   shadow-stack
                                                   asan msan tsan ubsan hwasan)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
 Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
 When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
-  (declare (ignore retpoline stack-protector shadow-stack
+  (declare (ignore retpoline spectre-mitigations stack-protector shadow-stack
                    asan msan tsan ubsan hwasan))
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))

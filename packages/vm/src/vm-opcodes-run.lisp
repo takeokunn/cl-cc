@@ -111,6 +111,10 @@
   (gethash reg (slot-value state 'registers) 0))
 
 (defmethod vm-reg-set ((state vm-state) reg value)
+  (when (%vm-profile-enabled-p state)
+    (incf (gethash (list reg (type-of value))
+                   (vm-get-profile-type-feedback state)
+                   0)))
   (setf (gethash reg (slot-value state 'registers)) value)
   value)
 

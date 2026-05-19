@@ -210,20 +210,30 @@ Uses $eqref_array_t as the canonical mutable eqref array representation."
                            (format nil "(array.new $eqref_array_t ~A ~A)" init size)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-aref) stream)
-  "Emit wasm-gc array element read via array.get." 
+  "Emit wasm-gc array element read via array.get."
   (let* ((reg-map (wasm-target-reg-map target))
          (arr (reg-local-ref reg-map (vm-array-reg inst)))
          (idx (wasm-fixnum-unbox reg-map (vm-index-reg inst))))
+    ;; BCE metadata suppresses any extra explicit bounds guard here.  Wasm GC has
+    ;; no standard unchecked array.get; the opcode retains mandatory trap
+    ;; semantics, so we emit a marker documenting that compiler-side BCE fired.
+    (when (opt-bounds-check-eliminable-marked-p inst)
+      (format stream "~%    ;; BCE: explicit bounds check eliminated; array.get remains spec-checked"))
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(array.get $eqref_array_t ~A ~A)" arr idx)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-aset) stream)
-  "Emit wasm-gc array element write via array.set." 
+  "Emit wasm-gc array element write via array.set."
   (let* ((reg-map (wasm-target-reg-map target))
          (arr (reg-local-ref reg-map (vm-array-reg inst)))
          (idx (wasm-fixnum-unbox reg-map (vm-index-reg inst)))
          (val (reg-local-ref reg-map (vm-val-reg inst))))
+    ;; BCE metadata suppresses any extra explicit bounds guard here.  Wasm GC has
+    ;; no standard unchecked array.set; the opcode retains mandatory trap
+    ;; semantics, so we emit a marker documenting that compiler-side BCE fired.
+    (when (opt-bounds-check-eliminable-marked-p inst)
+      (format stream "~%    ;; BCE: explicit bounds check eliminated; array.set remains spec-checked"))
     (format stream "~%    (array.set $eqref_array_t ~A ~A ~A)" arr idx val)))
 
 (defun %wasm-empty-symbol-eqref ()

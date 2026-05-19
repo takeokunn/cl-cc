@@ -79,31 +79,25 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/expander-defstruct.lisp`
   - 内容: デフォルトで `copy-<name>` 関数を生成。`:copier nil` で抑制
 
-- [ ] **FR-449** `defstruct :read-only` スロット
-  - 詳細: `docs/runtime-core.md` の FR-449 セクションを参照
-  - 対象: `packages/expand/src/expander-defstruct.lisp`
-  - 内容: `:read-only t` 指定時に setf アクセサを生成しない
+- [x] **FR-449** `defstruct :read-only` スロット (実装済み。テストあり: defstruct-tests.lisp:142-158)
 
-- [ ] **FR-452** `merge :key` サポート
-  - 詳細: `docs/runtime-core.md` の FR-452 セクションを参照
-  - 対象: `packages/expand/src/macros-sequence.lisp`
-  - 内容: `:key` 引数の処理。マージ比較時に key 関数適用
+- [x] **FR-452** `merge :key` サポート (実装済み: macros-sequence-fold.lisp で :key パラメータを抽出・比較時にキー関数適用)
 
 ---
 
 ## Phase 2: コンパイラインフラ (Medium)
 
-- [ ] **FR-131** Non-Closure Promotion
+- [x] **FR-131** Non-Closure Promotion
   - 詳細: `docs/tooling-compiler.md` の FR-131 セクションを参照
   - 対象: `packages/compile/src/codegen.lisp`
   - 内容: `vm-captured-vars = nil` の lambda 定義時点でクロージャオブジェクト割り当てなしの静的関数参照に昇格
 
-- [ ] **FR-129** Compile-Time `intern` 解決
+- [x] **FR-129** Compile-Time `intern` 解決
   - 詳細: `docs/tooling-compiler.md` の FR-129 セクションを参照
   - 対象: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
   - 内容: シンボル名とパッケージがリテラル定数の `(intern "CAR" :cl)` をコンパイル時に解決して `vm-const` に変換
 
-- [ ] **FR-134** Named-let サポート
+- [x] **FR-134** Named-let サポート (実装済み: lower.lisp で named LET を LABELS + 初期呼び出しへ lower)
   - 詳細: `docs/tooling-compiler.md` の FR-134 セクションを参照
   - 対象: `packages/expand/src/macros-basic.lisp`
   - 内容: named-let 構文を `labels` 内の再帰関数に展開するマクロを追加、末尾再帰ループのイディオムをサポート
@@ -226,7 +220,7 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/macros-sequence.lisp`
   - 内容: `(search sequence1 sequence2 &key test key start1 end1 start2 end2)` — 部分シーケンス検索
 
-- [ ] **FR-453** `map-into` 複数ソース
+- [x] **FR-453** `map-into` 複数ソース (実装済み: map-into が任意個数ソースを並列走査し、宛先または最短ソースで停止)
   - 詳細: `docs/runtime-core.md` の FR-453 セクションを参照
   - 対象: `packages/expand/src/macros-sequence.lisp`
   - 内容: 複数ソースシーケンスから並列にマッピング。最短ソースで停止

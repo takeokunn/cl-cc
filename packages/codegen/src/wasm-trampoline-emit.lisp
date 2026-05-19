@@ -7,6 +7,110 @@
 
 (in-package :cl-cc/codegen)
 
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; User-level dense CASE lowering helpers
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter +wasm-case-br-table-min-arms+ 4
+  "Minimum number of integer CASE arms before the trampoline considers br_table.")
+
+(defparameter +wasm-case-br-table-max-density-ratio+ 2
+  "Maximum SPAN/ARM-COUNT ratio for dense integer CASE br_table lowering.")
+
+(defun %wasm-normalize-integer-case-targets (case-targets)
+  "Return sorted unique (INTEGER . LABEL) CASE-TARGETS, or NIL if invalid.
+
+CASE-TARGETS is an emitter-pass representation of a user CASE dispatch: each
+entry maps an integer key to a VM label name. Duplicate keys are rejected so the
+WASM table preserves Common Lisp CASE's first-match semantics only after an
+upstream pass has already canonicalized clauses."
+  (when (and case-targets
+             (every (lambda (entry)
+                      (and (consp entry)
+                           (integerp (car entry))
+                           (cdr entry)))
+                    case-targets))
+    (let ((seen (make-hash-table :test #'eql))
+          (valid t)
+          (result nil))
+      (dolist (entry case-targets)
+        (if (gethash (car entry) seen)
+            (setf valid nil)
+            (progn
+              (setf (gethash (car entry) seen) t)
+              (push entry result))))
+      (when valid
+        (sort result #'< :key #'car)))))
+
+(defun wasm-dense-integer-case-targets-p (case-targets)
+  "Return T when CASE-TARGETS are dense enough to lower to WASM br_table.
+
+The density rule intentionally mirrors packages/expand's dense integer CASE
+selection: at least four integer arms, and the min-to-max span no more than two
+times the number of present arms. Sparse CASE dispatch should remain an if-chain
+or balanced integer decision tree."
+  (let ((targets (%wasm-normalize-integer-case-targets case-targets)))
+    (when (and targets (>= (length targets) +wasm-case-br-table-min-arms+))
+      (let* ((min-key (caar targets))
+             (max-key (caar (last targets)))
+             (span (1+ (- max-key min-key))))
+        (<= span (* +wasm-case-br-table-max-density-ratio+
+                    (length targets)))))))
+
+(defun %wasm-case-target-pc (label label-pc-map)
+  "Return LABEL's trampoline PC index from LABEL-PC-MAP, or NIL when unknown."
+  (and label (gethash label label-pc-map)))
+
+(defun maybe-emit-wasm-dense-case-br-table (selector-reg case-targets default-label
+                                      label-pc-map reg-map stream)
+  "Emit a user-level integer CASE dispatch as WASM br_table when dense.
+
+SELECTOR-REG is the VM register holding the boxed fixnum key. CASE-TARGETS is an
+alist of (integer-key . vm-label-name). DEFAULT-LABEL is the otherwise target.
+Each br_table arm maps to a small local block that sets the trampoline $pc to
+the corresponding VM basic block and branches back to $dispatch.
+
+Returns T when a br_table was emitted, NIL when CASE-TARGETS are sparse or any
+target label is unresolved. Callers should keep the existing if-chain/binary
+tree emission on NIL."
+  (let ((targets (%wasm-normalize-integer-case-targets case-targets)))
+    (unless (and targets (wasm-dense-integer-case-targets-p targets))
+      (return-from maybe-emit-wasm-dense-case-br-table nil))
+    (let* ((min-key (caar targets))
+           (max-key (caar (last targets)))
+           (span (1+ (- max-key min-key)))
+           (target-map (make-hash-table :test #'eql))
+           (default-pc (%wasm-case-target-pc default-label label-pc-map))
+           (pc-local (wasm-reg-map-pc-index reg-map)))
+      (unless default-pc
+        (return-from maybe-emit-wasm-dense-case-br-table nil))
+      (dolist (target targets)
+        (let ((pc (%wasm-case-target-pc (cdr target) label-pc-map)))
+          (unless pc
+            (return-from maybe-emit-wasm-dense-case-br-table nil))
+          (setf (gethash (car target) target-map) pc)))
+      (format stream "~%      ;; dense integer CASE lowered to WASM br_table [~D..~D]" min-key max-key)
+      (dotimes (i span)
+        (format stream "~%      (block $case_~D" i))
+      (format stream "~%        (block $case_default")
+      (format stream "~%          (br_table")
+      (dotimes (i span)
+        (format stream " $case_~D" i))
+      (format stream " $case_default")
+      (format stream "~%            (i32.wrap_i64 (i64.sub ~A (i64.const ~D))))"
+              (wasm-fixnum-unbox reg-map selector-reg)
+              min-key)
+      (format stream "~%        ) ;; end block $case_default")
+      (format stream "~%        (local.set ~D (i32.const ~D))" pc-local default-pc)
+      (format stream "~%        (br $dispatch)")
+      (dotimes (i span)
+        (let* ((key (+ min-key i))
+               (pc (gethash key target-map default-pc)))
+          (format stream "~%      ) ;; end block $case_~D" i)
+          (format stream "~%      (local.set ~D (i32.const ~D))" pc-local pc)
+          (format stream "~%      (br $dispatch)")))
+      t)))
+
 (defun emit-trampoline-instruction (inst label-pc-map reg-map num-blocks stream)
   "Emit WAT text for a single VM instruction to STREAM.
    Returns T if instruction was handled, NIL otherwise (emits warn comment)."

@@ -32,6 +32,24 @@
   (:sexp-tag :intern)
   (:sexp-slots dst src pkg))
 
+(define-vm-instruction vm-add-package-local-nickname (vm-instruction)
+  "Add a package-local nickname."
+  (dst nil :reader vm-dst)
+  (pkg nil :reader vm-local-nickname-pkg)
+  (nick nil :reader vm-local-nickname-nick)
+  (target nil :reader vm-local-nickname-target)
+  (:sexp-tag :add-package-local-nickname)
+  (:sexp-slots dst pkg nick target))
+
+(define-vm-instruction vm-remove-package-local-nickname (vm-instruction)
+  "Remove a package-local nickname."
+  (dst nil :reader vm-dst)
+  (pkg nil :reader vm-local-nickname-pkg)
+  (nick nil :reader vm-local-nickname-nick)
+  (target nil :reader vm-local-nickname-target)
+  (:sexp-tag :remove-package-local-nickname)
+  (:sexp-slots dst pkg nick target))
+
 (define-vm-instruction vm-find-package (vm-instruction)
   "Find a package by designator through the runtime package registry."
   (dst nil :reader vm-dst)
@@ -63,23 +81,63 @@
 (define-simple-instruction vm-symbol-name :unary symbol-name)
 (define-simple-instruction vm-make-symbol :unary make-symbol)
 
+(defun %vm-host-package-designator (designator)
+  (if (hash-table-p designator)
+      (or (gethash :host-package designator)
+          (gethash :name designator))
+      designator))
+
+(defun %vm-host-package-local-nickname-function (name)
+  (or (find-symbol name :cl)
+      (let ((pkg (find-package :sb-ext)))
+        (and pkg (find-symbol name pkg)))))
+
+(defun %vm-find-package-local-nickname (name &optional (package *package*))
+  (let ((fn (%vm-host-package-local-nickname-function "PACKAGE-LOCAL-NICKNAMES")))
+    (when (and fn package)
+      (let ((entry (assoc (string name) (funcall fn package) :test #'string=)))
+        (when entry (cdr entry))))))
+
 (defmethod execute-instruction ((inst vm-intern-symbol) state pc labels)
   (declare (ignore labels))
   (let* ((name (vm-reg-get state (vm-src inst)))
          (pkg-designator (when (vm-intern-pkg inst)
-                           (vm-reg-get state (vm-intern-pkg inst))))
+                            (vm-reg-get state (vm-intern-pkg inst))))
          (result (if pkg-designator
-                     (intern name (find-package pkg-designator))
-                     (intern name))))
+                      (intern name (or (%vm-find-package-local-nickname pkg-designator)
+                                       (find-package pkg-designator)))
+                      (intern name))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-add-package-local-nickname) state pc labels)
+  (declare (ignore labels))
+  (let* ((pkg-designator (vm-reg-get state (vm-local-nickname-pkg inst)))
+         (nickname (vm-reg-get state (vm-local-nickname-nick inst)))
+         (target (vm-reg-get state (vm-local-nickname-target inst)))
+         (fn (%vm-host-package-local-nickname-function "ADD-PACKAGE-LOCAL-NICKNAME"))
+         (result (funcall fn nickname
+                          (%vm-host-package-designator target)
+                          (%vm-host-package-designator pkg-designator))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-remove-package-local-nickname) state pc labels)
+  (declare (ignore labels))
+  (let* ((pkg-designator (vm-reg-get state (vm-local-nickname-pkg inst)))
+         (nickname (vm-reg-get state (vm-local-nickname-nick inst)))
+         (fn (%vm-host-package-local-nickname-function "REMOVE-PACKAGE-LOCAL-NICKNAME"))
+         (result (funcall fn nickname (%vm-host-package-designator pkg-designator))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-find-package) state pc labels)
   (declare (ignore labels))
   (let* ((name (vm-reg-get state (vm-src inst)))
-         (result (or (and cl-cc/bootstrap:*runtime-find-package-fn*
-                          (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
-                     (find-package name))))
+         (result (or (%vm-find-package-local-nickname name)
+                     (and cl-cc/bootstrap:*runtime-find-package-fn*
+                           (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
+                      (find-package name))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -93,9 +151,11 @@
                           (and cl-cc/bootstrap:*runtime-find-package-fn*
                                pkg-designator
                                (funcall cl-cc/bootstrap:*runtime-find-package-fn* pkg-designator))))
-         (host-pkg-designator (if (hash-table-p pkg-designator)
-                                  (gethash :name pkg-designator)
-                                  pkg-designator)))
+          (host-pkg-designator (if (hash-table-p pkg-designator)
+                                   (gethash :name pkg-designator)
+                                   (or (and pkg-designator
+                                            (%vm-find-package-local-nickname pkg-designator))
+                                       pkg-designator))))
     (multiple-value-bind (sym status)
         (if (hash-table-p runtime-pkg)
             (let* ((table (gethash :symbols runtime-pkg))

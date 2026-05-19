@@ -110,6 +110,8 @@
   (def-binop-like vm-rem)
   ;; FR-640: nreconc
   (def-binop-like vm-nreconc)
+  ;; CLOS MOP
+  (def-binop-like vm-compute-effective-slot-definition)
   )
 
 ;; Unary ops: dst+src pattern

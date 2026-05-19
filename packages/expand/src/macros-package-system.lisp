@@ -3,6 +3,23 @@
 
 ;;; Package-system macros over the current runtime-registry-backed package layer
 
+(defun %host-package-designator (designator)
+  (if (hash-table-p designator)
+      (or (gethash :host-package designator)
+          (gethash :name designator))
+      designator))
+
+(defun %host-package-local-nickname-function (name)
+  (or (find-symbol name :cl)
+      (let ((pkg (find-package :sb-ext)))
+        (and pkg (find-symbol name pkg)))))
+
+(defun add-package-local-nickname (package local-nickname actual-package)
+  (let ((fn (%host-package-local-nickname-function "ADD-PACKAGE-LOCAL-NICKNAME")))
+    (funcall fn local-nickname
+             (%host-package-designator actual-package)
+             (%host-package-designator package))))
+
 (register-macro 'in-package
   (lambda (form env)
     (declare (ignore env))
@@ -14,22 +31,27 @@
 (register-macro 'defpackage
   (lambda (form env)
     (declare (ignore env))
-     (let* ((name (second form))
-            (options (cddr form))
-            (use-list nil)
-            (export-list nil))
-      ;; Parse :use and :export options
-       (dolist (opt options)
-         (when (consp opt)
-           (case (first opt)
-              (:use (setf use-list (rest opt)))
-              (:export (setf export-list (rest opt))))))
-        `(progn
-           (let ((pkg (or (rt-find-package ',name)
-                           (rt-make-package ',name ,@(when use-list `(:use ',use-list))))))
-             ,@(when export-list
-                 `((dolist (sym ',export-list)
-                     (rt-export (rt-intern (string sym) pkg) pkg))))
+      (let* ((name (second form))
+             (options (cddr form))
+             (use-list nil)
+             (export-list nil)
+             (local-nicknames nil))
+      ;; Parse package options
+        (dolist (opt options)
+          (when (consp opt)
+            (case (first opt)
+               (:use (setf use-list (rest opt)))
+               (:export (setf export-list (rest opt)))
+               (:local-nicknames (setf local-nicknames (rest opt))))))
+         `(progn
+            (let ((pkg (or (rt-find-package ',name)
+                            (rt-make-package ',name ,@(when use-list `(:use ',use-list))))))
+              ,@(when local-nicknames
+                  `((dolist (entry ',local-nicknames)
+                      (add-package-local-nickname pkg (first entry) (second entry)))))
+              ,@(when export-list
+                  `((dolist (sym ',export-list)
+                      (rt-export (rt-intern (string sym) pkg) pkg))))
              (quote ,name))))))
 
 (defun %expand-package-iteration (binding-spec symbol-list-form-fn body)

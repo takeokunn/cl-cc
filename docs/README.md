@@ -2,14 +2,14 @@
 
 ## ANSI CL Compliance
 
-- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ✅ 698 / — 22 (MOP/SBCL-ext)
+- [ansi-cl-lang.md](ansi-cl-lang.md) — Language Core: eval, lambda, types, CLOS, conditions, symbols, packages, numbers (720 FR) — ✅ 720 / — 0
 - [ansi-cl-stdlib.md](ansi-cl-stdlib.md) — Standard Library: cons, arrays, strings, sequences, hash, I/O, printer, reader (352 FR) — ✅ COMPLETE (352 / 🔶 0 / ❌ 0)
 
 ## Type System
 
 - [type-core.md](type-core.md) — Core: inference, subtyping (Ch.1-3) — ✅ COMPLETE (12 / 12 direct FR; Ch.2,4-14 are bridge refs)
 - [type-advanced.md](type-advanced.md) — Advanced: safety types, type-level programming, proofs, concurrency types (Ch.15-34) — ✅ COMPLETE (109 / 109 FR marked ✅)
-  - 検証根拠: `type-core.md` は直接 FR 見出し 12/12 が ✅。`type-advanced.md` は FR 見出し 109/109 が ✅ で、`packages/type/tests/type-2026-nodes-tests.lisp` が docs FR リスト・semantic contract registry・implementation evidence registry の一致を検証します。
+  - 検証根拠: `packages/type/tests/type-2026-nodes-tests.lisp`, `type-2026-advanced-registry-tests.lisp`, `type-2026-advanced-semantic-tests.lisp` が全 PASS。`ADVANCED-FEATURE-REGISTRY-COVERS-DOC-FR-LIST` および `ADVANCED-FEATURE-IMPLEMENTATION-EVIDENCE-COVERS-ALL-FR-IDS` が FR 網羅性を検証。stdlib warm 成功、`nix run .#test --timeout 300` で 7441+ pass。
 
 ## Optimization
 

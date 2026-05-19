@@ -251,25 +251,25 @@
          (pred-b (make-ssa-test-block 2))
          (join   (make-ssa-test-block 3))
          (phi-b  (cl-cc/optimize:make-ssa-phi
-                  :dst :b.0
-                  :args (list (cons pred-a :x.0)
-                              (cons pred-b :x.0))
-                  :reg :b))
+                   :dst :b.0
+                   :args (list (cons pred-a :x.0)
+                               (cons pred-b :x.0))
+                   :reg :b))
          (phi-a  (cl-cc/optimize:make-ssa-phi
-                  :dst :a.0
-                  :args (list (cons pred-b :b.0)
-                              (cons pred-a :x.0))
-                  :reg :a))
+                   :dst :a.0
+                   :args (list (cons pred-b :b.0)
+                               (cons pred-a :x.0))
+                   :reg :a))
          (phi-same (cl-cc/optimize:make-ssa-phi
-                    :dst :same.0
-                    :args (list (cons pred-a :v.0)
-                                (cons pred-b :v.0))
-                    :reg :same))
+                     :dst :same.0
+                     :args (list (cons pred-a :v.0)
+                                 (cons pred-b :v.0))
+                     :reg :same))
          (phi-dead (cl-cc/optimize:make-ssa-phi
-                    :dst :dead.0
-                    :args (list (cons pred-a :d1.0)
-                                (cons pred-b :d2.0))
-                    :reg :dead))
+                     :dst :dead.0
+                     :args (list (cons pred-a :d1.0)
+                                 (cons pred-b :d2.0))
+                     :reg :dead))
          (phi-map (make-hash-table :test #'eq))
          (renamed (make-hash-table :test #'eq))
          (inst (make-vm-add :dst :r9 :lhs :a.0 :rhs :same.0)))
@@ -287,6 +287,138 @@
         (assert-= 0 total-phis)
         (assert-eq :x.0 (cl-cc/vm::vm-lhs rewritten))
         (assert-eq :v.0 (cl-cc/vm::vm-rhs rewritten))))))
+
+;;; ─── Targeted Trivial Phi Elimination Tests ─────────────────────────────
+
+(deftest ssa-phi-elim-all-same-arg-multi-pred
+  "A phi with three identical arguments from three predecessors is replaced."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (pred-c (make-ssa-test-block 3))
+         (join   (make-ssa-test-block 4))
+         (phi    (cl-cc/optimize:make-ssa-phi
+                  :dst (cl-cc/optimize:ssa-versioned-reg :r1 0)
+                  :args (list (cons pred-a :r0)
+                              (cons pred-b :r0)
+                              (cons pred-c :r0))
+                  :reg :r1))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq))
+         (inst    (make-vm-add :dst :r2 :lhs (cl-cc:phi-dst phi) :rhs :r5)))
+    (setf (gethash join phi-map) (list phi)
+          (gethash join renamed) (list inst))
+    (multiple-value-bind (new-phi-map new-renamed-map)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (let ((total-phis 0))
+        (maphash (lambda (_b phis) (incf total-phis (length phis))) new-phi-map)
+        (assert-= 0 total-phis)
+        (let ((rewritten (first (gethash join new-renamed-map))))
+          (assert-eq :r0 (cl-cc/vm::vm-lhs rewritten))
+          (assert-eq :r5 (cl-cc/vm::vm-rhs rewritten)))))))
+
+(deftest ssa-phi-elim-phi-of-phi-chain-deep
+  "Three-level phi chain A→B→C: after shortcutting, C's args bypass intermediate phi dsts."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi-a  (cl-cc/optimize:make-ssa-phi
+                  :dst :a.0
+                  :args (list (cons pred-a :x.0) (cons pred-b :y.0))
+                  :reg :a))
+         (phi-b  (cl-cc/optimize:make-ssa-phi
+                  :dst :b.0
+                  :args (list (cons pred-a :a.0) (cons pred-b :z.0))
+                  :reg :b))
+         (phi-c  (cl-cc/optimize:make-ssa-phi
+                  :dst :c.0
+                  :args (list (cons pred-b :b.0) (cons pred-a :w.0))
+                  :reg :c))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq)))
+    (setf (gethash pred-a phi-map) (list phi-a)
+          (gethash pred-b phi-map) (list phi-b)
+          (gethash join phi-map) (list phi-c)
+          (gethash pred-a renamed) (list (make-vm-add :dst :r1 :lhs :a.0 :rhs :c.0))
+          (gethash pred-b renamed) (list (make-vm-add :dst :r2 :lhs :b.0 :rhs :c.0))
+          (gethash join renamed) (list (make-vm-add :dst :r3 :lhs :c.0 :rhs :c.0)))
+    (multiple-value-bind (new-phi-map _new-renamed)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (declare (ignore _new-renamed))
+      (let ((new-phi-c (find-if (lambda (p) (eq (cl-cc:phi-dst p) :c.0))
+                                (gethash join new-phi-map)))
+            (new-phi-b (find-if (lambda (p) (eq (cl-cc:phi-dst p) :b.0))
+                                (gethash pred-b new-phi-map))))
+        (assert-true new-phi-b)
+        (assert-eq :x.0 (cdr (assoc pred-a (cl-cc:phi-args new-phi-b) :test #'eq)))
+        (assert-true new-phi-c)
+        (assert-eq :z.0 (cdr (assoc pred-b (cl-cc:phi-args new-phi-c) :test #'eq)))
+        (assert-eq :w.0 (cdr (assoc pred-a (cl-cc:phi-args new-phi-c) :test #'eq)))
+        ;; phi-b arg pred-b is unchanged
+        (assert-eq :z.0 (cdr (assoc pred-b (cl-cc:phi-args new-phi-b) :test #'eq)))))))
+
+(deftest ssa-phi-elim-unused-phi
+  "A phi whose destination is never read is removed entirely."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi    (cl-cc/optimize:make-ssa-phi
+                  :dst :unused.0
+                  :args (list (cons pred-a :x.0) (cons pred-b :y.0))
+                  :reg :unused))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq))
+         (inst    (make-vm-ret :reg :r0)))
+    (setf (gethash join phi-map) (list phi)
+          (gethash join renamed) (list inst))
+    (multiple-value-bind (new-phi-map _new-renamed)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (declare (ignore _new-renamed))
+      (let ((total-phis 0))
+        (maphash (lambda (_b phis) (incf total-phis (length phis))) new-phi-map)
+        (assert-= 0 total-phis)
+        ;; Verify the renamed instruction is untouched
+        (let ((original (first (gethash join renamed))))
+          (assert-eq :r0 (cl-cc/vm::vm-reg original)))))))
+
+(deftest ssa-phi-elim-idempotent
+  "Running ssa-eliminate-trivial-phis twice produces identical maps."
+  (let* ((pred-a (make-ssa-test-block 1))
+         (pred-b (make-ssa-test-block 2))
+         (join   (make-ssa-test-block 3))
+         (phi-a  (cl-cc/optimize:make-ssa-phi
+                  :dst :a.0
+                  :args (list (cons pred-a :x.0) (cons pred-b :y.0))
+                  :reg :a))
+         (phi-b  (cl-cc/optimize:make-ssa-phi
+                  :dst :b.0
+                  :args (list (cons pred-a :x.0) (cons pred-b :x.0))
+                  :reg :b))
+         (phi-map (make-hash-table :test #'eq))
+         (renamed (make-hash-table :test #'eq)))
+    (setf (gethash join phi-map) (list phi-a phi-b)
+          (gethash join renamed) (list (make-vm-add :dst :r2 :lhs :a.0 :rhs :x.0)))
+    (multiple-value-bind (first-phi first-renamed)
+        (cl-cc/optimize:ssa-eliminate-trivial-phis phi-map renamed)
+      (multiple-value-bind (second-phi second-renamed)
+          (cl-cc/optimize:ssa-eliminate-trivial-phis first-phi first-renamed)
+        ;; Same phi count
+        (let ((count-1 0) (count-2 0))
+          (maphash (lambda (_b phis) (incf count-1 (length phis))) first-phi)
+          (maphash (lambda (_b phis) (incf count-2 (length phis))) second-phi)
+          (assert-= count-1 count-2))
+        ;; Same instruction content (first pass should have eliminated phi-b (same-arg :x.0))
+        (let ((inst-1 (first (gethash join first-renamed)))
+              (inst-2 (first (gethash join second-renamed))))
+          (assert-eq (cl-cc/vm::vm-lhs inst-1) (cl-cc/vm::vm-lhs inst-2))
+          (assert-eq (cl-cc/vm::vm-rhs inst-1) (cl-cc/vm::vm-rhs inst-2)))
+        ;; Verify phi-b was eliminated and phi-a remains
+        (let ((phi-b-1 (find-if (lambda (p) (eq (cl-cc:phi-dst p) :b.0))
+                                (gethash join first-phi)))
+              (phi-b-2 (find-if (lambda (p) (eq (cl-cc:phi-dst p) :b.0))
+                                (gethash join second-phi))))
+          ;; phi-b is all-same-arg :x.0 → eliminated in both passes
+          (assert-false phi-b-1)
+          (assert-false phi-b-2))))))
 
 ;;; ─── Parallel Copy Sequentialization ─────────────────────────────────────
 

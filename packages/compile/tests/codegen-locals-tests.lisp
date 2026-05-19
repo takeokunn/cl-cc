@@ -73,6 +73,58 @@
       (declare (ignore tail-values))
       (assert-true (keywordp reg)))))
 
+;;; ─── labels tail-SCC contification ─────────────────────────────────────────
+
+(defun %mutual-tail-labels-fixture (body-form)
+  (make-ast-labels
+   :bindings
+   (list (list 'evenp-local '(n)
+               (make-ast-if
+                :cond (make-ast-binop :op '= :lhs (make-ast-var :name 'n) :rhs (make-ast-int :value 0))
+                :then (make-ast-int :value 1)
+                :else (make-ast-call
+                       :func 'oddp-local
+                       :args (list (make-ast-binop :op '-
+                                                   :lhs (make-ast-var :name 'n)
+                                                   :rhs (make-ast-int :value 1))))))
+         (list 'oddp-local '(n)
+               (make-ast-if
+                :cond (make-ast-binop :op '= :lhs (make-ast-var :name 'n) :rhs (make-ast-int :value 0))
+                :then (make-ast-int :value 0)
+                :else (make-ast-call
+                       :func 'evenp-local
+                       :args (list (make-ast-binop :op '-
+                                                   :lhs (make-ast-var :name 'n)
+                                                   :rhs (make-ast-int :value 1)))))))
+   :body (list body-form)))
+
+(deftest codegen-labels-mutual-tail-scc-emits-jumps-not-closures
+  "Tail-only non-escaping mutual labels are contified into local vm-jump targets."
+  (let ((ctx (make-codegen-ctx)))
+    (setf (cl-cc/compile:ctx-tail-position ctx) t)
+    (compile-ast
+     (%mutual-tail-labels-fixture
+      (make-ast-call :func 'evenp-local :args (list (make-ast-int :value 4))))
+     ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-closure))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-tail-call))
+    (assert-true
+     (some (lambda (inst)
+             (and (typep inst 'cl-cc/vm::vm-jump)
+                  (search "labels_tail_fn" (cl-cc/vm::vm-label-name inst))))
+           (codegen-instructions ctx)))))
+
+(deftest codegen-labels-non-tail-mutual-call-keeps-boxed-closures
+  "A non-tail call to a labels SCC falls back to boxed closures."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast
+     (%mutual-tail-labels-fixture
+      (make-ast-binop :op '+
+                      :lhs (make-ast-call :func 'evenp-local :args (list (make-ast-int :value 4)))
+                      :rhs (make-ast-int :value 1)))
+     ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-closure))))
+
 ;;; ─── emit-assembly ───────────────────────────────────────────────────────────
 
 (deftest emit-assembly-vm-target-returns-empty-string

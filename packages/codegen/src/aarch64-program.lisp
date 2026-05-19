@@ -170,7 +170,6 @@ Result plist keys:
   "Emit AArch64 machine code for the entire VM program.
    Uses two-pass approach for label resolution."
   (let* ((instructions (vm-program-instructions program))
-         (cfg (cfg-build instructions))
           (has-indirect-calls-p
             (some (lambda (inst)
                     (typep inst '(or vm-call vm-tail-call vm-generic-call)))
@@ -200,12 +199,13 @@ Result plist keys:
                               (* 8 probe-count)
                               (* 4 (1+ (length save-pairs)))
                               spill-frame-adjust-size))
-           (ordered-instructions (if (cfg-entry cfg)
-                                      (progn
-                                        (cfg-compute-dominators cfg)
-                                       (cfg-compute-loop-depths cfg)
+          (cfg (cfg-build instructions))
+          (ordered-instructions (if (cfg-entry cfg)
+                                    (progn
+                                      (cfg-compute-dominators cfg)
+                                      (cfg-compute-loop-depths cfg)
                                       (cfg-flatten-hot-cold cfg))
-                                     instructions))
+                                    instructions))
           (label-offsets (build-a64-label-offsets ordered-instructions prologue-size)))
       ;; CFI entry marker (FR-315): must be at function entry.
       (emit-aarch64-cfi-entry stream cfi-plan)

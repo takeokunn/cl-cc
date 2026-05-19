@@ -61,14 +61,22 @@
                                   (ast-lambda-optional-params node)
                                   (ast-lambda-rest-param node)
                                   (ast-lambda-key-params node))
-       (emit ctx (make-vm-closure
-                  :dst closure-reg :label func-label :params param-regs
-                  :optional-params opt-closure-data :rest-param rest-reg
-                  :key-params key-closure-data
-                  :rest-stack-alloc-p rest-stack-alloc-p
-                  :inline-policy inline-policy
-                  :dispatch-tag '(:anonymous . nil)
-                  :captured captured-vars))
+       (if captured-vars
+           (emit ctx (make-vm-closure
+                      :dst closure-reg :label func-label :params param-regs
+                      :optional-params opt-closure-data :rest-param rest-reg
+                      :key-params key-closure-data
+                      :rest-stack-alloc-p rest-stack-alloc-p
+                      :inline-policy inline-policy
+                      :dispatch-tag '(:anonymous . nil)
+                      :captured captured-vars))
+           (emit ctx (make-vm-func-ref
+                      :dst closure-reg :label func-label :params param-regs
+                      :optional-params opt-closure-data :rest-param rest-reg
+                      :key-params key-closure-data
+                      :rest-stack-alloc-p rest-stack-alloc-p
+                      :inline-policy inline-policy
+                      :dispatch-tag '(:anonymous . nil))))
       (%call-with-declaration-policies
        ctx
        (ast-lambda-declarations node)
@@ -123,14 +131,22 @@
                                   (ast-defun-optional-params node)
                                   (ast-defun-rest-param node)
                                   (ast-defun-key-params node))
-       (emit ctx (make-vm-closure
-                  :dst closure-reg :label func-label :params param-regs
-                  :optional-params opt-closure-data :rest-param rest-reg
-                  :key-params key-closure-data
-                  :rest-stack-alloc-p rest-stack-alloc-p
-                  :inline-policy inline-policy
-                  :dispatch-tag (cons :known-function name)
-                  :captured captured-vars))
+       (if captured-vars
+           (emit ctx (make-vm-closure
+                      :dst closure-reg :label func-label :params param-regs
+                      :optional-params opt-closure-data :rest-param rest-reg
+                      :key-params key-closure-data
+                      :rest-stack-alloc-p rest-stack-alloc-p
+                      :inline-policy inline-policy
+                      :dispatch-tag (cons :known-function name)
+                      :captured captured-vars))
+           (emit ctx (make-vm-func-ref
+                      :dst closure-reg :label func-label :params param-regs
+                      :optional-params opt-closure-data :rest-param rest-reg
+                      :key-params key-closure-data
+                      :rest-stack-alloc-p rest-stack-alloc-p
+                      :inline-policy inline-policy
+                      :dispatch-tag (cons :known-function name))))
       (setf (ctx-env ctx) (cons (cons name closure-reg) (ctx-env ctx)))
       (emit ctx (make-vm-register-function :name name :src closure-reg))
       (let ((*compiling-typed-fn* (or name t)))

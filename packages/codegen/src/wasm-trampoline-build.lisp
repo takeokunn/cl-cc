@@ -16,6 +16,100 @@
 ;;; Step 4: Build the trampoline body for a function
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defstruct wasm-case-dispatch-env
+  (const-values (make-hash-table :test #'eq))
+  (closure-labels (make-hash-table :test #'eq))
+  (list-labels (make-hash-table :test #'eq))
+  (vector-labels (make-hash-table :test #'eq))
+  (index-info (make-hash-table :test #'eq)))
+
+(defun %wasm-note-case-value (table dst value)
+  (when dst
+    (setf (gethash dst table) value)))
+
+(defun %wasm-build-case-dispatch-env (instructions)
+  "Collect the dense CASE table shape emitted by the user-level CASE expander."
+  (let ((env (make-wasm-case-dispatch-env)))
+    (dolist (inst instructions env)
+      (cond
+        ((typep inst 'vm-const)
+         (%wasm-note-case-value (wasm-case-dispatch-env-const-values env)
+                                (vm-dst inst)
+                                (vm-value inst)))
+        ((typep inst 'vm-closure)
+         (%wasm-note-case-value (wasm-case-dispatch-env-closure-labels env)
+                                (vm-dst inst)
+                                (vm-label-name inst)))
+        ((typep inst 'vm-cons)
+         (let* ((car-label (gethash (vm-car-reg inst)
+                                    (wasm-case-dispatch-env-closure-labels env)))
+                (cdr-labels (gethash (vm-cdr-reg inst)
+                                     (wasm-case-dispatch-env-list-labels env))))
+           (multiple-value-bind (cdr-value cdr-const-p)
+               (gethash (vm-cdr-reg inst)
+                        (wasm-case-dispatch-env-const-values env))
+             (when (and car-label (or (and cdr-const-p (null cdr-value)) cdr-labels))
+               (%wasm-note-case-value (wasm-case-dispatch-env-list-labels env)
+                                      (vm-dst inst)
+                                      (cons car-label cdr-labels))))))
+        ((typep inst 'cl-cc/vm::vm-coerce-to-vector)
+         (let ((labels (gethash (vm-src inst)
+                                (wasm-case-dispatch-env-list-labels env))))
+           (when labels
+             (%wasm-note-case-value (wasm-case-dispatch-env-vector-labels env)
+                                    (vm-dst inst)
+                                    labels))))
+        ((typep inst 'vm-sub)
+         (let ((min-key (gethash (vm-rhs inst)
+                                 (wasm-case-dispatch-env-const-values env))))
+           (when (integerp min-key)
+             (%wasm-note-case-value (wasm-case-dispatch-env-index-info env)
+                                    (vm-dst inst)
+                                    (cons (vm-lhs inst) min-key)))))
+        ((typep inst 'vm-move)
+         (dolist (accessor (list #'wasm-case-dispatch-env-vector-labels
+                                 #'wasm-case-dispatch-env-index-info))
+           (let ((value (gethash (vm-src inst) (funcall accessor env))))
+             (when value
+               (%wasm-note-case-value (funcall accessor env)
+                                      (vm-dst inst)
+                                      value)))))))))
+
+(defun %wasm-next-label-after (instructions start-index)
+  (loop for inst in (nthcdr start-index instructions)
+        when (typep inst 'vm-label)
+          return (vm-name inst)))
+
+(defun %maybe-emit-wasm-case-dispatch-pattern
+    (instructions index case-env label-pc-map reg-map stream fallback-default-label)
+  "Emit br_table for the CASE expander's SVREF/MOVE/CALL dispatch pattern.
+
+Returns the number of VM instructions consumed, or 0 when the pattern does not
+match or the br_table helper declines the dispatch."
+  (let ((svref (nth index instructions))
+        (move (nth (1+ index) instructions))
+        (call (nth (+ index 2) instructions)))
+    (when (and (typep svref 'cl-cc/vm::vm-svref)
+               (typep move 'vm-move)
+               (typep call 'vm-call)
+               (null (vm-args call))
+               (eq (vm-src move) (vm-dst svref))
+               (eq (vm-func-reg call) (vm-dst move)))
+      (let* ((targets (gethash (vm-lhs svref)
+                               (wasm-case-dispatch-env-vector-labels case-env)))
+             (index-info (gethash (vm-rhs svref)
+                                  (wasm-case-dispatch-env-index-info case-env)))
+             (default-label (or (%wasm-next-label-after instructions (+ index 3))
+                                fallback-default-label)))
+        (when (and targets index-info default-label)
+          (let ((case-targets (loop for label in targets
+                                    for key from (cdr index-info)
+                                    collect (cons key label))))
+            (when (maybe-emit-wasm-dense-case-br-table
+                   (car index-info) case-targets default-label
+                   label-pc-map reg-map stream)
+              3)))))))
+
 (defun build-trampoline-body (basic-blocks label-pc-map reg-map param-regs stream)
   "Emit the WAT trampoline body (nested blocks + loop) to STREAM.
    BASIC-BLOCKS is the list of wasm-basic-block. REG-MAP is the register map.
@@ -63,13 +157,30 @@
     ;;   ) ;; end block $blk_i
     ;;   <instructions for block i>
     ;;   (br $dispatch)   ;; unless last block
-    (dotimes (i num-blocks)
+    (let ((case-env (let ((all-instructions nil))
+                      (dolist (bb basic-blocks
+                               (%wasm-build-case-dispatch-env (nreverse all-instructions)))
+                        (dolist (inst (wasm-bb-instructions bb))
+                          (push inst all-instructions))))))
+      (dotimes (i num-blocks)
       (format stream "~%          ) ;; end block $blk_~D" i)
       (let ((bb (nth i basic-blocks)))
-        (dolist (inst (wasm-bb-instructions bb))
-          (emit-trampoline-instruction inst label-pc-map reg-map num-blocks stream)))
+        (loop with instructions = (wasm-bb-instructions bb)
+              with fallback-default-label = (and (< (1+ i) num-blocks)
+                                                 (wasm-bb-label (nth (1+ i) basic-blocks)))
+              for rest on instructions
+              for index from 0
+              for consumed = 0 then (if (plusp consumed) (1- consumed) 0)
+              when (zerop consumed)
+                do (let ((skip (%maybe-emit-wasm-case-dispatch-pattern
+                                instructions index case-env label-pc-map reg-map stream
+                                fallback-default-label)))
+                      (if (plusp skip)
+                          (setf consumed skip)
+                          (emit-trampoline-instruction (car rest) label-pc-map reg-map
+                                                       num-blocks stream)))))
       (unless (= i (1- num-blocks))
-        (format stream "~%          (br $dispatch)")))
+        (format stream "~%          (br $dispatch)"))))
 
     ;; Close loop and outer block
     (format stream "~%        ) ;; end loop $dispatch")

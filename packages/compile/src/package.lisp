@@ -94,7 +94,7 @@
    #:ctx-tail-position
    #:*builtin-special-variables* #:*repl-global-variables*
    #:*repl-label-counter* #:*repl-capture-label-counter*
-   #:*labels-boxed-fns* #:*compiling-typed-fn*
+  #:*labels-boxed-fns* #:*local-tail-jump-fns* #:*compiling-typed-fn*
    #:make-register #:make-label #:emit #:lookup-var
    #:*cps-compile-unsupported-ast-types*
    #:*cps-native-compile-unsupported-ast-types*

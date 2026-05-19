@@ -162,8 +162,9 @@ unrolling when the body is small."
   "Return T when INST is safe and profitable enough to sink.
 
 The pass keeps allocation sinking for vm-cons, adds constants/copies, admits
-constant-operand arithmetic, and otherwise allows pure instructions whose
-operands are known loop-invariant by this local analysis."
+constant-operand arithmetic, admits alias-checked read-only loads, and otherwise
+allows pure instructions whose operands are known loop-invariant by this local
+analysis."
   (let ((reads (opt-inst-read-regs inst)))
     (cond
       ((typep inst 'vm-const) t)
@@ -174,11 +175,39 @@ operands are known loop-invariant by this local analysis."
       ((typep inst '(or vm-add vm-sub vm-mul))
        (every (lambda (reg) (gethash reg constant-regs)) reads))
       ((opt-inst-pure-p inst)
-       (every (lambda (reg)
-                (or (gethash reg constant-regs)
-                    (gethash reg sunk-regs)))
-              reads))
+        (every (lambda (reg)
+                 (or (gethash reg constant-regs)
+                     (gethash reg sunk-regs)))
+               reads))
+      ((and (eq (vm-inst-effect-kind inst) :read-only)
+            (opt-memory-read-inst-p inst))
+       t)
       (t nil))))
+
+(defun %opt-code-sinking-linear-index (linear-insts target)
+  "Return TARGET's EQ position in LINEAR-INSTS, or NIL."
+  (position target linear-insts :test #'eq))
+
+(defun %opt-code-sinking-alias-safe-p (inst uses linear-insts alias-roots type-facts)
+  "Return T when sinking INST to USES does not cross an aliased write."
+  (if (not (opt-memory-read-inst-p inst))
+      t
+      (let ((def-pos (%opt-code-sinking-linear-index linear-insts inst)))
+        (and def-pos
+             (every (lambda (use)
+                      (let* ((use-inst (third use))
+                             (use-pos (%opt-code-sinking-linear-index linear-insts use-inst)))
+                        (and use-pos
+                             (let ((lo (min def-pos use-pos))
+                                   (hi (max def-pos use-pos)))
+                               (notany (lambda (candidate)
+                                         (and (not (eq candidate inst))
+                                              (opt-memory-write-inst-p candidate)
+                                              (opt-memory-accesses-may-alias-p inst candidate
+                                                                               alias-roots
+                                                                               type-facts)))
+                                       (subseq linear-insts (1+ lo) hi))))))
+                    uses)))))
 
 (defun %opt-first-inst-after-label-index (vec label-index)
   "Return first index after LABEL-INDEX that is not a vm-label, or NIL."
@@ -274,19 +303,23 @@ operands are known loop-invariant by this local analysis."
         t))))
 
 (defun opt-pass-code-sinking (instructions)
-  "Sink selected pure values closer to their CFG uses.
+  "Sink selected pure/read-only values closer to their CFG uses.
 
 The pass builds a CFG, computes dominance, finds all uses of each candidate
 definition, and moves it to the nearest common dominator of those uses.  Cheap
 constants may be duplicated into both arms of a conditional when both arms use
-the value.  Side-effecting instructions are never moved."
+the value.  Read-only loads are not moved across aliased writes. Side-effecting
+instructions are never moved."
   (let ((cfg (cfg-build instructions)))
     (cfg-compute-dominators cfg)
     (cfg-compute-loop-depths cfg)
     (let* ((blocks (coerce (cfg-blocks cfg) 'list))
-           (constant-regs (%opt-code-sinking-constant-regs blocks))
-           (sunk-regs (make-hash-table :test #'eq))
-           (changed nil))
+            (constant-regs (%opt-code-sinking-constant-regs blocks))
+            (linear-insts (cfg-flatten cfg))
+            (alias-roots (opt-compute-heap-aliases linear-insts))
+            (type-facts (opt-compute-heap-type-facts linear-insts alias-roots))
+            (sunk-regs (make-hash-table :test #'eq))
+            (changed nil))
       (dolist (block blocks)
         (let ((insts (bb-instructions block)))
           (loop for index downfrom (1- (length insts)) to 0
@@ -296,9 +329,11 @@ the value.  Side-effecting instructions are never moved."
                               (= (%opt-code-sinking-definition-count cfg dst) 1)
                               (%opt-code-sinking-candidate-p inst constant-regs sunk-regs))
                      (let ((uses (%opt-code-sinking-locations cfg dst)))
-                       (when uses
-                         (when (or (%opt-sink-duplicate-into-conditional-successors
-                                    block index inst dst uses)
+                        (when (and uses
+                                   (%opt-code-sinking-alias-safe-p inst uses linear-insts
+                                                                  alias-roots type-facts))
+                          (when (or (%opt-sink-duplicate-into-conditional-successors
+                                     block index inst dst uses)
                                    (and (= (length uses) 1)
                                         (%opt-sink-inst-before-uses block index inst dst uses)))
                            (setf (gethash dst sunk-regs) t

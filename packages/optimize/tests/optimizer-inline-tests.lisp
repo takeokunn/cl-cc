@@ -216,8 +216,57 @@
                             (typep inst 'cl-cc/vm::vm-func-ref))
                           once))
     (assert-= 1 (count-if (lambda (inst)
-                            (typep inst 'cl-cc/vm::vm-func-ref))
-                          twice))))
+                             (typep inst 'cl-cc/vm::vm-func-ref))
+                           twice))))
+
+(deftest opt-pass-devirtualize-sealed-satiated-single-method-gf
+  "Sealed+satiated generic calls with one exact primary method become direct calls."
+  (let* ((insts (list
+                 (cl-cc:make-vm-class-def :dst :r0 :class-name 'sealed-node
+                                           :superclasses nil :slot-names nil
+                                           :slot-initargs nil :sealed t)
+                 (cl-cc:make-vm-class-def :dst :r1 :class-name 'sealed-area
+                                           :superclasses nil :slot-names nil
+                                           :slot-initargs nil :sealed nil)
+                 (cl-cc:make-vm-set-global :name 'sealed-area :src :r1)
+                 (cl-cc:make-vm-get-global :dst :r2 :name 'sealed-area)
+                 (cl-cc:make-vm-closure :dst :r3 :label "METHOD_SEALED_AREA_NODE"
+                                        :params '(:r10) :captured nil)
+                 (cl-cc:make-vm-register-method :gf-reg :r2 :specializer 'sealed-node
+                                                :qualifier nil :method-reg :r3)
+                 (cl-cc:make-vm-const :dst :r4 :value :__satiated__)
+                 (cl-cc:make-vm-const :dst :r5 :value t)
+                 (cl-cc:make-vm-sethash :key :r4 :value :r5 :table :r2)
+                 (cl-cc:make-vm-make-obj :dst :r6 :class-reg :r0 :initarg-regs nil)
+                 (cl-cc:make-vm-generic-call :dst :r7 :gf-reg :r2 :args '(:r6))))
+         (out (cl-cc/optimize:opt-pass-devirtualize insts)))
+    (assert-false (find-if (lambda (inst)
+                             (typep inst 'cl-cc/vm::vm-generic-call))
+                           out))
+    (assert-true (find-if (lambda (inst)
+                            (and (typep inst 'cl-cc/vm::vm-func-ref)
+                                 (equal "METHOD_SEALED_AREA_NODE"
+                                        (cl-cc:vm-label-name inst))))
+                          out))
+    (assert-true (find-if #'cl-cc:vm-call-p out))))
+
+(deftest opt-pass-devirtualize-keeps-unsatiated-sealed-gf-dynamic
+  "Sealed generic calls are not direct-called until the GF is explicitly satiated."
+  (let* ((insts (list
+                 (cl-cc:make-vm-class-def :dst :r0 :class-name 'unsat-node
+                                           :superclasses nil :slot-names nil
+                                           :slot-initargs nil :sealed t)
+                 (cl-cc:make-vm-get-global :dst :r2 :name 'unsat-gf)
+                 (cl-cc:make-vm-closure :dst :r3 :label "METHOD_UNSAT"
+                                        :params '(:r10) :captured nil)
+                 (cl-cc:make-vm-register-method :gf-reg :r2 :specializer 'unsat-node
+                                                :qualifier nil :method-reg :r3)
+                 (cl-cc:make-vm-make-obj :dst :r6 :class-reg :r0 :initarg-regs nil)
+                 (cl-cc:make-vm-generic-call :dst :r7 :gf-reg :r2 :args '(:r6))))
+         (out (cl-cc/optimize:opt-pass-devirtualize insts)))
+    (assert-true (find-if (lambda (inst)
+                            (typep inst 'cl-cc/vm::vm-generic-call))
+                          out))))
 
 (deftest opt-pass-call-site-splitting-duplicates-known-predecessor-call
   "opt-pass-call-site-splitting clones a join call into a predecessor with a known callee."

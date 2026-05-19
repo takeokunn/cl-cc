@@ -19,6 +19,7 @@ side-table metadata and returns INST unchanged. Downstream codegen can query thi
 metadata without requiring cross-package instruction-shape changes."
   (setf (gethash inst *opt-bounds-check-eliminable-metadata*)
         (list :bounds-check-eliminable t
+              :bce-eliminable t
               :array-reg array-reg
               :index-reg index-reg
               :length-reg length-reg
@@ -31,7 +32,9 @@ metadata without requiring cross-package instruction-shape changes."
 
 (defun opt-bounds-check-eliminable-marked-p (inst)
   "Return T when INST has been annotated by the BCE pass."
-  (getf (opt-bounds-check-eliminable-metadata inst) :bounds-check-eliminable))
+  (let ((metadata (opt-bounds-check-eliminable-metadata inst)))
+    (or (getf metadata :bounds-check-eliminable)
+        (getf metadata :bce-eliminable))))
 
 (defstruct (mem-pass-state (:conc-name mps-))
   "Mutable state shared by the DSE and store-to-load-forward passes."

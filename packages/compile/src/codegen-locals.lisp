@@ -118,7 +118,13 @@ Falls through to an oob error when no index matches."
 
 ;;; ── flet ─────────────────────────────────────────────────────────────────
 
-(defun %compile-flet-binding (binding old-env ctx)
+(defun %canonical-shared-captures (captured shared-captures)
+  "Return the shared capture alist matching CAPTURED, or CAPTURED itself."
+  (or (find (closure-capture-key captured) shared-captures
+            :key #'closure-capture-key :test #'equal)
+      captured))
+
+(defun %compile-flet-binding (binding old-env ctx &optional shared-captures)
   "Compile one flet binding and return (name . closure-reg)."
   (let* ((name        (first binding))
          (params      (second binding))
@@ -132,6 +138,7 @@ Falls through to an oob error when no index matches."
                               collect (cons var (lookup-var ctx var))))
          (param-regs  (loop repeat (length params) collect (make-register ctx)))
          (skip-label  (make-label ctx "flet_skip")))
+    (setf captured (%canonical-shared-captures captured shared-captures))
     (if captured
         (emit ctx (make-vm-closure  :dst closure-reg :label func-label
                                     :params param-regs :captured captured))
@@ -142,21 +149,221 @@ Falls through to an oob error when no index matches."
     (emit ctx (make-vm-label :name  skip-label))
     (cons name closure-reg)))
 
+(defun %shared-sibling-capture-lists (bindings env ctx)
+  "Return capture alists for BINDINGS that have sibling-shared capture sets."
+  (let ((captures
+          (loop for binding in bindings
+                for params = (second binding)
+                for body-forms = (cddr binding)
+                for free-vars = (remove-if (lambda (v) (member v params :test #'eq))
+                                           (free-vars-of-list body-forms))
+                collect (loop for var in free-vars
+                              when (assoc var env :test #'eq)
+                                collect (cons var (lookup-var ctx var))))))
+    (let ((groups (group-shared-sibling-captures captures)))
+      (loop for captures in captures
+            when (gethash (closure-capture-key captures) groups)
+              collect captures))))
+
 (defmethod compile-ast ((node ast-flet) ctx)
   "Compile flet: non-recursive local function bindings."
   (let* ((tail     (ctx-tail-position ctx))
          (bindings (ast-flet-bindings node))
          (body     (ast-flet-body node))
-         (old-env  (ctx-env ctx)))
+         (old-env  (ctx-env ctx))
+         (shared-captures (%shared-sibling-capture-lists bindings old-env ctx)))
     (unwind-protect
          (progn
            (setf (ctx-env ctx)
-                 (append (mapcar (lambda (b) (%compile-flet-binding b old-env ctx)) bindings)
+                  (append (mapcar (lambda (b)
+                                    (%compile-flet-binding b old-env ctx shared-captures))
+                                  bindings)
                          old-env))
            (%compile-body-with-tail body tail ctx))
       (setf (ctx-env ctx) old-env))))
 
 ;;; ── labels ───────────────────────────────────────────────────────────────
+
+(defun %binding-names (bindings)
+  (mapcar #'first bindings))
+
+(defun %binding-body (bindings name)
+  (cddr (assoc name bindings :test #'eq)))
+
+(defun %record-local-call (func names tail calls)
+  (when (and (symbolp func) (member func names :test #'eq))
+    (push (cons func tail) (gethash func calls))))
+
+(defun %collect-local-calls-in-forms (forms names tail calls)
+  (loop for rest on forms
+        do (%collect-local-calls-in-node (car rest) names (and tail (null (cdr rest))) calls)))
+
+(defun %collect-local-calls-in-node (node names tail calls)
+  "Record direct calls to NAMES with whether they occur in effective tail position."
+  (typecase node
+    (ast-call
+     (%record-local-call (ast-call-func node) names tail calls)
+     (when (typep (ast-call-func node) 'ast-node)
+       (%collect-local-calls-in-node (ast-call-func node) names nil calls))
+     (dolist (arg (ast-call-args node))
+       (%collect-local-calls-in-node arg names nil calls)))
+    (ast-if
+     (%collect-local-calls-in-node (ast-if-cond node) names nil calls)
+     (%collect-local-calls-in-node (ast-if-then node) names tail calls)
+     (%collect-local-calls-in-node (ast-if-else node) names tail calls))
+    (ast-progn
+     (%collect-local-calls-in-forms (ast-progn-forms node) names tail calls))
+    (ast-let
+     (dolist (binding (ast-let-bindings node))
+       (%collect-local-calls-in-node (cdr binding) names nil calls))
+     (%collect-local-calls-in-forms (ast-let-body node) names tail calls))
+    (ast-local-fns
+     ;; Nested local function bodies are separate closure boundaries; the outer
+     ;; binding reference would be a capture/escape, handled by escape analysis.
+     (%collect-local-calls-in-forms (ast-local-fns-body node) names tail calls))
+    (t
+     (dolist (child (ast-children node))
+       (%collect-local-calls-in-node child names nil calls)))))
+
+(defun %local-call-tail-table (bindings body body-tail)
+  "Return a hash table NAME -> ((CALLEE . TAIL-P) ...)."
+  (let ((names (%binding-names bindings))
+        (calls (make-hash-table :test #'eq)))
+    (dolist (binding bindings)
+      (setf (gethash (first binding) calls) nil)
+      (%collect-local-calls-in-forms (cddr binding) names t calls))
+    (%collect-local-calls-in-forms body names body-tail calls)
+    calls))
+
+(defun %local-call-graph (bindings calls)
+  (loop for name in (%binding-names bindings)
+        collect (cons name (remove-duplicates (mapcar #'car (gethash name calls)) :test #'eq))))
+
+(defun %reachable-local-names (graph start)
+  (labels ((visit (name seen)
+             (if (member name seen :test #'eq)
+                 seen
+                 (reduce (lambda (acc next) (visit next acc))
+                         (cdr (assoc name graph :test #'eq))
+                         :initial-value (cons name seen)))))
+    (visit start nil)))
+
+(defun %local-call-sccs (graph)
+  "Compute SCCs for a small local call graph by mutual reachability."
+  (let ((remaining (mapcar #'car graph))
+        (sccs nil))
+    (loop while remaining
+          for seed = (car remaining)
+          for seed-reaches = (%reachable-local-names graph seed)
+          for component = (remove-if-not
+                           (lambda (name)
+                             (member seed (%reachable-local-names graph name) :test #'eq))
+                           seed-reaches)
+          do (push component sccs)
+             (setf remaining (set-difference remaining component :test #'eq)))
+    (nreverse sccs)))
+
+(defun %all-calls-to-component-tail-p (component calls)
+  (loop for edges being each hash-value of calls
+        always (every (lambda (edge)
+                        (or (not (member (car edge) component :test #'eq))
+                            (cdr edge)))
+                      edges)))
+
+(defun %local-function-ref-p (node name)
+  "Return T when NODE contains #'NAME, which lets a local binding escape."
+  (typecase node
+    (ast-function (eq (ast-function-name node) name))
+    (t (some (lambda (child) (%local-function-ref-p child name))
+             (ast-children node)))))
+
+(defun %local-function-ref-in-forms-p (forms name)
+  (some (lambda (form) (%local-function-ref-p form name)) forms))
+
+(defun %binding-escapes-from-local-scope-p (bindings body name)
+  (or (%local-function-ref-in-forms-p body name)
+      (binding-escapes-in-body-p body name)
+      (some (lambda (binding)
+              (or (%local-function-ref-in-forms-p (cddr binding) name)
+                  (binding-escapes-in-body-p (cddr binding) name)))
+            bindings)))
+
+(defun %tail-only-local-scc-names (bindings body body-tail)
+  "Return local binding names whose SCC can be compiled as labels + jumps only."
+  (let* ((calls (%local-call-tail-table bindings body body-tail))
+         (graph (%local-call-graph bindings calls))
+         (sccs  (%local-call-sccs graph)))
+    (loop for scc in sccs
+          when (and (%all-calls-to-component-tail-p scc calls)
+                    (every (lambda (name)
+                             (not (%binding-escapes-from-local-scope-p bindings body name)))
+                           scc))
+            append scc)))
+
+(defun %labels-jump-info (binding ctx)
+  (list (first binding)
+        (make-label ctx "labels_tail_fn")
+        (loop repeat (length (second binding)) collect (make-register ctx))))
+
+(defun %compile-labels-tail-function (info bindings env ctx)
+  "Emit one non-escaping local function body as a direct jump target."
+  (destructuring-bind (name func-label param-regs) info
+    (let ((binding (%binding-body bindings name))
+          (params (second (assoc name bindings :test #'eq)))
+          (old-env (ctx-env ctx)))
+      (unwind-protect
+           (progn
+             (emit ctx (make-vm-label :name func-label))
+             (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
+             (let ((last-reg (%compile-body-with-tail binding t ctx)))
+               (setf (ctx-tail-position ctx) nil)
+               (emit ctx (make-vm-ret :reg last-reg))))
+        (setf (ctx-env ctx) old-env)))))
+
+(defun %labels-tail-jump-entries (infos bindings)
+  (mapcar (lambda (info)
+            (destructuring-bind (name label param-regs) info
+              (cons name (list label (second (assoc name bindings :test #'eq)) param-regs))))
+          infos))
+
+(defun %compile-labels-tail-functions (infos bindings env ctx)
+  (when infos
+    (let ((skip-label (make-label ctx "labels_tail_skip")))
+      (emit ctx (make-vm-jump :label skip-label))
+      (dolist (info infos)
+        (%compile-labels-tail-function info bindings env ctx))
+      (emit ctx (make-vm-label :name skip-label)))))
+
+(defun %compile-labels-with-tail-sccs (bindings body optimized-names body-tail old-env ctx)
+  "Compile optimized tail-only SCCs as jumps and other LABELS bindings boxed."
+  (let* ((optimized-bindings (remove-if-not (lambda (b) (member (first b) optimized-names :test #'eq)) bindings))
+         (boxed-bindings     (remove-if     (lambda (b) (member (first b) optimized-names :test #'eq)) bindings))
+         (tail-infos         (mapcar (lambda (b) (%labels-jump-info b ctx)) optimized-bindings))
+         (tail-entries       (%labels-tail-jump-entries tail-infos bindings))
+         (old-tail-jumps     *local-tail-jump-fns*))
+    (unwind-protect
+         (progn
+           (setf *local-tail-jump-fns* (append tail-entries old-tail-jumps))
+           (if boxed-bindings
+               (multiple-value-bind (func-infos forward-env)
+                   (%labels-create-boxes boxed-bindings ctx)
+                 (setf *labels-boxed-fns* (append forward-env *labels-boxed-fns*))
+                  (setf (ctx-env ctx) (append forward-env old-env))
+                  (let ((shared-captures (%shared-sibling-capture-lists boxed-bindings (ctx-env ctx) ctx)))
+                    (dolist (info func-infos)
+                      (%labels-fill-closure info bindings ctx forward-env old-env shared-captures)))
+                 (%compile-labels-tail-functions tail-infos bindings (append forward-env old-env) ctx)
+                 (setf (ctx-env ctx)
+                       (append (mapcar (lambda (b)
+                                         (let ((n (first b)))
+                                           (cons n (lookup-var ctx n))))
+                                       boxed-bindings)
+                               old-env)))
+               (progn
+                 (%compile-labels-tail-functions tail-infos bindings old-env ctx)
+                 (setf (ctx-env ctx) old-env)))
+           (%compile-body-with-tail body body-tail ctx))
+      (setf *local-tail-jump-fns* old-tail-jumps))))
 
 (defun %labels-create-boxes (bindings ctx)
   "Phase 1 of labels compilation: allocate a cons-cell box per binding.
@@ -178,7 +385,7 @@ Returns (func-infos forward-env) where each info is (name label closure-reg box-
       (values func-infos
               (mapcar (lambda (info) (cons (first info) (fourth info))) func-infos)))))
 
-(defun %labels-fill-closure (info bindings ctx forward-env old-env)
+(defun %labels-fill-closure (info bindings ctx forward-env old-env &optional shared-captures)
   "Phase 2: emit closure creation + body code for one INFO entry."
   (let* ((name        (first info))
          (func-label  (second info))
@@ -194,6 +401,7 @@ Returns (func-infos forward-env) where each info is (name label closure-reg box-
                               collect (cons var (lookup-var ctx var))))
          (param-regs  (loop repeat (length params) collect (make-register ctx)))
          (skip-label  (make-label ctx "labels_skip")))
+    (setf captured (%canonical-shared-captures captured shared-captures))
     (emit ctx (make-vm-closure :dst closure-reg :label func-label
                                :params param-regs :captured captured))
     (emit ctx (make-vm-rplaca :cons box-reg :val closure-reg))
@@ -208,21 +416,25 @@ Returns (func-infos forward-env) where each info is (name label closure-reg box-
          (bindings         (ast-labels-bindings node))
          (body             (ast-labels-body node))
          (old-env          (ctx-env ctx))
-         (old-labels-boxes *labels-boxed-fns*))
+         (old-labels-boxes *labels-boxed-fns*)
+         (optimized-names  (%tail-only-local-scc-names bindings body tail)))
     (unwind-protect
-         (multiple-value-bind (func-infos forward-env)
-             (%labels-create-boxes bindings ctx)
-           (setf *labels-boxed-fns* (append forward-env old-labels-boxes))
-           (setf (ctx-env ctx)      (append forward-env old-env))
-           (dolist (info func-infos)
-             (%labels-fill-closure info bindings ctx forward-env old-env))
-           (setf (ctx-env ctx)
-                 (append (mapcar (lambda (b)
-                                   (let ((n (first b)))
-                                     (cons n (lookup-var ctx n))))
-                                 bindings)
-                         old-env))
-           (%compile-body-with-tail body tail ctx))
+         (if optimized-names
+             (%compile-labels-with-tail-sccs bindings body optimized-names tail old-env ctx)
+             (multiple-value-bind (func-infos forward-env)
+                 (%labels-create-boxes bindings ctx)
+               (setf *labels-boxed-fns* (append forward-env old-labels-boxes))
+                (setf (ctx-env ctx)      (append forward-env old-env))
+                (let ((shared-captures (%shared-sibling-capture-lists bindings (ctx-env ctx) ctx)))
+                  (dolist (info func-infos)
+                    (%labels-fill-closure info bindings ctx forward-env old-env shared-captures)))
+               (setf (ctx-env ctx)
+                     (append (mapcar (lambda (b)
+                                       (let ((n (first b)))
+                                         (cons n (lookup-var ctx n))))
+                                     bindings)
+                             old-env))
+               (%compile-body-with-tail body tail ctx)))
       (setf (ctx-env ctx)      old-env)
       (setf *labels-boxed-fns* old-labels-boxes))))
 

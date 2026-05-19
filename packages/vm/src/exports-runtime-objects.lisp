@@ -28,11 +28,12 @@
    collect-inherited-slots
    collect-inherited-initargs
    compute-class-precedence-list
-   vm-class-registry
-   %resolve-combination-operator
-   *method-combination-operators*
-   vm-classify-arg
-   %eql-specializer-p
+    vm-class-registry
+    %resolve-combination-operator
+    *method-combination-operators*
+    vm-classify-arg
+    vm-sealed-p
+    %eql-specializer-p
    %eql-specializer-matches-p
    %vm-extract-eql-specializer-keys
    %vm-gf-eql-methods
@@ -64,9 +65,10 @@
     hash-table-values
     %class-slot-initargs-for-slot
     %class-slot-metadata
-    %class-slot-definitions
-    slot-definition-name
-    slot-definition-initform
+     %class-slot-definitions
+     slot-definition-name
+     slot-definition-location
+     slot-definition-initform
     slot-definition-initfunction
     slot-definition-initargs
     slot-definition-type
@@ -117,9 +119,11 @@
    vm-profile-enabled-p
     vm-profile-call-stack
     vm-profile-samples
-    vm-get-profile-samples
-    vm-get-profile-bb-counts
-    vm-get-profile-branch-counts
+  vm-get-profile-samples
+  vm-get-profile-bb-counts
+  vm-get-profile-branch-counts
+  vm-get-profile-call-counts
+  vm-get-profile-type-feedback
     *instruction-constructors*
    vm-falsep
    vm-program-leaf-p

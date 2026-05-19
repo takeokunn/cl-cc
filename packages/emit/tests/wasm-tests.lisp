@@ -225,6 +225,19 @@
     (assert-output-contains get "array.get $eqref_array_t")
     (assert-output-contains set "array.set $eqref_array_t")))
 
+(deftest wasm-gc-array-bce-metadata-emits-elision-marker
+  "BCE metadata is consumed by Wasm array emitters while preserving spec traps."
+  (let ((get-inst (cl-cc:make-vm-aref :dst :r0 :array-reg :r1 :index-reg :r2))
+        (set-inst (cl-cc:make-vm-aset :array-reg :r0 :index-reg :r1 :val-reg :r2)))
+    (cl-cc/optimize:opt-mark-bounds-check-eliminable get-inst)
+    (cl-cc/optimize:opt-mark-bounds-check-eliminable set-inst)
+    (let ((get (%direct-wasm-emit get-inst))
+          (set (%direct-wasm-emit set-inst)))
+      (assert-output-contains get "BCE: explicit bounds check eliminated")
+      (assert-output-contains get "array.get $eqref_array_t")
+      (assert-output-contains set "BCE: explicit bounds check eliminated")
+      (assert-output-contains set "array.set $eqref_array_t"))))
+
 (deftest wasm-gc-slot-read-write-emitters
   "CLOS slot ops lower through struct.get(instance slots) + array get/set." 
   (let ((rd (%direct-wasm-emit

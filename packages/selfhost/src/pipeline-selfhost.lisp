@@ -44,7 +44,7 @@ finding: hangs in compile-toplevel-forms when *macro-eval-fn* is our-eval).")
     (%warm-stdlib-trace "%build-stdlib-vm-snapshot: returning snapshot-state")
     snapshot-state))
 
-(defun warm-stdlib-cache ()
+(defun warm-stdlib-cache (&rest args &key &allow-other-keys)
   (%warm-stdlib-trace "warm-stdlib-cache: enter")
   (%warm-stdlib-trace "warm-stdlib-cache: get-stdlib-forms returned ~A forms"
                       (length (get-stdlib-forms)))

@@ -37,11 +37,16 @@
    #:*macro-environment*
    #:*macro-eval-fn*
    #:*symbol-macro-table*
-   #:*compiler-macro-table*
-   #:*macroexpand-step-cache*
-   #:*macroexpand-all-cache*
+    #:*compiler-macro-table*
+    #:*deftransform-table*
+    #:*macroexpand-step-cache*
+    #:*macroexpand-all-cache*
+    #:register-deftransform
+    #:lookup-deftransform
+    #:deftransform
+    #:define-deftransform
 
-   ;; --- macro-lambda-list.lisp --- lambda-list helpers ----------------
+    ;; --- macro-lambda-list.lisp --- lambda-list helpers ----------------
    #:parse-lambda-list
    #:destructure-lambda-list
    #:generate-lambda-bindings

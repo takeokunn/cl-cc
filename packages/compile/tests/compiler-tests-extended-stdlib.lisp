@@ -285,7 +285,7 @@
                       (defun later-safe (x) (the integer x)))
                     :target :vm))
            (insts (cl-cc/compile:compilation-result-vm-instructions result)))
-      (assert-true (find-if #'cl-cc:vm-closure-p insts))
+      (assert-true (find-if (lambda (inst) (typep inst '(or cl-cc/vm::vm-closure cl-cc/vm::vm-func-ref))) insts))
       (assert-null (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-typep)) insts)))))
 
 (deftest compile-declaim-safety-zero-suppresses-top-level-the-type-assertion
@@ -299,7 +299,7 @@
       (assert-null (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-typep)) insts)))))
 
 (deftest-each compile-declaim-optimize-inline-policy-applies-globally-across-compilations
-  "Global optimize qualities annotate later defun closures through the existing inline policy path."
+  "Global optimize qualities annotate later defun callable refs through the existing inline policy path."
   :cases (("speed-three" '(declaim (optimize (speed 3))) :inline)
           ("debug-three" '(declaim (optimize (debug 3))) :notinline)
           ("space-two" '(declaim (optimize (space 2))) :notinline))
@@ -310,8 +310,8 @@
                     '((defun mapped-inline-policy (x) (+ x 1)))
                     :target :vm
                     :pass-pipeline '(:inline)))
-           (closure (find-if #'cl-cc:vm-closure-p
-                             (cl-cc/compile:compilation-result-vm-instructions result))))
+            (closure (find-if (lambda (inst) (typep inst '(or cl-cc/vm::vm-closure cl-cc/vm::vm-func-ref)))
+                              (cl-cc/compile:compilation-result-vm-instructions result))))
       (assert-true closure)
       (assert-eq expected-policy (cl-cc/vm:vm-closure-inline-policy closure)))))
 
@@ -323,8 +323,8 @@
                     (list `(defun big (x) ,(%fr-361-large-body-form)))
                     :target :vm
                     :pass-pipeline '(:inline)))
-           (closure (find-if #'cl-cc:vm-closure-p
-                             (cl-cc/compile:compilation-result-vm-instructions result))))
+            (closure (find-if (lambda (inst) (typep inst '(or cl-cc/vm::vm-closure cl-cc/vm::vm-func-ref)))
+                              (cl-cc/compile:compilation-result-vm-instructions result))))
       (assert-true closure)
       (assert-eq :inline (cl-cc/vm:vm-closure-inline-policy closure)))))
 
@@ -338,8 +338,8 @@
                     '((defun inc (x) (+ x 1)))
                     :target :vm
                     :pass-pipeline '(:inline)))
-           (closure (find-if #'cl-cc:vm-closure-p
-                             (cl-cc/compile:compilation-result-vm-instructions result))))
+            (closure (find-if (lambda (inst) (typep inst '(or cl-cc/vm::vm-closure cl-cc/vm::vm-func-ref)))
+                              (cl-cc/compile:compilation-result-vm-instructions result))))
       (assert-true closure)
       (assert-eq :notinline (cl-cc/vm:vm-closure-inline-policy closure)))))
 

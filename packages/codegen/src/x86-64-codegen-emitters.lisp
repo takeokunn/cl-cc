@@ -40,6 +40,21 @@ On mismatch, trap with UD2."
 ;; *x86-64-emitter-entries*, *x86-64-emitter-table*, and
 ;; emit-vm-instruction-with-labels are in x86-64-codegen-dispatch.lisp (loaded next).
 
+(defun codegen-hot-cold-ordered-instructions (instructions)
+  "Return INSTRUCTIONS in the CFG hot/cold order used for native emission.
+
+FR-036: codegen must emit the flat instruction stream produced by the optimizer's
+CFG layout logic, not the original basic-block order.  CFG-FLATTEN-HOT-COLD also
+patches broken implicit fall-through edges, so both label-offset computation and
+the second emission pass must consume this exact list."
+  (let ((cfg (cfg-build instructions)))
+    (if (cfg-entry cfg)
+        (progn
+          (cfg-compute-dominators cfg)
+          (cfg-compute-loop-depths cfg)
+          (cfg-flatten-hot-cold cfg))
+        instructions)))
+
 (defun emit-vm-program (program stream)
   "Emit machine code for entire VM program.
     Uses two-pass approach: first pass builds label offset table,
@@ -47,7 +62,6 @@ On mismatch, trap with UD2."
   ;; FR-370: Stack Map Generation — per-safepoint stack frame layout recorded for precise GC root scanning
   ;; FR-371: GC Safepoints — signal-based vs polling safepoint mechanism for Stop-The-World coordination
   (let* ((instructions (vm-program-instructions program))
-         (cfg (cfg-build instructions))
          (has-indirect-calls-p
            (some (lambda (inst)
                    (typep inst '(or vm-call vm-tail-call vm-generic-call)))
@@ -102,12 +116,7 @@ On mismatch, trap with UD2."
                               frame-pointer-establish-size
                               canary-prologue-size
                               spill-frame-adjust-size))
-             (ordered-instructions (if (cfg-entry cfg)
-                                       (progn
-                                        (cfg-compute-dominators cfg)
-                                       (cfg-compute-loop-depths cfg)
-                                      (cfg-flatten-hot-cold cfg))
-                                    instructions))
+             (ordered-instructions (codegen-hot-cold-ordered-instructions instructions))
            ;; First pass: build label offset table
            (label-offsets
              (let ((*x86-64-use-retpoline* (or *x86-64-use-retpoline* use-retpoline-p))
@@ -163,8 +172,9 @@ On mismatch, trap with UD2."
 
 ;;; Public API
 
-(defun compile-to-x86-64-bytes (program &key retpoline stack-protector shadow-stack
-                                          asan msan tsan ubsan hwasan)
+(defun compile-to-x86-64-bytes (program &key retpoline spectre-mitigations
+                                           stack-protector shadow-stack
+                                           asan msan tsan ubsan hwasan)
   "Compile VM program to x86-64 machine code bytes.
 
    Returns: (simple-array (unsigned-byte 8) (*))"
@@ -188,6 +198,8 @@ On mismatch, trap with UD2."
             (if (or stack-protector sanitizer-enabled *x86-64-stack-protector-enabled*)
                 nil
                 *x86-64-omit-frame-pointer*))
-          (*x86-64-use-retpoline* (or retpoline *x86-64-use-retpoline*)))
+          (*x86-64-use-retpoline* (or retpoline spectre-mitigations *x86-64-use-retpoline*))
+          (*x86-64-spectre-mitigations-enabled*
+            (or spectre-mitigations *x86-64-spectre-mitigations-enabled*)))
       (with-output-to-vector (stream)
         (emit-vm-program allocated-program stream))))))

@@ -58,23 +58,32 @@
 
 ;;; ─── Checked arithmetic emitters (FR-303) ─────────────────────────────────
 
-(deftest x86-emit-add-checked-emits-14-bytes
-  "emit-vm-add-checked emits exactly 14 bytes: MOV(3)+ADD(3)+JO(6)+UD2(2)."
+(deftest x86-emit-add-checked-emits-jno-and-ud2
+  "emit-vm-add-checked emits MOV+ADD+JNO+UD2 sequence (FR-149/303 overflow trap)."
   (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-checked inst)))
-    (assert-= 14 (length bytes))))
+    (assert-= 14 (length bytes))
+    (assert-equal '(#x0F #x81) (subseq bytes 6 8))
+    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 8 12))  ;; JNO rel32 offset = 2 (little-endian)
+    (assert-equal '(#x0F #x0B) (subseq bytes 12 14)))) ;; UD2 at bytes 12-13
 
-(deftest x86-emit-sub-checked-emits-14-bytes
-  "emit-vm-sub-checked emits exactly 14 bytes: MOV(3)+SUB(3)+JO(6)+UD2(2)."
+(deftest x86-emit-sub-checked-emits-jno-and-ud2
+  "emit-vm-sub-checked emits MOV+SUB+JNO+UD2 sequence (FR-149/303 overflow trap)."
   (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-checked inst)))
-    (assert-= 14 (length bytes))))
+    (assert-= 14 (length bytes))
+    (assert-equal '(#x0F #x81) (subseq bytes 6 8))
+    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 8 12))
+    (assert-equal '(#x0F #x0B) (subseq bytes 12 14))))
 
-(deftest x86-emit-mul-checked-emits-15-bytes
-  "emit-vm-mul-checked emits exactly 15 bytes: MOV(3)+IMUL(4)+JO(6)+UD2(2)."
+(deftest x86-emit-mul-checked-emits-jno-and-ud2
+  "emit-vm-mul-checked emits MOV+IMUL+JNO+UD2 sequence (FR-149/303 overflow trap)."
   (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-checked inst)))
-    (assert-= 15 (length bytes))))
+    (assert-= 15 (length bytes))
+    (assert-equal '(#x0F #x81) (subseq bytes 7 9))
+    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 9 13))  ;; JNO rel32 offset = 2 (little-endian)
+    (assert-equal '(#x0F #x0B) (subseq bytes 13 15))))
 
 (deftest x86-emit-mul-high-emits-19-bytes
   "vm-integer-mul-high-{u,s} emit the documented 19-byte save/MUL-high/restore sequence."

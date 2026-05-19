@@ -40,7 +40,14 @@
 (defun %opt-inline-def-label (def)
   "Return DEF's label when it has a closure entry."
   (let ((closure (getf def :closure)))
-    (and (vm-closure-p closure) (vm-label-name closure))))
+    (and (typep closure '(or vm-closure vm-func-ref))
+         (vm-label-name closure))))
+
+(defun %opt-inline-captured-vars (inst)
+  "Return captured vars for callable reference INST. vm-func-ref never captures."
+  (if (vm-closure-p inst)
+      (vm-captured-vars inst)
+      nil))
 
 (defun %opt-inline-size-adjustment (inst-count body-cost)
   "Return a conservative inline threshold adjustment for function size."
@@ -190,9 +197,9 @@ NOTINLINE always blocks inlining; INLINE only bypasses the cost threshold and
 does not weaken any structural safety checks."
   (let ((ci   (getf def :closure))
          (body (getf def :body)))
-    (and (vm-closure-p ci)
+    (and (typep ci '(or vm-closure vm-func-ref))
          (not (eq (vm-closure-inline-policy ci) :notinline))
-         (null (vm-captured-vars ci))
+         (null (%opt-inline-captured-vars ci))
          (null (vm-closure-optional-params ci))
          (null (vm-closure-rest-param ci))
          (null (vm-closure-key-params ci))

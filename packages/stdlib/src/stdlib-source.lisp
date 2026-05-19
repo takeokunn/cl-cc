@@ -42,7 +42,12 @@
     "(defun set-fdefinition (fn name) (setf (symbol-function name) fn) fn)"
 
     ;; FR-552: (setf find-class) — register class in host find-class
-    "(defun %set-find-class (name class) (setf (find-class name) class) class)"
+    "(defun %set-find-class (name class)
+       (let ((existing (find-class name)))
+         (when (and (hash-table-p existing) (gethash :__sealed__ existing))
+           (error \"Cannot redefine sealed class ~S\" name)))
+       (setf (find-class name) class)
+       class)"
 
     ;; ── FR-523〜528: MOP introspection ──────────────────────────────────────
     ;; Class hash tables store :__superclasses__, :__slots__, :__name__, etc.
@@ -52,6 +57,10 @@
     (dolist (entry imap (nreverse result))
       (when (eq (cdr entry) slot-name)
         (push (car entry) result)))))"
+
+    "(defun %class-slot-location (class slot-name)
+  (cdr (assoc slot-name
+              (and (hash-table-p class) (gethash :__slot-locations__ class)))))"
 
     "(defun %class-slot-metadata (class slot-name)
   (let ((slot (make-hash-table))
@@ -65,7 +74,10 @@
     (setf (gethash :initargs slot) (%class-slot-initargs-for-slot class slot-name))
     (setf (gethash :type slot) (or (cdr (assoc slot-name slot-types)) t))
     (setf (gethash :allocation slot)
-          (if (member slot-name class-slots) :class :instance))
+           (if (member slot-name class-slots) :class :instance))
+    (let ((location (%class-slot-location class slot-name)))
+      (when location
+        (setf (gethash :location slot) location)))
     slot))"
 
     "(defun %class-slot-definitions (class &optional (key :__slots__))
@@ -130,9 +142,9 @@
       :instance))"
 
     "(defun class-metaclass (class)
-  (if (hash-table-p class)
-      (or (gethash :__metaclass__ class) 'standard-class)
-      'standard-class))"
+   (if (hash-table-p class)
+       (or (gethash :__metaclass__ class) 'standard-class)
+       'standard-class))"
 
     "(defun compute-effective-slot-definition (class slot-name &optional direct-slots)
   (or (and (hash-table-p class)

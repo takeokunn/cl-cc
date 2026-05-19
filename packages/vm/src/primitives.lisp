@@ -87,12 +87,6 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 
 ;;; Instruction Execution - Arithmetic Extensions
 
-(defun %vm-fixnum-rational-p (value)
-  "Return T when VALUE is a rational with fixnum numerator and denominator."
-  (and (rationalp value)
-       (typep (numerator value) 'fixnum)
-       (typep (denominator value) 'fixnum)))
-
 (defun %vm-cl-div-fast-path (lhs rhs)
   "Return LHS/RHS and the selected rational arithmetic path.
 The path value is diagnostic and keeps the runtime specialization testable."
@@ -130,11 +124,7 @@ The path value is diagnostic and keeps the runtime specialization testable."
   (declare (ignore labels))
   (let* ((lhs (vm-reg-get state (vm-lhs inst)))
          (rhs (vm-reg-get state (vm-rhs inst)))
-         (result (if (or (typep lhs 'bignum)
-                         (typep rhs 'bignum)
-                         (vm-fixnum51-overflow-p (* lhs rhs)))
-                      (vm-bignum-multiply-integers lhs rhs)
-                      (* lhs rhs))))
+         (result (%vm-mul-with-overflow-fallback lhs rhs)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
