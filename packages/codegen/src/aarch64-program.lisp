@@ -66,6 +66,7 @@
   (let ((tp (type-of inst)))
     (cond
       ((or (eq tp 'vm-label)
+           (eq tp 'vm-func-ref))
            (eq tp 'vm-print)
            (eq tp 'vm-closure)
            (eq tp 'vm-register-function)
@@ -109,7 +110,12 @@
     (dolist (inst instructions pool)
       (cond
         ((typep inst 'vm-const)
-         (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+          (let ((value (logand (let ((v (vm-value inst)))
+                                 (cond ((integerp v) v)
+                                       ((null v) 0)
+                                       ((eq v t) 1)
+                                       (t 0)))
+                               #xFFFFFFFFFFFFFFFF)))
            (when (a64-literal-pool-value-p value)
              (a64-pool-add pool value))))
         ((a64-libm-function-for-instruction inst)

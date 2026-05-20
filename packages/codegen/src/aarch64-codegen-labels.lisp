@@ -101,7 +101,12 @@
      (let ((tp (type-of inst)))
        (cond
        ((eq tp 'vm-const)
-        (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+        (let ((value (logand (let ((v (vm-value inst)))
+                               (cond ((integerp v) v)
+                                     ((null v) 0)
+                                     ((eq v t) 1)
+                                     (t 0)))
+                             #xFFFFFFFFFFFFFFFF)))
           (if (a64-literal-pool-value-p value)
              8
              (* 4 (a64-imm64-size value)))))

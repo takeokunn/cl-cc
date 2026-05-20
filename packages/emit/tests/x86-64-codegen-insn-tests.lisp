@@ -62,7 +62,7 @@
       (assert-false (member branch-opcode bytes :test #'=)))))
 
 (deftest x86-64-jump-zero-test-je-adjacent
-  "emit-vm-jump-zero-inst emits TEST immediately followed by JE rel32."
+  "emit-vm-jump-zero-inst emits TEST immediately followed by JE rel8."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-jump-zero-inst
@@ -70,11 +70,10 @@
                    s 0 (let ((ht (make-hash-table :test #'equal)))
                          (setf (gethash "L1" ht) 9)
                          ht))))))
-    (assert-= 9 (length bytes))
+    (assert-= 5 (length bytes))
     (assert-= #x48 (nth 0 bytes))
     (assert-= #x85 (nth 1 bytes))
-    (assert-= #x0F (nth 3 bytes))
-    (assert-= #x84 (nth 4 bytes))))
+    (assert-= #x74 (nth 3 bytes))))
 
 (deftest x86-64-logcount-emitter-encoding
   "emit-vm-logcount emits POPCNT with the expected opcode sequence."
@@ -89,21 +88,22 @@
     (assert-= #xB8 (nth 3 bytes))))
 
 (deftest x86-64-integer-length-emitter-encoding
-  "emit-vm-integer-length emits xor/test/je/bsr/add sequence."
+  "emit-vm-integer-length emits xor/test/je/lzcnt/neg/add sequence."
   (let ((bytes (%x86-collect-bytes
                 (lambda (s)
                   (cl-cc/codegen::emit-vm-integer-length
                    (cl-cc:make-vm-integer-length :dst :R0 :src :R1) s)))))
-    (assert-= 16 (length bytes))
-    ;; xor rax,rax / test rcx,rcx / je rel8 / bsr rax,rcx / add rax,1
+    (assert-= 22 (length bytes))
+    ;; xor rax,rax / test rcx,rcx / je rel8 / lzcnt rax,rcx / neg rax / add rax,64
     (assert-= #x48 (nth 0 bytes))
     (assert-= #x31 (nth 1 bytes))
     (assert-= #x48 (nth 3 bytes))
     (assert-= #x85 (nth 4 bytes))
     (assert-= #x74 (nth 6 bytes))
-    (assert-= #x48 (nth 8 bytes))
-    (assert-= #x0F (nth 9 bytes))
-    (assert-= #xBD (nth 10 bytes))))
+    (assert-= #xF3 (nth 8 bytes))
+    (assert-= #x48 (nth 9 bytes))
+    (assert-= #x0F (nth 10 bytes))
+    (assert-= #xBD (nth 11 bytes))))
 
 (deftest x86-64-call-encoding
   "vm-call emits CALL r64 (#xFF /2) followed by MOV dst←rax: 6 bytes total."

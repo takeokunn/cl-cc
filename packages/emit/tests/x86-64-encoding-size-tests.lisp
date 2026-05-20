@@ -167,22 +167,24 @@
               :assignment assignment
               :spill-count 0
               :instructions nil))
-         (prog (cl-cc/vm::make-vm-program
-                :instructions nil
-                :result-register :R0
-                :leaf-p nil))
+          (prog (cl-cc/vm::make-vm-program
+                 :instructions (list (cl-cc:make-vm-halt :reg :R0))
+                 :result-register :R0
+                 :leaf-p nil))
          (bytes (let ((cl-cc/codegen::*current-regalloc* ra))
                   (%x86-collect-bytes
                    (lambda (s) (cl-cc/codegen::emit-vm-program prog s))))))
     ;; Prologue: PUSH R12 must be 2-byte encoding with REX.B prefix
     (assert-equal #x41 (first bytes))
     (assert-equal #x54 (second bytes))
+    ;; Body: VM halt moves the :R0 value (allocated to R12) back to RAX.
+    (assert-equal '(#x4C #x89 #xE0) (subseq bytes 2 5))
     ;; Epilogue: POP R12 must be 2-byte encoding with REX.B prefix
-    (assert-equal #x41 (third bytes))
-    (assert-equal #x5C (fourth bytes))
+    (assert-equal #x41 (nth 5 bytes))
+    (assert-equal #x5C (nth 6 bytes))
     ;; RET follows immediately
-    (assert-equal #xC3 (fifth bytes))
-    (assert-equal 5 (length bytes))))
+    (assert-equal #xC3 (nth 7 bytes))
+    (assert-equal 8 (length bytes))))
 
 ;;; ─── SETcc opcode2 values for each comparison ───────────────────────────
 
@@ -339,7 +341,7 @@ to be bound, which fails with NIL under raw invocation."
     (assert-equal '(#x48 #x89 #xE5) (subseq bytes 1 4))
     (assert-equal '(#x48 #x89 #x45 #xF8) (subseq bytes 4 8))
     (assert-equal '(#x48 #x8B #x5D #xF8) (subseq bytes 8 12))
-    (assert-equal #x5D (nth 12 bytes))
+    (assert-equal #xC9 (nth 12 bytes))
     (assert-equal #xC3 (nth 13 bytes))))
 
 (deftest-each x86-stack-probe-count-thresholds
@@ -384,7 +386,7 @@ to be bound, which fails with NIL under raw invocation."
           ("vm-mul"      (cl-cc:make-vm-mul      :dst :R0 :lhs :R1 :rhs :R2)  7)
           ("vm-integer-mul-high-u" (cl-cc:make-vm-integer-mul-high-u :dst :R0 :lhs :R1 :rhs :R2) 19)
           ("vm-integer-mul-high-s" (cl-cc:make-vm-integer-mul-high-s :dst :R0 :lhs :R1 :rhs :R2) 19)
-          ("vm-jump"     (cl-cc:make-vm-jump     :label "L")                    5)
+          ("vm-jump"     (cl-cc:make-vm-jump     :label "L")                    2)
           ("vm-ret"      (cl-cc:make-vm-ret)                                   1)
           ("vm-abs"      (make-vm-abs             :dst :R0 :src :R1)           15)
           ("vm-ash"      (make-vm-ash             :dst :R0 :lhs :R1 :rhs :R2) 24)
