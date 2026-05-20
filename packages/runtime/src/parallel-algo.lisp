@@ -1,0 +1,8 @@
+(in-package :cl-cc/runtime)
+(defvar *rt-parallel-threshold* 1024)
+(defun rt-parallel-p (size) (>= size *rt-parallel-threshold*))
+(defun rt-parallel-sort (seq pred &key key) (sort seq pred :key key))
+(defun rt-parallel-scan (vec fn init &key inclusive) (let* ((n (length vec)) (res (make-array n)) (acc init)) (dotimes (i n) (if inclusive (setf acc (funcall fn acc (aref vec i))) (progn (setf (aref res i) acc) (setf acc (funcall fn acc (aref vec i))))) (when inclusive (setf (aref res i) acc))) res))
+(defun rt-parallel-reduce (fn seq &key iv) (if iv (reduce fn seq :initial-value iv) (reduce fn seq)))
+(defun rt-parallel-map (fn seq) (mapcar fn (coerce seq 'list)))
+(defun rt-parallel-algo-init () (setf *rt-parallel-threshold* 1024) t)

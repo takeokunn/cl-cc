@@ -21,7 +21,7 @@ NaN-boxed pointer values are recognized with VAL-POINTER-P and decoded with
 DECODE-POINTER.  Runtime heap words that already contain object-start addresses
 are accepted as canonical internal addresses."
   (cond
-    ((and (integerp value) (val-pointer-p value))
+    ((and (typep value '(unsigned-byte 64)) (val-pointer-p value))
      (let ((addr (decode-pointer value)))
        (when (%rt-gc-object-start-p heap addr)
          addr)))
@@ -35,7 +35,7 @@ are accepted as canonical internal addresses."
 This is used during minor GC after from/to-space flipping, where the evacuation
 source is no longer considered a live heap range by RT-HEAP-ADDR-P."
   (cond
-    ((and (integerp value) (val-pointer-p value))
+    ((and (typep value '(unsigned-byte 64)) (val-pointer-p value))
      (let ((addr (decode-pointer value)))
        (when (funcall predicate addr) addr)))
     ((and (integerp value) (funcall predicate value))

@@ -1,0 +1,6 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-actor (mailbox nil) (behavior nil) (m (rt-make-mutex)) (c (rt-make-condition-variable)))
+(defun rt-make-actor (behavior) (make-rt-actor :behavior behavior))
+(defun rt-actor-send (a msg) (rt-with-mutex ((rt-actor-m a)) (push msg (rt-actor-mailbox a)) (rt-condition-notify (rt-actor-c a))) msg)
+(defun rt-actor-receive (a &key timeout) (rt-with-mutex ((rt-actor-m a) :timeout timeout) (loop until (rt-actor-mailbox a) do (rt-condition-wait (rt-actor-c a) (rt-actor-m a) :timeout timeout)) (pop (rt-actor-mailbox a))))
+(defun rt-actor-spawn (a) (rt-spawn (lambda () (loop (let ((msg (rt-actor-receive a))) (when msg (handler-case (funcall (rt-actor-behavior a) msg) (error (c) (format *error-output* "Actor err: ~A~%" c)))))))))

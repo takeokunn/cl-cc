@@ -1,0 +1,8 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-mvcc-var (versions nil) (m (rt-make-mutex)))
+(defstruct rt-mvcc-version (value nil) (ts 0))
+(defvar *rt-mvcc-global-time* 0)
+(defun rt-mvcc-read (var) (rt-with-mutex ((rt-mvcc-var-m var)) (let ((v (car (rt-mvcc-var-versions var)))) (when v (rt-mvcc-version-value v)))))
+(defun rt-mvcc-write (var val) (rt-with-mutex ((rt-mvcc-var-m var)) (incf *rt-mvcc-global-time*) (push (make-rt-mvcc-version :value val :ts *rt-mvcc-global-time*) (rt-mvcc-var-versions var))) val)
+(defun rt-mvcc-begin () *rt-mvcc-global-time*)
+(defun rt-mvcc-commit () t)

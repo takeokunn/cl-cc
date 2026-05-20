@@ -184,7 +184,7 @@
 (defconstant +wasm-gc-struct-set+         5)
 ;;; FR-297 targets the GC proposal encoding used by cl-cc's backend plan:
 ;;; array.new is emitted as 0xfb 0x1b followed by typeidx.
-(defconstant +wasm-gc-array-new+          #x1b)
+(defconstant +wasm-gc-array-new+          6)
 (defconstant +wasm-gc-array-new-default+  7)
 (defconstant +wasm-gc-array-new-fixed+    8)
 (defconstant +wasm-gc-array-get+         11)

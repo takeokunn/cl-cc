@@ -142,7 +142,7 @@ Only single-argument eql specializers are indexed for fast lookup."
     ((listp value) (copy-list value))
     ((hash-table-p value) (list value))
     ((functionp value) (list value))
-    (t (values nil))))
+    (t (list value))))
 
 (defun %vm-method-function (method)
   "Extract the callable closure from METHOD (which may be a descriptor hash-table)."

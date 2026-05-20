@@ -1,0 +1,8 @@
+(in-package :cl-cc/runtime)
+(defconstant +perf-cpu-cycles+ 0) (defconstant +perf-instructions+ 1)
+(defvar *rt-perf-counters* (make-hash-table))
+(defun rt-perf-init () (clrhash *rt-perf-counters*) t)
+(defstruct rt-perf-counter (type 0) (value 0) (enabled nil))
+(defun rt-perf-enable-counter (ct) (setf (gethash ct *rt-perf-counters*) (make-rt-perf-counter :type ct :enabled t)))
+(defun rt-perf-read-counter (ct) (let ((c (gethash ct *rt-perf-counters*))) (when (and c (rt-perf-counter-enabled c)) (rt-perf-counter-value c))))
+(defmacro rt-with-perf-counters ((&rest cts) &body body) `(progn (dolist (ct ',cts) (rt-perf-enable-counter ct)) (unwind-protect (progn ,@body) (dolist (ct ',cts) (rt-perf-disable-counter ct)))))

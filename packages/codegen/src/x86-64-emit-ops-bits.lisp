@@ -34,14 +34,28 @@
    Zero case returns 0; otherwise 64 - lzcnt(src)."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))
         (src (vm-reg-to-x86 (vm-src inst))))
-    ;; Test before writing DST so the dst=src allocation case remains correct.
-    (emit-test-rr64 src src stream)    ; set ZF when src = 0
-    (emit-je-short 14 stream)          ; skip LZCNT/NEG/ADD/JMP when zero
-    (emit-lzcnt-rr64 dst src stream)
-    (emit-neg-r64 dst stream)
-    (emit-add-ri8 dst 64 stream)
-    (emit-jmp-rel8 3 stream)
-    (emit-xor-rr64 dst dst stream)))   ; zero case => 0
+    (if (= dst src)
+        ;; Test before writing DST so the dst=src allocation case remains correct.
+        (progn
+          (emit-test-rr64 src src stream)    ; set ZF when src = 0
+          (emit-je-short 14 stream)          ; skip LZCNT/NEG/ADD/JMP when zero
+          (emit-lzcnt-rr64 dst src stream)
+          (emit-neg-r64 dst stream)
+          (emit-add-ri8 dst 64 stream)
+          (emit-jmp-rel8 3 stream)
+          (emit-xor-rr64 dst dst stream))    ; zero case => 0
+        (progn
+          (emit-xor-rr64 dst dst stream)
+          (emit-test-rr64 src src stream)
+          (emit-je-short 12 stream)
+          (emit-lzcnt-rr64 dst src stream)
+          (emit-neg-r64 dst stream)
+          (emit-add-ri8 dst 64 stream)
+          ;; Keep the historical fixed 22-byte VM instruction size used by
+          ;; label relaxation tables while preserving the dst≠src fast shape.
+          (emit-byte #x90 stream)
+          (emit-byte #x90 stream)
+          (emit-byte #x90 stream)))))
 
 (defun emit-vm-bswap (inst stream)
   "vm-bswap: dst = byte-swap(low32(src))  (network-order byte reversal)."

@@ -823,12 +823,11 @@ Returns the still-live fact after scanning the block."
              (setf constants (%opt-jump-put-constant dst value constants))
              (push (make-vm-const :dst dst :value value) new-insts)))
           ((and (%opt-jump-comparison-p inst) dst)
-           (multiple-value-bind (value ok) (%opt-jump-evaluate-comparison inst constants)
-             (if ok
-                 (progn
-                   (setf constants (%opt-jump-put-constant dst value constants))
-                   (push (make-vm-const :dst dst :value value) new-insts))
-                 (push inst new-insts))))
+           ;; Do not independently fold fresh comparisons here.  This pass only
+           ;; propagates branch-edge comparison facts; folding a comparison after
+           ;; either source register has been redefined would erase the required
+           ;; new comparison and conflate this pass with general constant folding.
+           (push inst new-insts))
           ((and (typep inst 'vm-move) dst)
            (multiple-value-bind (value ok) (%opt-jump-known-constant (vm-src inst) constants)
              (if ok

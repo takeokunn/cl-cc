@@ -615,9 +615,9 @@ not fusing across intervening writes to the multiply destination or operands."
        :inline
          :overflow-check-elim
          :sccp
-      :sequence-fusion
-     :demand-analysis
        :cons-slot-forward
+       :sequence-fusion
+     :demand-analysis
        :fma-synthesis
        :bswap-recognition
      :rotate-recognition

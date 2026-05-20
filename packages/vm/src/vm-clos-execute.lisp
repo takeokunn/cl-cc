@@ -645,7 +645,7 @@ VM primitives that need protocol hooks without introducing new instructions."
               (setf (gethash specializer methods-ht) desc)
               (when eql-index
                 (dolist (eql-key (%vm-extract-eql-specializer-keys specializer))
-                  (pushnew desc (gethash eql-key eql-index) :test #'eq))))
+                  (pushnew method-closure (gethash eql-key eql-index) :test #'eq))))
             (let ((qual-key (intern (format nil "__~A__" (string-upcase (string qualifier)))
                                     :keyword)))
               (unless (gethash qual-key gf-ht)

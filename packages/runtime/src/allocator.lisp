@@ -1,0 +1,7 @@
+(in-package :cl-cc/runtime)
+(defconstant +alloc-large-threshold+ 32768)
+(defparameter *alloc-size-classes* '(8 16 32 64 128 256 512 1024 2048 4096))
+(defun rt-alloc (size) (make-array (max size 1) :element-type '(unsigned-byte 8) :initial-element 0))
+(defun rt-free (obj size) (declare (ignore obj size)) nil)
+(defun rt-size-class-for (size) (or (find size *alloc-size-classes* :test #'>=) +alloc-large-threshold+))
+(defun rt-allocator-init () t)

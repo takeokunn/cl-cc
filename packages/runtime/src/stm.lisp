@@ -1,0 +1,7 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-tvar (value nil) (lock (rt-make-mutex)))
+(define-condition rt-stm-conflict (error) ())
+(defvar *rt-stm-read-log* nil)
+(defvar *rt-stm-write-log* nil)
+(defmacro rt-atomically (&body body) `(loop (handler-case (return (progn ,@body)) (rt-stm-conflict () (sleep 0.001)))))
+(defun rt-retry () (error 'rt-stm-conflict))

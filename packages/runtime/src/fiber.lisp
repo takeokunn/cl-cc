@@ -1,0 +1,6 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-fiber (thunk nil) (status :ready) (result nil))
+(defun rt-make-fiber (thunk) (make-rt-fiber :thunk thunk))
+(defun rt-fiber-resume (f) (setf (rt-fiber-status f) :running) (handler-case (progn (setf (rt-fiber-result f) (funcall (rt-fiber-thunk f))) (setf (rt-fiber-status f) :done)) (error (c) (setf (rt-fiber-status f) :failed))))
+(defun rt-fiber-done-p (f) (eq (rt-fiber-status f) :done))
+(defun rt-fiber-result (f) (rt-fiber-result f))

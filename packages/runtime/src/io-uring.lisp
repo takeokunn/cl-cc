@@ -1,0 +1,6 @@
+(in-package :cl-cc/runtime)
+(defun rt-iouring-available-p () nil)
+(defun rt-iouring-init (&key entries) (declare (ignore entries)) nil)
+(defun rt-iouring-read (fd buf off len cb) (declare (ignore fd buf off len)) (when cb (funcall cb 0)) 0)
+(defun rt-iouring-write (fd buf off len cb) (declare (ignore fd buf off len)) (when cb (funcall cb 0)) 0)
+(defun rt-iouring-poll (&key min-completions timeout) (declare (ignore min-completions timeout)) 0)

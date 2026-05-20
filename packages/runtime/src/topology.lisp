@@ -1,0 +1,5 @@
+(in-package :cl-cc/runtime)
+(defun rt-cpu-count () 1)
+(defun rt-cpu-topology () (list (cons :cores 1)))
+(defun rt-thread-set-affinity (core) (declare (ignore core)) nil)
+(defun rt-thread-get-affinity () 0)

@@ -279,4 +279,5 @@
     vm-closure-optional-params
     vm-closure-rest-param
     vm-closure-key-params
-    vm-closure-inst-dispatch-tag))
+    vm-closure-inst-dispatch-tag
+    vm-func-ref-dispatch-tag))

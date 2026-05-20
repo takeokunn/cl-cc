@@ -1,0 +1,6 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-event-loop (fds (make-hash-table)) (timers nil) (stop nil))
+(defun rt-make-event-loop () (make-rt-event-loop))
+(defun rt-event-loop-register (loop fd cb &key events) (declare (ignore events)) (setf (gethash fd (rt-event-loop-fds loop)) cb))
+(defun rt-event-loop-run (loop &key timeout) (declare (ignore timeout)) (loop until (rt-event-loop-stop loop) do (sleep 0.01) (maphash (lambda (fd cb) (declare (ignore fd)) (funcall cb)) (rt-event-loop-fds loop))))
+(defun rt-event-loop-stop (loop) (setf (rt-event-loop-stop loop) t))

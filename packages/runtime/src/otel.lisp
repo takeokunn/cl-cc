@@ -1,0 +1,7 @@
+(in-package :cl-cc/runtime)
+(defstruct rt-otel-span (name "") (trace-id nil) (span-id nil) (start 0) (end 0))
+(defvar *rt-otel-span* nil)
+(defun rt-otel-start-span (name &key parent) (let ((s (make-rt-otel-span :name name :trace-id (or (when parent (rt-otel-span-trace-id parent)) (format nil "~16,'0X" (random #xFFFFFFFFFFFFFFFF))) :span-id (format nil "~16,'0X" (random #xFFFFFFFFFFFFFFFF)) :start (get-universal-time)))) (setf *rt-otel-span* s) s))
+(defun rt-otel-end-span (s) (setf (rt-otel-span-end s) (get-universal-time)) (setf *rt-otel-span* nil) s)
+(defmacro rt-with-span ((name &key attrs) &body body) (let ((sv (gensym))) `(let ((,sv (rt-otel-start-span ,name))) (dolist (a ',attrs) (push (cons (car a) (cdr a)) (rt-otel-span-attrs ,sv))) (unwind-protect (progn ,@body) (rt-otel-end-span ,sv)))))
+(defun rt-otel-init () (setf *rt-otel-span* nil) t)

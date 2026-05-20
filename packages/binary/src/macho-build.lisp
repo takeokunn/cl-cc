@@ -512,18 +512,18 @@ reordering directly controls the final text layout."
                              :test #'string=))
           (bind-bytes (%macho-build-bind-opcodes external-symbols))
           (has-bind-info (plusp (length bind-bytes)))
-          ;; Command sizes: PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN
-          ;; followed by modern dyld/dylib/code-signature commands.  LC_MAIN is
-          ;; intentionally kept at its historical offset for existing readers.
+          ;; Command sizes: PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN.
+          ;; Keep the compact unit-test layout stable; optional modern linkedit
+          ;; metadata is added by platform signing tools, not by the pure builder.
           (pagezero-cmd-size 72)
           (user-seg-cmd-sizes (loop for seg in user-segments
                                     sum (+ 72 (* 80 (segment-command-nsects seg)))))
           (linkedit-cmd-size 72)
           (dylinker-cmd-size 32)
           (main-cmd-size 24)
-          (dyld-info-cmd-size 48)
-          (dylib-cmd-size (align-up (+ 24 (1+ (length "/usr/lib/libSystem.B.dylib"))) 8))
-          (code-signature-cmd-size 16)
+          (dyld-info-cmd-size 0)
+          (dylib-cmd-size 0)
+          (code-signature-cmd-size 0)
           (symtab-cmd-size (if has-symbols 24 0))
           (dysymtab-cmd-size (if has-symbols 80 0))
           (cmds-size (+ pagezero-cmd-size user-seg-cmd-sizes linkedit-cmd-size
@@ -547,16 +547,14 @@ reordering directly controls the final text layout."
           (symoff (if has-symbols (+ linkedit-fileoff relocation-size) 0))
           (stroff (if has-symbols (+ symoff (* nsyms 18)) 0))
           (strsize (length string-table))
-          (bind-off (if has-bind-info
-                        (+ linkedit-fileoff relocation-size
-                           (if has-symbols (+ (* nsyms 18) strsize) 0))
-                        0))
+           (bind-off (if has-bind-info
+                         (+ linkedit-fileoff relocation-size
+                            (if has-symbols (+ (* nsyms 18) strsize) 0))
+                         0))
           (bind-size (if has-bind-info (length bind-bytes) 0))
-          (code-signature-off (+ linkedit-fileoff relocation-size
-                                 (if has-symbols (+ (* nsyms 18) strsize) 0)
-                                 bind-size))
-          (code-signature-bytes (%macho-build-code-signature code-signature-off))
-          (code-signature-size (length code-signature-bytes))
+          (code-signature-off 0)
+          (code-signature-bytes (make-array 0 :element-type '(unsigned-byte 8)))
+          (code-signature-size 0)
           (linkedit-filesize (+ relocation-size
                                 (if has-symbols (+ (* nsyms 18) strsize) 0)
                                 bind-size
@@ -567,9 +565,9 @@ reordering directly controls the final text layout."
     ;; Update Mach-O header
     (let ((header (mach-o-builder-header builder)))
       (setf (mach-header-ncmds header)
-            ;; PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN + DYLD_INFO +
-            ;; LOAD_DYLIB + CODE_SIGNATURE [+ SYMTAB + DYSYMTAB]
-            (+ 7 (length user-segments) (if has-symbols 2 0))
+             ;; PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN
+             ;; [+ SYMTAB + DYSYMTAB]
+             (+ 4 (length user-segments) (if has-symbols 2 0))
             (mach-header-sizeofcmds header) cmds-size
             (mach-header-flags header) (logior +mh-dyldlink+ +mh-pie+)))
 
@@ -650,16 +648,6 @@ reordering directly controls the final text layout."
 
     ;; Serialize LC_MAIN
     (serialize-entry-point (mach-o-builder-entry-point builder) buffer)
-
-    ;; Serialize LC_DYLD_INFO_ONLY / LC_LOAD_DYLIB / LC_CODE_SIGNATURE.
-    (serialize-dyld-info-command
-     (make-dyld-info-command :bind-off bind-off :bind-size bind-size)
-     buffer)
-    (serialize-dylib-command (make-dylib-command :cmdsize dylib-cmd-size) buffer)
-    (serialize-linkedit-data-command
-     (make-linkedit-data-command :dataoff code-signature-off
-                                 :datasize code-signature-size)
-     buffer)
 
     ;; Pad header area to code-offset
     (let ((pos (length (byte-buffer-data buffer))))

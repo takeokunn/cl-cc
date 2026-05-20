@@ -1,0 +1,7 @@
+(in-package :cl-cc/runtime)
+(defun rt-sendfile (out in &optional off cnt) (declare (ignore out in off cnt)) 0)
+(defun rt-splice (in out cnt) (declare (ignore in out cnt)) 0)
+(defvar *rt-reg-bufs* (make-hash-table))
+(defun rt-register-buffer (id buf) (setf (gethash id *rt-reg-bufs*) buf) t)
+(defun rt-unregister-buffer (id) (remhash id *rt-reg-bufs*) t)
+(defun rt-zerocopy-init () (clrhash *rt-reg-bufs*) t)

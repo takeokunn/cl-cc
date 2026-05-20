@@ -1,0 +1,7 @@
+(in-package :cl-cc/runtime)
+(defconstant +image-magic+ #x434C4343)
+(defvar *rt-image-globals* nil)
+(defun rt-image-register-global (sym) (pushnew sym *rt-image-globals*))
+(defun rt-save-image (path &key globals) (declare (ignore globals)) (with-open-file (s path :direction :output :if-exists :supersede :element-type '(unsigned-byte 8)) (write-byte (ldb (byte 8 24) +image-magic+) s) (write-byte (ldb (byte 8 16) +image-magic+) s) (write-byte (ldb (byte 8 8) +image-magic+) s) (write-byte (ldb (byte 8 0) +image-magic+) s) (write-byte 1 s)) path)
+(defun rt-load-image (path) (with-open-file (s path :direction :input :element-type '(unsigned-byte 8)) (let ((m (+ (ash (read-byte s) 24) (ash (read-byte s) 16) (ash (read-byte s) 8) (read-byte s)))) (unless (= m +image-magic+) (error "Bad image magic: ~X" m))) (let ((v (read-byte s))) (unless (= v 1) (error "Bad image version: ~D" v)))) t)
+(defun rt-image-init () (setf *rt-image-globals* nil) t)
