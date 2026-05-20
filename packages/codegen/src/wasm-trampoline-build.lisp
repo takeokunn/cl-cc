@@ -105,10 +105,11 @@ match or the br_table helper declines the dispatch."
           (let ((case-targets (loop for label in targets
                                     for key from (cdr index-info)
                                     collect (cons key label))))
-            (when (maybe-emit-wasm-dense-case-br-table
-                   (car index-info) case-targets default-label
-                   label-pc-map reg-map stream)
-              3)))))))
+             (when (maybe-emit-wasm-dense-case-br-table
+                    (car index-info) case-targets default-label
+                    label-pc-map reg-map stream)
+              3))))))
+    0)
 
 (defun build-trampoline-body (basic-blocks label-pc-map reg-map param-regs stream)
   "Emit the WAT trampoline body (nested blocks + loop) to STREAM.
