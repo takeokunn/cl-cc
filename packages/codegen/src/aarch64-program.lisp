@@ -66,7 +66,7 @@
   (let ((tp (type-of inst)))
     (cond
       ((or (eq tp 'vm-label)
-           (eq tp 'vm-func-ref))
+           (eq tp 'vm-func-ref)
            (eq tp 'vm-print)
            (eq tp 'vm-closure)
            (eq tp 'vm-register-function)
