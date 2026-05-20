@@ -64,12 +64,10 @@
       value))
 
 (defun %vm-maybe-sso-string (string)
-  "Return an SSO immediate for short byte strings; otherwise return interned heap string."
-  (check-type string string)
-  (let ((encoder (%vm-sso-function "ENCODE-SSO-STRING")))
-    (if (and encoder (%vm-byte-string-p string))
-        (funcall encoder string)
-        (rt-string-intern string))))
+  "In the VM interpreter, return the host string directly.
+SSO encoding is reserved for native codegen backends; the interpreter
+stores host CL values in registers so tests receive proper strings."
+  string)
 
 (defun %vm-string-length (value)
   "Return the length of host or SSO string VALUE."
