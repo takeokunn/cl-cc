@@ -73,11 +73,11 @@
 ;;; ─── define-method-combination ────────────────────────────────────────────
 
 (deftest define-method-combination-returns-quoted-name
-  "DEFINE-METHOD-COMBINATION expands to (QUOTE name) as a registration side effect."
+  "DEFINE-METHOD-COMBINATION registers side effects, then returns (QUOTE name)."
   (let ((result (our-macroexpand-1
                  '(cl-cc::define-method-combination append :identity-with-one-argument t))))
-    (assert-eq 'quote (car result))
-    (assert-eq 'append (second result))))
+    (assert-eq 'progn (car result))
+    (assert-equal ''append (car (last result)))))
 
 (deftest-each instance-init-macros-use-shared-helper
   "REINITIALIZE-INSTANCE and SHARED-INITIALIZE both delegate to %APPLY-INSTANCE-INITARGS."

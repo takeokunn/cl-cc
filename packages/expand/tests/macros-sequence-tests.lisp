@@ -17,16 +17,16 @@
   (assert-eq (car (our-macroexpand-1 form)) 'let))
 
 (deftest reduce-without-initial-value-has-inner-let
-  "REDUCE without :initial-value wraps the scan body in an inner LET."
+  "REDUCE without :initial-value wraps the list scan body in an inner LET under dispatch."
   (let* ((result (our-macroexpand-1 '(reduce #'+ lst)))
-         (inner  (caddr result)))
-    (assert-eq (car inner) 'let)))
+          (inner  (caddr result)))
+    (assert-true (%tree-contains-head-p 'let inner))))
 
 (deftest reduce-with-initial-value-has-loop
-  "REDUCE with :initial-value expands to a LOOP accumulation form."
+  "REDUCE with :initial-value includes a LOOP accumulation form under dispatch."
   (let* ((result (our-macroexpand-1 '(reduce #'+ lst :initial-value 0)))
-         (body   (cddr result)))
-    (assert-true (some (lambda (f) (and (consp f) (eq (car f) 'loop))) body))))
+          (body   (cddr result)))
+    (assert-true (%tree-contains-head-p 'loop body))))
 
 (deftest substitute-expansion
   "SUBSTITUTE: outer LET containing a DOLIST loop."

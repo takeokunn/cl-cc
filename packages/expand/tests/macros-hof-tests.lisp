@@ -25,18 +25,15 @@
   (assert-eq (car (our-macroexpand-1 form)) 'let))
 
 (deftest mapcar-body-contains-dolist
-  "MAPCAR body iterates with DOLIST"
-  (let* ((result (our-macroexpand-1 '(mapcar fn lst)))
-         ;; dolist is in the body of the let
-         (dolist-form (caddr result)))
-    (assert-eq (car dolist-form) 'dolist)))
+  "MAPCAR's list path iterates with DOLIST, possibly under runtime TYPECASE dispatch."
+  (let ((result (our-macroexpand-1 '(mapcar fn lst))))
+    (assert-true (%tree-contains-head-p 'dolist result))))
 
 (deftest every-short-circuits-on-false
-  "EVERY body is a BLOCK NIL (for short-circuit RETURN); contains DOLIST"
-  (let* ((result     (our-macroexpand-1 '(every pred lst)))
-         (block-form (caddr result)))
-    (assert-eq (car  block-form) 'block)
-    (assert-eq (second block-form) nil)))
+  "EVERY has a BLOCK NIL short-circuit path containing DOLIST, possibly under TYPECASE."
+  (let ((result (our-macroexpand-1 '(every pred lst))))
+    (assert-true (%tree-contains-head-p 'block result))
+    (assert-true (%tree-contains-head-p 'dolist result))))
 
 (deftest-each notany-notevery-negation
   "notany/notevery are simple (not ...) wrappers around some/every."
@@ -46,11 +43,10 @@
   (assert-equal (our-macroexpand-1 form) expected))
 
 (deftest find-no-keys-is-eql-loop
-  "FIND without keyword args generates a fast EQL check loop"
-  (let* ((result (our-macroexpand-1 '(find item lst)))
-         ;; outer let binds item, body is a block with dolist
-         (body (caddr result)))
-    (assert-eq (car body) 'block)))
+  "FIND without keyword args generates a fast EQL check loop, possibly under TYPECASE."
+  (let ((result (our-macroexpand-1 '(find item lst))))
+    (assert-true (%tree-contains-head-p 'block result))
+    (assert-true (%tree-contains-head-p 'dolist result))))
 
 (deftest-each sequence-search-macro-outer-is-let
   "Sequence-search HOF macros (position/count/mapcan) expand to a LET."

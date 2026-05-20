@@ -25,3 +25,11 @@
 
 (defmacro assert-printed-contains (form needle)
   `(assert-true (search ,needle (format nil "~S" ,form))))
+
+(defun %tree-contains-head-p (head form)
+  "True if FORM contains any cons whose CAR is HEAD."
+  (cond ((consp form)
+         (or (eq (car form) head)
+             (%tree-contains-head-p head (car form))
+             (%tree-contains-head-p head (cdr form))))
+        (t nil)))

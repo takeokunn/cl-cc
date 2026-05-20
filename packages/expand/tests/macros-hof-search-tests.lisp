@@ -11,10 +11,10 @@
 ;;; ── position-if / position-if-not ──────────────────────────────────────────
 
 (deftest position-if-without-key-uses-block
-  "position-if without :key expands to let+block for indexed scan."
+  "position-if without :key expands to LET with a BLOCK scan path under dispatch."
   (let ((result (our-macroexpand-1 '(position-if #'oddp lst))))
     (assert-eq 'let (car result))
-    (assert-eq 'block (car (caddr result)))))
+    (assert-true (%tree-contains-head-p 'block result))))
 
 (deftest position-if-with-key-expands-to-let
   "position-if with :key expands to a let (no block needed for key path)."
@@ -36,10 +36,10 @@
 ;;; ── count-if / count-if-not ─────────────────────────────────────────────────
 
 (deftest count-if-without-key-uses-dolist
-  "count-if without :key expands to let+dolist for counting pass."
+  "count-if without :key expands to LET with a DOLIST counting path under dispatch."
   (let ((result (our-macroexpand-1 '(count-if #'oddp lst))))
     (assert-eq 'let (car result))
-    (assert-eq 'dolist (car (caddr result)))))
+    (assert-true (%tree-contains-head-p 'dolist result))))
 
 (deftest count-if-with-key-expands-to-let
   "count-if with :key expands to a let (key application inline)."
@@ -75,22 +75,22 @@
 ;;; ── assoc / assoc-if / assoc-if-not ────────────────────────────────────────
 
 (deftest assoc-without-test-uses-block
-  "assoc without :test expands to let+block for linear alist scan."
+  "assoc without :test expands to LET with a BLOCK alist scan path under dispatch."
   (let ((result (our-macroexpand-1 '(assoc item alist))))
     (assert-eq 'let (car result))
-    (assert-eq 'block (car (caddr result)))))
+    (assert-true (%tree-contains-head-p 'block result))))
 
 (deftest assoc-with-test-also-uses-block
-  "assoc with :test still expands to let+block (test applied inside)."
+  "assoc with :test still expands to LET with a BLOCK scan path under dispatch."
   (let ((result (our-macroexpand-1 '(assoc item alist :test #'equal))))
     (assert-eq 'let (car result))
-    (assert-eq 'block (car (caddr result)))))
+    (assert-true (%tree-contains-head-p 'block result))))
 
 (deftest assoc-if-uses-dolist
-  "assoc-if expands to let+dolist for predicate-based alist scan."
+  "assoc-if expands to LET with a DOLIST predicate alist scan path under dispatch."
   (let ((result (our-macroexpand-1 '(assoc-if #'oddp alist))))
     (assert-eq 'let (car result))
-    (assert-eq 'dolist (car (caddr result)))))
+    (assert-true (%tree-contains-head-p 'dolist result))))
 
 (deftest assoc-if-not-delegates-to-complement
   "assoc-if-not delegates to assoc-if with complement."
