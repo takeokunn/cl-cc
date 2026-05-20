@@ -228,16 +228,30 @@ tree emission on NIL."
                                     (reg-local-ref reg-map (vm-car-reg inst))
                                     (reg-local-ref reg-map (vm-cdr-reg inst)))))
      t)
-    (vm-closure
-     (let* ((label (vm-label-name inst))
-             (table-idx (if (and *wasm-label-to-table-idx* label)
-                            (gethash label *wasm-label-to-table-idx* 0)
-                            0)))
+     (vm-closure
+      (let* ((label (vm-label-name inst))
+              (table-idx (if (and *wasm-label-to-table-idx* label)
+                             (gethash label *wasm-label-to-table-idx* 0)
+                             0)))
        (format stream "~%      ;; struct.new typeidx ~D; array.new typeidx ~D"
                +type-idx-closure+ +type-idx-eqref-array+)
-       (emit-wasm-closure-allocation reg-map (vm-dst inst) table-idx
-                                     (vm-captured-vars inst) stream 6)
+        (emit-wasm-closure-allocation reg-map (vm-dst inst) table-idx
+                                      (vm-captured-vars inst) stream 6)
+        t))
+    (vm-func-ref
+     (let* ((label (vm-label-name inst))
+            (table-idx (if (and *wasm-label-to-table-idx* label)
+                           (gethash label *wasm-label-to-table-idx* 0)
+                           0)))
+       (format stream "~%      ;; struct.new typeidx ~D; funcidx ~D"
+               +type-idx-closure+ table-idx)
+       (emit-wasm-closure-allocation reg-map (vm-dst inst) table-idx nil stream 6)
        t))
+    (vm-register-function
+     (format stream "~%      ;; register-function ~S from local ~D (module table already populated)"
+             (vm-func-name inst)
+             (wasm-reg-to-local reg-map (vm-src inst)))
+     t)
     (vm-closure-ref-idx
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)

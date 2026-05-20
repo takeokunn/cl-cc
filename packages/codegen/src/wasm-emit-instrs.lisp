@@ -158,15 +158,16 @@ The host import $host_print_val takes a single eqref parameter."
                                           func-ref)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-func-ref) stream)
-  "Materialize function table index in DST and track typed call_ref label hint."
+  "Materialize a closure for LABEL in DST and track a direct-call label hint."
   (let* ((reg-map (wasm-target-reg-map target))
-         (module (wasm-target-module target))
-         (idx (or (and module (%wasm-function-index-for-label module (vm-label-name inst))) 0))
-         (dst (vm-dst inst)))
+          (module (wasm-target-module target))
+          (idx (or (and module (%wasm-function-index-for-label module (vm-label-name inst))) 0))
+          (dst (vm-dst inst)))
     (setf (gethash dst (wasm-target-known-func-labels target))
           (vm-label-name inst))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map dst (format nil "(i32.const ~D)" idx)))))
+    (format stream "~%    ;; struct.new typeidx ~D; funcidx ~D"
+            +type-idx-closure+ idx)
+    (emit-wasm-closure-allocation reg-map dst idx nil stream 4)))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-tail-call) stream)
   "Emit wasm tail-call instruction form when available.

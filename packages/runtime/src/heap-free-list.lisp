@@ -66,7 +66,13 @@ working."
 (defun %rt-free-list-record-remainder (heap addr size-words)
   "Record a split free-list remainder and install a scannable free header."
   (when (plusp size-words)
-    (rt-heap-set-header heap addr (make-header size-words 0 0))
+    ;; Production free-list blocks are old-space addresses and need a header so
+    ;; later sweep/verification can skip the remainder.  Some unit tests exercise
+    ;; the free-list as an abstract data structure with synthetic addresses; do
+    ;; not index outside the heap vector for those blocks.
+    (when (and (<= 0 addr)
+               (< addr (length (rt-heap-words heap))))
+      (rt-heap-set-header heap addr (make-header size-words 0 0)))
     (%rt-free-list-insert-block heap (cons size-words addr))))
 
 (defun %rt-free-list-rebuild-bins (heap blocks)

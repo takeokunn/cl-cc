@@ -51,7 +51,11 @@ choosing sliding addresses."
          (size      (header-size header))
          (age       (header-age header))
          (pinned-p  (rt-object-pinned-p heap from-addr))
-         (promote-p (or pinned-p (>= age *gc-tenuring-threshold*))))
+          ;; Header age is a 2-bit saturating field (0..3).  Dynamic tenure may
+          ;; temporarily raise the threshold above that representable maximum; in
+          ;; that case an age-saturated object must still be promotable.
+          (effective-threshold (min 3 *gc-tenuring-threshold*))
+          (promote-p (or pinned-p (>= age effective-threshold))))
     (let ((dest-addr
             (if promote-p
                 ;; Promote to old space, reusing sweep free-list blocks first.

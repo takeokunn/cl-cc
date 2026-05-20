@@ -288,7 +288,7 @@
   (wasm-encode-gc-op-u32 +wasm-gc-struct-new+ typeidx))
 
 (defun wasm-encode-array-new (typeidx)
-  "Encode array.new TYPEIDX: 0xfb 0x1b + LEB128(typeidx)."
+  "Encode array.new TYPEIDX: 0xfb 0x06 + LEB128(typeidx)."
   (wasm-encode-gc-op-u32 +wasm-gc-array-new+ typeidx))
 
 (defun wasm-encode-try (tag-type)
