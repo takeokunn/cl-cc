@@ -6,7 +6,7 @@
 ;;; Small, cohesive handler cluster split from codegen-phase2.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-;; make-hash-table: extract :test keyword and convert #'fn → 'fn
+;; make-hash-table: extract supported keywords and convert #'fn → 'fn
 (defun %hash-table-static-test-for-table-ast (ast ctx)
   "Return a statically known hash-table test for AST in CTX, if available."
   (or (%hash-table-static-test-from-make-hash-table-ast ast)
@@ -24,10 +24,7 @@
 
 (setf (gethash "MAKE-HASH-TABLE" *phase2-builtin-handlers*)
       (lambda (args result-reg ctx)
-        (let* ((test-ast (loop for kv on args by #'cddr
-                               when (and (cdr kv)
-                                         (%hash-table-keyword-ast-p (car kv) :test))
-                                 return (cadr kv)))
+        (let* ((test-ast (%phase2-find-keyword-arg args :test))
                (test-sym (and test-ast
                               (%hash-table-test-symbol-from-ast test-ast)))
                (test-reg (cond
@@ -36,8 +33,19 @@
                               (emit ctx (make-vm-const :dst reg :value test-sym))
                               reg))
                            (test-ast
-                            (compile-ast test-ast ctx)))))
-          (emit ctx (make-vm-make-hash-table :dst result-reg :test test-reg))
+                            (compile-ast test-ast ctx))))
+               (size-ast (%phase2-find-keyword-arg args :size))
+               (rehash-size-ast (%phase2-find-keyword-arg args :rehash-size))
+               (rehash-threshold-ast (%phase2-find-keyword-arg args :rehash-threshold))
+               (size-reg (when size-ast (compile-ast size-ast ctx)))
+               (rehash-size-reg (when rehash-size-ast (compile-ast rehash-size-ast ctx)))
+               (rehash-threshold-reg (when rehash-threshold-ast
+                                       (compile-ast rehash-threshold-ast ctx))))
+          (emit ctx (make-vm-make-hash-table :dst result-reg
+                                             :test test-reg
+                                             :size size-reg
+                                             :rehash-size rehash-size-reg
+                                             :rehash-threshold rehash-threshold-reg))
           result-reg)))
 
 ;; gethash: 2-arg (key table) or 3-arg (key table default)

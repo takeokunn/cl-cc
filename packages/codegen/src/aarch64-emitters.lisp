@@ -289,9 +289,10 @@
 
 (defun emit-a64-vm-ret (inst stream)
   "Emit inline epilogue (restore all callee-saved registers) then RET.
-   Must stay in sync with emit-a64-prologue and a64-instruction-size for vm-ret."
+    Must stay in sync with emit-a64-prologue and a64-instruction-size for vm-ret."
   (declare (ignore inst))
-  (dolist (pair (reverse (a64-used-callee-saved-pairs *current-a64-regalloc*)))
+  (dolist (pair (reverse (or *current-a64-epilogue-save-pairs*
+                            (a64-used-callee-saved-pairs *current-a64-regalloc*))))
     (destructuring-bind (rn rm) pair
       (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
   (emit-a64-instr +a64-ret+ stream))

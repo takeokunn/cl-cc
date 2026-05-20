@@ -241,7 +241,7 @@ tests rather than mmap-fast native startup."
        :compaction-trigger-fraction 0.5d0
         :gc-inhibit nil
         :gc-pending nil
-        :free-bins (make-array 16 :initial-element nil)
+         :free-bins (make-array +rt-free-list-bin-count+ :initial-element nil)
         :slab-pools (make-hash-table :test #'eql)
         :lazy-sweep-cursor (getf image :old-base)
         :lazy-sweep-limit (getf image :old-base)

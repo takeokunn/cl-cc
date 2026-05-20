@@ -15,6 +15,76 @@
 
 (defgeneric compile-ast (node ctx))
 
+(defvar *string-literal-pool* nil
+  "Per-compilation-unit pool mapping literal constants to vm-const registers.")
+
+(defun %copy-string-literal-pool (pool)
+  "Return a shallow copy of literal constant POOL using EQUAL comparison."
+  (when pool
+    (let ((copy (make-hash-table :test #'equal
+                                 :rehash-size (hash-table-rehash-size pool)
+                                 :rehash-threshold (hash-table-rehash-threshold pool))))
+      (maphash (lambda (key value)
+                 (setf (gethash key copy) value))
+                 pool)
+      copy)))
+
+(defun %poolable-literal-p (value)
+  "Return T when VALUE is a literal kind safe to deduplicate in the constant pool."
+  (or (integerp value)
+      (floatp value)
+      (stringp value)
+      (symbolp value)
+      (characterp value)))
+
+(defun %literal-pool-key (pool value)
+  "Return VALUE's scoped hash-table key for the literal constant pool."
+  (list pool
+        (type-of value)
+        (if (stringp value) (copy-seq value) value)))
+
+(defun %literal-pool-call-barrier-p (inst)
+  "Return T when INST may clobber caller-visible temporary registers."
+  (or (typep inst 'vm-call)
+      (typep inst 'vm-tail-call)
+      (typep inst 'vm-generic-call)
+      (typep inst 'vm-apply)))
+
+(defun %literal-pool-barrier-count (ctx)
+  "Return the number of call-like barriers emitted in CTX so far."
+  (count-if #'%literal-pool-call-barrier-p (ctx-instructions ctx)))
+
+(defun %literal-pool-lookup (key barrier pool)
+  "Return KEY's pooled register when it is valid for the current BARRIER."
+  (multiple-value-bind (entry present-p)
+      (gethash key pool)
+    (cond
+      ((not present-p) (values nil nil))
+      ((and (consp entry) (eql (cdr entry) barrier))
+       (values (car entry) t))
+      (t (values nil nil)))))
+
+(defun %emit-constant (ctx value &key dst)
+  "Return a register containing VALUE.
+Literals reuse a per-compilation-unit vm-const register via an EQUAL hash table."
+  (if (and (%poolable-literal-p value) *string-literal-pool*)
+      (let ((key (%literal-pool-key *string-literal-pool* value))
+            (barrier (%literal-pool-barrier-count ctx)))
+        (multiple-value-bind (existing present-p)
+            (%literal-pool-lookup key barrier *string-literal-pool*)
+        (if present-p
+            (progn
+              (when (and dst (not (eq dst existing)))
+                (emit ctx (make-vm-move :dst dst :src existing)))
+              (or dst existing))
+            (let ((target-reg (or dst (make-register ctx))))
+              (emit ctx (make-vm-const :dst target-reg :value value))
+              (setf (gethash key *string-literal-pool*) (cons target-reg barrier))
+              target-reg))))
+      (let ((target-reg (or dst (make-register ctx))))
+        (emit ctx (make-vm-const :dst target-reg :value value))
+        target-reg)))
+
 ;;; ── Binary operator dispatch table (data layer) ──────────────────────────
 ;;;
 ;;; One table carries every constructor variant for a numeric/comparison operator.
@@ -104,6 +174,22 @@ Falls back to the generic binop-ctor when no specialization applies."
        (or (%numeric-binop-ctor-function op :float) (binop-ctor op)))
       (t (binop-ctor op)))))
 
+(defun %numeric-binop-specialization-kind (lhs rhs ctx)
+  "Return :FIXNUM, :FLOAT, or NIL for the statically proven binary operand kind."
+  (let ((lhs-type (%ast-proven-type ctx lhs))
+        (rhs-type (%ast-proven-type ctx rhs)))
+    (cond
+      ((and (%proven-fixnum-type-p lhs-type) (%proven-fixnum-type-p rhs-type)) :fixnum)
+      ((or (and (%proven-float-type-p lhs-type) (%proven-float-type-p rhs-type))
+           (and (%float-literal-node-p lhs) (%float-literal-node-p rhs))) :float)
+      (t nil))))
+
+(defun %guard-type-for-numeric-kind (kind)
+  (case kind
+    (:fixnum 'fixnum)
+    (:float 'float)
+    (t nil)))
+
 (defun %equality-predicate-constructor (func-sym lhs rhs ctx)
   "Select a specialized constructor for EQ/EQL/EQUAL when operand types are proven.
 Fixnum pairs lower to direct numeric comparison. Symbol pairs lower to pointer-style
@@ -124,9 +210,7 @@ VM equality. Unknown types preserve each predicate's existing generic path."
 ;;; ── Primitive literal forms ──────────────────────────────────────────────
 
 (defmethod compile-ast ((node ast-int) ctx)
-  (let ((dst (make-register ctx)))
-    (emit ctx (make-vm-const :dst dst :value (ast-int-value node)))
-    dst))
+  (%emit-constant ctx (ast-int-value node)))
 
 (defmethod compile-ast ((node ast-hole) ctx)
   (declare (ignore ctx))
@@ -135,9 +219,7 @@ VM equality. Unknown types preserve each predicate's existing generic path."
 (defmethod compile-ast ((node ast-var) ctx)
   (let ((name (ast-var-name node)))
     (when (or (eq name t) (eq name nil) (keywordp name))
-      (let ((dst (make-register ctx)))
-        (emit ctx (make-vm-const :dst dst :value name))
-        (return-from compile-ast dst)))
+      (return-from compile-ast (%emit-constant ctx name)))
     (let ((local-entry (%assoc-eq name (ctx-env ctx))))
       (when (and local-entry (%member-eq-p name (ctx-boxed-vars ctx)))
         (let ((dst (make-register ctx)))
@@ -148,26 +230,46 @@ VM equality. Unknown types preserve each predicate's existing generic path."
     (multiple-value-bind (constant-value constant-present-p)
         (gethash name *constant-table*)
       (when constant-present-p
-        (let ((dst (make-register ctx)))
-          (emit ctx (make-vm-const :dst dst :value constant-value))
-          (return-from compile-ast dst))))
+        (return-from compile-ast (%emit-constant ctx constant-value))))
     (when (or (gethash name (ctx-global-variables ctx)) (boundp name))
-      (let ((dst (make-register ctx)))
-        (emit ctx (make-vm-get-global :dst dst :name name))
-        (return-from compile-ast dst)))
+      (let ((cache-reg (%global-cache-reg ctx name)))
+        (when cache-reg
+          (return-from compile-ast cache-reg))
+        (let ((dst (make-register ctx)))
+          (emit ctx (make-vm-get-global :dst dst :name name))
+          (return-from compile-ast dst))))
     (error "Unbound variable: ~S" name)))
 
 (defmethod compile-ast ((node ast-binop) ctx)
   ;; binop is never in tail position itself; clear to prevent sub-expression leakage
   (setf (ctx-tail-position ctx) nil)
-  (let* ((lhs-reg (compile-ast (ast-binop-lhs node) ctx))
-         (rhs-reg (compile-ast (ast-binop-rhs node) ctx))
+  (let* ((lhs-ast (ast-binop-lhs node))
+         (rhs-ast (ast-binop-rhs node))
+         (lhs-reg (compile-ast lhs-ast ctx))
+         (rhs-reg (compile-ast rhs-ast ctx))
          (dst (make-register ctx))
-         (ctor (%numeric-binop-constructor (ast-binop-op node)
-                                           (ast-binop-lhs node)
-                                           (ast-binop-rhs node)
-                                           ctx)))
-    (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg))
+         (kind (%numeric-binop-specialization-kind lhs-ast rhs-ast ctx))
+         (guard-type (%guard-type-for-numeric-kind kind))
+         (ctor (%numeric-binop-constructor (ast-binop-op node) lhs-ast rhs-ast ctx)))
+    (if (and (eq (ctx-target ctx) :vm)
+             kind guard-type (> (ctx-safety ctx) 0))
+        (let ((deopt-label (make-label ctx "deopt_binop"))
+              (slow-label (make-label ctx "deopt_binop_slow"))
+              (done-label (make-label ctx "deopt_binop_done"))
+              (deopt-id (make-label ctx "deopt_guard")))
+          (emit ctx (cl-cc/vm::make-vm-type-check
+                     :src lhs-reg :type-name guard-type :label deopt-label :id deopt-id))
+          (emit ctx (cl-cc/vm::make-vm-type-check
+                     :src rhs-reg :type-name guard-type :label deopt-label :id deopt-id))
+          (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg))
+          (emit ctx (make-vm-jump :label done-label))
+          (emit ctx (make-vm-label :name deopt-label))
+          (emit ctx (cl-cc/vm::make-vm-deopt
+                     :label slow-label :id deopt-id :reason (list :type-check guard-type)))
+          (emit ctx (make-vm-label :name slow-label))
+          (emit ctx (funcall (binop-ctor (ast-binop-op node)) :dst dst :lhs lhs-reg :rhs rhs-reg))
+          (emit ctx (make-vm-label :name done-label)))
+        (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg)))
     dst))
 
 (defmethod compile-ast ((node ast-progn) ctx)
@@ -224,7 +326,7 @@ Emits a move from the branch result into DST; optionally emits a jump to JUMP-LA
   (setf (ctx-tail-position ctx) tail)
   (let ((saved-type-env (ctx-type-env ctx)))
     (unwind-protect
-         (progn
+         (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
            (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type branch))
            (let ((result-reg (compile-ast ast ctx)))
              (setf (ctx-tail-position ctx) nil)

@@ -8,52 +8,103 @@
 
 ;;; String Comparison Instructions
 
-(defvar *rt-string-dedup-table* nil
-  "Weak-value table mapping string content hashes to canonical VM strings.")
+(defvar *runtime-string-table* nil
+  "Weak runtime string interning table mapping string contents to canonical strings.")
 
-(defun %rt-string-content-hash (string)
-  "Return a content hash for STRING."
-  (check-type string string)
-  (sxhash string))
+(defvar *rt-string-dedup-table* nil
+  "Compatibility alias for the runtime string interning table.")
 
 (defun %rt-ensure-string-dedup-table ()
-  "Return the VM string dedup table, creating it lazily."
-  (or *rt-string-dedup-table*
-      (setf *rt-string-dedup-table*
-            (if (fboundp 'rt-make-hash-table)
-                (rt-make-hash-table :test 'eql :weakness :value)
-                (make-hash-table :test 'eql
-                                 #+sbcl :weakness
-                                 #+sbcl :value)))))
-
-(defun %rt-string-table-get (hash table)
-  "Read HASH from TABLE regardless of whether TABLE is a VM hash object or host hash table."
-  (if (typep table 'vm-hash-table-object)
-      (gethash hash (vm-hash-table-internal table))
-      (gethash hash table)))
-
-(defun %rt-string-table-set (hash string table)
-  "Set HASH to STRING in TABLE regardless of table representation."
-  (if (typep table 'vm-hash-table-object)
-      (progn
-        (setf (gethash hash (vm-hash-table-internal table)) string)
-        (vm-record-weak-hash-entry table hash string))
-      (setf (gethash hash table) string))
-  string)
+  "Return the runtime string interning table, creating it lazily."
+  (or *runtime-string-table*
+      (let ((table (make-hash-table :test 'equal
+                                    #+sbcl :weakness
+                                    #+sbcl :key-and-value)))
+        (setf *runtime-string-table* table
+              *rt-string-dedup-table* table))))
 
 (defun rt-string-dedup (string)
   "Return the canonical VM string with the same contents as STRING."
   (check-type string string)
-  (let* ((table (%rt-ensure-string-dedup-table))
-         (hash (%rt-string-content-hash string)))
-    (multiple-value-bind (canonical found-p) (%rt-string-table-get hash table)
+  (let ((table (%rt-ensure-string-dedup-table)))
+    (multiple-value-bind (canonical found-p) (gethash string table)
       (if (and found-p canonical (string= canonical string))
           canonical
-          (%rt-string-table-set hash string table)))))
+          (setf (gethash string table) string)))))
 
 (defun rt-string-intern (string)
   "Return the canonical weakly interned VM string for STRING's contents."
   (rt-string-dedup string))
+
+(defun %vm-sso-function (name)
+  "Return runtime SSO function NAME when the runtime package is loaded."
+  (%vm-runtime-function name))
+
+(defun %vm-sso-string-p (value)
+  "True when VALUE is a runtime small-string immediate."
+  (and (integerp value)
+       (let ((predicate (%vm-sso-function "VAL-SSO-STRING-P")))
+         (and predicate (funcall predicate value)))))
+
+(defun %vm-decode-sso-string (value)
+  "Decode runtime SSO VALUE to a host string."
+  (funcall (%vm-sso-function "DECODE-SSO-STRING") value))
+
+(defun %vm-byte-string-p (string)
+  "True when STRING can be represented as inline SSO bytes."
+  (and (stringp string)
+       (<= (length string) 7)
+       (loop for char across string
+             always (<= (char-code char) #xFF))))
+
+(defun %vm-host-string (value)
+  "Return VALUE as a host string, decoding SSO immediates as needed."
+  (if (%vm-sso-string-p value)
+      (%vm-decode-sso-string value)
+      value))
+
+(defun %vm-maybe-sso-string (string)
+  "Return an SSO immediate for short byte strings; otherwise return interned heap string."
+  (check-type string string)
+  (let ((encoder (%vm-sso-function "ENCODE-SSO-STRING")))
+    (if (and encoder (%vm-byte-string-p string))
+        (funcall encoder string)
+        (rt-string-intern string))))
+
+(defun %vm-string-length (value)
+  "Return the length of host or SSO string VALUE."
+  (if (%vm-sso-string-p value)
+      (logand value #x7)
+      (length value)))
+
+(defun %vm-string-char (value index)
+  "Return character INDEX from host or SSO string VALUE."
+  (if (%vm-sso-string-p value)
+      (code-char (ldb (byte 8 (+ 3 (* 8 index))) value))
+      (char value index)))
+
+(defmacro define-vm-sso-string-comparison-executor (vm-class cl-fn)
+  `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
+     (declare (ignore labels))
+     (vm-reg-set state (vm-dst inst)
+                 (,cl-fn (%vm-host-string (vm-reg-get state (vm-str1 inst)))
+                         (%vm-host-string (vm-reg-get state (vm-str2 inst)))))
+     (values (1+ pc) nil nil)))
+
+(defmacro define-vm-sso-string-unary-executor (vm-class cl-fn)
+  `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
+     (declare (ignore labels))
+     (vm-reg-set state (vm-dst inst)
+                 (%vm-maybe-sso-string
+                  (,cl-fn (%vm-host-string (vm-reg-get state (vm-src inst))))))
+     (values (1+ pc) nil nil)))
+
+(defmacro define-vm-sso-string-destructive-unary-executor (vm-class cl-fn)
+  `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
+     (declare (ignore labels))
+     (vm-reg-set state (vm-dst inst)
+                 (,cl-fn (copy-seq (%vm-host-string (vm-reg-get state (vm-src inst))))))
+     (values (1+ pc) nil nil)))
 
 ;; All binary string comparisons share the same (dst str1 str2) slot structure.
 (defmacro define-vm-string-comparison (name tag docstring)
@@ -80,6 +131,106 @@
 ;;; String Access and Query Instructions
 
 ;; define-vm-unary-instruction and define-vm-char-comparison are defined in vm.lisp.
+
+;;; FR-136: ASCII character class lookup table
+
+(defconstant +char-class-alpha+ #x01)
+(defconstant +char-class-digit+ #x02)
+(defconstant +char-class-upper+ #x04)
+(defconstant +char-class-lower+ #x08)
+(defconstant +char-class-alphanumeric+ #x10)
+(defconstant +char-class-graphic+ #x20)
+(defconstant +char-class-whitespace+ #x40)
+(defconstant +char-class-standard+ #x80)
+
+(defun %make-char-class-table ()
+  "Build the immutable-by-convention ASCII character class table."
+  (let ((table (make-array 256 :element-type '(unsigned-byte 8) :initial-element 0)))
+    (labels ((add-flag (code flag)
+               (setf (aref table code) (logior (aref table code) flag)))
+             (add-range (start end flag)
+               (loop for code from start to end do (add-flag code flag))))
+      ;; Standard graphic ASCII characters are space through tilde. Newline is
+      ;; the only non-graphic standard character.
+      (add-range 32 126 +char-class-graphic+)
+      (add-range 32 126 +char-class-standard+)
+      (add-flag (char-code #\Newline) +char-class-standard+)
+      (dolist (code (mapcar #'char-code '(#\Space #\Tab #\Newline #\Return #\Page)))
+        (add-flag code +char-class-whitespace+))
+      (add-range (char-code #\0) (char-code #\9)
+                 (logior +char-class-digit+ +char-class-alphanumeric+))
+      (add-range (char-code #\A) (char-code #\Z)
+                 (logior +char-class-alpha+ +char-class-upper+ +char-class-alphanumeric+))
+      (add-range (char-code #\a) (char-code #\z)
+                 (logior +char-class-alpha+ +char-class-lower+ +char-class-alphanumeric+)))
+    table))
+
+(defparameter *char-class-table* (%make-char-class-table)
+  "256-byte ASCII character class table for O(1) character predicates.
+Each byte encodes +CHAR-CLASS-* flags. Treat as read-only after load.")
+
+(declaim (inline %char-code<=255-p %ascii-char-class-logtest
+                 vm-alpha-char-p-value vm-digit-char-p-value
+                 vm-upper-case-p-value vm-lower-case-p-value
+                 vm-alphanumericp-value vm-graphic-char-p-value
+                 vm-standard-char-p-value vm-both-case-p-value))
+
+(defun %char-code<=255-p (code)
+  (and (integerp code) (<= 0 code 255)))
+
+(defun %ascii-char-class-logtest (ch flag)
+  (let ((code (char-code ch)))
+    (and (%char-code<=255-p code)
+         (logtest (aref *char-class-table* code) flag))))
+
+(defun vm-alpha-char-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-alpha+)
+        (alpha-char-p ch))))
+
+(defun vm-digit-char-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (and (logtest (aref *char-class-table* code) +char-class-digit+)
+             (- code (char-code #\0)))
+        (digit-char-p ch))))
+
+(defun vm-upper-case-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-upper+)
+        (upper-case-p ch))))
+
+(defun vm-lower-case-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-lower+)
+        (lower-case-p ch))))
+
+(defun vm-alphanumericp-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-alphanumeric+)
+        (alphanumericp ch))))
+
+(defun vm-graphic-char-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-graphic+)
+        (graphic-char-p ch))))
+
+(defun vm-standard-char-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-standard+)
+        (standard-char-p ch))))
+
+(defun vm-both-case-p-value (ch)
+  (let ((code (char-code ch)))
+    (if (%char-code<=255-p code)
+        (logtest (aref *char-class-table* code) +char-class-alpha+)
+        (both-case-p ch))))
 
 (define-vm-unary-instruction vm-string-length :string-length "String length. DST = length of SRC string.")
 
@@ -154,27 +305,31 @@
 ;;;   string=, string-equal     → T or NIL
 ;;;   string<, string>, etc.    → mismatch index (integer) or NIL
 
-(define-simple-instruction vm-string= :binary string= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string< :binary string< :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string> :binary string> :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string<= :binary string<= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string>= :binary string>= :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-equal :binary string-equal :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-lessp :binary string-lessp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-greaterp :binary string-greaterp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-equal :binary string-not-equal :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-greaterp :binary string-not-greaterp :lhs vm-str1 :rhs vm-str2)
-(define-simple-instruction vm-string-not-lessp :binary string-not-lessp :lhs vm-str1 :rhs vm-str2)
+(define-vm-sso-string-comparison-executor vm-string= string=)
+(define-vm-sso-string-comparison-executor vm-string< string<)
+(define-vm-sso-string-comparison-executor vm-string> string>)
+(define-vm-sso-string-comparison-executor vm-string<= string<=)
+(define-vm-sso-string-comparison-executor vm-string>= string>=)
+(define-vm-sso-string-comparison-executor vm-string-equal string-equal)
+(define-vm-sso-string-comparison-executor vm-string-lessp string-lessp)
+(define-vm-sso-string-comparison-executor vm-string-greaterp string-greaterp)
+(define-vm-sso-string-comparison-executor vm-string-not-equal string-not-equal)
+(define-vm-sso-string-comparison-executor vm-string-not-greaterp string-not-greaterp)
+(define-vm-sso-string-comparison-executor vm-string-not-lessp string-not-lessp)
 
 ;;; Instruction Execution - String Access and Query
 
-(define-simple-instruction vm-string-length :unary length)
+(defmethod execute-instruction ((inst vm-string-length) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (%vm-string-length (vm-reg-get state (vm-src inst))))
+  (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-char) state pc labels)
   (declare (ignore labels))
   (let* ((string (vm-reg-get state (vm-string-reg inst)))
-         (index (vm-reg-get state (vm-index inst)))
-         (result (char string index)))
+          (index (vm-reg-get state (vm-index inst)))
+          (result (%vm-string-char string index)))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -192,32 +347,36 @@
          (start  (vm-reg-get state (vm-start inst)))
          ;; nil end-slot means no upper bound — pass nil to subseq (= end of sequence)
          (end    (if (vm-end inst) (vm-reg-get state (vm-end inst)) nil))
-         (result (subseq string start end)))
-    (vm-reg-set state (vm-dst inst) result)
+         (result (subseq (%vm-host-string string) start end)))
+    (vm-reg-set state (vm-dst inst) (%vm-maybe-sso-string result))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-concatenate) state pc labels)
   (declare (ignore labels))
   (let* ((parts (or (vm-parts inst)
-                    (list (vm-str1 inst) (vm-str2 inst))))
-         (result (apply #'concatenate 'string
-                        (mapcar (lambda (reg) (vm-reg-get state reg)) parts))))
-    (vm-reg-set state (vm-dst inst) result)
-    (values (1+ pc) nil nil)))
+                     (list (vm-str1 inst) (vm-str2 inst))))
+          (result (%vm-maybe-sso-string
+                   (apply #'concatenate 'string
+                          (mapcar (lambda (reg)
+                                    (%vm-host-string (vm-reg-get state reg)))
+                                  parts)))))
+     (vm-reg-set state (vm-dst inst) result)
+     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-string-upcase :unary string-upcase)
-(define-simple-instruction vm-string-downcase :unary string-downcase)
-(define-simple-instruction vm-string-capitalize :unary string-capitalize)
-(define-simple-instruction vm-nstring-upcase :unary nstring-upcase)
-(define-simple-instruction vm-nstring-downcase :unary nstring-downcase)
-(define-simple-instruction vm-nstring-capitalize :unary nstring-capitalize)
+(define-vm-sso-string-unary-executor vm-string-upcase string-upcase)
+(define-vm-sso-string-unary-executor vm-string-downcase string-downcase)
+(define-vm-sso-string-unary-executor vm-string-capitalize string-capitalize)
+(define-vm-sso-string-destructive-unary-executor vm-nstring-upcase nstring-upcase)
+(define-vm-sso-string-destructive-unary-executor vm-nstring-downcase nstring-downcase)
+(define-vm-sso-string-destructive-unary-executor vm-nstring-capitalize nstring-capitalize)
 
 (defmacro define-vm-string-trim-executor (vm-class cl-fn)
   `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
      (declare (ignore labels))
      (vm-reg-set state (vm-dst inst)
-                 (,cl-fn (vm-reg-get state (vm-char-bag inst))
-                         (vm-reg-get state (vm-string-reg inst))))
+                 (%vm-maybe-sso-string
+                  (,cl-fn (%vm-host-string (vm-reg-get state (vm-char-bag inst)))
+                          (%vm-host-string (vm-reg-get state (vm-string-reg inst))))))
      (values (1+ pc) nil nil)))
 
 (define-vm-string-trim-executor vm-string-trim       string-trim)
@@ -228,8 +387,8 @@
 
 (defmethod execute-instruction ((inst vm-search-string) state pc labels)
   (declare (ignore labels))
-  (let* ((pattern (vm-reg-get state (vm-pattern inst)))
-         (string (vm-reg-get state (vm-string-reg inst)))
+  (let* ((pattern (%vm-host-string (vm-reg-get state (vm-pattern inst))))
+         (string (%vm-host-string (vm-reg-get state (vm-string-reg inst))))
          (start (vm-reg-get state (vm-start inst)))
          (result (or (search pattern string :start2 start) -1)))
     (vm-reg-set state (vm-dst inst) result)

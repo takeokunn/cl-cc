@@ -7,11 +7,22 @@
   "Compiling ast-values emits vm-values and returns a register."
   (let* ((ctx (make-codegen-ctx))
          (reg (compile-ast (cl-cc/ast:make-ast-values
-                             :forms (list (make-ast-int :value 1)
-                                          (make-ast-int :value 2)
-                                          (make-ast-int :value 3)))
-                           ctx)))
+                              :forms (list (make-ast-int :value 1)
+                                           (make-ast-int :value 2)
+                                           (make-ast-int :value 3)
+                                           (make-ast-int :value 4)))
+                            ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-values))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-single-value-compilation-skips-mv-instructions
+  "A single-argument VALUES form returns the compiled value register directly."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc/ast:make-ast-values
+                             :forms (list (make-ast-int :value 42)))
+                           ctx)))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values-regs))
     (assert-true (keywordp reg))))
 
 (deftest-each codegen-values-run
@@ -43,6 +54,20 @@
                              :body (list (make-ast-var :name 'a)))
                            ctx)))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
+    (assert-true (keywordp reg))))
+
+(deftest codegen-single-var-mvb-skips-mv-bind
+  "A single-variable MULTIPLE-VALUE-BIND uses the primary result register directly."
+  (let* ((ctx (make-codegen-ctx))
+         (reg (compile-ast (cl-cc/ast:make-ast-multiple-value-bind
+                             :vars '(a)
+                             :values-form (make-ast-call :func 'floor
+                                                         :args (list (make-ast-int :value 17)
+                                                                     (make-ast-int :value 5)))
+                             :body (list (make-ast-var :name 'a)))
+                           ctx)))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-mv-bind-regs))
     (assert-true (keywordp reg))))
 
 (deftest-each codegen-mvb-run

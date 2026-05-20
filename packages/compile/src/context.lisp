@@ -20,8 +20,10 @@
                                  :documentation "Hash table mapping function names to statically known small multiple-value arities.")
      (function-conventions :initform (make-hash-table :test #'equal) :accessor ctx-function-conventions
                            :documentation "Hash table mapping function labels to :external or :internal calling conventions.")
-   (global-variables :initform (make-hash-table :test #'eq) :accessor ctx-global-variables
-                     :documentation "Hash table mapping global variable names to their registers")
+    (global-variables :initform (make-hash-table :test #'eq) :accessor ctx-global-variables
+                      :documentation "Hash table mapping global variable names to their registers")
+    (global-var-cache :initform nil :accessor ctx-global-var-cache
+                      :documentation "Function-local alist mapping cached global variable names to temporary registers.")
    (global-classes :initform (make-hash-table :test #'eq) :accessor ctx-global-classes
                    :documentation "Hash table mapping class names to their class descriptor registers")
     (global-generics :initform (make-hash-table :test #'eq) :accessor ctx-global-generics
@@ -53,9 +55,11 @@
     (hash-table-test-bindings :initform nil :accessor ctx-hash-table-test-bindings
                               :documentation "Alist mapping local hash-table variable names to statically known tests for specialized lookup lowering.")
     (tail-position :initform nil :accessor ctx-tail-position
-                      :documentation "Whether the current compilation position is a tail position.")
-     (diagnostics :initform nil :accessor ctx-diagnostics
-                  :documentation "Structured compiler diagnostics accumulated during code generation.")))
+                       :documentation "Whether the current compilation position is a tail position.")
+     (target :initarg :target :initform :vm :accessor ctx-target
+             :documentation "Current code generation target (:vm, :x86_64, :wasm, ...).")
+      (diagnostics :initform nil :accessor ctx-diagnostics
+                   :documentation "Structured compiler diagnostics accumulated during code generation.")))
 
 (defun %make-compile-warning (message &key source-file span error-code fix-it)
   "Create a structured compiler warning diagnostic."

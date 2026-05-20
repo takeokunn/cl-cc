@@ -79,7 +79,11 @@ SHAPE is one of:
   (result-register nil)
   (leaf-p nil :type boolean)
   (calling-convention :external :type keyword)
-  (function-conventions nil))
+  (function-conventions nil)
+  (deopt-info nil)
+  (osr-entry-points nil)
+  (tier1-entry-points nil)
+  (compilation-tier 0 :type integer))
 
 (defclass vm-state ()
    ((registers :initform (make-hash-table :test #'equal) :reader vm-state-registers)
@@ -139,10 +143,16 @@ Used by call-next-method and next-method-p.")
                             :documentation "Branch edge counters keyed by (kind from-pc to-pc).")
     (profile-call-counts :initform (make-hash-table :test #'equal) :accessor vm-profile-call-counts
                           :documentation "Function label -> dynamic call count collected for PGO.")
-    (profile-call-times :initform (make-hash-table :test #'equal) :accessor vm-profile-call-times
-                        :documentation "Function label -> cumulative elapsed time in nanoseconds collected for PGO.")
-    (profile-type-feedback :initform (make-hash-table :test #'equal) :accessor vm-profile-type-feedback
-                           :documentation "Register/type -> observation count collected for PGO."))
+     (profile-call-times :initform (make-hash-table :test #'equal) :accessor vm-profile-call-times
+                         :documentation "Function label -> cumulative elapsed time in nanoseconds collected for PGO.")
+     (profile-type-feedback :initform (make-hash-table :test #'equal) :accessor vm-profile-type-feedback
+                            :documentation "Register/type -> observation count collected for PGO.")
+     (current-deopt-frame :initform nil :accessor vm-current-deopt-frame
+                          :documentation "Most recent deoptimization snapshot.")
+     (deopt-history :initform nil :accessor vm-deopt-history
+                    :documentation "List of deoptimization snapshots, newest first.")
+     (tier1-code :initform (make-hash-table :test #'equal) :accessor vm-tier1-code
+                 :documentation "OSR id/label -> simple Tier-1 entry metadata used by the OSR stub."))
   (:documentation "VM execution state with registers, call stack, and heap."))
 
 ;;; VM state initialization, profiling, heap ops, and execute-instruction generic

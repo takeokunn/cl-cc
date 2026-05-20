@@ -66,7 +66,8 @@
    #:vm-spill-src
    #:vm-spill-dst
    #:vm-spill-slot
-   #:*current-regalloc*
+    #:*current-regalloc*
+    #:schedule-post-ra
 
    ;; ── x86-64 backend ──
     #:target-regalloc
@@ -82,13 +83,35 @@
    #:*phys-reg-to-asm-string*
    #:emit-instruction
    #:x86-64-target #:target-spill-base-reg
-    #:x86-64-red-zone-spill-p
-    #:compile-to-x86-64-bytes
-    #:*x86-64-spectre-mitigations-enabled*
+     #:x86-64-red-zone-spill-p
+     #:*shrink-wrap-enabled*
+     #:compile-to-x86-64-bytes
+     #:*x86-64-spectre-mitigations-enabled*
+
+     ;; ── MIR instruction selection ──
+     #:isel-diagnostic
+     #:isel-diagnostic-message
+     #:isel-rule
+     #:isel-rule-name
+     #:isel-rule-target
+     #:isel-rule-pattern
+     #:isel-rule-result-op
+     #:isel-rule-cost
+     #:isel-rule-size
+     #:isel-rule-emitter
+     #:register-isel-rule
+     #:isel-rules-for-target
+     #:isel-maximal-munch
+     #:isel-vm-program
+     #:vm-program->mir-module
+     #:mir-module->vm-program
+     #:optimize-mir-module-for-isel
+     #:*isel-x86-64-rules*
+     #:*isel-aarch64-rules*
 
    ;; ── AArch64 backend ──
-    #:aarch64-target
-    #:compile-to-aarch64-bytes
+     #:aarch64-target
+     #:compile-to-aarch64-bytes
 
     ;; ── RISC-V backend ──
     #:riscv64-target

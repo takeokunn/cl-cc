@@ -24,12 +24,22 @@
     vm-program-instructions
     vm-program-result-register
     vm-program-calling-convention
-    vm-program-function-conventions
+     vm-program-function-conventions
+     vm-program-deopt-info
+     vm-program-osr-entry-points
+     vm-program-tier1-entry-points
+     vm-program-compilation-tier
    vm-state
    vm-state-registers
    vm-state-heap
    vm-heap-counter
-   vm-call-stack
+    vm-call-stack
+    vm-current-deopt-frame
+    vm-deopt-history
+    vm-tier1-code
+    vm-capture-deopt-frame
+    vm-trigger-deopt
+    vm-register-tier1-osr-entry
    vm-method-call-stack
    vm-closure-env
    vm-heap-alloc
@@ -189,7 +199,8 @@
    vm-string-right-trim
    vm-search-string
     vm-string-set
-    *rt-string-dedup-table*
+     *runtime-string-table*
+     *rt-string-dedup-table*
     rt-string-dedup
     rt-string-intern
    vm-str1

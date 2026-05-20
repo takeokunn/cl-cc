@@ -53,13 +53,26 @@
       (vm-concatenate
        (let ((parts (or (vm-parts inst) (list (vm-str1 inst) (vm-str2 inst)))))
          (if (every (lambda (reg)
-                      (multiple-value-bind (val found) (gethash reg env)
-                        (and found (stringp val))))
+                       (multiple-value-bind (val found) (gethash reg env)
+                         (and found (stringp val))))
                     parts)
              (make-vm-const :dst (vm-dst inst)
-                            :value (apply #'concatenate 'string
-                                          (mapcar (lambda (reg) (gethash reg env)) parts)))
+                             :value (apply #'concatenate 'string
+                                           (mapcar (lambda (reg) (gethash reg env)) parts)))
              inst)))
+      (vm-char
+       (multiple-value-bind (string found-string) (gethash (vm-string-reg inst) env)
+         (multiple-value-bind (index found-index) (gethash (vm-index inst) env)
+           (if (and (gethash 'vm-char *opt-binary-fold-table*)
+                    found-string found-index
+                    (stringp string)
+                    (integerp index)
+                    (<= 0 index)
+                    (< index (length string)))
+               (make-vm-const :dst (vm-dst inst)
+                              :value (funcall (gethash 'vm-char *opt-binary-fold-table*)
+                                              string index))
+               inst))))
       (t
        (cond
          ;; Binary arithmetic/comparison — data-driven

@@ -94,6 +94,21 @@ unknown so callers can fall through instead of silently changing semantics."
         (values value nil)
         (values nil (compile-ast node ctx)))))
 
+(defun %phase2-static-dimensions (node)
+  "Return a static multi-dimensional MAKE-ARRAY dimension list, if known."
+  (multiple-value-bind (value known-p) (%phase2-static-value node)
+    (if (and known-p
+             (listp value)
+             (every (lambda (dimension)
+                      (typep dimension '(integer 0 *)))
+                    value))
+        (values value t)
+        (values nil nil))))
+
+(defun %phase2-dimensions-total-size (dimensions)
+  "Return the row-major total size for DIMENSIONS."
+  (reduce #'* dimensions :initial-value 1))
+
 ;;; ── Handler registrations ──────────────────────────────────────────────────
 
 ;; make-array: fixed-size array
@@ -103,15 +118,29 @@ unknown so callers can fall through instead of silently changing semantics."
     (when (%phase2-keyword-args-lowerable-p tail)
       (let ((contents (and contents-ast (ast-quote-value contents-ast))))
         (when (or (null contents-ast) (listp contents))
-          (let ((size-reg (compile-ast (first args) ctx))
-                init-reg
-                fill-pointer
-                fill-pointer-reg
-                adjustable
-                adjustable-reg
-                element-type
-                element-type-reg
-                displaced-to-reg)
+          (multiple-value-bind (dimensions static-dimensions-p)
+              (%phase2-static-dimensions (first args))
+            (let ((size-reg (if static-dimensions-p
+                                (let ((reg (make-register ctx)))
+                                  (emit ctx (make-vm-const
+                                             :dst reg
+                                             :value (%phase2-dimensions-total-size dimensions)))
+                                  reg)
+                                (compile-ast (first args) ctx)))
+                  (dimensions-reg (when static-dimensions-p
+                                    (let ((reg (make-register ctx)))
+                                      (emit ctx (make-vm-const
+                                                 :dst reg
+                                                 :value (coerce dimensions 'vector)))
+                                      reg)))
+                  init-reg
+                  fill-pointer
+                  fill-pointer-reg
+                  adjustable
+                  adjustable-reg
+                  element-type
+                  element-type-reg
+                  displaced-to-reg)
             (loop for kv on tail by #'cddr
                   for key = (%phase2-keyword-name (car kv))
                   for value-ast = (cadr kv)
@@ -136,17 +165,18 @@ unknown so callers can fall through instead of silently changing semantics."
                        (:displaced-to
                         (setf displaced-to-reg (compile-ast value-ast ctx)))))
             (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
-                                          :initial-element init-reg
-                                          :fill-pointer fill-pointer
-                                          :fill-pointer-reg fill-pointer-reg
-                                          :adjustable adjustable
-                                          :adjustable-reg adjustable-reg
-                                          :element-type element-type
-                                          :element-type-reg element-type-reg
-                                          :displaced-to-reg displaced-to-reg))
+                                           :dimensions-reg dimensions-reg
+                                           :initial-element init-reg
+                                           :fill-pointer fill-pointer
+                                           :fill-pointer-reg fill-pointer-reg
+                                           :adjustable adjustable
+                                           :adjustable-reg adjustable-reg
+                                           :element-type element-type
+                                           :element-type-reg element-type-reg
+                                           :displaced-to-reg displaced-to-reg))
             (when contents-ast
               (%phase2-emit-initial-contents ctx result-reg contents))
-            result-reg))))))
+            result-reg)))))))
 
 ;; make-adjustable-vector: array with fill-pointer
 (define-phase2-handler "MAKE-ADJUSTABLE-VECTOR" (args result-reg ctx)

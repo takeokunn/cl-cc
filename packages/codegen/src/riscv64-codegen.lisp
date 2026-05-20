@@ -584,11 +584,12 @@
   "Compile VM PROGRAM to RV64IMAFDC machine code bytes."
   (declare (ignore retpoline stack-protector shadow-stack asan msan tsan ubsan hwasan))
   (let* ((instructions (schedule-pre-ra (vm-program-instructions program)))
-         (float-vregs (riscv64-compute-float-vregs instructions))
-         (ra (allocate-registers instructions (riscv64-codegen-target) float-vregs))
-         (allocated-program (make-vm-program
-                             :instructions (regalloc-instructions ra)
-                             :result-register (vm-program-result-register program)
+          (float-vregs (riscv64-compute-float-vregs instructions))
+          (ra (allocate-registers instructions (riscv64-codegen-target) float-vregs))
+          (post-ra-instructions (schedule-post-ra (regalloc-instructions ra) ra))
+          (allocated-program (make-vm-program
+                              :instructions post-ra-instructions
+                              :result-register (vm-program-result-register program)
                              :leaf-p (vm-program-leaf-p program))))
     (let ((*current-riscv64-regalloc* ra)
           (*current-riscv64-float-vregs* float-vregs))

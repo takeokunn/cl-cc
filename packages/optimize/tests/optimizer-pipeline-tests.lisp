@@ -184,6 +184,11 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-eq :sccp (ninth cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-eq :cons-slot-forward (tenth cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-true (member :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*))
+  (assert-true (member :fma-recognition cl-cc/optimize::*opt-default-convergence-pass-keys*))
+  (assert-true (< (position :fma-recognition cl-cc/optimize::*opt-default-convergence-pass-keys*)
+                  (position :schedule-local cl-cc/optimize::*opt-default-convergence-pass-keys*)))
+  (assert-eq #'cl-cc/optimize::opt-pass-fma-recognition
+             (gethash :fma-recognition cl-cc/optimize::*opt-pass-registry*))
   (assert-true (< (position :copy-prop cl-cc/optimize::*opt-default-convergence-pass-keys*)
                   (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-true (< (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)
@@ -192,6 +197,58 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                   (position :cse cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-true (< (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)
                   (position :dce cl-cc/optimize::*opt-default-convergence-pass-keys*))))
+
+;;; ─── FR-099 FMA recognition ───────────────────────────────────────────────
+
+(defun %test-count-type (type insts)
+  (count-if (lambda (inst) (typep inst type)) insts))
+
+(deftest fr-099-fma-recognizes-mul-plus-accumulator
+  "FR-099: (+ (* 2.0 3.0) 4.0)-shape float VM code becomes one vm-fma."
+  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)))
+         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-fma out))
+    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-float-mul out))
+    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-float-add out))
+    (assert-equal '(:fma :r4 :r0 :r1 :r2) (cl-cc/vm:instruction->sexp (first out)))))
+
+(deftest fr-099-fma-recognizes-commuted-add
+  "FR-099: (+ 4.0 (* 2.0 3.0))-shape float VM code becomes one vm-fma."
+  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r2 :rhs :r3)))
+         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-fma out))
+    (assert-equal '(:fma :r4 :r0 :r1 :r2) (cl-cc/vm:instruction->sexp (first out)))))
+
+(deftest fr-099-fma-does-not-fuse-multiple-consumers
+  "FR-099: a multiply result used by two adds is not fused."
+  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)
+                      (cl-cc/vm::make-vm-float-add :dst :r5 :lhs :r3 :rhs :r6)))
+         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-mul out))
+    (assert-= 2 (%test-count-type 'cl-cc/vm::vm-float-add out))))
+
+(deftest fr-099-fma-does-not-fuse-integer-arithmetic
+  "FR-099: integer vm-mul/vm-add patterns are not converted to vm-fma."
+  (let* ((insts (list (make-vm-mul :dst :r3 :lhs :r0 :rhs :r1)
+                      (make-vm-add :dst :r4 :lhs :r3 :rhs :r2)))
+         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-mul out))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-add out))))
+
+(deftest fr-099-fma-does-not-cross-basic-block-boundary
+  "FR-099: FMA recognition does not fuse across labels/control-flow block boundaries."
+  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                      (make-vm-label :name "next")
+                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)))
+         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-mul out))
+    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-add out))))
 
 ;;; ─── *verify-optimizer-instructions* integration ──────────────────────────
 

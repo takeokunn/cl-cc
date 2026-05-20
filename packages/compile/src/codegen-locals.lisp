@@ -95,7 +95,7 @@ Falls through to an oob error when no index matches."
   (let ((old-env (ctx-env ctx))
         (old-tail (ctx-tail-position ctx)))
     (unwind-protect
-         (progn
+         (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
            (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
            (let ((last-reg (%compile-body-with-tail body-forms t ctx)))
              (setf (ctx-tail-position ctx) nil)

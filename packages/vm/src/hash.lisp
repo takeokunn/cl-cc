@@ -62,23 +62,30 @@
     (vm-hash-table-object (vm-hash-table-weakness table-obj))
     (hash-table nil)))
 
-(defun vm-make-host-hash-table (&key (test 'eql) weakness)
+(defun vm-make-host-hash-table (&key (test 'eql) size rehash-size rehash-threshold weakness)
   "Create the backing hash table, using host weak tables when available."
   (unless (vm-valid-hash-weakness-p weakness)
     (error "Unsupported hash-table weakness mode: ~S" weakness))
+(let ((args (list :test test)))
+  (when size
+    (setf args (append args (list :size size))))
+  (when rehash-size
+    (setf args (append args (list :rehash-size rehash-size))))
+  (when rehash-threshold
+    (setf args (append args (list :rehash-threshold rehash-threshold))))
   #+sbcl
-  (if weakness
-      (make-hash-table :test test :weakness weakness)
-      (make-hash-table :test test))
-  #-sbcl
-  (progn
-    (declare (ignore weakness))
-    (make-hash-table :test test)))
+  (when weakness
+    (setf args (append args (list :weakness weakness))))
+  (apply #'make-hash-table args)))
 
-(defun rt-make-hash-table (&key (test 'eql) weakness)
+(defun rt-make-hash-table (&key (test 'eql) size rehash-size rehash-threshold weakness)
   "Create a VM hash-table object with optional WEAKNESS metadata."
   (make-instance 'vm-hash-table-object
-                 :table (vm-make-host-hash-table :test test :weakness weakness)
+                 :table (vm-make-host-hash-table :test test
+                                                 :size size
+                                                 :rehash-size rehash-size
+                                                 :rehash-threshold rehash-threshold
+                                                 :weakness weakness)
                  :weakness weakness
                  :weak-entries (when weakness (make-hash-table :test test))
                  :lock #+sb-thread (sb-thread:make-mutex :name "vm-hash-table-lock")
@@ -148,8 +155,11 @@ abort count and retry under table lock fallback path."
                  (> (vm-hash-table-refcount table-obj) 1)))
     (let* ((src (vm-hash-table-internal table-obj))
            (weakness (vm-hash-table-weakness table-obj))
-           (copy (vm-make-host-hash-table :test (hash-table-test src)
-                                          :weakness weakness)))
+            (copy (vm-make-host-hash-table :test (hash-table-test src)
+                                           :size (hash-table-size src)
+                                           :rehash-size (hash-table-rehash-size src)
+                                           :rehash-threshold (hash-table-rehash-threshold src)
+                                           :weakness weakness)))
       (maphash (lambda (k v) (setf (gethash k copy) v)) src)
       (setf (slot-value table-obj 'table) copy
             (vm-hash-table-weakness table-obj) weakness
@@ -182,12 +192,21 @@ abort count and retry under table lock fallback path."
   "Create a new hash table. Default test is EQL."
   (dst nil :reader vm-dst)
   (test nil :reader vm-hash-test)
+  (size nil :reader vm-hash-size)
+  (rehash-size nil :reader vm-hash-rehash-size)
+  (rehash-threshold nil :reader vm-hash-rehash-threshold)
   (weakness nil :reader vm-hash-weakness))
 
 (defmethod instruction->sexp ((inst vm-make-hash-table))
   (let ((result (if (vm-hash-test inst)
-                    (list :make-hash-table (vm-dst inst) (vm-hash-test inst))
-                    (list :make-hash-table (vm-dst inst)))))
+                     (list :make-hash-table (vm-dst inst) (vm-hash-test inst))
+                     (list :make-hash-table (vm-dst inst)))))
+    (when (vm-hash-size inst)
+      (setf result (append result (list :size (vm-hash-size inst)))))
+    (when (vm-hash-rehash-size inst)
+      (setf result (append result (list :rehash-size (vm-hash-rehash-size inst)))))
+    (when (vm-hash-rehash-threshold inst)
+      (setf result (append result (list :rehash-threshold (vm-hash-rehash-threshold inst)))))
     (when (vm-hash-weakness inst)
       (setf result (append result (list :weakness (vm-hash-weakness inst)))))
     result))
@@ -197,9 +216,12 @@ abort count and retry under table lock fallback path."
         (let* ((third-arg (third sexp))
                (test (unless (keywordp third-arg) third-arg))
                (plist (if test (nthcdr 3 sexp) (nthcdr 2 sexp))))
-          (make-vm-make-hash-table :dst (second sexp)
-                                   :test test
-                                   :weakness (getf plist :weakness)))))
+           (make-vm-make-hash-table :dst (second sexp)
+                                    :test test
+                                    :size (getf plist :size)
+                                    :rehash-size (getf plist :rehash-size)
+                                    :rehash-threshold (getf plist :rehash-threshold)
+                                    :weakness (getf plist :weakness)))))
 
 (define-vm-instruction vm-gethash (vm-instruction)
   "Look up KEY in TABLE. Returns (values VALUE FOUND-P)."

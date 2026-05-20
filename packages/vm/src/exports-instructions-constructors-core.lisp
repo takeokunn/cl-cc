@@ -56,9 +56,10 @@
    make-vm-butlast
    make-vm-sbit
     make-vm-call
-    make-vm-tail-call
-    make-vm-trampoline
-    make-vm-call-next-method
+     make-vm-tail-call
+     make-vm-trampoline
+     make-vm-recompile
+     make-vm-call-next-method
    make-vm-car
    make-vm-cdr
    make-vm-ceiling-inst
@@ -86,8 +87,11 @@
     make-vm-cons
     make-vm-hash-cons
     make-vm-cons-p
-   make-vm-const
-   make-vm-complex
+    make-vm-const
+    make-vm-type-check
+    make-vm-deopt
+    make-vm-osr-entry
+    make-vm-complex
    make-vm-conjugate
    make-vm-copy-list
    make-vm-copy-tree

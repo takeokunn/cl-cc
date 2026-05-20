@@ -229,6 +229,95 @@ Result plist keys:
   ;; RET
   (emit-a64-instr +a64-ret+ stream))
 
+(defun emit-a64-shrink-pseudo (inst stream)
+  "Emit AArch64 shrink-wrap pseudo-instruction INST."
+  (typecase inst
+    (a64-shrink-save
+     (destructuring-bind (rn rm) (a64-shrink-save-pair inst)
+       (emit-a64-instr (encode-stp-pre rn rm +a64-sp+ -2) stream)))
+    (a64-shrink-restore
+     (destructuring-bind (rn rm) (a64-shrink-restore-pair inst)
+       (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))))
+
+(defun a64-phys-num->keyword (num)
+  "Return the physical register keyword for AArch64 register NUM."
+  (car (rassoc num *aarch64-reg-number* :test #'=)))
+
+(defun %a64-inst-touches-pair-p (inst pair assignment)
+  "Return true when INST reads or writes a virtual register assigned to PAIR."
+  (or (%native-inst-touches-phys-p inst (a64-phys-num->keyword (first pair)) assignment)
+      (%native-inst-touches-phys-p inst (a64-phys-num->keyword (second pair)) assignment)))
+
+(defun %a64-inst-reads-pair-p (inst pair assignment)
+  "Return true when INST reads a virtual register assigned to PAIR."
+  (or (%native-inst-reads-phys-p inst (a64-phys-num->keyword (first pair)) assignment)
+      (%native-inst-reads-phys-p inst (a64-phys-num->keyword (second pair)) assignment)))
+
+(defun a64-shrink-wrap-instructions (instructions save-pairs assignment)
+  "Annotate INSTRUCTIONS with AArch64 callee-save shrink-wrap pseudo-ops."
+  (let ((cfg (cfg-build instructions))
+        (fallback nil))
+    (unless (cfg-entry cfg)
+      (return-from a64-shrink-wrap-instructions (values instructions save-pairs save-pairs)))
+    (cfg-compute-dominators cfg)
+    (let ((save-map (make-hash-table :test #'eq))
+          (restore-map (make-hash-table :test #'eq)))
+      (dolist (pair save-pairs)
+        ;; Keep FP/LR and pair-wide entry saves at function entry; X29/X30 are part
+        ;; of frame/control-flow state, not ordinary allocatable temporaries.
+        (if (member 29 pair :test #'=)
+            (push pair fallback)
+            (let ((touch-blocks
+                    (loop for block across (cfg-blocks cfg)
+                          when (some (lambda (inst)
+                                       (%a64-inst-touches-pair-p inst pair assignment))
+                                     (bb-instructions block))
+                            collect block)))
+              (cond
+                ((null touch-blocks) nil)
+                (t
+                 (let* ((save-block (%native-common-dominator touch-blocks))
+                        (region (loop for block across (cfg-blocks cfg)
+                                      when (cfg-dominates-p save-block block)
+                                        collect block))
+                        (boundary-blocks
+                          (remove-duplicates
+                           (loop for block in region
+                                 when (or (null (bb-successors block))
+                                          (some (lambda (succ)
+                                                  (not (cfg-dominates-p save-block succ)))
+                                                (bb-successors block)))
+                                   collect block)
+                           :test #'eq)))
+                   (if (or (eq save-block (cfg-entry cfg))
+                           (some (lambda (block)
+                                   (let ((term (%native-block-terminator block)))
+                                     (and term (%a64-inst-reads-pair-p term pair assignment))))
+                                 boundary-blocks))
+                       (push pair fallback)
+                       (progn
+                         (push (make-a64-shrink-save :pair pair) (gethash save-block save-map))
+                         (dolist (block boundary-blocks)
+                           (push (make-a64-shrink-restore :pair pair)
+                                 (gethash block restore-map)))))))))))
+      (let ((result nil))
+        (loop for block across (cfg-blocks cfg) do
+          (when (bb-label block)
+            (push (bb-label block) result))
+          (dolist (pseudo (reverse (gethash block save-map)))
+            (push pseudo result))
+          (let* ((insts (bb-instructions block))
+                 (term (%native-block-terminator block))
+                 (body (if term (butlast insts) insts)))
+            (dolist (inst body)
+              (push inst result))
+            (dolist (pseudo (reverse (gethash block restore-map)))
+              (push pseudo result))
+            (when term
+              (push term result))))
+        (let ((entry-pairs (nreverse fallback)))
+          (values (nreverse result) entry-pairs entry-pairs))))))
+
 (defun a64-stack-frame-size (save-pairs spill-count)
   "Return conservative stack-frame bytes represented by pair saves plus spill slots."
   (+ (* 16 (length save-pairs))
@@ -279,31 +368,48 @@ Result plist keys:
           (*current-a64-spill-base-reg* (if frame-pointer-p +a64-fp+ +a64-sp+))
           (*current-a64-spill-offset-bias* (if frame-pointer-p 0 spill-frame-size))
            (save-pairs (a64-used-callee-saved-pairs *current-a64-regalloc*
-                                                     :frame-pointer-p frame-pointer-p))
-           (probe-count (stack-probe-count
-                         (a64-stack-frame-size save-pairs
-                                               spill-count)))
+                                                      :frame-pointer-p frame-pointer-p))
+            (shrink-wrap-p (and *shrink-wrap-enabled*
+                                (zerop spill-count)
+                                (not has-indirect-calls-p)))
+            (shrink-entry-pairs nil)
+            (shrink-final-pairs nil)
+            (cfg (cfg-build instructions))
+            (ordered-body (if (cfg-entry cfg)
+                                      (progn
+                                        (cfg-compute-dominators cfg)
+                                        (cfg-compute-loop-depths cfg)
+                                        (cfg-flatten-hot-cold cfg))
+                                      instructions))
+            (ordered-instructions
+              (if shrink-wrap-p
+                  (multiple-value-bind (annotated entry-pairs final-pairs)
+                      (a64-shrink-wrap-instructions ordered-body save-pairs
+                                                    (regalloc-assignment *current-a64-regalloc*))
+                    (setf shrink-entry-pairs entry-pairs
+                          shrink-final-pairs final-pairs)
+                    annotated)
+                  (progn
+                    (setf shrink-entry-pairs save-pairs
+                          shrink-final-pairs save-pairs)
+                    ordered-body)))
+            (probe-count (stack-probe-count
+                          (a64-stack-frame-size save-pairs
+                                                spill-count)))
            ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
            ;; Each stack probe is SUB-immediate + STUR, two 4-byte instructions.
            (spill-frame-adjust-size (if (plusp spill-frame-size) 4 0))
-            (prologue-size (+ cfi-entry-size
-                              (* 8 probe-count)
-                              (* 4 (1+ (length save-pairs)))
-                              spill-frame-adjust-size))
-          (cfg (cfg-build instructions))
-           (ordered-instructions (if (cfg-entry cfg)
-                                     (progn
-                                       (cfg-compute-dominators cfg)
-                                       (cfg-compute-loop-depths cfg)
-                                       (cfg-flatten-hot-cold cfg))
-                                     instructions))
-           (literal-pool (a64-collect-literal-pool ordered-instructions)))
+             (prologue-size (+ cfi-entry-size
+                               (* 8 probe-count)
+                               (* 4 (1+ (length shrink-entry-pairs)))
+                               spill-frame-adjust-size))
+            (literal-pool (a64-collect-literal-pool ordered-instructions)))
       (multiple-value-bind (label-offsets island-sites island-bases body-end)
           (a64-compute-labels-and-islands ordered-instructions prologue-size literal-pool)
         (let* ((island-plan (a64-constant-island-plan ordered-instructions prologue-size
                                                       island-bases body-end))
             (stack-deallocate-size (if (plusp spill-frame-size) 4 0))
-            (epilogue-size (+ (* 4 (length save-pairs)) 20))
+            (epilogue-size (+ (* 4 (length shrink-final-pairs)) 20))
                (pool-input-offset (+ body-end
                                   stack-deallocate-size epilogue-size)))
       (declare (ignore island-plan))
@@ -315,22 +421,25 @@ Result plist keys:
         ;; Stack probing: touch each guard page before the large frame is used.
         (emit-a64-stack-probes stream probe-count)
         ;; Prologue
-        (emit-a64-prologue stream save-pairs)
+        (emit-a64-prologue stream shrink-entry-pairs)
         (when (plusp spill-frame-size)
           (emit-a64-stack-allocate stream spill-frame-size))
         ;; Second pass: emit instructions
             (let ((pos prologue-size)
+                  (*current-a64-epilogue-save-pairs* shrink-final-pairs)
                   (remaining-islands island-sites))
           (dolist (inst ordered-instructions)
                 (when (and remaining-islands (= pos (first remaining-islands)))
                   (incf pos (a64-emit-constant-island literal-pool stream pos))
                   (pop remaining-islands))
-            (emit-a64-instruction inst stream pos label-offsets)
+            (if (typep inst '(or a64-shrink-save a64-shrink-restore))
+                (emit-a64-shrink-pseudo inst stream)
+                (emit-a64-instruction inst stream pos label-offsets))
             (incf pos (a64-instruction-size inst))))
         (when (plusp spill-frame-size)
           (emit-a64-stack-deallocate stream spill-frame-size))
         ;; Epilogue
-        (emit-a64-epilogue stream save-pairs)
+        (emit-a64-epilogue stream shrink-final-pairs)
         (loop repeat (/ (- (a64-literal-pool-base-offset literal-pool)
                            pool-input-offset)
                         4)
@@ -346,9 +455,10 @@ Result plist keys:
   (declare (ignore retpoline stack-protector shadow-stack asan msan tsan ubsan hwasan))
   (let ((*current-calling-convention* (vm-program-calling-convention-object program)))
   (let* ((instructions (schedule-pre-ra (vm-program-instructions program)))
-            (ra (allocate-registers instructions (a64-codegen-target)))
+             (ra (allocate-registers instructions (a64-codegen-target)))
+          (post-ra-instructions (schedule-post-ra (regalloc-instructions ra) ra))
           (allocated-program (make-vm-program
-                              :instructions (regalloc-instructions ra)
+                              :instructions post-ra-instructions
                               :result-register (vm-program-result-register program)
                               :leaf-p (vm-program-leaf-p program)
                               :calling-convention (vm-program-calling-convention program)

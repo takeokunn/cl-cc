@@ -13,7 +13,12 @@
 NIL disables size-based eviction for this optimization pass.")
 
 (defun opt-build-call-graph (instructions func-defs name-to-label)
-  "Return label → direct callees graph for the linear function bodies in FUNC-DEFS."
+  "Return label → direct callees graph for all linear bodies in FUNC-DEFS.
+The scan is intentionally whole-program: after LTO has concatenated compilation
+units, FUNC-DEFS and NAME-TO-LABEL cover functions registered by every unit, so
+symbol designators, direct func refs, and simple moves can form cross-module
+edges."
+  (declare (ignore instructions))
   (let ((graph (make-hash-table :test #'equal)))
     (maphash (lambda (label def)
                (let ((body (getf def :body))
@@ -23,23 +28,48 @@ NIL disables size-based eviction for this optimization pass.")
                    (typecase inst
                      ((or vm-closure vm-func-ref)
                       (let ((callee (vm-label-name inst)))
-                        (when (gethash callee func-defs)
-                          (setf (gethash (vm-dst inst) reg-track) callee))))
+                        (if (gethash callee func-defs)
+                            (setf (gethash (vm-dst inst) reg-track) callee)
+                            (remhash (vm-dst inst) reg-track))))
                      (vm-const
                       (let ((callee (and (symbolp (vm-value inst))
                                          (gethash (vm-value inst) name-to-label))))
-                        (when callee
-                          (setf (gethash (vm-dst inst) reg-track) callee))))
-                     (vm-call
+                        (if (and callee (gethash callee func-defs))
+                            (setf (gethash (vm-dst inst) reg-track) callee)
+                            (remhash (vm-dst inst) reg-track))))
+                     (vm-move
+                      (multiple-value-bind (callee present-p)
+                          (gethash (vm-src inst) reg-track)
+                        (if present-p
+                            (setf (gethash (vm-dst inst) reg-track) callee)
+                            (remhash (vm-dst inst) reg-track))))
+                     ((or vm-call vm-tail-call vm-apply)
                       (let ((callee (gethash (vm-func-reg inst) reg-track)))
-                        (when callee
-                          (pushnew callee callees :test #'equal))))
+                        (when (and callee (gethash callee func-defs))
+                          (pushnew callee callees :test #'equal)))
+                      (let ((dst (opt-inst-dst inst)))
+                        (when dst (remhash dst reg-track))))
                      (t
                       (let ((dst (opt-inst-dst inst)))
                         (when dst (remhash dst reg-track))))))
                  (setf (gethash label graph) callees)))
              func-defs)
     graph))
+
+(defun opt-call-graph-bottom-up-labels (graph)
+  "Return GRAPH labels in leaf-to-root order, suitable for bottom-up inlining."
+  (let ((seen (make-hash-table :test #'equal))
+        (order nil))
+    (labels ((visit (label)
+               (unless (gethash label seen)
+                 (setf (gethash label seen) t)
+                 (dolist (callee (gethash label graph))
+                   (visit callee))
+                 (push label order))))
+      (maphash (lambda (label _callees)
+                 (visit label))
+               graph))
+    (nreverse order)))
 
 (defun %opt-call-graph-reaches-self-p (graph start node seen)
   "Return T if NODE can reach START via GRAPH edges, using SEEN to avoid cycles."

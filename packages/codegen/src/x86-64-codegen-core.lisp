@@ -47,6 +47,10 @@ branch is encoded as rel8.")
       (x86-64-lea-address-byte-size inst))
     (x86-64-bextr-field
      16)
+    (x86-64-shrink-save
+     (push-r64-byte-size (x86-64-shrink-save-reg inst)))
+    (x86-64-shrink-restore
+     (pop-r64-byte-size (x86-64-shrink-restore-reg inst)))
     (vm-const
      (if (floatp (vm-value inst)) 15 10))
     (vm-move

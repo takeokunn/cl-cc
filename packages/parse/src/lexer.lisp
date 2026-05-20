@@ -29,8 +29,81 @@
 
 ;;; ─── Character Classification ────────────────────────────────────────────────
 
+(defconstant +char-class-alpha+ #x01)
+(defconstant +char-class-digit+ #x02)
+(defconstant +char-class-upper+ #x04)
+(defconstant +char-class-lower+ #x08)
+(defconstant +char-class-alphanumeric+ #x10)
+(defconstant +char-class-graphic+ #x20)
+(defconstant +char-class-whitespace+ #x40)
+(defconstant +char-class-standard+ #x80)
+
+(defun %make-char-class-table ()
+  "Build the immutable-by-convention ASCII character class table."
+  (let ((table (make-array 256 :element-type '(unsigned-byte 8) :initial-element 0)))
+    (labels ((add-flag (code flag)
+               (setf (aref table code) (logior (aref table code) flag)))
+             (add-range (start end flag)
+               (loop for code from start to end do (add-flag code flag))))
+      (add-range 32 126 +char-class-graphic+)
+      (add-range 32 126 +char-class-standard+)
+      (add-flag (char-code #\Newline) +char-class-standard+)
+      (dolist (code (mapcar #'char-code '(#\Space #\Tab #\Newline #\Return #\Page)))
+        (add-flag code +char-class-whitespace+))
+      (add-range (char-code #\0) (char-code #\9)
+                 (logior +char-class-digit+ +char-class-alphanumeric+))
+      (add-range (char-code #\A) (char-code #\Z)
+                 (logior +char-class-alpha+ +char-class-upper+ +char-class-alphanumeric+))
+      (add-range (char-code #\a) (char-code #\z)
+                 (logior +char-class-alpha+ +char-class-lower+ +char-class-alphanumeric+)))
+    table))
+
+(defparameter *char-class-table* (%make-char-class-table)
+  "256-byte ASCII character class table for lexer hot-path predicates.
+Each byte encodes +CHAR-CLASS-* flags. Treat as read-only after load.")
+
+(declaim (inline %lex-ascii-code lex-alpha-char-p lex-digit-char-p
+                 lex-decimal-digit-char-p lex-whitespace-p))
+
+(defun %lex-ascii-code (ch)
+  (when ch
+    (let ((code (char-code ch)))
+      (when (<= 0 code 255) code))))
+
+(defun lex-alpha-char-p (ch)
+  "Fast ALPHA-CHAR-P for ASCII, host fallback for Unicode."
+  (let ((code (%lex-ascii-code ch)))
+    (if code
+        (logtest (aref *char-class-table* code) +char-class-alpha+)
+        (and ch (alpha-char-p ch)))))
+
+(defun lex-decimal-digit-char-p (ch)
+  "Fast decimal DIGIT-CHAR-P for ASCII, host fallback for Unicode."
+  (let ((code (%lex-ascii-code ch)))
+    (if code
+        (and (logtest (aref *char-class-table* code) +char-class-digit+)
+             (- code (char-code #\0)))
+        (and ch (digit-char-p ch)))))
+
+(defun lex-digit-char-p (ch &optional (radix 10))
+  "Fast DIGIT-CHAR-P for ASCII, including radix digits; host fallback for Unicode."
+  (let ((code (%lex-ascii-code ch)))
+    (if code
+        (let ((value (cond
+                       ((logtest (aref *char-class-table* code) +char-class-digit+)
+                        (- code (char-code #\0)))
+                       ((logtest (aref *char-class-table* code) +char-class-upper+)
+                        (+ 10 (- code (char-code #\A))))
+                       ((logtest (aref *char-class-table* code) +char-class-lower+)
+                        (+ 10 (- code (char-code #\a)))))))
+          (and value (< value radix) value))
+        (and ch (digit-char-p ch radix)))))
+
 (defun lex-whitespace-p (ch)
-  (member ch '(#\Space #\Tab #\Newline #\Return #\Page) :test #'char=))
+  (let ((code (%lex-ascii-code ch)))
+    (if code
+        (logtest (aref *char-class-table* code) +char-class-whitespace+)
+        (member ch '(#\Space #\Tab #\Newline #\Return #\Page) :test #'char=))))
 
 (defun lex-constituent-p (ch)
   "Is CH a constituent character for CL symbols?"

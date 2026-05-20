@@ -13,9 +13,10 @@
         :cl-cc/optimize
         :cl-cc/emit
         :cl-cc/expand
-        :cl-cc/compile
-        :cl-cc/vm
-        :cl-cc/stdlib)
+         :cl-cc/compile
+         :cl-cc/vm
+         :cl-cc/mir
+         :cl-cc/stdlib)
   (:export
    ;; Public
    #:compile-string-with-stdlib
@@ -23,7 +24,9 @@
    #:get-stdlib-forms
    #:warm-stdlib-cache  ; defined in :cl-cc/selfhost; pre-interned here so
                         ; pipeline-runtime can call it as bare symbol
-   #:pipeline-opts
+    #:pipeline-opts
+    #:*compilation-tier*
+    #:normalize-compilation-tier
    ;; Stdlib cache state
     #:*stdlib-vm-snapshot*
     #:*stdlib-accessor-slot-map*
@@ -38,8 +41,9 @@
     #:*stdlib-symbol-index*
     #:stdlib-symbol-defined-p
    ;; Native cache parameters
-   #:*compile-cache-root*
-   #:*native-command-timeout-seconds*
+    #:*compile-cache-root*
+    #:*native-command-timeout-seconds*
+    #:*use-mir-pipeline*
    ;; Internal helpers exported so cross-package callers (selfhost/repl)
    ;; and tests can resolve them as bare or cl-cc:: symbols.
    #:%prepare-ast

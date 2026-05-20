@@ -191,9 +191,44 @@ Coding Agent 用逐次実装タスクリスト。
   - 内容: `make-hash-table :test` から `gethash` のホットパスを特化し、`vm-gethash-eq`/`vm-gethash-eql`/`vm-gethash-equal` を生成
 
 - [x] **FR-049** Equality 述語特化 (`eq`/`eql`/`equal`)
-  - 詳細: `docs/runtime-core.md` の FR-049 セクションを参照
-  - 対象: `packages/vm/src/primitives.lisp`, `packages/compile/src/codegen.lisp`
-  - 内容: 型情報から `eq`/`eql`/`equal` の最速パスを選択するコンパイル時ディスパッチ
+   - 詳細: `docs/runtime-core.md` の FR-049 セクションを参照
+   - 対象: `packages/vm/src/primitives.lisp`, `packages/compile/src/codegen.lisp`
+   - 内容: 型情報から `eq`/`eql`/`equal` の最速パスを選択するコンパイル時ディスパッチ
+
+- [x] **FR-042** Dynamic Variable Access Caching
+   - 詳細: `docs/runtime-core.md` の FR-042 セクションを参照
+   - 対象: `packages/vm/src/vm.lisp`, `packages/compile/src/codegen.lisp`
+   - 内容: 関数エントリ時にグローバルをレジスタにロード、変更時のみ書き戻し
+
+- [x] **FR-043** Closure Environment Flattening
+   - 詳細: `docs/runtime-core.md` の FR-043 セクションを参照
+   - 対象: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-execute.lisp`
+   - 内容: captured-valuesをalistから並列ベクタに変換、インデックスアクセス化
+
+- [x] **FR-046** Condition System Zero-Cost Fast Path
+   - 詳細: `docs/runtime-core.md` の FR-046 セクションを参照
+   - 対象: `packages/compile/src/codegen-control.lisp`
+   - 内容: 保護フォーム内にsignal系なしの場合にvm-establish-handlerを省略
+
+- [x] **FR-139** Handler Elision for Pure Bodies
+   - 詳細: `docs/runtime-core.md` の FR-139 セクションを参照
+   - 対象: `packages/compile/src/codegen-control.lisp`
+   - 内容: 保護フォームの命令が全てpureの場合にhandler確立を省略
+
+- [x] **FR-141** Self-Hosting Profile Feedback
+   - 詳細: `docs/runtime-core.md` の FR-141 セクションを参照
+   - 対象: `packages/cli/src/main.lisp`, `packages/vm/src/vm-state-init.lisp`
+   - 内容: `cl-cc selfhost --profile` でVM命令頻度ヒストグラム収集・活用
+
+- [x] **FR-156** Size-Class Segregated Allocator
+   - 詳細: `docs/runtime-core.md` の FR-156 セクションを参照
+   - 対象: `packages/runtime/src/heap-core.lisp`, `packages/runtime/src/heap-free-list.lisp`
+   - 内容: free-listをサイズクラスバケットに分割、O(1)再利用
+
+- [x] **FR-338** Runtime String Interning
+   - 詳細: `docs/runtime-core.md` の FR-338 セクションを参照
+   - 対象: `packages/vm/src/strings.lisp`, `packages/vm/src/symbols.lisp`
+   - 内容: ランタイム文字列インターンテーブルで重複排除・メモリ削減
 
 - [x] **FR-441** `sort`/`stable-sort` ベクタ対応
   - 詳細: `docs/runtime-core.md` の FR-441 セクションを参照
@@ -221,9 +256,49 @@ Coding Agent 用逐次実装タスクリスト。
   - 内容: `(search sequence1 sequence2 &key test key start1 end1 start2 end2)` — 部分シーケンス検索
 
 - [x] **FR-453** `map-into` 複数ソース (実装済み: map-into が任意個数ソースを並列走査し、宛先または最短ソースで停止)
-  - 詳細: `docs/runtime-core.md` の FR-453 セクションを参照
-  - 対象: `packages/expand/src/macros-sequence.lisp`
-  - 内容: 複数ソースシーケンスから並列にマッピング。最短ソースで停止
+   - 詳細: `docs/runtime-core.md` の FR-453 セクションを参照
+   - 対象: `packages/expand/src/macros-sequence.lisp`
+   - 内容: 複数ソースシーケンスから並列にマッピング。最短ソースで停止
+
+- [x] **FR-180** Single-Value Optimization
+   - 詳細: `docs/runtime-core.md` の FR-180 セクションを参照
+   - 対象: `packages/compile/src/codegen-values.lisp`, `packages/compile/src/codegen-values-helpers.lisp`
+   - 内容: `(values x)` が単一値の場合に `vm-values` 命令を省略し直接レジスタ移動に変換
+
+- [x] **FR-185** Optimization Reports
+   - 詳細: `docs/runtime-core.md` の FR-185 セクションを参照
+   - 対象: `packages/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
+   - 内容: `--optimization-report` フラグで最適化判断をレポート出力
+
+- [x] **FR-339** Hash Table Size/Rehash Control
+   - 詳細: `docs/runtime-core.md` の FR-339 セクションを参照
+   - 対象: `packages/vm/src/hash.lisp`, `packages/compile/src/codegen-hash-table.lisp`
+   - 内容: `make-hash-table` に `:size`/`:rehash-size`/`:rehash-threshold` を追加。アクセサ関数追加
+
+- [x] **FR-340** Compile-Time Sequence/String Folding
+   - 詳細: `docs/runtime-core.md` の FR-340 セクションを参照
+   - 対象: `packages/optimize/src/optimizer-tables.lisp`
+   - 内容: `(length "hello")` → `5` 等のシーケンス/文字列述語のコンパイル時畳み込み
+
+- [x] **FR-343** Set Operations Hash Acceleration
+   - 詳細: `docs/runtime-core.md` の FR-343 セクションを参照
+   - 対象: `packages/expand/src/macros-setops.lisp`
+   - 内容: `remove-duplicates`/`union`/`intersection`/`set-difference` のハッシュテーブル高速化
+
+- [x] **FR-181** Constant Pool / Literal Deduplication
+   - 詳細: `docs/runtime-core.md` の FR-181 セクションを参照
+   - 対象: `packages/compile/src/codegen-core.lisp`, `packages/pipeline/src/pipeline.lisp`
+   - 内容: コンパイル単位ごとの定数プール構築。同一リテラルの重複排除（FR-137の汎化）
+
+- [x] **FR-341** HOF Macro Vector Path (mapcar vector 対応)
+   - 詳細: `docs/runtime-core.md` の FR-341 セクションを参照
+   - 対象: `packages/expand/src/macros-stdlib.lisp`
+   - 内容: mapcar のベクタ入力対応 (dotimes+aref)
+
+- [x] **FR-344** String/List Algebraic Simplification (一部既存)
+   - 詳細: `docs/runtime-core.md` の FR-344 セクションを参照
+   - 対象: `packages/optimize/src/optimizer-algebraic.lisp`
+   - 内容: 型述語の生産者命令型に基づく簡約ルール追加
 
 ---
 
@@ -283,15 +358,15 @@ Coding Agent 用逐次実装タスクリスト。
   - 対象: `packages/expand/src/expander.lisp`
   - 内容: `compiler-macroexpand-all` の 25 分岐 `cond` をコンパイル時生成の minimal perfect hash に変換
 
-- [ ] **FR-136** Character Class ルックアップテーブル
-  - 詳細: `docs/runtime-core.md` の FR-136 セクションを参照
-  - 対象: `packages/parse/src/cl/lexer.lisp`, `packages/vm/src/strings.lisp`
-  - 内容: `vm-alpha-char-p` 等を 256 バイト配列ルックアップに変換
+- [x] **FR-136** Character Class ルックアップテーブル (実装済み: strings.lisp:84-182 に既存)
+   - 詳細: `docs/runtime-core.md` の FR-136 セクションを参照
+   - 対象: `packages/vm/src/strings.lisp`
+   - 内容: `vm-alpha-char-p` 等を 256 バイト配列ルックアップに変換
 
-- [ ] **FR-137** String Literal Pool
-  - 詳細: `docs/runtime-core.md` の FR-137 セクションを参照
-  - 対象: `packages/compile/src/codegen-core.lisp`
-  - 内容: コンパイル時の `*string-literal-pool*` で同一文字列リテラルを単一 `vm-const` に重複排除
+- [x] **FR-137** String Literal Pool (実装済み: codegen-core.lisp 等に既存)
+   - 詳細: `docs/runtime-core.md` の FR-137 セクションを参照
+   - 対象: `packages/compile/src/codegen-core.lisp`
+   - 内容: コンパイル時の `*string-literal-pool*` で同一文字列リテラルを単一 `vm-const` に重複排除
 
 - [ ] **FR-152** 推移的関数純粋性推論
   - 詳細: `docs/tooling-compiler.md` の FR-152 セクションを参照

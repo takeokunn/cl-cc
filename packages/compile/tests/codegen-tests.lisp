@@ -102,6 +102,32 @@ stable, isolated context."
       (assert-true inst)
       (assert-equal datum (cl-cc::vm-const-value inst)))))
 
+(deftest codegen-string-literal-pool-deduplicates-string-equal-values
+  "Identical string literals share one pooled vm-const register within a compilation unit."
+  (let ((ctx (make-codegen-ctx))
+        (first-literal (copy-seq "shared"))
+        (second-literal (copy-seq "shared")))
+    (let ((cl-cc/compile:*string-literal-pool* (make-hash-table :test #'equal)))
+      (let ((first-reg (compile-ast (make-ast-quote :value first-literal) ctx))
+            (second-reg (compile-ast (make-ast-quote :value second-literal) ctx)))
+        (assert-eq first-reg second-reg)
+        (let ((consts (remove-if-not (lambda (inst)
+                                       (typep inst 'cl-cc/vm::vm-const))
+                                     (codegen-instructions ctx))))
+          (assert-= 1 (length consts))
+          (assert-true (string= "shared" (cl-cc::vm-const-value (first consts)))))))))
+
+(deftest codegen-string-literal-pool-does-not-deduplicate-non-strings
+  "FR-137 pools strings only; other quoted constants keep direct vm-const emission."
+  (let ((ctx (make-codegen-ctx)))
+    (let ((cl-cc/compile:*string-literal-pool* (make-hash-table :test #'equal)))
+      (compile-ast (make-ast-quote :value 'same-symbol) ctx)
+      (compile-ast (make-ast-quote :value 'same-symbol) ctx)
+      (let ((consts (remove-if-not (lambda (inst)
+                                     (typep inst 'cl-cc/vm::vm-const))
+                                   (codegen-instructions ctx))))
+        (assert-= 2 (length consts))))))
+
 ;;; ─── compile-ast: ast-binop ─────────────────────────────────────────────
 
 (deftest-each codegen-binop-emits-correct-instruction

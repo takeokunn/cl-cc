@@ -27,31 +27,71 @@
            (has-iv (not (null (member :initial-value keys))))
            (iv-expr (getf keys :initial-value nil))
            (fe-expr (getf keys :from-end nil))
-           (key-fn (getf keys :key nil))
-           (seq-init (if fe-expr (list 'reverse seq) seq))
-           (elem-form (if key-fn
-                          (list 'funcall key-fn (list 'car cur-var))
-                          (list 'car cur-var))))
-      (if has-iv
-          (list 'let (list (list fn-var fn)
-                           (list acc-var iv-expr)
-                           (list cur-var seq-init))
-                (list 'loop 'while cur-var
-                      'do
-                      (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
-                      (list 'setq cur-var (list 'cdr cur-var)))
-                acc-var)
-          (list 'let (list (list fn-var fn)
-                           (list cur-var seq-init))
-                (list 'let (list (list acc-var (if key-fn
-                                                   (list 'funcall key-fn (list 'car cur-var))
-                                                   (list 'car cur-var))))
-                      (list 'setq cur-var (list 'cdr cur-var))
-                      (list 'loop 'while cur-var
-                            'do
-                            (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
-                            (list 'setq cur-var (list 'cdr cur-var)))
-                      acc-var))))))
+            (key-fn (getf keys :key nil))
+            (seq-init (if fe-expr (list 'reverse seq) seq)))
+       (flet ((list-form (seq-form)
+                (let ((elem-form (if key-fn
+                                     (list 'funcall key-fn (list 'car cur-var))
+                                     (list 'car cur-var))))
+                  (if has-iv
+                      (list 'let (list (list fn-var fn)
+                                       (list acc-var iv-expr)
+                                       (list cur-var seq-form))
+                            (list 'loop 'while cur-var
+                                  'do
+                                  (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
+                                  (list 'setq cur-var (list 'cdr cur-var)))
+                            acc-var)
+                      (list 'let (list (list fn-var fn)
+                                       (list cur-var seq-form))
+                            (list 'let (list (list acc-var (if key-fn
+                                                               (list 'funcall key-fn (list 'car cur-var))
+                                                               (list 'car cur-var))))
+                                  (list 'setq cur-var (list 'cdr cur-var))
+                                  (list 'loop 'while cur-var
+                                        'do
+                                        (list 'setq acc-var (list 'funcall fn-var acc-var elem-form))
+                                        (list 'setq cur-var (list 'cdr cur-var)))
+                                  acc-var)))))
+              (indexed-form (seq-form stringp)
+                (let ((len (gensym "LEN"))
+                      (i (gensym "I"))
+                      (start (gensym "START"))
+                      (step (gensym "STEP"))
+                      (done (gensym "DONE"))
+                      (elt (gensym "ELT")))
+                  (flet ((ref () (if stringp `(char ,cur-var ,i) `(aref ,cur-var ,i))))
+                    `(let* ((,fn-var ,fn)
+                            (,cur-var ,seq-form)
+                            (,len (length ,cur-var)))
+                       ,(if has-iv
+                            `(let ((,acc-var ,iv-expr)
+                                   (,start (if ,fe-expr (- ,len 1) 0))
+                                   (,step (if ,fe-expr -1 1))
+                                   (,done (if ,fe-expr -1 ,len)))
+                               (do ((,i ,start (+ ,i ,step)))
+                                   ((= ,i ,done) ,acc-var)
+                                 (let ((,elt ,(ref)))
+                                   (setq ,acc-var (funcall ,fn-var ,acc-var ,(if key-fn `(funcall ,key-fn ,elt) elt))))))
+                            `(if (= ,len 0)
+                                 nil
+                                 (let* ((,start (if ,fe-expr (- ,len 1) 0))
+                                        (,step (if ,fe-expr -1 1))
+                                        (,done (if ,fe-expr -1 ,len))
+                                        (,i ,start)
+                                        (,elt ,(ref))
+                                        (,acc-var ,(if key-fn `(funcall ,key-fn ,elt) elt)))
+                                   (setq ,i (+ ,i ,step))
+                                   (do ()
+                                       ((= ,i ,done) ,acc-var)
+                                     (let ((,elt ,(ref)))
+                                       (setq ,acc-var (funcall ,fn-var ,acc-var ,(if key-fn `(funcall ,key-fn ,elt) elt))))
+                                     (setq ,i (+ ,i ,step)))))))))))
+         (%sequence-dispatch-expand
+          seq-init
+          #'list-form
+          (lambda (seq-form) (indexed-form seq-form nil))
+           (lambda (seq-form) (indexed-form seq-form t)))))))
 
 ;;; NSUBSTITUTE / NSUBSTITUTE-IF / NSUBSTITUTE-IF-NOT (FR-505): destructive delegates
 

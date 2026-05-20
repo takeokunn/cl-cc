@@ -5,6 +5,7 @@
 ;;;;   compile <file> [-o out] [--arch x86-64|arm64] [--lang lisp|php] [--verbose]
 ;;;;   eval    <expr> [--stdlib] [--verbose]
 ;;;;   check   <file> [--lang lisp|php] [--strict] [--verbose]
+;;;;   selfhost [file] [--profile]
 ;;;;   help    [command]
 
 (in-package :cl-cc/cli)
@@ -25,6 +26,7 @@ Commands:
   eval     <expr>         Evaluate an expression inline
   repl                    Start interactive REPL
   check    <file>         Type-check only, no execution
+  selfhost [file]         Run the self-hosting profile workload
   help     [command]      Show this help or command-specific help
 
 Options:
@@ -44,15 +46,17 @@ Options:
   --stdlib                Eagerly prepend standard library (run/eval/repl)
   --no-stdlib             Disable lazy stdlib auto-require
   --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
-  --verbose               Show compilation details on stderr
+   --optimization-report   Print per-optimization debugging report lines
+   --tier N               Compilation tier: 0 fast, 1 optimized (default: 0)
+   --verbose               Show compilation details on stderr
    --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
-   --block-compile       Enable file-level cross-function inlining
+   --block-compile       Enable file/LTO cross-function inlining (max 30 insts)
    --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
   --pgo-generate <file>   Write lightweight optimizer profile data
   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
-  --profile               Print a sampled VM frame report after run/eval
+  --profile               Enable VM profile collection/reporting
   --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
@@ -71,12 +75,14 @@ Options:
   --lang lisp|php   Source language (auto-detect from .php extension)
   --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source  Add source-location comments when available
-  --stdlib          Eagerly prepend standard library
+  --stdlib          Prepend standard library eagerly
   --no-stdlib       Disable lazy stdlib auto-require
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --optimization-report Print per-optimization debugging report lines
+  --tier N          Compilation tier: 0 fast, 1 optimized
   --verbose         Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
-  --block-compile       Enable file-level cross-function inlining
+   --block-compile       Enable file/LTO cross-function inlining (max 30 insts)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -106,9 +112,11 @@ Options:
   --compress            Add compressed code payload sections when supported
   --no-compress         Disable code payload compression (default)
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --optimization-report Print per-optimization debugging report lines
+  --tier N              Compilation tier: 0 fast, 1 optimized
   --verbose             Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
-  --block-compile         Enable file-level cross-function inlining
+  --block-compile         Enable file/LTO cross-function inlining (max 30 insts)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -127,9 +135,11 @@ Options:
   --stdlib   Eagerly prepend standard library
   --no-stdlib Disable lazy stdlib auto-require
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
+  --optimization-report Print per-optimization debugging report lines
+  --tier N          Compilation tier: 0 fast, 1 optimized
   --verbose  Show compilation details on stderr
   --pass-pipeline <spec>  Optimizer pipeline (e.g. fold,dce)
-  --block-compile         Enable file-level cross-function inlining
+  --block-compile         Enable file/LTO cross-function inlining (max 30 insts)
   --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
@@ -163,6 +173,18 @@ Examples:
   --lang lisp|php   Source language
   --strict          Treat type warnings as errors (exit 1)
   --verbose         Show type-inference details on stderr
+  ")
+    ("selfhost" . "Usage: cl-cc selfhost [options] [file]
+
+  Run a self-hosting workload through the CL-CC VM.
+  With --profile, write .cl-cc-profile.sexp as an instruction histogram used by later compilations.
+
+Options:
+  --profile         Collect VM instruction frequencies
+  --stdlib          Eagerly prepend standard library
+  --no-stdlib       Disable lazy stdlib auto-require
+  --verbose         Show compilation details on stderr
+  --timeout <sec>   Maximum execution time
  ")
   )
   "Alist mapping command name strings to their help text strings.")
@@ -190,7 +212,8 @@ Examples:
     ("compile"  . %do-compile)
     ("eval"     . %do-eval)
     ("repl"     . %do-repl)
-    ("check"    . %do-check))
+    ("check"    . %do-check)
+    ("selfhost" . %do-selfhost))
   "Alist mapping command name strings to their handler functions.")
 
 (defun main ()
@@ -220,14 +243,21 @@ subcommands, then dispatches to the appropriate handler."
         ((string= command "help")
          (%print-help (car (parsed-args-positional parsed)))
          (uiop:quit 0))
-        (t
-         (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
-           (if entry
-               (funcall (cdr entry) parsed)
-               (progn
-                 (format *error-output* "Unknown command: ~A~%~%" command)
-                 (%print-global-help)
-                 (uiop:quit 2)))))))))
+         (t
+          (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
+            (if entry
+                (let ((cl-cc/optimize:*optimization-report-stream*
+                        (if (flag parsed "--optimization-report")
+                            *standard-output*
+                            cl-cc/optimize:*optimization-report-stream*))
+                      (cl-cc/pipeline:*compilation-tier*
+                        (cl-cc/pipeline:normalize-compilation-tier
+                         (or (flag parsed "--tier") 0))))
+                  (funcall (cdr entry) parsed))
+                (progn
+                  (format *error-output* "Unknown command: ~A~%~%" command)
+                  (%print-global-help)
+                  (uiop:quit 2)))))))))
 
 
 ;;; (Utilities, dump functions, and compile options

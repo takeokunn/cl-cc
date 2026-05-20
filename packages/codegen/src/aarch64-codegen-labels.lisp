@@ -94,21 +94,26 @@
 
 (defun a64-instruction-size (inst)
   "Return size in bytes (multiple of 4) for an AArch64-encoded VM instruction."
-  (let ((tp (type-of inst)))
-    (cond
-      ((eq tp 'vm-const)
-       (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
-         (if (a64-literal-pool-value-p value)
+  (typecase inst
+    ((or a64-shrink-save a64-shrink-restore) 4)
+    (t
+     (let ((tp (type-of inst)))
+       (cond
+       ((eq tp 'vm-const)
+        (let ((value (logand (vm-value inst) #xFFFFFFFFFFFFFFFF)))
+          (if (a64-literal-pool-value-p value)
              8
              (* 4 (a64-imm64-size value)))))
-      ((eq tp 'vm-move)
-       (let ((rd (a64-reg (vm-dst inst)))
-             (rn (a64-reg (vm-src inst))))
-         (if (= rd rn) 0 4)))
-      ((eq tp 'vm-prefetch)
-       (if (vm-prefetch-index-reg inst) 8 4))
+       ((eq tp 'vm-move)
+        (let ((rd (a64-reg (vm-dst inst)))
+              (rn (a64-reg (vm-src inst))))
+          (if (= rd rn) 0 4)))
+       ((eq tp 'vm-ret)
+        (+ (* 4 (length (or *current-a64-epilogue-save-pairs* '()))) 4))
+       ((eq tp 'vm-prefetch)
+        (if (vm-prefetch-index-reg inst) 8 4))
       (t
-       (or (gethash tp *a64-instruction-sizes*) 0)))))
+        (or (gethash tp *a64-instruction-sizes*) 0)))))))
 
 ;;; Label offset table builder
 

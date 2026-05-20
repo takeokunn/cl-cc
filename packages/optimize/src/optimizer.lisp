@@ -15,7 +15,75 @@
 ;;; FR-020: Allocation Sinking — delays heap allocations (cons etc.) as late as possible, moving them into conditional branches to reduce GC pressure on fast paths
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defvar *optimization-report-stream* nil
+  "When non-NIL, optimizer passes emit one-line optimization reports here.")
+
+(defparameter *optimizer-tier* 1
+  "Optimizer tier selected by callers. Tier 0 callers bind
+*skip-optimizer-passes* so optimize-instructions returns the input unchanged;
+Tier 1 runs the full pass pipeline.")
+
+(defun %opt-report (kind control &rest args)
+  "Emit one optimizer debugging report line when reporting is enabled."
+  (when *optimization-report-stream*
+    (format *optimization-report-stream* "~&opt-report ~A " kind)
+    (apply #'format *optimization-report-stream* control args)
+    (terpri *optimization-report-stream*)))
+
 ;;; ─── Pass 1: Constant Folding + Algebraic Simplification ─────────────────
+
+;;;; ─── FR-179: Sequence Operation Fusion ──────────────────────────────────
+
+(defun %opt-sequence-fusion-callee-name (inst)
+  "Return the normalized callee name for a direct function reference INST."
+  (when (typep inst 'vm-func-ref)
+    (let ((label (vm-label-name inst)))
+      (cond
+        ((symbolp label) (symbol-name label))
+        ((stringp label) (string-upcase label))
+        (t nil)))))
+
+(defun %opt-sequence-op-name-p (name)
+  "Return T when NAME is one of the sequence operations handled by FR-179."
+  (member name '("MAPCAR" "REMOVE-IF" "REMOVE-IF-NOT") :test #'string=))
+
+(defun %opt-sequence-fusion-candidate-p (instructions)
+  "Return T when INSTRUCTIONS still contain an unfused direct sequence-op chain.
+
+The normal FR-179 implementation is source preserving: compiler macros in the
+expander rewrite visible sequence chains before MAPCAR/REMOVE-IF expand into
+loops.  This predicate is retained in the optimizer so pass tracing can identify
+late direct-call chains produced by non-stdlib frontends without risking an
+incorrect closure synthesis at VM level."
+  (let ((func-refs (make-hash-table :test #'eq))
+        (sequence-call-dsts nil))
+    (dolist (inst instructions nil)
+      (typecase inst
+        (vm-func-ref
+         (let ((name (%opt-sequence-fusion-callee-name inst)))
+           (when (%opt-sequence-op-name-p name)
+             (setf (gethash (vm-dst inst) func-refs) name))))
+        (vm-call
+         (let ((callee (gethash (vm-func-reg inst) func-refs)))
+           (when (%opt-sequence-op-name-p callee)
+             (when (some (lambda (arg) (member arg sequence-call-dsts :test #'eq))
+                         (vm-args inst))
+               (return-from %opt-sequence-fusion-candidate-p t))
+             (pushnew (vm-dst inst) sequence-call-dsts :test #'eq))))))))
+
+(defun opt-pass-sequence-fusion (instructions)
+  "FR-179: fuse chained sequence operations.
+
+Source-level compiler macros lower MAPCAR/REMOVE-IF chains into one explicit
+loop before macro expansion, so the instruction stream normally arrives here
+already fused.  The optimizer pass is intentionally conservative: it recognizes
+late direct-call chains for reporting, but does not synthesize new closures from
+VM bytecode.  Macro-expanded loop streams are therefore preserved exactly after
+their intermediate allocation has already been eliminated upstream."
+  (when (%opt-sequence-fusion-candidate-p instructions)
+    (%opt-report :sequence-fusion
+                 "late direct sequence call chain left unchanged; source fusion unavailable"))
+  instructions)
 
 (defun opt-fold-binop-value (inst lval rval)
   "Fold binary INST with numeric constants LVAL and RVAL.
@@ -99,6 +167,45 @@
                (and (%opt-known-constant-p lval) (eql lval (cadr cond)))))
         (return (%opt-apply-algebraic-action action dst lhs-reg rhs-reg))))))
 
+(defun %opt-producer-condition-types (condition)
+  "Return producer instruction types named by an algebraic CONDITION, if any."
+  (when (and (consp condition) (eq (car condition) :producer))
+    (let ((types (cadr condition)))
+      (if (listp types) types (list types)))))
+
+(defun %opt-algebraic-producer-type-p (type)
+  "Return T when TYPE is referenced by a producer-based algebraic rule."
+  (loop for rules being the hash-values of *opt-algebraic-identity-rules*
+        thereis (loop for rule in rules
+                      for producer-types = (%opt-producer-condition-types (car rule))
+                      thereis (member type producer-types :test #'eq))))
+
+(defun opt-simplify-type-pred-with-producer (inst producer-facts)
+  "Simplify unary type predicate INST using producer facts for its source register."
+  (let ((producer-type (gethash (vm-src inst) producer-facts)))
+    (when producer-type
+      (dolist (rule (gethash (type-of inst) *opt-algebraic-identity-rules*) nil)
+        (let ((producer-types (%opt-producer-condition-types (car rule))))
+          (when (member producer-type producer-types :test #'eq)
+            (return (%opt-apply-algebraic-action (cdr rule) (vm-dst inst) nil nil))))))))
+
+(defun %opt-clear-derived-facts (dst env low-bit-facts producer-facts)
+  "Clear all non-structural derived facts for destination register DST."
+  (when dst
+    (remhash dst env)
+    (remhash dst low-bit-facts)
+    (remhash dst producer-facts)))
+
+(defun %opt-record-producer-fact (inst env low-bit-facts producer-facts)
+  "Record TYPE-OF INST as a producer fact for its destination when rule-relevant."
+  (let ((dst (opt-inst-dst inst)))
+    (when dst
+      (remhash dst env)
+      (remhash dst low-bit-facts)
+      (if (%opt-algebraic-producer-type-p (type-of inst))
+          (setf (gethash dst producer-facts) (type-of inst))
+          (remhash dst producer-facts)))))
+
 (defun %opt-branch-target-labels (instructions)
   "Return a hash table of labels that are explicit branch targets."
   (let ((targets (make-hash-table :test #'equal)))
@@ -107,20 +214,22 @@
         ((or vm-jump vm-jump-zero)
          (setf (gethash (vm-label-name inst) targets) t))))))
 
-(defun %fold-vm-label (inst env low-bit-facts emit target-labels)
+(defun %fold-vm-label (inst env low-bit-facts producer-facts emit target-labels)
   "Flush constant knowledge only at labels that are explicit branch targets."
   (when (gethash (vm-name inst) target-labels)
     (clrhash env)
-    (clrhash low-bit-facts))
+    (clrhash low-bit-facts)
+    (clrhash producer-facts))
   (funcall emit inst))
 
-(defun %fold-vm-const (inst env low-bit-facts emit)
+(defun %fold-vm-const (inst env low-bit-facts producer-facts emit)
   "Record the constant value of INST's destination in ENV, then emit."
   (remhash (vm-dst inst) low-bit-facts)
+  (remhash (vm-dst inst) producer-facts)
   (setf (gethash (vm-dst inst) env) (vm-value inst))
   (funcall emit inst))
 
-(defun %fold-vm-move (inst env low-bit-facts emit emit-const clear)
+(defun %fold-vm-move (inst env low-bit-facts producer-facts emit emit-const clear)
   "Propagate constant if src is known in ENV; eliminate self-moves silently."
   (let ((src (vm-src inst)) (dst (vm-dst inst)))
     (cond
@@ -128,15 +237,17 @@
       (t
        (multiple-value-bind (sval found) (gethash src env)
           (if found
-              (progn
-                (remhash dst low-bit-facts)
-                (funcall emit-const dst sval))
-              (progn
-                (funcall clear dst)
-                (%opt-copy-derived-fact src dst low-bit-facts)
-                (funcall emit inst))))))))
+               (progn
+                 (remhash dst low-bit-facts)
+                 (remhash dst producer-facts)
+                  (funcall emit-const dst sval inst))
+               (progn
+                 (funcall clear dst)
+                 (%opt-copy-derived-fact src dst low-bit-facts)
+                 (%opt-copy-derived-fact src dst producer-facts)
+                 (funcall emit inst))))))))
 
-(defun %fold-binary-inst (inst env low-bit-facts emit emit-const clear)
+(defun %fold-binary-inst (inst env low-bit-facts producer-facts emit emit-const clear)
   "Binary arithmetic/comparison: full fold or algebraic simplification.
    Dispatch derived from opt-binary-lhs-rhs-p (covers *opt-binary-lhs-rhs-types*).
    vm-floor-inst/vm-ceiling-inst/vm-truncate are excluded (values-list side-channel)."
@@ -151,13 +262,13 @@
            (multiple-value-bind (folded ok)
                (opt-fold-binop-value inst lval rval)
               (if ok
-                  (progn
-                    (remhash dst low-bit-facts)
-                    (funcall emit-const dst folded))
-                  (progn
-                    (remhash dst low-bit-facts)
-                    (funcall clear dst)
-                    (funcall emit inst)))))
+                   (progn
+                     (remhash dst low-bit-facts)
+                     (remhash dst producer-facts)
+                      (funcall emit-const dst folded inst))
+                   (progn
+                    (%opt-clear-derived-facts dst env low-bit-facts producer-facts)
+                     (funcall emit inst)))))
           ;; Try algebraic identity simplification
           (t
            (let ((parity-rewrite
@@ -168,66 +279,112 @@
                                            (if lfound lval :unknown)
                                            (if rfound rval :unknown))))
              (cond
-               (parity-rewrite
-                (remhash dst low-bit-facts)
-                (funcall clear dst)
-                (funcall emit parity-rewrite))
-               (simp
-                (when (vm-const-p simp)
-                  (setf (gethash dst env) (vm-const-value simp)))
-                (cond
-                  ((vm-const-p simp)
-                   (remhash dst low-bit-facts))
-                  ((typep simp 'vm-move)
-                   (funcall clear dst)
-                   (%opt-copy-derived-fact (vm-src simp) dst low-bit-facts))
-                  (t
-                   (funcall clear dst)
-                   (remhash dst low-bit-facts)))
-                (funcall emit simp))
-               (t
-                (funcall clear dst)
-                (let ((source (%opt-logand-low-bit-source lhs rhs lval lfound rval rfound)))
-                  (if (and (typep inst 'vm-logand) source)
-                      (setf (gethash dst low-bit-facts) source)
+                (parity-rewrite
+                 (%opt-clear-derived-facts dst env low-bit-facts producer-facts)
+                 (funcall emit parity-rewrite))
+                (simp
+                 (when (vm-const-p simp)
+                   (setf (gethash dst env) (vm-const-value simp)))
+                 (cond
+                   ((vm-const-p simp)
+                    (remhash dst low-bit-facts)
+                    (remhash dst producer-facts))
+                   ((typep simp 'vm-move)
+                    (funcall clear dst)
+                    (%opt-copy-derived-fact (vm-src simp) dst low-bit-facts)
+                    (%opt-copy-derived-fact (vm-src simp) dst producer-facts))
+                   (t
+                    (%opt-clear-derived-facts dst env low-bit-facts producer-facts)))
+                  (when (vm-const-p simp)
+                    (%opt-report :fold "original=~S result=~S"
+                                 (instruction->sexp inst)
+                                 (instruction->sexp simp)))
+                  (funcall emit simp))
+                (t
+                 (funcall clear dst)
+                 (remhash dst producer-facts)
+                 (let ((source (%opt-logand-low-bit-source lhs rhs lval lfound rval rfound)))
+                   (if (and (typep inst 'vm-logand) source)
+                       (setf (gethash dst low-bit-facts) source)
                       (remhash dst low-bit-facts)))
                 (funcall emit inst))))))))))
 
 (defun %fold-unary-constant-eligible-p (inst value)
   "Return T when unary INST can be safely folded for constant VALUE."
-  (or (numberp value)
-      (eq (type-of inst) 'vm-not)
-      (and (member (type-of inst) '(vm-car vm-cdr) :test #'eq)
-           (or (consp value) (null value)))))
+  (case (type-of inst)
+    ((vm-string-length vm-string-upcase vm-string-downcase)
+     (stringp value))
+    (vm-length
+     (or (vectorp value)
+         (and (listp value)
+              (ignore-errors (length value) t))))
+    ((vm-car vm-cdr)
+     (or (consp value) (null value)))
+    (vm-not t)
+    (otherwise (numberp value))))
 
-(defun %fold-unary-inst (inst env low-bit-facts emit emit-const clear)
+(defun %fold-vm-char (inst env low-bit-facts producer-facts emit emit-const clear)
+  "Fold VM-CHAR only when both string and index operands are known constants."
+  (declare (ignore clear))
+  (let ((dst (vm-dst inst)))
+    (multiple-value-bind (string found-string) (gethash (vm-string-reg inst) env)
+      (multiple-value-bind (index found-index) (gethash (vm-index inst) env)
+        (if (and (gethash 'vm-char *opt-binary-fold-table*)
+                 found-string found-index
+                 (stringp string)
+                 (integerp index)
+                 (<= 0 index)
+                 (< index (length string)))
+            (progn
+              (remhash dst low-bit-facts)
+              (remhash dst producer-facts)
+               (funcall emit-const dst
+                        (funcall (gethash 'vm-char *opt-binary-fold-table*) string index)
+                        inst))
+            (progn
+              (%opt-clear-derived-facts dst env low-bit-facts producer-facts)
+              (funcall emit inst)))))))
+
+(defun %fold-unary-inst (inst env low-bit-facts producer-facts emit emit-const clear)
   "Unary arithmetic: data-driven via opt-foldable-unary-arith-p → *opt-unary-fold-table*."
+  (declare (ignore clear))
   (let* ((dst (vm-dst inst)) (src (vm-src inst))
          (fold-fn (gethash (type-of inst) *opt-unary-fold-table*)))
     (multiple-value-bind (sval found) (gethash src env)
       (if (and found fold-fn
                 (%fold-unary-constant-eligible-p inst sval))
-          (progn
-            (remhash dst low-bit-facts)
-            (funcall emit-const dst (funcall fold-fn sval)))
-          (progn
-            (funcall clear dst)
-            (remhash dst low-bit-facts)
-            (funcall emit inst))))))
+           (progn
+             (remhash dst low-bit-facts)
+             (remhash dst producer-facts)
+              (funcall emit-const dst (funcall fold-fn sval) inst))
+           (progn
+            (%opt-record-producer-fact inst env low-bit-facts producer-facts)
+             (funcall emit inst))))))
 
-(defun %fold-type-pred-inst (inst env low-bit-facts emit emit-const clear)
+(defun %fold-type-pred-inst (inst env low-bit-facts producer-facts emit emit-const clear)
   "Type predicates: data-driven via opt-foldable-type-pred-p → *opt-type-pred-fold-table*."
+  (declare (ignore clear))
   (let* ((dst (vm-dst inst)) (src (vm-src inst))
          (pred-fn (gethash (type-of inst) *opt-type-pred-fold-table*)))
     (multiple-value-bind (sval found) (gethash src env)
       (if (and found pred-fn)
-          (progn
-            (remhash dst low-bit-facts)
-            (funcall emit-const dst (if (funcall pred-fn sval) 1 0)))
-          (progn
-            (funcall clear dst)
-            (remhash dst low-bit-facts)
-            (funcall emit inst))))))
+           (progn
+             (remhash dst low-bit-facts)
+             (remhash dst producer-facts)
+              (funcall emit-const dst (if (funcall pred-fn sval) 1 0) inst))
+          (let ((simp (opt-simplify-type-pred-with-producer inst producer-facts)))
+            (if simp
+                (progn
+                  (remhash dst low-bit-facts)
+                  (remhash dst producer-facts)
+                  (setf (gethash dst env) (vm-const-value simp))
+                  (%opt-report :fold "original=~S result=~S"
+                               (instruction->sexp inst)
+                               (instruction->sexp simp))
+                  (funcall emit simp))
+                (progn
+                  (%opt-clear-derived-facts dst env low-bit-facts producer-facts)
+                  (funcall emit inst))))))))
 
 (defun %fold-vm-jump-zero (inst env emit)
   "Constant branch folding: known-false → unconditional jump; known-true → drop."
@@ -238,38 +395,47 @@
             nil) ; condition is always true → branch never taken → drop
         (funcall emit inst))))
 
-(defun %fold-default-inst (inst env low-bit-facts emit clear)
+(defun %fold-default-inst (inst env low-bit-facts producer-facts emit clear)
   "Default: invalidate any written destination register, then emit."
-  (declare (ignore env))
+  (declare (ignore clear))
   (let ((dst (opt-inst-dst inst)))
     (when dst
-      (funcall clear dst)
-      (remhash dst low-bit-facts)))
+      (%opt-record-producer-fact inst env low-bit-facts producer-facts)))
   (funcall emit inst))
 
 (defun opt-pass-fold (instructions)
   "Forward pass: constant folding, algebraic simplification, constant branch elimination."
   (let ((env (make-hash-table :test #'eq)) ; reg → known constant value
         (low-bit-facts (make-hash-table :test #'eq)) ; reg → original src for (logand src 1)
+        (producer-facts (make-hash-table :test #'eq)) ; reg → known producer instruction type
         (target-labels (%opt-branch-target-labels instructions))
         (result nil))
     (flet ((emit (inst) (push inst result))
-           (emit-const (dst val)
-             (setf (gethash dst env) val)
-             (push (make-vm-const :dst dst :value val) result))
-            (clear (reg) (remhash reg env)))
+           (emit-const (dst val &optional original-inst)
+              (setf (gethash dst env) val)
+              (remhash dst producer-facts)
+              (let ((const-inst (make-vm-const :dst dst :value val)))
+                (when original-inst
+                  (%opt-report :fold "original=~S result=~S"
+                               (instruction->sexp original-inst)
+                               (instruction->sexp const-inst)))
+                 (push const-inst result)))
+             (clear (reg)
+               (remhash reg env)
+               (remhash reg producer-facts)))
       (dolist (inst instructions)
         (typecase inst
-          (vm-label    (%fold-vm-label      inst env low-bit-facts #'emit target-labels))
-          (vm-const    (%fold-vm-const      inst env low-bit-facts #'emit))
-          (vm-move     (%fold-vm-move       inst env low-bit-facts #'emit #'emit-const #'clear))
+          (vm-label    (%fold-vm-label      inst env low-bit-facts producer-facts #'emit target-labels))
+          (vm-const    (%fold-vm-const      inst env low-bit-facts producer-facts #'emit))
+          (vm-move     (%fold-vm-move       inst env low-bit-facts producer-facts #'emit #'emit-const #'clear))
           (vm-jump-zero (%fold-vm-jump-zero inst env #'emit))
           (t
-           (cond
-              ((opt-binary-lhs-rhs-p inst)      (%fold-binary-inst    inst env low-bit-facts #'emit #'emit-const #'clear))
-              ((opt-foldable-unary-arith-p inst) (%fold-unary-inst     inst env low-bit-facts #'emit #'emit-const #'clear))
-              ((opt-foldable-type-pred-p inst)   (%fold-type-pred-inst inst env low-bit-facts #'emit #'emit-const #'clear))
-              (t                                 (%fold-default-inst   inst env low-bit-facts #'emit #'clear))))))
+            (cond
+                ((typep inst 'vm-char)             (%fold-vm-char       inst env low-bit-facts producer-facts #'emit #'emit-const #'clear))
+                ((opt-binary-lhs-rhs-p inst)      (%fold-binary-inst    inst env low-bit-facts producer-facts #'emit #'emit-const #'clear))
+               ((opt-foldable-unary-arith-p inst) (%fold-unary-inst     inst env low-bit-facts producer-facts #'emit #'emit-const #'clear))
+               ((opt-foldable-type-pred-p inst)   (%fold-type-pred-inst inst env low-bit-facts producer-facts #'emit #'emit-const #'clear))
+               (t                                 (%fold-default-inst   inst env low-bit-facts producer-facts #'emit #'clear))))))
     (nreverse result))))
 
 ;;;; ─── Size-oriented passes: function outlining and safepoint polling ─────
@@ -926,5 +1092,216 @@ idempotent in the convergence pipeline."
                            (setf changed t))
                          (setf i (1+ (getf lp :exit-index)))))))
         (if changed (nreverse out) instructions))))
+
+;;; FR-182: Demand / Strictness Analysis
+
+(defstruct (opt-demand-summary (:conc-name opt-demand-summary-))
+  "Per-function demand summary for VM parameters.
+DEMANDS is an alist of (param-reg . (:strict | :lazy | :absent)).  STRICT-PARAMS
+are safe candidates for unboxed/stack-local calling-convention treatment;
+ABSENT-PARAMS let call-site cleanup replace unused argument values, enabling DCE
+of pure argument computations."
+  function
+  (params nil :type list)
+  (demands nil :type list)
+  (strict-params nil :type list)
+  (absent-params nil :type list))
+
+(defvar *opt-demand-summary-table* (make-hash-table :test #'equal)
+  "Latest FR-182 demand summaries keyed by function label.")
+
+(defun %opt-demand-param-state (state param)
+  (or (cdr (assoc param state :test #'eq)) :killed))
+
+(defun %opt-demand-mark-read (state param)
+  (let ((cell (assoc param state :test #'eq)))
+    (cond
+      ((null cell) state)
+      ((eq (cdr cell) :unseen)
+       (acons param :read (remove param state :key #'car :test #'eq)))
+      (t state))))
+
+(defun %opt-demand-mark-killed (state param)
+  (let ((cell (assoc param state :test #'eq)))
+    (cond
+      ((null cell) state)
+      ((eq (cdr cell) :unseen)
+       (acons param :killed (remove param state :key #'car :test #'eq)))
+      (t state))))
+
+(defun %opt-demand-step-inst (inst params state)
+  "Advance PARAM demand STATE through INST."
+  (let ((next state))
+    (dolist (reg (opt-inst-read-regs inst))
+      (when (member reg params :test #'eq)
+        (setf next (%opt-demand-mark-read next reg))))
+    (let ((dst (opt-inst-dst inst)))
+      (when (and dst (member dst params :test #'eq))
+        (setf next (%opt-demand-mark-killed next dst))))
+    next))
+
+(defun %opt-demand-block-transfer (block params state)
+  (let ((next state))
+    (dolist (inst (bb-instructions block) next)
+      (setf next (%opt-demand-step-inst inst params next)))))
+
+(defun %opt-demand-exit-block-p (block)
+  (let ((insts (bb-instructions block)))
+    (or (null insts)
+        (typep (car (last insts)) '(or vm-ret vm-halt)))))
+
+(defun %opt-demand-collect-exit-states (cfg params)
+  "Path-sensitive demand propagation over CFG."
+  (let ((work (list (cons (cfg-entry cfg)
+                          (mapcar (lambda (p) (cons p :unseen)) params))))
+        (seen (make-hash-table :test #'equal))
+        (exits nil))
+    (loop while work do
+      (destructuring-bind (block . state) (pop work)
+        (let ((key (list (bb-id block) state)))
+          (unless (gethash key seen)
+            (setf (gethash key seen) t)
+            (let ((out (%opt-demand-block-transfer block params state)))
+              (if (or (%opt-demand-exit-block-p block)
+                      (null (bb-successors block)))
+                  (push out exits)
+                  (dolist (succ (bb-successors block))
+                    (push (cons succ out) work))))))))
+    (or exits (list (mapcar (lambda (p) (cons p :killed)) params)))))
+
+(defun opt-analyze-function-demand (function params body-instructions)
+  "Analyze PARAM usage in BODY-INSTRUCTIONS for FUNCTION label."
+  (let* ((cfg (cfg-build body-instructions))
+         (exits (%opt-demand-collect-exit-states cfg params))
+         (demands
+           (loop for param in params
+                 collect (let* ((states (mapcar (lambda (state)
+                                                  (%opt-demand-param-state state param))
+                                                exits))
+                                (read-count (count :read states :test #'eq)))
+                           (cons param
+                                 (cond
+                                   ((and states (= read-count (length states))) :strict)
+                                   ((plusp read-count) :lazy)
+                                   (t :absent))))))
+         (strict-params (loop for (param . demand) in demands
+                              when (eq demand :strict) collect param))
+         (absent-params (loop for (param . demand) in demands
+                              when (eq demand :absent) collect param)))
+    (make-opt-demand-summary
+     :function function
+     :params params
+     :demands demands
+     :strict-params strict-params
+     :absent-params absent-params)))
+
+(defun %opt-demand-collect-function-bodies (instructions)
+  "Return label -> body-instructions for closures/functions in INSTRUCTIONS."
+  (let ((labels (make-hash-table :test #'equal))
+        (callable-labels (make-hash-table :test #'equal)))
+    (dolist (inst instructions)
+      (when (typep inst '(or vm-closure vm-func-ref))
+        (setf (gethash (vm-label-name inst) callable-labels) t)))
+    (let ((vec (coerce instructions 'vector)))
+      (loop for i from 0 below (length vec)
+            for inst = (aref vec i)
+            when (and (typep inst 'vm-label)
+                      (gethash (vm-name inst) callable-labels))
+              do (let ((body nil))
+                   (loop for j from (1+ i) below (length vec)
+                         for body-inst = (aref vec j)
+                         do (push body-inst body)
+                         when (typep body-inst '(or vm-ret vm-halt))
+                           do (return))
+                   (setf (gethash (vm-name inst) labels) (nreverse body)))))
+    labels))
+
+(defun opt-analyze-program-demand (instructions)
+  "Analyze all VM closures/functions in INSTRUCTIONS and return a summary table."
+  (let ((bodies (%opt-demand-collect-function-bodies instructions))
+        (summaries (make-hash-table :test #'equal)))
+    (dolist (inst instructions summaries)
+      (when (and (typep inst '(or vm-closure vm-func-ref))
+                 (vm-closure-params inst))
+        (let* ((label (vm-label-name inst))
+               (body (gethash label bodies)))
+          (when body
+            (setf (gethash label summaries)
+                  (opt-analyze-function-demand label (vm-closure-params inst) body))))))))
+
+(defun %opt-demand-rewrite-call (inst new-args)
+  (if (typep inst 'vm-tail-call)
+      (make-vm-tail-call :dst (vm-dst inst) :func (vm-func-reg inst) :args new-args)
+      (make-vm-call :dst (vm-dst inst) :func (vm-func-reg inst) :args new-args)))
+
+(defun opt-pass-demand-analysis (instructions)
+  "Run FR-182 demand analysis and expose call-site cleanup for absent params.
+
+The pass is conservative: it preserves arity, replacing only absent argument
+registers with a fresh NIL constant at known direct call sites. This lets later
+DCE remove pure computations that fed those now-unused registers, while effectful
+argument computations remain in the instruction stream."
+  (let* ((summaries (opt-analyze-program-demand instructions))
+         (reg->label (make-hash-table :test #'eq))
+         (nil-const-regs (make-hash-table :test #'eq))
+         (base (1+ (opt-max-reg-index instructions)))
+         (changed nil)
+         (out nil))
+    (setf *opt-demand-summary-table* summaries)
+    (flet ((fresh-nil-reg ()
+             (prog1 (intern (format nil "R~A" base) :keyword)
+               (incf base)))
+           (absent-position-p (index params summary)
+             (let ((param (nth index params)))
+               (member param (opt-demand-summary-absent-params summary) :test #'eq)))
+           (clear-dst (inst)
+             (let ((dst (opt-inst-dst inst)))
+               (when dst
+                 (remhash dst reg->label)
+                 (remhash dst nil-const-regs)))))
+      (dolist (inst instructions)
+        (cond
+          ((typep inst '(or vm-closure vm-func-ref))
+           (setf (gethash (vm-dst inst) reg->label) (vm-label-name inst))
+           (remhash (vm-dst inst) nil-const-regs)
+           (push inst out))
+          ((typep inst 'vm-const)
+           (remhash (vm-dst inst) reg->label)
+           (if (null (vm-value inst))
+               (setf (gethash (vm-dst inst) nil-const-regs) t)
+               (remhash (vm-dst inst) nil-const-regs))
+           (push inst out))
+          ((typep inst '(or vm-call vm-tail-call))
+           (let* ((label (gethash (vm-func-reg inst) reg->label))
+                  (summary (and label (gethash label summaries)))
+                  (params (and summary (opt-demand-summary-params summary)))
+                  (args (vm-args inst)))
+             (cond
+               ((and summary params args)
+                (let ((prefix nil)
+                      (new-args nil))
+                  (loop for arg in args
+                        for i from 0
+                        do (cond
+                             ((absent-position-p i params summary)
+                              (if (gethash arg nil-const-regs)
+                                  (push arg new-args)
+                                  (let ((nil-reg (fresh-nil-reg)))
+                                    (setf (gethash nil-reg nil-const-regs) t)
+                                    (push (make-vm-const :dst nil-reg :value nil) prefix)
+                                    (push nil-reg new-args)
+                                    (setf changed t))))
+                             (t
+                              (push arg new-args))))
+                  (dolist (const (nreverse prefix))
+                    (push const out))
+                  (push (%opt-demand-rewrite-call inst (nreverse new-args)) out)))
+               (t
+                (push inst out))))
+           (clear-dst inst))
+          (t
+           (clear-dst inst)
+           (push inst out)))))
+    (if changed (nreverse out) instructions)))
 
 ;;; ─── Top-Level Optimizer ─────────────────────────────────────────────────

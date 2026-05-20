@@ -10,6 +10,33 @@
 
 ;;; ─── VM Profiling ────────────────────────────────────────────────────────────
 
+(defparameter *vm-instruction-profile* (make-hash-table :test #'eq)
+  "Global VM instruction-name frequency histogram used by self-host profile feedback.")
+
+(defparameter *vm-instruction-profile-enabled* nil
+  "When non-NIL, collect instruction frequencies in *VM-INSTRUCTION-PROFILE*.")
+
+(defun vm-reset-instruction-profile ()
+  "Clear the global VM instruction frequency histogram."
+  (clrhash *vm-instruction-profile*)
+  *vm-instruction-profile*)
+
+(defun vm-instruction-profile-alist (&optional (profile *vm-instruction-profile*))
+  "Return PROFILE as a descending alist of (INSTRUCTION-NAME . COUNT)."
+  (let (rows)
+    (maphash (lambda (instruction-name count)
+               (push (cons instruction-name count) rows))
+             profile)
+    (sort rows #'> :key #'cdr)))
+
+(defun vm-write-instruction-profile (path &optional (profile *vm-instruction-profile*))
+  "Write PROFILE to PATH as a readable instruction histogram alist."
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (write (vm-instruction-profile-alist profile) :stream out :pretty t)
+    (terpri out))
+  path)
+
 (defun %vm-profile-enabled-p (state)
   (typecase state
     (vm2-state (vm2-state-profile-enabled-p state))
@@ -98,6 +125,8 @@
 
 (defun vm-profile-inst-hit (state instruction)
   "Increment the instruction frequency counter for INSTRUCTION's concrete type."
+  (when *vm-instruction-profile-enabled*
+    (incf (gethash (type-of instruction) *vm-instruction-profile* 0)))
   (when (%vm-profile-enabled-p state)
     (incf (gethash (type-of instruction)
                    (vm-get-profile-inst-counts state)

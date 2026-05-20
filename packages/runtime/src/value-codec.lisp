@@ -60,19 +60,67 @@
 ;;; Pointer encode / decode
 ;;; ------------------------------------------------------------
 
-(declaim (inline encode-pointer decode-pointer pointer-tag))
+(declaim (inline compressed-pointer-enabled-p
+                 encode-compressed-pointer decode-compressed-pointer
+                 encode-pointer decode-pointer pointer-tag
+                 val-encode-pointer val-decode-pointer))
+
+(defun compressed-pointer-enabled-p ()
+  "Return true when NaN-boxed pointer payloads should use 32-bit offsets."
+  *compressed-pointers-enabled*)
+
+(defun encode-compressed-pointer (addr)
+  "Return ADDR as a 32-bit offset from *HEAP-BASE-ADDRESS*.
+
+The pure CL heap uses logical word addresses. Native backends can bind the same
+contract to byte addresses as long as the heap region is 4GB or smaller."
+  (declare (type (unsigned-byte 64) addr))
+  (let ((offset (- addr *heap-base-address*)))
+    (unless (<= 0 offset #xffffffff)
+      (error "encode-compressed-pointer: address ~D is outside 4GB heap region based at ~D"
+             addr *heap-base-address*))
+    (logand offset +max-u64+)))
+
+(defun decode-compressed-pointer (offset)
+  "Expand a 32-bit heap-relative OFFSET to an absolute logical heap address."
+  (declare (type (unsigned-byte 32) offset))
+  (+ *heap-base-address* offset))
 
 (defun encode-pointer (addr tag)
-  "Box the 48-bit heap ADDRESS with the given TAG constant.
+  "Box the heap ADDRESS with the given TAG constant.
+
+When *COMPRESSED-POINTERS-ENABLED* is true, the payload stores a 32-bit offset
+from *HEAP-BASE-ADDRESS* and sets +COMPRESSED-POINTER-FLAG+.
+
    TAG must be one of +tag-object+, +tag-cons+, +tag-symbol+,
    +tag-function+, or +tag-string+."
   (declare (type (unsigned-byte 64) addr tag))
-  (logior +ptr-base+ tag (logand addr +addr-mask+)))
+  (logand
+   (if *compressed-pointers-enabled*
+       (logior +ptr-base+
+               tag
+               +compressed-pointer-flag+
+               (logand (encode-compressed-pointer addr)
+                       +compressed-pointer-offset-mask+))
+       (logior +ptr-base+ tag (logand addr +addr-mask+)))
+   +max-u64+))
 
 (defun decode-pointer (v)
-  "Extract the 48-bit heap address from a pointer-tagged NaN-boxed value."
+  "Extract the heap address from a pointer-tagged NaN-boxed value."
   (declare (type (unsigned-byte 64) v))
-  (logand v +addr-mask+))
+  (if (val-compressed-pointer-p v)
+      (decode-compressed-pointer (logand v +compressed-pointer-offset-mask+))
+      (logand v +addr-mask+)))
+
+(defun val-encode-pointer (addr tag)
+  "Compatibility alias for ENCODE-POINTER."
+  (declare (type (unsigned-byte 64) addr tag))
+  (encode-pointer addr tag))
+
+(defun val-decode-pointer (v)
+  "Compatibility alias for DECODE-POINTER."
+  (declare (type (unsigned-byte 64) v))
+  (decode-pointer v))
 
 (defun pointer-tag (v)
   "Return the 3-bit sub-tag word from a pointer-tagged NaN-boxed value."
@@ -88,7 +136,7 @@
 (defun encode-char (c)
   "Box the CL character C as a NaN-boxed character immediate."
   (declare (type character c))
-  (logior +tag-char+ (char-code c)))
+  (logand (logior +tag-char+ (char-code c)) +max-u64+))
 
 (defun decode-char (v)
   "Unbox NaN-boxed character V to a CL character."
@@ -119,10 +167,15 @@
      (if (and (>= x (- (expt 2 50))) (< x (expt 2 50)))
          (encode-fixnum x)
          (error "cl-value->val: integer ~A out of 51-bit fixnum range" x)))
-    (double-float (encode-double x))
-    (single-float (encode-double (float x 1.0d0)))
-    (character    (encode-char x))
-    (t
+     (double-float (encode-double x))
+     (single-float (encode-double (float x 1.0d0)))
+     (character    (encode-char x))
+     (string
+      (if (and (<= (length x) +sso-string-max-length+)
+               (loop for char across x always (<= (char-code char) #xFF)))
+          (encode-sso-string x)
+          (error "cl-value->val: string ~S requires heap string allocation" x)))
+     (t
      (error "cl-value->val: cannot box value of type ~S (use encode-pointer for heap objects)"
             (type-of x)))))
 
@@ -134,8 +187,9 @@
     ((= v +val-nil+)     nil)
     ((= v +val-t+)       t)
     ((= v +val-unbound+) (error "val->cl-value: unbound slot"))
-    ((val-fixnum-p v)    (decode-fixnum v))
-    ((val-char-p v)      (decode-char v))
+     ((val-fixnum-p v)    (decode-fixnum v))
+     ((val-sso-string-p v) (decode-sso-string v))
+     ((val-char-p v)      (decode-char v))
     ((val-double-p v)    (decode-double v))
     ((val-pointer-p v)   (decode-pointer v))
     (t

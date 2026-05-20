@@ -141,7 +141,9 @@ preserving existing closure semantics."
     ;; Normal closure — optionally push frame (skipped for TCO), bind args, jump
     (t
       (let* ((resolved-func (%vm-defunctionalized-dispatch state func))
-             (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+              (arg-values (mapcar (lambda (r) (vm-reg-get state r)) arg-regs)))
+        (vm-closure-note-invocation resolved-func)
+        (vm-maybe-tier-upgrade-closure resolved-func)
         (if (and (vm-closure-program-flat resolved-func)
                  (vm-closure-label-table resolved-func)
                  (or (not *vm-exec-flat*)

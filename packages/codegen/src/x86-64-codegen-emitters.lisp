@@ -73,9 +73,141 @@ Frame-pointer functions restore non-RBP callee-saved registers, then use
         (emit-leave stream)
         (emit-ret stream))
       (progn
-        (dolist (reg (reverse save-regs))
-          (emit-pop-r64 reg stream))
-        (emit-ret stream))))
+       (dolist (reg (reverse save-regs))
+         (emit-pop-r64 reg stream))
+       (emit-ret stream))))
+
+(defun emit-x86-64-shrink-pseudo (inst stream)
+  "Emit x86-64 shrink-wrap pseudo-instruction INST."
+  (typecase inst
+    (x86-64-shrink-save
+     (emit-push-r64 (x86-64-shrink-save-reg inst) stream))
+    (x86-64-shrink-restore
+     (emit-pop-r64 (x86-64-shrink-restore-reg inst) stream))))
+
+(defun x86-64-phys-code->keyword (code)
+  "Return the physical register keyword for x86-64 register CODE."
+  (car (rassoc code *phys-reg-to-x86-code* :test #'=)))
+
+(defun %native-inst-touches-phys-p (inst phys-key assignment)
+  "Return true when INST reads or writes a virtual register assigned to PHYS-KEY."
+  (or (some (lambda (reg) (eq (gethash reg assignment) phys-key))
+            (instruction-defs inst))
+      (some (lambda (reg) (eq (gethash reg assignment) phys-key))
+            (instruction-uses inst))))
+
+(defun %native-inst-reads-phys-p (inst phys-key assignment)
+  "Return true when INST reads a virtual register assigned to PHYS-KEY."
+  (some (lambda (reg) (eq (gethash reg assignment) phys-key))
+        (instruction-uses inst)))
+
+(defun %native-common-dominator (blocks)
+  "Return the nearest common dominator for BLOCKS."
+  (labels ((depth (b)
+             (loop with n = 0
+                   for cur = b then (bb-idom cur)
+                   while (and cur (not (eq cur (bb-idom cur))))
+                   do (incf n)
+                   finally (return n)))
+           (raise (b n)
+             (loop repeat n do (setf b (bb-idom b)) finally (return b)))
+           (join2 (a b)
+             (let ((da (depth a))
+                   (db (depth b)))
+               (when (> da db) (setf a (raise a (- da db))))
+               (when (> db da) (setf b (raise b (- db da))))
+               (loop until (eq a b)
+                     do (setf a (bb-idom a)
+                              b (bb-idom b)))
+               a)))
+    (reduce #'join2 (rest blocks) :initial-value (first blocks))))
+
+(defun %native-block-terminator (block)
+  "Return BLOCK's final control-transfer instruction, if present."
+  (let ((last (car (last (bb-instructions block)))))
+    (and (typep last '(or vm-jump vm-jump-zero vm-ret vm-halt)) last)))
+
+(defun %native-unsafe-restore-before-terminator-p (block phys-key assignment)
+  "True when restoring before BLOCK's terminator would clobber its condition/value."
+  (let ((term (%native-block-terminator block)))
+    (and term (%native-inst-reads-phys-p term phys-key assignment))))
+
+(defun %native-shrink-wrap-plan (instructions reg-codes assignment make-save make-restore)
+  "Return three values: annotated instructions, entry-save regs, final-restore regs.
+
+The planner is intentionally conservative: a save is placed at the nearest common
+dominator of all blocks touching the callee-saved register, and restores are
+placed at every edge leaving that dominated region (before the block terminator).
+If an edge restore would clobber a terminator that reads the same register, the
+register falls back to the monolithic entry/final epilogue path."
+  (let ((cfg (cfg-build instructions))
+        (entry-regs nil)
+        (final-regs nil))
+    (unless (cfg-entry cfg)
+      (return-from %native-shrink-wrap-plan (values instructions reg-codes reg-codes)))
+    (cfg-compute-dominators cfg)
+    (let ((save-map (make-hash-table :test #'eq))
+          (restore-map (make-hash-table :test #'eq))
+          (fallback nil))
+      (dolist (reg-code reg-codes)
+        (let* ((phys-key (if (numberp reg-code)
+                             (x86-64-phys-code->keyword reg-code)
+                             reg-code))
+               (touch-blocks
+                 (loop for block across (cfg-blocks cfg)
+                       when (some (lambda (inst)
+                                    (%native-inst-touches-phys-p inst phys-key assignment))
+                                  (bb-instructions block))
+                         collect block)))
+          (cond
+            ((null touch-blocks) nil)
+            (t
+             (let* ((save-block (%native-common-dominator touch-blocks))
+                    (region (loop for block across (cfg-blocks cfg)
+                                  when (cfg-dominates-p save-block block)
+                                    collect block))
+                    (boundary-blocks
+                      (remove-duplicates
+                       (loop for block in region
+                             when (or (null (bb-successors block))
+                                      (some (lambda (succ)
+                                              (not (cfg-dominates-p save-block succ)))
+                                            (bb-successors block)))
+                               collect block)
+                       :test #'eq)))
+               (if (or (eq save-block (cfg-entry cfg))
+                       (some (lambda (block)
+                               (%native-unsafe-restore-before-terminator-p block phys-key assignment))
+                             boundary-blocks))
+                   (push reg-code fallback)
+                   (progn
+                     (push (funcall make-save reg-code) (gethash save-block save-map))
+                     (dolist (block boundary-blocks)
+                       (push (funcall make-restore reg-code) (gethash block restore-map))))))))))
+      (setf entry-regs (nreverse fallback)
+            final-regs (nreverse fallback))
+      (let ((result nil))
+        (loop for block across (cfg-blocks cfg) do
+          (when (bb-label block)
+            (push (bb-label block) result))
+          (dolist (pseudo (reverse (gethash block save-map)))
+            (push pseudo result))
+          (let* ((insts (bb-instructions block))
+                 (term (%native-block-terminator block))
+                 (body (if term (butlast insts) insts)))
+            (dolist (inst body)
+              (push inst result))
+            (dolist (pseudo (reverse (gethash block restore-map)))
+              (push pseudo result))
+            (when term
+              (push term result))))
+        (values (nreverse result) entry-regs final-regs)))))
+
+(defun x86-64-shrink-wrap-instructions (instructions save-regs assignment)
+  "Annotate INSTRUCTIONS with x86-64 callee-save shrink-wrap pseudo-ops."
+  (%native-shrink-wrap-plan instructions save-regs assignment
+                            (lambda (reg) (make-x86-64-shrink-save :reg reg))
+                            (lambda (reg) (make-x86-64-shrink-restore :reg reg))))
 
 ;; Per-instruction emitters (emit-vm-halt-inst through emit-vm-spill-load-inst),
 ;; *x86-64-emitter-entries*, *x86-64-emitter-table*, and
@@ -361,10 +493,10 @@ which makes the process monotonic and bounded by the number of branches."
   ;; FR-371: GC Safepoints — signal-based vs polling safepoint mechanism for Stop-The-World coordination
   (let* ((instructions (vm-program-instructions program))
          (calling-convention (vm-program-calling-convention-object program))
-         (has-indirect-calls-p
-           (some (lambda (inst)
-                   (typep inst '(or vm-call vm-tail-call vm-generic-call)))
-                 instructions))
+          (has-indirect-calls-p
+            (some (lambda (inst)
+                    (typep inst '(or vm-call vm-tail-call vm-generic-call)))
+                  instructions))
          (cfi-plan (x86-64-cfi-plan :has-indirect-calls-p has-indirect-calls-p))
          (cfi-entry-size (if (eq (getf cfi-plan :entry-opcode) :endbr64) 4 0))
          (leaf-p (vm-program-leaf-p program))
@@ -403,8 +535,34 @@ which makes the process monotonic and bounded by the number of branches."
                                    (x86-64-program-has-stack-buffer-p instructions)))
           (canary-plan (x86-64-stack-canary-plan
                         :has-stack-buffer-p has-stack-buffer-p))
-          (probe-count (stack-probe-count
-                          (x86-64-stack-frame-size save-regs spill-frame-size)))
+           (shrink-wrap-p (and *shrink-wrap-enabled*
+                               (zerop spill-count)
+                               (not has-indirect-calls-p)))
+           (ordered-body
+             (x86-64-peephole-lea-addresses
+              (codegen-hot-cold-ordered-instructions instructions)))
+           (shrink-entry-regs nil)
+           (shrink-final-regs nil)
+           (ordered-instructions
+             (if shrink-wrap-p
+                 (multiple-value-bind (annotated entry-regs final-regs)
+                     (x86-64-shrink-wrap-instructions ordered-body callee-saved
+                                                       (regalloc-assignment *current-regalloc*))
+                   (setf shrink-entry-regs entry-regs
+                         shrink-final-regs final-regs)
+                   annotated)
+                 (progn
+                   (setf shrink-entry-regs callee-saved
+                         shrink-final-regs callee-saved)
+                   ordered-body)))
+           (entry-save-regs (if frame-pointer-p
+                                (cons +rbp+ shrink-entry-regs)
+                                shrink-entry-regs))
+           (final-save-regs (if frame-pointer-p
+                                (cons +rbp+ shrink-final-regs)
+                                shrink-final-regs))
+           (probe-count (stack-probe-count
+                           (x86-64-stack-frame-size save-regs spill-frame-size)))
           (probe-size (* probe-count +x86-64-stack-probe-size+))
            (canary-prologue-size (if (and frame-pointer-p (getf canary-plan :enabled-p)) 13 0))
            (frame-pointer-establish-size (if frame-pointer-p 3 0))
@@ -412,14 +570,11 @@ which makes the process monotonic and bounded by the number of branches."
           ;; Push sizes: 1 byte for RAX-RDI, 2 bytes for R8-R15 (REX.B prefix).
            (prologue-size (+ cfi-entry-size
                               probe-size
-                              (reduce #'+ save-regs :key #'push-r64-byte-size :initial-value 0)
-                              frame-pointer-establish-size
-                              canary-prologue-size
-                              spill-frame-adjust-size))
-            (ordered-instructions
-                 (x86-64-peephole-lea-addresses
-                  (codegen-hot-cold-ordered-instructions instructions)))
-            (branch-encodings nil)
+                               (reduce #'+ entry-save-regs :key #'push-r64-byte-size :initial-value 0)
+                               frame-pointer-establish-size
+                               canary-prologue-size
+                               spill-frame-adjust-size))
+             (branch-encodings nil)
            ;; First pass: relax branches and build label offset table
             (label-offsets
               (let ((*x86-64-use-retpoline* (or *x86-64-use-retpoline* use-retpoline-p))
@@ -439,7 +594,7 @@ which makes the process monotonic and bounded by the number of branches."
     (emit-x86-64-stack-probes stream probe-count)
 
     ;; Prologue: save only the callee-saved registers actually used.
-    (emit-x86-64-function-prologue stream frame-pointer-p save-regs)
+    (emit-x86-64-function-prologue stream frame-pointer-p entry-save-regs)
 
     (when (plusp spill-frame-size)
       (emit-sub-ri32 +rsp+ spill-frame-size stream))
@@ -456,7 +611,9 @@ which makes the process monotonic and bounded by the number of branches."
                 (opt-shadow-stack-plan-enabled-p shadow-stack-plan)))
           (*x86-64-branch-encodings* branch-encodings))
       (dolist (inst ordered-instructions)
-        (emit-vm-instruction-with-labels inst stream pos label-offsets)
+        (if (typep inst '(or x86-64-shrink-save x86-64-shrink-restore))
+            (emit-x86-64-shrink-pseudo inst stream)
+            (emit-vm-instruction-with-labels inst stream pos label-offsets))
         (incf pos (instruction-size inst))))
 
     (when (plusp spill-frame-size)
@@ -466,7 +623,7 @@ which makes the process monotonic and bounded by the number of branches."
     (emit-x86-64-stack-canary-epilogue stream canary-plan frame-pointer-p)
 
     ;; Epilogue: restore callee-saved registers and return.
-    (emit-x86-64-function-epilogue stream frame-pointer-p save-regs)))
+    (emit-x86-64-function-epilogue stream frame-pointer-p final-save-regs)))
 
 ;;; Public API
 
@@ -483,11 +640,12 @@ which makes the process monotonic and bounded by the number of branches."
   (let* ((instructions (schedule-pre-ra (vm-program-instructions program)))
          (float-vregs (x86-64-compute-float-vregs instructions))
          (target (x86-64-codegen-target))
-           (ra (allocate-registers instructions target float-vregs))
-           (allocated-program (make-vm-program
-                                 :instructions (opt-analyze-branch-weights
-                                                (regalloc-instructions ra))
-                                 :result-register (vm-program-result-register program)
+            (ra (allocate-registers instructions target float-vregs))
+            (post-ra-instructions (schedule-post-ra (regalloc-instructions ra) ra))
+            (allocated-program (make-vm-program
+                                  :instructions (opt-analyze-branch-weights
+                                                 post-ra-instructions)
+                                  :result-register (vm-program-result-register program)
                                  :leaf-p (vm-program-leaf-p program)
                                  :calling-convention (vm-program-calling-convention program)
                                  :function-conventions (vm-program-function-conventions program))))

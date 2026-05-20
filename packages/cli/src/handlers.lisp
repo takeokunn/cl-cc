@@ -142,6 +142,11 @@ is created as needed."
     (when path
       (%write-pgo-profile path result vm-state))))
 
+(defun %write-selfhost-instruction-profile (&optional (path *selfhost-profile-path*))
+  "Write the self-hosting VM instruction histogram to PATH."
+  (cl-cc/vm:vm-write-instruction-profile path)
+  (format *error-output* "; cl-cc selfhost: wrote VM instruction profile to ~A~%" path))
+
 (defun print-profile (vm-state &optional (stream *standard-output*))
   "Print a simple collapsed-stack profile report for VM-STATE."
   (let ((samples (and vm-state (cl-cc/vm:vm-get-profile-samples vm-state))))
@@ -282,6 +287,48 @@ exits with status 0 on success."
                       ret))))
               (uiop:quit 0)))))
        "run"))))
+
+(defun %default-selfhost-file ()
+  "Return the default self-hosting workload file."
+  (or (probe-file #p"example/selfhost.lisp")
+      (probe-file #p"./example/selfhost.lisp")
+      (error "Default selfhost workload not found: example/selfhost.lisp")))
+
+(defun %do-selfhost (parsed)
+  "Handle `cl-cc selfhost' and optionally emit VM instruction feedback."
+  (let* ((file (or (car (parsed-args-positional parsed))
+                   (namestring (%default-selfhost-file))))
+         (stdlib (flag parsed "--stdlib"))
+         (no-stdlib (flag parsed "--no-stdlib"))
+         (verbose (flag parsed "--verbose"))
+         (timeout (%get-timeout parsed))
+         (opts (%parse-compile-opts parsed))
+         (source (%read-command-source file)))
+    (when verbose
+      (format *error-output* "; cl-cc selfhost: ~A  profile=~A~%"
+              file (if (compile-opts-profile opts) "yes" "no")))
+    (%with-cli-error-handler
+      (%call-with-cli-timeout
+       timeout
+       (lambda ()
+         (%call-with-optional-output-file
+          (compile-opts-trace-json-path opts)
+          (lambda (stream)
+            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+                   (kwargs (%compile-opts-kwargs opts stream)))
+              (when (compile-opts-profile opts)
+                (cl-cc/vm:vm-reset-instruction-profile))
+              (let ((ret (let ((cl-cc/vm:*vm-instruction-profile-enabled*
+                                  (not (null (compile-opts-profile opts)))))
+                           (let* ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib))
+                                  (value (%run-compiled-result result vm-state opts)))
+                             (%maybe-write-pgo-profile opts result vm-state)
+                             value))))
+                (when (compile-opts-profile opts)
+                  (%write-selfhost-instruction-profile))
+                (format t "~S~%" ret)
+                (uiop:quit 0))))))
+       "selfhost"))))
 
 (defun %do-compile (parsed)
   "Handle the `cl-cc compile' subcommand using PARSED arguments.

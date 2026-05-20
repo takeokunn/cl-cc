@@ -79,14 +79,15 @@ KEY slots may include a fourth explicit keyword-name element."
 (defmethod cps-transform-ast ((node ast-defun) k)
   "Transform defun conservatively through host DEFUN."
   (%cps-progn
-   (append (list 'defun
-                 (ast-defun-name node)
-                 (%cps-extended-lambda-list (ast-defun-params node)
-                                            (ast-defun-optional-params node)
-                                            (ast-defun-rest-param node)
-                                            (ast-defun-key-params node)))
-           (ast-defun-declarations node)
-           (mapcar #'ast-to-sexp (ast-defun-body node)))
+   (trmc-transform-defun-form
+    (append (list 'defun
+                  (ast-defun-name node)
+                  (%cps-extended-lambda-list (ast-defun-params node)
+                                             (ast-defun-optional-params node)
+                                             (ast-defun-rest-param node)
+                                             (ast-defun-key-params node)))
+            (ast-defun-declarations node)
+            (mapcar #'ast-to-sexp (ast-defun-body node))))
    (%cps-funcall k (list 'quote (ast-defun-name node)))))
 
 (defmethod cps-transform-ast ((node ast-defmacro) k)

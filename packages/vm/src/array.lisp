@@ -162,6 +162,26 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
         (vm-cow-vector-backing value))
       value))
 
+(defun %vm-array-dimensions-designator (size dimensions)
+  "Return a MAKE-ARRAY dimensions designator from SIZE and optional DIMENSIONS."
+  (let ((raw (or dimensions size)))
+    (cond
+      ((vectorp raw) (coerce raw 'list))
+      ((listp raw) raw)
+      (t raw))))
+
+(defun %vm-array-total-size (dimensions-designator)
+  "Return row-major total size for DIMENSIONS-DESIGNATOR."
+  (if (listp dimensions-designator)
+      (reduce #'* dimensions-designator :initial-value 1)
+      dimensions-designator))
+
+(defun %vm-array-vector-dimensions-p (dimensions-designator)
+  "Return true when DIMENSIONS-DESIGNATOR denotes a one-dimensional vector."
+  (or (integerp dimensions-designator)
+      (and (consp dimensions-designator)
+           (null (rest dimensions-designator)))))
+
 ;;; VM Array/Vector Operations
 ;;;
 ;;; This file extends the VM with array and vector instructions including
@@ -175,6 +195,7 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   "Create an array of given size. Supports make-array keyword arguments."
   (dst nil :reader vm-dst)
   (size-reg nil :reader vm-size-reg)
+  (dimensions-reg nil :reader vm-dimensions-reg)
   (initial-element nil :reader vm-initial-element)
   (fill-pointer nil :reader vm-fill-pointer)
   (fill-pointer-reg nil :reader vm-fill-pointer-reg)
@@ -185,7 +206,8 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (displaced-to-reg nil :reader vm-displaced-to-reg)
   (:sexp-tag :make-array)
   (:sexp-slots dst size-reg initial-element fill-pointer adjustable element-type
-               fill-pointer-reg adjustable-reg element-type-reg displaced-to-reg))
+                fill-pointer-reg adjustable-reg element-type-reg displaced-to-reg
+                dimensions-reg))
 
 (define-vm-instruction vm-aref (vm-instruction)
   "Get element at INDEX from ARRAY, store in DST."
@@ -261,6 +283,11 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
 (defmethod execute-instruction ((inst vm-make-array) state pc labels)
   (declare (ignore labels))
   (let* ((size (vm-reg-get state (vm-size-reg inst)))
+          (dimensions (and (vm-dimensions-reg inst)
+                           (vm-reg-get state (vm-dimensions-reg inst))))
+          (dimensions-designator (%vm-array-dimensions-designator size dimensions))
+          (total-size (%vm-array-total-size dimensions-designator))
+          (vector-dimensions-p (%vm-array-vector-dimensions-p dimensions-designator))
           (init-present-p (vm-initial-element inst))
           (fp (if (vm-fill-pointer-reg inst)
                   (vm-reg-get state (vm-fill-pointer-reg inst))
@@ -284,44 +311,45 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
                          default-init))
            (specialized-type (%vm-normalize-specialized-element-type elt-type))
            (arr (cond
-                   (displaced-to
-                    (cond
-                      ((and fp adj)
-                       (make-array size :element-type (or elt-type t)
-                                   :displaced-to displaced-to
-                                   :fill-pointer (if (eq fp t) 0 fp)
-                                   :adjustable t))
-                      (fp
-                       (make-array size :element-type (or elt-type t)
-                                   :displaced-to displaced-to
-                                   :fill-pointer (if (eq fp t) 0 fp)))
-                      (adj
-                       (make-array size :element-type (or elt-type t)
-                                   :displaced-to displaced-to
-                                   :adjustable t))
-                      (t
-                       (make-array size :element-type (or elt-type t)
-                                   :displaced-to displaced-to))))
-                    ((and (member specialized-type '(:fixnum :double-float :character :bit)
-                                  :test #'eq)
-                          (not fp)
-                         (not adj)
-                         (not init-present-p))
-                    (vm-make-specialized-array size specialized-type))
-                   ((and fp adj)
-                   (make-array size :element-type (or elt-type t) :initial-element init-elem
-                               :fill-pointer (if (eq fp t) 0 fp)
-                               :adjustable t))
-                  (fp
-                   (make-array size :element-type (or elt-type t) :initial-element init-elem
-                               :fill-pointer (if (eq fp t) 0 fp)))
-                  (adj
-                   (make-array size :element-type (or elt-type t) :initial-element init-elem
-                               :adjustable t))
-                  (init-present-p
-                   (make-array size :element-type (or elt-type t) :initial-element init-elem))
-                  (t
-                   (make-array size :element-type (or elt-type t) :initial-element init-elem)))))
+                    (displaced-to
+                     (cond
+                       ((and fp adj)
+                        (make-array dimensions-designator :element-type (or elt-type t)
+                                    :displaced-to displaced-to
+                                    :fill-pointer (if (eq fp t) 0 fp)
+                                    :adjustable t))
+                       (fp
+                        (make-array dimensions-designator :element-type (or elt-type t)
+                                    :displaced-to displaced-to
+                                    :fill-pointer (if (eq fp t) 0 fp)))
+                       (adj
+                        (make-array dimensions-designator :element-type (or elt-type t)
+                                    :displaced-to displaced-to
+                                    :adjustable t))
+                       (t
+                        (make-array dimensions-designator :element-type (or elt-type t)
+                                    :displaced-to displaced-to))))
+                    ((and vector-dimensions-p
+                          (member specialized-type '(:fixnum :double-float :character :bit)
+                                   :test #'eq)
+                           (not fp)
+                          (not adj)
+                          (not init-present-p))
+                     (vm-make-specialized-array total-size specialized-type))
+                    ((and fp adj)
+                    (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem
+                                :fill-pointer (if (eq fp t) 0 fp)
+                                :adjustable t))
+                   (fp
+                    (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem
+                                :fill-pointer (if (eq fp t) 0 fp)))
+                   (adj
+                    (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem
+                                :adjustable t))
+                   (init-present-p
+                    (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem))
+                   (t
+                    (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem)))))
     (vm-reg-set state (vm-dst inst) arr)
     (values (1+ pc) nil nil)))
 

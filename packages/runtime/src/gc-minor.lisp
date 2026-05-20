@@ -238,6 +238,12 @@
           (%gc-cheney-scan heap evac-target to-free-cell promoted-list-cell #'in-source-p)
           ;; Step 5: Scan promoted objects — update stale pointers, dirty cards
           (%gc-update-promoted heap (car promoted-list-cell))
+          ;; Weak references are deliberately not evacuation roots.  Once the
+          ;; copying graph is closed, either retarget them to the forwarding
+          ;; address of a live referent or clear/drop them when the referent was
+          ;; left behind in the evacuation source.
+          (when (fboundp 'rt-gc-process-weak-after-minor)
+            (rt-gc-process-weak-after-minor heap #'in-source-p))
           ;; Step 6: Commit new young-free
           (setf (rt-heap-young-free heap) (cdr to-free-cell))
           ;; Step 7: Statistics — words collected = semi-size - live words in new from-space

@@ -200,10 +200,13 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
     (error "Unsupported hash-table weakness mode: ~S" weakness))
   (let ((table (%rt-make-backing-hash-table test size weakness)))
     (if weakness
-        (%make-rt-weak-hash-table
-         :table table
-         :weakness weakness
-         :entries (make-hash-table :test test))
+        (let ((weak-table (%make-rt-weak-hash-table
+                           :table table
+                           :weakness weakness
+                           :entries (make-hash-table :test test))))
+          (when (boundp '*rt-weak-hash-table-registry*)
+            (pushnew weak-table *rt-weak-hash-table-registry* :test #'eq))
+          weak-table)
         table)))
 
 (defun %rt-record-weak-hash-entry (ht key val)
@@ -290,22 +293,39 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
 
 (defun rt-signal-error (condition)
   (%rt-with-signal-gc-inhibit
-    (error condition)))
+    (multiple-value-bind (result handled-p) (rt-dispatch-signal condition)
+      (if handled-p
+          result
+          (error condition)))))
 
 (defun rt-signal (condition)
   (%rt-with-signal-gc-inhibit
-    (signal condition)))
+    (multiple-value-bind (result handled-p) (rt-dispatch-signal condition)
+      (if handled-p
+          result
+          (signal condition)))))
 
 (defun rt-warn-fn (condition)
   (%rt-with-signal-gc-inhibit
-    (warn "~A" condition)))
+    (multiple-value-bind (result handled-p) (rt-dispatch-signal condition)
+      (if handled-p
+          result
+          (warn "~A" condition)))))
 
 (defun rt-cerror (continue-string condition)
   (%rt-with-signal-gc-inhibit
-    (cerror continue-string "~A" condition)))
+    (rt-establish-restart 'continue (lambda () nil)
+      (lambda ()
+        (multiple-value-bind (result handled-p) (rt-dispatch-signal condition)
+          (if handled-p
+              result
+              (cerror continue-string "~A" condition)))))))
 
 (defun rt-invoke-restart (name &rest args)
-  (apply #'invoke-restart name args))
+  (multiple-value-bind (result handled-p) (rt-dispatch-restart name args)
+    (if handled-p
+        result
+        (apply #'invoke-restart name args))))
 
 ;;; ------------------------------------------------------------
 ;;; Misc

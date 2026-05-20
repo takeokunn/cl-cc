@@ -411,6 +411,7 @@
     :components
     ((:file "mir-tests")
      (:file "mir-target-tests")
+     (:file "mir-isel-tests")
      (:file "regalloc-tests")
      (:file "wasm-tests")
      (:file "wasm-ir-tests")

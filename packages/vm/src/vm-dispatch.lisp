@@ -23,6 +23,10 @@ Used by custom method combination to do synchronous sub-calls.")
 (defvar *vm-exec-labels* nil
   "When non-nil, the label table of the currently executing VM program.")
 
+(defvar *vm-current-program-osr-entry-points* nil
+  "When non-nil, the list of OSR entry point metadata for the currently executing program.
+Each entry is a plist (:PC <pc> :LABEL <label> :ID <id>).")
+
 (defun %vm-call-closure-sync (closure state args &key method-context)
   "Call a VM closure synchronously, returning its result value.
 Requires *vm-exec-flat* and *vm-exec-labels* to be bound.
@@ -40,6 +44,8 @@ Saves and restores call stack around the sub-invocation."
       ;; Push a call frame; return-pc is irrelevant since we detect return by stack depth
       (vm-push-call-frame state 0 result-reg)
       (push method-context (vm-method-call-stack state))
+      (vm-closure-note-invocation closure)
+      (vm-maybe-tier-upgrade-closure closure)
       (vm-profile-enter-call state (vm-closure-entry-label closure))
       (vm-bind-closure-args closure state args)
       (let ((*vm-exec-flat* flat)
@@ -160,11 +166,11 @@ Restores captured environment, then handles required, &optional, &rest, and &key
         (opt-params (vm-closure-optional-params closure))
         (rest-param (vm-closure-rest-param closure))
         (key-params (vm-closure-key-params closure))
-        (captured   (vm-closure-captured-values closure)))
+        (captured-regs (vm-closure-captured-regs closure))
+        (captured-vals (vm-closure-captured-vals closure)))
     ;; Restore captured environment into registers
-    (map nil (lambda (binding)
-               (vm-reg-set state (car binding) (cdr binding)))
-          captured)
+    (dotimes (i (min (length captured-regs) (length captured-vals)))
+      (vm-reg-set state (aref captured-regs i) (aref captured-vals i)))
     (let* ((n-req (length params))
            (n-opt (length opt-params))
            (fixed-fast-p (and (null opt-params)
@@ -219,8 +225,8 @@ Restores captured environment, then handles required, &optional, &rest, and &key
                                         (nth (1+ pos) post-opt-args)
                                         default)))))))
     ;; Activate closure environment for nested closures
-    (when captured
-      (setf (vm-closure-env state) captured)))))
+    (when (plusp (length captured-vals))
+      (setf (vm-closure-env state) closure)))))
 
 (defun vm-list-to-lisp-list (state value)
   "Convert a VM list (possibly using vm-cons-cell heap objects) to a Lisp list."

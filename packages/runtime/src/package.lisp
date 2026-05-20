@@ -2,6 +2,7 @@
 
 (defpackage :cl-cc/runtime
   (:use :cl)
+  (:shadow #:compute-applicable-methods)
   (:export
    ;; Tagged pointer constants (3-bit native tag values, used by runtime.lisp / heap.lisp)
    #:+tag-fixnum+ #:+rt-tag-cons+ #:+rt-tag-symbol+ #:+rt-tag-function+
@@ -104,14 +105,25 @@
    ;; CLOS
    #:rt-defclass #:rt-make-instance #:rt-slot-value #:rt-slot-set
    #:rt-slot-boundp #:rt-slot-makunbound #:rt-slot-exists-p
-    #:rt-class-name #:rt-class-of #:rt-find-class #:rt-register-method #:rt-call-generic
-    #:rt-make-instance-0
-    #:*rt-class-registry*
-   ;; Conditions
-   #:rt-signal-error #:rt-signal #:rt-warn-fn #:rt-cerror
-   #:rt-invoke-restart
-    ;; Misc
-    #:rt-boundp #:rt-fboundp #:rt-makunbound
+     #:rt-class-name #:rt-class-of #:rt-find-class #:rt-register-method #:rt-call-generic
+     #:rt-compute-applicable-methods #:compute-applicable-methods
+     #:rt-make-instance-0
+     #:*rt-class-registry* #:*rt-generic-function-registry*
+    ;; Conditions
+    #:rt-signal-error #:rt-signal #:rt-warn-fn #:rt-cerror
+    #:rt-invoke-restart
+    #:*handler-stack* #:*restart-stack*
+    #:rt-handler #:rt-handler-p #:make-rt-handler
+    #:rt-handler-condition-type #:rt-handler-handler-function
+    #:rt-restart #:rt-restart-p #:make-rt-restart
+    #:rt-restart-name #:rt-restart-function
+    #:rt-push-handler #:rt-pop-handler #:rt-establish-handler
+    #:rt-find-handler #:rt-dispatch-signal
+    #:rt-push-restart #:rt-pop-restart #:rt-find-restart
+    #:rt-establish-restart #:rt-restart-bind #:rt-restart-case
+    #:rt-dispatch-restart
+     ;; Misc
+     #:rt-boundp #:rt-fboundp #:rt-makunbound
    #:rt-random #:rt-make-random-state
    #:rt-get-universal-time #:rt-get-internal-real-time #:rt-get-internal-run-time
     #:rt-read-from-string #:rt-read-sexp
@@ -187,7 +199,9 @@
    #:*gc-young-size-words* #:*gc-old-size-words* #:*gc-tenuring-threshold*
    #:+gc-card-size-words+
    ;; Object header helpers
-   #:make-header #:header-size #:header-tag #:header-age
+    #:make-rt-header
+    #:rt-header-type-tag #:rt-header-gc-bits #:rt-header-shape-id #:rt-header-size
+    #:make-header #:header-size #:header-tag #:header-age
    #:header-marked-p #:header-gray-p #:header-forwarding-p
    #:header-set-mark #:header-clear-mark #:header-set-gray #:header-clear-gray
    #:header-make-forwarding-ptr #:header-forwarding-ptr #:header-increment-age
@@ -282,19 +296,22 @@
     ;; GC policy (FR-424)
     #:rt-gc-select-policy
     ;; Reference strength (FR-381-384)
-    #:*rt-reference-registry* #:*rt-reference-queue*
-    #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
-    #:rt-soft-ref-referent #:rt-weak-ref-referent #:%rt-phantom-ref-referent
-    #:rt-ref-get #:rt-ref-clear-p #:rt-reference-queue-process
+     #:*rt-reference-registry* #:*rt-default-reference-queue*
+     #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
+     #:rt-make-soft-ref #:rt-make-weak-ref #:rt-make-phantom-ref
+     #:rt-make-weak-pointer #:rt-weak-pointer-p #:rt-weak-pointer-value
+     #:rt-soft-ref-referent #:rt-weak-ref-referent #:%rt-phantom-ref-referent
+     #:rt-ref-get #:rt-ref-clear-p #:rt-reference-queue-process
     ;; Ephemerons (FR-246)
     #:rt-ephemeron #:make-rt-ephemeron #:rt-ephemeron-key #:rt-ephemeron-value
     #:*rt-ephemeron-registry* #:rt-make-ephemeron
     ;; GC reference processing (FR-381-384, FR-246)
     #:rt-gc-process-references
     ;; Finalization (FR-459/460/471)
-    #:rt-register-finalizer #:rt-unregister-finalizer #:rt-register-stream-finalizer
-    #:header-finalized-p #:header-set-finalized #:header-clear-finalized
-    #:*rt-finalizer-registry* #:*rt-finalization-queue*
+     #:rt-register-finalizer #:rt-unregister-finalizer #:rt-register-stream-finalizer
+     #:rt-finalize #:rt-cancel-finalization
+     #:header-finalized-p #:header-set-finalized #:header-clear-finalized
+     #:*rt-finalizer-registry* #:*rt-finalization-queue*
     ;; Precise roots (FR-332)
      #:rt-gc-add-root-typed #:*gc-threads*
      #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*

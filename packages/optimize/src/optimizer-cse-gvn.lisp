@@ -51,6 +51,9 @@
 
 ;;; ─── Pass: Common Subexpression Elimination ──────────────────────────────
 
+(defvar *opt-cse-unification-count* 0
+  "Dynamic counter used by opt-pass-cse for optimization-report output.")
+
 (defun %cse-emit-or-cse (inst dst key state result)
   "Emit INST or replace with vm-move if KEY is already in STATE.
    Returns updated RESULT list (head = most recently emitted, not yet reversed)."
@@ -58,6 +61,7 @@
     (if existing
         (progn (%cse-bump-gen state dst)
                (setf (gethash dst (cse-val-env state)) key)
+               (incf *opt-cse-unification-count*)
                (cons (make-vm-move :dst dst :src existing) result))
         (progn (%cse-bump-gen state dst)
                (%cse-record state dst key)
@@ -70,53 +74,57 @@
   (let ((state         (make-cse-state))
         (target-labels (%opt-branch-target-labels instructions))
         (result        nil))
-    (dolist (inst instructions)
-      (typecase inst
-        (vm-label
-         (when (gethash (vm-name inst) target-labels)
-           (%cse-flush state))
-         (push inst result))
-        (vm-const
-         ;; Never replace vm-const with vm-move: doing so creates a
-         ;; fold<->CSE oscillation that DCE can turn into a dangling
-         ;; register reference (first canonical reg gets removed by
-         ;; DCE while later moves still point to it, leaving the
-         ;; register uninitialized = 0 instead of NIL).
-         ;; The fold pass already propagates constant values; CSE is
-         ;; only needed for computed expressions.
-         (let ((dst (vm-dst inst))
-               (key (list :const (vm-value inst))))
-           (%cse-bump-gen state dst)
-           (%cse-record state dst key)
-           (push inst result)))
-        (vm-move
-         (let* ((dst     (vm-move-dst inst))
-                (src-val (%cse-get-val state (vm-move-src inst))))
-           (%cse-bump-gen state dst)
-           (setf (gethash dst (cse-val-env state)) src-val)
-           (push inst result)))
-        (t
-         (cond
-           ((opt-binary-lhs-rhs-p inst)
-            (let* ((dst (vm-dst inst))
-                   (lv  (%cse-get-val state (vm-lhs inst)))
-                   (rv  (%cse-get-val state (vm-rhs inst)))
-                   (op  (type-of inst))
-                   (key (if (%opt-commutative-inst-p inst)
-                            (list op (if (%opt-value< lv rv) lv rv)
-                                     (if (%opt-value< lv rv) rv lv))
-                            (list op lv rv))))
-              (setf result (%cse-emit-or-cse inst dst key state result))))
-           ((opt-unary-src-p inst)
-            (let* ((dst (vm-dst inst))
-                   (sv  (%cse-get-val state (vm-src inst)))
-                   (key (list (type-of inst) sv)))
-              (setf result (%cse-emit-or-cse inst dst key state result))))
-           (t
-            (let ((dst (opt-inst-dst inst)))
-              (when dst (%cse-bump-gen state dst)))
-            (push inst result))))))
-    (nreverse result)))
+    (let ((*opt-cse-unification-count* 0))
+      (prog1
+          (progn
+            (dolist (inst instructions)
+              (typecase inst
+                (vm-label
+                 (when (gethash (vm-name inst) target-labels)
+                   (%cse-flush state))
+                 (push inst result))
+                (vm-const
+                 ;; Never replace vm-const with vm-move: doing so creates a
+                 ;; fold<->CSE oscillation that DCE can turn into a dangling
+                 ;; register reference (first canonical reg gets removed by
+                 ;; DCE while later moves still point to it, leaving the
+                 ;; register uninitialized = 0 instead of NIL).
+                 ;; The fold pass already propagates constant values; CSE is
+                 ;; only needed for computed expressions.
+                 (let ((dst (vm-dst inst))
+                       (key (list :const (vm-value inst))))
+                   (%cse-bump-gen state dst)
+                   (%cse-record state dst key)
+                   (push inst result)))
+                (vm-move
+                 (let* ((dst     (vm-move-dst inst))
+                        (src-val (%cse-get-val state (vm-move-src inst))))
+                   (%cse-bump-gen state dst)
+                   (setf (gethash dst (cse-val-env state)) src-val)
+                   (push inst result)))
+                (t
+                 (cond
+                   ((opt-binary-lhs-rhs-p inst)
+                    (let* ((dst (vm-dst inst))
+                           (lv  (%cse-get-val state (vm-lhs inst)))
+                           (rv  (%cse-get-val state (vm-rhs inst)))
+                           (op  (type-of inst))
+                           (key (if (%opt-commutative-inst-p inst)
+                                    (list op (if (%opt-value< lv rv) lv rv)
+                                          (if (%opt-value< lv rv) rv lv))
+                                    (list op lv rv))))
+                      (setf result (%cse-emit-or-cse inst dst key state result))))
+                   ((opt-unary-src-p inst)
+                    (let* ((dst (vm-dst inst))
+                           (sv  (%cse-get-val state (vm-src inst)))
+                           (key (list (type-of inst) sv)))
+                      (setf result (%cse-emit-or-cse inst dst key state result))))
+                   (t
+                    (let ((dst (opt-inst-dst inst)))
+                      (when dst (%cse-bump-gen state dst)))
+                    (push inst result))))))
+            (nreverse result))
+        (%opt-report :cse "unified=~D" *opt-cse-unification-count*)))))
 
 ;;; ─── GVN helpers ─────────────────────────────────────────────────────────
 

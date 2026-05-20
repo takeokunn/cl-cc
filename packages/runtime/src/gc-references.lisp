@@ -23,6 +23,11 @@
 (defvar *rt-reference-registry* nil)
 (defvar *rt-default-reference-queue* (make-rt-reference-queue))
 
+(defvar *rt-weak-hash-table-registry* nil
+  "All runtime weak hash tables.  The collector uses this metadata to remove
+entries whose weak key/value has died without treating the metadata itself as a
+strong reference.")
+
 (defstruct (rt-hash-cons-entry (:constructor %make-rt-hash-cons-entry))
   "Weak registration for hash-consed canonical objects."
   object
@@ -44,6 +49,23 @@
 
 (defun rt-make-weak-ref (referent &optional (queue *rt-default-reference-queue*))
   (%rt-register-reference (%make-rt-weak-ref :referent referent :queue queue)))
+
+(defun rt-make-weak-pointer (referent &optional (queue *rt-default-reference-queue*))
+  "Create a weak pointer to REFERENT.  The referent is not treated as a GC root."
+  (rt-make-weak-ref referent queue))
+
+(defun rt-weak-pointer-p (object)
+  "Return true when OBJECT is a runtime weak pointer."
+  (rt-weak-ref-p object))
+
+(defun rt-weak-pointer-value (weak-pointer)
+  "Return WEAK-POINTER's referent, or NIL after the GC clears it."
+  (rt-ref-get weak-pointer))
+
+(defun (setf rt-weak-pointer-value) (value weak-pointer)
+  "Retarget WEAK-POINTER to VALUE without creating a strong GC root."
+  (check-type weak-pointer rt-weak-ref)
+  (setf (rt-weak-ref-referent weak-pointer) value))
 
 (defun rt-register-hash-cons (cons-cell)
   "Register CONS-CELL as a hash-consed canonical object via a weak reference.
@@ -117,7 +139,56 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
      (unless (rt-phantom-ref-enqueued ref)
        (setf (rt-phantom-ref-referent ref) nil
              (rt-phantom-ref-enqueued ref) t)
-       (%rt-reference-queue-push (rt-phantom-ref-queue ref) ref)))))
+        (%rt-reference-queue-push (rt-phantom-ref-queue ref) ref)))))
+
+(defun %rt-gc-reference-value-address (heap value)
+  "Return VALUE's heap address, or NIL for non-heap host values."
+  (%rt-gc-pointer-address heap value))
+
+(defun %rt-gc-reference-live-p (heap marked-set value)
+  "True when VALUE is not managed by HEAP or its managed referent is live.
+
+Host values are outside the cl-cc heap and are therefore not cleared by the
+runtime GC.  Heap values are live when they are young/current large objects or
+when their old-space header was marked by the major collector."
+  (let ((addr (%rt-gc-reference-value-address heap value)))
+    (or (null addr)
+        (gethash addr marked-set))))
+
+(defun %rt-gc-add-range-to-marked-set (heap marked-set start end predicate)
+  "Add object starts in [START, END) satisfying PREDICATE to MARKED-SET."
+  (loop with addr = start
+        while (< addr end) do
+          (let ((h (rt-heap-object-header heap addr)))
+            (cond
+              ((header-forwarding-p h) (incf addr 1))
+              ((or (not (integerp h)) (zerop (header-size h))) (return))
+              (t
+               (when (funcall predicate h)
+                 (setf (gethash addr marked-set) t))
+               (incf addr (header-size h))))))
+  marked-set)
+
+(defun %rt-gc-build-marked-set (heap)
+  "Build an address set from the completed major-GC mark state.
+
+All allocated young objects are live for an old-generation collection.  Old
+objects are live only when their mark bit is set; this function must run before
+sweep clears those bits."
+  (let ((marked-set (make-hash-table :test #'eql)))
+    (%rt-gc-add-range-to-marked-set
+     heap marked-set
+     (rt-heap-young-from-base heap) (rt-heap-young-free heap)
+     (lambda (h) (declare (ignore h)) t))
+    (%rt-gc-add-range-to-marked-set
+     heap marked-set
+     (rt-heap-old-base heap) (rt-heap-old-free heap)
+     #'header-marked-p)
+    (%rt-gc-add-range-to-marked-set
+     heap marked-set
+     (rt-heap-large-obj-base heap) (rt-heap-large-obj-free heap)
+     (lambda (h) (declare (ignore h)) t))
+    marked-set))
 
 (defun rt-reference-queue-process (queue callback)
   (check-type queue rt-reference-queue)
@@ -159,33 +230,32 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
   "Clear soft references whose referents are not marked, but ONLY when
    heap occupancy exceeds the pressure threshold. Soft refs are the most
    resilient reference type — they survive until memory pressure is high."
-  (declare (ignore marked-set))
   (when (>= (rt-heap-occupancy-pct heap) 80.0d0)
     (dolist (ref *rt-reference-registry*)
       (when (rt-soft-ref-p ref)
         (let ((referent (rt-soft-ref-referent ref)))
-          (when referent
-            ;; Clear soft ref if referent is unreachable
+          (when (and referent
+                     (not (%rt-gc-reference-live-p heap marked-set referent)))
             (%rt-reference-clear ref)))))))
 
 (defun %rt-gc-process-weak-references (heap marked-set)
   "Clear weak references whose referents are NOT marked (unreachable).
    Weak refs are always cleared when their referent is unreachable."
-  (declare (ignore heap))
   (dolist (ref *rt-reference-registry*)
     (when (rt-weak-ref-p ref)
       (let ((referent (rt-weak-ref-referent ref)))
-        (when (and referent (not (gethash referent marked-set)))
+        (when (and referent
+                   (not (%rt-gc-reference-live-p heap marked-set referent)))
           (%rt-reference-clear ref))))))
 
 (defun %rt-gc-process-phantom-references (heap marked-set)
   "Enqueue phantom references whose referents are collected.
    Phantom refs are enqueued after the referent is finalized and collected."
-  (declare (ignore heap))
   (dolist (ref *rt-reference-registry*)
     (when (rt-phantom-ref-p ref)
       (let ((referent (rt-phantom-ref-referent ref)))
-        (when (and referent (not (gethash referent marked-set))
+        (when (and referent
+                   (not (%rt-gc-reference-live-p heap marked-set referent))
                    (not (rt-phantom-ref-enqueued ref)))
           (%rt-reference-clear ref))))))
 
@@ -193,16 +263,17 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
   "Process ephemerons: mark values whose keys are marked.
    Uses fixed-point iteration because ephemerons can form chains:
    eph1.key → marked → eph1.value marked → (if eph2.key = eph1.value) → eph2.value marked"
-  (declare (ignore heap))
+  (dolist (eph *rt-ephemeron-registry*)
+    (setf (rt-ephemeron-marked eph) nil))
   (loop with changed = t
         while changed
         do (setf changed nil)
            (dolist (eph *rt-ephemeron-registry*)
              (unless (rt-ephemeron-marked eph)
-               (when (gethash (rt-ephemeron-key eph) marked-set)
-                 (setf (rt-ephemeron-marked eph) t)
-                 (setf (gethash (rt-ephemeron-value eph) marked-set) t)
-                 (setf changed t))))))
+                (when (%rt-gc-reference-live-p heap marked-set (rt-ephemeron-key eph))
+                  (setf (rt-ephemeron-marked eph) t)
+                  (%rt-gc-mark-reference-value heap marked-set (rt-ephemeron-value eph))
+                  (setf changed t))))))
 
 (defun rt-gc-process-references (heap marked-set)
   "Process all reference types during major GC after the mark phase.
@@ -211,28 +282,39 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
   (%rt-gc-process-ephemerons heap marked-set)
   (%rt-gc-process-soft-references heap marked-set)
   (%rt-gc-process-weak-references heap marked-set)
-  (%rt-gc-process-phantom-references heap marked-set))
+  (%rt-gc-process-weak-hash-tables heap marked-set))
 
 ;;; ------------------------------------------------------------
 ;;; Finalizer Support (FR-337, FR-459, FR-460, FR-471)
 ;;; ------------------------------------------------------------
 
 (defvar *rt-finalizer-registry* nil
-  "Alist of (object-address . finalizer-function) for objects that
-   should have finalizers run when they become unreachable.")
+  "Alist of (object . finalizer-function) for objects that should have
+finalizers run before they are reclaimed.")
 
 (defvar *rt-finalization-queue* nil
-  "Objects whose finalizers should be run on the next cycle.
-   Two-phase: first GC marks as finalizable, second GC actually collects.")
+  "Objects whose finalizers were scheduled during the current GC cycle.")
 
 (defun rt-register-finalizer (object-addr finalizer-fn)
   "Register FINALIZER-FN to be called when OBJECT-ADDR becomes unreachable."
-  (push (cons object-addr finalizer-fn) *rt-finalizer-registry*))
+  (check-type finalizer-fn function)
+  (rt-unregister-finalizer object-addr)
+  (push (cons object-addr finalizer-fn) *rt-finalizer-registry*)
+  object-addr)
 
 (defun rt-unregister-finalizer (object-addr)
   "Remove any finalizer registered for OBJECT-ADDR."
   (setf *rt-finalizer-registry*
-        (delete object-addr *rt-finalizer-registry* :key #'car :test #'eql)))
+        (delete object-addr *rt-finalizer-registry* :key #'car :test #'eql))
+  object-addr)
+
+(defun rt-finalize (object function)
+  "Register FUNCTION to run with OBJECT when OBJECT becomes unreachable."
+  (rt-register-finalizer object function))
+
+(defun rt-cancel-finalization (object)
+  "Cancel any pending finalization for OBJECT."
+  (rt-unregister-finalizer object))
 
 (defun rt-register-stream-finalizer (stream-obj)
   "Register a finalizer that closes STREAM-OBJ when it becomes unreachable.
@@ -245,39 +327,22 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
                                    stream-obj))))
 
 (defun %rt-gc-process-finalizers (heap marked-set)
-  "Two-phase finalization:
-   Phase 1: Objects with finalizers that are NOT marked get added to
-            the finalization queue and are resurrected (marked) for one more cycle.
-   Phase 2: Objects in the finalization queue that survived the previous cycle
-            but are now unreachable get their finalizers run and are collected."
-  (declare (ignore heap))
-  ;; Phase 1: Find finalizable unreachable objects, resurrect them
-  (dolist (entry *rt-finalizer-registry*)
-    (let ((obj-addr (car entry)))
-      (unless (gethash obj-addr marked-set)
-        ;; Object is unreachable but has a finalizer — resurrect it
-        (setf (gethash obj-addr marked-set) t)
-        (push obj-addr *rt-finalization-queue*))))
-  ;; Phase 2: Run finalizers for objects that were queued last cycle
-  ;; and are still unreachable this cycle
-  (let ((to-run nil)
-        (still-alive nil))
-    (dolist (obj-addr *rt-finalization-queue*)
-      (if (gethash obj-addr marked-set)
-          (push obj-addr still-alive)
-          (push obj-addr to-run)))
-    (setf *rt-finalization-queue* still-alive)
-    ;; Run finalizers for truly dead objects
-    (dolist (obj-addr to-run)
-      (let ((entry (assoc obj-addr *rt-finalizer-registry* :test #'eql)))
-        (when entry
-          (handler-case
-              (funcall (cdr entry) obj-addr)
-            (error (e)
-              (format *error-output*
-                      "WARNING: Finalizer for ~D failed: ~A~%" obj-addr e)))
-          ;; Prevent re-finalization (FR-460 resurrection prevention)
-          (rt-unregister-finalizer obj-addr))))))
+  "Run finalizers for unreachable objects before sweep reclaims them."
+  (let ((remaining nil)
+        (scheduled nil))
+    (dolist (entry *rt-finalizer-registry*)
+      (destructuring-bind (object . function) entry
+        (if (%rt-gc-reference-live-p heap marked-set object)
+            (push entry remaining)
+            (progn
+              (push object scheduled)
+              (handler-case
+                  (funcall function object)
+                (error (e)
+                  (format *error-output*
+                          "WARNING: Finalizer for ~S failed: ~A~%" object e)))))))
+    (setf *rt-finalization-queue* (nreverse scheduled)
+          *rt-finalizer-registry* (nreverse remaining))))
 
 ;;; ------------------------------------------------------------
 ;;; Weak Hash Table Support (FR-448, FR-449)
@@ -290,3 +355,111 @@ reference, and hash-cons entries whose REFCOUNT is zero are removed by
   value
   (key-ephemeron nil)
   (value-ephemeron nil))
+
+(defun %rt-gc-mark-reference-value (heap marked-set value)
+  "Mark VALUE and its strong outgoing graph during ephemeron processing."
+  (let ((addr (%rt-gc-reference-value-address heap value)))
+    (when (and addr (not (gethash addr marked-set)))
+      (setf (gethash addr marked-set) t)
+      (when (and (rt-old-addr-p heap addr)
+                 (fboundp '%rt-gc-grey-object)
+                 (fboundp '%rt-gc-drain-major-mark-work))
+        (let ((queue-cell (cons nil nil)))
+          (%rt-gc-grey-object heap queue-cell addr)
+          (%rt-gc-drain-major-mark-work heap queue-cell)
+          ;; The drain marks transitively; refresh the visible set for weak
+          ;; processing without consuming mark bits.
+          (maphash (lambda (k v) (declare (ignore v))
+                     (setf (gethash k marked-set) t))
+                   (%rt-gc-build-marked-set heap))))))
+  marked-set)
+
+(defun %rt-gc-process-weak-hash-tables (heap marked-set)
+  "Remove weak hash entries whose key/value liveness violates their weakness."
+  (dolist (ht *rt-weak-hash-table-registry*)
+    (when (rt-weak-hash-table-p ht)
+      (let ((backing (rt-weak-hash-table-table ht))
+            (entries (rt-weak-hash-table-entries ht))
+            (weakness (rt-weak-hash-table-weakness ht))
+            (dead-keys nil))
+        (maphash
+         (lambda (metadata-key entry)
+           (let* ((key (rtwhe-key entry))
+                  (value (rtwhe-value entry))
+                  (key-live-p (%rt-gc-reference-live-p heap marked-set key))
+                  (value-live-p (%rt-gc-reference-live-p heap marked-set value))
+                  (remove-p
+                    (case weakness
+                      (:key (not key-live-p))
+                      (:value (not value-live-p))
+                      (:key-and-value (and (not key-live-p) (not value-live-p)))
+                      (:key-or-value (or (not key-live-p) (not value-live-p)))
+                      (otherwise nil))))
+             (when remove-p
+               (remhash key backing)
+               (push metadata-key dead-keys))))
+         entries)
+        (dolist (key dead-keys)
+          (remhash key entries)))))
+  *rt-weak-hash-table-registry*)
+
+(defun %rt-gc-forwarded-value-after-minor (heap value in-source-p)
+  "Return (values NEW-VALUE LIVE-IN-SOURCE-P) for a weak referent after minor GC."
+  (let ((addr (%rt-gc-value-address-for-predicate value in-source-p)))
+    (if (null addr)
+        (values value t)
+        (let ((h (rt-heap-object-header heap addr)))
+          (if (header-forwarding-p h)
+              (values (%rt-gc-rebox-pointer-like value (header-forwarding-ptr h)) t)
+              (values nil nil))))))
+
+(defun rt-gc-process-weak-after-minor (heap in-source-p)
+  "Update or clear weak references after young-generation evacuation."
+  (dolist (ref *rt-reference-registry*)
+      (when (rt-weak-ref-p ref)
+        (let ((referent (rt-weak-ref-referent ref)))
+          (when referent
+            (multiple-value-bind (new live-p)
+                (%rt-gc-forwarded-value-after-minor heap referent in-source-p)
+              (if live-p
+                  (setf (rt-weak-ref-referent ref) new)
+                  (%rt-reference-clear ref)))))))
+  (dolist (ht *rt-weak-hash-table-registry*)
+      (when (rt-weak-hash-table-p ht)
+        (let ((backing (rt-weak-hash-table-table ht))
+              (entries (rt-weak-hash-table-entries ht))
+              (dead-keys nil)
+              (updates nil))
+          (maphash
+           (lambda (metadata-key entry)
+             (multiple-value-bind (new-key key-live-p)
+                 (%rt-gc-forwarded-value-after-minor heap (rtwhe-key entry) in-source-p)
+               (multiple-value-bind (new-value value-live-p)
+                   (%rt-gc-forwarded-value-after-minor heap (rtwhe-value entry) in-source-p)
+                 (let* ((weakness (rt-weak-hash-table-weakness ht))
+                        (remove-p
+                          (case weakness
+                            (:key (not key-live-p))
+                            (:value (not value-live-p))
+                            (:key-and-value (and (not key-live-p) (not value-live-p)))
+                            (:key-or-value (or (not key-live-p) (not value-live-p)))
+                            (otherwise nil))))
+                   (if remove-p
+                       (progn
+                         (remhash (rtwhe-key entry) backing)
+                         (push metadata-key dead-keys))
+                       (progn
+                         (setf (rtwhe-key entry) new-key
+                               (rtwhe-value entry) new-value)
+                         (push (list metadata-key new-key new-value entry) updates)))))))
+           entries)
+          (dolist (key dead-keys)
+            (remhash key entries))
+          (dolist (update updates)
+            (destructuring-bind (old-key new-key new-value entry) update
+              (unless (eql old-key new-key)
+                (remhash old-key entries)
+                (remhash old-key backing))
+              (setf (gethash new-key entries) entry
+                    (gethash new-key backing) new-value))))))
+  heap)

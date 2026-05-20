@@ -32,6 +32,112 @@
   (warnings nil :type list)
   (errors nil :type list))
 
+;;; ── FR-138 zero-cost exception table bookkeeping ───────────────────────────
+
+(defvar *pending-exception-table-entries* nil
+  "Compile-time handler range descriptors awaiting final PC resolution.")
+
+(defvar *next-exception-table-entry-order* 0
+  "Monotonic source-order counter for exception-table clause tie breaking.")
+
+(defstruct compile-exception-entry
+  start-inst
+  end-inst
+  handler-label
+  condition-type
+  result-reg
+  order)
+
+(defun %record-exception-table-entry (start-inst end-inst handler-label condition-type result-reg)
+  "Record a protected instruction range for final PC→handler table creation."
+  (when (and start-inst end-inst handler-label)
+    (push (make-compile-exception-entry
+           :start-inst start-inst
+           :end-inst end-inst
+           :handler-label handler-label
+           :condition-type condition-type
+           :result-reg result-reg
+           :order (prog1 *next-exception-table-entry-order*
+                    (incf *next-exception-table-entry-order*)))
+          *pending-exception-table-entries*)))
+
+(defun %instruction-pc-index (instructions)
+  "Return an EQ hash table mapping instruction objects to their final PCs."
+  (let ((index (make-hash-table :test #'eq)))
+    (loop for inst in instructions
+          for pc from 0
+          do (setf (gethash inst index) pc))
+    index))
+
+(defun %build-exception-table (instructions)
+  "Resolve pending exception ranges into concrete VM exception-table entries."
+  (let ((pending (nreverse (copy-list *pending-exception-table-entries*))))
+    (when pending
+      (let ((pc-index (%instruction-pc-index instructions))
+            (labels   (cl-cc/vm::build-label-table instructions))
+            (entries  nil))
+        (dolist (entry pending)
+          (let* ((start-pc (gethash (compile-exception-entry-start-inst entry) pc-index))
+                 (last-pc  (gethash (compile-exception-entry-end-inst entry) pc-index))
+                 (handler-pc (cl-cc/vm::vm-label-table-lookup
+                              labels (compile-exception-entry-handler-label entry))))
+            (when (and start-pc last-pc handler-pc (<= start-pc last-pc))
+              (push (cl-cc/vm::make-vm-exception-entry
+                     start-pc
+                     (1+ last-pc)
+                     handler-pc
+                     (compile-exception-entry-condition-type entry)
+                     (compile-exception-entry-result-reg entry)
+                     (compile-exception-entry-order entry))
+                    entries))))
+        (coerce (nreverse entries) 'vector)))))
+
+(defun %insert-osr-entry-markers (instructions)
+  "Insert lightweight OSR markers immediately before loop back-edge jumps."
+  (let ((labels (cl-cc/vm::build-label-table instructions))
+        (marked nil))
+    (loop for inst in instructions
+          for pc from 0
+          do (when (typep inst 'vm-jump)
+               (let* ((label (vm-label-name inst))
+                      (target-pc (cl-cc/vm::vm-label-table-lookup labels label)))
+                 (when (and target-pc (<= target-pc pc))
+                   (push (cl-cc/vm::make-vm-osr-entry
+                          :label label
+                          :id (list :back-edge label pc))
+                         marked))))
+             (push inst marked))
+    (nreverse marked)))
+
+(defun %build-deopt-info (instructions)
+  "Build PC -> interpreter reconstruction metadata for FR-155 checkpoints."
+  (let ((table (make-hash-table :test #'eql))
+        (osr nil))
+    (loop for inst in instructions
+          for pc from 0
+          do (cond
+               ((typep inst 'cl-cc/vm::vm-type-check)
+                (setf (gethash pc table)
+                      (cl-cc/vm::make-vm-deopt-info
+                       :pc pc
+                       :label (cl-cc/vm::vm-type-check-deopt-label inst)
+                       :live-regs (list (vm-src inst))
+                       :description (list :type-check (cl-cc/vm::vm-type-name inst)
+                                          :id (cl-cc/vm::vm-type-check-deopt-id inst)))))
+               ((typep inst 'cl-cc/vm::vm-deopt)
+                (setf (gethash pc table)
+                      (cl-cc/vm::make-vm-deopt-info
+                       :pc pc
+                       :label (cl-cc/vm::vm-deopt-label inst)
+                       :description (list :deopt (cl-cc/vm::vm-deopt-reason inst)
+                                          :id (cl-cc/vm::vm-deopt-id inst)))))
+               ((typep inst 'cl-cc/vm::vm-osr-entry)
+                (push (list :pc pc
+                            :label (cl-cc/vm::vm-osr-label inst)
+                            :id (cl-cc/vm::vm-osr-id inst))
+                      osr))))
+    (values table (nreverse osr))))
+
 (defun %make-toplevel-recovery-error (form-index form condition)
   "Return a plist describing a recovered top-level compilation CONDITION."
   (list :form-index form-index
@@ -63,6 +169,7 @@
   global-function-mv-arities
   function-conventions
   global-variables
+  global-var-cache
   global-classes
   global-generics
   global-generic-params
@@ -95,11 +202,12 @@
    :safety (ctx-safety ctx)
    :block-env (copy-tree (ctx-block-env ctx))
    :tagbody-env (copy-tree (ctx-tagbody-env ctx))
-   :global-functions (%copy-compiler-hash-table (ctx-global-functions ctx))
-   :global-function-mv-arities (%copy-compiler-hash-table (ctx-global-function-mv-arities ctx))
-   :function-conventions (%copy-compiler-hash-table (ctx-function-conventions ctx))
-   :global-variables (%copy-compiler-hash-table (ctx-global-variables ctx))
-   :global-classes (%copy-compiler-hash-table (ctx-global-classes ctx))
+    :global-functions (%copy-compiler-hash-table (ctx-global-functions ctx))
+    :global-function-mv-arities (%copy-compiler-hash-table (ctx-global-function-mv-arities ctx))
+    :function-conventions (%copy-compiler-hash-table (ctx-function-conventions ctx))
+    :global-variables (%copy-compiler-hash-table (ctx-global-variables ctx))
+    :global-var-cache (copy-list (ctx-global-var-cache ctx))
+    :global-classes (%copy-compiler-hash-table (ctx-global-classes ctx))
    :global-generics (%copy-compiler-hash-table (ctx-global-generics ctx))
    :global-generic-params (%copy-compiler-hash-table (ctx-global-generic-params ctx))
    :current-function-name (ctx-current-function-name ctx)
@@ -134,6 +242,7 @@
   (setf (ctx-global-function-mv-arities ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-function-mv-arities snapshot)))
   (setf (ctx-function-conventions ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-function-conventions snapshot)))
   (setf (ctx-global-variables ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-variables snapshot)))
+  (setf (ctx-global-var-cache ctx) (copy-list (toplevel-compilation-snapshot-global-var-cache snapshot)))
   (setf (ctx-global-classes ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-classes snapshot)))
   (setf (ctx-global-generics ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generics snapshot)))
   (setf (ctx-global-generic-params ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generic-params snapshot)))
@@ -316,6 +425,55 @@ Returns two values: result register and CPS form used for the AST."
                   last-cps))
         (values (compile-ast ast ctx) last-cps))))
 
+(defmethod compile-ast ((node ast-handler-case) ctx)
+  "Compile handler-case with a PC→handler side table instead of push/pop ops."
+  (setf (ctx-tail-position ctx) nil)
+  (let* ((clauses           (ast-handler-case-clauses node))
+         (result-reg        (make-register ctx))
+         (normal-exit-label (make-label ctx "handler_case_exit"))
+         (handler-infos     (loop repeat (length clauses)
+                                   collect (list (make-label ctx "handler")
+                                                 (make-register ctx))))
+         (protected-form    (ast-handler-case-form node))
+         (prefix            (ctx-instructions ctx))
+         (form-result       (compile-ast protected-form ctx))
+         (body-rev          (ldiff (ctx-instructions ctx) prefix))
+         (body-instructions (nreverse (copy-list body-rev)))
+         (elide-handlers-p  (%handler-case-can-elide-handlers-p
+                             protected-form body-instructions)))
+    (emit ctx (make-vm-move :dst result-reg :src form-result))
+    (unless elide-handlers-p
+      (when body-instructions
+        (loop for clause in clauses
+              for info in handler-infos
+              do (%record-exception-table-entry
+                  (first body-instructions)
+                  (car (last body-instructions))
+                  (first info)
+                  (first clause)
+                  (second info))))
+      (emit ctx (make-vm-jump :label normal-exit-label))
+      (loop for clause in clauses
+            for info   in handler-infos
+            do (let* ((var           (second clause))
+                      (body          (cddr clause))
+                      (handler-label (first info))
+                      (error-reg     (second info))
+                      (old-env       (ctx-env ctx)))
+                 (emit ctx (make-vm-label :name handler-label))
+                 (when var
+                   (setf (ctx-env ctx) (cons (cons var error-reg) (ctx-env ctx))))
+                 (let ((last-reg (if body
+                                     (loop for form in body
+                                           for r = (compile-ast form ctx)
+                                           finally (return r))
+                                     error-reg)))
+                   (emit ctx (make-vm-move :dst result-reg :src last-reg)))
+                 (setf (ctx-env ctx) old-env)
+                 (emit ctx (make-vm-jump :label normal-exit-label))))
+      (emit ctx (make-vm-label :name normal-exit-label)))
+    result-reg))
+
 (defun %top-level-in-package-form-p (form)
   "Return T when FORM is an in-package declaration skipped by top-level compilation."
   (and (consp form)
@@ -344,7 +502,7 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
        (%compile-toplevel-ast-into-context ast ctx target type-check opts))
      (values last-reg last-type last-cps type-env compiled-asts)))
 
-(defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors)
+(defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier)
   "Finalize CTX after all top-level forms have been compiled."
   (when last-reg
     (emit ctx (make-vm-halt :reg last-reg)))
@@ -361,19 +519,35 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                           (:internal (setf has-internal-p t))))
                       function-conventions)
              (if (and has-internal-p (not has-external-p)) :internal :external)))
-         (instructions (nreverse (ctx-instructions ctx)))
+         (raw-instructions (nreverse (ctx-instructions ctx)))
+         (instructions (if (eq target :vm)
+                           (%insert-osr-entry-markers raw-instructions)
+                           raw-instructions))
          (optimized nil)
          (leaf-p    nil)
-         (program   nil))
+         (program   nil)
+         (deopt-info nil)
+         (osr-entry-points nil))
     (multiple-value-setq (optimized leaf-p)
-      (apply #'optimize-instructions instructions opts))
+      (let ((cl-cc/optimize:*skip-optimizer-passes*
+              (or cl-cc/optimize:*skip-optimizer-passes*
+                  (zerop compilation-tier))))
+        (apply #'optimize-instructions instructions opts)))
+    (multiple-value-setq (deopt-info osr-entry-points)
+      (%build-deopt-info instructions))
     (setf program (make-vm-program :instructions (if (or (eq target :vm) (eq target :wasm))
-                                                     instructions
-                                                     (or optimized instructions))
+                                                       instructions
+                                                       (or optimized instructions))
                                     :result-register last-reg
                                     :leaf-p          leaf-p
-                                    :calling-convention program-convention
-                                    :function-conventions function-conventions))
+                                     :calling-convention program-convention
+                                     :function-conventions function-conventions
+                                     :deopt-info deopt-info
+                                     :osr-entry-points osr-entry-points
+                                     :compilation-tier compilation-tier))
+    (cl-cc/vm::vm-register-program-exception-table
+     program
+     (%build-exception-table (vm-program-instructions program)))
     (make-compilation-result :program                program
                              :assembly               (emit-assembly program :target target)
                              :globals                (ctx-global-functions ctx)
@@ -393,19 +567,20 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                          pass-pipeline print-pass-timings timing-stream coverage
                                         print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                         print-pass-stats stats-stream trace-json-stream
-                                        retpoline spectre-mitigations stack-protector shadow-stack
-                                        asan msan tsan ubsan hwasan)
+                                         retpoline spectre-mitigations stack-protector shadow-stack
+                                         asan msan tsan ubsan hwasan (compilation-tier 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
   (declare (ignore coverage retpoline spectre-mitigations stack-protector shadow-stack
                    asan msan tsan ubsan hwasan))
-  (let ((ctx           (make-instance 'compiler-context :safety safety))
+  (let ((ctx           (make-instance 'compiler-context :safety safety :target target))
         (last-reg      nil)
         (last-type     nil)
         (last-cps      nil)
         (compiled-asts nil)
         (errors        nil)
+        (*string-literal-pool* (make-hash-table :test #'equal))
          (type-env      (type-env-empty))
          (opts          (%make-compile-opts :pass-pipeline pass-pipeline
                                               :speed speed
@@ -420,19 +595,24 @@ Returns a compilation-result struct with program, assembly, and globals."
                                             :stats-stream stats-stream
                                             :trace-json-stream trace-json-stream)))
     (let ((*compile-time-value-env*    nil)
-          (*compile-time-function-env* nil))
+          (*compile-time-function-env* nil)
+          (*pending-exception-table-entries* nil)
+          (*next-exception-table-entry-order* 0))
        (loop for form in forms
              for form-index from 0
              do (unless (%top-level-in-package-form-p form)
-                  (let ((snapshot (%snapshot-toplevel-compilation-state ctx opts)))
-                    (handler-case
-                        (multiple-value-setq (last-reg last-type last-cps type-env compiled-asts)
-                          (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))
-                      (error (e)
-                        (setf opts (%restore-toplevel-compilation-state ctx snapshot))
-                        (push (%make-toplevel-recovery-error form-index form e) errors))))))
+                   (let ((snapshot (%snapshot-toplevel-compilation-state ctx opts))
+                         (string-literal-pool-snapshot
+                           (%copy-string-literal-pool *string-literal-pool*)))
+                     (handler-case
+                         (multiple-value-setq (last-reg last-type last-cps type-env compiled-asts)
+                           (%process-toplevel-form form ctx target type-env type-check safety opts compiled-asts))
+                       (error (e)
+                         (setf opts (%restore-toplevel-compilation-state ctx snapshot))
+                          (setf *string-literal-pool* string-literal-pool-snapshot)
+                         (push (%make-toplevel-recovery-error form-index form e) errors))))))
        (setf (ctx-type-env ctx) type-env)
-        (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors))))
+         (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

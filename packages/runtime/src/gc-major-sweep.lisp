@@ -299,6 +299,19 @@ Returns a plist describing the compaction result."
         (%rt-gc-drain-major-mark-work heap queue-cell)
         (when (fboundp '%rt-gc-sweep-hash-consing)
           (%rt-gc-sweep-hash-consing))
+        ;; Weak refs / weak hash tables / finalizers are processed after the
+        ;; strong graph is completely marked and before old-space sweep consumes
+        ;; mark bits.  They never seed roots; ephemeron values are the only
+        ;; conditional marking path and are drained before weak clearing.
+        (let ((marked-set (and (fboundp '%rt-gc-build-marked-set)
+                               (%rt-gc-build-marked-set heap))))
+          (when marked-set
+            (when (fboundp 'rt-gc-process-references)
+              (rt-gc-process-references heap marked-set))
+            (when (fboundp '%rt-gc-process-finalizers)
+              (%rt-gc-process-finalizers heap marked-set))
+            (when (fboundp '%rt-gc-process-phantom-references)
+              (%rt-gc-process-phantom-references heap marked-set))))
         ;; FR-339: verify no black old-space object still points to a white
         ;; old-space object before marks are consumed by sweeping.
         (multiple-value-bind (ok violating-addr)

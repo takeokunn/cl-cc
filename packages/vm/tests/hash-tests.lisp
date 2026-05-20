@@ -39,6 +39,24 @@
     (let ((obj (cl-cc/vm::vm-reg-get state :R0)))
       (assert-true (typep obj 'cl-cc/vm::vm-hash-table-object)))))
 
+(deftest make-hash-table-size-and-rehash-options
+  "vm-make-hash-table passes size and rehash control options to the backing table."
+  (let ((state (make-test-vm)))
+    (cl-cc/vm::vm-reg-set state :SIZE 32)
+    (cl-cc/vm::vm-reg-set state :REHASH-SIZE 2)
+    (cl-cc/vm::vm-reg-set state :REHASH-THRESHOLD 0.75)
+    (vm-exec (cl-cc:make-vm-make-hash-table :dst :R0
+                                            :size :SIZE
+                                            :rehash-size :REHASH-SIZE
+                                            :rehash-threshold :REHASH-THRESHOLD)
+             state)
+    (vm-exec (cl-cc:make-vm-hash-table-size :dst :R1 :table :R0) state)
+    (vm-exec (cl-cc:make-vm-hash-table-rehash-size :dst :R2 :table :R0) state)
+    (vm-exec (cl-cc:make-vm-hash-table-rehash-threshold :dst :R3 :table :R0) state)
+    (assert-true (>= (cl-cc/vm::vm-reg-get state :R1) 32))
+    (assert-equal 2 (cl-cc/vm::vm-reg-get state :R2))
+    (assert-true (= 0.75 (cl-cc/vm::vm-reg-get state :R3)))))
+
 ;;; ─── Hash Table Set/Get Round-Trip ────────────────────────────────────────
 
 (deftest sethash-gethash-roundtrip

@@ -178,6 +178,64 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
     (when rest-binding (list rest-binding))
     key-bindings))
 
+(defun %global-variable-names (ctx)
+  "Return global variable names known to CTX."
+  (let ((names nil))
+    (maphash (lambda (name _)
+               (declare (ignore _))
+               (push name names))
+             (ctx-global-variables ctx))
+    names))
+
+(defun %read-free-variables-of-list (nodes)
+  "Return variables read by NODES, excluding assignment targets and nested closure bodies."
+  (reduce #'union (mapcar #'%read-free-variables nodes) :initial-value nil))
+
+(defun %read-free-variables-of-defaults (param-list)
+  (let ((defaults (remove nil (mapcar #'second param-list))))
+    (%read-free-variables-of-list defaults)))
+
+(defun %read-free-variables (ast)
+  "Find variables read in AST for function-local global caching.
+Unlike FIND-FREE-VARIABLES, SETQ's target is not a read, and nested closure
+bodies are compiled/cached independently."
+  (typecase ast
+    (null nil)
+    (ast-var (list (ast-var-name ast)))
+    (ast-setq (%read-free-variables (ast-setq-value ast)))
+    (ast-let
+     (let ((binding-free (%read-free-variables-of-list (mapcar #'cdr (ast-let-bindings ast))))
+           (body-free (%read-free-variables-of-list (ast-let-body ast))))
+       (set-difference (union binding-free body-free) (ast-bound-names ast))))
+    (ast-lambda
+     (set-difference (union (%read-free-variables-of-defaults (ast-lambda-optional-params ast))
+                            (%read-free-variables-of-defaults (ast-lambda-key-params ast)))
+                     (ast-bound-names ast)))
+    (ast-defun nil)
+    (ast-local-fns (%read-free-variables-of-list (ast-local-fns-body ast)))
+    (ast-multiple-value-bind
+     (set-difference (union (%read-free-variables (ast-mvb-values-form ast))
+                            (%read-free-variables-of-list (ast-mvb-body ast)))
+                     (ast-bound-names ast)))
+    (t (%read-free-variables-of-list (ast-children ast)))))
+
+(defun %function-global-cache-names (ctx body bound-names)
+  "Return known globals read by BODY and not shadowed by BOUND-NAMES."
+  (intersection (set-difference (%read-free-variables-of-list body) bound-names)
+                (%global-variable-names ctx)
+                :test #'eq))
+
+(defun %emit-global-cache-entry-loads (ctx names)
+  "Emit entry loads for global variable NAMES and return a name→register alist."
+  (loop for name in names
+        for reg = (make-register ctx)
+        do (emit ctx (make-vm-get-global :dst reg :name name))
+        collect (cons name reg)))
+
+(defun %global-cache-reg (ctx name)
+  "Return cached register for global NAME in the current function, if any."
+  (cdr (assoc name (ctx-global-var-cache ctx) :test #'eq)))
+
 (defun %required-param-name (param)
   "Return the symbol name for a required PARAM, accepting typed `(name type)` entries."
   (if (and (consp param) (= (length param) 2) (symbolp (first param)))
@@ -215,6 +273,7 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
   "Bind parameters, emit defaults, compile BODY, emit vm-ret, and restore environment."
   (let ((old-env (ctx-env ctx))
         (old-type-env (ctx-type-env ctx))
+        (old-global-var-cache (ctx-global-var-cache ctx))
         (old-tail (ctx-tail-position ctx))
         (old-current-function-name (ctx-current-function-name ctx))
         (old-current-function-label (ctx-current-function-label ctx))
@@ -222,11 +281,15 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
         (old-current-function-simple-p (ctx-current-function-simple-p ctx)))
     (unwind-protect
          (progn
-           (setf (ctx-env ctx)
-                 (append (build-all-param-bindings params param-regs
-                                                   opt-bindings rest-binding
-                                                   key-bindings)
-                         (ctx-env ctx)))
+            (let* ((param-bindings (build-all-param-bindings params param-regs
+                                                             opt-bindings rest-binding
+                                                             key-bindings))
+                   (cache-body (append (mapcar #'cdr non-constant-defaults) body))
+                   (cache-names (%function-global-cache-names ctx cache-body (mapcar #'car param-bindings)))
+                   (cache-bindings (%emit-global-cache-entry-loads ctx cache-names)))
+              (setf (ctx-global-var-cache ctx) cache-bindings)
+              (setf (ctx-env ctx)
+                    (append param-bindings (ctx-env ctx))))
            (setf (ctx-current-function-name ctx) current-function-name)
            (setf (ctx-current-function-label ctx) current-function-label)
            (setf (ctx-current-function-params ctx) params)
@@ -252,6 +315,7 @@ For each (register . ast-node), emits: if register eq sentinel, register = compi
              (emit ctx (make-vm-ret :reg last-reg))))
       (setf (ctx-env ctx) old-env)
       (setf (ctx-type-env ctx) old-type-env)
+      (setf (ctx-global-var-cache ctx) old-global-var-cache)
       (setf (ctx-tail-position ctx) old-tail)
       (setf (ctx-current-function-name ctx) old-current-function-name)
       (setf (ctx-current-function-label ctx) old-current-function-label)

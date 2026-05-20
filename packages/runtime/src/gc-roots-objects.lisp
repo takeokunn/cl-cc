@@ -210,10 +210,26 @@ storage and are traced via the global/runtime registries instead."
 ;;; Section 1: Allocation
 ;;; ------------------------------------------------------------
 
+(defun %rt-gc-old-space-allocation-p (type-tag)
+  "Return true when TYPE-TAG explicitly requests old-generation allocation."
+  (member type-tag '(:old :old-space :old-generation :tenured) :test #'eq))
+
+(defun %rt-gc-alloc-old-bump (heap size-words)
+  "Allocate SIZE-WORDS words from old-space using the bump pointer."
+  (let* ((addr (rt-heap-old-free heap))
+         (limit (+ (rt-heap-old-base heap) (rt-heap-old-size heap))))
+    (when (> (+ addr size-words) limit)
+      (error "cl-cc/runtime: old space exhausted — ~D words requested" size-words))
+    (%rt-ensure-compressed-pointer-range addr size-words)
+    (setf (rt-heap-old-free heap) (+ addr size-words))
+    addr))
+
 (defun rt-gc-alloc (heap type-tag size-words)
   "Allocate SIZE-WORDS words in young from-space and return the word address.
-   TYPE-TAG is stored for documentation purposes but the header is NOT written here;
-   the caller is responsible for writing the header word immediately after allocation.
+   TYPE-TAG selects allocation policy/slab class.  Object headers are FR-266
+   compressed one-word headers built with MAKE-HEADER/MAKE-RT-HEADER, but the
+   header is NOT written here; the caller is responsible for writing it
+   immediately after allocation, optionally embedding an FR-214 shape id.
    Automatically triggers a minor GC if from-space is exhausted.
    Signals an error if the heap is exhausted even after GC."
   (%rt-gc-enforce-heap-limit heap size-words)
@@ -221,10 +237,10 @@ storage and are traced via the global/runtime registries instead."
   (%rt-gc-note-allocation-rate heap)
   (dolist (hook *rt-gc-alloc-hooks*)
     (funcall hook heap size-words))
-  ;; The allocator returns an uninitialized object whose header is written by the
-  ;; caller.  Stress mode therefore collects immediately before each allocation,
-  ;; exercising GC on every allocation boundary without evacuating a headerless
-  ;; object that has not yet been installed by the caller.
+  ;; The allocator returns an uninitialized object whose compressed header is
+  ;; written by the caller.  Stress mode therefore collects immediately before
+  ;; each allocation, exercising GC on every allocation boundary without
+  ;; evacuating a headerless object that has not yet been installed by the caller.
   (when (and *gc-stress-mode*
              (not (rt-heap-gc-inhibit heap))
              (eq (rt-heap-gc-state heap) :normal)
@@ -235,10 +251,11 @@ storage and are traced via the global/runtime registries instead."
     (cond
      (slab-class
       ;; Try slab allocation first; fall back to bump-pointer if exhausted
-      (handler-case
-          (let ((addr (rt-slab-alloc heap slab-class)))
-            (rt-gc-profile-sample (* size-words 8))
-            addr)
+       (handler-case
+           (let ((addr (rt-slab-alloc heap slab-class)))
+             (%rt-ensure-compressed-pointer-range addr size-words)
+             (rt-gc-profile-sample (* size-words 8))
+             addr)
         (error ()
           ;; Slab exhausted — fall through to bump-pointer allocator
           nil)))
@@ -249,9 +266,18 @@ storage and are traced via the global/runtime registries instead."
                        (rt-heap-large-obj-size heap))))
         (when (> (+ addr size-words) limit)
           (error "cl-cc/runtime: large object space exhausted — ~D words requested" size-words))
+        (%rt-ensure-compressed-pointer-range addr size-words)
         (setf (rt-heap-large-obj-free heap) (+ addr size-words))
         (rt-gc-profile-sample (* size-words 8))
         addr))
+    ((%rt-gc-old-space-allocation-p type-tag)
+      (multiple-value-bind (class-size free-list-addr)
+          (rt-free-list-alloc-from-bin heap size-words)
+        (let* ((alloc-size (or class-size size-words))
+               (addr (or free-list-addr
+                         (%rt-gc-alloc-old-bump heap alloc-size))))
+          (rt-gc-profile-sample (* alloc-size 8))
+          addr)))
     (t
       (let* ((from-base (rt-heap-young-from-base heap))
              (semi-size (rt-heap-young-semi-size heap))
@@ -268,6 +294,7 @@ storage and are traced via the global/runtime registries instead."
           (when (> (+ addr size-words) limit)
             (error "cl-cc/runtime: heap exhausted — ~D words requested, ~D words available in young space"
                    size-words (- limit addr))))
+        (%rt-ensure-compressed-pointer-range addr size-words)
         (setf (rt-heap-young-free heap) (+ addr size-words))
         (rt-gc-profile-sample (* size-words 8))
         addr)))))

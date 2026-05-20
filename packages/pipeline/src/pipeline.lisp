@@ -42,6 +42,39 @@ compile-toplevel-forms."
           (%opts->optimize-kwargs opts)
           (%opts->codegen-kwargs opts)))
 
+(defun %tier-0-p (opts)
+  "Return T when OPTS requests the fast Tier-0 compilation path."
+  (zerop (pipeline-opts-compilation-tier opts)))
+
+(defun %pipeline-optimize-ast (ast opts)
+  "Run AST optimization unless OPTS selects Tier-0."
+  (if (%tier-0-p opts) ast (optimize-ast ast)))
+
+(defun %call-with-tiered-optimizer-policy (opts thunk)
+  "Run THUNK with VM optimizer passes enabled only for Tier-1."
+  (let ((cl-cc/optimize:*skip-optimizer-passes*
+          (or cl-cc/optimize:*skip-optimizer-passes* (%tier-0-p opts)))
+        (cl-cc/optimize::*optimizer-tier* (pipeline-opts-compilation-tier opts)))
+    (funcall thunk)))
+
+(defun %tier1-recompile-closure (closure target-tier)
+  "Upgrade CLOSURE's owning instruction stream to Tier-1 optimized bytecode."
+  (when (and (>= target-tier 1)
+             (cl-cc/vm:vm-closure-program-flat closure))
+    (let* ((instructions (coerce (cl-cc/vm:vm-closure-program-flat closure) 'list))
+           (optimized (multiple-value-bind (optimized-instrs leaf-p)
+                          (let ((cl-cc/optimize:*skip-optimizer-passes* nil)
+                                (cl-cc/optimize::*optimizer-tier* 1))
+                            (optimize-instructions instructions))
+                        (declare (ignore leaf-p))
+                        (or optimized-instrs instructions))))
+      (setf (cl-cc/vm:vm-closure-program-flat closure) (coerce optimized 'vector)
+            (cl-cc/vm:vm-closure-label-table closure) (cl-cc/vm:build-label-table optimized)
+            (cl-cc/vm:vm-closure-compilation-tier closure) 1)))
+  closure)
+
+(setf cl-cc/vm:*vm-recompile-function-hook* #'%tier1-recompile-closure)
+
 (defun %prepare-ast (expr)
   "Macro-expand EXPR (if not already an AST node), then lower to an AST node."
   (let ((expanded (if (typep expr 'ast-node) expr (compiler-macroexpand-all expr))))
@@ -168,7 +201,7 @@ optimized, checked for target-specific CPS safety, and either replaced with the
 CPS entry expression or returned as the original form."
   (if (and (consp form) (eq (car form) 'in-package))
       form
-      (let* ((ast      (optimize-ast (%prepare-ast form)))
+      (let* ((ast      (%pipeline-optimize-ast (%prepare-ast form) opts))
              (safe-p   (%pipeline-cps-safe-ast-p (pipeline-opts-target opts) ast)))
         (if safe-p
             (%cps-identity-entry-form (cps-transform-ast* ast))
@@ -190,6 +223,7 @@ OPTS supplies the target backend. The recursion guard prevents a CPS rewrite
 from recursively re-entering the same fast path while compiling the generated
 identity-entry expression."
   (and (not *compile-expression-cps-recursion-guard*)
+       (not (%tier-0-p opts))
        (let ((target (pipeline-opts-target opts)))
          (cond
            ((eq target :vm)   (and *enable-cps-vm-primary-path*
@@ -367,16 +401,20 @@ The runtime keys map logical plan IDs onto VM profile keys:
     (%pgo-apply-type-feedback-to-instructions full-instrs
                                               (pipeline-opts-pgo-profile-data opts))
     (multiple-value-bind (optimized-instrs leaf-p)
-        (apply #'optimize-instructions full-instrs (%opts->optimize-kwargs opts))
+        (%call-with-tiered-optimizer-policy
+         opts
+         (lambda ()
+           (apply #'optimize-instructions full-instrs (%opts->optimize-kwargs opts))))
       (if *repl-capture-label-counter*
           (setf *repl-capture-label-counter* (ctx-next-label ctx))
           nil)
       (let* ((target (pipeline-opts-target opts))
              (runtime-instructions
               (%pipeline-runtime-instructions target full-instrs optimized-instrs))
-             (program (make-vm-program :instructions runtime-instructions
-                                       :result-register result-reg
-                                       :leaf-p leaf-p))
+              (program (make-vm-program :instructions runtime-instructions
+                                        :result-register result-reg
+                                        :leaf-p leaf-p
+                                        :compilation-tier (pipeline-opts-compilation-tier opts)))
              (result-type (if (pipeline-opts-type-check opts) inferred-type nil)))
         (make-compilation-result
          :program                program
@@ -395,9 +433,15 @@ The runtime keys map logical plan IDs onto VM profile keys:
   (if (= (length forms) 1)
       (apply #'compile-expression (first forms) (%opts->compile-kwargs opts))
       (let ((*enable-cps-vm-primary-path* nil))
-        (let ((result (apply #'compile-toplevel-forms
-                             (%maybe-cps-toplevel-forms forms opts)
-                             (%opts->compile-kwargs opts))))
+        (let ((result (%call-with-tiered-optimizer-policy
+                       opts
+                       (lambda ()
+                         (apply #'compile-toplevel-forms
+                                (%maybe-cps-toplevel-forms forms opts)
+                                (%opts->compile-kwargs opts))))))
+          (setf (cl-cc/vm:vm-program-compilation-tier
+                 (cl-cc/compile:compilation-result-program result))
+                (pipeline-opts-compilation-tier opts))
           (setf (cl-cc/compile:compilation-result-pgo-counter-plan result)
                 (%build-pgo-counter-plan-from-instructions
                  (cl-cc/compile:compilation-result-vm-instructions result)))
@@ -437,8 +481,9 @@ value carries top-level source locations for later AST annotation.
                                       print-opt-remarks opt-remarks-stream
                                       (opt-remarks-mode :all)
                                       print-pass-stats stats-stream trace-json-stream
-                                        retpoline spectre-mitigations stack-protector shadow-stack
-                                         asan msan tsan ubsan hwasan pgo-profile-data)
+                                         retpoline spectre-mitigations stack-protector shadow-stack
+                                          asan msan tsan ubsan hwasan pgo-profile-data
+                                          (compilation-tier *compilation-tier*))
   "Compile EXPR and return a compilation-result object.
 
 EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
@@ -468,9 +513,11 @@ streams, and PGO counter plan."
                    :tsan tsan
                    :ubsan ubsan
                    :hwasan hwasan
-                   :pgo-profile-data pgo-profile-data))
+                   :pgo-profile-data pgo-profile-data
+                   :compilation-tier (normalize-compilation-tier compilation-tier)))
          (ctx           (make-instance 'compiler-context :safety safety))
-         (ast           (optimize-ast (%prepare-ast expr)))
+         (*constant-pool* (make-hash-table :test #'equal))
+          (ast           (%pipeline-optimize-ast (%prepare-ast expr) opts))
          (inferred-type (%type-check-safe ctx ast type-check)))
     (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
     (multiple-value-bind (cps cps-result)
@@ -524,7 +571,8 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
                                       retpoline spectre-mitigations stack-protector shadow-stack
-                                      asan msan tsan ubsan hwasan pgo-profile-data)
+                                      asan msan tsan ubsan hwasan pgo-profile-data
+                                      (compilation-tier *compilation-tier*))
   "Compile SOURCE text and return a compilation-result object.
 
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -553,14 +601,21 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :tsan tsan
                     :ubsan ubsan
                     :hwasan hwasan
-                    :pgo-profile-data pgo-profile-data))
+                    :pgo-profile-data pgo-profile-data
+                    :compilation-tier (normalize-compilation-tier compilation-tier)))
            (result (%call-with-source-file-macro-eval
                     (and (eq language :lisp) source-file)
                     (lambda ()
                       (if (eq language :lisp)
                           (%compile-string-forms forms opts)
-                          (apply #'compile-toplevel-forms forms (%opts->compile-kwargs opts)))))))
+                           (%call-with-tiered-optimizer-policy
+                            opts
+                            (lambda ()
+                              (apply #'compile-toplevel-forms forms (%opts->compile-kwargs opts)))))))))
       (%pgo-apply-type-feedback-to-result result opts)
+      (setf (cl-cc/vm:vm-program-compilation-tier
+             (cl-cc/compile:compilation-result-program result))
+            (pipeline-opts-compilation-tier opts))
       (if (and (eq language :lisp) source-locations)
           (%attach-source-locations-to-result result
                                              (%non-in-package-form-locations forms source-locations))
@@ -574,7 +629,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                                  (opt-remarks-mode :all)
                                                 print-pass-stats stats-stream trace-json-stream
                                                    retpoline spectre-mitigations stack-protector shadow-stack
-                                                   asan msan tsan ubsan hwasan pgo-profile-data)
+                                                    asan msan tsan ubsan hwasan pgo-profile-data
+                                                    (compilation-tier *compilation-tier*))
   "Compile Lisp SOURCE with the standard library forms prepended.
 
 The standard library is obtained from GET-STDLIB-FORMS, combined with parsed
@@ -605,19 +661,26 @@ compilation-result object shape as COMPILE-STRING."
                    :tsan tsan
                    :ubsan ubsan
                     :hwasan hwasan
-                    :pgo-profile-data pgo-profile-data))
+                     :pgo-profile-data pgo-profile-data
+                     :compilation-tier (normalize-compilation-tier compilation-tier)))
            (*enable-cps-vm-primary-path* nil)
            (stdlib-forms (get-stdlib-forms))
            (all-forms (append stdlib-forms source-forms))
             (result (%call-with-source-file-macro-eval
                      source-file
                      (lambda ()
-                       (apply #'compile-toplevel-forms
-                              all-forms
-                              (%opts->compile-kwargs opts))))))
+                        (%call-with-tiered-optimizer-policy
+                         opts
+                         (lambda ()
+                           (apply #'compile-toplevel-forms
+                                  all-forms
+                                  (%opts->compile-kwargs opts))))))))
       (setf (cl-cc/compile:compilation-result-pgo-counter-plan result)
             (%build-pgo-counter-plan-from-instructions
              (cl-cc/compile:compilation-result-vm-instructions result)))
+      (setf (cl-cc/vm:vm-program-compilation-tier
+             (cl-cc/compile:compilation-result-program result))
+            (pipeline-opts-compilation-tier opts))
       (%pgo-apply-type-feedback-to-result result opts)
       (if source-locations
           (%attach-source-locations-to-result

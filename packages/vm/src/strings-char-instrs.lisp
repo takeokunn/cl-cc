@@ -39,9 +39,9 @@
 (define-vm-unary-instruction vm-char-name       :char-name       "Return the name of a character as a string, or nil.")
 (define-vm-unary-instruction vm-name-char       :name-char       "Return the character with the given name string, or nil.")
 
-(define-simple-instruction vm-both-case-p    :pred1 both-case-p)
-(define-simple-instruction vm-graphic-char-p :pred1 graphic-char-p)
-(define-simple-instruction vm-standard-char-p :pred1 standard-char-p)
+(define-simple-instruction vm-both-case-p    :pred1 vm-both-case-p-value)
+(define-simple-instruction vm-graphic-char-p :pred1 vm-graphic-char-p-value)
+(define-simple-instruction vm-standard-char-p :pred1 vm-standard-char-p-value)
 (define-simple-instruction vm-digit-char     :unary digit-char)
 (define-simple-instruction vm-char-name      :unary char-name)
 (define-simple-instruction vm-name-char      :unary name-char)

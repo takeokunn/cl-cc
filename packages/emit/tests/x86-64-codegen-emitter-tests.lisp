@@ -145,3 +145,57 @@
          (offsets (let ((cl-cc/codegen::*current-regalloc* nil))
                     (cl-cc/codegen::build-label-offsets insts 0))))
     (assert-= 0 (gethash "after-self-move" offsets))))
+
+;;; ─── FR-072 shrink-wrapping ────────────────────────────────────────────────
+
+(defun %fr072-assignment (&rest pairs)
+  (let ((ht (make-hash-table :test #'eq)))
+    (loop for (vreg phys) on pairs by #'cddr
+          do (setf (gethash vreg ht) phys))
+    ht))
+
+(deftest x86-64-shrink-wrap-delays-save-to-cold-block
+  "FR-072: a callee-saved register used only in a cold block is saved/restored in that block."
+  (let* ((insts (list (cl-cc:make-vm-jump-zero :reg :R0 :label "cold")
+                      (cl-cc:make-vm-halt :reg :R0)
+                      (cl-cc:make-vm-label :name "cold")
+                      (cl-cc:make-vm-add :dst :R1 :lhs :R2 :rhs :R3)
+                      (cl-cc:make-vm-halt :reg :R0)))
+         (assignment (%fr072-assignment :R1 :rbx))
+         (rbx cl-cc/codegen::+rbx+))
+    (multiple-value-bind (annotated entry-regs final-regs)
+        (cl-cc/codegen::x86-64-shrink-wrap-instructions insts (list rbx) assignment)
+      (assert-equal nil entry-regs)
+      (assert-equal nil final-regs)
+      (assert-= 1 (count-if (lambda (x) (typep x 'cl-cc/codegen::x86-64-shrink-save)) annotated))
+      (assert-= 1 (count-if (lambda (x) (typep x 'cl-cc/codegen::x86-64-shrink-restore)) annotated)))))
+
+(deftest x86-64-shrink-wrap-early-return-path-skips-save
+  "FR-072: an early-return path before the first callee-saved use has no save pseudo-op before it."
+  (let* ((insts (list (cl-cc:make-vm-jump-zero :reg :R0 :label "cold")
+                      (cl-cc:make-vm-halt :reg :R0)
+                      (cl-cc:make-vm-label :name "cold")
+                      (cl-cc:make-vm-add :dst :R1 :lhs :R2 :rhs :R3)
+                      (cl-cc:make-vm-halt :reg :R0)))
+         (assignment (%fr072-assignment :R1 :rbx)))
+    (multiple-value-bind (annotated entry-regs final-regs)
+        (cl-cc/codegen::x86-64-shrink-wrap-instructions
+         insts (list cl-cc/codegen::+rbx+) assignment)
+      (declare (ignore entry-regs final-regs))
+      (let ((early-halt (position-if (lambda (x) (typep x 'cl-cc/vm::vm-halt)) annotated))
+            (save (position-if (lambda (x) (typep x 'cl-cc/codegen::x86-64-shrink-save))
+                               annotated)))
+        (assert-true (< early-halt save))))))
+
+(deftest x86-64-shrink-wrap-degenerate-entry-use-stays-monolithic
+  "FR-072: a register touched in the entry block falls back to the monolithic prologue/epilogue."
+  (let* ((insts (list (cl-cc:make-vm-add :dst :R1 :lhs :R2 :rhs :R3)
+                      (cl-cc:make-vm-halt :reg :R1)))
+         (assignment (%fr072-assignment :R1 :rbx))
+         (rbx cl-cc/codegen::+rbx+))
+    (multiple-value-bind (annotated entry-regs final-regs)
+        (cl-cc/codegen::x86-64-shrink-wrap-instructions insts (list rbx) assignment)
+      (assert-equal (list rbx) entry-regs)
+      (assert-equal (list rbx) final-regs)
+      (assert-false (find-if (lambda (x) (typep x 'cl-cc/codegen::x86-64-shrink-save))
+                             annotated)))))

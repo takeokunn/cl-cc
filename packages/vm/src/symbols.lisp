@@ -79,6 +79,13 @@
   (:sexp-slots dst src))
 
 (define-simple-instruction vm-symbol-name :unary symbol-name)
+
+(defmethod execute-instruction ((inst vm-symbol-name) state pc labels)
+  (declare (ignore labels))
+  (let ((result (%vm-maybe-sso-string (symbol-name (vm-reg-get state (vm-src inst))))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
 (define-simple-instruction vm-make-symbol :unary make-symbol)
 
 (defun %vm-host-package-designator (designator)
@@ -100,9 +107,9 @@
 
 (defmethod execute-instruction ((inst vm-intern-symbol) state pc labels)
   (declare (ignore labels))
-  (let* ((name (vm-reg-get state (vm-src inst)))
-         (pkg-designator (when (vm-intern-pkg inst)
-                            (vm-reg-get state (vm-intern-pkg inst))))
+  (let* ((name (%vm-host-string (vm-reg-get state (vm-src inst))))
+          (pkg-designator (when (vm-intern-pkg inst)
+                             (%vm-host-string (vm-reg-get state (vm-intern-pkg inst)))))
          (result (if pkg-designator
                       (intern name (or (%vm-find-package-local-nickname pkg-designator)
                                        (find-package pkg-designator)))
@@ -196,19 +203,19 @@
 (defmethod execute-instruction ((inst vm-digit-char-p) state pc labels)
   (declare (ignore labels))
   (let* ((ch (vm-reg-get state (vm-src inst)))
-         (result (digit-char-p ch)))
+         (result (vm-digit-char-p-value ch)))
     (vm-reg-set state (vm-dst inst) (or result nil))
     (values (1+ pc) nil nil)))
 
-(define-simple-instruction vm-alpha-char-p :pred1 alpha-char-p)
-(define-simple-instruction vm-upper-case-p :pred1 upper-case-p)
-(define-simple-instruction vm-lower-case-p :pred1 lower-case-p)
+(define-simple-instruction vm-alpha-char-p :pred1 vm-alpha-char-p-value)
+(define-simple-instruction vm-upper-case-p :pred1 vm-upper-case-p-value)
+(define-simple-instruction vm-lower-case-p :pred1 vm-lower-case-p-value)
 (define-simple-instruction vm-char-upcase :unary char-upcase)
 (define-simple-instruction vm-char-downcase :unary char-downcase)
 (define-simple-instruction vm-stringp :pred1 stringp)
 (define-simple-instruction vm-characterp :pred1 characterp)
 (define-simple-instruction vm-parse-integer :unary parse-integer)
-(define-simple-instruction vm-alphanumericp :pred1 alphanumericp)
+(define-simple-instruction vm-alphanumericp :pred1 vm-alphanumericp-value)
 
 ;;; ─── Sleep (FR-681) ─────────────────────────────────────────────────────────
 

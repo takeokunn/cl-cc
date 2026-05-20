@@ -10,8 +10,9 @@
         (value 0)
         (count 0))
     (loop for ch = (lex-peek state)
-          while (and ch (digit-char-p ch radix))
-          do (setf value (+ (* value radix) (digit-char-p ch radix)))
+          for digit = (and ch (lex-digit-char-p ch radix))
+          while digit
+          do (setf value (+ (* value radix) digit))
              (lex-advance state)
              (incf count))
     (when (zerop count)
@@ -35,8 +36,9 @@ Does NOT advance state if neither char is present."
   (let ((int-part 0)
         (has-int nil))
     (loop for ch = (lex-peek state)
-          while (and ch (digit-char-p ch))
-          do (setf int-part (+ (* int-part 10) (digit-char-p ch)))
+          for digit = (and ch (lex-decimal-digit-char-p ch))
+          while digit
+          do (setf int-part (+ (* int-part 10) digit))
              (setf has-int t)
              (lex-advance state))
     (values int-part has-int)))
@@ -53,7 +55,7 @@ Does NOT advance state if neither char is present."
        (let ((next-pos (1+ (lexer-state-pos state)))
              (src (lexer-state-source state)))
          (and (< next-pos (length src))
-              (digit-char-p (char src next-pos))))))
+               (lex-decimal-digit-char-p (char src next-pos))))))
 
 (defun %lex-read-ratio-tail (state sign int-part start)
   "Called after HAS-INT and / detected; advance past /, read denominator, make :T-RATIO token."
@@ -68,8 +70,9 @@ Does NOT advance state if neither char is present."
         (frac-digits 0)
         (exp-marker nil))
     (loop for ch = (lex-peek state)
-          while (and ch (digit-char-p ch))
-          do (setf frac-val (+ (* frac-val 10) (digit-char-p ch)))
+          for digit = (and ch (lex-decimal-digit-char-p ch))
+          while digit
+          do (setf frac-val (+ (* frac-val 10) digit))
              (incf frac-digits)
              (lex-advance state))
     (let ((mantissa (+ int-part (/ frac-val (expt 10 frac-digits))))

@@ -11,13 +11,29 @@
  '(vm-cons-cell-car
    vm-cons-cell-cdr
    vm-closure-object
-   vm-closure-entry-label
-   vm-closure-params
-   vm-closure-captured-values
+    vm-closure-entry-label
+    vm-closure-params
+     vm-closure-captured-regs
+     vm-closure-captured-vals
+     vm-closure-captured-values
+     vm-closure-invocation-count
+     vm-closure-compilation-tier
+     vm-closure-program-flat
+     vm-closure-label-table
    vm-instruction
-   vm-const
-   vm-move
-   vm-binop
+    vm-const
+    vm-move
+    vm-type-check
+    vm-deopt
+    vm-osr-entry
+    vm-type-check-deopt-label
+    vm-type-check-deopt-id
+    vm-deopt-label
+    vm-deopt-id
+    vm-deopt-reason
+    vm-osr-label
+    vm-osr-id
+    vm-binop
    vm-add
    vm-integer-add
    vm-integer-sub
@@ -50,9 +66,10 @@
    vm-halt
    vm-closure
     vm-call
-    vm-tail-call
-    vm-trampoline
-    vm-ret
+     vm-tail-call
+     vm-trampoline
+     vm-recompile
+     vm-ret
     vm-func-ref
     vm-push
     vm-pop

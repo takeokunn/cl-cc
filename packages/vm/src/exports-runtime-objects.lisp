@@ -122,10 +122,15 @@
       vm-profile-samples
    vm-get-profile-samples
    vm-get-profile-bb-counts
-    vm-profile-inst-counts
-    vm-get-profile-inst-counts
-    vm-profile-inst-hit
-    vm-get-profile-branch-counts
+     vm-profile-inst-counts
+     vm-get-profile-inst-counts
+     vm-profile-inst-hit
+     *vm-instruction-profile*
+     *vm-instruction-profile-enabled*
+     vm-reset-instruction-profile
+     vm-instruction-profile-alist
+     vm-write-instruction-profile
+     vm-get-profile-branch-counts
     vm-get-profile-call-counts
     vm-profile-call-times
     vm-get-profile-call-times
@@ -147,6 +152,8 @@
    *vm-eval-hook*
    *vm-macroexpand-1-hook*
    *vm-macroexpand-hook*
-   *vm-compile-string-hook*
+    *vm-compile-string-hook*
+    *tier-upgrade-threshold*
+    *vm-recompile-function-hook*
    *vm-parse-forms-hook*
    refine))

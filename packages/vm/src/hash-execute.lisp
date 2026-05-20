@@ -10,11 +10,21 @@
 (defmethod execute-instruction ((inst vm-make-hash-table) state pc labels)
   (declare (ignore labels))
   (let* ((test-sym (when (vm-hash-test inst)
-                       (vm-reg-get state (vm-hash-test inst))))
-         (weakness (when (vm-hash-weakness inst)
-                     (vm-reg-get state (vm-hash-weakness inst))))
-         (test-designator (resolve-hash-test test-sym))
-         (hash-obj (rt-make-hash-table :test test-designator :weakness weakness)))
+                        (vm-reg-get state (vm-hash-test inst))))
+          (size (when (vm-hash-size inst)
+                  (vm-reg-get state (vm-hash-size inst))))
+          (rehash-size (when (vm-hash-rehash-size inst)
+                         (vm-reg-get state (vm-hash-rehash-size inst))))
+          (rehash-threshold (when (vm-hash-rehash-threshold inst)
+                              (vm-reg-get state (vm-hash-rehash-threshold inst))))
+          (weakness (when (vm-hash-weakness inst)
+                      (vm-reg-get state (vm-hash-weakness inst))))
+          (test-designator (resolve-hash-test test-sym))
+          (hash-obj (rt-make-hash-table :test test-designator
+                                        :size size
+                                        :rehash-size rehash-size
+                                        :rehash-threshold rehash-threshold
+                                        :weakness weakness)))
     (vm-reg-set state (vm-dst inst) hash-obj)
     (values (1+ pc) nil nil)))
 

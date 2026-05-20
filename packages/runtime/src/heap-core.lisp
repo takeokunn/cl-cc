@@ -318,8 +318,17 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 (defconstant +gc-card-size-words+ 64
   "Card size in words (512 bytes with 8-byte words).")
 
+(defparameter *rt-free-list-size-class-bytes* #(8 16 32 64 128 256 512 1024)
+  "FR-156 old-space segregated free-list size classes, in bytes.")
+
+(defparameter *rt-free-list-size-class-words* #(1 2 4 8 16 32 64 128)
+  "FR-156 old-space segregated free-list size classes, in heap words.")
+
+(defparameter *rt-free-list-fallback-class-words* #(256 512 1024 2048 4096 8192 16384 32768)
+  "Compatibility fallback classes for blocks larger than the FR-156 buckets.")
+
 (defconstant +rt-free-list-bin-count+ 16
-  "Number of segregated old-space free-list bins.")
+  "Number of old-space free-list bins: 8 FR-156 buckets plus 8 oversized fallbacks.")
 
 (defconstant +rt-slab-page-words+ 256
   "Default slab page size in heap words for fixed-size object classes.")
@@ -344,21 +353,44 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 ;;; Object Header Bit Layout Constants
 ;;; ------------------------------------------------------------
 
-;;; Size field: bits 63..32
-(defconstant +header-size-shift+    32)
-(defconstant +header-size-mask+     #xFFFFFFFF00000000)
+;;; FR-266 compressed object header (one 64-bit word):
+;;;   [ type-tag:8 | gc-bits:4 | shape-id:20 | size:32 ]
+;;;
+;;; The public RT-HEADER-* accessors expose those bitfields directly.  The older
+;;; HEADER-* API remains as a compatibility alias: HEADER-TAG maps to TYPE-TAG,
+;;; HEADER-AGE maps to GC-BITS, and HEADER-SIZE maps to SIZE.
+;;;
+;;; MARK/GRAY are transient collector flags used by the existing mark-sweep
+;;; implementation.  They are kept as compatibility bits outside the compressed
+;;; payload so the FR-266 fields retain their exact widths; native runtimes can
+;;; lower them to side metadata or use the 4 GC bits according to their collector
+;;; encoding.
 
-;;; Type tag field: bits 31..24
-(defconstant +header-tag-shift+     24)
-(defconstant +header-tag-mask+      #x00000000FF000000)
+;;; Size field: bits 31..0
+(defconstant +header-size-shift+    0)
+(defconstant +header-size-mask+     #x00000000FFFFFFFF)
 
-;;; Age field: bits 23..20
-(defconstant +header-age-shift+     20)
-(defconstant +header-age-mask+      #x0000000000F00000)
+;;; Shape-id field: bits 51..32
+(defconstant +header-shape-id-shift+ 32)
+(defconstant +header-shape-field-mask+ #x000FFFFF00000000)
+(defconstant +header-shape-id-mask+ #x000FFFFF00000000)
+(defconstant +header-shape-id-max+ #xFFFFF)
 
-;;; Flag bits (bits 19 and 18 for mark/gray; used only on integer headers)
-(defconstant +header-mark-bit+      #x0000000000080000)  ; bit 19
-(defconstant +header-gray-bit+      #x0000000000040000)  ; bit 18
+;;; GC-bits field: bits 55..52
+(defconstant +header-gc-bits-shift+ 52)
+(defconstant +header-gc-bits-mask+  #x00F0000000000000)
+
+;;; Type tag field: bits 63..56
+(defconstant +header-tag-shift+     56)
+(defconstant +header-tag-mask+      #xFF00000000000000)
+
+;;; Compatibility names for the old age bitfield.
+(defconstant +header-age-shift+     +header-gc-bits-shift+)
+(defconstant +header-age-mask+      +header-gc-bits-mask+)
+
+;;; Transient compatibility mark/gray bits kept outside the compressed payload.
+(defconstant +header-mark-bit+      #x10000000000000000)
+(defconstant +header-gray-bit+      #x20000000000000000)
 
 ;;; Forwarding pointers are represented as (cons :forwarded dest-addr)
 ;;; rather than bit-packed integers.  This avoids address-size limitations
@@ -368,26 +400,58 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 ;;; Header Construction and Accessors
 ;;; ------------------------------------------------------------
 
-(defun make-header (size type-tag &optional (age 0))
-  "Construct a header word encoding SIZE, TYPE-TAG, and AGE.
-   SIZE is the object size in words (including header).
-   TYPE-TAG is 0-7 matching +tag-* constants.
-   AGE is 0-15 (minor GC survival count)."
-  (logior (ash size +header-size-shift+)
-          (ash (logand type-tag #xFF) +header-tag-shift+)
-          (ash (logand age #xF) +header-age-shift+)))
+(defun make-rt-header (size type-tag &key (gc-bits 0) (shape-id 0))
+  "Construct a FR-266 compressed runtime object header.
+
+SIZE is the object size in heap words, including the header word.  TYPE-TAG is
+an 8-bit runtime type tag.  GC-BITS is the 4-bit collector field used by the
+compatibility HEADER-AGE accessor.  SHAPE-ID embeds the FR-214 object-shape id in
+the header, replacing the need for a per-object class pointer in compact object
+layouts."
+  (check-type size (integer 0 #xffffffff))
+  (check-type type-tag (integer 0 #xff))
+  (check-type gc-bits (integer 0 #xf))
+  (check-type shape-id (integer 0 #xfffff))
+  (logior (ash (logand type-tag #xFF) +header-tag-shift+)
+          (ash (logand gc-bits #xF) +header-gc-bits-shift+)
+          (ash (logand shape-id +header-shape-id-max+) +header-shape-id-shift+)
+          (logand size #xFFFFFFFF)))
+
+(defun make-header (size type-tag &optional (age 0) (shape-id 0))
+  "Compatibility constructor for a compressed FR-266 header.
+
+AGE maps to the 4-bit GC-BITS field.  Optional SHAPE-ID embeds the FR-214 shape
+id when available; callers that do not know a shape retain shape id 0."
+  (make-rt-header size type-tag :gc-bits age :shape-id shape-id))
+
+(defun rt-header-size (h)
+  "Extract the 32-bit object size field from compressed header H."
+  (logand h #xFFFFFFFF))
+
+(defun rt-header-type-tag (h)
+  "Extract the 8-bit runtime type tag from compressed header H."
+  (logand (ash h (- +header-tag-shift+)) #xFF))
+
+(defun rt-header-gc-bits (h)
+  "Extract the 4-bit GC field from compressed header H."
+  (logand (ash h (- +header-gc-bits-shift+)) #xF))
+
+(defun rt-header-shape-id (h)
+  "Extract the embedded 20-bit FR-214 shape id from compressed header H."
+  (logand (ash (logand h +header-shape-id-mask+) (- +header-shape-id-shift+))
+          +header-shape-id-max+))
 
 (defun header-size (h)
   "Extract the object size in words from header word H."
-  (ash h (- +header-size-shift+)))
+  (rt-header-size h))
 
 (defun header-tag (h)
   "Extract the type tag (0-7) from header word H."
-  (logand (ash h (- +header-tag-shift+)) #xFF))
+  (rt-header-type-tag h))
 
 (defun header-age (h)
   "Extract the age (0-15) from header word H."
-  (logand (ash h (- +header-age-shift+)) #xF))
+  (rt-header-gc-bits h))
 
 (defun header-marked-p (h)
   "Return true if the mark bit is set in header word H."
@@ -440,7 +504,7 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 ;;; ------------------------------------------------------------
 
 (defun make-rt-heap (&key (young-size *gc-young-size-words* young-size-p)
-                          (old-size   *gc-old-size-words* old-size-p))
+                           (old-size   *gc-old-size-words* old-size-p))
   "Allocate and initialize a fresh managed heap.
 
    YOUNG-SIZE is the total young generation size in words; it is split
@@ -456,15 +520,16 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
     (setf young-size *gc-young-size-words*
           old-size *gc-old-size-words*))
    (let* ((semi-size  (floor young-size 2))
-          (large-obj-size old-size)
-           (heap-base (if *rt-heap-randomize*
-                          (rt-heap-randomize-base (+ young-size old-size large-obj-size))
-                          (rt-heap-randomize-base)))
-          (young-from-base heap-base)
-          (young-to-base (+ young-from-base semi-size))
-          (old-base   (+ young-to-base semi-size))
-          (large-obj-base (+ old-base old-size))
-          (total-size (+ heap-base (* 2 semi-size) old-size large-obj-size))
+           (large-obj-size old-size)
+           (managed-words (+ (* 2 semi-size) old-size large-obj-size))
+            (heap-base (if *rt-heap-randomize*
+                           (rt-heap-randomize-base managed-words)
+                           (rt-heap-randomize-base)))
+           (young-from-base heap-base)
+           (young-to-base (+ young-from-base semi-size))
+           (old-base   (+ young-to-base semi-size))
+           (large-obj-base (+ old-base old-size))
+           (total-size (+ heap-base managed-words))
           (words      (make-array total-size :initial-element 0))
           (num-cards  (ceiling old-size +gc-card-size-words+))
          (card-table (make-array num-cards
@@ -475,8 +540,14 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
            (age-hist (make-array 16 :initial-element 0))
            (free-bins (make-array +rt-free-list-bin-count+ :initial-element nil))
            (slab-pools (make-hash-table :test #'eql))
-           (now (get-internal-real-time)))
-    (%make-rt-heap
+            (now (get-internal-real-time)))
+     (when (and *compressed-pointers-enabled*
+                (> managed-words +compressed-heap-region-words+))
+       (error "cl-cc/runtime: compressed pointers require heap <= 4GB (~D words requested, max ~D)"
+              managed-words +compressed-heap-region-words+))
+     (when *compressed-pointers-enabled*
+       (setf *heap-base-address* young-from-base))
+     (%make-rt-heap
       :words           words
       :young-from-base young-from-base
       :young-to-base   young-to-base
@@ -576,7 +647,7 @@ can test density-sensitive paths without native pointer compression."
   (check-type heap rt-heap)
   (check-type addr integer)
   (let* ((base (rt-heap-young-from-base heap))
-         (offset (- addr base)))
+          (offset (- addr base)))
     (unless (<= 0 offset #xffffffff)
       (error "cl-cc/runtime: address ~D cannot be compressed relative to heap base ~D"
              addr base))
@@ -587,6 +658,14 @@ can test density-sensitive paths without native pointer compression."
   (check-type heap rt-heap)
   (check-type offset (integer 0 #xffffffff))
   (+ (rt-heap-young-from-base heap) offset))
+
+(defun %rt-ensure-compressed-pointer-range (addr size-words)
+  "Signal if [ADDR, ADDR+SIZE-WORDS) cannot be represented as a compressed pointer."
+  (when *compressed-pointers-enabled*
+    (let ((end-offset (- (+ addr size-words) *heap-base-address*)))
+      (unless (<= 0 end-offset +compressed-heap-region-words+)
+        (error "cl-cc/runtime: allocation [~D, ~D) escapes compressed 4GB heap region based at ~D"
+               addr (+ addr size-words) *heap-base-address*)))))
 
 ;;; ------------------------------------------------------------
 ;;; TODO(roadmap, FR-288): Large Page Support (not implemented in Pure CL)

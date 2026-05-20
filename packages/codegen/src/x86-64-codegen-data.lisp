@@ -25,6 +25,27 @@ virtual registers."
   (start 0)
   (width 0))
 
+(defparameter *shrink-wrap-enabled* t
+  "When true, native backends may split callee-save saves/restores around the
+   blocks that actually touch those registers.  Frame setup, stack probes,
+   stack canaries, and final returns remain anchored at function entry/exit.")
+
+(defstruct x86-64-shrink-save
+  "Codegen-local pseudo-instruction that saves one x86-64 callee-saved register."
+  reg)
+
+(defstruct x86-64-shrink-restore
+  "Codegen-local pseudo-instruction that restores one x86-64 callee-saved register."
+  reg)
+
+(defstruct a64-shrink-save
+  "Codegen-local pseudo-instruction that saves one AArch64 callee-saved pair."
+  pair)
+
+(defstruct a64-shrink-restore
+  "Codegen-local pseudo-instruction that restores one AArch64 callee-saved pair."
+  pair)
+
 ;;; Two-Pass Code Generation (Labels + Jumps)
 
 ;;; ============================================================

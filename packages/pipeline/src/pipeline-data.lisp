@@ -15,6 +15,21 @@
   "Uppercased names of forms that define or declare rather than compute.
 These cannot be batched through the CPS fast path.")
 
+(defparameter *compilation-tier* 1
+  "Default compilation tier. 0 is fast Tier-0 codegen with optimizer passes
+disabled; 1 is Tier-1 full optimization.")
+
+(defun normalize-compilation-tier (tier)
+  "Normalize TIER to 0 or 1, signaling an error for invalid values."
+  (let ((value (cond
+                 ((null tier) *compilation-tier*)
+                 ((integerp tier) tier)
+                 ((stringp tier) (parse-integer tier :junk-allowed nil))
+                 (t (error "Invalid compilation tier: ~S" tier)))))
+    (unless (member value '(0 1))
+      (error "Invalid compilation tier: ~S (expected 0 or 1)" tier))
+    value))
+
 (defstruct (pipeline-opts (:constructor %make-pipeline-opts))
   "All compilation options in one bundle. Pass as a single argument to internal
 pipeline functions instead of threading 12 separate keyword arguments."
@@ -44,7 +59,8 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (ubsan              nil)
   (hwasan             nil)
   (compress           nil)
-  (pgo-profile-data   nil))
+  (pgo-profile-data   nil)
+  (compilation-tier   *compilation-tier* :type integer))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 

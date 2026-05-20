@@ -14,6 +14,19 @@
       (assert-true inst)
       (assert-true (cl-cc::vm-make-hash-table-test inst)))))
 
+(deftest codegen-make-hash-table-emits-size-option
+  "make-hash-table compiles :size into the VM make-hash-table instruction."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'make-hash-table
+                            (make-var :test)
+                            (make-quoted 'eql)
+                            (make-var :size)
+                            (make-int 100))
+                 ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-make-hash-table)))
+      (assert-true inst)
+      (assert-true (cl-cc/vm::vm-hash-size inst)))))
+
 (deftest codegen-gethash-emits-default-register
   "gethash emits vm-gethash and preserves the optional default register."
   (let ((ctx (make-codegen-ctx)))

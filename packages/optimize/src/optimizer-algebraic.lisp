@@ -16,9 +16,10 @@
 ;;; ─── Algebraic Identity Rules ────────────────────────────────────────────
 ;;;
 ;;; Each entry: (inst-type . ((condition . action) ...))
-;;; Conditions: (:rconst N) = right operand is constant N
-;;;             (:lconst N) = left operand is constant N
-;;;             :same-reg   = both operands are the same register
+;;; Conditions: (:rconst N)       = right operand is constant N
+;;;             (:lconst N)       = left operand is constant N
+;;;             :same-reg         = both operands are the same register
+;;;             (:producer TYPES) = unary source was produced by one of TYPES
 ;;; Actions:    :move-lhs / :move-rhs   = copy one operand
 ;;;             (:const V)              = produce constant V
 ;;;             (:neg :lhs) / (:neg :rhs) = negate one operand
@@ -56,8 +57,21 @@
       (reg 'vm-rem       '(((:lconst 0) . (:const 0))))
       (reg 'vm-ash       '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0))))
       (reg 'vm-rotate    '(((:rconst 0) . :move-lhs) ((:lconst 0) . (:const 0))))
-    ht))
-  "Maps VM binary instruction types to lists of algebraic identity rules.")
+
+      ;; FR-344: Type-predicate simplifications from proven producer types.
+      ;; These are straight-line type-flow rules: if a predicate consumes the
+      ;; destination of a known producer instruction, the predicate result is
+      ;; fixed even when the produced value itself is not constant.
+      (reg 'vm-null-p   '(((:producer (vm-cons vm-hash-cons)) . (:const 0))))
+      (reg 'vm-cons-p   '(((:producer (vm-cons vm-hash-cons)) . (:const 1))))
+      (reg 'vm-listp    '(((:producer (vm-cons vm-hash-cons vm-make-list
+                                  vm-coerce-to-list)) . (:const 1))))
+      (reg 'vm-stringp  '(((:producer (vm-concatenate vm-make-string
+                                  vm-string-coerce vm-coerce-to-string
+                                  vm-subseq)) . (:const 1))))
+      (reg 'vm-vectorp  '(((:producer (vm-make-array vm-coerce-to-vector)) . (:const 1))))
+      ht))
+  "Maps VM instruction types to lists of algebraic identity rules.")
 
 ;;; ─── Classification Predicates ───────────────────────────────────────────
 ;;;

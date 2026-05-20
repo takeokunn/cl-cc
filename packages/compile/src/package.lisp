@@ -93,8 +93,9 @@
    #:ctx-noescape-cons-bindings #:ctx-noescape-array-bindings
         #:ctx-noescape-instance-bindings #:ctx-noescape-closure-bindings
         #:ctx-hash-table-test-bindings
-    #:ctx-tail-position
-    #:ctx-diagnostics
+     #:ctx-tail-position
+     #:ctx-target
+     #:ctx-diagnostics
    #:*builtin-special-variables* #:*repl-global-variables*
    #:*repl-label-counter* #:*repl-capture-label-counter*
   #:*labels-boxed-fns* #:*local-tail-jump-fns* #:*compiling-typed-fn*
@@ -115,10 +116,12 @@
    #:target-instance #:type-check-ast
    #:emit-assembly
 
-   ;; ── codegen-core.lisp ──
-   #:compile-ast
+    ;; ── codegen-core.lisp ──
+    #:compile-ast
+   #:*string-literal-pool*
+    #:%emit-constant
 
-   ;; ── codegen.lisp ──
+    ;; ── codegen.lisp ──
    #:compile-toplevel-forms
    #:compilation-result
    #:make-compilation-result

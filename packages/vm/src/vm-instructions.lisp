@@ -176,6 +176,13 @@ and OFFSET denotes the address to prefetch; LOCALITY is :T0/:NTA on x86-64 and
   (args nil :reader vm-args)
   (:sexp-tag :trampoline))
 
+(define-vm-instruction vm-recompile (vm-instruction)
+  "Request runtime recompilation/tier upgrade for FUNC to TIER."
+  (func nil :reader vm-func-reg)
+  (tier 1 :reader vm-recompile-tier)
+  (:sexp-tag :recompile)
+  (:sexp-slots func tier))
+
 (define-vm-instruction vm-ret (vm-instruction)
   (reg nil :reader vm-reg)
   (:sexp-tag :ret))

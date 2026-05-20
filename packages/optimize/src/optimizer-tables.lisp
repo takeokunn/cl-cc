@@ -125,8 +125,9 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
       (vm-div         . ,#'floor)
       (vm-cl-div      . ,#'/)
       (vm-float-div   . ,#'/)
-      (vm-gcd         . ,#'gcd)
-      (vm-lcm         . ,#'lcm)))
+       (vm-gcd         . ,#'gcd)
+       (vm-lcm         . ,#'lcm)
+       (vm-char        . ,#'char)))
   "Maps binary VM instruction types to their CL fold functions.
    Used by opt-fold-binop-value for constant folding.")
 
@@ -159,8 +160,12 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
       (vm-rationalize . ,#'rationalize)
       (vm-numerator   . ,#'numerator)
       (vm-denominator . ,#'denominator)
+      (vm-string-length . ,#'length)
+      (vm-length      . ,#'length)
       (vm-car         . ,#'car)
       (vm-cdr         . ,#'cdr)
+      (vm-string-upcase . ,#'string-upcase)
+      (vm-string-downcase . ,#'string-downcase)
       (vm-not         . ,(lambda (x) (if (null x) t nil)))))
   "Maps unary VM instruction types to their CL fold functions.")
 
@@ -170,9 +175,12 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
      (vm-cons-p          . ,#'consp)
      (vm-symbol-p        . ,#'symbolp)
      (vm-number-p        . ,#'numberp)
-     (vm-integer-p       . ,#'integerp)
-     (vm-function-p      . ,(lambda (x) (declare (ignore x)) nil))
-     (vm-simple-vector-p . ,#'simple-vector-p)))
+      (vm-integer-p       . ,#'integerp)
+      (vm-function-p      . ,(lambda (x) (declare (ignore x)) nil))
+      (vm-stringp         . ,#'stringp)
+      (vm-listp           . ,#'listp)
+      (vm-vectorp         . ,#'vectorp)
+      (vm-simple-vector-p . ,#'simple-vector-p)))
   "Maps type-predicate VM instruction types to their CL predicate functions.
    Predicates fold to 1/0.  vm-function-p always returns 0 for constants.")
 
@@ -201,10 +209,12 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 
 (defparameter *opt-unary-src-types*
   '(vm-neg vm-abs vm-inc vm-dec vm-lognot vm-bswap vm-not
+    vm-string-length vm-length
     vm-car vm-cdr
+    vm-string-upcase vm-string-downcase
     vm-rational vm-rationalize vm-numerator vm-denominator
     vm-cons-p vm-null-p vm-symbol-p vm-number-p
-    vm-integer-p vm-function-p)
+    vm-integer-p vm-function-p vm-stringp vm-listp vm-vectorp)
   "Instruction types that have vm-src/vm-dst unary accessors.
    Used by opt-inst-read-regs, opt-pass-fold, opt-pass-cse, and WASM register collection.")
 
@@ -239,6 +249,8 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
           (lambda (inst)
             (remove nil (or (vm-parts inst)
                             (list (vm-str1 inst) (vm-str2 inst))))))
+    (setf (gethash 'vm-char ht)
+          (lambda (inst) (list (vm-string-reg inst) (vm-index inst))))
     ;; Object operations
     (setf (gethash 'vm-closure-ref-idx ht) (lambda (inst) (list (vm-closure-reg inst))))
     (setf (gethash 'vm-slot-read ht)    (lambda (inst) (list (vm-obj-reg inst))))

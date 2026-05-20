@@ -63,7 +63,22 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 ;;; Instruction Execution - Type Predicates
 ;;; (vm-typep data tables + check function → see primitives-typep.lisp)
 
-(define-simple-instruction vm-eq        :pred2 eql)
+(declaim (inline %vm-decode-immediate-symbol-for-eql))
+
+(defun %vm-decode-immediate-symbol-for-eql (value)
+  (if (vm-immediate-symbol-p value)
+      (vm-decode-symbol value)
+      value))
+
+(defmethod execute-instruction ((inst vm-eq) state pc labels)
+  (declare (ignore labels))
+  (let* ((lhs (%vm-decode-immediate-symbol-for-eql
+               (vm-reg-get state (vm-lhs inst))))
+         (rhs (%vm-decode-immediate-symbol-for-eql
+               (vm-reg-get state (vm-rhs inst))))
+         (result (if (eql lhs rhs) 1 0)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
 (define-simple-instruction vm-cons-p    :pred1 consp)
 (define-simple-instruction vm-null-p    :pred1 null)
 (define-simple-instruction vm-symbol-p  :pred1 symbolp)

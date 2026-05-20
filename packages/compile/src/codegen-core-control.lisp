@@ -63,7 +63,8 @@
 
 (defmethod compile-ast ((node ast-tagbody) ctx)
   (setf (ctx-tail-position ctx) nil)
-  (let* ((tags (ast-tagbody-tags node))
+  (let* ((*string-literal-pool* nil)
+         (tags (ast-tagbody-tags node))
          (end-label (make-label ctx "tagbody_end"))
          (result-reg (make-register ctx))
          (old-tagbody-env (ctx-tagbody-env ctx))
@@ -89,7 +90,8 @@
     result-reg))
 
 (defmethod compile-ast ((node ast-go) ctx)
-  (emit ctx (make-vm-jump :label (lookup-tag ctx (ast-go-tag node))))
+  (let ((label (lookup-tag ctx (ast-go-tag node))))
+    (emit ctx (make-vm-jump :label label)))
   (make-register ctx))
 
 ;;; ── Assignment: setq / quote / the ──────────────────────────────────────
@@ -108,15 +110,16 @@
        (emit ctx (make-vm-move :dst (cdr local-entry) :src value-reg))
        (cdr local-entry))
       ((gethash var-name (ctx-global-variables ctx))
-       (emit ctx (make-vm-set-global :name var-name :src value-reg))
-       value-reg)
+        (let ((cache-reg (%global-cache-reg ctx var-name)))
+          (when cache-reg
+            (emit ctx (make-vm-move :dst cache-reg :src value-reg)))
+          (emit ctx (make-vm-set-global :name var-name :src (or cache-reg value-reg))))
+        value-reg)
       (t
        (error "Unbound variable for setq: ~S" var-name)))))
 
 (defmethod compile-ast ((node ast-quote) ctx)
-  (let ((dst (make-register ctx)))
-    (emit ctx (make-vm-const :dst dst :value (ast-quote-value node)))
-    dst))
+  (%emit-constant ctx (ast-quote-value node)))
 
 (defun type-error-message-from-mismatch (e)
   "Extract a human-readable message from a type-mismatch-error condition."

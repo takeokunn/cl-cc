@@ -24,10 +24,11 @@
   "Emit the jump-over + label + body + end-label pattern common to lambda and defun."
   (emit ctx (make-vm-jump :label end-label))
   (emit ctx (make-vm-label :name func-label))
-  (compile-function-body ctx params param-regs opt-bindings rest-binding
-                          key-bindings non-constant-defaults body
-                          supplied-p-entries type-bindings
-                          current-function-name current-function-label)
+  (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
+    (compile-function-body ctx params param-regs opt-bindings rest-binding
+                            key-bindings non-constant-defaults body
+                            supplied-p-entries type-bindings
+                            current-function-name current-function-label))
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)

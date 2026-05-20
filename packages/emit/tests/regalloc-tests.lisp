@@ -66,6 +66,82 @@
     (assert-= 0 (interval-start r0-int))
     (assert-= 4 (interval-end r0-int))))
 
+;;; FR-068: Post-RA Instruction Scheduling
+
+(defun %test-regalloc-result (pairs)
+  (let ((assignment (make-hash-table :test #'eq)))
+    (dolist (pair pairs)
+      (setf (gethash (car pair) assignment) (cdr pair)))
+    (cl-cc/regalloc::make-regalloc-result
+     :assignment assignment
+     :spill-map (make-hash-table :test #'eq)
+     :spill-count 0
+     :instructions nil)))
+
+(deftest post-ra-scheduler-reorders-independent-instructions
+  "schedule-post-ra reorders independent instructions using physical-register dependencies and pressure/latency priorities."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-mul :dst :r2 :lhs :r3 :rhs :r4)
+                      (make-vm-halt :reg :r0)))
+         (ra (%test-regalloc-result '((:r0 . :rax) (:r2 . :rdx)
+                                      (:r3 . :rbx) (:r4 . :rcx))))
+         (scheduled (cl-cc/codegen:schedule-post-ra insts ra)))
+    (assert-true (typep (first scheduled) 'vm-mul))
+    (assert-true (typep (second scheduled) 'vm-const))
+    (assert-true (typep (third scheduled) 'vm-halt))))
+
+(deftest post-ra-scheduler-preserves-raw-dependencies
+  "schedule-post-ra does not move consumers before their physical-register producers."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-add :dst :r1 :lhs :r0 :rhs :r2)
+                      (make-vm-halt :reg :r1)))
+         (ra (%test-regalloc-result '((:r0 . :rax) (:r1 . :rcx) (:r2 . :rdx))))
+         (scheduled (cl-cc/codegen:schedule-post-ra insts ra)))
+    (assert-true (typep (first scheduled) 'vm-const))
+    (assert-true (typep (second scheduled) 'vm-add))
+    (assert-true (typep (third scheduled) 'vm-halt))))
+
+(deftest post-ra-scheduler-preserves-physical-waw-dependencies
+  "schedule-post-ra uses physical registers, so coalesced virtual registers with the same physical register remain ordered."
+  (let* ((insts (list (make-vm-const :dst :r0 :value 1)
+                      (make-vm-const :dst :r1 :value 2)
+                      (make-vm-halt :reg :r1)))
+         (ra (%test-regalloc-result '((:r0 . :rax) (:r1 . :rax))))
+         (scheduled (cl-cc/codegen:schedule-post-ra insts ra)))
+    (assert-eq :r0 (vm-dst (first scheduled)))
+    (assert-eq :r1 (vm-dst (second scheduled)))
+    (assert-true (typep (third scheduled) 'vm-halt))))
+
+(deftest post-ra-scheduler-treats-unknown-registers-as-barriers
+  "schedule-post-ra preserves original order around unmapped operands with unknown dependencies."
+  (let* ((unknown (make-vm-const :dst :unknown :value 7))
+         (insts (list (make-vm-const :dst :r0 :value 1)
+                      unknown
+                      (make-vm-mul :dst :r2 :lhs :r3 :rhs :r4)
+                      (make-vm-halt :reg :r0)))
+         (ra (%test-regalloc-result '((:r0 . :rax) (:r2 . :rdx)
+                                      (:r3 . :rbx) (:r4 . :rcx))))
+         (scheduled (cl-cc/codegen:schedule-post-ra insts ra)))
+    (assert-true (typep (first scheduled) 'vm-const))
+    (assert-eq unknown (second scheduled))
+    (assert-true (typep (third scheduled) 'vm-mul))
+    (assert-true (typep (fourth scheduled) 'vm-halt))))
+
+(deftest post-ra-scheduler-integrates-with-native-backends
+  "compile-to-*-bytes runs post-RA scheduling in x86-64, AArch64, and RISC-V pipelines without changing output contracts."
+  (let ((program (cl-cc/vm::make-vm-program
+                  :instructions (list (make-vm-const :dst :r0 :value 1)
+                                      (make-vm-const :dst :r1 :value 2)
+                                      (make-vm-add :dst :r2 :lhs :r0 :rhs :r1)
+                                      (make-vm-halt :reg :r2))
+                  :result-register :r2
+                  :leaf-p t)))
+    (dolist (bytes (list (cl-cc/codegen:compile-to-x86-64-bytes program)
+                         (cl-cc/codegen:compile-to-aarch64-bytes program)
+                         (cl-cc/codegen:compile-to-riscv64-bytes program)))
+      (assert-true (typep bytes '(simple-array (unsigned-byte 8) (*))))
+      (assert-true (plusp (length bytes))))))
+
 (deftest regalloc-interprocedural-hints-detect-leaf-and-leaf-callee-chain
   "Interprocedural hint oracle marks leaf functions and leaf-callee chains conservatively."
   (let* ((insts (list

@@ -4,47 +4,79 @@
 ;;; Segregated free lists and slabs (FR-359, FR-362)
 ;;; ------------------------------------------------------------
 
-(defun rt-free-list-bin-index (size-words)
-  "Return the segregated free-list bin index for SIZE-WORDS."
+(defun rt-free-list-size-class-words (size-words)
+  "Round SIZE-WORDS up to the next FR-156 size class, or return NIL.
+
+The segregated classes cover 8..1024 bytes (1..128 heap words).  Larger blocks
+remain in the canonical free-list fallback so non-class sizes keep working."
   (check-type size-words (integer 1 *))
-  (let ((bytes (* size-words 8)))
-    (cond
-      ((<= bytes 8) 0)
-      ((<= bytes 16) 1)
-      ((<= bytes 32) 2)
-      ((<= bytes 64) 3)
-      ((<= bytes 128) 4)
-      ((<= bytes 256) 5)
-      ((<= bytes 512) 6)
-      ((<= bytes 1024) 7)
-      ((<= bytes 2048) 8)
-      ((<= bytes 4096) 9)
-      ((<= bytes 8192) 10)
-      ((<= bytes 16384) 11)
-      ((<= bytes 32768) 12)
-      ((<= bytes 65536) 13)
-      ((<= bytes 131072) 14)
-      (t 15))))
+  (loop for class across *rt-free-list-size-class-words*
+        when (<= size-words class)
+          return class))
+
+(defun rt-free-list-bin-index (size-words)
+  "Return the FR-156 size-class bin index for SIZE-WORDS.
+
+The first eight indices are the required 8..1024 byte buckets. Larger sizes map
+to compatibility fallback buckets so pre-existing oversized free-list reuse keeps
+working."
+  (check-type size-words (integer 1 *))
+  (or (loop for class across *rt-free-list-size-class-words*
+            for index from 0
+            when (<= size-words class)
+              return index)
+      (loop for class across *rt-free-list-fallback-class-words*
+            for index from (length *rt-free-list-size-class-words*)
+            when (<= size-words class)
+              return index)
+      (1- +rt-free-list-bin-count+)))
 
 (defun rt-heap-free-list-blocks (heap)
-  "Return all old-space free blocks from segregated bins or the heap mirror."
-  (let ((bins (rt-heap-free-bins heap)))
-    (if bins
-        (loop for i from 0 below (length bins) append (copy-list (svref bins i)))
-        (copy-list (rt-heap-free-list heap)))))
+  "Return all old-space free blocks from the canonical free-list mirror."
+  (copy-list (rt-heap-free-list heap)))
 
 (defun %rt-free-list-sync-mirror (heap)
-  (setf (rt-heap-free-list heap) (rt-heap-free-list-blocks heap)))
+  "Compatibility hook: the heap free-list is the canonical mirror in FR-156."
+  (rt-heap-free-list heap))
+
+(defun %rt-free-list-ensure-bins (heap)
+  (or (rt-heap-free-bins heap)
+      (setf (rt-heap-free-bins heap)
+            (make-array +rt-free-list-bin-count+ :initial-element nil))))
+
+(defun %rt-free-list-remove-block (heap block)
+  "Remove BLOCK from the canonical mirror and its size-class bin."
+  (setf (rt-heap-free-list heap)
+        (delete block (rt-heap-free-list heap) :test #'eq))
+  (let ((index (rt-free-list-bin-index (car block)))
+        (bins (rt-heap-free-bins heap)))
+    (when (and index bins)
+      (setf (svref bins index)
+            (delete block (svref bins index) :test #'eq))))
+  block)
+
+(defun %rt-free-list-insert-block (heap block)
+  "Insert BLOCK into the canonical mirror and, when class-sized, its bucket."
+  (push block (rt-heap-free-list heap))
+  (let ((index (rt-free-list-bin-index (car block))))
+    (when index
+      (push block (svref (%rt-free-list-ensure-bins heap) index)))
+    index))
+
+(defun %rt-free-list-record-remainder (heap addr size-words)
+  "Record a split free-list remainder and install a scannable free header."
+  (when (plusp size-words)
+    (rt-heap-set-header heap addr (make-header size-words 0 0))
+    (%rt-free-list-insert-block heap (cons size-words addr))))
 
 (defun %rt-free-list-rebuild-bins (heap blocks)
-  (let ((bins (or (rt-heap-free-bins heap)
-                  (setf (rt-heap-free-bins heap)
-                        (make-array +rt-free-list-bin-count+ :initial-element nil)))))
+  (let ((bins (%rt-free-list-ensure-bins heap)))
     (fill bins nil)
+    (setf (rt-heap-free-list heap) (copy-list blocks))
     (dolist (block blocks)
       (let ((index (rt-free-list-bin-index (car block))))
-        (push block (svref bins index))))
-    (%rt-free-list-sync-mirror heap)
+        (when index
+          (push block (svref bins index)))))
     bins))
 
 (defun rt-free-list-insert (heap size-words addr)
@@ -52,37 +84,82 @@
   (check-type heap rt-heap)
   (check-type size-words (integer 1 *))
   (check-type addr integer)
-  (let* ((bins (or (rt-heap-free-bins heap)
-                   (setf (rt-heap-free-bins heap)
-                         (make-array +rt-free-list-bin-count+ :initial-element nil))))
-         (index (rt-free-list-bin-index size-words)))
-    (push (cons size-words addr) (svref bins index))
-    (%rt-free-list-sync-mirror heap)
-    index))
+  (%rt-free-list-insert-block heap (cons size-words addr)))
 
 (defun rt-free-list-find (heap size-words)
-  "Find and remove a block at least SIZE-WORDS words; return BIN-INDEX and ADDR."
+  "Find and remove an old-space free block for SIZE-WORDS.
+
+For FR-156 class-sized requests (8..1024 bytes), round to the next size class
+and check that bucket first for O(1) reuse.  Larger compatible buckets are only
+consulted if the target bucket has no suitable block, preserving existing
+free-list semantics before callers fall back to bump-pointer allocation."
   (check-type heap rt-heap)
   (check-type size-words (integer 1 *))
-  (let ((bins (rt-heap-free-bins heap)))
-    (when bins
-      (loop for i from (rt-free-list-bin-index size-words) below (length bins) do
-        (loop with prev = nil
-              for cell on (svref bins i)
+  (let ((index (rt-free-list-bin-index size-words)))
+    (if index
+        (let ((bins (rt-heap-free-bins heap)))
+          (when bins
+            (loop for bin-index from index below (length bins) do
+              (loop with prev = nil
+                    for cell on (svref bins bin-index)
+                    for block = (car cell)
+                    for block-size = (car block)
+                    for block-addr = (cdr block)
+                    when (>= block-size size-words) do
+                      (let ((remainder (- block-size size-words)))
+                        (if prev
+                            (setf (cdr prev) (cdr cell))
+                            (setf (svref bins bin-index) (cdr cell)))
+                        (setf (rt-heap-free-list heap)
+                              (delete block (rt-heap-free-list heap) :test #'eq))
+                        (%rt-free-list-record-remainder heap (+ block-addr size-words) remainder)
+                        (return-from rt-free-list-find (values bin-index block-addr)))
+                    do (setf prev cell)))))
+        (loop for cell on (rt-heap-free-list heap)
               for block = (car cell)
               for block-size = (car block)
               for block-addr = (cdr block)
               when (>= block-size size-words) do
                 (let ((remainder (- block-size size-words)))
-                  (if prev
-                      (setf (cdr prev) (cdr cell))
-                      (setf (svref bins i) (cdr cell)))
-                  (when (plusp remainder)
-                    (rt-free-list-insert heap remainder (+ block-addr size-words)))
-                  (%rt-free-list-sync-mirror heap)
-                  (return-from rt-free-list-find (values i block-addr)))
-              do (setf prev cell)))))
+                  (%rt-free-list-remove-block heap block)
+                  (%rt-free-list-record-remainder heap (+ block-addr size-words) remainder)
+                  (return-from rt-free-list-find (values nil block-addr))))))
   (values nil nil))
+
+(defun rt-free-list-alloc-from-bin (heap size-words)
+  "Pop a block from SIZE-WORDS' FR-156 size-class bin.
+
+SIZE-WORDS is rounded to the next 8..1024 byte size class before lookup.  Only
+the matching segregated bin is consulted; callers that receive NIL can fall back
+to old-space bump allocation without scanning larger bins.  Returns
+  (values CLASS-SIZE ADDR), or (values NIL NIL) when the request has no FR-156
+  class or the target bin is empty.  The returned size is the actual allocated
+  size (which may be SIZE-WORDS, not necessarily CLASS-SIZE)."
+  (check-type heap rt-heap)
+  (check-type size-words (integer 1 *))
+  (let ((class-size (rt-free-list-size-class-words size-words)))
+    (unless class-size
+      (return-from rt-free-list-alloc-from-bin (values nil nil)))
+    (let* ((index (rt-free-list-bin-index class-size))
+           (bins (rt-heap-free-bins heap))
+           (block (and bins (pop (svref bins index)))))
+      (unless block
+        (return-from rt-free-list-alloc-from-bin (values nil nil)))
+      (let ((block-size (car block))
+            (block-addr (cdr block)))
+        ;; Safety: reject blocks smaller than the actual request
+        (when (< block-size size-words)
+          (setf (rt-heap-free-list heap)
+                (delete block (rt-heap-free-list heap) :test #'eq))
+          (return-from rt-free-list-alloc-from-bin (values nil nil)))
+        (setf (rt-heap-free-list heap)
+              (delete block (rt-heap-free-list heap) :test #'eq))
+        ;; Split at actual request size, not class-size
+        (when (> block-size size-words)
+          (%rt-free-list-record-remainder heap
+                                          (+ block-addr size-words)
+                                          (- block-size size-words)))
+        (values size-words block-addr)))))
 
 (defun rt-slab-size-class (type-tag size-words)
   "Return the slab class key for a known fixed-size runtime allocation."

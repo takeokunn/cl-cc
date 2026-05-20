@@ -13,6 +13,7 @@
    #:cps-transform-ast
    #:cps-transform-ast*
    #:cps-transform-sequence
-    #:cps-transform-eval
-    #:cps-simplify-form
-    #:cps-trampoline-run))
+     #:cps-transform-eval
+     #:cps-simplify-form
+     #:cps-trampoline-run
+     #:*enable-trmc*))

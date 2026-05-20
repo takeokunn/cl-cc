@@ -222,6 +222,103 @@ The cl-cc execution model treats both NIL and numeric zero as false."
                   (vm-reg-get state (vm-select-then-reg inst))))
   (values (1+ pc) nil nil))
 
+;;; FR-155: Deoptimization checkpoints and OSR markers.
+
+(defun %vm-current-deopt-info (pc)
+  "Return deoptimization metadata for PC from the active program, when present."
+  (let ((program-info (and (boundp '*vm-current-program-deopt-info*)
+                           (symbol-value '*vm-current-program-deopt-info*))))
+    (cond
+      ((hash-table-p program-info) (gethash pc program-info))
+      ((listp program-info) (cdr (assoc pc program-info :test #'eql)))
+      (t nil))))
+
+(defun %vm-deopt-resume-pc (labels label pc)
+  "Resolve a deoptimization resume LABEL, falling back to the next instruction."
+  (or (and label (vm-label-table-lookup labels label))
+      (1+ pc)))
+
+(defun vm-capture-deopt-frame (state pc reason &optional info)
+  "Capture enough VM state to rebuild an interpreter frame after deoptimization."
+  (make-vm-deopt-frame
+   :pc pc
+   :reason reason
+   :registers (vm-save-registers state)
+   :call-stack (copy-tree (vm-call-stack state))
+   :closure-env (vm-closure-env state)
+   :values-list (copy-list (vm-values-list state))
+   :info info))
+
+(defun vm-trigger-deopt (state pc labels label reason)
+  "Save register/interpreter state and resume at LABEL in the VM interpreter."
+  (let* ((info (%vm-current-deopt-info pc))
+         (frame (vm-capture-deopt-frame state pc reason info)))
+    (setf (vm-current-deopt-frame state) frame)
+    (push frame (vm-deopt-history state))
+    (values (%vm-deopt-resume-pc labels label pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-type-check) state pc labels)
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (if (vm-typep-check value (vm-type-name inst))
+        (values (1+ pc) nil nil)
+        (vm-trigger-deopt state pc labels (vm-type-check-deopt-label inst)
+                          (list :type-check-failed
+                                :register (vm-src inst)
+                                :expected (vm-type-name inst)
+                                :actual value
+                                :id (vm-type-check-deopt-id inst))))))
+
+(defmethod execute-instruction ((inst vm-deopt) state pc labels)
+  (vm-trigger-deopt state pc labels (vm-deopt-label inst)
+                    (list :deopt (vm-deopt-reason inst) :id (vm-deopt-id inst))))
+
+(defun vm-register-tier1-osr-entry (state id entry)
+  "Register simple Tier-1 OSR ENTRY metadata for ID.
+ENTRY may be a PC integer, a label, or a plist containing :PC or :LABEL."
+  (setf (gethash id (vm-tier1-code state)) entry))
+
+(defun %vm-tier1-osr-target-pc (state labels id label)
+  "Return a Tier-1 OSR target PC for ID/LABEL, or NIL when not ready."
+  (let ((entry (or (gethash id (vm-tier1-code state))
+                   (and label (gethash label (vm-tier1-code state))))))
+    (cond
+      ((integerp entry) entry)
+      ((and (symbolp entry) labels) (vm-label-table-lookup labels entry))
+      ((and (stringp entry) labels) (vm-label-table-lookup labels entry))
+      ((and (consp entry) (getf entry :pc)) (getf entry :pc))
+      ((and (consp entry) (getf entry :label))
+       (vm-label-table-lookup labels (getf entry :label)))
+      (t nil))))
+
+(defmethod execute-instruction ((inst vm-osr-entry) state pc labels)
+  ;; Phase 1: Look up current PC in osr-entry-points metadata
+  (let ((entry (and (boundp '*vm-current-program-osr-entry-points*)
+                    (symbol-value '*vm-current-program-osr-entry-points*)
+                    (find pc *vm-current-program-osr-entry-points*
+                          :key (lambda (e) (getf e :pc))
+                          :test #'eql))))
+    (when entry
+      ;; Phase 2: If a deopt frame is pending from a prior compiled→interpreter
+      ;; transition, reconstruct the interpreter state from its saved registers.
+      (let ((deopt-frame (vm-current-deopt-frame state)))
+        (when deopt-frame
+          (when (vm-deopt-frame-registers deopt-frame)
+            (vm-restore-registers state (vm-deopt-frame-registers deopt-frame)))
+          (when (vm-deopt-frame-call-stack deopt-frame)
+            (setf (vm-call-stack state) (vm-deopt-frame-call-stack deopt-frame)))
+          (when (vm-deopt-frame-closure-env deopt-frame)
+            (setf (vm-closure-env state) (vm-deopt-frame-closure-env deopt-frame)))
+          (when (vm-deopt-frame-values-list deopt-frame)
+            (setf (vm-values-list state) (vm-deopt-frame-values-list deopt-frame)))
+          ;; Clear the consumed deopt frame — the reconstructed state is live.
+          (setf (vm-current-deopt-frame state) nil))))
+
+    ;; Phase 3: Check for Tier-1 target PC and jump, or continue to next inst.
+    (let ((target-pc (%vm-tier1-osr-target-pc state labels
+                                              (vm-osr-id inst)
+                                              (vm-osr-label inst))))
+      (values (or target-pc (1+ pc)) nil nil))))
+
 (defmethod execute-instruction ((inst vm-print) state pc labels)
   (declare (ignore labels))
   (format (vm-output-stream state) "~A~%" (vm-reg-get state (vm-reg inst)))
@@ -233,30 +330,31 @@ The cl-cc execution model treats both NIL and numeric zero as false."
 
 (defmethod execute-instruction ((inst vm-closure) state pc labels)
   (declare (ignore labels))
-  ;; captured is a list of (symbol . register) pairs from the compiler
-  ;; We store values keyed by REGISTER name so vm-call restores to the correct register
   (let* ((dst-reg (vm-dst inst))
-         (captured-vals (coerce
-                         (mapcar (lambda (binding)
-                                   (cons (cdr binding) (vm-reg-get state (cdr binding))))
-                                 (vm-captured-vars inst))
-                         'vector))
-          (closure (make-instance 'vm-closure-object
-                                  :entry-label (vm-label-name inst)
-                                  :params (vm-closure-params inst)
+          (captured-bindings (vm-captured-vars inst))
+          (captured-regs (coerce (mapcar #'cdr captured-bindings) 'vector))
+          (captured-vals (coerce (mapcar (lambda (binding)
+                                           (vm-reg-get state (cdr binding)))
+                                         captured-bindings)
+                                 'vector))
+           (closure (make-instance 'vm-closure-object
+                                   :entry-label (vm-label-name inst)
+                                   :params (vm-closure-params inst)
                                   :optional-params (vm-closure-optional-params inst)
                                   :rest-param (vm-closure-rest-param inst)
-                                  :key-params (vm-closure-key-params inst)
-                                  :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
-                                  :dispatch-tag (vm-closure-inst-dispatch-tag inst)
-                                  :captured-values captured-vals)))
+                                   :key-params (vm-closure-key-params inst)
+                                   :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
+                                    :dispatch-tag (vm-closure-inst-dispatch-tag inst)
+                                    :captured-regs captured-regs
+                                    :captured-vals captured-vals
+                                    :program-flat *vm-exec-flat*
+                                    :label-table labels)))
     (vm-reg-set state dst-reg closure)
     ;; Fix self-references for recursive labels: if a captured register
     ;; is the same as dst-reg, the closure captures itself (not yet created at lookup time)
-    (dotimes (i (length captured-vals))
-      (let ((cv-pair (aref captured-vals i)))
-        (when (eql (car cv-pair) dst-reg)
-          (setf (cdr cv-pair) closure))))
+    (dotimes (i (length captured-regs))
+      (when (eql (aref captured-regs i) dst-reg)
+        (setf (aref captured-vals i) closure)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-call) state pc labels)
@@ -282,6 +380,14 @@ The cl-cc execution model treats both NIL and numeric zero as false."
                      ((typep func 'vm-closure-object)
                       (%vm-call-closure-sync func state arg-values))
                       (t (error "Cannot trampoline function designator: ~S" func))))))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-recompile) state pc labels)
+  (declare (ignore labels))
+  (let ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst)))))
+    (unless (typep func 'vm-closure-object)
+      (error "Cannot recompile non-closure function: ~S" func))
+    (vm-maybe-tier-upgrade-closure func (vm-recompile-tier inst))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-ret) state pc labels)
@@ -328,20 +434,26 @@ The cl-cc execution model treats both NIL and numeric zero as false."
                             :params (vm-closure-params inst)
                             :optional-params (vm-closure-optional-params inst)
                             :rest-param (vm-closure-rest-param inst)
-                            :key-params (vm-closure-key-params inst)
-                            :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
-                            :dispatch-tag (vm-func-ref-dispatch-tag inst)
-                            :captured-values nil))))
+                             :key-params (vm-closure-key-params inst)
+                             :rest-stack-alloc-p (vm-closure-rest-stack-alloc-p inst)
+                              :dispatch-tag (vm-func-ref-dispatch-tag inst)
+                              :captured-regs #()
+                              :captured-vals #()
+                              :program-flat *vm-exec-flat*
+                              :label-table labels))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-make-closure) state pc labels)
   (declare (ignore labels))
   (let* ((captured-values (coerce (mapcar (lambda (reg) (vm-reg-get state reg)) (vm-env-regs inst)) 'vector))
-          (closure (make-instance 'vm-closure-object
-                                  :entry-label (vm-label-name inst)
-                                  :params (vm-make-closure-params inst)
-                                  :rest-stack-alloc-p nil
-                                  :captured-values captured-values))
+           (closure (make-instance 'vm-closure-object
+                                   :entry-label (vm-label-name inst)
+                                   :params (vm-make-closure-params inst)
+                                    :rest-stack-alloc-p nil
+                                    :captured-regs #()
+                                    :captured-vals captured-values
+                                    :program-flat *vm-exec-flat*
+                                    :label-table labels))
          (addr (vm-heap-alloc state closure)))
     (vm-reg-set state (vm-dst inst) addr)
     (values (1+ pc) nil nil)))
@@ -351,7 +463,7 @@ The cl-cc execution model treats both NIL and numeric zero as false."
   (let* ((addr (vm-reg-get state (vm-closure-reg inst)))
          (closure (vm-heap-get state addr))
          (idx (vm-closure-index inst))
-         (values-vec (vm-closure-captured-values closure)))
+          (values-vec (vm-closure-captured-vals closure)))
     (when (>= idx (length values-vec))
       (error "Closure ref index ~D out of bounds (captured ~D values)" idx (length values-vec)))
     (vm-reg-set state (vm-dst inst) (aref values-vec idx))

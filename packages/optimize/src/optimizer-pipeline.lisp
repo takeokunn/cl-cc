@@ -407,7 +407,8 @@ Builds a dependency DAG for each basic block, computes critical-path priorities,
 and schedules ready instructions with a register-pressure tie-breaker.  The pass
 never moves instructions across labels, control-flow instructions, calls, stores,
 signals, or other side-effecting barriers, so basic-block boundaries and codegen
-semantics are preserved."
+semantics are preserved.  FR-067 is complete and this function is the backend
+entry point used before register allocation."
   (let ((cfg (cfg-build instructions)))
     (loop for block across (cfg-blocks cfg) do
       (setf (bb-instructions block)
@@ -418,9 +419,9 @@ semantics are preserved."
   "Compatibility wrapper for FR-069 local scheduling."
   (opt-pass-schedule-local instructions))
 
-;;; FR-099: FMA (Fused Multiply-Add) Pattern Synthesis
+;;; FR-099: FMA (Fused Multiply-Add) Pattern Recognition
 ;;;
-;;; Pattern: (vm-mul A B → T) followed by (vm-add C T → D) where T is used only once
+;;; Pattern: (vm-float-mul A B → T) followed by (vm-float-add C T → D) where T is used only once
 ;;; → replace with a single FMA instruction (vm-fma A B C → D).
 
 (defun %opt-register-read-count (reg instructions)
@@ -428,35 +429,101 @@ semantics are preserved."
   (loop for inst in instructions
         sum (count reg (opt-inst-read-regs inst) :test #'eq)))
 
-(defun opt-pass-fma-synthesis (instructions)
-  "FR-099: Synthesize scalar floating FMA from adjacent mul+add patterns.
-Detects (vm-float-mul A B → T), (vm-float-add C T → D), when T has exactly
-one read, and replaces the pair with (vm-fma D A B C)."
+(defun %opt-fma-block-boundary-p (inst)
+  "Return T when INST delimits a basic block for local FMA recognition."
+  (or (typep inst 'vm-label)
+      (eq (vm-inst-effect-kind inst) :control)))
+
+(defun %opt-fma-pure-p (inst)
+  "Return T when INST is side-effect free enough for FMA replacement."
+  (eq (vm-inst-effect-kind inst) :pure))
+
+(defun %opt-fma-add-accumulator (mul add)
+  "Return ADD's non-MUL accumulator operand, or NIL when ADD does not read MUL."
+  (let ((tmp (vm-dst mul)))
+    (cond
+      ((eq tmp (vm-lhs add)) (vm-rhs add))
+      ((eq tmp (vm-rhs add)) (vm-lhs add))
+      (t nil))))
+
+(defun %opt-inst-writes-reg-p (inst reg)
+  "Return T when INST writes REG."
+  (eq (opt-inst-dst inst) reg))
+
+(defun %opt-fma-intervening-barrier-p (inst protected-regs)
+  "Return T when INST prevents moving an earlier multiply to a later FMA site."
+  (or (not (%opt-fma-pure-p inst))
+      (some (lambda (reg) (%opt-inst-writes-reg-p inst reg)) protected-regs)))
+
+(defun %opt-fma-replacement (mul add instructions)
+  "Return a VM-FMA replacing MUL and ADD when the FR-099 guards hold."
+  (let ((acc (%opt-fma-add-accumulator mul add)))
+    (when (and acc
+               (%opt-fma-pure-p mul)
+               (%opt-fma-pure-p add)
+               (= 1 (%opt-register-read-count (vm-dst mul) instructions)))
+      (make-vm-fma :dst (vm-dst add)
+                   :a (vm-lhs mul)
+                   :b (vm-rhs mul)
+                   :c acc))))
+
+(defun %opt-fuse-fma-in-block (block instructions)
+  "Recognize FR-099 FMA patterns inside one basic block."
+  (let* ((n (length block))
+         (insts (coerce block 'vector))
+         (removed (make-array n :initial-element nil))
+         (replacements (make-hash-table :test #'eql)))
+    (loop for mul-index from 0 below n
+          for mul = (aref insts mul-index)
+          when (and (not (aref removed mul-index))
+                    (typep mul 'vm-float-mul)
+                    (%opt-fma-pure-p mul)
+                    (= 1 (%opt-register-read-count (vm-dst mul) instructions)))
+            do (let ((protected-regs (remove-duplicates
+                                      (list (vm-dst mul) (vm-lhs mul) (vm-rhs mul))
+                                      :test #'eq)))
+                 (loop for add-index from (1+ mul-index) below n
+                       for candidate = (aref insts add-index)
+                       do (cond
+                            ((and (not (aref removed add-index))
+                                  (typep candidate 'vm-float-add))
+                             (let ((replacement (%opt-fma-replacement mul candidate instructions)))
+                               (when replacement
+                                 (setf (aref removed mul-index) t)
+                                 (setf (gethash add-index replacements) replacement)
+                                 (return))))
+                            ((%opt-fma-intervening-barrier-p candidate protected-regs)
+                             (return))))))
+    (loop for i from 0 below n
+          unless (aref removed i)
+            collect (or (gethash i replacements) (aref insts i)))))
+
+(defun opt-pass-fma-recognition (instructions)
+  "FR-099: Recognize scalar floating FMA in flat VM instruction streams.
+
+Within each basic block, detects (vm-float-mul A B → T) feeding exactly one
+(vm-float-add T C → D) or (vm-float-add C T → D), then replaces the pair with
+(vm-fma D A B C).  The pass refuses to cross labels/control-flow boundaries,
+requires both arithmetic instructions to be pure, and preserves operand values by
+not fusing across intervening writes to the multiply destination or operands."
   (let ((result nil)
-        (rest instructions))
-    (loop while rest
-          for cur = (first rest)
-          for nxt = (second rest)
-          do (if (and nxt
-                      (typep cur 'vm-float-mul)
-                      (typep nxt 'vm-float-add)
-                      (or (eq (vm-dst cur) (vm-lhs nxt))
-                          (eq (vm-dst cur) (vm-rhs nxt)))
-                      (= 1 (%opt-register-read-count (vm-dst cur) instructions)))
-                 (let* ((tmp (vm-dst cur))
-                        (acc (if (eq tmp (vm-lhs nxt))
-                                 (vm-rhs nxt)
-                                 (vm-lhs nxt))))
-                   (push (make-vm-fma :dst (vm-dst nxt)
-                                      :a (vm-lhs cur)
-                                      :b (vm-rhs cur)
-                                      :c acc)
-                         result)
-                   (setf rest (cddr rest)))
-                 (progn
-                   (push cur result)
-                   (setf rest (cdr rest)))))
-    (nreverse result)))
+        (block nil))
+    (labels ((flush-block ()
+               (when block
+                 (setf result (nconc result (%opt-fuse-fma-in-block (nreverse block) instructions)))
+                 (setf block nil))))
+      (dolist (inst instructions)
+        (if (%opt-fma-block-boundary-p inst)
+            (progn
+              (flush-block)
+              (setf result (nconc result (list inst))))
+            (push inst block)))
+      (flush-block)
+      result)))
+
+(defun opt-pass-fma-synthesis (instructions)
+  "Compatibility wrapper for the FR-099 FMA recognition pass."
+  (opt-pass-fma-recognition instructions))
 
 (defun opt-pass-allocation-sinking (instructions)
   "FR-020 wrapper for branch-local allocation sinking."
@@ -468,8 +535,10 @@ one read, and replaces the pair with (vm-fma D A B C)."
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
   `((:prolog-rewrite            . ,#'%maybe-apply-prolog-rewrite)
+    (:sequence-fusion           . ,#'opt-pass-sequence-fusion)
     (:egraph                    . ,#'optimize-with-egraph)
     (:call-site-splitting       . ,#'opt-pass-call-site-splitting)
+    (:demand-analysis           . ,#'opt-pass-demand-analysis)
     (:devirtualize              . ,#'opt-pass-devirtualize)
     (:if-conversion             . ,#'opt-pass-if-conversion)
     (:closure-capture-dedup     . ,#'opt-pass-closure-capture-dedup)
@@ -521,10 +590,11 @@ one read, and replaces the pair with (vm-fma D A B C)."
     (:constant-hoist            . ,#'opt-pass-licm)
     (:global-dce                . ,#'opt-pass-global-dce)
      (:dead-labels               . ,#'opt-pass-dead-labels)
-     (:hot-cold-layout           . ,#'opt-pass-hot-cold-layout)
-     (:branch-weights            . ,#'opt-analyze-branch-weights)
-     (:dce                       . ,#'opt-pass-dce)
-     (:schedule-local            . ,#'opt-pass-schedule-local))
+      (:hot-cold-layout           . ,#'opt-pass-hot-cold-layout)
+      (:branch-weights            . ,#'opt-analyze-branch-weights)
+      (:dce                       . ,#'opt-pass-dce)
+      (:fma-recognition           . ,#'opt-pass-fma-recognition)
+      (:schedule-local            . ,#'opt-pass-schedule-local))
   "Ordered (keyword . function) pairs — single source for pipeline and registry.")
 
 (defparameter *opt-pass-registry*
@@ -536,7 +606,9 @@ one read, and replaces the pair with (vm-fma D A B C)."
 
 (defparameter *opt-default-convergence-pass-keys*
   '(:prolog-rewrite
+      :sequence-fusion
      :call-site-splitting
+     :demand-analysis
       :devirtualize
       :if-conversion
        :closure-capture-dedup
@@ -586,9 +658,10 @@ one read, and replaces the pair with (vm-fma D A B C)."
      :global-dce
      :dead-labels
      :hot-cold-layout
-     :branch-weights
-     :dce
-     :schedule-local)
+      :branch-weights
+      :dce
+      :fma-recognition
+      :schedule-local)
   "Default convergence pipeline keys.
 `:egraph` remains available as an explicit pass, but the default rewrite stage is
 `:prolog-rewrite`, which already composes both the Prolog peephole backend and

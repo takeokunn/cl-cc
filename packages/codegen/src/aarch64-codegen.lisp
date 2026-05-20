@@ -31,6 +31,9 @@
 (defparameter *current-a64-regalloc* nil
   "Current regalloc-result during AArch64 code generation.")
 
+(defparameter *current-a64-epilogue-save-pairs* nil
+  "AArch64 callee-saved pairs restored by inline vm-ret emission in this function.")
+
 (defparameter *a64-omit-frame-pointer* t
   "When true, prefer SP-relative spill slots over reserving X29 as a frame pointer.")
 

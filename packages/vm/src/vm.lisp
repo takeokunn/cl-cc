@@ -16,6 +16,9 @@ closures, and reader states."))
 
 ;;; VM Closure Object
 
+(defparameter *vm-current-compilation-tier* 0
+  "Compilation tier associated with closures allocated by the currently running program.")
+
 (defclass vm-closure-object (vm-heap-object)
   ((entry-label :initarg :entry-label :reader vm-closure-entry-label
                 :documentation "Label where function code begins")
@@ -31,13 +34,76 @@ closures, and reader states."))
                 :documentation "List of (keyword register default-value) for &key")
     (rest-stack-alloc-p :initarg :rest-stack-alloc-p :initform nil :reader vm-closure-rest-stack-alloc-p
                         :documentation "T when the &rest list may be stack-allocated")
-    (captured-values :initarg :captured-values :initform #() :reader vm-closure-captured-values
-                     :documentation "Captured lexical environment values as a vector of (register . value) pairs")
-   (program-flat :initarg :program-flat :initform nil :accessor vm-closure-program-flat
-                 :documentation "Optional flat instruction vector that owns this closure's entry label.")
+    (captured-regs :initarg :captured-regs :initform #() :accessor vm-closure-captured-regs
+                   :documentation "Captured lexical environment register names as a flat vector.")
+    (captured-vals :initarg :captured-vals :initform #() :accessor vm-closure-captured-vals
+                   :documentation "Captured lexical environment values as a flat vector parallel to CAPTURED-REGS.")
+    (captured-values :initarg :captured-values :initform nil :accessor %vm-closure-legacy-captured-values
+                      :documentation "Legacy serialized captured environment payload, normalized after initialization.")
+    (deopt-info :initarg :deopt-info :initform nil :accessor vm-closure-deopt-info
+                :documentation "PC -> deoptimization reconstruction metadata for optimized closures.")
+    (osr-entry-points :initarg :osr-entry-points :initform nil :accessor vm-closure-osr-entry-points
+                      :documentation "Loop back-edge OSR entry metadata for this closure.")
+    (tier1-entry-points :initarg :tier1-entry-points :initform nil :accessor vm-closure-tier1-entry-points
+                        :documentation "Optional Tier-1 entry metadata used by the OSR stub.")
+    (invocation-count :initarg :invocation-count :initform 0 :accessor vm-closure-invocation-count
+                      :documentation "Dynamic invocation count used by tiered compilation.")
+    (compilation-tier :initarg :compilation-tier :initform *vm-current-compilation-tier* :accessor vm-closure-compilation-tier
+                      :documentation "Compilation tier for this closure: 0 fast, 1 optimized.")
+    (program-flat :initarg :program-flat :initform nil :accessor vm-closure-program-flat
+                  :documentation "Optional flat instruction vector that owns this closure's entry label.")
    (label-table :initarg :label-table :initform nil :accessor vm-closure-label-table
                 :documentation "Optional label table paired with PROGRAM-FLAT for cross-program calls."))
   (:documentation "Represents a closure with code and captured environment."))
+
+(defun %vm-normalize-captured-values (captured-values)
+  "Return two vectors, captured registers and captured values, from legacy CAPTURED-VALUES.
+Legacy bytecode used either a vector/list of (register . value) pairs for normal
+closures or a vector/list of raw values for indexed heap closures."
+  (let ((payload (cond
+                   ((null captured-values) nil)
+                   ((vectorp captured-values) (coerce captured-values 'list))
+                   ((listp captured-values) captured-values)
+                   (t (list captured-values)))))
+    (if (and payload (every #'consp payload))
+        (values (coerce (mapcar #'car payload) 'vector)
+                (coerce (mapcar #'cdr payload) 'vector))
+        (values #() (coerce (or payload nil) 'vector)))))
+
+(defmethod initialize-instance :after ((closure vm-closure-object) &key captured-values captured-regs captured-vals)
+  "Normalize legacy closure captures into flat parallel vectors."
+  (declare (ignore captured-regs captured-vals))
+  (when captured-values
+    (multiple-value-bind (regs vals) (%vm-normalize-captured-values captured-values)
+      (setf (vm-closure-captured-regs closure) regs
+            (vm-closure-captured-vals closure) vals))))
+
+(defun vm-closure-captured-values (closure)
+  "Return CLOSURE's legacy captured payload when present, otherwise values.
+Runtime restore uses VM-CLOSURE-CAPTURED-REGS/VALS; this reader remains for
+serialized bytecode/tests that constructed closures with :CAPTURED-VALUES."
+  (or (%vm-closure-legacy-captured-values closure)
+      (vm-closure-captured-vals closure)))
+
+(defparameter *tier-upgrade-threshold* 50
+  "Number of calls after which a Tier-0 closure is upgraded to Tier-1.")
+
+(defvar *vm-recompile-function-hook* nil
+  "Optional function called as (HOOK CLOSURE TARGET-TIER) for runtime tier upgrades.")
+
+(defun vm-closure-note-invocation (closure)
+  "Increment CLOSURE's invocation counter and return the new count."
+  (incf (vm-closure-invocation-count closure)))
+
+(defun vm-maybe-tier-upgrade-closure (closure &optional (target-tier 1))
+  "Upgrade hot Tier-0 CLOSURE to TARGET-TIER using *VM-RECOMPILE-FUNCTION-HOOK*."
+  (when (and (typep closure 'vm-closure-object)
+             (< (vm-closure-compilation-tier closure) target-tier)
+             (> (vm-closure-invocation-count closure) *tier-upgrade-threshold*))
+    (when *vm-recompile-function-hook*
+      (funcall *vm-recompile-function-hook* closure target-tier))
+    (setf (vm-closure-compilation-tier closure) target-tier))
+  closure)
 
 ;;; VM Cons Cell (Heap-based)
 
@@ -68,24 +134,76 @@ closures, and reader states."))
         (funcall constructor sexp)
         (error "Unknown instruction sexp: ~S" sexp))))
 
-(defun %vm-instruction-sexp-position-form (position)
-  "Return the SEXP accessor form for the 1-based instruction operand POSITION."
-  (case position
-    (1 '(second sexp))
-    (2 '(third sexp))
-    (3 '(fourth sexp))
-    (4 '(fifth sexp))
-    (5 '(sixth sexp))
-    (6 '(seventh sexp))
-    (t `(nth ,position sexp))))
+;;; FR-140: VM-local helpers for the runtime's immediate-symbol bit patterns.
+;;; Kept here (rather than depending on cl-cc/runtime) because cl-cc-vm is built
+;;; as an independent ASDF system.
+(defconstant +vm-immediate-symbol-base+ #x7FFF000000000100)
+(defconstant +vm-immediate-symbol-mask+ #xFFFFFFFFFFFFFF00)
+(defconstant +vm-immediate-symbol-index-mask+ #xFF)
 
-(defun %vm-instruction-constructor-args (slot-names &optional (position 1))
-  "Build keyword/value constructor arguments for SLOT-NAMES from an instruction SEXP."
-  (if (null slot-names)
-      nil
-      (append (list (intern (symbol-name (car slot-names)) :keyword)
-                    (%vm-instruction-sexp-position-form position))
-              (%vm-instruction-constructor-args (cdr slot-names) (+ position 1)))))
+(defparameter *vm-immediate-symbol-table*
+  #(:key :value :test :test-not :start :end :from-end :count :initial-value
+    :element-type :initial-element :allow-other-keys :adjustable :fill-pointer
+    quote lambda function declare setq setf if progn let let* block return-from
+    tagbody go catch throw unwind-protect flet labels macrolet symbol-macrolet
+    the values multiple-value-bind multiple-value-call eval-when locally and or
+    cond case typecase ecase ccase loop do do* dolist dotimes defun defmacro
+    defvar defparameter defconstant defclass defmethod defgeneric car cdr cons
+    list append apply funcall))
+
+(defparameter *vm-immediate-symbol-indexes*
+  (let ((table (make-hash-table :test #'eq)))
+    (loop for sym across *vm-immediate-symbol-table*
+          for i from 0
+          do (setf (gethash sym table) i))
+    table))
+
+(declaim (inline vm-immediate-symbol-p vm-decode-symbol vm-encode-common-symbol))
+
+(defun vm-immediate-symbol-p (value)
+  (and (typep value '(unsigned-byte 64))
+       (= (logand value +vm-immediate-symbol-mask+) +vm-immediate-symbol-base+)))
+
+(defun vm-decode-symbol (value)
+  (if (vm-immediate-symbol-p value)
+      (svref *vm-immediate-symbol-table*
+             (logand value +vm-immediate-symbol-index-mask+))
+      value))
+
+(defun vm-encode-common-symbol (symbol)
+  (or (let ((index (and (symbolp symbol)
+                        (gethash symbol *vm-immediate-symbol-indexes*))))
+        (and index (logior +vm-immediate-symbol-base+ index)))
+      symbol))
+
+(defun vm-immediate-intern-enabled-p ()
+  "Avoid immediate symbols while compiling CL-CC's own build-time macro code."
+  (let* ((package (or *package* (find-package :cl-user)))
+         (name (and package (package-name package))))
+    (not (and name
+              (or (string= name "CL-CC")
+                  (and (>= (length name) 6)
+                       (string= name "CL-CC/" :end1 6)))))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %vm-instruction-sexp-position-form (position)
+    "Return the SEXP accessor form for the 1-based instruction operand POSITION."
+    (case position
+      (1 '(second sexp))
+      (2 '(third sexp))
+      (3 '(fourth sexp))
+      (4 '(fifth sexp))
+      (5 '(sixth sexp))
+      (6 '(seventh sexp))
+      (t `(nth ,position sexp))))
+
+  (defun %vm-instruction-constructor-args (slot-names &optional (position 1))
+    "Build keyword/value constructor arguments for SLOT-NAMES from an instruction SEXP."
+    (if (null slot-names)
+        nil
+        (append (list (intern (symbol-name (car slot-names)) :keyword)
+                      (%vm-instruction-sexp-position-form position))
+                (%vm-instruction-constructor-args (cdr slot-names) (+ position 1))))))
 
 (defmacro define-vm-instruction (name (parent) &body body)
   "Define a VM instruction as a defstruct with auto-generated sexp serialization.
@@ -147,11 +265,11 @@ Options:
                                       (list 'defmethod reader
                                             (list (list 'inst name))
                                             (list (struct-acc sname) 'inst)))))
-                (sexp-forms
-                  (when sexp-tag
-                    (let ((ctor-args
-                            (%vm-instruction-constructor-args sexp-slots)))
-                      (list
+                 (sexp-forms
+                   (when sexp-tag
+                     (let ((ctor-args
+                             (%vm-instruction-constructor-args sexp-slots)))
+                       (list
                         (list 'defmethod 'instruction->sexp
                               (list (list 'inst name))
                               (cons 'list
@@ -159,16 +277,105 @@ Options:
                                           (mapcar (lambda (s)
                                                     (list (struct-acc s) 'inst))
                                                   sexp-slots))))
-                        (list 'setf
-                              (list 'gethash sexp-tag '*instruction-constructors*)
-                              (append (list 'lambda '(sexp))
-                                      (unless sexp-slots
-                                        (list '(declare (ignore sexp))))
-                                      (list (cons (ctor) ctor-args)))))))))
-           (cons 'progn
-                 (append (list struct-form)
-                         reader-forms
-                         sexp-forms)))))))
+                         (list 'setf
+                               (list 'gethash sexp-tag '*instruction-constructors*)
+                               (append (list 'lambda '(sexp))
+                                       (unless sexp-slots
+                                         (list '(declare (ignore sexp))))
+                                       (list (cons (ctor) ctor-args))))))))
+                 (immediate-symbol-forms
+                   (case name
+                     (vm-intern-symbol
+                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
+                          (multiple-value-bind (next-pc value-1 value-2) (call-next-method)
+                            (when (vm-immediate-intern-enabled-p)
+                              (let ((value (vm-reg-get state (vm-dst inst))))
+                                (when (symbolp value)
+                                  (vm-reg-set state (vm-dst inst)
+                                              (vm-encode-common-symbol value)))))
+                            (values next-pc value-1 value-2)))))
+                     (vm-symbol-name
+                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
+                          (declare (ignore labels))
+                          (let ((value (vm-reg-get state (vm-src inst))))
+                            (if (vm-immediate-symbol-p value)
+                                (progn
+                                  (vm-reg-set state (vm-dst inst)
+                                              (rt-string-intern
+                                                (symbol-name (vm-decode-symbol value))))
+                                  (values (1+ pc) nil nil))
+                                (call-next-method))))))
+                     (vm-keywordp
+                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
+                          (declare (ignore labels))
+                          (let ((value (vm-reg-get state (vm-src inst))))
+                            (if (vm-immediate-symbol-p value)
+                                (progn
+                                  (vm-reg-set state (vm-dst inst)
+                                              (if (keywordp (vm-decode-symbol value)) 1 0))
+                                  (values (1+ pc) nil nil))
+                                (call-next-method))))))
+                     (vm-symbol-p
+                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
+                          (declare (ignore labels))
+                          (let ((value (vm-reg-get state (vm-src inst))))
+                            (if (vm-immediate-symbol-p value)
+                                (progn
+                                  (vm-reg-set state (vm-dst inst) 1)
+                                  (values (1+ pc) nil nil))
+                                (call-next-method)))))))))
+            (cons 'progn
+                  (append (list struct-form)
+                          reader-forms
+                          sexp-forms
+                          immediate-symbol-forms)))))))
+
+;;; FR-155: Deoptimization / OSR metadata and checkpoint instructions.
+
+(defstruct vm-deopt-info
+  "Interpreter-state reconstruction metadata for one optimized-code PC."
+  (pc nil)
+  (label nil)
+  (live-regs nil)
+  (env nil)
+  (description nil))
+
+(defstruct vm-deopt-frame
+  "Runtime snapshot captured when a type guard or checkpoint deoptimizes."
+  (pc nil)
+  (reason nil)
+  (registers nil)
+  (call-stack nil)
+  (closure-env nil)
+  (values-list nil)
+  (info nil))
+
+(defvar *vm-current-program-deopt-info* nil
+  "Dynamically bound PC -> deoptimization metadata for the currently running program.")
+
+(define-vm-instruction vm-type-check (vm-instruction)
+  "Runtime type guard for optimized code.  On failure, deoptimizes to LABEL."
+  (src nil :reader vm-src)
+  (type-name nil :reader vm-type-name)
+  (label nil :reader vm-type-check-deopt-label)
+  (id nil :reader vm-type-check-deopt-id)
+  (:sexp-tag :type-check)
+  (:sexp-slots src type-name label id))
+
+(define-vm-instruction vm-deopt (vm-instruction)
+  "Explicit deoptimization checkpoint.  Saves VM state and resumes in interpreter code."
+  (label nil :reader vm-deopt-label)
+  (id nil :reader vm-deopt-id)
+  (reason :checkpoint :reader vm-deopt-reason)
+  (:sexp-tag :deopt)
+  (:sexp-slots label id reason))
+
+(define-vm-instruction vm-osr-entry (vm-instruction)
+  "Loop back-edge marker eligible for on-stack replacement into Tier-1 code."
+  (label nil :reader vm-osr-label)
+  (id nil :reader vm-osr-id)
+  (:sexp-tag :osr-entry)
+  (:sexp-slots label id))
 
 ;;; Shorthand macros (define-simple-instruction, define-vm-unary-instruction,
 ;;; define-vm-binary-instruction, define-vm-char-comparison), vm-program,

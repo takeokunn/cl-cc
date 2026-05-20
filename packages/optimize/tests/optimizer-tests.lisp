@@ -72,6 +72,32 @@
   (assert-run= expected expr)
   (assert-false (opt-has-p expr instr)))
 
+(deftest-each optimizer-algebraic-type-producer-identity
+  "FR-344 type predicates fold when their source comes from a proven producer instruction."
+  :cases (("null-of-cons" 0
+           (make-vm-cons :dst :r1 :car-src :r0 :cdr-src :r0)
+           (make-vm-null-p :dst :r2 :src :r1))
+          ("consp-of-cons" 1
+           (make-vm-cons :dst :r1 :car-src :r0 :cdr-src :r0)
+           (make-vm-cons-p :dst :r2 :src :r1))
+          ("listp-of-cons" 1
+           (make-vm-cons :dst :r1 :car-src :r0 :cdr-src :r0)
+           (make-vm-listp :dst :r2 :src :r1))
+          ("stringp-of-concatenate" 1
+           (make-vm-concatenate :dst :r1 :str1 :r0 :str2 :r0)
+           (make-vm-stringp :dst :r2 :src :r1))
+          ("vectorp-of-coerce-to-vector" 1
+           (make-vm-coerce-to-vector :dst :r1 :src :r0)
+           (make-vm-vectorp :dst :r2 :src :r1)))
+  (expected-value producer predicate)
+  (let ((out (cl-cc/optimize::opt-pass-fold (list producer predicate))))
+    (assert-true (some (lambda (i)
+                         (and (typep i 'cl-cc/vm::vm-const)
+                              (eq (cl-cc/vm::vm-dst i) :r2)
+                              (eql (cl-cc/vm::vm-value i) expected-value)))
+                       out))
+    (assert-false (some (lambda (i) (typep i (type-of predicate))) out))))
+
 ;;; ── Dead Code Elimination: Semantics ─────────────────────────────────────
 
 (deftest-each optimizer-dce

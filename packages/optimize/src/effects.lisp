@@ -79,6 +79,10 @@
 (defparameter *opt-read-only-inst-types*
   '(;; Global reads (read but do not modify global state)
      vm-get-global vm-boundp vm-fboundp
+     vm-gethash vm-gethash-eq vm-gethash-eql vm-gethash-equal
+     vm-hash-table-count vm-hash-table-keys vm-hash-table-values
+     vm-hash-table-test vm-hash-table-size vm-hash-table-rehash-size
+     vm-hash-table-rehash-threshold
      ;; Hardware cache hints: no semantic writes, but keep them ordered around memory.
      vm-prefetch
      ;; Heap reads (non-mutating)
@@ -116,7 +120,8 @@
      vm-makunbound
      vm-add-package-local-nickname vm-remove-package-local-nickname
      vm-progv-enter vm-progv-exit
-    vm-symbol-set vm-remprop vm-set-symbol-plist
+     vm-symbol-set vm-remprop vm-set-symbol-plist
+     vm-sethash vm-remhash vm-clrhash
     ;; Heap mutation
     vm-rplaca vm-rplacd vm-slot-write
     vm-aset vm-fill vm-copy-vector vm-svset vm-set-fill-pointer vm-vector-push vm-vector-pop

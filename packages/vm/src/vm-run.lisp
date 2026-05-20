@@ -280,7 +280,10 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
       (%set-vm-profile-call-start-times state (list (%vm-profile-now-ns))))
     (let ((result
             (let ((*vm-exec-flat* flat)
-                  (*vm-exec-labels* labels))
+                  (*vm-exec-labels* labels)
+                  (*vm-current-compilation-tier* (vm-program-compilation-tier program))
+                  (*vm-current-program-deopt-info* (vm-program-deopt-info program))
+                  (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))
               (loop with pc = 0
                      while (< pc (length flat))
                      do (let ((instruction (aref flat pc)))

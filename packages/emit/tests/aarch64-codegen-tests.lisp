@@ -29,6 +29,39 @@ Returns the byte vector, or NIL on error."
     (funcall emit-fn (lambda (b) (push b bytes)))
     (nreverse bytes)))
 
+(defun %fr072-a64-assignment (&rest pairs)
+  (let ((ht (make-hash-table :test #'eq)))
+    (loop for (vreg phys) on pairs by #'cddr
+          do (setf (gethash vreg ht) phys))
+    ht))
+
+(deftest aarch64-shrink-wrap-delays-save-to-cold-block
+  "FR-072: an AArch64 callee-saved pair used only in a cold block is saved/restored there."
+  (let* ((insts (list (cl-cc:make-vm-jump-zero :reg :R0 :label "cold")
+                      (cl-cc:make-vm-halt :reg :R0)
+                      (cl-cc:make-vm-label :name "cold")
+                      (cl-cc:make-vm-add :dst :R1 :lhs :R2 :rhs :R3)
+                      (cl-cc:make-vm-halt :reg :R0)))
+         (assignment (%fr072-a64-assignment :R1 :x19)))
+    (multiple-value-bind (annotated entry-pairs final-pairs)
+        (cl-cc/codegen::a64-shrink-wrap-instructions insts '((19 20)) assignment)
+      (assert-equal nil entry-pairs)
+      (assert-equal nil final-pairs)
+      (assert-= 1 (count-if (lambda (x) (typep x 'cl-cc/codegen::a64-shrink-save)) annotated))
+      (assert-= 1 (count-if (lambda (x) (typep x 'cl-cc/codegen::a64-shrink-restore)) annotated)))))
+
+(deftest aarch64-shrink-wrap-degenerate-entry-use-stays-monolithic
+  "FR-072: AArch64 entry-block callee-saved use falls back to monolithic save pairs."
+  (let* ((insts (list (cl-cc:make-vm-add :dst :R1 :lhs :R2 :rhs :R3)
+                      (cl-cc:make-vm-halt :reg :R1)))
+         (assignment (%fr072-a64-assignment :R1 :x19)))
+    (multiple-value-bind (annotated entry-pairs final-pairs)
+        (cl-cc/codegen::a64-shrink-wrap-instructions insts '((19 20)) assignment)
+      (assert-equal '((19 20)) entry-pairs)
+      (assert-equal '((19 20)) final-pairs)
+      (assert-false (find-if (lambda (x) (typep x 'cl-cc/codegen::a64-shrink-save))
+                             annotated)))))
+
 (deftest aarch64-fpe-codegen-target-frees-x29
   "Default AArch64 FPE exposes X29 to regalloc; debug opt-out reserves it again."
   (let ((fpe-target (let ((cl-cc/codegen::*a64-omit-frame-pointer* t))

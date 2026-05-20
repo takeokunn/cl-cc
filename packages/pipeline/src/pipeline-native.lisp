@@ -17,6 +17,10 @@
 (defparameter *native-command-timeout-seconds* 10
   "Timeout in seconds for short external helper commands used by native compilation.")
 
+(defparameter *use-mir-pipeline* nil
+  "When true, native compilation routes VM instructions through MIR SSA and ISel.
+The direct VM-to-codegen path remains the fallback and the default.")
+
 (defun %run-short-native-command (argv)
   "Run a short external helper command with an explicit timeout.
 Returns NIL on timeout or command failure so native compilation can continue
@@ -118,7 +122,8 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
          :spectre-mitigations (getf opts :spectre-mitigations)
         :stack-protector (getf opts :stack-protector)
         :shadow-stack (getf opts :shadow-stack)
-        :compress (getf opts :compress)
+         :compress (getf opts :compress)
+         :mir-isel (getf opts :mir-isel)
         :asan (getf opts :asan)
         :msan (getf opts :msan)
         :tsan (getf opts :tsan)
@@ -161,9 +166,9 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
                                   print-pass-timings timing-stream coverage
                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                  print-pass-stats stats-stream trace-json-stream
-                                  retpoline spectre-mitigations stack-protector shadow-stack
-                                  compress asan msan tsan ubsan hwasan
-                                  target-os)
+                                   retpoline spectre-mitigations stack-protector shadow-stack
+                                    compress asan msan tsan ubsan hwasan
+                                    target-os mir-isel compilation-tier)
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
   (append (list :pass-pipeline pass-pipeline)
           (if speed (list :speed speed) nil)
@@ -178,11 +183,13 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
                 :print-pass-stats    print-pass-stats
                 :stats-stream        stats-stream
                  :trace-json-stream   trace-json-stream
+                 :compilation-tier    (normalize-compilation-tier compilation-tier)
                  :retpoline          retpoline
                  :spectre-mitigations spectre-mitigations
                  :stack-protector    stack-protector
                  :shadow-stack       shadow-stack
-                 :compress           compress
+                  :compress           compress
+                  :mir-isel           mir-isel
                  :asan               asan
                 :msan               msan
                 :tsan               tsan
@@ -467,7 +474,27 @@ Returns PROGRAM unchanged if it is not a VM-PROGRAM."
                            :ubsan (getf opts :ubsan)
                            :hwasan (getf opts :hwasan))
                      nil))
-          (error "Unknown native architecture: ~S" arch))))
+           (error "Unknown native architecture: ~S" arch))))
+
+(defun %native-mir-target (arch)
+  "Return the MIR instruction-selection target keyword for native ARCH."
+  (ecase arch
+    (:x86-64 :x86-64)
+    (:arm64 :aarch64)))
+
+(defun %mir-pipeline-enabled-p (opts)
+  "Return true when the MIR pipeline should be attempted."
+  (or *use-mir-pipeline* (getf opts :mir-isel)))
+
+(defun %maybe-route-program-through-mir (program arch opts)
+  "Route PROGRAM through MIR/ISel when enabled, falling back on any failure."
+  (if (%mir-pipeline-enabled-p opts)
+      (handler-case
+          (cl-cc/codegen:isel-vm-program program :target (%native-mir-target arch))
+        (error (condition)
+          (format *error-output* "; MIR pipeline disabled for this unit: ~A~%" condition)
+          program))
+      program))
 
 (defun %strip-internal-opts (opts)
   "Remove pipeline-internal options from OPTS that downstream compile functions
@@ -478,6 +505,7 @@ don't accept as keyword arguments."
     ;; and must not reach compile-string / compile-expression / compile-toplevel-forms.
     (remf stripped :target-os)
     (remf stripped :compress)
+    (remf stripped :mir-isel)
     stripped))
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp)
@@ -487,7 +515,7 @@ don't accept as keyword arguments."
                                     print-pass-stats stats-stream trace-json-stream
                                     retpoline spectre-mitigations stack-protector shadow-stack
                                      compress asan msan tsan ubsan hwasan
-                                     target-os)
+                                      target-os mir-isel)
   "Compile SOURCE to a native executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -517,7 +545,8 @@ Returns the output file path on success."
                                         :spectre-mitigations spectre-mitigations
                                         :stack-protector stack-protector
                                         :shadow-stack shadow-stack
-                                        :compress compress
+                                         :compress compress
+                                         :mir-isel mir-isel
                                         :asan asan
                                        :msan msan
                                        :tsan tsan
@@ -526,7 +555,9 @@ Returns the output file path on success."
                                        :target-os effective-target-os))
          (compile-opts (%strip-internal-opts opts))
          (result (%compile-native-source source native-target language compile-opts))
-          (program (pipeline-reorder-functions (compilation-result-program result)))
+           (program (pipeline-reorder-functions
+                     (%maybe-route-program-through-mir
+                      (compilation-result-program result) arch opts)))
          (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
                              (or (getf opts :retpoline)
                                  (getf opts :spectre-mitigations)
@@ -616,8 +647,8 @@ Returns the output file path on success."
                                              print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                              print-pass-stats stats-stream trace-json-stream
                                                retpoline spectre-mitigations stack-protector shadow-stack
-                                              compress asan msan tsan ubsan hwasan
-                                              target-os)
+                                               compress asan msan tsan ubsan hwasan
+                                               target-os mir-isel (compilation-tier *compilation-tier*))
   "Compile a CL-CC source file to a native executable.
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
@@ -645,13 +676,15 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
                                        :spectre-mitigations spectre-mitigations
                                        :stack-protector stack-protector
                                        :shadow-stack shadow-stack
-                                       :compress compress
+                                        :compress compress
+                                        :mir-isel mir-isel
                                        :asan asan
                                       :msan msan
                                       :tsan tsan
                                       :ubsan ubsan
-                                      :hwasan hwasan
-                                      :target-os effective-target-os))
+                                       :hwasan hwasan
+                                      :compilation-tier compilation-tier
+                                       :target-os effective-target-os))
            (cache-key (%compile-cache-key source arch effective-language opts))
           (cache-path (%compile-cache-path cache-key output)))
     (ensure-directories-exist cache-path)
@@ -664,7 +697,9 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
         (let* ((native-target (%native-target-for-arch arch))
                (compile-opts (%strip-internal-opts opts))
                (result (%compile-native-file-source source native-target effective-language compile-opts))
-                (program (pipeline-reorder-functions (compilation-result-program result)))
+                 (program (pipeline-reorder-functions
+                           (%maybe-route-program-through-mir
+                            (compilation-result-program result) arch opts)))
                 (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
                                     (or (getf opts :retpoline)
                                         (getf opts :spectre-mitigations)

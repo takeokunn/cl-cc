@@ -68,8 +68,10 @@
       (%with-compiled-registers (source-regs (ast-values-forms values-form) ctx)
         (%registers-for-vars vars source-regs ctx))
       (progn
-        (let ((known-count (%static-small-values-arity values-form ctx)))
-          (compile-ast values-form ctx)
+        (let ((known-count (%static-small-values-arity values-form ctx))
+              (primary-reg (compile-ast values-form ctx)))
+          (when (= (length vars) 1)
+            (return-from %compile-mvb-value-registers (list primary-reg)))
           (when (and known-count (= known-count (length vars)))
             (let ((var-regs (%allocate-registers-for-vars vars ctx)))
               (emit ctx (make-vm-mv-bind-regs :dst-regs var-regs :count known-count))

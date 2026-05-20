@@ -107,9 +107,9 @@
         (otherwise
          (cond
            ;; #nR — arbitrary radix; #n= — label assignment; #n# — label reference
-           ((digit-char-p ch)
-            (let ((num-str ""))
-              (loop while (and (not (lex-at-end-p state)) (digit-char-p (lex-peek state)))
+            ((lex-decimal-digit-char-p ch)
+             (let ((num-str ""))
+               (loop while (and (not (lex-at-end-p state)) (lex-decimal-digit-char-p (lex-peek state)))
                     do (setf num-str (concatenate 'string num-str (string (lex-advance state)))))
               (when (lex-at-end-p state)
                 (error "Lexer error at byte ~D: unexpected end after #~A" start num-str))

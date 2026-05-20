@@ -106,6 +106,225 @@ ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
     `(let ((,vals-var (multiple-value-list ,form)))
        (nth ,n ,vals-var))))
 
+;;; FR-179: source-level sequence operation fusion.
+;;;
+;;; Compiler macros run before ordinary macro expansion, so they can still see
+;;; chains such as (mapcar f (mapcar g xs)) before MAPCAR/REMOVE-IF expand into
+;;; DOLIST/DOTIMES loops.  The generated code is deliberately a single explicit
+;;; loop over the original sequence, which gives the later VM optimizer an
+;;; already-fused instruction stream with no intermediate list allocation.
+
+(defun %fr179-form-head-p (form name)
+  "Return T when FORM is a list whose head symbol has symbol-name NAME."
+  (and (consp form)
+       (symbolp (car form))
+       (string= (symbol-name (car form)) name)))
+
+(defun %fr179-simple-mapcar-form-p (form)
+  "Return T when FORM is a simple two-argument MAPCAR call."
+  (and (%fr179-form-head-p form "MAPCAR")
+       (= (length form) 3)))
+
+(defun %fr179-simple-filter-form-p (form)
+  "Return T when FORM is a simple REMOVE-IF or REMOVE-IF-NOT call without keys."
+  (and (or (%fr179-form-head-p form "REMOVE-IF")
+           (%fr179-form-head-p form "REMOVE-IF-NOT"))
+       (= (length form) 3)))
+
+(defun %fr179-filter-keep-true-p (filter-head)
+  "Return T when FILTER-HEAD keeps elements whose predicate result is true."
+  (string= (symbol-name filter-head) "REMOVE-IF-NOT"))
+
+(defun %fr179-ref-form (sequence index kind)
+  "Return the element reference form for SEQUENCE at INDEX of KIND."
+  (case kind
+    (string `(char ,sequence ,index))
+    (vector `(aref ,sequence ,index))
+    (otherwise `(nth ,index ,sequence))))
+
+(defun %fr179-loop-body (kind seq-var item-var index-var element-form final-form body-form)
+  "Build a sequence loop for KIND executing BODY-FORM for each element."
+  (case kind
+    (list `(dolist (,item-var ,seq-var ,final-form)
+             ,body-form))
+    ((vector string)
+     `(dotimes (,index-var (length ,seq-var) ,final-form)
+        (let ((,item-var ,element-form))
+          ,body-form)))))
+
+(defun %fr179-fused-map-map-form (outer-fn inner-fn sequence)
+  "Expand (mapcar OUTER-FN (mapcar INNER-FN SEQUENCE)) into one loop."
+  (let ((outer-var (gensym "OUTER-FN"))
+        (inner-var (gensym "INNER-FN"))
+        (seq-var   (gensym "SEQUENCE"))
+        (item-var  (gensym "ITEM"))
+        (index-var (gensym "INDEX"))
+        (acc-var   (gensym "ACC")))
+    `(let ((,outer-var ,outer-fn)
+           (,inner-var ,inner-fn)
+           (,seq-var ,sequence))
+       (typecase ,seq-var
+         (list
+          (let ((,acc-var nil))
+            ,(%fr179-loop-body
+              'list seq-var item-var index-var item-var `(nreverse ,acc-var)
+              `(setq ,acc-var
+                     (cons (funcall ,outer-var (funcall ,inner-var ,item-var))
+                           ,acc-var)))))
+         (vector
+          (let ((,acc-var nil))
+            ,(%fr179-loop-body
+              'vector seq-var item-var index-var `(aref ,seq-var ,index-var)
+              `(nreverse ,acc-var)
+              `(setq ,acc-var
+                     (cons (funcall ,outer-var (funcall ,inner-var ,item-var))
+                           ,acc-var)))))
+         (string
+          (let ((,acc-var nil))
+            ,(%fr179-loop-body
+              'string seq-var item-var index-var `(char ,seq-var ,index-var)
+              `(nreverse ,acc-var)
+              `(setq ,acc-var
+                     (cons (funcall ,outer-var (funcall ,inner-var ,item-var))
+                           ,acc-var)))))
+         (otherwise
+          (error ,(%type-error-form seq-var '(or list vector string))))))))
+
+(defun %fr179-fused-map-filter-form (map-fn filter-form)
+  "Expand (mapcar MAP-FN (remove-if[-not] PRED SEQUENCE)) into one loop."
+  (let ((pred (second filter-form))
+        (sequence (third filter-form))
+        (keep-true-p (%fr179-filter-keep-true-p (car filter-form)))
+        (map-var (gensym "MAP-FN"))
+        (pred-var (gensym "PRED-FN"))
+        (seq-var (gensym "SEQUENCE"))
+        (item-var (gensym "ITEM"))
+        (index-var (gensym "INDEX"))
+        (mapped-var (gensym "MAPPED"))
+        (acc-var (gensym "ACC")))
+    (labels ((body ()
+               `(let ((,mapped-var (funcall ,map-var ,item-var)))
+                  (when ,(if keep-true-p
+                             `(funcall ,pred-var ,item-var)
+                             `(not (funcall ,pred-var ,item-var)))
+                    (setq ,acc-var (cons ,mapped-var ,acc-var))))))
+      `(let ((,map-var ,map-fn)
+             (,pred-var ,pred)
+             (,seq-var ,sequence))
+         (typecase ,seq-var
+           (list
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'list seq-var item-var index-var item-var
+                                  `(nreverse ,acc-var) (body))))
+           (vector
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'vector seq-var item-var index-var `(aref ,seq-var ,index-var)
+                                  `(nreverse ,acc-var) (body))))
+           (string
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'string seq-var item-var index-var `(char ,seq-var ,index-var)
+                                  `(nreverse ,acc-var) (body))))
+           (otherwise
+            (error ,(%type-error-form seq-var '(or list vector string)))))))))
+
+(defun %fr179-fused-filter-map-form (filter-head pred map-form)
+  "Expand (remove-if[-not] PRED (mapcar MAP-FN SEQUENCE)) into one loop."
+  (let ((map-fn (second map-form))
+        (sequence (third map-form))
+        (keep-true-p (%fr179-filter-keep-true-p filter-head))
+        (map-var (gensym "MAP-FN"))
+        (pred-var (gensym "PRED-FN"))
+        (seq-var (gensym "SEQUENCE"))
+        (item-var (gensym "ITEM"))
+        (index-var (gensym "INDEX"))
+        (mapped-var (gensym "MAPPED"))
+        (acc-var (gensym "ACC")))
+    (labels ((body ()
+               `(let ((,mapped-var (funcall ,map-var ,item-var)))
+                  (when ,(if keep-true-p
+                             `(funcall ,pred-var ,mapped-var)
+                             `(not (funcall ,pred-var ,mapped-var)))
+                    (setq ,acc-var (cons ,mapped-var ,acc-var))))))
+      `(let ((,map-var ,map-fn)
+             (,pred-var ,pred)
+             (,seq-var ,sequence))
+         (typecase ,seq-var
+           (list
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'list seq-var item-var index-var item-var
+                                  `(nreverse ,acc-var) (body))))
+           (vector
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'vector seq-var item-var index-var `(aref ,seq-var ,index-var)
+                                  `(nreverse ,acc-var) (body))))
+           (string
+            (let ((,acc-var nil))
+              ,(%fr179-loop-body 'string seq-var item-var index-var `(char ,seq-var ,index-var)
+                                  `(nreverse ,acc-var) (body))))
+           (otherwise
+            (error ,(%type-error-form seq-var '(or list vector string)))))))))
+
+(unless (boundp '*compiler-macro-table*)
+  (setf *compiler-macro-table* (make-hash-table :test #'eq)))
+
+(register-compiler-macro
+ 'mapcar
+ (lambda (form env)
+   (declare (ignore env))
+   (if (and (= (length form) 3)
+            (%fr179-simple-mapcar-form-p (third form)))
+       (%fr179-fused-map-map-form (second form) (second (third form)) (third (third form)))
+       (if (and (= (length form) 3)
+                (%fr179-simple-filter-form-p (third form)))
+           (%fr179-fused-map-filter-form (second form) (third form))
+           form))))
+
+(dolist (name '(remove-if remove-if-not))
+  (register-compiler-macro
+   name
+   (lambda (form env)
+     (declare (ignore env))
+     (if (and (= (length form) 3)
+              (%fr179-simple-mapcar-form-p (third form)))
+         (%fr179-fused-filter-map-form (car form) (second form) (third form))
+         form))))
+
+;; MAPCAR — list accumulation over lists and vectors (FR-341)
+(our-defmacro mapcar (function sequence)
+  "Apply FUNCTION to each element of SEQUENCE and return a fresh list of results."
+  (labels ((quoted-value (form)
+             (when (and (consp form) (eq (car form) 'quote))
+               (values (cadr form) t)))
+           (list-expansion (fn-var seq-var result-var item-var)
+             `(let ((,result-var nil))
+                (dolist (,item-var ,seq-var (nreverse ,result-var))
+                  (setq ,result-var (cons (funcall ,fn-var ,item-var)
+                                           ,result-var)))))
+           (vector-expansion (fn-var seq-var result-var index-var)
+             `(let ((,result-var nil))
+                (dotimes (,index-var (length ,seq-var) (nreverse ,result-var))
+                  (setq ,result-var (cons (funcall ,fn-var (aref ,seq-var ,index-var))
+                                           ,result-var))))))
+    (let ((fn-var (gensym "FUNCTION"))
+          (seq-var (gensym "SEQUENCE"))
+          (result-var (gensym "RESULT"))
+          (item-var (gensym "ITEM"))
+          (index-var (gensym "INDEX")))
+      (multiple-value-bind (literal-value literalp) (quoted-value sequence)
+        `(let ((,fn-var ,function)
+               (,seq-var ,sequence))
+           ,(if literalp
+                (typecase literal-value
+                  (list (list-expansion fn-var seq-var result-var item-var))
+                  (vector (vector-expansion fn-var seq-var result-var index-var))
+                  (otherwise
+                   `(error ,(%type-error-form seq-var '(or list vector)))))
+                `(typecase ,seq-var
+                   (list ,(list-expansion fn-var seq-var result-var item-var))
+                   (vector ,(vector-expansion fn-var seq-var result-var index-var))
+                   (otherwise
+                    (error ,(%type-error-form seq-var '(or list vector)))))))))))
+
 ;; ECASE — signal type-error when no clause matches
 (our-defmacro ecase (keyform &body cases)
   "Like CASE but signals a TYPE-ERROR if no case matches."

@@ -138,12 +138,18 @@
     #:opt-pass-cons-slot-forward
     #:opt-pass-bounds-check-elimination
 
-    ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
-    #:opt-known-callee-labels
-    #:opt-pass-call-site-splitting
-    #:opt-pass-devirtualize
-    #:opt-pass-closure-capture-dedup
-    #:opt-pass-closure-thunk-sharing
+     ;; ─── optimizer-inline.lisp ─────────────────────────────────────────
+     #:opt-known-callee-labels
+     #:opt-pass-call-site-splitting
+     #:opt-pass-devirtualize
+     #:opt-pass-closure-capture-dedup
+     #:opt-pass-closure-thunk-sharing
+     #:opt-demand-summary #:make-opt-demand-summary #:opt-demand-summary-p
+     #:opt-demand-summary-function #:opt-demand-summary-params
+     #:opt-demand-summary-demands #:opt-demand-summary-strict-params
+     #:opt-demand-summary-absent-params #:*opt-demand-summary-table*
+     #:opt-analyze-function-demand #:opt-analyze-program-demand
+     #:opt-pass-demand-analysis
 
      ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
       #:opt-pass-fill-recognition
@@ -164,9 +170,11 @@
     #:opt-pass-prefetch-insertion
 
     ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-      #:optimize-instructions
-      #:*block-compile*
-      #:*skip-optimizer-passes*
+       #:optimize-instructions
+      #:*optimization-report-stream*
+       #:*block-compile*
+       #:*max-inline-size*
+       #:*skip-optimizer-passes*
      #:*verify-optimizer-instructions*
      #:*opt-enable-pure-call-optimization*
      #:*opt-enable-sealed-gf-devirtualization*
