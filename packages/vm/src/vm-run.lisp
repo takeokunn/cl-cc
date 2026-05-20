@@ -266,7 +266,8 @@ nearest preceding label in LABELS, which identifies the caller function region."
 Returns the halted result value, or NIL if execution falls off the end.
 Used by run-string-repl for incremental REPL execution."
   (let ((result
-           (loop with pc = start-pc
+           (let ((*vm-managed-cons-allocation-enabled* nil))
+              (loop with pc = start-pc
                    while (< pc (length instructions))
                    do (let ((instruction (aref instructions pc)))
                         (when (typep instruction 'vm-call)
@@ -277,7 +278,7 @@ Used by run-string-repl for incremental REPL execution."
                           (when halted
                             (return (vm-force-trampoline-result value)))
                           (setf pc next-pc)))
-                       finally (return nil))))
+                   finally (return nil)))))
     (vm-maybe-dump-type-profile state)
     result))
 
@@ -298,8 +299,9 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                   (*vm-exec-labels* labels)
                   (*vm-current-compilation-tier* (vm-program-compilation-tier program))
                   (*vm-current-program-deopt-info* (vm-program-deopt-info program))
-               (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))
-               (loop with pc = 0
+                  (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))
+               (let ((*vm-managed-cons-allocation-enabled* nil))
+                 (loop with pc = 0
                        while (< pc (length flat))
                       do (let ((instruction (aref flat pc)))
                            (when (typep instruction 'vm-call)
@@ -330,6 +332,6 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                                         (or value
                                             (vm-reg-get state (vm-program-result-register program))))))
                              (setf pc next-pc)))
-                   finally (return nil))))
+                      finally (return nil))))))
       (vm-maybe-dump-type-profile state)
       (%vm-managed-tree-materialize state result))))
