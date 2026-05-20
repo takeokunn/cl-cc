@@ -153,9 +153,10 @@
 
      ;; ─── optimizer-recognition.lisp ─────────────────────────────────────
       #:opt-pass-fill-recognition
-      #:opt-pass-copy-recognition
-      #:opt-pass-auto-vectorization
-      #:vm-simd-vector-op
+       #:opt-pass-copy-recognition
+       #:opt-pass-auto-vectorization
+       #:opt-pass-slp-vectorize
+       #:vm-simd-vector-op
       #:make-vm-simd-vector-op
       #:vm-simd-vector-op-p
       #:opt-pass-function-outlining

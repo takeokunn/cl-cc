@@ -254,6 +254,30 @@ SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
   "MOVDQA [base + offset], xmm (aligned packed 128-bit store)."
   (emit-sse66-0f-mx #x7F base offset src-xmm stream))
 
+(defun emit-ssef3-0f-xm (opcode dst-xmm base offset stream)
+  "Emit an F3 0F /r XMM load-like instruction with a memory source."
+  (emit-byte #xF3 stream)
+  (emit-sse-prefix-rex-if-needed dst-xmm base stream)
+  (emit-byte #x0F stream)
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-xmm base offset stream))
+
+(defun emit-ssef3-0f-mx (opcode base offset src-xmm stream)
+  "Emit an F3 0F /r XMM store-like instruction with a memory destination."
+  (emit-byte #xF3 stream)
+  (emit-sse-prefix-rex-if-needed src-xmm base stream)
+  (emit-byte #x0F stream)
+  (emit-byte opcode stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) src-xmm base offset stream))
+
+(defun emit-movdqu-xm (dst-xmm base offset stream)
+  "MOVDQU xmm, [base + offset] (unaligned packed 128-bit load)."
+  (emit-ssef3-0f-xm #x6F dst-xmm base offset stream))
+
+(defun emit-movdqu-mx (base offset src-xmm stream)
+  "MOVDQU [base + offset], xmm (unaligned packed 128-bit store)."
+  (emit-ssef3-0f-mx #x7F base offset src-xmm stream))
+
 (define-sse66-0f-xmm-op paddd #xFE
   "PADDD xmm, xmm/m128 (packed signed/unsigned dword add).")
 (define-sse66-0f-xmm-op psubd #xFA
@@ -308,6 +332,22 @@ SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
   "VPADDD ymm, ymm, [base + offset] (AVX2 packed dword add)."
   (emit-avx2-vex-yym #xFE +vex-map-0f+ dst-ymm src1-ymm base offset stream))
 
+(defun emit-vpsubd-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPSUBD ymm, ymm, ymm (AVX2 packed dword subtract)."
+  (emit-avx2-vex-yyy #xFA +vex-map-0f+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpand-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPAND ymm, ymm, ymm (AVX2 packed bitwise and)."
+  (emit-avx2-vex-yyy #xDB +vex-map-0f+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpor-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPOR ymm, ymm, ymm (AVX2 packed bitwise or)."
+  (emit-avx2-vex-yyy #xEB +vex-map-0f+ dst-ymm src1-ymm src2-ymm stream))
+
+(defun emit-vpxor-yyy (dst-ymm src1-ymm src2-ymm stream)
+  "VPXOR ymm, ymm, ymm (AVX2 packed bitwise xor)."
+  (emit-avx2-vex-yyy #xEF +vex-map-0f+ dst-ymm src1-ymm src2-ymm stream))
+
 (defun emit-vpmulld-yyy (dst-ymm src1-ymm src2-ymm stream)
   "VPMULLD ymm, ymm, ymm (AVX2 packed signed dword multiply)."
   (emit-avx2-vex-yyy #x40 +vex-map-0f38+ dst-ymm src1-ymm src2-ymm stream))
@@ -315,6 +355,22 @@ SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
 (defun emit-vpmulld-yym (dst-ymm src1-ymm base offset stream)
   "VPMULLD ymm, ymm, [base + offset] (AVX2 packed signed dword multiply)."
   (emit-avx2-vex-yym #x40 +vex-map-0f38+ dst-ymm src1-ymm base offset stream))
+
+(defun emit-vmovdqu-ym (dst-ymm base offset stream)
+  "VMOVDQU ymm, [base + offset] (AVX unaligned 256-bit load)."
+  (emit-vex-prefix stream
+                   :map +vex-map-0f+ :w 0 :vvvv #xF :l 1 :pp +vex-pp-f3+
+                   :r (ash dst-ymm -3) :b (ash base -3))
+  (emit-byte #x6F stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst-ymm base offset stream))
+
+(defun emit-vmovdqu-my (base offset src-ymm stream)
+  "VMOVDQU [base + offset], ymm (AVX unaligned 256-bit store)."
+  (emit-vex-prefix stream
+                   :map +vex-map-0f+ :w 0 :vvvv #xF :l 1 :pp +vex-pp-f3+
+                   :r (ash src-ymm -3) :b (ash base -3))
+  (emit-byte #x7F stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) src-ymm base offset stream))
 
 (defun emit-vpermd-yyy (dst-ymm src1-ymm src2-ymm stream)
   "VPERMD ymm, ymm, ymm (AVX2 permute dwords)."

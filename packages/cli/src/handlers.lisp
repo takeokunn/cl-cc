@@ -594,40 +594,44 @@ with a source caret and type trace on failure."
   (let* ((file (%required-file-arg parsed "check"))
          (strict (flag parsed "--strict"))
          (verbose (flag parsed "--verbose"))
+         (timeout (%get-timeout parsed))
          (mode (if strict :strict :warn))
          (source (%read-command-source file)))
     (when verbose
       (format *error-output* "; cl-cc check: ~A  mode=~A~%" file mode))
-    (handler-case
-        (progn
-          (multiple-value-bind (result inferred-type)
-              (run-string-typed source :mode mode)
-            (declare (ignore result))
-            (if inferred-type
-                (format t "~A~%" (type-to-string inferred-type))
-                (format t "<no type inferred>~%")))
-          (uiop:quit 0))
-      (error (e)
-        (let* ((message (princ-to-string e))
-               (location (and (typep e 'cl-cc/ast:ast-compilation-error)
-                              (cl-cc/ast:ast-error-location e)))
-               (line-number nil)
-               (column-number nil))
-          (multiple-value-setq (line-number column-number)
-            (%extract-line-column-from-location location))
-          (let* ((line-text (%source-line-at source line-number))
-                 (snippet (cl-cc/optimize:opt-build-diagnostic-caret-line
-                           line-text
-                           (or column-number 1)))
-                 (trace (cl-cc/optimize:opt-format-type-trace
-                         (list message))))
-            (format *error-output* "~A~%"
-                    (cl-cc/optimize:opt-format-diagnostic-reason
-                     "type-check"
-                     "failed"
-                     message))
-            (when location
-              (format *error-output* "at ~A~%" location))
-            (format *error-output* "~A~%" snippet)
-            (format *error-output* "~A~%" trace)))
-        (uiop:quit 1)))))
+    (%call-with-cli-timeout timeout
+     (lambda ()
+       (handler-case
+           (progn
+             (multiple-value-bind (result inferred-type)
+                 (run-string-typed source :mode mode)
+               (declare (ignore result))
+               (if inferred-type
+                   (format t "~A~%" (type-to-string inferred-type))
+                   (format t "<no type inferred>~%")))
+             (uiop:quit 0))
+         (error (e)
+           (let* ((message (princ-to-string e))
+                  (location (and (typep e 'cl-cc/ast:ast-compilation-error)
+                                 (cl-cc/ast:ast-error-location e)))
+                  (line-number nil)
+                  (column-number nil))
+             (multiple-value-setq (line-number column-number)
+               (%extract-line-column-from-location location))
+             (let* ((line-text (%source-line-at source line-number))
+                    (snippet (cl-cc/optimize:opt-build-diagnostic-caret-line
+                              line-text
+                              (or column-number 1)))
+                    (trace (cl-cc/optimize:opt-format-type-trace
+                            (list message))))
+               (format *error-output* "~A~%"
+                       (cl-cc/optimize:opt-format-diagnostic-reason
+                        "type-check"
+                        "failed"
+                        message))
+               (when location
+                 (format *error-output* "at ~A~%" location))
+               (format *error-output* "~A~%" snippet)
+               (format *error-output* "~A~%" trace)))
+           (uiop:quit 1))))
+     "check")))

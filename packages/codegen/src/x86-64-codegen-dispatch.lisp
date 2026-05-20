@@ -370,6 +370,7 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-aref         . emit-vm-aref)
     (vm-aset         . emit-vm-aset)
     (vm-prefetch     . emit-vm-prefetch)
+    (vm-simd-vector-op . emit-vm-simd-vector-op)
     ;; Comparison
     (vm-lt           . emit-vm-lt)
     (vm-gt           . emit-vm-gt)

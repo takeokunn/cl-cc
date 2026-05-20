@@ -130,6 +130,39 @@
   (emit-fn expected-bytes)
   (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
 
+(deftest-each x86-simd-packed-integer-encoding
+  "SSE packed integer SIMD instructions used by vm-simd-vector-op encode exactly."
+  :cases (("movdqu-load-r11" (lambda (s) (cl-cc/codegen::emit-movdqu-xm cl-cc/codegen::+xmm0+ cl-cc/codegen::+r11+ 0 s))
+           '(#xF3 #x41 #x0F #x6F #x03))
+          ("movdqu-store-r11" (lambda (s) (cl-cc/codegen::emit-movdqu-mx cl-cc/codegen::+r11+ 0 cl-cc/codegen::+xmm0+ s))
+           '(#xF3 #x41 #x0F #x7F #x03))
+          ("paddd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-paddd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #xFE #xC1))
+          ("psubd-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-psubd-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #xFA #xC1))
+          ("pmulld-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-pmulld-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #x38 #x40 #xC1))
+          ("pand-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-pand-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #xDB #xC1))
+          ("por-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-por-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #xEB #xC1))
+          ("pxor-xmm0-xmm1" (lambda (s) (cl-cc/codegen::emit-pxor-xx cl-cc/codegen::+xmm0+ cl-cc/codegen::+xmm1+ s))
+           '(#x66 #x0F #xEF #xC1)))
+  (emit-fn expected-bytes)
+  (assert-equal expected-bytes (%x86-encoding-collect-bytes emit-fn)))
+
+(deftest x86-simd-marker-lowers-to-sse-sequence
+  "vm-simd-vector-op lowers to address materialization, MOVDQU loads/store, and PADDD."
+  (let* ((inst (make-vm-simd-vector-op :op :add :dst-array :r3 :lhs-array :r1
+                                       :rhs-array :r2 :index-reg :r4 :lanes 4
+                                       :element-type :i32))
+         (bytes (%x86-encoding-collect-bytes
+                 (lambda (s) (cl-cc/codegen::emit-vm-simd-vector-op inst s)))))
+    (assert-equal (cl-cc/codegen::instruction-size inst) (length bytes))
+    (assert-true (search '(#xF3 #x41 #x0F #x6F #x03) bytes :test #'=))
+    (assert-true (search '(#x66 #x0F #xFE #xC1) bytes :test #'=))
+    (assert-true (search '(#xF3 #x41 #x0F #x7F #x03) bytes :test #'=))))
+
 ;;; ─── emit-push-r64 / emit-pop-r64 / emit-ret / emit-vm-ret-inst ─────────
 
 (deftest-each x86-ret-encoding

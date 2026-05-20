@@ -29,6 +29,12 @@
   (remove nil (list (vm-prefetch-base-reg inst)
                     (vm-prefetch-index-reg inst))))
 
+(defmethod instruction-uses ((inst vm-simd-vector-op))
+  (list (vm-simd-vector-op-dst-array inst)
+        (vm-simd-vector-op-lhs-array inst)
+        (vm-simd-vector-op-rhs-array inst)
+        (vm-simd-vector-op-index-reg inst)))
+
 ;; vm-binop: dst = lhs op rhs (covers add, sub, mul, and all comparison ops)
 (defmethod instruction-defs ((inst vm-binop)) (list (vm-dst inst)))
 (defmethod instruction-uses ((inst vm-binop)) (list (vm-lhs inst) (vm-rhs inst)))

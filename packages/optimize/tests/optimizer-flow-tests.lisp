@@ -32,9 +32,26 @@
 (defun %test-jump-zero-position (instructions target-label)
   "Return the position of a vm-jump-zero targeting TARGET-LABEL, or NIL."
   (position-if (lambda (inst)
-                 (and (typep inst 'cl-cc/vm::vm-jump-zero)
-                      (equal (cl-cc/vm::vm-label-name inst) target-label)))
-               instructions))
+                  (and (typep inst 'cl-cc/vm::vm-jump-zero)
+                       (equal (cl-cc/vm::vm-label-name inst) target-label)))
+                instructions))
+
+(defun %make-slp-array-map (&key (op :add))
+  "Build a four-lane straight-line scalar array map for SLP tests."
+  (append
+   (loop for i below 4
+         collect (make-vm-const :dst (intern (format nil "I~D" i) :keyword) :value i))
+   (loop for i below 4
+         for idx = (intern (format nil "I~D" i) :keyword)
+         for lhs = (intern (format nil "A~D" i) :keyword)
+         for rhs = (intern (format nil "B~D" i) :keyword)
+         for val = (intern (format nil "V~D" i) :keyword)
+         append (list (cl-cc/vm::make-vm-aref :dst lhs :array-reg :array-a :index-reg idx)
+                      (cl-cc/vm::make-vm-aref :dst rhs :array-reg :array-b :index-reg idx)
+                      (ecase op
+                        (:add (make-vm-add :dst val :lhs lhs :rhs rhs))
+                        (:logxor (cl-cc/vm::make-vm-logxor :dst val :lhs lhs :rhs rhs)))
+                      (cl-cc/vm::make-vm-aset :array-reg :array-c :index-reg idx :val-reg val)))))
 
 ;;; ─── opt-pass-dce / opt-build-label-index / opt-thread-label ────────────
 
@@ -98,7 +115,37 @@
              (and (typep i 'cl-cc/vm::vm-label)
                   (search cl-cc/optimize::*opt-outlined-label-prefix*
                           (cl-cc/vm::vm-name i))))
-           out))))
+            out))))
+
+(deftest slp-vectorize-packs-four-adjacent-arithmetic-lanes
+  "FR-227 SLP packs four adjacent scalar array-map lanes into one vm-simd-vector-op."
+  (let* ((insts (%make-slp-array-map :op :add))
+         (out (cl-cc/optimize:opt-pass-slp-vectorize insts))
+         (simd (find-if (lambda (inst) (typep inst 'cl-cc/vm:vm-simd-vector-op)) out)))
+    (assert-true simd)
+    (assert-eq :add (cl-cc/vm:vm-simd-vector-op-op simd))
+    (assert-eq :array-a (cl-cc/vm:vm-simd-vector-op-lhs-array simd))
+    (assert-eq :array-b (cl-cc/vm:vm-simd-vector-op-rhs-array simd))
+    (assert-eq :array-c (cl-cc/vm:vm-simd-vector-op-dst-array simd))
+    (assert-= 4 (cl-cc/vm:vm-simd-vector-op-lanes simd))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm:vm-add)) out))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm:vm-aset)) out))))
+
+(deftest slp-vectorize-packs-bitwise-lanes
+  "FR-227 SLP also packs supported bitwise operations."
+  (let* ((insts (%make-slp-array-map :op :logxor))
+         (out (cl-cc/optimize:opt-pass-slp-vectorize insts))
+         (simd (find-if (lambda (inst) (typep inst 'cl-cc/vm:vm-simd-vector-op)) out)))
+    (assert-true simd)
+    (assert-eq :logxor (cl-cc/vm:vm-simd-vector-op-op simd))
+    (assert-false (some (lambda (inst) (typep inst 'cl-cc/vm:vm-logxor)) out))))
+
+(deftest slp-vectorize-is-idempotent
+  "Running FR-227 SLP twice leaves the SIMD-packed stream unchanged."
+  (let* ((once (cl-cc/optimize:opt-pass-slp-vectorize (%make-slp-array-map :op :add)))
+         (twice (cl-cc/optimize:opt-pass-slp-vectorize once)))
+    (assert-equal (mapcar #'cl-cc/vm:instruction->sexp once)
+                  (mapcar #'cl-cc/vm:instruction->sexp twice))))
 
 (deftest dce-eliminates-unread-move
   "opt-pass-dce removes a vm-move whose destination register is never subsequently read."

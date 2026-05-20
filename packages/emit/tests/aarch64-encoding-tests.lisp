@@ -101,6 +101,31 @@
   (assert-equal #x9BC27C20 (cl-cc/codegen::encode-umulh 0 1 2))
   (assert-equal #x9B427C20 (cl-cc/codegen::encode-smulh 0 1 2)))
 
+(deftest a64-neon-simd-encoders
+  "NEON encoders for vm-simd-vector-op match assembler spot-checks."
+  (assert-equal #x4EA28420 (cl-cc/codegen::encode-neon-add4s 0 1 2))
+  (assert-equal #x6EA28420 (cl-cc/codegen::encode-neon-sub4s 0 1 2))
+  (assert-equal #x4EA29C20 (cl-cc/codegen::encode-neon-mul4s 0 1 2))
+  (assert-equal #x4E221C20 (cl-cc/codegen::encode-neon-and16b 0 1 2))
+  (assert-equal #x4EA21C20 (cl-cc/codegen::encode-neon-orr16b 0 1 2))
+  (assert-equal #x6E221C20 (cl-cc/codegen::encode-neon-eor16b 0 1 2))
+  (assert-equal #x4C407820 (cl-cc/codegen::encode-neon-ld1-4s 0 1))
+  (assert-equal #x4C007820 (cl-cc/codegen::encode-neon-st1-4s 0 1)))
+
+(deftest a64-simd-marker-lowers-to-neon-sequence
+  "vm-simd-vector-op lowers to fixed-width NEON LD1/ADD/ST1 sequence."
+  (let ((bytes nil)
+        (inst (make-vm-simd-vector-op :op :add :dst-array :r3 :lhs-array :r1
+                                      :rhs-array :r2 :index-reg :r4 :lanes 4
+                                      :element-type :i32)))
+    (cl-cc/codegen::emit-a64-vm-simd-vector-op inst (lambda (b) (push b bytes)))
+    (setf bytes (nreverse bytes))
+    (assert-equal 40 (length bytes))
+    (assert-equal 40 (cl-cc/codegen::a64-instruction-size inst))
+    (assert-true (search '(#x00 #x7A #x40 #x4C) bytes :test #'=))
+    (assert-true (search '(#x00 #x84 #xA1 #x4E) bytes :test #'=))
+    (assert-true (search '(#x00 #x7A #x00 #x4C) bytes :test #'=))))
+
 (deftest a64-fsqrt-encoder
   "FSQRT Dd,Dn preserves Rd/Rn fields while selecting the scalar double opcode."
   (assert-equal #x1E61C020 (cl-cc/codegen::encode-fsqrt 0 1)))

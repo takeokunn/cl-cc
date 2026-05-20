@@ -556,6 +556,7 @@ not fusing across intervening writes to the multiply destination or operands."
       (:fill-recognition          . ,#'opt-pass-fill-recognition)
        (:copy-recognition          . ,#'opt-pass-copy-recognition)
        (:auto-vectorization        . ,#'opt-pass-auto-vectorization)
+       (:slp-vectorize             . ,#'opt-pass-slp-vectorize)
        (:function-outlining        . ,#'opt-pass-function-outlining)
       (:safepoint-polling         . ,#'opt-pass-safepoint-polling)
       (:software-pipelining       . ,#'opt-pass-software-pipelining)
@@ -623,6 +624,7 @@ not fusing across intervening writes to the multiply destination or operands."
      :fill-recognition
       :copy-recognition
       :auto-vectorization
+      :slp-vectorize
        :function-outlining
        :safepoint-polling
        :software-pipelining

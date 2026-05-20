@@ -4,6 +4,7 @@
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-bootstrap :cl-cc-vm :cl-cc-mir :cl-cc-target
+               :cl-cc-binary
                :cl-cc-optimize :cl-cc-regalloc)
   :pathname "src"
   :serial t
@@ -46,7 +47,7 @@
    (:file "wasm-trampoline-tables")
    (:file "wasm-trampoline-emit")
    (:file "wasm-trampoline-build")
-    (:file "wasm")
-    (:file "wasm-emit-data")
+     (:file "wasm")
+     (:file "wasm-emit-data")
     (:file "wasm-emit-sections")
     (:file "wasm-emit-instrs")))

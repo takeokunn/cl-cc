@@ -11,6 +11,10 @@
           ("vm-binop"     (make-vm-add       :dst :r2 :lhs :r0 :rhs :r1)         '(:r2) '(:r0 :r1))
           ("vm-call"      (make-vm-call      :dst :r3 :func :r0 :args '(:r1 :r2)) '(:r3) '(:r0 :r1 :r2))
           ("vm-jump-zero" (make-vm-jump-zero :reg :r0 :label "L1")                nil    '(:r0))
+          ("vm-simd-vector-op" (make-vm-simd-vector-op :op :add :dst-array :r3 :lhs-array :r1
+                                                        :rhs-array :r2 :index-reg :r4 :lanes 4
+                                                        :element-type :i32)
+           nil '(:r3 :r1 :r2 :r4))
           ("vm-label"     (make-vm-label     :name "L1")                           nil    nil)
           ("vm-tail-call" (cl-cc:make-vm-tail-call :dst :r9 :func :r0 :args '(:r1 :r2)) nil '(:r0 :r1 :r2)))
   (inst expected-defs expected-uses)

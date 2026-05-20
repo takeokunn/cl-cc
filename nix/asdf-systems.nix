@@ -119,6 +119,7 @@ let
         "cl-cc-vm"
         "cl-cc-mir"
         "cl-cc-target"
+        "cl-cc-binary"
         "cl-cc-optimize"
       ];
     };

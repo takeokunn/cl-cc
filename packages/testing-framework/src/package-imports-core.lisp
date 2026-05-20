@@ -104,7 +104,8 @@
           cl-cc:vm-lcm cl-cc:vm-gcd cl-cc:vm-ash cl-cc:vm-rotate cl-cc:vm-bswap
           cl-cc:vm-logand cl-cc:vm-logior cl-cc:vm-logxor cl-cc:vm-logeqv
           cl-cc:vm-logtest cl-cc:vm-logbitp cl-cc:vm-logcount cl-cc:vm-integer-length
-          cl-cc:vm-min cl-cc:vm-max cl-cc:vm-rem cl-cc:vm-mod cl-cc:vm-div cl-cc:vm-truncate
+           cl-cc:vm-min cl-cc:vm-max cl-cc:vm-rem cl-cc:vm-mod cl-cc:vm-div cl-cc:vm-truncate
+           cl-cc:vm-simd-vector-op
           cl-cc:vm-floor-inst cl-cc:vm-ceiling-inst cl-cc:vm-round-inst
           cl-cc:vm-lognot cl-cc:vm-rational cl-cc:vm-rationalize cl-cc:vm-numerator cl-cc:vm-denominator
           cl-cc:vm-make-array
@@ -142,7 +143,8 @@
           cl-cc:make-vm-min cl-cc:make-vm-max cl-cc:make-vm-rotate
           cl-cc:make-vm-array-length cl-cc:make-vm-aset
           cl-cc:make-vm-concatenate cl-cc:make-vm-make-array
-          cl-cc:make-vm-float-add cl-cc:make-vm-integer-add cl-cc:make-vm-integer-mul
+           cl-cc:make-vm-float-add cl-cc:make-vm-integer-add cl-cc:make-vm-integer-mul
+           cl-cc:make-vm-simd-vector-op
           cl-cc:make-vm-register-function cl-cc:make-vm-select
           cl-cc:make-vm-program cl-cc:make-vm-signal-error cl-cc:make-vm-slot-write
           ;; VM Heap operations

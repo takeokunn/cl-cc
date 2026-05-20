@@ -420,3 +420,48 @@ Includes MOP-oriented method-combination/method-table metadata placeholders."
   (let ((buf (cl-cc/binary::make-wasm-buffer)))
     (cl-cc/binary::wasm-buf-write-f64 buf value)
     (assert-equal expected (coerce buf 'list))))
+
+(deftest-each wasm-binary-leb128-encodings
+  "FR-297 binary helpers encode unsigned and signed LEB128 values."
+  :cases (("uleb-624485" :u 624485 '(#xe5 #x8e #x26))
+          ("sleb--123456" :s -123456 '(#xc0 #xbb #x78))
+          ("sleb-0" :s 0 '(0)))
+  (kind value expected)
+  (let ((actual (ecase kind
+                  (:u (cl-cc/codegen::wasm-encode-unsigned-leb128 value))
+                  (:s (cl-cc/codegen::wasm-encode-signed-leb128 value)))))
+    (assert-equal expected (coerce actual 'list))))
+
+(deftest-each wasm-binary-opcode-bytes
+  "FR-297 maps VM instructions to their WASM binary opcode bytes."
+  :cases (("i64.const-42" (cl-cc:make-vm-const :dst :r0 :value 42) '(#x42 #x2a))
+          ("i64.add"      (cl-cc:make-vm-add :dst :r0 :lhs :r1 :rhs :r2) '(#x7c))
+          ("i64.sub"      (cl-cc:make-vm-sub :dst :r0 :lhs :r1 :rhs :r2) '(#x7d))
+          ("i64.mul"      (cl-cc:make-vm-mul :dst :r0 :lhs :r1 :rhs :r2) '(#x7e))
+          ("call_indirect" (cl-cc:make-vm-call :dst :r0 :func :r1 :args nil) '(#x11 0 0)))
+  (inst expected)
+  (assert-equal expected
+                (coerce (cl-cc/codegen::wasm-encode-vm-instruction-opcode inst)
+                        'list)))
+
+(deftest wasm-binary-minimal-module-sections
+  "compile-to-wasm-binary emits magic/version plus type/function/export/code sections."
+  (let* ((program (cl-cc:make-vm-program
+                   :instructions (list (cl-cc:make-vm-const :dst :r0 :value 42)
+                                       (cl-cc:make-vm-halt :reg :r0))
+                   :result-register :r0))
+         (bytes (cl-cc/codegen:compile-to-wasm-binary program))
+         (list-bytes (coerce bytes 'list)))
+    (assert-type (simple-array (unsigned-byte 8) (*)) bytes)
+    (assert-equal '(#x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00)
+                  (subseq list-bytes 0 8))
+    ;; section ids in order: type, function, export, code.  Payload sizes in
+    ;; this minimal fixture are single-byte LEB128 values.
+    (assert-equal '(#x01 #x03 #x07 #x0a)
+                  (loop with i = 8
+                        while (< i (length list-bytes))
+                        for id = (nth i list-bytes)
+                        for size = (nth (1+ i) list-bytes)
+                        collect id
+                        do (incf i (+ 2 size))))
+    (assert-true (search '(#x04 #x6d #x61 #x69 #x6e) list-bytes :test #'eql))))

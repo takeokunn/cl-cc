@@ -287,6 +287,35 @@
       (error "AArch64 PRFM offset must be an unsigned multiple of 8 within imm12 range: ~D" offset))
     (emit-a64-instr (encode-prfm rt rn (ash offset -3)) stream)))
 
+(defun emit-a64-simd-address (array-reg index-reg stream)
+  "Materialize ARRAY-REG + INDEX-REG*4 + data offset in X16."
+  (emit-a64-instr (encode-add-shift +a64-stack-probe-scratch+ array-reg index-reg 0 2) stream)
+  (emit-a64-instr (encode-add-imm +a64-stack-probe-scratch+
+                                  +a64-stack-probe-scratch+
+                                  +x86-64-array-data-offset+ 0)
+                  stream))
+
+(defun emit-a64-vm-simd-vector-op (inst stream)
+  "Lower VM-SIMD-VECTOR-OP to NEON packed 4x:i32 array operations."
+  (a64-validate-simd-vector-op inst)
+  (let ((dst-array (a64-reg (vm-simd-vector-op-dst-array inst)))
+        (lhs-array (a64-reg (vm-simd-vector-op-lhs-array inst)))
+        (rhs-array (a64-reg (vm-simd-vector-op-rhs-array inst)))
+        (index (a64-reg (vm-simd-vector-op-index-reg inst))))
+    (emit-a64-simd-address lhs-array index stream)
+    (emit-a64-instr (encode-neon-ld1-4s 0 +a64-stack-probe-scratch+) stream)
+    (emit-a64-simd-address rhs-array index stream)
+    (emit-a64-instr (encode-neon-ld1-4s 1 +a64-stack-probe-scratch+) stream)
+    (ecase (vm-simd-vector-op-op inst)
+      (:add (emit-a64-instr (encode-neon-add4s 0 0 1) stream))
+      (:sub (emit-a64-instr (encode-neon-sub4s 0 0 1) stream))
+      (:mul (emit-a64-instr (encode-neon-mul4s 0 0 1) stream))
+      (:logand (emit-a64-instr (encode-neon-and16b 0 0 1) stream))
+      (:logior (emit-a64-instr (encode-neon-orr16b 0 0 1) stream))
+      (:logxor (emit-a64-instr (encode-neon-eor16b 0 0 1) stream)))
+    (emit-a64-simd-address dst-array index stream)
+    (emit-a64-instr (encode-neon-st1-4s 0 +a64-stack-probe-scratch+) stream)))
+
 (defun emit-a64-vm-ret (inst stream)
   "Emit inline epilogue (restore all callee-saved registers) then RET.
     Must stay in sync with emit-a64-prologue and a64-instruction-size for vm-ret."

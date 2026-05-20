@@ -122,8 +122,32 @@ branch is encoded as rel8.")
               (offset (vm-prefetch-offset inst))
               (index-fixup-size (if (and raw-index (= (logand raw-index #x7) 4)) 3 0))
               (rex-size (if (or (>= base 8) (and index (>= index 8))) 1 0)))
-         (+ index-fixup-size rex-size 2
-            (x86-64-memory-address-byte-size base offset :index index))))
+          (+ index-fixup-size rex-size 2
+             (x86-64-memory-address-byte-size base offset :index index))))
+      (vm-simd-vector-op
+       (x86-64-validate-simd-vector-op inst)
+       (let* ((raw-index (vm-reg-to-x86 (vm-simd-vector-op-index-reg inst)))
+              (index-fixup-size (if (= (logand raw-index #x7) 4) 3 0))
+              (index (if (= (logand raw-index #x7) 4) +r11+ raw-index))
+              (element-type (vm-simd-vector-op-element-type inst))
+              (addr-size (lambda (base)
+                           (x86-64-lea-address-byte-size
+                            (make-x86-64-lea-address
+                             :dst +r11+ :base base :index index
+                             :scale (x86-64-simd-element-scale element-type)
+                             :displacement +x86-64-array-data-offset+))))
+              (lhs (vm-reg-to-x86 (vm-simd-vector-op-lhs-array inst)))
+              (rhs (vm-reg-to-x86 (vm-simd-vector-op-rhs-array inst)))
+              (dst (vm-reg-to-x86 (vm-simd-vector-op-dst-array inst)))
+              (mov-size 5)
+              (op-size (if (= (vm-simd-vector-op-lanes inst) 4)
+                           (if (eq (vm-simd-vector-op-op inst) :mul) 5 4)
+                           4)))
+         (+ index-fixup-size
+            (funcall addr-size lhs) mov-size
+            (funcall addr-size rhs) mov-size
+            op-size
+            (funcall addr-size dst) mov-size)))
       (t
      (let ((tp (string-downcase (symbol-name (type-of inst)))))
        (if (member tp

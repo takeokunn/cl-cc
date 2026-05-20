@@ -62,14 +62,14 @@
     (setf (gethash 'vm-integer-mul-high-u ht) 4) ; encode-umulh
     (setf (gethash 'vm-integer-mul-high-s ht) 4) ; encode-smulh
     (setf (gethash 'vm-sqrt ht) 4)          ; encode-fsqrt
-    (setf (gethash 'vm-sin-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-cos-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-exp-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-log-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-tan-inst ht) 28)     ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-asin-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-acos-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
-    (setf (gethash 'vm-atan-inst ht) 28)    ; FMOV+STP+ADRP/LDR+BLR+LDP+FMOV
+    (setf (gethash 'vm-sin-inst ht) 36)     ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-cos-inst ht) 36)     ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-exp-inst ht) 36)     ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-log-inst ht) 36)     ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-tan-inst ht) 36)     ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-asin-inst ht) 36)    ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-acos-inst ht) 36)    ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
+    (setf (gethash 'vm-atan-inst ht) 36)    ; FMOV+STP+MOVZ/MOVK*4+BLR+LDP+FMOV
     (setf (gethash 'vm-min ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-max ht) 8)           ; encode-cmp + encode-csel
     (setf (gethash 'vm-select ht) 12)       ; encode-mov-rr + encode-cmp + encode-csel
@@ -88,6 +88,7 @@
     (setf (gethash 'vm-spill-store ht) 4)   ; STUR
     (setf (gethash 'vm-spill-load ht) 4)    ; LDUR
     (setf (gethash 'vm-prefetch ht) 4)      ; PRFM
+    (setf (gethash 'vm-simd-vector-op ht) 40) ; 3 addresses + 2 loads + op + store
     (setf (gethash 'vm-print ht) 0)
     ht)
   "Maps VM instruction type symbols to their AArch64 encoded byte sizes.")
@@ -110,8 +111,11 @@
           (if (= rd rn) 0 4)))
        ((eq tp 'vm-ret)
         (+ (* 4 (length (or *current-a64-epilogue-save-pairs* '()))) 4))
-       ((eq tp 'vm-prefetch)
-        (if (vm-prefetch-index-reg inst) 8 4))
+        ((eq tp 'vm-prefetch)
+         (if (vm-prefetch-index-reg inst) 8 4))
+        ((eq tp 'vm-simd-vector-op)
+         (a64-validate-simd-vector-op inst)
+         40)
       (t
         (or (gethash tp *a64-instruction-sizes*) 0)))))))
 

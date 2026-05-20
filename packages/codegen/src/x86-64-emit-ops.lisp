@@ -147,6 +147,68 @@ memory operand."
         (emit-prefetch-mem-indexed locality base index scale offset stream)
         (emit-prefetch-mem locality base offset stream))))
 
+(defun x86-64-simd-element-scale (element-type)
+  "Return byte scale for a packed SIMD lane ELEMENT-TYPE."
+  (ecase element-type
+    (:i32 4)))
+
+(defun x86-64-validate-simd-vector-op (inst)
+  "Validate supported x86-64 SIMD marker combinations."
+  (let ((lanes (vm-simd-vector-op-lanes inst))
+        (element-type (vm-simd-vector-op-element-type inst))
+        (op (vm-simd-vector-op-op inst)))
+    (unless (eq element-type :i32)
+      (error "x86-64 SIMD supports only :I32 lanes, got ~S" element-type))
+    (unless (member lanes '(4 8))
+      (error "x86-64 SIMD supports 4-lane SSE or 8-lane AVX2 :I32 vectors, got ~D" lanes))
+    (unless (member op '(:add :sub :mul :logand :logior :logxor))
+      (error "x86-64 SIMD op ~S is unsupported for ~D lanes of ~S" op lanes element-type))))
+
+(defun emit-x86-64-simd-address (array-reg index-reg element-type stream)
+  "Materialize ARRAY-REG + INDEX-REG*ELEMENT-SCALE + data offset in R11."
+  (emit-lea +r11+ array-reg index-reg (x86-64-simd-element-scale element-type)
+            +x86-64-array-data-offset+ stream))
+
+(defun emit-vm-simd-vector-op (inst stream)
+  "Lower VM-SIMD-VECTOR-OP to SSE/AVX2 packed :I32 array operations."
+  (x86-64-validate-simd-vector-op inst)
+  (let* ((lanes (vm-simd-vector-op-lanes inst))
+         (element-type (vm-simd-vector-op-element-type inst))
+         (dst-array (vm-reg-to-x86 (vm-simd-vector-op-dst-array inst)))
+         (lhs-array (vm-reg-to-x86 (vm-simd-vector-op-lhs-array inst)))
+         (rhs-array (vm-reg-to-x86 (vm-simd-vector-op-rhs-array inst)))
+         (index (x86-64-sib-index-register
+                 (vm-reg-to-x86 (vm-simd-vector-op-index-reg inst)) stream)))
+    (if (= lanes 4)
+        (progn
+          (emit-x86-64-simd-address lhs-array index element-type stream)
+          (emit-movdqu-xm +xmm0+ +r11+ 0 stream)
+          (emit-x86-64-simd-address rhs-array index element-type stream)
+          (emit-movdqu-xm +xmm1+ +r11+ 0 stream)
+          (ecase (vm-simd-vector-op-op inst)
+            (:add (emit-paddd-xx +xmm0+ +xmm1+ stream))
+            (:sub (emit-psubd-xx +xmm0+ +xmm1+ stream))
+            (:mul (emit-pmulld-xx +xmm0+ +xmm1+ stream))
+            (:logand (emit-pand-xx +xmm0+ +xmm1+ stream))
+            (:logior (emit-por-xx +xmm0+ +xmm1+ stream))
+            (:logxor (emit-pxor-xx +xmm0+ +xmm1+ stream)))
+          (emit-x86-64-simd-address dst-array index element-type stream)
+          (emit-movdqu-mx +r11+ 0 +xmm0+ stream))
+        (progn
+          (emit-x86-64-simd-address lhs-array index element-type stream)
+          (emit-vmovdqu-ym +ymm0+ +r11+ 0 stream)
+          (emit-x86-64-simd-address rhs-array index element-type stream)
+          (emit-vmovdqu-ym +ymm1+ +r11+ 0 stream)
+          (ecase (vm-simd-vector-op-op inst)
+            (:add (emit-vpaddd-yyy +ymm0+ +ymm0+ +ymm1+ stream))
+            (:sub (emit-vpsubd-yyy +ymm0+ +ymm0+ +ymm1+ stream))
+            (:mul (emit-vpmulld-yyy +ymm0+ +ymm0+ +ymm1+ stream))
+            (:logand (emit-vpand-yyy +ymm0+ +ymm0+ +ymm1+ stream))
+            (:logior (emit-vpor-yyy +ymm0+ +ymm0+ +ymm1+ stream))
+            (:logxor (emit-vpxor-yyy +ymm0+ +ymm0+ +ymm1+ stream)))
+          (emit-x86-64-simd-address dst-array index element-type stream)
+          (emit-vmovdqu-my +r11+ 0 +ymm0+ stream)))))
+
 (define-float-binary-emitter emit-vm-float-add emit-addsd-xx)
 (define-float-binary-emitter emit-vm-float-sub emit-subsd-xx)
 (define-float-binary-emitter emit-vm-float-mul emit-mulsd-xx)

@@ -118,4 +118,5 @@
     #:compile-to-riscv64-bytes
 
     ;; ── WASM backend ──
-   #:compile-to-wasm-wat))
+   #:compile-to-wasm-wat
+   #:compile-to-wasm-binary))

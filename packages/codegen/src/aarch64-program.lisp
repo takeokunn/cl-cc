@@ -57,6 +57,7 @@
     (setf (gethash 'vm-spill-store ht) #'emit-a64-vm-spill-store)
     (setf (gethash 'vm-spill-load ht) #'emit-a64-vm-spill-load)
     (setf (gethash 'vm-prefetch ht) #'emit-a64-vm-prefetch)
+    (setf (gethash 'vm-simd-vector-op ht) #'emit-a64-vm-simd-vector-op)
     ht)
   "Maps VM instruction type symbols to AArch64 emitter functions (inst stream).")
 
