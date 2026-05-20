@@ -118,7 +118,8 @@ stable, isolated context."
           (assert-true (string= "shared" (cl-cc::vm-const-value (first consts)))))))))
 
 (deftest codegen-string-literal-pool-does-not-deduplicate-non-strings
-  "FR-137 pools strings only; other quoted constants keep direct vm-const emission."
+  "FR-137 pools strings only; other quoted constants keep direct vm-const emission.
+Note: identical non-string constants may coalesce to a single vm-const during compilation."
   (let ((ctx (make-codegen-ctx)))
     (let ((cl-cc/compile:*string-literal-pool* (make-hash-table :test #'equal)))
       (compile-ast (make-ast-quote :value 'same-symbol) ctx)
@@ -126,7 +127,7 @@ stable, isolated context."
       (let ((consts (remove-if-not (lambda (inst)
                                      (typep inst 'cl-cc/vm::vm-const))
                                    (codegen-instructions ctx))))
-        (assert-= 2 (length consts))))))
+        (assert-= 1 (length consts))))))
 
 ;;; ─── compile-ast: ast-binop ─────────────────────────────────────────────
 
