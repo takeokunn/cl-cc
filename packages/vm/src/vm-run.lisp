@@ -277,7 +277,7 @@ Used by run-string-repl for incremental REPL execution."
                           (when halted
                             (return (vm-force-trampoline-result value)))
                           (setf pc next-pc)))
-                   finally (return nil)))))
+                       finally (return nil))))
     (vm-maybe-dump-type-profile state)
     result))
 
@@ -330,6 +330,6 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                                         (or value
                                             (vm-reg-get state (vm-program-result-register program))))))
                              (setf pc next-pc)))
-                      finally (return nil))))))
+                   finally (return nil))))
       (vm-maybe-dump-type-profile state)
       (%vm-managed-tree-materialize state result))))
