@@ -607,16 +607,16 @@ not fusing across intervening writes to the multiply destination or operands."
 
 (defparameter *opt-default-convergence-pass-keys*
   '(:prolog-rewrite
-      :sequence-fusion
      :call-site-splitting
-     :demand-analysis
       :devirtualize
       :if-conversion
        :closure-capture-dedup
       :closure-thunk-sharing
        :inline
-        :overflow-check-elim
-        :sccp
+         :overflow-check-elim
+         :sccp
+      :sequence-fusion
+     :demand-analysis
        :cons-slot-forward
        :fma-synthesis
        :bswap-recognition

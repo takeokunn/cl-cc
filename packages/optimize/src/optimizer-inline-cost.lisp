@@ -229,7 +229,7 @@ does not weaken any structural safety checks."
       threshold))
 
 (defun %opt-inline-candidate-labels (bottom-up-labels func-defs recursive-labels
-                                      threshold profile-data)
+                                       threshold profile-data)
   "Return a table of non-recursive small functions eligible for inlining.
 BOTTOM-UP-LABELS is consumed in leaf-to-root order so callers see callee bodies
 that have already been reduced for the current LTO call graph."
@@ -239,12 +239,23 @@ that have already been reduced for the current LTO call graph."
              (effective-threshold (and def
                                        (%opt-inline-effective-threshold def threshold profile-data))))
         (when (and def
-                   (not (gethash label recursive-labels))
-                   (opt-inline-eligible-p def effective-threshold))
-          (setf (gethash label candidates) t))))))
+                    (not (gethash label recursive-labels))
+                    (opt-inline-eligible-p def effective-threshold))
+           (setf (gethash label candidates) t))))))
+
+(defun %opt-inline-function-name-for-label (label name-to-label)
+  "Return the registered function name for LABEL when NAME-TO-LABEL has one."
+  (cond
+    ((hash-table-p name-to-label)
+     (loop for name being the hash-keys of name-to-label
+           using (hash-value mapped-label)
+           when (equal mapped-label label)
+             return name))
+    ((listp name-to-label)
+     (car (rassoc label name-to-label :test #'equal)))))
 
 (defun %opt-inline-expand-call (inst label def base-idx name-to-label const-track
-                                effective-threshold)
+                                 effective-threshold)
   "Return replacement instructions for inlining INST, or NIL if it is unsafe.
 The second value is the next fresh register base."
   (let* ((body   (getf def :body))
@@ -262,7 +273,7 @@ The second value is the next fresh register base."
                        (opt-make-renaming body base-idx)))
            (replacement nil))
       (%opt-report :inline "function=~A instructions=~D reason=~A"
-                   (or (car (rassoc label name-to-label :test #'equal)) label)
+                   (or (%opt-inline-function-name-for-label label name-to-label) label)
                    inst-count
                    reason)
       (loop for param in params
