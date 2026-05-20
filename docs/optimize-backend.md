@@ -202,7 +202,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/vm/src/list.lisp` に `*vm-hash-cons-table*` / `vm-hash-cons` / `vm-clear-hash-cons-table` と明示命令 `vm-hash-cons` を実装済み。`*vm-hash-cons-table*` は SBCL で `:weakness :value` を使う。`packages/vm/src/list-execute.lisp` は `vm-hash-cons` だけを intern table 経由で実行し、`vm-cons` は ANSI CL の fresh cons セマンティクスを維持する。`packages/compile/src/builtin-registry-data-ext.lisp` と `packages/expand/src/expander-data.lisp` により `(hash-cons a b)` は builtin として VM 命令へ lower される。`packages/vm/tests/list-tests.lisp` と `packages/compile/tests/pipeline-eval-tests.lisp` が helper・命令・compiled builtin 経路を検証する
 
-#### FR-256: Pure Function Auto-Memoization (純関数自動メモ化) ✅
+#### FR-256: Pure Function Auto-Memoization (純関数自動メモ化) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/effects.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
@@ -524,7 +524,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/src/optimizer-memory-dse.lisp` に `opt-pass-dead-store-elim` を実装済み。straight-line な global/slot store 上書き除去を対象とし、`opt-compute-heap-aliases` で保守的な slot alias を扱う。`packages/optimize/tests/optimizer-memory-pass-tests.lisp` と `packages/optimize/tests/optimizer-store-analysis-tests.lisp` に回帰テストがある。
 
-#### FR-017: Alias Analysis (型ベース別名解析, TBAA) ✅
+#### FR-017: Alias Analysis (型ベース別名解析, TBAA) 🔶
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**: 型情報に基づいてメモリ操作の別名関係を推論。`vm-get-slot` で整数スロットとシンボルスロットは別名なし。異なるクラスのインスタンス間はスロット別名なし。TBAA メタデータを VM 命令に付与し、命令スケジューリング・DSE の精度向上
@@ -808,7 +808,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/src/optimizer-speculative-passes.lisp` の PGO layout helper 群が profile edge count に基づく hot-chain / loop rotation 計画を提供し、`packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-pgo-build-hot-chain-prefers-hottest-successors` と `optimize-pgo-rotate-loop-places-preferred-exit-at-bottom` が回帰を検証する。
 
-#### FR-298: AutoFDO (Sampling-based Profile) ✅
+#### FR-298: AutoFDO (Sampling-based Profile) 🔶
 
 - **対象**: コンパイルパイプライン
 - **内容**: `perf record` / `dtrace` のサンプリングプロファイルを直接 PGO 入力として使用。計装不要のため本番ワークロードのプロファイルが得られる。サンプルを IR レベルの基本ブロックにマッピングするデバッグ情報 (FR-330) が前提
@@ -840,7 +840,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 63 — JIT & 動的コンパイル（実装済み）
 
-#### FR-310: Tiered Compilation (多段 JIT) ✅
+#### FR-310: Tiered Compilation (多段 JIT) 🔶
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
@@ -1074,7 +1074,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 ### Phase 69 — コンパイラ自体の品質・保守性（実装済み）
 
-#### FR-345: Compiler Correctness Testing (正確性テスト) ✅
+#### FR-345: Compiler Correctness Testing (正確性テスト) 🔶
 
 - **対象**: `tests/` 全体
 - **内容**: (1) Differential Testing: 同一プログラムを最適化あり/なしでコンパイルして出力を比較、(2) Translation Validation: コンパイル前後の IR が意味的に等価であることを SMT ソルバーで検証 (ALIVE2 方式)、(3) Property-Based Testing: ランダム CL プログラム生成 → SBCL と比較
@@ -1226,14 +1226,14 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: ANSI CL 3.1.2.1.1 / SBCL constant inlining。定数の実行時ルックアップをゼロに
 - **難易度**: Easy
 
-#### FR-366: `load-time-value` 最適化 ✅
+#### FR-366: `load-time-value` 最適化 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/pipeline/pipeline.lisp`
 - **内容**: `(load-time-value expr)` はロード時に 1 回だけ `expr` を評価してキャッシュする。コンパイル時に `expr` が副作用なし・定数と判明する場合は `defconstant` 相当にフォールバック。ロード時評価のスロットを `.fasl` に記録し重複評価を防止
 - **根拠**: ANSI CL 3.2.2.2 / SBCL `load-time-value` compilation。正規表現コンパイル・ハッシュテーブル初期化のイディオムで使用
 - **難易度**: Medium
 
-#### FR-367: `declare (ignore/ignorable)` と DCE 統合 ✅
+#### FR-367: `declare (ignore/ignorable)` と DCE 統合 🔶
 
 - **対象**: `packages/compile/src/codegen-core-let.lisp`, `packages/compile/src/codegen-core-let-emit.lisp`
 - **内容**: `(declare (ignore x))` で変数 `x` が意図的に未使用と宣言される場合だけ、`let` バインディングの余分な move を省略し、純粋な初期化式は後段 DCE で除去可能にする。`(declare (ignorable x))` は警告抑制のみ（コード生成に影響なし）。
@@ -1666,7 +1666,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Intel AMX-BF16 / ARM BF16 拡張 (v8.6-A)。LLM 推論の数値演算コアに必要
 - **難易度**: Hard
 
-#### FR-433: Posit 数システム ✅
+#### FR-433: Posit 数システム 🔶
 
 - **対象**: `packages/vm/src/vm-numeric.lisp`
 - **内容**: IEEE 754 の代替数値形式 Posit (Gustafson 2017) のサポート。Posit の特徴: (1) NaN / Inf なし（例外なし演算）、(2) ゼロ近傍で高精度・大数で低精度（動的精度）、(3) Quire（512-bit 累積器）による正確な内積計算。数値計算・科学シミュレーションでの IEEE 754 代替として 2024 年に HPC で採用増
@@ -1726,7 +1726,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: LLVM `-polly-parallel` / GCC `-ftree-parallelize-loops`
 - **難易度**: Hard
 
-#### FR-442: FPGA 高レベル合成 (HLS) ✅
+#### FR-442: FPGA 高レベル合成 (HLS) 🔶
 
 - **対象**: 新規 `packages/emit/src/fpga.lisp`
 - **内容**: 純粋関数（副作用なし）を FPGA 回路（Verilog/VHDL）に合成。パイプライン挿入・リソース共有・タイミング制約の最適化。Xilinx Vitis HLS / Intel oneAPI 相当の CL フロントエンド。DSP・信号処理・暗号アルゴリズムの FPGA 実装に適用
@@ -1791,7 +1791,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-build-async-state-machine-builds-linear-transitions` が await→state transition 生成を検証する。
 
-#### FR-450: Coroutine Lowering — Stackful vs Stackless ✅
+#### FR-450: Coroutine Lowering — Stackful vs Stackless 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
@@ -1801,7 +1801,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-choose-coroutine-lowering-strategy-prefers-stackful-when-needed` が戦略選択の分岐を検証する。
 
-#### FR-451: Channel / CSP 操作の最適化 ✅
+#### FR-451: Channel / CSP 操作の最適化 🔶
 
 - **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
@@ -1811,7 +1811,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 
 - **関連実装**: `packages/optimize/tests/optimizer-pipeline-tests.lisp` の `optimize-channel-select-path-classifies-buffered-sync-and-contended-cases` と `optimize-channel-jump-table-select-threshold` が、経路選択と select 閾値判定の回帰を検証する。
 
-#### FR-452: STM（Software Transactional Memory）コンパイル ✅
+#### FR-452: STM（Software Transactional Memory）コンパイル 🔶
 
 - **対象**: `packages/optimize/src/optimizer-speculative-passes.lisp`, `packages/optimize/tests/optimizer-pipeline-tests.lisp`
 - **現状**: ✅ 完了 — 実装・検証・証拠登録済み（詳細は関連実装/検証を参照）。
@@ -2089,7 +2089,7 @@ Partial evaluation, memory analysis, numeric optimization, string/control flow, 
 - **根拠**: Stepanov et al. "MemorySanitizer" (CGO 2015) / LLVM MSan
 - **難易度**: Hard
 
-#### FR-491: ThreadSanitizer (TSan) ✅
+#### FR-491: ThreadSanitizer (TSan) 🔶
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**: データ競合（2 スレッドが同期なしで同一メモリを読み書き）を検出。Shadow State Machine: 各メモリロケーションに最近のアクセス履歴（スレッド ID・タイムスタンプ・read/write フラグ）を格納。全メモリアクセスをフックして競合検出。`./cl-cc compile --tsan` で有効化

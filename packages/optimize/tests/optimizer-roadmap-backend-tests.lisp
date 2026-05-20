@@ -243,8 +243,9 @@
          (member "docs/optimize-backend.md"
                  (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
                  :test #'string=))
-        (assert-true
-         (cl-cc/optimize::optimize-roadmap-evidence-well-formed-p evidence))
+        (when (eq evidence-status :implemented)
+          (assert-true
+           (cl-cc/optimize::optimize-roadmap-evidence-well-formed-p evidence)))
         (push (cl-cc/optimize::opt-roadmap-evidence-modules evidence) profiles)
         (if (eq evidence-status :implemented)
             (progn
@@ -277,7 +278,7 @@
 
 (deftest optimize-backend-roadmap-all-fr-complete-gate-is-strict
   "Completion gate reflects all-✅ state exactly."
-  (assert-true (cl-cc/optimize:optimize-backend-roadmap-all-fr-complete-p)))
+  (assert-false (cl-cc/optimize:optimize-backend-roadmap-all-fr-complete-p)))
 
 (deftest optimize-backend-roadmap-fr-ids-by-status-partitions-document
   "Status-filtered FR ID lists partition the optimize-backend roadmap exactly once."
@@ -680,7 +681,7 @@
     (dolist (case '(("FR-303" :implemented)
                     ("FR-352" :implemented)
                     ("FR-360" :implemented)
-                    ("FR-366" :implemented)
+                    ("FR-366" :partial)
                     ("FR-370" :implemented)
                     ("FR-374" :implemented)
                     ("FR-376" :implemented)
@@ -709,7 +710,7 @@
                     "packages/type/src/inference-handlers.lisp"
                     ("CL-CC/TYPE" . "INFER-THE")
                     infer-the-matching-type-is-fixnum)
-                  ("FR-366" :implemented
+                   ("FR-366" :partial
                    "packages/expand/src/macros-runtime-support.lisp"
                    ("CL-CC/EXPAND" . "*LOAD-TIME-VALUE-CACHE*")
                    load-time-value-is-memoized-during-expansion)
