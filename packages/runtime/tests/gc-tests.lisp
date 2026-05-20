@@ -46,7 +46,7 @@
   "make-header round-trips size, tag, and age fields independently."
   :cases (("size" (cl-cc/runtime:make-header 7 1 0) #'cl-cc/runtime:header-size 7)
           ("tag"  (cl-cc/runtime:make-header 3 5 0) #'cl-cc/runtime:header-tag  5)
-          ("age"  (cl-cc/runtime:make-header 3 1 9) #'cl-cc/runtime:header-age  9))
+           ("age"  (cl-cc/runtime:make-header 3 1 2) #'cl-cc/runtime:header-age  2))
   (h accessor expected)
   (assert-= expected (funcall accessor h)))
 
@@ -78,9 +78,9 @@
       (assert-false (cl-cc/runtime:header-forwarding-p plain-header))))
 
 (deftest-each gc-header-increment-age
-  "header-increment-age increments by 1 normally; caps at 15."
-  :cases (("increment" 2  3)
-          ("cap-at-15" 15 15))
+  "header-increment-age increments by 1 normally; caps at 3."
+  :cases (("increment" 1  2)
+          ("cap-at-3"  3  3))
   (start-age expected)
   (let* ((h  (cl-cc/runtime:make-header 3 1 start-age))
          (h2 (cl-cc/runtime:header-increment-age h)))

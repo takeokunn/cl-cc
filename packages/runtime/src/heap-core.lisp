@@ -384,13 +384,16 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 (defconstant +header-tag-shift+     56)
 (defconstant +header-tag-mask+      #xFF00000000000000)
 
-;;; Compatibility names for the old age bitfield.
+;;; Age occupies bits 53..52 (2 bits, 0-3) within the GC-bits field.
+;;; Mark (bit 55) and gray (bit 54) are outside the age sub-field.
 (defconstant +header-age-shift+     +header-gc-bits-shift+)
-(defconstant +header-age-mask+      +header-gc-bits-mask+)
+(defconstant +header-age-mask+      #x0030000000000000)
 
-;;; Transient compatibility mark/gray bits kept outside the compressed payload.
-(defconstant +header-mark-bit+      #x10000000000000000)
-(defconstant +header-gray-bit+      #x20000000000000000)
+;;; Mark/Gray bits live inside the GC-bits field (bits 55..52) so the entire
+;;; header word always fits in (unsigned-byte 64).  Bit 55 = mark, bit 54 = gray,
+;;; leaving bits 53..52 for the 2-bit age/survival counter.
+(defconstant +header-mark-bit+      #x0080000000000000)
+(defconstant +header-gray-bit+      #x0040000000000000)
 
 ;;; Forwarding pointers are represented as (cons :forwarded dest-addr)
 ;;; rather than bit-packed integers.  This avoids address-size limitations
@@ -450,8 +453,9 @@ id when available; callers that do not know a shape retain shape id 0."
   (rt-header-type-tag h))
 
 (defun header-age (h)
-  "Extract the age (0-15) from header word H."
-  (rt-header-gc-bits h))
+  "Extract the age (0-3) from header word H.
+   Age occupies bits 53..52; mark (bit 55) and gray (bit 54) are masked out."
+  (logand (rt-header-gc-bits h) #x3))
 
 (defun header-marked-p (h)
   "Return true if the mark bit is set in header word H."
@@ -493,9 +497,9 @@ id when available; callers that do not know a shape retain shape id 0."
   (cdr h))
 
 (defun header-increment-age (h)
-  "Return a new header with age incremented by 1, capped at 15."
+  "Return a new header with age incremented by 1, capped at 3."
   (let* ((current-age (header-age h))
-         (new-age (min 15 (1+ current-age))))
+         (new-age (min 3 (1+ current-age))))
     (logior (logand h (lognot +header-age-mask+))
             (ash new-age +header-age-shift+))))
 
