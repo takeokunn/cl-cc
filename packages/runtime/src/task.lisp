@@ -1,0 +1,8 @@
+;;;; Structured Concurrency / Task Groups (FR-280)
+(in-package :cl-cc/runtime)
+(defstruct rt-task-group (tasks nil) (errors nil) (mutex (rt-make-mutex)))
+(defvar *rt-current-task-group* nil)
+(defun %rt-task-group-collect-errors (task) (when (eq (rt-green-thread-status task) :failed) (push (rt-green-thread-error task) (rt-task-group-errors *rt-current-task-group*))))
+(defmacro rt-with-task-group ((&key) &body body) (let ((g (gensym "GROUP"))) `(let* ((,g (make-rt-task-group)) (*rt-current-task-group* ,g)) (progn ,@body) (dolist (task (rt-task-group-tasks ,g)) (loop while (member (rt-green-thread-status task) '(:ready :running :sleeping)) do (sleep 0.001)) (%rt-task-group-collect-errors task)) ,g)))
+(defun rt-task-cancel (task) (setf (rt-green-thread-cancelled-p task) t))
+(defun rt-task-cancelled-p (task) (rt-green-thread-cancelled-p task))

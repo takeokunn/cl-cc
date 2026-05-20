@@ -1,0 +1,7 @@
+;;;; Read-Copy-Update (FR-380)
+(in-package :cl-cc/runtime)
+(defun rt-rcu-read-lock () nil)
+(defun rt-rcu-read-unlock () nil)
+(defun rt-rcu-assign-pointer (place new) (setf (symbol-value place) new))
+(defun rt-rcu-dereference (place) (symbol-value place))
+(defun rt-rcu-synchronize () t)

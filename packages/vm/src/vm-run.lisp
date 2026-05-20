@@ -266,18 +266,19 @@ nearest preceding label in LABELS, which identifies the caller function region."
 Returns the halted result value, or NIL if execution falls off the end.
 Used by run-string-repl for incremental REPL execution."
   (let ((result
-          (loop with pc = start-pc
-                 while (< pc (length instructions))
-                  do (let ((instruction (aref instructions pc)))
-                       (when (typep instruction 'vm-call)
-                         (vm-check-call-stack-depth state))
-                       (vm-profile-inst-hit state instruction)
-                       (multiple-value-bind (next-pc halted value)
-                           (execute-instruction instruction state pc labels)
-                        (when halted
-                          (return (vm-force-trampoline-result value)))
-                        (setf pc next-pc)))
-                 finally (return nil))))
+           (let ((*vm-managed-cons-allocation-enabled* nil))
+              (loop with pc = start-pc
+                   while (< pc (length instructions))
+                   do (let ((instruction (aref instructions pc)))
+                        (when (typep instruction 'vm-call)
+                          (vm-check-call-stack-depth state))
+                        (vm-profile-inst-hit state instruction)
+                        (multiple-value-bind (next-pc halted value)
+                            (execute-instruction instruction state pc labels)
+                          (when halted
+                            (return (vm-force-trampoline-result value)))
+                          (setf pc next-pc)))
+                   finally (return nil)))))
     (vm-maybe-dump-type-profile state)
     result))
 
@@ -299,37 +300,38 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                   (*vm-current-compilation-tier* (vm-program-compilation-tier program))
                   (*vm-current-program-deopt-info* (vm-program-deopt-info program))
                   (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))
-              (loop with pc = 0
-                      while (< pc (length flat))
+               (let ((*vm-managed-cons-allocation-enabled* nil))
+                 (loop with pc = 0
+                       while (< pc (length flat))
                       do (let ((instruction (aref flat pc)))
                            (when (typep instruction 'vm-call)
                              (vm-check-call-stack-depth state))
                            (vm-profile-bb-hit state pc)
                            (vm-profile-inst-hit state instruction)
-                          (vm-profile-sample state)
-                          (multiple-value-bind (next-pc halted value)
-                              (execute-instruction instruction state pc labels)
-                            (when (and next-pc
-                                       (or (typep instruction 'vm-jump)
-                                           (typep instruction 'vm-jump-zero)
-                                           (typep instruction 'vm-call)
-                                           (typep instruction 'vm-tail-call)
-                                           (typep instruction 'vm-ret)))
-                              (vm-profile-branch-edge state
-                                                      (type-of instruction)
-                                                      pc
-                                                      next-pc))
-                           (when halted
-                             (return (vm-force-trampoline-result value)))
-                           (when (null next-pc)
-                             ;; Some execution paths (notably cross-context returns and
-                             ;; top-level RET forms) use NIL to signal "no next pc".
-                             ;; Treat that as a graceful stop instead of falling into
-                             ;; the next loop iteration and crashing on (< NIL LEN).
-                             (return (vm-force-trampoline-result
-                                      (or value
-                                          (vm-reg-get state (vm-program-result-register program))))))
-                            (setf pc next-pc)))
-                    finally (return nil)))))
+                           (vm-profile-sample state)
+                           (multiple-value-bind (next-pc halted value)
+                               (execute-instruction instruction state pc labels)
+                             (when (and next-pc
+                                        (or (typep instruction 'vm-jump)
+                                            (typep instruction 'vm-jump-zero)
+                                            (typep instruction 'vm-call)
+                                            (typep instruction 'vm-tail-call)
+                                            (typep instruction 'vm-ret)))
+                               (vm-profile-branch-edge state
+                                                       (type-of instruction)
+                                                       pc
+                                                       next-pc))
+                             (when halted
+                               (return (vm-force-trampoline-result value)))
+                             (when (null next-pc)
+                               ;; Some execution paths (notably cross-context returns and
+                               ;; top-level RET forms) use NIL to signal "no next pc".
+                               ;; Treat that as a graceful stop instead of falling into
+                               ;; the next loop iteration and crashing on (< NIL LEN).
+                               (return (vm-force-trampoline-result
+                                        (or value
+                                            (vm-reg-get state (vm-program-result-register program))))))
+                             (setf pc next-pc)))
+                      finally (return nil))))))
       (vm-maybe-dump-type-profile state)
-      result)))
+      (%vm-managed-tree-materialize state result))))
