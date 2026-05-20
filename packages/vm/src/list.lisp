@@ -222,6 +222,12 @@ list/tree shapes can share storage under explicit hash-cons opt-in."
 (defvar *vm-managed-cons-sequence-state* nil
   "Dynamically bound VM state for managed cons sequence generic operations.")
 
+(defvar *vm-managed-cons-allocation-enabled* nil
+  "When T, vm-cons creates managed cons pointers via %vm-managed-cons-alloc.
+When NIL (default), host CL cons cells are used.  Enable for native codegen
+paths that require NaN-boxed cons pointers; the VM interpreter stores host
+values directly.")
+
 (defun %vm-managed-nil-p (value)
   "Return true if VALUE is host NIL or the runtime NaN-boxed NIL singleton."
   (or (null value)
@@ -389,11 +395,16 @@ lets RT-OBJECT-POINTER-SLOTS trace slots 1 and 2 during minor/major GC."
 
 (defmethod execute-instruction :around ((inst vm-cons) state pc labels)
   (declare (ignore labels))
-  (let ((car-val (vm-reg-get state (vm-car-reg inst)))
-        (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
-    (vm-reg-set state (vm-dst inst)
-                (%vm-managed-cons-alloc state (vm-dst inst) car-val cdr-val))
-    (values (1+ pc) nil nil)))
+  (if *vm-managed-cons-allocation-enabled*
+      (let ((car-val (vm-reg-get state (vm-car-reg inst)))
+            (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
+        (vm-reg-set state (vm-dst inst)
+                    (%vm-managed-cons-alloc state (vm-dst inst) car-val cdr-val))
+        (values (1+ pc) nil nil))
+      (let ((car-val (vm-reg-get state (vm-car-reg inst)))
+            (cdr-val (vm-reg-get state (vm-cdr-reg inst))))
+        (vm-reg-set state (vm-dst inst) (cons car-val cdr-val))
+        (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction :around ((inst vm-car) state pc labels)
   (declare (ignore labels))
