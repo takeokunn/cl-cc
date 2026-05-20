@@ -137,19 +137,38 @@ field-sensitive object graphs remain out of scope for this helper."
   (or (typep inst '(or vm-call vm-tail-call vm-generic-call vm-apply))
       (eq (vm-inst-effect-kind inst) :unknown)))
 
+(defun %opt-resolve-vm-type-symbol (type)
+  "Return TYPE when it names a known class, or the matching VM package symbol.
+
+Some roadmap-level memory op names are intentionally referenced before their VM
+instruction structs exist.  Calling TYPEP with those symbols raises an unknown
+type error on SBCL, so memory predicates resolve them defensively and simply
+treat absent instruction families as non-matches."
+  (or (and (find-class type nil) type)
+      (multiple-value-bind (vm-type status)
+          (find-symbol (symbol-name type) :cl-cc/vm)
+        (and status (find-class vm-type nil) vm-type))))
+
+(defun %opt-typep-any (inst types)
+  "Return T when INST is of any known type in TYPES. Unknown type names are NIL."
+  (some (lambda (type)
+          (let ((resolved (%opt-resolve-vm-type-symbol type)))
+            (and resolved (typep inst resolved))))
+        types))
+
 (defun opt-memory-write-inst-p (inst)
   "Return T when INST may modify memory relevant to load motion safety."
-  (or (typep inst '(or vm-set-global vm-slot-write
-                    vm-rplaca vm-rplacd vm-aset vm-fill vm-svset
-                    vm-set-fill-pointer vm-vector-push vm-vector-pop
-                    vm-vector-push-extend vm-adjust-array
-                    vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not))
+  (or (%opt-typep-any inst '(vm-set-global vm-slot-write
+                             vm-rplaca vm-rplacd vm-aset vm-fill vm-svset
+                             vm-set-fill-pointer vm-vector-push vm-vector-pop
+                             vm-vector-push-extend vm-adjust-array
+                             vm-bit-set vm-bit-and vm-bit-or vm-bit-xor vm-bit-not))
       (opt-memory-unknown-write-inst-p inst)))
 
 (defun opt-memory-read-inst-p (inst)
   "Return T when INST reads memory and needs alias checks before code motion."
-  (typep inst '(or vm-get-global vm-slot-read vm-car vm-cdr
-                vm-aref vm-svref vm-row-major-aref vm-bit-access vm-sbit)))
+  (%opt-typep-any inst '(vm-get-global vm-slot-read vm-car vm-cdr
+                         vm-aref vm-svref vm-row-major-aref vm-bit-access vm-sbit)))
 
 (defun opt-memory-accesses-may-alias-p (read-inst write-inst alias-roots type-facts)
   "Return T when READ-INST may observe WRITE-INST.
@@ -182,8 +201,8 @@ non-aliasing while unknown roots remain conservative."
     ((and (typep read-inst 'vm-aref)
           (typep write-inst 'vm-aset))
      (opt-may-alias-p (vm-array-reg read-inst) (vm-array-reg write-inst) alias-roots type-facts))
-    ((and (typep read-inst '(or vm-svref vm-row-major-aref))
-          (typep write-inst 'vm-svset))
+    ((and (%opt-typep-any read-inst '(vm-svref vm-row-major-aref))
+          (%opt-typep-any write-inst '(vm-svset)))
      (opt-may-alias-p (vm-lhs read-inst) (vm-array-reg write-inst) alias-roots type-facts))
     ;; A modeled write of another family cannot affect this modeled read.
     ((and (opt-memory-read-inst-p read-inst)
