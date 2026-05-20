@@ -27,16 +27,20 @@
                 (if (vm-open-file-external-format-reg inst)
                     (vm-reg-get state (vm-open-file-external-format-reg inst))
                     (vm-open-file-external-format inst)))
-              (normalized-external-format
-                (when external-format-designator
-                  (%normalize-text-encoding nil external-format-designator)))
-              (handle (vm-allocate-file-handle state))
-              (open-args (append (list path-str
-                                       :direction direction
-                                       :if-exists if-exists
-                                       :if-does-not-exist if-not-exists)
-                                 (when normalized-external-format
-                                   (list :external-format normalized-external-format))))
+               (normalized-external-format
+                 (when external-format-designator
+                   (%normalize-text-encoding nil external-format-designator)))
+               (element-type (when (vm-element-type-reg inst)
+                               (vm-reg-get state (vm-element-type-reg inst))))
+               (handle (vm-allocate-file-handle state))
+               (open-args (append (list path-str
+                                        :direction direction
+                                        :if-exists if-exists
+                                        :if-does-not-exist if-not-exists)
+                                  (when element-type
+                                    (list :element-type element-type))
+                                  (when normalized-external-format
+                                    (list :external-format normalized-external-format))))
               (stream (apply #'open open-args)))
         (setf (gethash handle (vm-open-files state)) stream)
         (vm-reg-set state (vm-dst inst) handle)
@@ -142,6 +146,20 @@
          (stream (vm-get-stream state handle))
          (length (file-length stream)))
     (vm-reg-set state (vm-dst inst) length)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-read-sequence) state pc labels)
+  (declare (ignore labels))
+  (let ((seq (vm-reg-get state (vm-rseq-seq-reg inst)))
+        (stream (vm-reg-get state (vm-rseq-stream-reg inst))))
+    (vm-reg-set state (vm-dst inst) (read-sequence seq stream))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-write-sequence) state pc labels)
+  (declare (ignore labels))
+  (let ((seq (vm-reg-get state (vm-wseq-seq-reg inst)))
+        (stream (vm-reg-get state (vm-wseq-stream-reg inst))))
+    (write-sequence seq stream)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-eof-p) state pc labels)

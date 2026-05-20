@@ -1,5 +1,10 @@
 (in-package :cl-cc/vm)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (shadow '(lisp-implementation-type lisp-implementation-version
+            machine-type machine-version machine-instance
+            software-type software-version room apropos apropos-list)))
+
 ;;; VM Heap Object Base Class
 
 (defclass vm-heap-object ()
@@ -388,3 +393,54 @@ Options:
 ;;; vm-execute.lisp — execute-instruction methods for core instructions
 ;;; vm-clos.lisp    — CLOS instruction defstructs + execute-instruction methods
 ;;; vm-run.lisp     — Handler-case, label table, run-vm, vm2-state
+
+;;; ─── FR-612: Environment Introspection API ──────────────────────────────────
+
+(defun lisp-implementation-type ()
+  "CL-CC")
+
+(defun lisp-implementation-version ()
+  "0.1.0")
+
+(defun machine-type () (cl:machine-type))
+(defun machine-version () (cl:machine-version))
+(defun machine-instance () (cl:machine-instance))
+(defun software-type () (cl:software-type))
+(defun software-version () (cl:software-version))
+
+(defun room (&optional (stream cl:*standard-output*))
+  (cl:format stream "; CL-CC ~A ~A on ~A ~A~%"
+             (lisp-implementation-type) (lisp-implementation-version)
+             (machine-type) (software-type)))
+
+(defun apropos-list (string-designator &optional (package nil package-supplied-p))
+  (let ((result nil)
+        (string (cl:string string-designator))
+        (packages (cl:if package-supplied-p
+                         (cl:list (cl:find-package package))
+                         (cl:list-all-packages))))
+    (cl:dolist (pkg packages result)
+      (cl:do-symbols (sym pkg)
+        (cl:when (cl:search string (cl:symbol-name sym) :test #'cl:char-equal)
+          (cl:pushnew sym result))))))
+
+(defun apropos (string-designator &optional package)
+  (cl:dolist (sym (apropos-list string-designator package))
+    (cl:format cl:t "~A~%" sym))
+  (cl:values))
+
+;; FR-622: Package locks
+(defvar *vm-package-locks* (make-hash-table :test #'eq))
+
+(defun vm-lock-package (package)
+  (setf (gethash package *vm-package-locks*) t) package)
+
+(defun vm-unlock-package (package)
+  (remhash package *vm-package-locks*) package)
+
+(defun vm-package-locked-p (package)
+  (gethash package *vm-package-locks*))
+
+(define-condition vm-package-locked-error (error)
+  ((package :initarg :package :reader vm-package-locked-error-package))
+  (:report (lambda (c s) (format s "Package ~S is locked" (vm-package-locked-error-package c)))))

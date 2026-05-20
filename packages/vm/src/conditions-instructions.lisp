@@ -9,6 +9,18 @@
 ;;; Depends on conditions.lisp (condition classes, vm-handler-stack ops,
 ;;; vm-restart ops, %vm-jump-to-handler, vm-signal-condition).
 
+(defun vm-abort-restart ()
+  (invoke-restart 'abort))
+
+(defun vm-muffle-warning-restart ()
+  (invoke-restart 'muffle-warning))
+
+(defun vm-use-value-restart (value)
+  (invoke-restart 'use-value value))
+
+(defun vm-store-value-restart (value)
+  (invoke-restart 'store-value value))
+
 ;;; ─── VM Condition Instructions ───────────────────────────────────────────────
 
 (define-vm-instruction vm-signal (vm-instruction)

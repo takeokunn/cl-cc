@@ -25,6 +25,24 @@ and OFFSET denotes the address to prefetch; LOCALITY is :T0/:NTA on x86-64 and
   (:sexp-tag :prefetch)
   (:sexp-slots base-reg index-reg scale offset locality kind))
 
+(define-vm-instruction vm-simd-vector-op (vm-instruction)
+  "Backend-neutral SIMD array-map marker.
+
+Semantics: for LANES elements starting at INDEX-REG, compute
+  DST-ARRAY[i+k] = (OP LHS-ARRAY[i+k] RHS-ARRAY[i+k])
+for k in [0, LANES).  ELEMENT-TYPE describes the packed lane type.  Native
+backends lower supported combinations to SIMD instructions; unsupported
+lane/type/op combinations must signal a clear error."
+  (op nil :reader vm-simd-vector-op-op)
+  (dst-array nil :reader vm-simd-vector-op-dst-array)
+  (lhs-array nil :reader vm-simd-vector-op-lhs-array)
+  (rhs-array nil :reader vm-simd-vector-op-rhs-array)
+  (index-reg nil :reader vm-simd-vector-op-index-reg)
+  (lanes 4 :reader vm-simd-vector-op-lanes)
+  (element-type :i32 :reader vm-simd-vector-op-element-type)
+  (:sexp-tag :simd-vector-op)
+  (:sexp-slots op dst-array lhs-array rhs-array index-reg lanes element-type))
+
 (define-vm-instruction vm-binop (vm-instruction)
   (dst nil :reader vm-dst)
   (lhs nil :reader vm-lhs)

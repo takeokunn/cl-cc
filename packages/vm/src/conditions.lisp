@@ -52,18 +52,45 @@ Inherits from CL's UNBOUND-VARIABLE so user code can catch it via
 Inherits from CL's UNDEFINED-FUNCTION so user code can catch it via
 (handler-case ... (undefined-function (c) ...)).")
   (:report (lambda (condition stream)
-             (format stream "VM Undefined Function: ~S"
-                     (cell-error-name condition)))))
+              (format stream "VM Undefined Function: ~S"
+                      (cell-error-name condition)))))
 
-(define-condition vm-division-by-zero (vm-error division-by-zero)
-  ((dividend :initarg :dividend :reader vm-dividend
-             :documentation "The value being divided (extra context beyond ANSI operands)."))
-  (:documentation "Error raised when attempting to divide by zero.
-Inherits from CL's DIVISION-BY-ZERO so user code can catch it via
-(handler-case ... (division-by-zero (c) ...)).")
-  (:report (lambda (condition stream)
-             (format stream "VM Division By Zero: attempted to divide ~S by zero"
-                     (vm-dividend condition)))))
+(define-condition vm-arithmetic-error (vm-error arithmetic-error) ()
+  (:documentation "Error signaled when an arithmetic operation fails."))
+
+(define-condition vm-division-by-zero (vm-arithmetic-error division-by-zero)
+  ((dividend :initarg :dividend :reader vm-dividend))
+  (:report (lambda (c s) (format s "VM Division By Zero: attempted to divide ~S by zero" (vm-dividend c)))))
+
+(define-condition vm-floating-point-overflow (vm-arithmetic-error) ()
+  (:documentation "Error signaled when a floating-point operation overflows."))
+
+(define-condition vm-floating-point-underflow (vm-arithmetic-error) ()
+  (:documentation "Error signaled when a floating-point operation underflows."))
+
+(define-condition vm-cell-error (vm-error cell-error) ()
+  (:documentation "Error signaled when accessing an unbound cell."))
+
+(define-condition vm-unbound-slot (vm-cell-error) ()
+  (:documentation "Error signaled when accessing an unbound slot."))
+
+(define-condition vm-stream-error (vm-error stream-error) ()
+  (:documentation "Error signaled for stream-related errors."))
+
+(define-condition vm-end-of-file (vm-stream-error end-of-file) ()
+  (:documentation "Error signaled when reading past end of file."))
+
+(define-condition vm-reader-error (vm-stream-error reader-error) ()
+  (:documentation "Error signaled when the reader encounters invalid input."))
+
+(define-condition vm-package-error (vm-error package-error) ()
+  (:documentation "Error signaled for package-related errors."))
+
+(define-condition vm-storage-condition (vm-error storage-condition) ()
+  (:documentation "Error signaled when storage is exhausted."))
+
+(define-condition vm-style-warning (vm-warning style-warning) ()
+  (:documentation "Warning about style issues."))
 
 
 ;;; ─── VM Handler Stack ────────────────────────────────────────────────────────

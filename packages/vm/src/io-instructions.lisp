@@ -29,8 +29,9 @@
   (if-not-exists nil :reader vm-if-not-exists)
   (external-format nil :reader vm-open-file-external-format)
   (external-format-reg nil :reader vm-open-file-external-format-reg)
+  (element-type-reg nil :reader vm-element-type-reg)
   (:sexp-tag :open-file)
-  (:sexp-slots dst path direction if-exists if-not-exists external-format external-format-reg))
+  (:sexp-slots dst path direction if-exists if-not-exists external-format external-format-reg element-type-reg))
 
 (define-vm-instruction vm-close-file (vm-instruction)
   "Close a file handle."
@@ -135,6 +136,16 @@
   (byte-val nil :reader vm-byte-val)
   (:sexp-tag :write-byte)
   (:sexp-slots handle byte-val))
+
+(define-vm-instruction vm-read-sequence (vm-instruction)
+  (dst nil :reader vm-dst) (seq-reg nil :reader vm-rseq-seq-reg)
+  (stream-reg nil :reader vm-rseq-stream-reg)
+  (:sexp-tag :read-sequence) (:sexp-slots dst seq-reg stream-reg))
+
+(define-vm-instruction vm-write-sequence (vm-instruction)
+  (seq-reg nil :reader vm-wseq-seq-reg)
+  (stream-reg nil :reader vm-wseq-stream-reg)
+  (:sexp-tag :write-sequence) (:sexp-slots seq-reg stream-reg))
 
 ;;; ─── String Streams ──────────────────────────────────────────────────────────
 

@@ -15,7 +15,13 @@
 ;;;;   exports-conditions.lisp    — condition types, handlers, misc symbols
 
 (defpackage :cl-cc/vm
-  (:use :cl :cl-cc/bootstrap))
+  (:use :cl :cl-cc/bootstrap)
+  (:shadow #:get-universal-time
+           #:get-internal-real-time
+           #:internal-time-units-per-second
+           #:sleep
+           #:encode-universal-time
+           #:decode-universal-time))
 
 (in-package :cl-cc/vm)
 

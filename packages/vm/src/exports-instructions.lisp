@@ -134,11 +134,21 @@
       vm-prefetch
       vm-prefetch-base-reg
       vm-prefetch-index-reg
-      vm-prefetch-scale
-      vm-prefetch-offset
-      vm-prefetch-locality
-      vm-prefetch-kind
-      vm-fill
+       vm-prefetch-scale
+       vm-prefetch-offset
+       vm-prefetch-locality
+       vm-prefetch-kind
+       vm-simd-vector-op
+       make-vm-simd-vector-op
+       vm-simd-vector-op-p
+       vm-simd-vector-op-op
+       vm-simd-vector-op-dst-array
+       vm-simd-vector-op-lhs-array
+       vm-simd-vector-op-rhs-array
+       vm-simd-vector-op-index-reg
+       vm-simd-vector-op-lanes
+       vm-simd-vector-op-element-type
+       vm-fill
      vm-copy-vector
     vm-eq
    vm-num-eq

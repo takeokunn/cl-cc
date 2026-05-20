@@ -12,6 +12,19 @@
 ;;; Load order: after vm-clos.lisp; vm-opcodes.lisp loads after this.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+(defparameter *max-call-stack-depth* 10000
+  "Maximum VM call stack depth before signaling a stack-overflow condition.")
+
+(define-condition vm-stack-overflow (error)
+  ((depth :initarg :depth :reader vm-stack-overflow-depth))
+  (:report (lambda (c s) (format s "VM Stack overflow at depth ~D" (vm-stack-overflow-depth c)))))
+
+(defun vm-check-call-stack-depth (state)
+  "Signal VM-STACK-OVERFLOW when STATE's call stack exceeds the configured limit."
+  (let ((depth (length (vm-call-stack state))))
+    (when (>= depth *max-call-stack-depth*)
+      (error 'vm-stack-overflow :depth depth))))
+
 ;;; ── Handler-Case VM Instructions ─────────────────────────────────────────
 
 (define-vm-instruction vm-establish-handler (vm-instruction)
@@ -255,10 +268,12 @@ Used by run-string-repl for incremental REPL execution."
   (let ((result
           (loop with pc = start-pc
                  while (< pc (length instructions))
-                 do (let ((instruction (aref instructions pc)))
-                      (vm-profile-inst-hit state instruction)
-                      (multiple-value-bind (next-pc halted value)
-                          (execute-instruction instruction state pc labels)
+                  do (let ((instruction (aref instructions pc)))
+                       (when (typep instruction 'vm-call)
+                         (vm-check-call-stack-depth state))
+                       (vm-profile-inst-hit state instruction)
+                       (multiple-value-bind (next-pc halted value)
+                           (execute-instruction instruction state pc labels)
                         (when halted
                           (return (vm-force-trampoline-result value)))
                         (setf pc next-pc)))
@@ -285,10 +300,12 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                   (*vm-current-program-deopt-info* (vm-program-deopt-info program))
                   (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))
               (loop with pc = 0
-                     while (< pc (length flat))
-                     do (let ((instruction (aref flat pc)))
-                          (vm-profile-bb-hit state pc)
-                          (vm-profile-inst-hit state instruction)
+                      while (< pc (length flat))
+                      do (let ((instruction (aref flat pc)))
+                           (when (typep instruction 'vm-call)
+                             (vm-check-call-stack-depth state))
+                           (vm-profile-bb-hit state pc)
+                           (vm-profile-inst-hit state instruction)
                           (vm-profile-sample state)
                           (multiple-value-bind (next-pc halted value)
                               (execute-instruction instruction state pc labels)
