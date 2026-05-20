@@ -445,7 +445,7 @@ Result plist keys:
                            pool-input-offset)
                         4)
               do (emit-a64-instr 0 stream))
-            (a64-pool-emit literal-pool))))))
+            (a64-pool-emit literal-pool stream))))))
 
 ;;; Public API
 
