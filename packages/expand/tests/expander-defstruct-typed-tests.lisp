@@ -102,7 +102,7 @@
 (deftest typed-expansion-forms-ctor-is-first-when-present
   "%defstruct-typed-expansion-forms places ctor-form first when non-nil."
   (let* ((ctor  '(defun make-pt (&key x y) (list 'pt x y)))
-          (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt (list ctor) '() nil nil)))
+          (forms (cl-cc/expand::%defstruct-typed-expansion-forms 'pt ctor '() nil nil)))
     (assert-equal ctor (first forms))))
 
 (deftest typed-register-accessors-adds-setf-handler

@@ -237,10 +237,14 @@ Restores captured environment, then handles required, &optional, &rest, and &key
      (cons (vm-cons-cell-car value)
            (vm-list-to-lisp-list state (vm-cons-cell-cdr value))))
     (integer
-     ;; Could be a heap address
+     ;; Could be a heap address or managed cons pointer (NaN-boxed)
      (let ((obj (vm-heap-get state value)))
        (if (typep obj 'vm-cons-cell)
            (cons (vm-cons-cell-car obj)
                  (vm-list-to-lisp-list state (vm-cons-cell-cdr obj)))
-           (list value))))
+           ;; Check for managed cons pointer (loaded after this file)
+           (if (and (fboundp 'cl-cc/vm::%vm-managed-cons-pointer-p)
+                    (cl-cc/vm::%vm-managed-cons-pointer-p value))
+               (cl-cc/vm::%vm-managed-tree-materialize state value)
+               (list value)))))
     (t (list value))))
