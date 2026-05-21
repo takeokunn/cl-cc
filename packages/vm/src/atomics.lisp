@@ -54,14 +54,14 @@
     (vm-reg-set state (vm-aincf-addr inst) (+ addr delta))
     (values (1+ pc) nil nil)))
 
-(define-vm-instruction vm-memory-barrier (vm-instruction) () (:sexp-tag :memory-barrier))
+(define-vm-instruction vm-memory-barrier (vm-instruction) (:sexp-tag :memory-barrier))
 (defmethod execute-instruction ((inst vm-memory-barrier) state pc labels)
   (declare (ignore inst state labels)) (values (1+ pc) nil nil))
 
-(define-vm-instruction vm-load-fence (vm-instruction) () (:sexp-tag :load-fence))
+(define-vm-instruction vm-load-fence (vm-instruction) (:sexp-tag :load-fence))
 (defmethod execute-instruction ((inst vm-load-fence) state pc labels)
   (declare (ignore inst state labels)) (values (1+ pc) nil nil))
 
-(define-vm-instruction vm-store-fence (vm-instruction) () (:sexp-tag :store-fence))
+(define-vm-instruction vm-store-fence (vm-instruction) (:sexp-tag :store-fence))
 (defmethod execute-instruction ((inst vm-store-fence) state pc labels)
   (declare (ignore inst state labels)) (values (1+ pc) nil nil))

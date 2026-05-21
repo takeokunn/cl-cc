@@ -1,5 +1,24 @@
 (defpackage :cl-cc
-  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/sb-mop :cl-cc/sb-pcl :closer-mop :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl))
+  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/sb-mop :cl-cc/sb-pcl :closer-mop :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl)
+  (:shadowing-import-from :cl-cc/vm
+    #:get-universal-time #:get-internal-real-time #:get-internal-run-time
+    #:internal-time-units-per-second #:sleep #:time
+    #:encode-universal-time #:decode-universal-time
+    #:random-state #:random-state-p #:make-random-state #:*random-state* #:random
+    #:*print-base* #:*print-radix* #:*print-circle*
+    #:*print-pretty* #:*print-level* #:*print-length*
+    #:*print-readably* #:*print-pprint-dispatch*
+    #:with-standard-io-syntax
+    #:pprint-logical-block #:pprint-indent #:pprint-newline #:pprint-tab
+    #:copy-pprint-dispatch #:set-pprint-dispatch #:get-pprint-dispatch
+    #:*readtable* #:copy-readtable
+    #:set-macro-character #:get-macro-character
+    #:set-dispatch-macro-character #:get-dispatch-macro-character
+    #:readtable-case
+    #:lisp-implementation-type #:lisp-implementation-version
+    #:machine-type #:machine-version #:machine-instance
+    #:software-type #:software-version
+    #:room #:apropos #:apropos-list))
 
 (in-package :cl-cc)
 
@@ -72,6 +91,15 @@
               (cl-cc/expand:register-macro vm-sym macro-fn)))
           ;; Unintern exp-sym so use-package won't conflict
           (unintern exp-sym :cl-cc/expand)))))
+  ;; Shadow-import VM symbols into parse/expand before use-package bridges.
+  ;; cl-cc/parse and cl-cc/expand use :cl but not :cl-cc/vm, so they have
+  ;; CL:RANDOM etc. accessible.  When (use-package :cl-cc ...) below brings
+  ;; in the re-exported CL-CC/VM:RANDOM etc., SBCL signals a name-conflict
+  ;; unless those symbols are already in the target package's shadow list.
+  (do-external-symbols (s :cl-cc/vm)
+    (when (find-symbol (symbol-name s) :cl)
+      (shadowing-import (list s) :cl-cc/parse)
+      (shadowing-import (list s) :cl-cc/expand)))
   ;; NOW establish use-package bridges so child packages can see
   ;; ALL re-exported symbols from the umbrella (including cross-package deps).
   (use-package :cl-cc :cl-cc/parse)

@@ -13,6 +13,45 @@
   (lex-advance state)
   (lex-make-token state :T-INT (lex-read-radix-integer state radix) start))
 
+(defun %lex-expect-dispatch-char (state expected start context)
+  "Consume EXPECTED from STATE or signal a contextual lexer error."
+  (when (lex-at-end-p state)
+    (error "Lexer error at byte ~D: unexpected end in ~A" start context))
+  (let ((actual (lex-peek state)))
+    (unless (char= actual expected)
+      (error "Lexer error at byte ~D: expected ~C in ~A, got ~C"
+             start expected context actual))
+    (lex-advance state)))
+
+(defun %lex-complex-number-token (state start part-name)
+  "Read a numeric component of a #C literal and return its numeric value."
+  (lex-skip-trivia state)
+  (let ((part-start (lexer-state-pos state)))
+    (when (lex-at-end-p state)
+      (error "Lexer error at byte ~D: unexpected end while reading #C ~A part"
+             start part-name))
+    (let ((tok (lex-read-number state)))
+      (unless (and tok (member (lexer-token-type tok)
+                               '(:T-INT :T-FLOAT :T-RATIO)))
+        (error "Lexer error at byte ~D: expected numeric #C ~A part"
+               part-start part-name))
+      (when (and (not (lex-at-end-p state))
+                 (let ((ch (lex-peek state)))
+                   (and (not (lex-whitespace-p ch))
+                        (not (char= ch #\))))))
+        (error "Lexer error at byte ~D: malformed #C ~A part"
+               part-start part-name))
+      (lexer-token-value tok))))
+
+(defun %lex-read-complex (state start)
+  "Read #C(real imag) natively and return a :T-COMPLEX token."
+  (%lex-expect-dispatch-char state #\( start "#C literal")
+  (let ((real (%lex-complex-number-token state start "real"))
+        (imag (%lex-complex-number-token state start "imaginary")))
+    (lex-skip-trivia state)
+    (%lex-expect-dispatch-char state #\) start "#C literal")
+    (lex-make-token state :T-COMPLEX (complex real imag) start)))
+
 (defun lex-read-hash-dispatch (state)
   "Handle # dispatch: #', #\\, #(, #b/B, #o/O, #x/X, #s/S, #t, #f, #|...|#, #:, #+, #-, #., #0-9."
   (let ((start (lexer-state-pos state)))
@@ -69,10 +108,7 @@
                (lex-make-token state :T-INT value start)))
         ;; #C complex literal — #C(real imag) → (complex real imag)
         (#\c (lex-advance state)
-             (let* ((form-text (lex-read-form-text state))
-                    (full-text (concatenate 'string "#C" form-text))
-                    (value (read-from-string full-text)))
-               (lex-make-token state :T-INT value start)))
+             (%lex-read-complex state start))
         ;; #S(struct-name slot1 val1 ...) — read-time struct constructor
         ;; Delegates to host CL read to construct the struct at read time
         (#\s (lex-advance state)

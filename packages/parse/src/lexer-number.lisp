@@ -31,14 +31,21 @@ Does NOT advance state if neither char is present."
       (lex-advance state))
     sign))
 
-(defun %lex-read-decimal-int (state)
-  "Consume decimal digits from STATE and return (values integer-value found-p)."
+(defun %lex-current-read-base ()
+  "Return the active *READ-BASE* for standalone number parsing."
+  (let ((base cl:*read-base*))
+    (unless (and (integerp base) (<= 2 base 36))
+      (error "Lexer error: *READ-BASE* must be an integer from 2 to 36, got ~S" base))
+    base))
+
+(defun %lex-read-int (state radix)
+  "Consume RADIX digits from STATE and return (values integer-value found-p)."
   (let ((int-part 0)
         (has-int nil))
     (loop for ch = (lex-peek state)
-          for digit = (and ch (lex-decimal-digit-char-p ch))
+          for digit = (and ch (lex-digit-char-p ch radix))
           while digit
-          do (setf int-part (+ (* int-part 10) digit))
+          do (setf int-part (+ (* int-part radix) digit))
              (setf has-int t)
              (lex-advance state))
     (values int-part has-int)))
@@ -60,7 +67,11 @@ Does NOT advance state if neither char is present."
 (defun %lex-read-ratio-tail (state sign int-part start)
   "Called after HAS-INT and / detected; advance past /, read denominator, make :T-RATIO token."
   (lex-advance state)
-  (let ((denom (lex-read-radix-integer state 10)))
+  (let* ((radix (%lex-current-read-base))
+         (denom-start (lexer-state-pos state))
+         (denom (lex-read-radix-integer state radix)))
+    (when (zerop denom)
+      (error "Lexer error at byte ~D: ratio denominator must not be zero" denom-start))
     (lex-make-token state :T-RATIO (/ (* sign int-part) denom) start)))
 
 (defun %lex-read-float-tail (state sign int-part start)
@@ -101,8 +112,9 @@ Does NOT advance state if neither char is present."
 (defun lex-read-number (state)
   "Read a number token: integer, float, or ratio."
   (let ((start (lexer-state-pos state))
-        (sign  (%lex-read-sign state)))
-    (multiple-value-bind (int-part has-int) (%lex-read-decimal-int state)
+        (sign  (%lex-read-sign state))
+        (radix (%lex-current-read-base)))
+    (multiple-value-bind (int-part has-int) (%lex-read-int state radix)
       (cond
         ((%lex-ratio-next-p state has-int)
          (%lex-read-ratio-tail state sign int-part start))

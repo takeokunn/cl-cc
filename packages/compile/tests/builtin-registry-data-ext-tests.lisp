@@ -122,9 +122,9 @@
 (deftest-each builtin-nullary-representative-entries
   "*builtin-nullary-entries* maps nullary fns to constructors."
   :cases (("gensym"               'gensym               'cl-cc::make-vm-gensym-inst)
-          ("get-universal-time"   'get-universal-time   'cl-cc::make-vm-get-universal-time)
+          ("get-universal-time"   'cl-cc/vm:get-universal-time   'cl-cc::make-vm-get-universal-time)
           ("next-method-p"        'next-method-p        'cl-cc::make-vm-next-method-p)
-          ("lisp-implementation-type" 'lisp-implementation-type 'cl-cc::make-vm-lisp-implementation-type))
+          ("lisp-implementation-type" 'cl-cc/vm:lisp-implementation-type 'cl-cc::make-vm-lisp-implementation-type))
   (sym expected-ctor)
   (assert-equal expected-ctor (cdr (assoc sym cl-cc/compile::*builtin-nullary-entries*))))
 

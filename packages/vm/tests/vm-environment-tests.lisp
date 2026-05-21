@@ -113,7 +113,7 @@
           ("copy"   nil))
   (arg)
   (let ((result (%env-unary #'cl-cc:make-vm-make-random-state arg)))
-    (assert-true (typep result 'random-state))))
+    (assert-true (cl-cc/vm:vm-random-state-p result))))
 
 ;;; ─── vm-get-universal-time ───────────────────────────────────────────────
 

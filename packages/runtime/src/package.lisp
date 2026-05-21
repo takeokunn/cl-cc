@@ -339,4 +339,56 @@
      #:rt-image-register-global #:rt-save-image #:rt-load-image
      #:rt-capture-image-state #:rt-restore-image-state
      ;; DOT graph (FR-415)
-     #:rt-gc-heap-dump-dot))
+     #:rt-gc-heap-dump-dot
+   ;; ── Sync primitives (sync.lisp) ──────────────────────────────────
+   #:rt-make-mutex #:rt-mutex-lock #:rt-mutex-unlock
+   #:rt-make-condition-variable
+   #:rt-make-semaphore #:rt-semaphore-wait #:rt-semaphore-signal
+   #:rt-make-barrier #:rt-barrier-wait
+   #:rt-make-once #:rt-once-call
+   ;; ── Green-thread scheduler (scheduler.lisp) ───────────────────────
+   #:rt-make-scheduler #:rt-scheduler-init #:rt-scheduler-run
+   #:rt-spawn #:rt-yield
+   ;; ── Futures / promises (future.lisp) ─────────────────────────────
+   #:rt-make-future #:rt-future-resolve #:rt-future-await #:rt-future-done-p
+   ;; ── CSP channels (channel.lisp) ──────────────────────────────────
+   #:rt-make-channel #:rt-channel-send #:rt-channel-recv #:rt-channel-close
+   ;; ── Actor model (actor.lisp) ─────────────────────────────────────
+   #:rt-make-actor #:rt-actor-send #:rt-actor-receive
+   ;; ── STM (stm.lisp) ───────────────────────────────────────────────
+   #:rt-atomically #:rt-retry
+   ;; ── Lock-free data structures (lockfree.lisp) ────────────────────
+   #:rt-make-lfstack #:rt-lfstack-push #:rt-lfstack-pop
+   #:rt-make-lfqueue #:rt-make-lfhash-map
+   ;; ── Epoch-based reclamation (ebr.lisp) ───────────────────────────
+   #:rt-ebr-init #:rt-ebr-register-thread #:rt-ebr-enter #:rt-ebr-leave
+   ;; ── Hazard pointers (hazard.lisp) ────────────────────────────────
+   #:rt-hp-register-thread #:rt-hp-protect #:rt-hp-retire
+   ;; ── RCU (rcu.lisp) ───────────────────────────────────────────────
+   #:rt-rcu-read-lock #:rt-rcu-synchronize
+   ;; ── QSBR (qsbr.lisp) ─────────────────────────────────────────────
+   #:rt-qsbr-init #:rt-qsbr-register-thread #:rt-qsbr-synchronize
+   ;; ── OS abstraction (os.lisp) ─────────────────────────────────────
+   #:rt-open #:rt-close #:rt-getenv #:rt-argv #:rt-exit
+   ;; ── Network (net.lisp) ───────────────────────────────────────────
+   #:rt-socket #:rt-bind #:rt-listen #:rt-connect
+   ;; ── GC safe-region depth table (gc-data.lisp) ────────────────────
+   #:*rt-gc-safe-region-depths*
+   ;; ── TLAB public API (exported; functions added in gc-tlab.lisp) ──
+   #:rt-tlab-alloc #:rt-tlab-retire
+   ;; ── Context propagation (context.lisp) ───────────────────────────
+   #:rt-context-cancel #:rt-context-cancelled-p
+   ;; ── SPSC ring buffer (spsc.lisp) ─────────────────────────────────
+   #:rt-make-spsc-queue #:rt-spsc-try-push #:rt-spsc-try-pop
+   ;; ── Performance counters (perf.lisp) ─────────────────────────────
+   #:rt-perf-init #:rt-perf-enable-counter
+   ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
+   #:rt-otel-start-span #:rt-otel-end-span
+   ;; ── Consensus / Raft (consensus.lisp) ────────────────────────────
+   #:rt-make-raft-node #:rt-make-raft-cluster #:rt-raft-propose
+   #:rt-raft-cluster-nodes
+   ;; ── CRDTs (crdt.lisp) ────────────────────────────────────────────
+   #:rt-make-gcounter #:rt-gcounter-increment #:rt-gcounter-value
+   #:rt-make-pncounter #:rt-make-lwwregister
+   ;; ── Parallel algorithms (parallel-algo.lisp) ─────────────────────
+   #:rt-parallel-algo-init))

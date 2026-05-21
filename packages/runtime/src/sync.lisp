@@ -3,7 +3,10 @@
 (defstruct rt-mutex (name nil) (host-mutex #+sbcl (sb-thread:make-mutex) #-sbcl nil) (owner nil) (recursive-p nil))
 (defun rt-make-mutex (&key name recursive-p) (make-rt-mutex :name name :recursive-p recursive-p))
 (defun rt-mutex-lock (m &key timeout)
-  #+sbcl (progn (when timeout (sb-thread:grab-mutex (rt-mutex-host-mutex m) :timeout timeout)) (unless timeout (sb-thread:grab-mutex (rt-mutex-host-mutex m)) t))
+  #+sbcl (if timeout
+             (let ((ok (sb-thread:grab-mutex (rt-mutex-host-mutex m) :timeout timeout)))
+               (when ok t))
+             (progn (sb-thread:grab-mutex (rt-mutex-host-mutex m)) t))
   #-sbcl t)
 (defun rt-mutex-unlock (m) #+sbcl (sb-thread:release-mutex (rt-mutex-host-mutex m)) #-sbcl t)
 (defmacro rt-with-mutex ((m &key timeout) &body body) `(unwind-protect (progn (rt-mutex-lock ,m :timeout ,timeout) ,@body) (rt-mutex-unlock ,m)))

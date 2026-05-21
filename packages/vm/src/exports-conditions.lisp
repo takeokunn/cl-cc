@@ -14,6 +14,8 @@
 #-cl-cc-self-hosting
 (export
  '(;; ─── Condition System Operations ───────────────────────────────────────────
+   vm-define-condition
+   vm-handler-case
    vm-signal-condition
    vm-find-handler
    vm-find-restart

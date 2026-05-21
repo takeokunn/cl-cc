@@ -330,3 +330,16 @@ buffers are flushed to the heap, allowing the collector to observe the full
 ;;; Each policy adjusts *gc-young-size-words*, *gc-old-size-words*,
 ;;; and *gc-tenuring-threshold*.
 ;;; ------------------------------------------------------------
+
+;;; ------------------------------------------------------------
+;;; TLAB Public API aliases (FR-550)
+;;; ------------------------------------------------------------
+(defun rt-tlab-alloc (heap thread-id size-words)
+  "Public alias for rt-gc-tlab-alloc (FR-550)."
+  (rt-gc-tlab-alloc heap thread-id size-words))
+
+(defun rt-tlab-retire (heap thread-id)
+  "Public alias: retire the TLAB for THREAD-ID (FR-550)."
+  (let ((tlab (rt-tlab-retire-all heap)))
+    (declare (ignore thread-id))
+    tlab))

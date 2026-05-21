@@ -33,7 +33,7 @@
           ("sym"    'foo           'symbol)
           ("cons"   '(a)           'cons)
           ("pathname" #p"/tmp"     'pathname)
-          ("random-state" (make-random-state t) 'random-state))
+          ("random-state" (cl-cc:make-random-state t) 'cl-cc/vm:random-state))
   (src expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 src)

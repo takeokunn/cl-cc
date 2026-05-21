@@ -75,9 +75,9 @@
 (defun rt-make-callback (fn arg-types return-type)
   "Create a C-callable function pointer from a Lisp function."
   (let ((id (incf *rt-ffi-next-callback-id*)))
-    #+sbcl (sb-alien:alien-callback
-            (function sb-alien:void) fn)
-    #-sbcl (let ((cb (make-rt-ffi-callback :id id :fn fn
+    #+(and sbcl sb-alien-callback) (sb-alien:alien-callback
+                                    (function sb-alien:void) fn)
+    #-(and sbcl sb-alien-callback) (let ((cb (make-rt-ffi-callback :id id :fn fn
                                            :arg-types arg-types
                                            :return-type return-type)))
              (setf (gethash id *rt-ffi-callbacks*) cb)
