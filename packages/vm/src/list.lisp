@@ -216,6 +216,7 @@ list/tree shapes can share storage under explicit hash-cons opt-in."
 (defun %vm-managed-cons-pointer-p (value)
   "Return true if VALUE is a runtime NaN-boxed cons pointer."
   (and (integerp value)
+       (typep value '(unsigned-byte 64))
        (let ((predicate (%vm-runtime-function "VAL-CONS-P")))
          (and predicate (funcall predicate value)))))
 
@@ -232,6 +233,7 @@ values directly.")
   "Return true if VALUE is host NIL or the runtime NaN-boxed NIL singleton."
   (or (null value)
       (and (integerp value)
+           (typep value '(unsigned-byte 64))
            (let ((predicate (%vm-runtime-function "VAL-NIL-P")))
              (and predicate (funcall predicate value))))))
 

@@ -43,6 +43,7 @@
 (defun %vm-sso-string-p (value)
   "True when VALUE is a runtime small-string immediate."
   (and (integerp value)
+       (typep value '(unsigned-byte 64))
        (let ((predicate (%vm-sso-function "VAL-SSO-STRING-P")))
          (and predicate (funcall predicate value)))))
 

@@ -44,7 +44,8 @@ distinct tags and are safe to normalize at the run-string boundary."
 (defun %normalize-vm-boundary-value (state value)
   "Convert VM boundary VALUE to the host CL representation expected by tests."
   (cond
-    ((and (fboundp 'cl-cc/vm::%vm-managed-cons-pointer-p)
+    ((and (typep value '(unsigned-byte 64))
+          (fboundp 'cl-cc/vm::%vm-managed-cons-pointer-p)
           (cl-cc/vm::%vm-managed-cons-pointer-p value))
      (cl-cc/vm::%vm-managed-tree-materialize state value))
     ((consp value)
