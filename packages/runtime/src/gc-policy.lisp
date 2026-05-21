@@ -300,3 +300,36 @@ can defer non-critical mixed collection work."
     (when (< (length *vm-call-frame-pool*) *vm-call-frame-pool-limit*)
       (push zeroed *vm-call-frame-pool*))
     zeroed))
+
+;;; ------------------------------------------------------------
+;;; FR-425: GC Pacer / Allocation Pacing
+;;; FR-427: Allocation Back-Pressure
+;;; ------------------------------------------------------------
+
+(defparameter *gc-pacer-enabled* nil
+  "When true, allocation rate is throttled to let GC catch up (FR-425).")
+
+(defparameter *gc-allocation-rate-limit-words-per-sec* 0
+  "Target allocation rate ceiling in words/sec for GC pacer (FR-425).
+When 0, no allocation pacing is applied.")
+
+(defparameter *gc-back-pressure-threshold* 0.85d0
+  "Heap occupancy fraction above which allocation back-pressure triggers (FR-427).
+When occupancy exceeds this threshold, GC is requested more aggressively and
+allocation hooks may throttle or trigger synchronous collection.")
+
+(defun rt-gc-pacer-maybe-throttle (heap size-words)
+  "FR-425/427: Optionally delay allocation to allow GC to catch up.
+
+When *gc-pacer-enabled* and allocation-rate-limit is set, this function
+waits proportionally to SIZE-WORDS.  When heap occupancy exceeds
+*gc-back-pressure-threshold*, synchronous GC is triggered before
+returning to reduce fragmentation risk."
+  (check-type heap rt-heap)
+  (check-type size-words (integer 1 *))
+  (when (and *gc-pacer-enabled*
+             (plusp *gc-allocation-rate-limit-words-per-sec*))
+    (sleep (/ (float size-words) (float *gc-allocation-rate-limit-words-per-sec*))))
+  (when (> (rt-heap-occupancy-pct heap) (* 100.0d0 *gc-back-pressure-threshold*))
+    (rt-gc-minor-collect heap))
+  heap)

@@ -31,18 +31,39 @@
   len)
 
 (defun rt-iouring-poll (&key (min-completions 0) timeout)
-  (declare (ignore timeout))
+  "Poll the portable io_uring simulation for completed requests.
+
+This is a timeout-aware portable queue simulation, not a Linux-native
+io_uring_enter implementation.  TIMEOUT is expressed in seconds.  When
+provided, polling stops once the computed internal-time deadline is exceeded;
+a TIMEOUT of 0 checks immediately available simulated completions and returns
+without blocking."
   (unless *rt-iouring-instance* (return-from rt-iouring-poll 0))
-  (let ((completed 0))
-    (loop while (and (rt-iouring-submission-queue *rt-iouring-instance*)
-                     (or (zerop min-completions) (< completed min-completions)))
-          for req = (pop (rt-iouring-submission-queue *rt-iouring-instance*))
-          for len = (getf (cdr req) :length)
-          for cb = (getf (cdr req) :callback)
-          do (push (list :request req :result len) (rt-iouring-completion-queue *rt-iouring-instance*))
-             (incf completed)
-             (when cb (funcall cb len)))
-    completed))
+  (let ((completed 0)
+        (deadline (and timeout
+                       (+ (get-internal-real-time)
+                          (* timeout internal-time-units-per-second)))))
+    (labels ((need-more-p ()
+               (or (zerop min-completions) (< completed min-completions)))
+             (deadline-exceeded-p ()
+               (and deadline (>= (get-internal-real-time) deadline)))
+             (complete-one ()
+               (let* ((req (pop (rt-iouring-submission-queue *rt-iouring-instance*)))
+                      (len (getf (cdr req) :length))
+                      (cb (getf (cdr req) :callback)))
+                 (push (list :request req :result len)
+                       (rt-iouring-completion-queue *rt-iouring-instance*))
+                 (incf completed)
+                 (when cb (funcall cb len)))))
+      (loop while (need-more-p)
+            do (cond
+                 ((rt-iouring-submission-queue *rt-iouring-instance*)
+                  (complete-one))
+                 ((or (null timeout) (deadline-exceeded-p))
+                  (return completed))
+                 (t
+                  (sleep 0.001))))
+      completed)))
 
 (defun rt-iouring-close ()
   (when *rt-iouring-instance*

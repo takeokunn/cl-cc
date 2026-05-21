@@ -279,6 +279,8 @@
      #:rt-tlab-thread-id #:rt-tlab-waste-bytes
      #:rt-tlab-retired-p
      #:rt-gc-tlab-alloc #:rt-gc-tlab-retire-all
+     ;; SIMD zero-fill (FR-345)
+     #:rt-gc-simd-zero-fill
     ;; GC verification (FR-413)
     #:rt-gc-verify-heap #:*gc-verify-after-collect*
      ;; GC stress (FR-414)
@@ -295,6 +297,9 @@
     #:rt-gc-register-alloc-hook #:rt-gc-register-death-hook
     ;; GC policy (FR-424)
     #:rt-gc-select-policy
+    ;; GC Pacer & Back-Pressure (FR-425, FR-427)
+    #:*gc-pacer-enabled* #:*gc-allocation-rate-limit-words-per-sec*
+    #:*gc-back-pressure-threshold* #:rt-gc-pacer-maybe-throttle
     ;; Reference strength (FR-381-384)
      #:*rt-reference-registry* #:*rt-default-reference-queue*
      #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
@@ -340,6 +345,8 @@
      #:rt-capture-image-state #:rt-restore-image-state
      ;; DOT graph (FR-415)
      #:rt-gc-heap-dump-dot
+  ;; Heap walk (FR-445)
+  #:rt-gc-map-heap-objects
    ;; ── Sync primitives (sync.lisp) ──────────────────────────────────
    #:rt-make-mutex #:rt-mutex-lock #:rt-mutex-unlock
    #:rt-make-condition-variable
@@ -349,9 +356,26 @@
    ;; ── Green-thread scheduler (scheduler.lisp) ───────────────────────
    #:rt-make-scheduler #:rt-scheduler-init #:rt-scheduler-run
    #:rt-spawn #:rt-yield
-   ;; ── Futures / promises (future.lisp) ─────────────────────────────
-   #:rt-make-future #:rt-future-resolve #:rt-future-await #:rt-future-done-p
-   ;; ── CSP channels (channel.lisp) ──────────────────────────────────
+    ;; ── Futures / promises (future.lisp) ─────────────────────────────
+    #:rt-make-future #:rt-future-resolve #:rt-future-await #:rt-future-done-p
+    #:rt-future-then
+    ;; ── Async / async generators (async.lisp, async-generators.lisp) ──
+    #:rt-async #:rt-await
+    #:rt-aiter #:rt-aiter-p #:make-rt-aiter
+    #:rt-aiter-next-fn #:rt-aiter-next
+    #:rt-aiter-from-list #:rt-aiter-map #:rt-aiter-filter #:rt-aiter-take #:rt-aiter-collect
+    #:rt-async-generator-state #:rt-async-generator-state-p #:make-rt-async-generator-state
+    #:rt-async-generator-state-items #:rt-async-generator-state-done-p
+    #:rt-async-generator-state-error #:rt-async-generator-state-waiters
+    #:rt-make-async-generator #:rt-async-yield #:rt-async-generator-next
+    #:rt-async-generator-close #:rt-async-generator-fail #:rt-async-for
+    ;; ── Algebraic effects (effects.lisp) ─────────────────────────────
+    #:rt-effect #:rt-effect-p #:make-rt-effect #:rt-effect-name #:rt-effect-payload
+    #:rt-perform #:rt-handle #:rt-handler-state #:rt-handler-state-p
+    #:make-rt-handler-state #:rt-handler-state-handlers #:rt-with-handler
+    #:rt-resume #:rt-current-handler #:rt-effect-state #:rt-effect-error
+    #:rt-effect-read #:rt-effect-write #:*rt-handler-stack*
+    ;; ── CSP channels (channel.lisp) ──────────────────────────────────
    #:rt-make-channel #:rt-channel-send #:rt-channel-recv #:rt-channel-close
    ;; ── Actor model (actor.lisp) ─────────────────────────────────────
    #:rt-make-actor #:rt-actor-send #:rt-actor-receive
@@ -382,13 +406,38 @@
    #:rt-make-spsc-queue #:rt-spsc-try-push #:rt-spsc-try-pop
    ;; ── Performance counters (perf.lisp) ─────────────────────────────
    #:rt-perf-init #:rt-perf-enable-counter
-   ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
-   #:rt-otel-start-span #:rt-otel-end-span
-   ;; ── Consensus / Raft (consensus.lisp) ────────────────────────────
-   #:rt-make-raft-node #:rt-make-raft-cluster #:rt-raft-propose
+    ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
+    #:rt-otel-start-span #:rt-otel-end-span
+    ;; ── Deadlock detector (deadlock.lisp) ────────────────────────────
+    #:*rt-dl-enabled* #:*rt-dl-thread-locks* #:*rt-dl-thread-waits*
+    #:rt-deadlock-before-lock #:rt-deadlock-after-lock
+    #:rt-deadlock-after-unlock #:rt-deadlock-detect #:rt-deadlock-init
+    ;; ── Consensus / Raft (consensus.lisp) ────────────────────────────
+    #:rt-make-raft-node #:rt-make-raft-cluster #:rt-raft-propose
    #:rt-raft-cluster-nodes
    ;; ── CRDTs (crdt.lisp) ────────────────────────────────────────────
    #:rt-make-gcounter #:rt-gcounter-increment #:rt-gcounter-value
    #:rt-make-pncounter #:rt-make-lwwregister
-   ;; ── Parallel algorithms (parallel-algo.lisp) ─────────────────────
-   #:rt-parallel-algo-init))
+    ;; ── Parallel algorithms (parallel-algo.lisp) ─────────────────────
+    #:rt-parallel-algo-init
+    ;; ── GPU compute (gpu.lisp) ────────────────────────────────────────
+    #:rt-gpu-buffer #:rt-gpu-kernel
+    #:rt-gpu-buffer-alloc #:rt-gpu-buffer-copy #:rt-gpu-buffer-free
+    #:rt-gpu-kernel-compile #:rt-gpu-launch-kernel #:rt-gpu-launch-async
+    ;; ── Reactive Streams (reactive.lisp) ──────────────────────────────
+    #:rt-subscription #:rt-subscriber
+    #:rt-subscribe #:rt-on-subscribe #:rt-on-next #:rt-on-error #:rt-on-complete
+    #:rt-request #:rt-cancel
+    #:rt-publisher-from-list #:rt-publisher-map #:rt-publisher-filter
+    #:rt-publisher-merge #:rt-publisher-zip
+    #:rt-make-subscriber #:rt-subscriber-collect
+    ;; ── Async Generators (async-generators.lisp) ─────────────────────
+    #:rt-aiter #:rt-aiter-next #:rt-aiter-from-list
+    #:rt-async-generator-state #:rt-make-async-generator
+    #:rt-async-yield #:rt-async-generator-close #:rt-async-generator-fail
+    #:rt-async-generator-next
+    #:rt-aiter-map #:rt-aiter-filter #:rt-aiter-take #:rt-aiter-collect
+    ;; ── Effect system (effects.lisp) ───────────────────────────────────
+    #:rt-effect #:rt-handler-state
+    #:rt-current-handler #:rt-resume #:rt-perform #:rt-handle
+    #:rt-effect-state #:rt-effect-error #:rt-effect-read #:rt-effect-write))

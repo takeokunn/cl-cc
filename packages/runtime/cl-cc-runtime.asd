@@ -42,8 +42,9 @@
       (:file "gc-major-mark")
       (:file "gc-workers")
       (:file "gc-major-sweep")
-     ;; ── Synchronization & concurrency primitives ──
-     (:file "sync")
+      ;; ── Synchronization & concurrency primitives ──
+      (:file "deadlock")
+      (:file "sync")
      (:file "lockfree")
      (:file "spsc")
      (:file "ebr")
@@ -54,10 +55,12 @@
      (:file "future")
      (:file "channel")
      (:file "actor")
-     (:file "task")
-     (:file "stm")
-     (:file "async")
-     (:file "fiber")
+      (:file "task")
+      (:file "stm")
+      (:file "async")
+      (:file "async-generators")
+      (:file "effects")
+      (:file "fiber")
      (:file "context")
      (:file "image")
      ;; ── OS / I/O / Network ──
@@ -71,8 +74,7 @@
      (:file "zerocopy")
      (:file "ratelimit")
      ;; ── Debug / Observability / Distributed ──
-     (:file "deadlock")
-     (:file "perf")
+      (:file "perf")
      (:file "otel")
      (:file "log")
      (:file "clock")
@@ -82,5 +84,8 @@
      ;; ── Memory / Topology / Algorithms ──
      (:file "allocator")
      (:file "topology")
-     (:file "mvcc")
-     (:file "parallel-algo")))
+      (:file "mvcc")
+       (:file "parallel-algo")
+       ;; ── GPU / WASM / Reactive / Async ──
+       (:file "gpu")
+       (:file "reactive")))

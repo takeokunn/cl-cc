@@ -282,11 +282,19 @@ array storage."
       (%rt-gc-note-allocation-rate heap)
       (dolist (hook *rt-gc-alloc-hooks*)
         (funcall hook heap size-words))
-      ;; FR-345 (stub):  In a native codegen backend the caller may issue
-      ;; SIMD zero-fill instructions over [ADDR, ADDR + SIZE-WORDS).  The
-      ;; Pure CL heap is zero-initialised at allocation, so explicit
-      ;; zeroing is unnecessary here.
+      (rt-gc-simd-zero-fill heap addr size-words)
       addr)))
+
+(defun rt-gc-simd-zero-fill (heap addr size-words)
+  "FR-345: SIMD zero-fill interface for newly allocated heap blocks.
+In a native codegen backend (x86-64, AArch64) this is replaced by vectorised
+zero-fill.  Pure CL zeroes via sequential rt-heap-set.  Returns ADDR."
+  (check-type heap rt-heap)
+  (check-type addr (integer 0 *))
+  (check-type size-words (integer 0 *))
+  (loop for i from 0 below size-words
+        do (rt-heap-set heap (+ addr i) 0))
+  addr)
 
 (defun rt-gc-tlab-retire-all (heap)
   "Retire all TLABs for HEAP.  Called before a minor GC so that all thread

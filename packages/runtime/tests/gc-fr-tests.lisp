@@ -330,6 +330,18 @@
       (assert-= 0 (cl-cc/runtime:rt-heap-ref heap (+ addr 1)))
       (assert-= 0 (cl-cc/runtime:rt-heap-ref heap (+ addr 2))))))
 
+(deftest fr-345-simd-zero-fill-returns-addr-and-is-fboundp
+  "FR-345: rt-gc-simd-zero-fill is exported, callable, and returns its addr argument."
+  (let ((heap (%make-small-heap-fr)))
+    (assert-true (fboundp 'cl-cc/runtime:rt-gc-simd-zero-fill))
+    (let ((result (cl-cc/runtime:rt-gc-simd-zero-fill heap 64 4)))
+      (assert-= 64 result))
+    ;; Validate argument type checks reject negative inputs
+    (assert-signals error
+                    (cl-cc/runtime:rt-gc-simd-zero-fill heap -1 4))
+    (assert-signals error
+                    (cl-cc/runtime:rt-gc-simd-zero-fill heap 0 -1))))
+
 ;;; ------------------------------------------------------------
 ;;; FR-347: Compressed object references (⚠️ Pure CL offset codec)
 ;;; ------------------------------------------------------------

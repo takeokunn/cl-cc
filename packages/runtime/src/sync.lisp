@@ -3,12 +3,23 @@
 (defstruct rt-mutex (name nil) (host-mutex #+sbcl (sb-thread:make-mutex) #-sbcl nil) (owner nil) (recursive-p nil))
 (defun rt-make-mutex (&key name recursive-p) (make-rt-mutex :name name :recursive-p recursive-p))
 (defun rt-mutex-lock (m &key timeout)
-  #+sbcl (if timeout
-             (let ((ok (sb-thread:grab-mutex (rt-mutex-host-mutex m) :timeout timeout)))
-               (when ok t))
-             (progn (sb-thread:grab-mutex (rt-mutex-host-mutex m)) t))
-  #-sbcl t)
-(defun rt-mutex-unlock (m) #+sbcl (sb-thread:release-mutex (rt-mutex-host-mutex m)) #-sbcl t)
+  (let ((thread (%rt-current-thread)))
+    (rt-deadlock-before-lock m thread)
+    (let ((ok #+sbcl (if timeout
+                         (sb-thread:grab-mutex (rt-mutex-host-mutex m) :timeout timeout)
+                         (progn (sb-thread:grab-mutex (rt-mutex-host-mutex m)) t))
+              #-sbcl t))
+      (rt-deadlock-after-lock m thread ok)
+      (when ok
+        (setf (rt-mutex-owner m) thread)
+        t))))
+(defun rt-mutex-unlock (m)
+  (let ((thread (%rt-current-thread)))
+    #+sbcl (sb-thread:release-mutex (rt-mutex-host-mutex m))
+    (when (eq (rt-mutex-owner m) thread)
+      (setf (rt-mutex-owner m) nil))
+    (rt-deadlock-after-unlock m thread)
+    t))
 (defmacro rt-with-mutex ((m &key timeout) &body body) `(unwind-protect (progn (rt-mutex-lock ,m :timeout ,timeout) ,@body) (rt-mutex-unlock ,m)))
 (defstruct rt-condition-variable (name nil) #+sbcl (waitqueue (sb-thread:make-waitqueue)) #-sbcl (waiting nil))
 (defun rt-make-condition-variable (&key name) (make-rt-condition-variable :name name))
@@ -26,8 +37,9 @@
 (defun rt-make-once () (make-rt-once))
 (defun rt-once-call (o fn) (rt-with-mutex ((rt-once-m o)) (unless (rt-once-done-p o) (setf (rt-once-done-p o) (cons t (funcall fn))))) (cdr (rt-once-done-p o)))
 (defun rt-mutex-try-lock (m)
-  "Try to acquire M without blocking. Returns true on success."
-  #+sbcl (sb-thread:grab-mutex (rt-mutex-host-mutex m) :waitp nil)
+  "Try to acquire M without blocking. Returns true on success, NIL if already locked."
+  #+sbcl (handler-case (sb-thread:grab-mutex (rt-mutex-host-mutex m) :waitp nil)
+           (error () nil))
   #-sbcl (declare (ignore m))
   #-sbcl t)
 

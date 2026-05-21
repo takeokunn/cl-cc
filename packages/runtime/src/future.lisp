@@ -1,27 +1,29 @@
 ;;;; Future/Promise (FR-283)
 (in-package :cl-cc/runtime)
 (defstruct rt-future
-  (value nil) (resolved-p nil)
+  (value nil) (values nil) (resolved-p nil)
   (mutex (rt-make-mutex)) (cond (rt-make-condition-variable)))
 (defun rt-make-future () (make-rt-future))
-(defun rt-future-resolve (f val)
+(defun rt-future-resolve (f &rest values)
   (rt-with-mutex ((rt-future-mutex f))
-    (setf (rt-future-value f) val
+    (setf (rt-future-value f) (first values)
+          (rt-future-values f) values
           (rt-future-resolved-p f) t)
     (rt-condition-notify-all (rt-future-cond f)))
-  val)
+  (values-list values))
 (defun rt-future-await (f &key timeout)
   (rt-with-mutex ((rt-future-mutex f) :timeout timeout)
     (loop until (rt-future-resolved-p f)
           do (rt-condition-wait (rt-future-cond f)
-                                (rt-future-mutex f)
-                                :timeout timeout)))
-  (rt-future-value f))
+                                 (rt-future-mutex f)
+                                 :timeout timeout)))
+  (values-list (rt-future-values f)))
 (defun rt-future-then (f callback)
   (let ((new-f (rt-make-future)))
     (rt-spawn (lambda ()
-                (rt-future-resolve new-f
-                  (funcall callback (rt-future-await f)))))
+                 (multiple-value-call #'rt-future-resolve
+                   new-f
+                   (multiple-value-call callback (rt-future-await f)))))
     new-f))
 (defun rt-future-done-p (f) (rt-future-resolved-p f))
 (defun rt-all-futures (futures)

@@ -7,7 +7,7 @@
   (let ((tok (ts-peek ts)))
     (when (null tok) (return-from parse-cl-atom nil))
     (case (lexer-token-type tok)
-      ((:T-INT :T-FLOAT :T-RATIO :T-STRING :T-CHAR :T-KEYWORD
+      ((:T-INT :T-FLOAT :T-RATIO :T-COMPLEX :T-STRING :T-CHAR :T-KEYWORD
         :T-IDENT :T-BOOL-TRUE :T-BOOL-FALSE)
        (%tok-to-cst (ts-advance ts)))
       (otherwise nil))))

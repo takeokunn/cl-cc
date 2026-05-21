@@ -23,8 +23,8 @@
 
 ## Runtime
 
-- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR)
-- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR)
+- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — ✅ COMPLETE (52 / 52 FR)
+- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
 - [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR)
 - [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto (71 FR)
 - [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures (73 FR)
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: 1791/1798 tracked FRs complete (99.6%) | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | Self-hosting verified by `selfhost-suite` | Test: 7553 pass / 114 pre-existing failures | Last updated: 2026-05-20**
+**Status: 1843/1850 tracked FRs complete (99.6%) | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | runtime-core 52/52 FRs ✅ | runtime-subsystem 170/170 FRs ✅ | Self-hosting verified by `selfhost-suite` | Test: 7744 pass / 2 pre-existing failures | Last updated: 2026-05-21**

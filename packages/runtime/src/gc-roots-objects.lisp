@@ -316,6 +316,7 @@ storage and are traced via the global/runtime registries instead."
    Automatically triggers a minor GC if from-space is exhausted.
    Signals an error if the heap is exhausted even after GC."
   (rt-gc-safepoint-check heap :kind :allocation)
+  (rt-gc-pacer-maybe-throttle heap size-words)
   (%rt-gc-enforce-heap-limit heap size-words)
   (incf (rt-heap-total-alloc-words heap) size-words)
   (%rt-gc-note-allocation-rate heap)
