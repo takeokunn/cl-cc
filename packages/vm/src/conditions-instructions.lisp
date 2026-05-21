@@ -21,6 +21,66 @@
 (defun vm-store-value-restart (value)
   (invoke-restart 'store-value value))
 
+(defun vm-retry-restart ()
+  "Invoke the active RETRY restart."
+  (invoke-restart 'retry))
+
+(defun retry (&optional condition)
+  "Invoke the active RETRY restart, if one is available."
+  (declare (ignore condition))
+  (let ((restart (find-restart 'retry)))
+    (if restart
+        (invoke-restart restart)
+        (error "RETRY invoked but no RETRY restart is active"))))
+
+(defun vm-compute-restarts (&optional condition vm-state)
+  "Return VM and host restarts active for CONDITION.
+
+When VM-STATE is supplied, VM label/function restarts are returned first and
+host Common Lisp restarts are appended for interoperability."
+  (append (and vm-state (vm-get-restarts vm-state))
+          (compute-restarts condition)))
+
+(defun vm-invoke-restart (restart &rest values)
+  "Invoke RESTART, accepting a VM restart record, a host restart, or a name."
+  (cond ((typep restart 'vm-restart)
+         (let ((fn (vm-restart-restart-fn restart)))
+           (if (functionp fn)
+               (apply fn values)
+               (error "VM restart ~S is label-based and cannot be invoked as a host function"
+                      (vm-restart-name restart)))))
+        ((ignore-errors (restart-name restart))
+         (apply #'invoke-restart restart values))
+        (t
+         (apply #'invoke-restart restart values))))
+
+(defun vm-find-standard-restart (name &optional condition vm-state)
+  "Find restart NAME in VM-STATE's restart table, then host active restarts."
+  (or (and vm-state (vm-find-restart vm-state name))
+      (find-restart name condition)))
+
+(defun vm-invoke-debugger (condition &optional vm-state labels)
+  "Print a VM backtrace when available, then enter the host debugger."
+  (when vm-state
+    (vm-print-backtrace vm-state :labels labels))
+  (invoke-debugger condition))
+
+(defun vm-break (format-control &rest format-arguments)
+  "Signal a VM break using FORMAT-CONTROL and FORMAT-ARGUMENTS."
+  (apply #'break format-control format-arguments))
+
+(defun %vm-break-on-signals-matches-p (condition)
+  "Return true when CL:*BREAK-ON-SIGNALS* requests debugger entry."
+  (let ((spec *break-on-signals*))
+    (and spec
+         (or (eq spec t)
+             (ignore-errors (typep condition spec))))))
+
+(defun %vm-maybe-break-on-signal (condition vm-state labels)
+  "Enter the debugger for CONDITION when *BREAK-ON-SIGNALS* matches."
+  (when (%vm-break-on-signals-matches-p condition)
+    (vm-invoke-debugger condition vm-state labels)))
+
 ;;; ─── VM Condition Instructions ───────────────────────────────────────────────
 
 (define-vm-instruction vm-signal (vm-instruction)
@@ -116,6 +176,7 @@ unless a handler explicitly handles them."
   "Signal a CONDITION in the context of VM-STATE.
 If ERROR-P is true, signal an error if no handler is found.
 Returns (values handler-found-p handler-info) or signals error."
+  (%vm-maybe-break-on-signal condition vm-state nil)
   (let ((handler (vm-find-handler vm-state condition)))
     (if handler
         (values t handler)
@@ -126,6 +187,7 @@ Returns (values handler-found-p handler-info) or signals error."
 (defmethod execute-instruction ((inst vm-signal) state pc labels)
   (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
          (handler   (vm-find-handler state condition)))
+    (%vm-maybe-break-on-signal condition state labels)
     (if handler
         (%vm-jump-to-handler state labels condition handler)
         ;; No handler - continue execution
@@ -134,6 +196,7 @@ Returns (values handler-found-p handler-info) or signals error."
 (defmethod execute-instruction ((inst vm-error-instruction) state pc labels)
   (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
          (handler   (vm-find-handler state condition)))
+    (%vm-maybe-break-on-signal condition state labels)
     (if handler
         (%vm-jump-to-handler state labels condition handler)
         (progn (error condition) (values (1+ pc) nil nil)))))
@@ -143,6 +206,7 @@ Returns (values handler-found-p handler-info) or signals error."
   ;; The restart allows continuing after the error
   (let* ((condition (vm-reg-get state (vm-condition-reg inst)))
          (handler   (vm-find-handler state condition)))
+    (%vm-maybe-break-on-signal condition state labels)
     ;; Add a continue restart
     (vm-add-restart state 'continue
                     (list :label nil
@@ -154,8 +218,8 @@ Returns (values handler-found-p handler-info) or signals error."
         (values (1+ pc) nil nil))))
 
 (defmethod execute-instruction ((inst vm-warn) state pc labels)
-  (declare (ignore labels))
   (let ((condition (vm-reg-get state (vm-condition-reg inst))))
+    (%vm-maybe-break-on-signal condition state labels)
     ;; Warnings don't interrupt execution by default
     ;; But handlers can still process them
     (vm-signal-condition condition state)
@@ -212,10 +276,10 @@ Returns (values handler-found-p handler-info) or signals error."
                 (values (gethash label labels) nil nil))
               ;; It's a function-based restart
               (funcall restart-info)))
-        (error 'vm-error
-               :vm-state state
-               :format-control "No restart named ~S found"
-               :format-arguments (list restart-name)))))
+        (error 'vm-simple-error
+                :vm-state state
+                :format-control "No restart named ~S found"
+                :format-arguments (list restart-name)))))
 
 ;;; ─── Condition Construction Helpers ──────────────────────────────────────────
 
@@ -225,8 +289,28 @@ Returns (values handler-found-p handler-info) or signals error."
                   :vm-state vm-state
                   :error-code error-code
                   :fix-it vm-fix-it
-                  :expected-type expected-type
-                  :datum datum))
+                   :expected-type expected-type
+                   :datum datum))
+
+(defun make-vm-simple-error (vm-state format-control format-arguments
+                             &key error-code ((:fix-it vm-fix-it)))
+  "Construct a vm-simple-error condition."
+  (make-condition 'vm-simple-error
+                  :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
+                  :format-control format-control
+                  :format-arguments format-arguments))
+
+(defun make-vm-simple-warning (vm-state format-control format-arguments
+                               &key error-code ((:fix-it vm-fix-it)))
+  "Construct a vm-simple-warning condition."
+  (make-condition 'vm-simple-warning
+                  :vm-state vm-state
+                  :error-code error-code
+                  :fix-it vm-fix-it
+                  :format-control format-control
+                  :format-arguments format-arguments))
 
 (defun make-vm-unbound-variable (vm-state variable-name &key error-code ((:fix-it vm-fix-it)))
   "Construct a vm-unbound-variable condition."

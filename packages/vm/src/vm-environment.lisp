@@ -11,6 +11,17 @@
 
 (in-package :cl-cc/vm)
 
+(export '(lisp-implementation-type
+          lisp-implementation-version
+          machine-type
+          machine-version
+          machine-instance
+          software-type
+          software-version
+          room
+          apropos
+          apropos-list))
+
 ;;; Phase 3+: FR-1202 Environment Predicates and FR-1205 Random
 
 ;; FR-1202: boundp — test if a symbol has a global variable binding
@@ -189,6 +200,87 @@ Signals a VM-level error (catchable by handler-case/ignore-errors) if undefined.
                      (encode-universal-time sec min hour date month year))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
+
+;;; FR-612: Environment introspection API
+
+(defparameter *cl-cc-implementation-version* "0.1.0"
+  "Version string reported by LISP-IMPLEMENTATION-VERSION.")
+
+(defun lisp-implementation-type ()
+  "Return the CL-CC implementation type string."
+  "cl-cc")
+
+(defun lisp-implementation-version ()
+  "Return the CL-CC implementation version string."
+  *cl-cc-implementation-version*)
+
+(defun machine-type ()
+  "Return the host machine type used by this VM instance."
+  (or (cl:machine-type) "unknown"))
+
+(defun machine-version ()
+  "Return the host machine version used by this VM instance."
+  (or (cl:machine-version) "unknown"))
+
+(defun machine-instance ()
+  "Return the host machine instance name used by this VM instance."
+  (or (cl:machine-instance) "unknown"))
+
+(defun software-type ()
+  "Return the host operating system type."
+  (or (cl:software-type) "unknown"))
+
+(defun software-version ()
+  "Return the host operating system version."
+  (or (cl:software-version) "unknown"))
+
+(defun %room-state-summary (state stream)
+  (let* ((heap (and state (ignore-errors (vm-state-heap state))))
+         (globals (and state (ignore-errors (vm-global-vars state))))
+         (functions (and state (ignore-errors (vm-function-registry state))))
+         (classes (and state (ignore-errors (vm-class-registry state)))))
+    (format stream "; VM heap objects: ~D~%" (if heap (hash-table-count heap) 0))
+    (format stream "; VM globals: ~D~%" (if globals (hash-table-count globals) 0))
+    (format stream "; VM functions: ~D~%" (if functions (hash-table-count functions) 0))
+    (format stream "; VM classes: ~D~%" (if classes (hash-table-count classes) 0))))
+
+(defun room (&optional x)
+  "Print a compact CL-CC VM room report.
+When X is a VM state, include heap/global/function/class table usage.  For
+compatibility with older CL-CC code, a stream argument is also accepted."
+  (let ((stream (if (streamp x) x *standard-output*))
+        (state (and (not (streamp x)) (typep x 'vm-state) x)))
+    (format stream "; ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
+    (format stream "; Host: ~A ~A on ~A (~A)~%"
+            (software-type) (software-version) (machine-type) (machine-instance))
+    (%room-state-summary (or state *vm-current-state*) stream)
+    (values)))
+
+(defun %apropos-package-list (package package-supplied-p)
+  (if package-supplied-p
+      (let ((pkg (find-package package)))
+        (if pkg
+            (list pkg)
+            (error "No such package: ~S" package)))
+      (list-all-packages)))
+
+(defun apropos-list (string-designator &optional (package nil package-supplied-p))
+  "Return symbols whose names contain STRING-DESIGNATOR, case-insensitively."
+  (let ((needle (string string-designator))
+        (result nil))
+    (dolist (pkg (%apropos-package-list package package-supplied-p)
+             (sort result #'string< :key #'symbol-name))
+      (do-symbols (sym pkg)
+        (when (search needle (symbol-name sym) :test #'char-equal)
+          (pushnew sym result :test #'eq))))))
+
+(defun apropos (string-designator &optional package)
+  "Print symbols matching STRING-DESIGNATOR and return no values."
+  (dolist (sym (if package
+                   (apropos-list string-designator package)
+                   (apropos-list string-designator)))
+    (format t "~A~%" sym))
+  (values))
 
 ;;; FR-507: Environment query functions (nullary — return host CL values)
 (defmacro %define-nullary-env-query (name tag cl-form doc)

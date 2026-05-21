@@ -6,7 +6,13 @@
 ;;; VM instruction definitions, execute-instruction methods, and condition constructors
 ;;; are in conditions-instructions.lisp (loaded immediately after this file).
 
-;;; ─── VM Condition Classes ────────────────────────────────────────────────────
+;;; ─── Standard/VM Condition Classes ───────────────────────────────────────────
+
+(defvar *active-restarts* nil
+  "VM-visible list of active restart records.
+
+This mirrors the self-hosted stdlib's restart registry while host-side VM code
+continues to interoperate with Common Lisp's native restart protocol.")
 
 (define-condition vm-condition (condition)
   ((vm-state :initarg :vm-state :reader vm-condition-state
@@ -17,7 +23,15 @@
                :documentation "Optional structured fix-it suggestion for this VM condition."))
   (:documentation "Base class for all VM conditions."))
 
-(define-condition vm-error (vm-condition error)
+(define-condition vm-serious-condition (vm-condition serious-condition)
+  ()
+  (:documentation "Base class for serious VM conditions."))
+
+(define-condition vm-simple-condition (vm-condition simple-condition)
+  ()
+  (:documentation "VM condition carrying FORMAT-CONTROL and FORMAT-ARGUMENTS."))
+
+(define-condition vm-error (vm-serious-condition error)
   ()
   (:documentation "Base class for VM errors. These are serious conditions that
 typically require intervention to continue execution."))
@@ -26,6 +40,14 @@ typically require intervention to continue execution."))
   ()
   (:documentation "Base class for VM warnings. These indicate potential issues
 but don't interrupt normal execution."))
+
+(define-condition vm-simple-error (vm-error simple-error)
+  ()
+  (:documentation "Simple VM error with FORMAT-CONTROL/FORMAT-ARGUMENTS."))
+
+(define-condition vm-simple-warning (vm-warning simple-warning)
+  ()
+  (:documentation "Simple VM warning with FORMAT-CONTROL/FORMAT-ARGUMENTS."))
 
 (define-condition vm-type-error (vm-error type-error)
   ()
@@ -62,17 +84,23 @@ Inherits from CL's UNDEFINED-FUNCTION so user code can catch it via
   ((dividend :initarg :dividend :reader vm-dividend))
   (:report (lambda (c s) (format s "VM Division By Zero: attempted to divide ~S by zero" (vm-dividend c)))))
 
-(define-condition vm-floating-point-overflow (vm-arithmetic-error) ()
+(define-condition vm-floating-point-overflow (vm-arithmetic-error floating-point-overflow) ()
   (:documentation "Error signaled when a floating-point operation overflows."))
 
-(define-condition vm-floating-point-underflow (vm-arithmetic-error) ()
+(define-condition vm-floating-point-underflow (vm-arithmetic-error floating-point-underflow) ()
   (:documentation "Error signaled when a floating-point operation underflows."))
 
 (define-condition vm-cell-error (vm-error cell-error) ()
   (:documentation "Error signaled when accessing an unbound cell."))
 
-(define-condition vm-unbound-slot (vm-cell-error) ()
+(define-condition vm-unbound-slot (vm-cell-error unbound-slot) ()
   (:documentation "Error signaled when accessing an unbound slot."))
+
+(define-condition vm-control-error (vm-error control-error) ()
+  (:documentation "Error signaled for invalid dynamic control transfer."))
+
+(define-condition vm-program-error (vm-control-error program-error) ()
+  (:documentation "Error signaled for malformed programs or invalid syntax."))
 
 (define-condition vm-stream-error (vm-error stream-error) ()
   (:documentation "Error signaled for stream-related errors."))
@@ -86,11 +114,35 @@ Inherits from CL's UNDEFINED-FUNCTION so user code can catch it via
 (define-condition vm-package-error (vm-error package-error) ()
   (:documentation "Error signaled for package-related errors."))
 
-(define-condition vm-storage-condition (vm-error storage-condition) ()
+(define-condition vm-storage-condition (vm-condition storage-condition) ()
   (:documentation "Error signaled when storage is exhausted."))
 
 (define-condition vm-style-warning (vm-warning style-warning) ()
   (:documentation "Warning about style issues."))
+
+(defun %vm-condition-printer-name (condition)
+  "Return the summary class name used for escaped condition printing."
+  (cond ((typep condition 'error) "ERROR")
+        ((typep condition 'warning) "WARNING")
+        ((typep condition 'serious-condition) "SERIOUS-CONDITION")
+        (t "CONDITION")))
+
+(defun %vm-condition-report-string (condition)
+  "Return CONDITION's human-readable report without escaped object syntax."
+  (let ((*print-escape* nil))
+    (princ-to-string condition)))
+
+(defmethod print-object ((condition vm-condition) stream)
+  "Print VM conditions as #<ERROR: report> when escaped, otherwise report them.
+
+The unescaped branch delegates to the host condition reporter, preserving
+DEFINE-CONDITION :REPORT behavior for VM condition subclasses."
+  (if *print-escape*
+      (print-unreadable-object (condition stream)
+        (format stream "~A: ~A"
+                (%vm-condition-printer-name condition)
+                (%vm-condition-report-string condition)))
+      (call-next-method)))
 
 
 ;;; ─── VM Handler Stack ────────────────────────────────────────────────────────
@@ -272,7 +324,7 @@ this models dynamic propagation without a runtime handler stack."
                  (if (vm-call-stack state)
                      (setf probe-pc
                            (%vm-restore-frame-for-exception-propagation
-                            state (pop (vm-call-stack state))))
+                           state (vm-pop-call-frame state)))
                      (progn
                        (when error-p
                          (vm-print-backtrace state :labels labels)

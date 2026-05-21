@@ -29,9 +29,10 @@
   (if-not-exists nil :reader vm-if-not-exists)
   (external-format nil :reader vm-open-file-external-format)
   (external-format-reg nil :reader vm-open-file-external-format-reg)
+  (element-type nil :reader vm-open-file-element-type)
   (element-type-reg nil :reader vm-element-type-reg)
   (:sexp-tag :open-file)
-  (:sexp-slots dst path direction if-exists if-not-exists external-format external-format-reg element-type-reg))
+  (:sexp-slots dst path direction if-exists if-not-exists external-format external-format-reg element-type element-type-reg))
 
 (define-vm-instruction vm-close-file (vm-instruction)
   "Close a file handle."

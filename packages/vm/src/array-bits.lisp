@@ -81,15 +81,48 @@
 ;;; ─── FR-605: adjust-array and array-displacement ─────────────────────────────
 
 (define-vm-instruction vm-adjust-array (vm-instruction)
-  "Adjust dimensions of an adjustable array."
+  "Adjust dimensions of an adjustable array. Supports common ADJUST-ARRAY options."
   (dst nil :reader vm-dst) (arr nil :reader vm-arr) (dims nil :reader vm-dims)
-  (:sexp-tag :adjust-array) (:sexp-slots dst arr dims))
+  (initial-element nil :reader vm-initial-element)
+  (fill-pointer nil :reader vm-fill-pointer)
+  (fill-pointer-reg nil :reader vm-fill-pointer-reg)
+  (element-type nil :reader vm-element-type)
+  (element-type-reg nil :reader vm-element-type-reg)
+  (displaced-to-reg nil :reader vm-displaced-to-reg)
+  (displaced-index-offset-reg nil :reader vm-displaced-index-offset-reg)
+  (:sexp-tag :adjust-array)
+  (:sexp-slots dst arr dims initial-element fill-pointer fill-pointer-reg
+                element-type element-type-reg displaced-to-reg
+                displaced-index-offset-reg))
 (defmethod execute-instruction ((inst vm-adjust-array) state pc labels)
   (declare (ignore labels))
   (let* ((arr (vm-reg-get state (vm-arr inst)))
          (dims (vm-reg-get state (vm-dims inst)))
-         (new-dims (if (listp dims) dims (list dims))))
-    (vm-reg-set state (vm-dst inst) (adjust-array arr new-dims))
+         (new-dims (if (or (integerp dims) (vectorp dims)) dims (copy-list dims)))
+         (init-present-p (vm-initial-element inst))
+         (fp (if (vm-fill-pointer-reg inst)
+                 (vm-reg-get state (vm-fill-pointer-reg inst))
+                 (vm-fill-pointer inst)))
+         (elt-type (if (vm-element-type-reg inst)
+                       (vm-reg-get state (vm-element-type-reg inst))
+                       (vm-element-type inst)))
+         (displaced-to (and (vm-displaced-to-reg inst)
+                            (vm-reg-get state (vm-displaced-to-reg inst))))
+         (displaced-index-offset (if (vm-displaced-index-offset-reg inst)
+                                     (vm-reg-get state (vm-displaced-index-offset-reg inst))
+                                     0))
+         (args (append (list arr new-dims)
+                       (when init-present-p
+                         (list :initial-element
+                               (vm-reg-get state (vm-initial-element inst))))
+                       (when fp
+                         (list :fill-pointer (if (eq fp t) 0 fp)))
+                       (when elt-type
+                         (list :element-type elt-type))
+                       (when displaced-to
+                         (list :displaced-to displaced-to
+                               :displaced-index-offset displaced-index-offset)))))
+    (vm-reg-set state (vm-dst inst) (apply #'adjust-array args))
     (values (1+ pc) nil nil)))
 
 (define-vm-instruction vm-array-displacement (vm-instruction)

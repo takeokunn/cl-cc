@@ -27,7 +27,7 @@
 Returns (values new-pc halt-p halt-result)."
   (if (vm-call-stack state)
       (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
-          (pop (vm-call-stack state))
+        (vm-pop-call-frame state)
         (vm-profile-return state)
         (vm-restore-registers state saved-regs)
         (vm-reg-set state dst-reg result)

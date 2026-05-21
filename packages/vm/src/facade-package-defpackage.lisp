@@ -18,10 +18,40 @@
   (:use :cl :cl-cc/bootstrap)
   (:shadow #:get-universal-time
            #:get-internal-real-time
+           #:get-internal-run-time
            #:internal-time-units-per-second
            #:sleep
+           #:time
            #:encode-universal-time
-           #:decode-universal-time))
+           #:decode-universal-time
+           #:random-state
+           #:random-state-p
+           #:make-random-state
+           #:*random-state*
+           #:random
+           #:*print-base*
+           #:*print-radix*
+           #:*print-circle*
+           #:*print-pretty*
+           #:*print-level*
+           #:*print-length*
+           #:*print-readably*
+           #:*print-pprint-dispatch*
+           #:with-standard-io-syntax
+           #:pprint-logical-block
+           #:pprint-indent
+           #:pprint-newline
+           #:pprint-tab
+           #:copy-pprint-dispatch
+           #:set-pprint-dispatch
+           #:get-pprint-dispatch
+           #:*readtable*
+           #:copy-readtable
+           #:set-macro-character
+           #:get-macro-character
+           #:set-dispatch-macro-character
+           #:get-dispatch-macro-character
+           #:readtable-case))
 
 (in-package :cl-cc/vm)
 

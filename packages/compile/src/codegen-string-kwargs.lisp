@@ -57,7 +57,13 @@
                  ("STRING>"      . make-vm-string>)
                  ("STRING<="     . make-vm-string<=)
                  ("STRING>="     . make-vm-string>=)
-                 ("STRING-EQUAL" . make-vm-string-equal)))
+                 ("STRING-EQUAL" . make-vm-string-equal)
+                 ("STRING-NOT-EQUAL" . make-vm-string-not-equal)
+                 ("STRING/=" . make-vm-string-not-equal)
+                 ("STRING-LESSP" . make-vm-string-lessp)
+                 ("STRING-GREATERP" . make-vm-string-greaterp)
+                 ("STRING-NOT-GREATERP" . make-vm-string-not-greaterp)
+                 ("STRING-NOT-LESSP" . make-vm-string-not-lessp)))
   (%register-string-cmp-handler (car entry) (cdr entry)))
 
 ;; FR-627: string-upcase/downcase/capitalize with :start/:end keyword args

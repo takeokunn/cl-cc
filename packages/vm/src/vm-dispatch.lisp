@@ -153,11 +153,19 @@ helper for known-call snapshot trimming experiments."
 
 (defun vm-push-call-frame (state return-pc dst-reg &optional live-regs)
   "Save current environment and push a call frame onto the call stack."
+  (when (slot-exists-p state 'stack-depth)
+    (incf (vm-stack-depth state)))
   (push (list return-pc dst-reg (vm-closure-env state)
               (if live-regs
                   (vm-save-registers-subset state live-regs)
                   (vm-save-registers state)))
         (vm-call-stack state)))
+
+(defun vm-pop-call-frame (state)
+  "Pop one VM call frame while maintaining the O(1) stack-depth counter."
+  (when (slot-exists-p state 'stack-depth)
+    (setf (vm-stack-depth state) (max 0 (1- (vm-stack-depth state)))))
+  (pop (vm-call-stack state)))
 
 (defun vm-bind-closure-args (closure state arg-values)
   "Bind ARG-VALUES to CLOSURE's parameter registers in STATE.

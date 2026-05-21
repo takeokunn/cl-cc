@@ -21,9 +21,32 @@
 
 (defun vm-check-call-stack-depth (state)
   "Signal VM-STACK-OVERFLOW when STATE's call stack exceeds the configured limit."
-  (let ((depth (length (vm-call-stack state))))
+  (let ((depth (if (slot-exists-p state 'stack-depth)
+                   (vm-stack-depth state)
+                   (length (vm-call-stack state)))))
     (when (>= depth *max-call-stack-depth*)
       (error 'vm-stack-overflow :depth depth))))
+
+(defparameter *vm-safepoint-heap* nil
+  "Optional runtime heap polled by the VM interpreter loop.")
+
+(defun vm-safepoint-poll (state pc instruction &key (kind :poll))
+  "Poll cooperative safepoints from the VM interpreter.
+
+Function entries are represented by labels, loop back-edges by backward jumps,
+and every interpreter iteration is also a preemption poll."
+  (declare (ignore state))
+  (let ((poll-kind (cond
+                     ((typep instruction 'vm-label) :function-entry)
+                     ((and (member (type-of instruction) '(vm-jump vm-jump-zero) :test #'eq)
+                           (integerp pc)) :loop-back-edge)
+                     (t kind))))
+    (when (and (boundp '*vm-safepoint-heap*) *vm-safepoint-heap*)
+      (let* ((pkg (find-package :cl-cc/runtime))
+             (sym (and pkg (find-symbol "RT-GC-SAFEPOINT-CHECK" pkg))))
+        (when (and sym (fboundp sym))
+          (funcall (symbol-function sym) *vm-safepoint-heap* :kind poll-kind)))))
+  nil)
 
 ;;; ── Handler-Case VM Instructions ─────────────────────────────────────────
 
@@ -269,9 +292,10 @@ Used by run-string-repl for incremental REPL execution."
            (let ((*vm-managed-cons-allocation-enabled* nil))
               (loop with pc = start-pc
                    while (< pc (length instructions))
-                   do (let ((instruction (aref instructions pc)))
-                        (when (typep instruction 'vm-call)
-                          (vm-check-call-stack-depth state))
+                      do (let ((instruction (aref instructions pc)))
+                         (vm-safepoint-poll state pc instruction)
+                         (when (typep instruction 'vm-call)
+                           (vm-check-call-stack-depth state))
                         (vm-profile-inst-hit state instruction)
                         (multiple-value-bind (next-pc halted value)
                             (execute-instruction instruction state pc labels)
@@ -303,9 +327,10 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                (let ((*vm-managed-cons-allocation-enabled* nil))
                  (loop with pc = 0
                        while (< pc (length flat))
-                      do (let ((instruction (aref flat pc)))
-                           (when (typep instruction 'vm-call)
-                             (vm-check-call-stack-depth state))
+                       do (let ((instruction (aref flat pc)))
+                            (vm-safepoint-poll state pc instruction)
+                            (when (typep instruction 'vm-call)
+                              (vm-check-call-stack-depth state))
                            (vm-profile-bb-hit state pc)
                            (vm-profile-inst-hit state instruction)
                            (vm-profile-sample state)

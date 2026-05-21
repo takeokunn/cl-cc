@@ -182,6 +182,59 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
       (and (consp dimensions-designator)
            (null (rest dimensions-designator)))))
 
+(defun %vm-array-object (value)
+  "Return the host array object for VALUE, materializing VM COW vectors."
+  (%vm-cow-vector-materialize value))
+
+(defun vm-array-rank-value (array)
+  "VM-aware ARRAY-RANK supporting specialized one-dimensional arrays."
+  (if (vm-specialized-array-p array)
+      1
+      (array-rank (%vm-array-object array))))
+
+(defun vm-array-dimensions-value (array)
+  "VM-aware ARRAY-DIMENSIONS supporting specialized one-dimensional arrays."
+  (if (vm-specialized-array-p array)
+      (list (vm-specialized-array-length array))
+      (array-dimensions (%vm-array-object array))))
+
+(defun vm-array-dimension-value (array axis)
+  "VM-aware ARRAY-DIMENSION supporting specialized one-dimensional arrays."
+  (if (vm-specialized-array-p array)
+      (if (zerop axis)
+          (vm-specialized-array-length array)
+          (error "Invalid specialized array dimension axis: ~D" axis))
+      (array-dimension (%vm-array-object array) axis)))
+
+(defun vm-array-total-size-value (array)
+  "VM-aware ARRAY-TOTAL-SIZE supporting specialized one-dimensional arrays."
+  (if (vm-specialized-array-p array)
+      (vm-specialized-array-length array)
+      (array-total-size (%vm-array-object array))))
+
+(defun vm-array-element-type-value (array)
+  "Return the element type for host or VM specialized ARRAY."
+  (if (vm-specialized-array-p array)
+      (case (vm-specialized-array-element-type array)
+        (:fixnum 'fixnum)
+        (:double-float 'double-float)
+        (:character 'character)
+        (:bit 'bit)
+        (:any t)
+        (otherwise (vm-specialized-array-element-type array)))
+      (array-element-type (%vm-array-object array))))
+
+(defun vm-array-in-bounds-p-value (array subscripts)
+  "Return true when SUBSCRIPTS are within ARRAY bounds."
+  (let ((dimensions (vm-array-dimensions-value array))
+        (subs (if (listp subscripts) subscripts (list subscripts))))
+    (and (= (length dimensions) (length subs))
+         (every (lambda (dimension subscript)
+                  (and (integerp subscript)
+                       (<= 0 subscript)
+                       (< subscript dimension)))
+                dimensions subs))))
+
 ;;; VM Array/Vector Operations
 ;;;
 ;;; This file extends the VM with array and vector instructions including
@@ -204,10 +257,11 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (element-type nil :reader vm-element-type)
   (element-type-reg nil :reader vm-element-type-reg)
   (displaced-to-reg nil :reader vm-displaced-to-reg)
+  (displaced-index-offset-reg nil :reader vm-displaced-index-offset-reg)
   (:sexp-tag :make-array)
   (:sexp-slots dst size-reg initial-element fill-pointer adjustable element-type
                 fill-pointer-reg adjustable-reg element-type-reg displaced-to-reg
-                dimensions-reg))
+                dimensions-reg displaced-index-offset-reg))
 
 (define-vm-instruction vm-aref (vm-instruction)
   "Get element at INDEX from ARRAY, store in DST."
@@ -299,7 +353,10 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
                         (vm-reg-get state (vm-element-type-reg inst))
                         (vm-element-type inst)))
           (displaced-to (and (vm-displaced-to-reg inst)
-                             (vm-reg-get state (vm-displaced-to-reg inst))))
+                              (vm-reg-get state (vm-displaced-to-reg inst))))
+          (displaced-index-offset (if (vm-displaced-index-offset-reg inst)
+                                      (vm-reg-get state (vm-displaced-index-offset-reg inst))
+                                      0))
           (default-init (case elt-type
                           (character #\Nul)
                           (single-float 0.0f0)
@@ -311,24 +368,28 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
                          default-init))
            (specialized-type (%vm-normalize-specialized-element-type elt-type))
            (arr (cond
-                    (displaced-to
-                     (cond
-                       ((and fp adj)
-                        (make-array dimensions-designator :element-type (or elt-type t)
-                                    :displaced-to displaced-to
-                                    :fill-pointer (if (eq fp t) 0 fp)
-                                    :adjustable t))
-                       (fp
-                        (make-array dimensions-designator :element-type (or elt-type t)
-                                    :displaced-to displaced-to
-                                    :fill-pointer (if (eq fp t) 0 fp)))
-                       (adj
-                        (make-array dimensions-designator :element-type (or elt-type t)
-                                    :displaced-to displaced-to
-                                    :adjustable t))
-                       (t
-                        (make-array dimensions-designator :element-type (or elt-type t)
-                                    :displaced-to displaced-to))))
+                     (displaced-to
+                      (cond
+                        ((and fp adj)
+                         (make-array dimensions-designator :element-type (or elt-type t)
+                                     :displaced-to displaced-to
+                                     :displaced-index-offset displaced-index-offset
+                                     :fill-pointer (if (eq fp t) 0 fp)
+                                     :adjustable t))
+                        (fp
+                         (make-array dimensions-designator :element-type (or elt-type t)
+                                     :displaced-to displaced-to
+                                     :displaced-index-offset displaced-index-offset
+                                     :fill-pointer (if (eq fp t) 0 fp)))
+                        (adj
+                         (make-array dimensions-designator :element-type (or elt-type t)
+                                     :displaced-to displaced-to
+                                     :displaced-index-offset displaced-index-offset
+                                     :adjustable t))
+                        (t
+                         (make-array dimensions-designator :element-type (or elt-type t)
+                                     :displaced-index-offset displaced-index-offset
+                                     :displaced-to displaced-to))))
                     ((and vector-dimensions-p
                           (member specialized-type '(:fixnum :double-float :character :bit)
                                    :test #'eq)
@@ -465,19 +526,25 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   "Return number of dimensions of ARRAY."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-rank) (:sexp-slots dst src))
-(define-simple-instruction vm-array-rank :unary array-rank)
+(define-simple-instruction vm-array-rank :unary vm-array-rank-value)
 
 (define-vm-instruction vm-array-total-size (vm-instruction)
   "Return total number of elements in ARRAY."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-total-size) (:sexp-slots dst src))
-(define-simple-instruction vm-array-total-size :unary array-total-size)
+(define-simple-instruction vm-array-total-size :unary vm-array-total-size-value)
 
 (define-vm-instruction vm-array-dimensions (vm-instruction)
   "Return list of dimension sizes of ARRAY."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-dimensions) (:sexp-slots dst src))
-(define-simple-instruction vm-array-dimensions :unary array-dimensions)
+(define-simple-instruction vm-array-dimensions :unary vm-array-dimensions-value)
+
+(define-vm-instruction vm-array-element-type (vm-instruction)
+  "Return ARRAY's element type."
+  (dst nil :reader vm-dst) (src nil :reader vm-src)
+  (:sexp-tag :array-element-type) (:sexp-slots dst src))
+(define-simple-instruction vm-array-element-type :unary vm-array-element-type-value)
 
 (define-vm-instruction vm-array-dimension (vm-instruction)
   "Return size of dimension AXIS of ARRAY."
@@ -486,8 +553,21 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
 (defmethod execute-instruction ((inst vm-array-dimension) state pc labels)
   (declare (ignore labels))
   (vm-reg-set state (vm-dst inst)
-              (array-dimension (vm-reg-get state (vm-lhs inst))
-                               (vm-reg-get state (vm-rhs inst))))
+              (vm-array-dimension-value (vm-reg-get state (vm-lhs inst))
+                                        (vm-reg-get state (vm-rhs inst))))
+  (values (1+ pc) nil nil))
+
+(define-vm-instruction vm-array-in-bounds-p (vm-instruction)
+  "Return true if SUBSCRIPTS are valid for ARRAY."
+  (dst nil :reader vm-dst) (arr nil :reader vm-arr) (subs nil :reader vm-subs)
+  (:sexp-tag :array-in-bounds-p) (:sexp-slots dst arr subs))
+(defmethod execute-instruction ((inst vm-array-in-bounds-p) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (if (vm-array-in-bounds-p-value (vm-reg-get state (vm-arr inst))
+                                              (vm-reg-get state (vm-subs inst)))
+                  t
+                  nil))
   (values (1+ pc) nil nil))
 
 ;;; ─── FR-602: Row-major access ────────────────────────────────────────────
@@ -498,9 +578,12 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (:sexp-tag :row-major-aref) (:sexp-slots dst lhs rhs))
 (defmethod execute-instruction ((inst vm-row-major-aref) state pc labels)
   (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (row-major-aref (vm-reg-get state (vm-lhs inst))
-                              (vm-reg-get state (vm-rhs inst))))
+  (let ((array (vm-reg-get state (vm-lhs inst)))
+        (index (vm-reg-get state (vm-rhs inst))))
+    (vm-reg-set state (vm-dst inst)
+                (if (vm-specialized-array-p array)
+                    (vm-specialized-array-ref array index)
+                    (row-major-aref (%vm-array-object array) index))))
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-array-row-major-index (vm-instruction)
@@ -572,6 +655,12 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-adjustable-p) (:sexp-slots dst src))
 (define-simple-instruction vm-array-adjustable-p :pred1 adjustable-array-p)
+
+(define-vm-instruction vm-adjustable-array-p (vm-instruction)
+  "Return T if array is adjustable. ANSI spelling alias."
+  (dst nil :reader vm-dst) (src nil :reader vm-src)
+  (:sexp-tag :adjustable-array-p) (:sexp-slots dst src))
+(define-simple-instruction vm-adjustable-array-p :pred1 adjustable-array-p)
 
 (define-vm-instruction vm-vector-push (vm-instruction)
   "Push VAL onto ARRAY if below fill-pointer limit. Returns new index or NIL."

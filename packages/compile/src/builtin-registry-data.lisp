@@ -119,9 +119,11 @@
     (array-rank       . make-vm-array-rank)
     (array-total-size . make-vm-array-total-size)
     (array-dimensions . make-vm-array-dimensions)
+    (array-element-type . make-vm-array-element-type)
     (fill-pointer     . make-vm-fill-pointer-inst)
     (array-has-fill-pointer-p . make-vm-array-has-fill-pointer-p)
     (array-adjustable-p . make-vm-array-adjustable-p)
+    (adjustable-array-p . make-vm-adjustable-array-p)
     (vector-pop       . make-vm-vector-pop)
     (array-displacement . make-vm-array-displacement)
     ;; Bit array

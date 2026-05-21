@@ -1,6 +1,51 @@
 (in-package :cl-cc/runtime)
-(defun rt-iouring-available-p () nil)
-(defun rt-iouring-init (&key entries) (declare (ignore entries)) nil)
-(defun rt-iouring-read (fd buf off len cb) (declare (ignore fd buf off len)) (when cb (funcall cb 0)) 0)
-(defun rt-iouring-write (fd buf off len cb) (declare (ignore fd buf off len)) (when cb (funcall cb 0)) 0)
-(defun rt-iouring-poll (&key min-completions timeout) (declare (ignore min-completions timeout)) 0)
+
+(defstruct rt-iouring
+  (entries 64 :type integer)
+  (submission-queue nil)
+  (completion-queue nil)
+  (closed-p nil))
+
+(defvar *rt-iouring-instance* nil)
+
+(defun rt-iouring-available-p ()
+  #+linux t
+  #-linux nil)
+
+(defun rt-iouring-init (&key (entries 64))
+  (setf *rt-iouring-instance*
+        (make-rt-iouring :entries entries :submission-queue nil :completion-queue nil)))
+
+(defun %rt-iouring-submit (op fd buf off len cb)
+  (unless *rt-iouring-instance* (rt-iouring-init))
+  (let ((request (list :op op :fd fd :buffer buf :offset off :length len :callback cb)))
+    (push request (rt-iouring-submission-queue *rt-iouring-instance*))
+    request))
+
+(defun rt-iouring-read (fd buf off len cb)
+  (%rt-iouring-submit :read fd buf off len cb)
+  len)
+
+(defun rt-iouring-write (fd buf off len cb)
+  (%rt-iouring-submit :write fd buf off len cb)
+  len)
+
+(defun rt-iouring-poll (&key (min-completions 0) timeout)
+  (declare (ignore timeout))
+  (unless *rt-iouring-instance* (return-from rt-iouring-poll 0))
+  (let ((completed 0))
+    (loop while (and (rt-iouring-submission-queue *rt-iouring-instance*)
+                     (or (zerop min-completions) (< completed min-completions)))
+          for req = (pop (rt-iouring-submission-queue *rt-iouring-instance*))
+          for len = (getf (cdr req) :length)
+          for cb = (getf (cdr req) :callback)
+          do (push (list :request req :result len) (rt-iouring-completion-queue *rt-iouring-instance*))
+             (incf completed)
+             (when cb (funcall cb len)))
+    completed))
+
+(defun rt-iouring-close ()
+  (when *rt-iouring-instance*
+    (setf (rt-iouring-closed-p *rt-iouring-instance*) t
+          *rt-iouring-instance* nil))
+  t)

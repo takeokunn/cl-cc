@@ -22,4 +22,149 @@
 (defstruct rt-once (done-p nil) (m (rt-make-mutex)))
 (defun rt-make-once () (make-rt-once))
 (defun rt-once-call (o fn) (rt-with-mutex ((rt-once-m o)) (unless (rt-once-done-p o) (setf (rt-once-done-p o) (cons t (funcall fn))))) (cdr (rt-once-done-p o)))
+(defun rt-mutex-try-lock (m)
+  "Try to acquire M without blocking. Returns true on success."
+  #+sbcl (sb-thread:grab-mutex (rt-mutex-host-mutex m) :waitp nil)
+  #-sbcl (declare (ignore m))
+  #-sbcl t)
+
+(defmacro rt-with-try-mutex ((m) &body body)
+  `(when (rt-mutex-try-lock ,m)
+     (unwind-protect (progn ,@body)
+       (rt-mutex-unlock ,m))))
+
+(defstruct rt-recursive-mutex
+  (name nil)
+  (mutex (rt-make-mutex))
+  (owner nil)
+  (depth 0))
+
+(defun rt-make-recursive-mutex (&key name)
+  (make-rt-recursive-mutex :name name))
+
+(defun %rt-current-thread ()
+  #+sbcl sb-thread:*current-thread*
+  #-sbcl :single-thread)
+
+(defun rt-recursive-mutex-lock (m &key timeout)
+  (let ((me (%rt-current-thread)))
+    (if (eq (rt-recursive-mutex-owner m) me)
+        (progn (incf (rt-recursive-mutex-depth m)) t)
+        (when (rt-mutex-lock (rt-recursive-mutex-mutex m) :timeout timeout)
+          (setf (rt-recursive-mutex-owner m) me
+                (rt-recursive-mutex-depth m) 1)
+          t))))
+
+(defun rt-recursive-mutex-try-lock (m)
+  (let ((me (%rt-current-thread)))
+    (if (eq (rt-recursive-mutex-owner m) me)
+        (progn (incf (rt-recursive-mutex-depth m)) t)
+        (when (rt-mutex-try-lock (rt-recursive-mutex-mutex m))
+          (setf (rt-recursive-mutex-owner m) me
+                (rt-recursive-mutex-depth m) 1)
+          t))))
+
+(defun rt-recursive-mutex-unlock (m)
+  (unless (eq (rt-recursive-mutex-owner m) (%rt-current-thread))
+    (error "recursive mutex not owned by current thread: ~A" (rt-recursive-mutex-name m)))
+  (decf (rt-recursive-mutex-depth m))
+  (when (zerop (rt-recursive-mutex-depth m))
+    (setf (rt-recursive-mutex-owner m) nil)
+    (rt-mutex-unlock (rt-recursive-mutex-mutex m)))
+  t)
+
+(defmacro rt-with-recursive-mutex ((m &key timeout) &body body)
+  `(unwind-protect
+        (progn (rt-recursive-mutex-lock ,m :timeout ,timeout) ,@body)
+     (rt-recursive-mutex-unlock ,m)))
+
+(defstruct rt-rwlock
+  (name nil)
+  (mutex (rt-make-mutex))
+  (readers-ok (rt-make-condition-variable))
+  (writers-ok (rt-make-condition-variable))
+  (readers 0)
+  (writer nil)
+  (waiting-writers 0))
+
+(defun rt-make-rwlock (&key name)
+  (make-rt-rwlock :name name))
+
+(defun rt-rwlock-read-lock (rw &key timeout)
+  (rt-with-mutex ((rt-rwlock-mutex rw) :timeout timeout)
+    (loop while (or (rt-rwlock-writer rw) (> (rt-rwlock-waiting-writers rw) 0))
+          do (rt-condition-wait (rt-rwlock-readers-ok rw) (rt-rwlock-mutex rw) :timeout timeout))
+    (incf (rt-rwlock-readers rw))
+    t))
+
+(defun rt-rwlock-try-read-lock (rw)
+  (rt-with-try-mutex ((rt-rwlock-mutex rw))
+    (unless (or (rt-rwlock-writer rw) (> (rt-rwlock-waiting-writers rw) 0))
+      (incf (rt-rwlock-readers rw))
+      t)))
+
+(defun rt-rwlock-read-unlock (rw)
+  (rt-with-mutex ((rt-rwlock-mutex rw))
+    (when (<= (rt-rwlock-readers rw) 0)
+      (error "rwlock read-unlock without reader: ~A" (rt-rwlock-name rw)))
+    (decf (rt-rwlock-readers rw))
+    (when (and (zerop (rt-rwlock-readers rw)) (> (rt-rwlock-waiting-writers rw) 0))
+      (rt-condition-notify (rt-rwlock-writers-ok rw)))
+    t))
+
+(defun rt-rwlock-write-lock (rw &key timeout)
+  (rt-with-mutex ((rt-rwlock-mutex rw) :timeout timeout)
+    (incf (rt-rwlock-waiting-writers rw))
+    (unwind-protect
+         (progn
+           (loop while (or (rt-rwlock-writer rw) (> (rt-rwlock-readers rw) 0))
+                 do (rt-condition-wait (rt-rwlock-writers-ok rw) (rt-rwlock-mutex rw) :timeout timeout))
+           (setf (rt-rwlock-writer rw) (%rt-current-thread))
+           t)
+      (decf (rt-rwlock-waiting-writers rw)))))
+
+(defun rt-rwlock-try-write-lock (rw)
+  (rt-with-try-mutex ((rt-rwlock-mutex rw))
+    (unless (or (rt-rwlock-writer rw) (> (rt-rwlock-readers rw) 0))
+      (setf (rt-rwlock-writer rw) (%rt-current-thread))
+      t)))
+
+(defun rt-rwlock-write-unlock (rw)
+  (rt-with-mutex ((rt-rwlock-mutex rw))
+    (unless (rt-rwlock-writer rw)
+      (error "rwlock write-unlock without writer: ~A" (rt-rwlock-name rw)))
+    (setf (rt-rwlock-writer rw) nil)
+    (if (> (rt-rwlock-waiting-writers rw) 0)
+        (rt-condition-notify (rt-rwlock-writers-ok rw))
+        (rt-condition-notify-all (rt-rwlock-readers-ok rw)))
+    t))
+
+(defmacro rt-with-read-lock ((rw &key timeout) &body body)
+  `(unwind-protect
+        (progn (rt-rwlock-read-lock ,rw :timeout ,timeout) ,@body)
+     (rt-rwlock-read-unlock ,rw)))
+
+(defmacro rt-with-write-lock ((rw &key timeout) &body body)
+  `(unwind-protect
+        (progn (rt-rwlock-write-lock ,rw :timeout ,timeout) ,@body)
+     (rt-rwlock-write-unlock ,rw)))
+
+(defun rt-condition-wait-until (cv m predicate &key timeout)
+  "Wait while PREDICATE is false. Rechecks after wakeups to tolerate spurious wakeups."
+  (loop until (funcall predicate)
+        do (rt-condition-wait cv m :timeout timeout))
+  t)
+
+(defun rt-semaphore-try-wait (s)
+  (rt-with-try-mutex ((rt-semaphore-m s))
+    (when (> (rt-semaphore-count s) 0)
+      (decf (rt-semaphore-count s))
+      t)))
+
+(defun rt-barrier-reset (b)
+  (rt-with-mutex ((rt-barrier-m b))
+    (setf (rt-barrier-count b) 0)
+    (incf (rt-barrier-gen b))
+    (rt-condition-notify-all (rt-barrier-c b))
+    t))
 (defun rt-sync-init () t)

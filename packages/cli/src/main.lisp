@@ -154,6 +154,7 @@ Options:
 
   Start an interactive ANSI Common Lisp REPL.
   Definitions persist across expressions within the session.
+  ANSI REPL variables *, **, ***, +, ++, +++, /, //, /// are maintained.
 
 Options:
   --stdlib   Prepend standard library on startup

@@ -82,7 +82,8 @@ unknown so callers can fall through instead of silently changing semantics."
         for key = (%phase2-keyword-name (car kv))
         always (and (cdr kv)
                     (member key '(:initial-element :initial-contents :element-type
-                                  :fill-pointer :adjustable :displaced-to)
+                                  :fill-pointer :adjustable :displaced-to
+                                  :displaced-index-offset)
                             :test #'eq)
                     (or (not (eq key :initial-contents))
                         (typep (cadr kv) 'ast-quote)))))
@@ -138,9 +139,10 @@ unknown so callers can fall through instead of silently changing semantics."
                   fill-pointer-reg
                   adjustable
                   adjustable-reg
-                  element-type
-                  element-type-reg
-                  displaced-to-reg)
+                   element-type
+                   element-type-reg
+                   displaced-to-reg
+                   displaced-index-offset-reg)
             (loop for kv on tail by #'cddr
                   for key = (%phase2-keyword-name (car kv))
                   for value-ast = (cadr kv)
@@ -162,8 +164,10 @@ unknown so callers can fall through instead of silently changing semantics."
                             (%phase2-static-or-register-value value-ast ctx)
                           (setf element-type value
                                 element-type-reg reg)))
-                       (:displaced-to
-                        (setf displaced-to-reg (compile-ast value-ast ctx)))))
+                        (:displaced-to
+                         (setf displaced-to-reg (compile-ast value-ast ctx)))
+                        (:displaced-index-offset
+                         (setf displaced-index-offset-reg (compile-ast value-ast ctx)))))
             (emit ctx (make-vm-make-array :dst result-reg :size-reg size-reg
                                            :dimensions-reg dimensions-reg
                                            :initial-element init-reg
@@ -171,9 +175,10 @@ unknown so callers can fall through instead of silently changing semantics."
                                            :fill-pointer-reg fill-pointer-reg
                                            :adjustable adjustable
                                            :adjustable-reg adjustable-reg
-                                           :element-type element-type
-                                           :element-type-reg element-type-reg
-                                           :displaced-to-reg displaced-to-reg))
+                                            :element-type element-type
+                                            :element-type-reg element-type-reg
+                                            :displaced-to-reg displaced-to-reg
+                                            :displaced-index-offset-reg displaced-index-offset-reg))
             (when contents-ast
               (%phase2-emit-initial-contents ctx result-reg contents))
             result-reg)))))))

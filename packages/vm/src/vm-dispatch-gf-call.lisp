@@ -69,12 +69,20 @@ Returns (values next-pc halt-p result) like execute-instruction."
          ;; Look up qualified methods
          (before-methods (%lookup-qualified-methods gf-ht :__BEFORE__ state all-arg-values))
          (after-methods  (%lookup-qualified-methods gf-ht :__AFTER__ state all-arg-values))
-         (around-methods (%lookup-qualified-methods gf-ht :__AROUND__ state all-arg-values)))
+         (around-methods (%lookup-qualified-methods gf-ht :__AROUND__ state all-arg-values))
+         (combination-plan (list :gf gf-ht
+                                 :args all-arg-values
+                                 :around around-methods
+                                 :before before-methods
+                                 :primary all-methods
+                                 :after after-methods)))
     (if (and (null before-methods) (null after-methods) (null around-methods))
         ;; Fast path: no qualified methods — original behavior
         (progn
           (vm-push-call-frame state (1+ pc) dst-reg)
-          (push (list gf-ht all-methods all-arg-values) (vm-method-call-stack state))
+          (push combination-plan (vm-clos-shadow-stack state))
+          (push (list gf-ht all-methods all-arg-values :combination combination-plan)
+                (vm-method-call-stack state))
           (vm-profile-enter-call state (vm-closure-entry-label method-closure))
           (vm-bind-closure-args method-closure state all-arg-values)
           (values (vm-label-table-lookup labels (vm-closure-entry-label method-closure)) nil nil))
@@ -87,6 +95,7 @@ Returns (values next-pc halt-p result) like execute-instruction."
                                     (t method-closure)))
                 (first-closure (%vm-method-function first-method)))
           (vm-push-call-frame state (1+ pc) dst-reg)
+          (push combination-plan (vm-clos-shadow-stack state))
           (push (list gf-ht all-methods all-arg-values
                       :qualified t
                       :around-pending (if has-around (cdr around-methods) nil)
@@ -153,7 +162,7 @@ preserving existing closure semantics."
               (vm-reg-set state dst-reg (%vm-call-closure-sync resolved-func state arg-values))
               (values (1+ pc) nil nil))
             (progn
-              (unless tail-p
+              (unless (and tail-p (vm-tail-call-optimization-enabled-p state))
                 (vm-push-call-frame state (1+ pc) dst-reg live-regs)
                 (push nil (vm-method-call-stack state)))
               (vm-profile-enter-call state (vm-closure-entry-label resolved-func) :tail-p tail-p)

@@ -23,22 +23,103 @@
    vm-push-handler-to-stack
    vm-pop-handler-from-stack
    vm-clear-condition-context
-   *active-restarts*
+    *active-restarts*
+    *debugger-hook*
+    *break-on-signals*
+    invoke-debugger
+    break
 
-   ;; ─── Condition Types ───────────────────────────────────────────────────────
-   vm-type-error
-   vm-unbound-variable
-   vm-undefined-function
-   vm-division-by-zero
-   vm-warning
-   vm-error
+    ;; ─── Condition Types ───────────────────────────────────────────────────────
+    vm-condition
+    vm-serious-condition
+    vm-simple-condition
+    vm-type-error
+    vm-simple-error
+    vm-simple-warning
+    vm-unbound-variable
+    vm-undefined-function
+    vm-arithmetic-error
+    vm-division-by-zero
+    vm-floating-point-overflow
+    vm-floating-point-underflow
+    vm-cell-error
+    vm-unbound-slot
+    vm-control-error
+    vm-program-error
+    vm-stream-error
+    vm-end-of-file
+    vm-reader-error
+    vm-package-error
+    vm-storage-condition
+    vm-style-warning
+    vm-warning
+    vm-error
+    condition
+    serious-condition
+    error
+    simple-error
+    type-error
+    arithmetic-error
+    division-by-zero
+    floating-point-overflow
+    floating-point-underflow
+    cell-error
+    unbound-variable
+    undefined-function
+    unbound-slot
+    control-error
+    program-error
+    stream-error
+    end-of-file
+    reader-error
+    package-error
+    warning
+    simple-warning
+    style-warning
+    storage-condition
 
-   ;; ─── Condition Slots ───────────────────────────────────────────────────────
-   vm-condition-error-code
-   vm-condition-fix-it
-   vm-dividend
-   vm-restart-name
-   vm-handler-type
+    ;; ─── Condition Slots ───────────────────────────────────────────────────────
+    vm-condition-state
+    vm-condition-error-code
+    vm-condition-fix-it
+    vm-dividend
+    simple-condition-format-control
+    simple-condition-format-arguments
+    type-error-datum
+    type-error-expected-type
+    arithmetic-error-operation
+    arithmetic-error-operands
+    cell-error-name
+    unbound-slot-instance
+    stream-error-stream
+    package-error-package
+
+    ;; ─── Restart Operations ────────────────────────────────────────────────────
+    abort
+    continue
+    muffle-warning
+    use-value
+    store-value
+    retry
+    invoke-restart
+    find-restart
+    restart-name
+    compute-restarts
+    restart-case
+    restart-bind
+    with-simple-restart
+    vm-abort-restart
+    vm-muffle-warning-restart
+    vm-use-value-restart
+    vm-store-value-restart
+    vm-retry-restart
+    vm-compute-restarts
+    vm-invoke-restart
+    vm-find-standard-restart
+    vm-invoke-debugger
+    vm-break
+    vm-restart-name
+    vm-handler-type
    vm-handler-entry-saved-regs
 
    ;; ─── Transcendental Constructors ───────────────────────────────────────────
@@ -90,7 +171,9 @@
    make-vm-fboundp
    make-vm-char-equal
    make-vm-string
-   make-vm-type-error
-   make-vm-unbound-variable
+    make-vm-type-error
+    make-vm-simple-error
+    make-vm-simple-warning
+    make-vm-unbound-variable
    make-vm-undefined-function
    make-vm-division-by-zero))

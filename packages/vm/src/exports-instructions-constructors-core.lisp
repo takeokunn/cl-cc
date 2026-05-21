@@ -37,14 +37,17 @@
     make-vm-aset
     make-vm-prefetch
     make-vm-assoc
-   make-vm-array-adjustable-p
-   make-vm-array-dimension
-   make-vm-array-dimensions
-   make-vm-array-displacement
-   make-vm-array-has-fill-pointer-p
-   make-vm-array-rank
-   make-vm-array-row-major-index
-   make-vm-array-total-size
+    make-vm-array-adjustable-p
+    make-vm-array-dimension
+    make-vm-array-dimensions
+    make-vm-array-displacement
+    make-vm-array-element-type
+    make-vm-array-has-fill-pointer-p
+    make-vm-array-in-bounds-p
+    make-vm-array-rank
+    make-vm-array-row-major-index
+    make-vm-array-total-size
+    make-vm-adjustable-array-p
    make-vm-atom
    make-vm-binop
    make-vm-bit-access

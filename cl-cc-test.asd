@@ -464,9 +464,10 @@
       (:file "heap-sanitizer-tests")
      (:file "heap-gc-tests")
      (:file "heap-trace-tests")
-     (:file "gc-write-barrier-tests")
-     (:file "value-tests")
-     (:file "frame-tests")))
+      (:file "gc-write-barrier-tests")
+      (:file "runtime-subsystem-fr-tests")
+      (:file "value-tests")
+      (:file "frame-tests")))
    (:module "bytecode-tests"
     :pathname "packages/bytecode/tests"
     :serial t

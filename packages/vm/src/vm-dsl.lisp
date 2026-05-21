@@ -152,7 +152,13 @@ Used by call-next-method and next-method-p.")
      (deopt-history :initform nil :accessor vm-deopt-history
                     :documentation "List of deoptimization snapshots, newest first.")
      (tier1-code :initform (make-hash-table :test #'equal) :accessor vm-tier1-code
-                 :documentation "OSR id/label -> simple Tier-1 entry metadata used by the OSR stub."))
+                 :documentation "OSR id/label -> simple Tier-1 entry metadata used by the OSR stub.")
+     (stack-depth :initform 0 :accessor vm-stack-depth
+                  :documentation "O(1) logical VM call-stack depth counter.")
+     (tail-call-optimization-enabled-p :initform t :accessor vm-tail-call-optimization-enabled-p
+                                       :documentation "When true, vm-tail-call reuses the current frame.")
+     (clos-shadow-stack :initform nil :accessor vm-clos-shadow-stack
+                        :documentation "Shadow stack for CLOS call-next-method/method-combination chains."))
   (:documentation "VM execution state with registers, call stack, and heap."))
 
 ;;; VM state initialization, profiling, heap ops, and execute-instruction generic

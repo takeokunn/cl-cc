@@ -19,6 +19,50 @@
 
 ;;; ─── VM I/O State ────────────────────────────────────────────────────────────
 
+(defparameter *print-level* nil
+  "Maximum depth to print, or NIL for unlimited depth.")
+
+(defparameter *print-length* nil
+  "Maximum number of elements to print at each level, or NIL for unlimited length.")
+
+(defparameter *print-circle* nil
+  "When true, detect and mark circular/shared printed structure.")
+
+(defparameter *print-readably* nil
+  "When true, signal if an object cannot be printed readably.")
+
+(defparameter *print-base* 10
+  "Radix used when printing integers.")
+
+(defparameter *print-radix* nil
+  "When true, print radix markers for numbers.")
+
+(defparameter *print-pretty* nil
+  "When true, use the pretty printer for structured output.")
+
+(declaim (special *print-pprint-dispatch* *readtable*))
+
+(defmacro with-standard-io-syntax (&body body)
+  "Execute BODY with ANSI standard I/O control variables bound to defaults."
+  `(let ((*print-base* 10)
+         (*print-radix* nil)
+         (*print-circle* nil)
+         (*print-pretty* nil)
+         (*print-level* nil)
+         (*print-length* nil)
+         (*print-readably* nil)
+         (*print-pprint-dispatch* (copy-pprint-dispatch nil))
+         (*readtable* (copy-readtable nil))
+         (cl:*print-base* 10)
+         (cl:*print-radix* nil)
+         (cl:*print-circle* nil)
+         (cl:*print-pretty* nil)
+         (cl:*print-level* nil)
+         (cl:*print-length* nil)
+         (cl:*print-readably* nil)
+         (cl:*readtable* (cl:copy-readtable nil)))
+     ,@body))
+
 (defclass vm-io-state (vm-state)
   ((open-files :initform (make-hash-table :test #'eql)
                :reader vm-open-files
@@ -184,6 +228,16 @@ the VM bridge resolves the current VM symbol value to its underlying stream."
   (mapcar #'%vm-bridge-stream-result (concatenated-stream-streams stream)))
 
 (eval-when (:load-toplevel :execute)
+  (vm-register-host-bridge 'with-standard-io-syntax
+                           (lambda (thunk)
+                             (with-standard-io-syntax (funcall thunk))))
+  (vm-register-host-bridge 'make-readtable #'make-readtable)
+  (vm-register-host-bridge 'copy-readtable #'copy-readtable)
+  (vm-register-host-bridge 'set-macro-character #'set-macro-character)
+  (vm-register-host-bridge 'get-macro-character #'get-macro-character)
+  (vm-register-host-bridge 'set-dispatch-macro-character #'set-dispatch-macro-character)
+  (vm-register-host-bridge 'get-dispatch-macro-character #'get-dispatch-macro-character)
+  (vm-register-host-bridge 'readtable-case #'readtable-case)
   (vm-register-host-bridge 'make-synonym-stream #'%vm-bridge-make-synonym-stream)
   (vm-register-host-bridge 'make-broadcast-stream #'%vm-bridge-make-broadcast-stream)
   (vm-register-host-bridge 'make-two-way-stream #'%vm-bridge-make-two-way-stream)

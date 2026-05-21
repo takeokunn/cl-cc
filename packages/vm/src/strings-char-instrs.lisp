@@ -39,12 +39,52 @@
 (define-vm-unary-instruction vm-char-name       :char-name       "Return the name of a character as a string, or nil.")
 (define-vm-unary-instruction vm-name-char       :name-char       "Return the character with the given name string, or nil.")
 
+(defparameter *vm-standard-character-names*
+  `(("SPACE" . ,#\Space)
+    ("NEWLINE" . ,#\Newline)
+    ("TAB" . ,#\Tab)
+    ("RETURN" . ,#\Return)
+    ("RUBOUT" . ,(code-char 127))
+    ("BACKSPACE" . ,(code-char 8))
+    ("PAGE" . ,#\Page)
+    ("NULL" . ,(code-char 0))
+    ("NUL" . ,(code-char 0))
+    ("ALTMODE" . ,(code-char 27))
+    ("DELETE" . ,(code-char 127))
+    ("ESCAPE" . ,(code-char 27))
+    ("ESC" . ,(code-char 27)))
+  "Portable character-name aliases required by the VM character runtime.")
+
+(defun vm-char-name-value (character)
+  "Return the VM-standard name for CHARACTER, or delegate to CL:CHAR-NAME."
+  (check-type character character)
+  (cond
+    ((char= character #\Space) "Space")
+    ((char= character #\Newline) "Newline")
+    ((char= character #\Tab) "Tab")
+    ((char= character #\Return) "Return")
+    ((char= character (code-char 127)) "Rubout")
+    ((char= character (code-char 8)) "Backspace")
+    ((char= character #\Page) "Page")
+    ((char= character (code-char 0)) "Null")
+    ((char= character (code-char 27)) "Escape")
+    (t (char-name character))))
+
+(defun vm-name-char-value (name)
+  "Return the character named by NAME, accepting required VM aliases."
+  (let* ((string (etypecase name
+                   (string name)
+                   (symbol (symbol-name name))))
+         (normalized (string-upcase string)))
+    (or (cdr (assoc normalized *vm-standard-character-names* :test #'string=))
+        (name-char string))))
+
 (define-simple-instruction vm-both-case-p    :pred1 vm-both-case-p-value)
 (define-simple-instruction vm-graphic-char-p :pred1 vm-graphic-char-p-value)
 (define-simple-instruction vm-standard-char-p :pred1 vm-standard-char-p-value)
 (define-simple-instruction vm-digit-char     :unary digit-char)
-(define-simple-instruction vm-char-name      :unary char-name)
-(define-simple-instruction vm-name-char      :unary name-char)
+(define-simple-instruction vm-char-name      :unary vm-char-name-value)
+(define-simple-instruction vm-name-char      :unary vm-name-char-value)
 
 ;;; FR-405: make-string
 

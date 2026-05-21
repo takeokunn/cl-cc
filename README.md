@@ -137,15 +137,29 @@ Full CLOS implementation including multiple dispatch, inheritance chains, and `c
 
 **Strings**: `string=`, `string<`, `string>`, `string-upcase`, `string-downcase`, `subseq`, `concatenate`, `string-trim`, `search`
 
-**Characters**: `char-code`, `code-char`, `char-upcase`, `char-downcase`, `digit-char-p`, `alpha-char-p`, all comparison predicates
+**Characters**: `char-code`, `code-char`, `char-upcase`, `char-downcase`, `digit-char-p`, `alpha-char-p`, `char-name`, `name-char`, all comparison predicates (`char=`, `char<`, `char>`, `char<=`, `char>=`, `char-equal`, `char-not-equal`, `char-lessp`, `char-greaterp`, `char-not-greaterp`, `char-not-lessp`)
 
 **Hash tables**: `make-hash-table`, `gethash`, `(setf gethash)`, `remhash`, `clrhash`, `maphash`, `hash-table-count`
 
-**Arrays**: `make-array`, `aref`, `(setf aref)`, `vector-push-extend`, `array-rank`, `array-dimensions`, bit array operations
+**Arrays**: `make-array` (adjustable, fill-pointer, displaced), `aref`, `(setf aref)`, `vector-push`, `vector-push-extend`, `vector-pop`, `fill-pointer`, `adjust-array`, `array-has-fill-pointer-p`, `adjustable-array-p`, `array-element-type`, `array-rank`, `array-dimensions`, `array-dimension`, `array-total-size`, `array-in-bounds-p`, `row-major-aref`, `array-displacement`, bit array operations
 
 **Numbers**: full arithmetic, `floor`/`ceiling`/`truncate`/`round`, `mod`, `rem`, `abs`, `max`, `min`, `expt`, `sqrt`, `exp`, `log`, trig functions, `ash`, `logand`, `logior`, `logxor`, `lognot`
 
-**I/O**: `format`, `print`, `princ`, `prin1`, `read-line`, `read-char`, `write-char`, `with-open-file`, `with-output-to-string`
+**I/O**: `format`, `print`, `princ`, `prin1`, `read-line`, `read-char`, `write-char`, `with-open-file`, `with-output-to-string`, `read-sequence`, `write-sequence`, `peek-char`, `unread-char`, `listen`, `clear-input`, `clear-output`, `finish-output`, `force-output`
+
+**Strings**: `string=`, `string<`, `string>`, `string-upcase`, `string-downcase`, `string-capitalize`, `nstring-upcase`, `nstring-downcase`, `nstring-capitalize`, `subseq`, `concatenate`, `string-trim`, `string-left-trim`, `string-right-trim`, `search`
+
+**Pretty Printer**: `pprint-logical-block`, `pprint-indent`, `pprint-newline`, `pprint-tab`, `pprint-dispatch-table`, `*print-pretty*`, `*print-level*`, `*print-length*`, `*print-circle*`, `*print-readably*`, `*print-base*`, `*print-radix*`
+
+**Streams**: `broadcast-stream`, `concatenated-stream`, `echo-stream`, `synonym-stream`, `two-way-stream`, `string-input-stream`, `string-output-stream`, fundamental-stream (Gray Streams protocol)
+
+**Unicode**: BMP General Category predicates, case folding, UTF-8 encoding/decoding, NFC/NFD normalization (Latin-1), syntax class determination
+
+**Time**: `get-universal-time`, `get-internal-real-time`, `get-internal-run-time`, `sleep`, `encode-universal-time`, `decode-universal-time`, `time` macro
+
+**Random**: `random-state` (MT19937), `make-random-state`, `*random-state*`, `random`
+
+**Environment**: `lisp-implementation-type`, `lisp-implementation-version`, `machine-type`, `machine-version`, `software-type`, `software-version`, `room`, `apropos`, `apropos-list`
 
 **Predicates**: `numberp`, `integerp`, `stringp`, `symbolp`, `consp`, `null`, `listp`, `functionp`, `characterp`, `vectorp`, `hash-table-p`
 
@@ -196,6 +210,11 @@ Goodbye.
 
 Definitions persist across expressions within a session (function registry, class registry, and heap are preserved).
 
+REPL history variables follow ANSI CL conventions:
+- `*`, `**`, `***` — last 3 primary return values
+- `+`, `++`, `+++` — last 3 input forms
+- `/`, `//`, `///` — last 3 return value lists
+
 ## Architecture
 
 ```
@@ -243,7 +262,25 @@ Type System:
 Runtime:
   - 2-generation GC: Young (Cheney semi-space) + Old (tri-color mark-sweep)
   - SATB write barrier
+  - Thread-Local Allocation Buffers (TLAB)
+  - GC safepoint infrastructure with precise stack maps
   - Heap-allocated closures, cons cells, CLOS instances
+  - `storage-condition` with 80/90/95% heap pressure warnings
+  - Stack overflow guard (`*max-call-stack-depth*`)
+
+Runtime Subsystems:
+  - **Inline Caches**: Monomorphic, polymorphic, and megamorphic call site dispatch
+  - **Type Feedback Vector (TFV)**: Runtime type profiling for Tier-1 compilation
+  - **Concurrency**: Green threads (work-stealing scheduler), CSP channels, actor model, STM, futures/promises, structured task groups, fibers
+  - **Memory Reclamation**: Epoch-Based Reclamation (EBR), Hazard Pointers, RCU, Quiescent-State-Based Reclamation (QSBR), MVCC
+  - **Lock-Free**: Lock-free stack, queue, hash map, SPSC ring buffer
+  - **Synchronization**: Mutex, RWLock, semaphore, condition variable, barrier, once-call
+  - **OS Layer**: File I/O, process control, signal handling, mmap, socket/network (TCP/UDP), io_uring stubs, event loop
+  - **FFI**: Foreign function calling, callback trampolines, native struct layout, inline assembly stubs
+  - **Image**: Heap snapshot save/restore with magic/version/CRC32 verification
+  - **Distributed**: Raft consensus (leader election, log replication), CRDTs (GCounter, PNCounter, LWWRegister), cluster membership
+  - **Observability**: OpenTelemetry spans (JSON export), performance counters, structured logging, vector clocks, deadlock detector
+  - **Atomic Operations**: CAS, swap, load, store, incf, memory barrier, load/store fences
 ```
 
 ## Self-Hosting
@@ -364,11 +401,13 @@ $ cl-cc repl
 ## Known Limitations
 
 - **Package system**: runtime package operations now maintain internal registry metadata and use host Common Lisp only as a bootstrap fallback. Multi-package programs are not yet fully self-hosted.
-- **Restarts**: Support is partial. Core restart forms exist, but some advanced helpers are still missing.
 - **`format` directives**: Delegated to the host SBCL in the VM interpreter. Not available in native binaries.
 - **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL handles the arithmetic). Not represented in the native x86-64 backend (fixnum only).
-- **Streams**: File handles are integers; first-class stream objects and stream predicates (`streamp`, `stream-element-type`) are not implemented.
 - **Native backend parity**: Some VM-interpreter facilities (`load`, host-backed FFI, host-backed `format`, and host stream bridges) are not yet available in native binaries.
+- **Unicode normalization**: NFC/NFD is implemented for Latin-1 characters. Full Unicode 15 normalization (NFKC/NFKD, UCA collation) requires the complete Unicode Character Database.
+- **Concurrency**: Green threads, channels, actors, STM, lock-free structures, and EBR/RCU/QSBR are implemented as pure-CL primitives suitable for cooperative multitasking. Native OS thread scheduling and M:N threading are not yet integrated.
+- **Distributed systems**: Raft consensus and CRDTs have proof-of-concept implementations. They lack full RPC integration, log persistence, and network transport layers needed for production use.
+- **Standalone binary**: The `standalone` CLI option generates a native Mach-O/ELF binary with runtime linked, but full self-hosting (no host CL dependency at all) is not yet complete.
 
 ## Building & Testing
 
@@ -396,10 +435,12 @@ rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/
 
 ```
 cl-cc run <file>          Compile and run a .lisp file
+  --timeout <seconds>     Maximum execution time (default: 30)
 cl-cc compile <file>      Compile to native Mach-O binary
   --arch x86-64|arm64
   -o <output>
 cl-cc eval "<expr>"       Evaluate a single expression
+  --timeout <seconds>     Maximum execution time (default: 30)
 cl-cc repl                Interactive REPL (definitions persist)
   --stdlib                Include higher-order function library
 cl-cc check <file>        Type-check without executing

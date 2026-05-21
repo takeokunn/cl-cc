@@ -192,12 +192,16 @@
             (unless next-method
               (error "no-next-method: There is no next method for the generic function ~S when called with arguments ~S"
                      (gethash :__name__ gf-ht) orig-args))
-            (let* ((call-args (if (vm-cnm-args-reg inst)
-                                  (vm-reg-get state (vm-cnm-args-reg inst))
-                                  orig-args))
-                   (next-fn (%vm-method-function next-method)))
+             (let* ((call-args (if (vm-cnm-args-reg inst)
+                                   (vm-reg-get state (vm-cnm-args-reg inst))
+                                   orig-args))
+                    (next-fn (%vm-method-function next-method)))
+              (push (list :call-next-method :gf gf-ht :method next-method :args call-args)
+                    (vm-clos-shadow-stack state))
               (vm-push-call-frame state (1+ pc) (vm-dst inst))
-              (push (list gf-ht (cdr methods-list) call-args) (vm-method-call-stack state))
+              (push (list gf-ht (cdr methods-list) call-args
+                          :shadow (car (vm-clos-shadow-stack state)))
+                    (vm-method-call-stack state))
                (vm-bind-closure-args next-fn state call-args)
                (values (vm-label-table-lookup labels (vm-closure-entry-label next-fn)) nil nil)))))))
 

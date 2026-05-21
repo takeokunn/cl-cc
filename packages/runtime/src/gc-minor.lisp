@@ -219,6 +219,19 @@
                   (when from-addr
                     (%gc-ensure-copied heap from-addr to-free-cell
                                        promoted-list-cell #'in-source-p))))))
+          ;; Precise stack maps are compiler-provided roots.  They supplement
+          ;; registered root cells without changing the copying algorithm.
+          (dolist (thread-state *gc-threads*)
+            (dolist (frame (and (consp thread-state) (getf thread-state :frames)))
+              (rt-gc-update-stackmap-frame
+               heap frame
+               (lambda (val)
+                 (let ((from-addr (%rt-gc-value-address-for-predicate val #'in-source-p)))
+                   (when from-addr
+                     (%rt-gc-rebox-pointer-like
+                      val
+                      (%gc-ensure-copied heap from-addr to-free-cell
+                                         promoted-list-cell #'in-source-p))))))))
           ;; Step 2: Drain SATB queue — treat entries as additional roots
           (let ((new-satb nil))
             (dolist (ptr (rt-heap-satb-queue heap))

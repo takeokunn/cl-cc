@@ -130,9 +130,35 @@
    vm-file-position
    vm-file-length
    vm-eof-p
-   vm-make-string-stream
-   vm-get-string-from-stream
-   vm-file-handle
+    vm-make-string-stream
+    vm-get-string-from-stream
+    fundamental-stream
+    fundamental-character-input-stream
+    fundamental-character-output-stream
+    fundamental-binary-input-stream
+    fundamental-binary-output-stream
+    fundamental-character-stream
+    fundamental-binary-stream
+    stream-read-char
+    stream-unread-char
+    stream-read-char-no-hang
+    stream-peek-char
+    stream-listen
+    stream-read-line
+    stream-clear-input
+    stream-write-char
+    stream-write-string
+    stream-terpri
+    stream-fresh-line
+    stream-finish-output
+    stream-force-output
+    stream-clear-output
+    stream-advance-to-column
+    stream-line-column
+    stream-start-line-p
+    stream-read-byte
+    stream-write-byte
+    vm-file-handle
    vm-file-direction
    vm-char-reg
    vm-str-reg
@@ -145,10 +171,37 @@
    vm-princ-sexp
    vm-make-string-output-stream-inst
    vm-get-output-stream-string-inst
-   vm-stream-write-string-inst
-   vm-read-from-string-inst
-    vm-read-sexp-inst
-    vm-eval
+    vm-stream-write-string-inst
+    vm-read-from-string-inst
+     vm-read-sexp-inst
+     *print-base*
+     *print-radix*
+     *print-circle*
+     *print-pretty*
+     *print-level*
+     *print-length*
+     *print-readably*
+     *print-pprint-dispatch*
+     with-standard-io-syntax
+     pprint-logical-block
+     pprint-indent
+     pprint-newline
+     pprint-tab
+     pprint-dispatch-table
+     make-pprint-dispatch-table
+     pprint-dispatch-table-p
+     copy-pprint-dispatch
+     set-pprint-dispatch
+     get-pprint-dispatch
+     *readtable*
+     make-readtable
+     copy-readtable
+     set-macro-character
+     get-macro-character
+     set-dispatch-macro-character
+     get-dispatch-macro-character
+     readtable-case
+     vm-eval
     vm-type-of
     vm-type-rep
     vm-type-rep-p
@@ -239,5 +292,23 @@
     vm-hash-table-reg
     vm-hash-default
     vm-hash-fn
-    string-to-octets
-    octets-to-string))
+     string-to-octets
+     octets-to-string
+     unicode-general-category
+     unicode-alpha-char-p
+     unicode-digit-char-p
+     unicode-upper-case-p
+     unicode-lower-case-p
+     unicode-alphanumericp
+     unicode-char-code
+     unicode-code-char
+     unicode-char-upcase
+     unicode-char-downcase
+     unicode-normalize-string
+     unicode-normalize-nfc
+     unicode-normalize-nfd
+     unicode-normalize-nfkc
+     unicode-normalize-nfkd
+     string-to-utf8-bytes
+     utf8-bytes-to-string
+     unicode-syntax-class))

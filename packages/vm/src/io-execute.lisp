@@ -22,7 +22,11 @@
              ;; Use user-specified if-exists/if-not-exists, falling back to defaults
               (if-exists (or (vm-if-exists inst) :supersede))
               (if-not-exists (or (vm-if-not-exists inst)
-                                 (if (eq direction :output) :create :error)))
+                                  (case direction
+                                    (:output :create)
+                                    (:io :create)
+                                    (:probe nil)
+                                    (otherwise :error))))
               (external-format-designator
                 (if (vm-open-file-external-format-reg inst)
                     (vm-reg-get state (vm-open-file-external-format-reg inst))
@@ -30,8 +34,9 @@
                (normalized-external-format
                  (when external-format-designator
                    (%normalize-text-encoding nil external-format-designator)))
-               (element-type (when (vm-element-type-reg inst)
-                               (vm-reg-get state (vm-element-type-reg inst))))
+               (element-type (if (vm-element-type-reg inst)
+                                 (vm-reg-get state (vm-element-type-reg inst))
+                                 (vm-open-file-element-type inst)))
                (handle (vm-allocate-file-handle state))
                (open-args (append (list path-str
                                         :direction direction
@@ -42,8 +47,9 @@
                                   (when normalized-external-format
                                     (list :external-format normalized-external-format))))
               (stream (apply #'open open-args)))
-        (setf (gethash handle (vm-open-files state)) stream)
-        (vm-reg-set state (vm-dst inst) handle)
+         (when stream
+           (setf (gethash handle (vm-open-files state)) stream))
+        (vm-reg-set state (vm-dst inst) (if stream handle nil))
         (values (1+ pc) nil nil))
     (file-error (e)
       (error "vm-open-file: Failed to open file: ~A" e))))
@@ -150,15 +156,15 @@
 
 (defmethod execute-instruction ((inst vm-read-sequence) state pc labels)
   (declare (ignore labels))
-  (let ((seq (vm-reg-get state (vm-rseq-seq-reg inst)))
-        (stream (vm-reg-get state (vm-rseq-stream-reg inst))))
+  (let* ((seq (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-rseq-seq-reg inst))))
+         (stream (vm-get-stream state (vm-reg-get state (vm-rseq-stream-reg inst)))))
     (vm-reg-set state (vm-dst inst) (read-sequence seq stream))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-write-sequence) state pc labels)
   (declare (ignore labels))
-  (let ((seq (vm-reg-get state (vm-wseq-seq-reg inst)))
-        (stream (vm-reg-get state (vm-wseq-stream-reg inst))))
+  (let* ((seq (%vm-cow-vector-materialize (vm-reg-get state (vm-wseq-seq-reg inst))))
+         (stream (vm-get-stream state (vm-reg-get state (vm-wseq-stream-reg inst)))))
     (write-sequence seq stream)
     (values (1+ pc) nil nil)))
 

@@ -403,10 +403,18 @@ ENTRY may be a PC integer, a label, or a plist containing :PC or :LABEL."
     ;; Normal return path
     (if (vm-call-stack state)
         (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
-            (pop (vm-call-stack state))
+            (vm-pop-call-frame state)
           ;; Pop method-call-stack in sync with call-stack
           (when (vm-method-call-stack state)
-            (pop (vm-method-call-stack state)))
+            (let ((method-frame (pop (vm-method-call-stack state))))
+              (when (and method-frame (listp method-frame)
+                         (getf (cdddr method-frame) :combination)
+                         (vm-clos-shadow-stack state))
+                (pop (vm-clos-shadow-stack state)))
+              (when (and method-frame (listp method-frame)
+                         (getf (cdddr method-frame) :shadow)
+                         (vm-clos-shadow-stack state))
+                (pop (vm-clos-shadow-stack state)))))
           (vm-profile-return state)
           (vm-restore-registers state saved-regs)
           ;; Write the return value into the destination register

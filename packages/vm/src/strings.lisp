@@ -101,8 +101,11 @@ stores host CL values in registers so tests receive proper strings."
 (defmacro define-vm-sso-string-destructive-unary-executor (vm-class cl-fn)
   `(defmethod execute-instruction ((inst ,vm-class) state pc labels)
      (declare (ignore labels))
-     (vm-reg-set state (vm-dst inst)
-                 (,cl-fn (copy-seq (%vm-host-string (vm-reg-get state (vm-src inst))))))
+     (let ((string (%vm-host-string (vm-reg-get state (vm-src inst)))))
+       (vm-reg-set state (vm-dst inst)
+                   (if (stringp string)
+                       (,cl-fn string)
+                       (,cl-fn (copy-seq string)))))
      (values (1+ pc) nil nil)))
 
 ;; All binary string comparisons share the same (dst str1 str2) slot structure.

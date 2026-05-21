@@ -183,9 +183,8 @@ Returns RESULT-REG on success, or NIL when ARG-REGS cannot satisfy PIECES."
 
 ;; open: parse selected keyword args used by the VM-backed file stream.
 (define-phase2-handler "OPEN" (args result-reg ctx)
-  ;; Parse :direction, :if-exists, :if-does-not-exist, and :external-format.
-  ;; Other keyword args (:element-type, etc.) are compiled for evaluation order
-  ;; but ignored by the current VM-backed stream runtime.
+  ;; Parse :direction, :if-exists, :if-does-not-exist, :external-format,
+  ;; and :element-type for the VM-backed stream runtime.
   (flet ((keyword-ast-value (ast)
            (if (and (typep ast 'ast-var) (keywordp (ast-var-name ast)))
                (ast-var-name ast)
@@ -195,9 +194,11 @@ Returns RESULT-REG on success, or NIL when ARG-REGS cannot satisfy PIECES."
     (let* ((path-reg  (compile-ast (first args) ctx))
             (direction :input)
             (if-exists :supersede)
-            (if-not-exists nil)
-            (external-format nil)
-            (external-format-reg nil))
+             (if-not-exists nil)
+             (external-format nil)
+             (external-format-reg nil)
+             (element-type nil)
+             (element-type-reg nil))
       (loop for kv on (cdr args) by #'cddr
              when (cdr kv)
                do (let* ((key (car kv))
@@ -209,16 +210,22 @@ Returns RESULT-REG on success, or NIL when ARG-REGS cannot satisfy PIECES."
                           ((eq k :direction)         (setf direction    (or v :input)))
                           ((eq k :if-exists)         (setf if-exists    (or v :supersede)))
                           ((eq k :if-does-not-exist) (setf if-not-exists v))
-                          ((eq k :external-format)
-                           (if v
-                               (setf external-format v)
-                               (setf external-format-reg (compile-ast val ctx))))
-                          (t (compile-ast val ctx)))))))
+                           ((eq k :external-format)
+                            (if v
+                                (setf external-format v)
+                                (setf external-format-reg (compile-ast val ctx))))
+                           ((eq k :element-type)
+                            (if v
+                                (setf element-type v)
+                                (setf element-type-reg (compile-ast val ctx))))
+                           (t (compile-ast val ctx)))))))
     ;; if-not-exists default: :create for output, :error for input (computed in execute-instruction)
       (emit ctx (make-vm-open-file :dst result-reg :path path-reg :direction direction
-                                   :if-exists if-exists :if-not-exists if-not-exists
-                                   :external-format external-format
-                                   :external-format-reg external-format-reg))
+                                    :if-exists if-exists :if-not-exists if-not-exists
+                                    :external-format external-format
+                                    :external-format-reg external-format-reg
+                                    :element-type element-type
+                                    :element-type-reg element-type-reg))
       result-reg)))
 
 ;; close: (close stream &key abort) — :abort accepted but ignored (FR-589)

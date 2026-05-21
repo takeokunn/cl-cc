@@ -50,6 +50,30 @@ A positive depth means the mutator has reached a point where the collector may
 observe its roots.  The Pure CL runtime uses this as a portable safepoint model;
 native backends can map the same API to thread suspension/cooperation.")
 
+(defparameter *gc-pending* nil
+  "Global cooperative GC request flag observed by safepoint checks.")
+
+(defparameter *rt-preemption-pending* nil
+  "When true, mutators yield at cooperative preemption safepoints.")
+
+(defparameter *rt-preemption-yield-hook* nil
+  "Optional function called by safepoints when cooperative preemption is pending.")
+
+(defvar *rt-gc-stackmap-table* (make-hash-table :test #'equal)
+  "Function/frame id -> RT-STACKMAP metadata for precise stack root scanning.")
+
+(defstruct (rt-stackmap (:constructor make-rt-stackmap
+                            (&key frame-id (slots nil) (source :compiler-stub))))
+  "Precise stack map for one activation frame.
+
+SLOTS is an alist of (FRAME-OFFSET . KIND), where KIND is :OBJECT for traced
+heap references and scalar kinds such as :FIXNUM, :DOUBLE, and :CHAR are ignored
+by the collector. SOURCE records whether the map came from the compiler or a
+runtime stub."
+  frame-id
+  (slots nil :type list)
+  (source :compiler-stub :type keyword))
+
 (defvar *rt-current-gc-heap* nil
   "Dynamically bound heap used by signal handlers that need to inhibit GC.")
 

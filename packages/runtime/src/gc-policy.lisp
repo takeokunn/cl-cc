@@ -207,9 +207,14 @@ can defer non-critical mixed collection work."
       (rt-gc-major-collect heap))
     (when (> (+ (%rt-heap-live-used-words heap) requested-words)
              *gc-max-heap-words*)
-      (error "cl-cc/runtime: GC heap limit exceeded — ~D live/requested words exceed limit ~D"
-             (+ (%rt-heap-live-used-words heap) requested-words)
-             *gc-max-heap-words*))))
+      (if (fboundp 'rt-signal-oom)
+          (rt-signal-oom requested-words
+                         :heap heap
+                         :limit-words *gc-max-heap-words*
+                         :used-words (%rt-heap-live-used-words heap))
+          (error "cl-cc/runtime: GC heap limit exceeded — ~D live/requested words exceed limit ~D"
+                 (+ (%rt-heap-live-used-words heap) requested-words)
+                 *gc-max-heap-words*)))))
 
 (defun %rt-gc-check-pressure (heap)
   (let* ((occupancy (rt-heap-occupancy-pct heap))
@@ -218,6 +223,9 @@ can defer non-critical mixed collection work."
                   ((<= occupancy (rt-heap-pressure-threshold-low heap)) :low)
                   (t nil))))
     (when level
+      (when (and (fboundp 'rt-check-heap-pressure-thresholds)
+                 (member level '(:high) :test #'eq))
+        (rt-check-heap-pressure-thresholds heap))
       (dolist (hook (rt-heap-pressure-hooks heap))
         (funcall hook heap level occupancy)))
     level))

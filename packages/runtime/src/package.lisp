@@ -314,7 +314,14 @@
      #:*rt-finalizer-registry* #:*rt-finalization-queue*
     ;; Precise roots (FR-332)
      #:rt-gc-add-root-typed #:*gc-threads*
-     #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
+      #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
+      #:*gc-pending* #:rt-gc-request #:rt-gc-safepoint-check
+      #:rt-gc-register-thread #:rt-gc-unregister-thread
+      #:rt-gc-register-stackmap #:rt-gc-generate-stackmap-stub #:rt-gc-scan-stackmaps
+      #:rt-stackmap #:make-rt-stackmap #:rt-stackmap-slots
+      #:rt-poison-return-address #:rt-unpoison-return-address
+      #:rt-check-stack-overflow #:rt-with-call-stack-guard
+      #:rt-oom-condition #:rt-gc-pressure-warning
     ;; Profiling (FR-366)
     #:rt-gc-profile-sample #:rt-gc-profile-report #:*gc-profile-enabled*
     #:*gc-profile-interval*
@@ -326,7 +333,10 @@
      #:rt-gc-detect-worker-count
      #:rt-gc-parallel-root-scan #:rt-gc-parallel-mark #:rt-gc-parallel-sweep
      #:%rt-gc-work-stealing-drain #:rt-gc-verify-tri-color-invariant
-     ;; Heap snapshot (FR-368)
-    #:rt-gc-heap-snapshot
-    ;; DOT graph (FR-415)
-    #:rt-gc-heap-dump-dot))
+    ;; Heap snapshot (FR-368)
+     #:rt-gc-heap-snapshot
+     ;; Runtime image snapshot/restore (FR-350, FR-563)
+     #:rt-image-register-global #:rt-save-image #:rt-load-image
+     #:rt-capture-image-state #:rt-restore-image-state
+     ;; DOT graph (FR-415)
+     #:rt-gc-heap-dump-dot))

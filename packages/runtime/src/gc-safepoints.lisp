@@ -10,7 +10,77 @@
        (setf (rt-heap-gc-inhibit ,heap) old-inhibit)
        (when (and (not old-inhibit) (rt-heap-gc-pending ,heap))
          (setf (rt-heap-gc-pending ,heap) nil)
-           (rt-gc-minor-collect ,heap)))))
+            (rt-gc-minor-collect ,heap)))))
+
+(defun rt-gc-register-thread (&key (id *rt-current-thread-id*) stack frames state)
+  "Register a logical mutator thread for cooperative safepoint coordination.
+
+STATE may be an existing plist/thread descriptor.  When omitted, a descriptor
+compatible with the existing GC root scanner is created from ID, STACK, and
+FRAMES.  The descriptor is returned and retained in *GC-THREADS*."
+  (let ((thread-state (or state (list :id id :name id :stack stack :frames frames))))
+    (pushnew thread-state *gc-threads* :test #'equal)
+    thread-state))
+
+(defun rt-gc-unregister-thread (thread-or-id)
+  "Remove THREAD-OR-ID from *GC-THREADS* and clear its safe-region depth."
+  (let ((id (%rt-gc-thread-id thread-or-id)))
+    (setf *gc-threads*
+          (remove-if (lambda (thread-state)
+                       (or (equal thread-state thread-or-id)
+                           (equal (%rt-gc-thread-id thread-state) id)))
+                     *gc-threads*))
+    (remhash id *rt-gc-safe-region-depths*)
+    id))
+
+(defun rt-gc-request (heap &key (reason :explicit))
+  "Request GC at the next safepoint for HEAP and return REASON."
+  (declare (ignore reason))
+  (setf *gc-pending* t)
+  (when heap
+    (setf (rt-heap-gc-pending heap) t))
+  reason)
+
+(defun rt-gc-preemption-request (&optional (pending t))
+  "Set cooperative preemption request state observed by safepoints."
+  (setf *rt-preemption-pending* pending))
+
+(defun rt-gc-safepoint-check (heap &key (kind :poll) (thread-id *rt-current-thread-id*))
+  "Poll a GC/preemption safepoint.
+
+KIND documents the compiler/VM position: :FUNCTION-ENTRY, :LOOP-BACK-EDGE,
+:ALLOCATION, or :POLL.  If a GC is pending while HEAP is inhibited (for example
+inside WITHOUT-GCING), the request stays pending.  Otherwise a minor collection
+is serviced after briefly marking THREAD-ID as safe."
+  (declare (ignore kind))
+  (when *rt-preemption-pending*
+    (when *rt-preemption-yield-hook*
+      (funcall *rt-preemption-yield-hook* thread-id))
+    (setf *rt-preemption-pending* nil))
+  (when (and heap (or *gc-pending* (rt-heap-gc-pending heap)))
+    (if (rt-heap-gc-inhibit heap)
+        (setf (rt-heap-gc-pending heap) t)
+        (progn
+          (rt-gc-enter-safe-region thread-id)
+          (unwind-protect
+               (progn
+                 (setf *gc-pending* nil
+                       (rt-heap-gc-pending heap) nil)
+                 (rt-gc-minor-collect heap))
+            (rt-gc-leave-safe-region thread-id)))))
+  heap)
+
+(defmacro with-gc-function-entry-safepoint ((heap &optional (thread-id '*rt-current-thread-id*)) &body body)
+  "Run BODY after polling a function-entry safepoint."
+  `(progn
+     (rt-gc-safepoint-check ,heap :kind :function-entry :thread-id ,thread-id)
+     ,@body))
+
+(defmacro with-gc-loop-backedge-safepoint ((heap &optional (thread-id '*rt-current-thread-id*)) &body body)
+  "Run BODY after polling a loop-back-edge safepoint."
+  `(progn
+     (rt-gc-safepoint-check ,heap :kind :loop-back-edge :thread-id ,thread-id)
+     ,@body))
 
 (defun %rt-gc-thread-id (thread-state)
   "Return the logical thread id for THREAD-STATE."
@@ -71,7 +141,7 @@ stop-the-world work."
     (setf (rt-heap-gc-inhibit heap) old-inhibit)
     (when (and (not old-inhibit) (rt-heap-gc-pending heap))
       (setf (rt-heap-gc-pending heap) nil)
-      (rt-gc-minor-collect heap)))
+       (rt-gc-minor-collect heap)))
   heap)
 
 (defmacro with-gc-signal-inhibit ((heap) &body body)
