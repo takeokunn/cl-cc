@@ -221,7 +221,8 @@
 
 (deftest opt-pass-devirtualize-sealed-satiated-single-method-gf
   "Sealed+satiated generic calls with one exact primary method become direct calls."
-  (let* ((insts (list
+  (let* (         (cl-cc/optimize:*opt-enable-sealed-gf-devirtualization* t)
+         (insts (list
                  (cl-cc:make-vm-class-def :dst :r0 :class-name 'sealed-node
                                            :superclasses nil :slot-names nil
                                            :slot-initargs nil :sealed t)

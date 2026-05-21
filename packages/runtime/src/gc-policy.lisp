@@ -229,7 +229,7 @@ can defer non-critical mixed collection work."
     ((> promotion-ratio 0.5d0)
      (setf *gc-tenuring-threshold* (max 1 (1- *gc-tenuring-threshold*))))
     ((< promotion-ratio 0.1d0)
-     (setf *gc-tenuring-threshold* (min 15 (1+ *gc-tenuring-threshold*)))))
+     (setf *gc-tenuring-threshold* (min 3 (1+ *gc-tenuring-threshold*)))))
   *gc-tenuring-threshold*)
 
 ;;; FR-333: Nursery Sizing Heuristics — adaptive young size based on promotion ratio and allocation rate

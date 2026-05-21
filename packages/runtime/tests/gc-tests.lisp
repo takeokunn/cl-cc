@@ -179,15 +179,14 @@
   "An object that survives enough minor GCs is promoted to old space."
   ;; Use a larger heap to fit the object after repeated copies.
   ;; Bind *gc-tenuring-threshold* to insulate against parallel-test mutation.
-  (let* ((cl-cc/runtime:*gc-tenuring-threshold* cl-cc/runtime:*gc-tenuring-threshold*)
+  (let* ((cl-cc/runtime:*gc-tenuring-threshold* 3)
          (heap (cl-cc/runtime:make-rt-heap :young-size 128 :old-size 64)))
     (let ((addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
       ;; Write header with age already at the tenuring threshold so the
       ;; very next minor GC will promote it.
       (cl-cc/runtime:rt-heap-set-header
        heap addr
-       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+
-                                  cl-cc/runtime:*gc-tenuring-threshold*))
+       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 3))
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
         (cl-cc/runtime:rt-gc-minor-collect heap)

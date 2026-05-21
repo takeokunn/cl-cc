@@ -27,7 +27,7 @@ Host VM execution stores ordinary CL values in registers, so fixnum/double bit
 patterns are intentionally not decoded here: ordinary integers can share those
 patterns.  SSO strings, singleton values, characters, and pointers have
 distinct tags and are safe to normalize at the run-string boundary."
-  (and (integerp value)
+  (and (typep value '(unsigned-byte 64))
        (let ((val-sso-string-p (%pipeline-runtime-function "VAL-SSO-STRING-P"))
              (val-nil-p        (%pipeline-runtime-function "VAL-NIL-P"))
              (val-t-p          (%pipeline-runtime-function "VAL-T-P"))
