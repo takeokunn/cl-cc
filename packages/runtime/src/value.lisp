@@ -228,11 +228,11 @@ NIL and T intentionally remain +VAL-NIL+ and +VAL-T+, not entries here.")
 (defun val-pointer-p (v)
   "True if V is any pointer-tagged value (object/cons/symbol/function/string).
    Pointer upper-16-bits range: #x7FF9 (object/tag=001) to #x7FFD (string/tag=101)."
-  (declare (type (unsigned-byte 64) v))
   ;; Extract upper 16 bits and check they fall in the pointer sub-tag range.
-  (let ((h (ash v -48)))
-    (declare (type (unsigned-byte 16) h))
-    (and (>= h #x7FF9) (<= h #x7FFD))))
+  (and (typep v '(unsigned-byte 64))
+       (let ((h (ash v -48)))
+         (declare (type (unsigned-byte 16) h))
+         (and (>= h #x7FF9) (<= h #x7FFD)))))
 
 (defun val-compressed-pointer-p (v)
   "True if V is a pointer-tagged value carrying a 32-bit heap-relative offset."

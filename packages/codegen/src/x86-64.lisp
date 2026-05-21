@@ -37,6 +37,11 @@
     (when extra-args
       (format stream "  add rsp, ~D~%" (* 8 (length extra-args))))))
 
+(defmethod emit-instruction (target (inst vm-type-check) stream)
+  "No-op: runtime type-check instructions are metadata only on x86-64."
+  (declare (ignore target inst stream))
+  nil)
+
 (defmethod emit-instruction (target (inst vm-instruction) stream)
   (declare (ignore target stream))
   (error "Unsupported x86-64 instruction: ~A" (type-of inst)))

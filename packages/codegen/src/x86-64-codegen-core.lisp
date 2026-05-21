@@ -289,26 +289,35 @@ formats such as:\n
                                (not (token-char-p (char lower (1- i)))))
                            (or (= end len)
                                (not (token-char-p (char lower end))))))))
-           (loop for i from 0 below len thereis (matches-at-p i))))))
+            (loop for i from 0 below len thereis (matches-at-p i))))))
+
+(defun x86-64-host-x86-p ()
+  "Return T when the host machine is itself x86/x86-64."
+  (let ((machine (string-upcase (or (machine-type) ""))))
+    (or (search "X86" machine)
+        (search "AMD64" machine)
+        (search "X86-64" machine)
+        (search "X86_64" machine))))
 
 (defun x86-64-host-cpu-feature-text ()
   "Return best-effort host CPU feature text, or NIL when probing fails."
-  (or (ignore-errors
-        (when (and (find-package :uiop)
-                   (fboundp 'uiop:run-program))
-          (sb-ext:with-timeout *x86-64-host-probe-timeout-seconds*
-            (uiop:run-program
-             '("sysctl" "-a")
-             :output :string
-             :ignore-error-status t))))
-      (ignore-errors
-        (with-open-file (in "/proc/cpuinfo" :direction :input)
-          (let ((buf (make-string-output-stream)))
-            (loop for line = (read-line in nil nil)
-                  while line
-                  do (progn (write-string line buf)
-                            (write-char #\Newline buf)))
-            (get-output-stream-string buf))))))
+  (when (x86-64-host-x86-p)
+    (or (ignore-errors
+          (when (and (find-package :uiop)
+                     (fboundp 'uiop:run-program))
+            (sb-ext:with-timeout *x86-64-host-probe-timeout-seconds*
+              (uiop:run-program
+               '("sysctl" "-a")
+               :output :string
+               :ignore-error-status t))))
+        (ignore-errors
+          (with-open-file (in "/proc/cpuinfo" :direction :input)
+            (let ((buf (make-string-output-stream)))
+              (loop for line = (read-line in nil nil)
+                    while line
+                    do (progn (write-string line buf)
+                              (write-char #\Newline buf)))
+              (get-output-stream-string buf)))))))
 
 (defun x86-64-host-supports-cpu-feature-p (token)
   "Return T when host CPU feature TOKEN is visible in sysctl/procfs output."
@@ -340,9 +349,10 @@ Priority:
 
 All probe failures are treated as "unknown" => NIL.
 Environment variables remain the primary override path."
-   (or
-    ;; macOS / Darwin path
-    (ignore-errors
+   (and (x86-64-host-x86-p)
+    (or
+     ;; macOS / Darwin path
+     (ignore-errors
       (when (and (find-package :uiop)
                  (fboundp 'uiop:run-program))
         (let ((out (sb-ext:with-timeout *x86-64-host-probe-timeout-seconds*
@@ -359,7 +369,7 @@ Environment variables remain the primary override path."
                while line
                do (progn (write-string line buf)
                          (write-char #\Newline buf)))
-         (and (x86-64-ibrs-token-present-p (get-output-stream-string buf)) t))))))
+          (and (x86-64-ibrs-token-present-p (get-output-stream-string buf)) t)))))))
 
 (defun x86-64-supports-ibrs-p ()
   "Return T when runtime feature flags indicate IBRS/eIBRS support.

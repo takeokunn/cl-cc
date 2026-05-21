@@ -81,6 +81,7 @@ virtual registers."
     ;; I/O: vm-print = MOV RDI(3) + MOV R11(10) + CALL R11(3) = 16 bytes (FR-298)
     (vm-print                           16)
     (vm-closure                          0)
+    (vm-type-check                       0)
     (vm-call                            6)
      (vm-tail-call                       3)
      ;; FR-073 register multiple-values: up to three MOV rr64 instructions.

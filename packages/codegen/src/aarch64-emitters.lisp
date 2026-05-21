@@ -82,6 +82,59 @@
 (define-a64-binary-emitter emit-a64-vm-float-mul encode-fmul)
 (define-a64-binary-emitter emit-a64-vm-float-div encode-fdiv)
 
+(defun emit-a64-boolean-result (rd cond-code stream)
+  "Set RD to 1 when current flags satisfy COND-CODE, otherwise 0.
+
+NOTE: Uses +A64-STACK-PROBE-SCRATCH+ (x16) as a temporary register.
+Regalloc must NOT allocate x16 as the destination register (RD) for any
+comparison instruction, as x16 is reserved for stack probing and this
+emitter clobbers it."
+  (emit-a64-instr (encode-movz rd 0 0) stream)
+  (emit-a64-instr (encode-movz +a64-stack-probe-scratch+ 1 0) stream)
+  (emit-a64-instr (encode-csel rd +a64-stack-probe-scratch+ rd cond-code) stream))
+
+(defun emit-a64-vm-null-p (inst stream)
+  "vm-null-p: dst = (src == 0) ? 1 : 0  (nil is encoded as zero)."
+  (let ((rd (a64-reg (vm-dst inst)))
+        (rn (a64-reg (vm-src inst))))
+    (emit-a64-instr (encode-cmp rn +a64-zr+) stream)
+    (emit-a64-boolean-result rd 0 stream)))
+
+(defun emit-a64-vm-true-pred (inst stream)
+  "Emit dst = 1 for predicates that are always true in integer-only mode.
+
+FIXNUM-ONLY ASSUMPTION: The AArch64 backend currently operates in fixnum-only
+integer mode. All values are integers, so numberp/integerp are always true and
+consp/symbolp/functionp are always false. When full type-tag support is added,
+these must be reimplemented with actual tag checks."
+  (emit-a64-instr (encode-movz (a64-reg (vm-dst inst)) 1 0) stream))
+
+(defun emit-a64-vm-false-pred (inst stream)
+  "Emit dst = 0 for predicates that are always false in integer-only mode.
+
+FIXNUM-ONLY ASSUMPTION: The AArch64 backend currently operates in fixnum-only
+integer mode. All values are integers, so numberp/integerp are always true and
+consp/symbolp/functionp are always false. When full type-tag support is added,
+these must be reimplemented with actual tag checks."
+  (emit-a64-instr (encode-movz (a64-reg (vm-dst inst)) 0 0) stream))
+
+(defmacro define-a64-cmp-emitter (fn-name cond-code description)
+  "Define an AArch64 comparison emitter that materializes a boolean result."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((rd (a64-reg (vm-dst inst)))
+           (rn (a64-reg (vm-lhs inst)))
+           (rm (a64-reg (vm-rhs inst))))
+       (emit-a64-instr (encode-cmp rn rm) stream)
+       (emit-a64-boolean-result rd ,cond-code stream))))
+
+(define-a64-cmp-emitter emit-a64-vm-lt     11 "vm-lt: dst = (lhs < rhs) ? 1 : 0  -- signed.")
+(define-a64-cmp-emitter emit-a64-vm-gt     12 "vm-gt: dst = (lhs > rhs) ? 1 : 0  -- signed.")
+(define-a64-cmp-emitter emit-a64-vm-le     13 "vm-le: dst = (lhs <= rhs) ? 1 : 0  -- signed.")
+(define-a64-cmp-emitter emit-a64-vm-ge     10 "vm-ge: dst = (lhs >= rhs) ? 1 : 0  -- signed.")
+(define-a64-cmp-emitter emit-a64-vm-num-eq 0  "vm-num-eq: dst = (lhs == rhs) ? 1 : 0.")
+(define-a64-cmp-emitter emit-a64-vm-eq     0  "vm-eq: dst = (lhs == rhs) ? 1 : 0.")
+
 (defun emit-a64-vm-fma (inst stream)
   "Emit FMADD Dd, Dn, Dm, Da for vm-fma."
   (let ((rd (a64-reg (vm-dst inst)))

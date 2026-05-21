@@ -174,8 +174,9 @@
           cl-cc:vm-reg
           cl-cc:vm-value
           cl-cc:vm-captured-vars
-          cl-cc:vm-func-reg
-          cl-cc:vm-args
+           cl-cc:vm-func-reg
+           cl-cc:vm-func-ref-dispatch-tag
+           cl-cc:vm-args
           cl-cc:vm-var-name
           cl-cc:vm-car-reg
           cl-cc:vm-cdr-reg

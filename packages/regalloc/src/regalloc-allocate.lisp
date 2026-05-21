@@ -662,6 +662,8 @@ float-vreg map updated with split children."
      (list (make-vm-const :dst scratch :value (cadr remat))))
     ((and (consp remat) (eq (car remat) :inst))
      (list (%regalloc-rewrite-inst-dst (cadr remat) scratch)))
+    ((or (integerp remat) (symbolp remat) (characterp remat) (stringp remat))
+     (list (make-vm-const :dst scratch :value remat)))
     (t nil)))
 
 (defun %regalloc-reserved-scratch-regs (inst cc)

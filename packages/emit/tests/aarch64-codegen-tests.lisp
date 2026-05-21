@@ -29,6 +29,12 @@ Returns the byte vector, or NIL on error."
     (funcall emit-fn (lambda (b) (push b bytes)))
     (nreverse bytes)))
 
+(defun %a64-assert-emitted-bytes (expected bytes)
+  "Assert that BYTES match EXPECTED and preserve 4-byte instruction width."
+  (assert-= (length expected) (length bytes))
+  (assert-= 0 (mod (length bytes) 4))
+  (assert-equal expected bytes))
+
 (defun %fr072-a64-assignment (&rest pairs)
   (let ((ht (make-hash-table :test #'eq)))
     (loop for (vreg phys) on pairs by #'cddr
@@ -368,6 +374,160 @@ Returns the byte vector, or NIL on error."
     (assert-= #xC0 (nth 5 max-bytes))
     (assert-= #x82 (nth 6 max-bytes))
     (assert-= #x9A (nth 7 max-bytes))))
+
+(deftest aarch64-null-p-emitter-byte-patterns
+  "emit-a64-vm-null-p emits CMP + MOVZ + MOVZ + CSEL with EQ condition."
+  (let ((zero-src (%a64-collect-bytes
+                   (lambda (s)
+                     (cl-cc/codegen::emit-a64-vm-null-p
+                      (cl-cc:make-vm-null-p :dst :R0 :src :R0) s))))
+        (non-zero-src (%a64-collect-bytes
+                       (lambda (s)
+                         (cl-cc/codegen::emit-a64-vm-null-p
+                          (cl-cc:make-vm-null-p :dst :R0 :src :R1) s)))))
+    (%a64-assert-emitted-bytes
+     '(#x1F #x00 #x1F #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     zero-src)
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x1F #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     non-zero-src)))
+
+(deftest aarch64-eq-emitter-byte-patterns
+  "emit-a64-vm-eq emits CMP + MOVZ + MOVZ + CSEL with EQ condition."
+  (let ((equal-operands (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-eq
+                            (cl-cc:make-vm-eq :dst :R0 :lhs :R1 :rhs :R1) s))))
+        (unequal-operands (%a64-collect-bytes
+                           (lambda (s)
+                             (cl-cc/codegen::emit-a64-vm-eq
+                              (cl-cc:make-vm-eq :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     equal-operands)
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     unequal-operands)))
+
+(deftest aarch64-num-eq-emitter-byte-patterns
+  "emit-a64-vm-num-eq uses the same EQ byte pattern as vm-eq."
+  (let ((equal-operands (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-num-eq
+                            (cl-cc:make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R1) s))))
+        (unequal-operands (%a64-collect-bytes
+                           (lambda (s)
+                             (cl-cc/codegen::emit-a64-vm-num-eq
+                              (cl-cc:make-vm-num-eq :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     equal-operands)
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #x02 #x80 #x9A)
+     unequal-operands)))
+
+(deftest aarch64-lt-gt-emitter-byte-patterns
+  "emit-a64-vm-lt/gt encode signed LT/GT condition codes in CSEL."
+  (let ((lt-true-shape (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-lt
+                           (cl-cc:make-vm-lt :dst :R0 :lhs :R1 :rhs :R2) s))))
+        (lt-false-shape (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-lt
+                            (cl-cc:make-vm-lt :dst :R0 :lhs :R2 :rhs :R1) s))))
+        (gt-true-shape (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-gt
+                           (cl-cc:make-vm-gt :dst :R0 :lhs :R2 :rhs :R1) s))))
+        (gt-false-shape (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-gt
+                            (cl-cc:make-vm-gt :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xB2 #x80 #x9A)
+     lt-true-shape)
+    (%a64-assert-emitted-bytes
+     '(#x5F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xB2 #x80 #x9A)
+     lt-false-shape)
+    (%a64-assert-emitted-bytes
+     '(#x5F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xC2 #x80 #x9A)
+     gt-true-shape)
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xC2 #x80 #x9A)
+     gt-false-shape)))
+
+(deftest aarch64-le-ge-emitter-byte-patterns
+  "emit-a64-vm-le/ge encode signed LE/GE condition codes in CSEL."
+  (let ((le-true-shape (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-le
+                           (cl-cc:make-vm-le :dst :R0 :lhs :R1 :rhs :R2) s))))
+        (le-false-shape (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-le
+                            (cl-cc:make-vm-le :dst :R0 :lhs :R2 :rhs :R1) s))))
+        (ge-true-shape (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-ge
+                           (cl-cc:make-vm-ge :dst :R0 :lhs :R2 :rhs :R1) s))))
+        (ge-false-shape (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-ge
+                             (cl-cc:make-vm-ge :dst :R0 :lhs :R1 :rhs :R2) s)))))
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xD2 #x80 #x9A)
+     le-true-shape)
+    (%a64-assert-emitted-bytes
+     '(#x5F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xD2 #x80 #x9A)
+     le-false-shape)
+    (%a64-assert-emitted-bytes
+     '(#x5F #x00 #x01 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xA2 #x80 #x9A)
+     ge-true-shape)
+    (%a64-assert-emitted-bytes
+     '(#x3F #x00 #x02 #xEB #x00 #x00 #x80 #xD2
+       #x30 #x00 #x80 #xD2 #x00 #xA2 #x80 #x9A)
+     ge-false-shape)))
+
+(deftest aarch64-fixnum-only-predicate-emitter-byte-patterns
+  "Fixnum-only AArch64 predicates emit unconditional MOVZ true/false constants."
+  (let ((numberp-bytes (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-true-pred
+                           (cl-cc:make-vm-number-p :dst :R0 :src :R1) s))))
+        (integerp-bytes (%a64-collect-bytes
+                         (lambda (s)
+                           (cl-cc/codegen::emit-a64-vm-true-pred
+                            (cl-cc:make-vm-integer-p :dst :R0 :src :R1) s))))
+        (consp-bytes (%a64-collect-bytes
+                      (lambda (s)
+                        (cl-cc/codegen::emit-a64-vm-false-pred
+                         (cl-cc:make-vm-cons-p :dst :R0 :src :R1) s))))
+        (symbolp-bytes (%a64-collect-bytes
+                        (lambda (s)
+                          (cl-cc/codegen::emit-a64-vm-false-pred
+                           (cl-cc:make-vm-symbol-p :dst :R0 :src :R1) s))))
+        (functionp-bytes (%a64-collect-bytes
+                          (lambda (s)
+                            (cl-cc/codegen::emit-a64-vm-false-pred
+                             (cl-cc:make-vm-function-p :dst :R0 :src :R1) s)))))
+    (dolist (bytes (list numberp-bytes integerp-bytes))
+      (%a64-assert-emitted-bytes '(#x20 #x00 #x80 #xD2) bytes))
+    (dolist (bytes (list consp-bytes symbolp-bytes functionp-bytes))
+      (%a64-assert-emitted-bytes '(#x00 #x00 #x80 #xD2) bytes))))
 
 (deftest aarch64-select-emitter-encoding
   "emit-a64-vm-select emits MOV + CMP + CSEL on AArch64."

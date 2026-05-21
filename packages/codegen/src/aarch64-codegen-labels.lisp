@@ -54,6 +54,18 @@
     (setf (gethash 'vm-float-sub ht) 4)     ; encode-fsub
     (setf (gethash 'vm-float-mul ht) 4)     ; encode-fmul
     (setf (gethash 'vm-float-div ht) 4)     ; encode-fdiv
+    (setf (gethash 'vm-lt ht) 16)           ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-gt ht) 16)           ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-le ht) 16)           ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-ge ht) 16)           ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-num-eq ht) 16)       ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-eq ht) 16)           ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-null-p ht) 16)       ; CMP + MOVZ + MOVZ + CSEL
+    (setf (gethash 'vm-number-p ht) 4)      ; MOVZ #1
+    (setf (gethash 'vm-integer-p ht) 4)     ; MOVZ #1
+    (setf (gethash 'vm-cons-p ht) 4)        ; MOVZ #0
+    (setf (gethash 'vm-symbol-p ht) 4)      ; MOVZ #0
+    (setf (gethash 'vm-function-p ht) 4)    ; MOVZ #0
     (setf (gethash 'vm-fma ht) 4)           ; encode-fmadd
     ;; Checked arithmetic (FR-303): flag-setting ALU + B.cond + BRK
     (setf (gethash 'vm-add-checked ht) 12)  ; ADDS + B.cond VC + BRK (3 instrs)
@@ -77,6 +89,7 @@
     (setf (gethash 'vm-rotate ht) 8)        ; MOV + RORV
     (setf (gethash 'vm-label ht) 0)         ; no code
     (setf (gethash 'vm-closure ht) 0)       ; top-level/native scaffolding only
+    (setf (gethash 'vm-type-check ht) 0)
     (setf (gethash 'vm-register-function ht) 0)
     (setf (gethash 'vm-set-global ht) 0)
     (setf (gethash 'vm-jump ht) 4)          ; encode-b

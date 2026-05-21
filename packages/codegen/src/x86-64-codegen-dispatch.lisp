@@ -218,6 +218,11 @@ materializes explicit CET SS instructions under the shadow-stack gate:
         (emit-byte #x66 stream)
         (emit-byte #x90 stream))))
 
+(defun emit-vm-native-noop-inst (inst stream)
+  "Emit nothing for VM-only metadata/check instructions with no native lowering yet."
+  (declare (ignore inst stream))
+  nil)
+
 (defun fits-in-rel8-p (offset)
   "Return T when OFFSET is encodable as a signed 8-bit branch displacement."
   (typep offset '(signed-byte 8)))
@@ -360,6 +365,7 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-atan-inst    . emit-vm-atan)
     ;; FR-298: vm-print with real I/O (indirect call through R11)
     (vm-print        . emit-vm-print)
+    (vm-type-check   . emit-vm-native-noop-inst)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)

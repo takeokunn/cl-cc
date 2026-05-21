@@ -85,6 +85,33 @@
     (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 9 13))  ;; JNO rel32 offset = 2 (little-endian)
     (assert-equal '(#x0F #x0B) (subseq bytes 13 15))))
 
+(deftest x86-emit-add-checked-emits-14-bytes
+  "FR-303 roadmap evidence anchor for checked add size and ADD/JNO trap semantics."
+  (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-checked inst)))
+    (assert-= 14 (length bytes))
+    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
+    (assert-equal '(#x48 #x01 #xD0) (subseq bytes 3 6))  ;; ADD RAX,RDX
+    (assert-equal '(#x0F #x81) (subseq bytes 6 8))))       ;; JNO rel32
+
+(deftest x86-emit-sub-checked-emits-14-bytes
+  "FR-303 roadmap evidence anchor for checked sub size and SUB/JNO trap semantics."
+  (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-checked inst)))
+    (assert-= 14 (length bytes))
+    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
+    (assert-equal '(#x48 #x29 #xD0) (subseq bytes 3 6))  ;; SUB RAX,RDX
+    (assert-equal '(#x0F #x81) (subseq bytes 6 8))))       ;; JNO rel32
+
+(deftest x86-emit-mul-checked-emits-15-bytes
+  "FR-303 roadmap evidence anchor for checked mul size and IMUL/JNO trap semantics."
+  (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-checked inst)))
+    (assert-= 15 (length bytes))
+    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
+    (assert-equal '(#x48 #x0F #xAF #xC2) (subseq bytes 3 7))  ;; IMUL RAX,RDX
+    (assert-equal '(#x0F #x81) (subseq bytes 7 9))))       ;; JNO rel32
+
 (deftest x86-emit-mul-high-emits-19-bytes
   "vm-integer-mul-high-{u,s} emit the documented 19-byte save/MUL-high/restore sequence."
   (assert-equal '(#x49 #x89 #xD3 #x50 #x52 #x48 #x89 #xC8 #x49 #xF7 #xE3 #x49 #x89 #xD3 #x5A #x58 #x4C #x89 #xD8)

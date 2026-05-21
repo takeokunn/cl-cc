@@ -54,7 +54,6 @@
           ;; Keep the historical fixed 22-byte VM instruction size used by
           ;; label relaxation tables while preserving the dst≠src fast shape.
           (emit-byte #x90 stream)
-          (emit-byte #x90 stream)
           (emit-byte #x90 stream)))))
 
 (defun emit-vm-bswap (inst stream)

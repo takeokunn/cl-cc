@@ -243,9 +243,9 @@
          (member "docs/optimize-backend.md"
                  (cl-cc/optimize::opt-roadmap-evidence-modules evidence)
                  :test #'string=))
-        (when (eq evidence-status :implemented)
-          (assert-true
-           (cl-cc/optimize::optimize-roadmap-evidence-well-formed-p evidence)))
+         (when (eq evidence-status :implemented)
+           (assert-true
+            (cl-cc/optimize::optimize-roadmap-evidence-well-formed-p evidence)))
         (push (cl-cc/optimize::opt-roadmap-evidence-modules evidence) profiles)
         (if (eq evidence-status :implemented)
             (progn

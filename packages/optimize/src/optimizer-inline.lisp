@@ -416,24 +416,25 @@ The original join call remains available for fall-through and unknown preds."
   (let ((dst (opt-inst-dst inst)))
     (typecase inst
       (vm-class-def
-       (%opt-set-reg-fact dst reg-class (vm-class-name-sym inst)
-                          reg-name reg-object-class reg-const reg-closure-label reg-gf-literal))
+       (%opt-set-reg-fact (vm-dst inst) reg-class (vm-class-name-sym inst)
+                           reg-name reg-object-class reg-const reg-closure-label reg-gf-literal))
       (vm-get-global
-       (%opt-set-reg-fact dst reg-name (vm-global-name inst)
-                          reg-class reg-object-class reg-const reg-closure-label reg-gf-literal))
+       (%opt-set-reg-fact (vm-dst inst) reg-name (vm-global-name inst)
+                           reg-class reg-object-class reg-const reg-closure-label reg-gf-literal))
       (vm-const
-       (%opt-set-reg-fact dst reg-const (vm-value inst)
-                          reg-name reg-class reg-object-class reg-closure-label reg-gf-literal)
+       (%opt-set-reg-fact (vm-dst inst) reg-const (vm-value inst)
+                           reg-name reg-class reg-object-class reg-closure-label reg-gf-literal)
        (let ((literal-info (%opt-hash-gf-info (vm-value inst))))
          (when literal-info
-           (setf (gethash dst reg-gf-literal) literal-info))))
+           (setf (gethash (vm-dst inst) reg-gf-literal) literal-info))))
       ((or vm-closure vm-func-ref)
-       (%opt-set-reg-fact dst reg-closure-label (vm-label-name inst)
-                          reg-name reg-class reg-object-class reg-const reg-gf-literal))
+       (%opt-set-reg-fact (vm-dst inst) reg-closure-label (vm-label-name inst)
+                           reg-name reg-class reg-object-class reg-const reg-gf-literal))
       (vm-move
-       (let ((src (vm-move-src inst)))
+       (let ((dst (vm-dst inst))
+             (src (vm-move-src inst)))
          (%opt-clear-reg-facts dst reg-name reg-class reg-object-class
-                               reg-const reg-closure-label reg-gf-literal)
+                                reg-const reg-closure-label reg-gf-literal)
          (dolist (pair `((,reg-name . ,(gethash src reg-name))
                          (,reg-class . ,(gethash src reg-class))
                          (,reg-object-class . ,(gethash src reg-object-class))
@@ -445,9 +446,10 @@ The original join call remains available for fall-through and unknown preds."
              (when found-p
                (setf (gethash dst (car pair)) (cdr pair)))))))
       (vm-make-obj
-       (let ((class-name (gethash (vm-class-reg inst) reg-name)))
+       (let ((class-name (or (gethash (vm-class-reg inst) reg-name)
+                             (gethash (vm-class-reg inst) reg-class))))
          (%opt-clear-reg-facts dst reg-name reg-class reg-object-class
-                               reg-const reg-closure-label reg-gf-literal)
+                                 reg-const reg-closure-label reg-gf-literal)
          (when (and class-name (gethash class-name class-sealed))
            (setf (gethash dst reg-object-class) class-name))))
       (vm-register-method
@@ -529,8 +531,11 @@ The original join call remains available for fall-through and unknown preds."
                                                        gf-infos)))
     (if label
         (let ((func-reg (funcall fresh-reg)))
-          (push (make-vm-call :dst (vm-dst inst) :func func-reg :args (copy-list (vm-args inst))) result)
-          (push (make-vm-func-ref :dst func-reg :label label) result))
+          (push (make-vm-func-ref :dst func-reg :label label) result)
+          (push (make-vm-call :dst (vm-dst inst)
+                              :func func-reg
+                              :args (copy-list (vm-args inst)))
+                result))
         (push inst result)))
   result)
 
