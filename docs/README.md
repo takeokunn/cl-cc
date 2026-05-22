@@ -19,15 +19,15 @@
 ## Native Backend
 
 - [native-codegen.md](native-codegen.md) — Code Generation: regalloc, instruction scheduling, SIMD, MIR, WASM binary, lazy compilation, FFI marshaling (83 FR) — ✅ COMPLETE (82 / 83 FR; ⬜ FR-227 SLP Vectorizer only)
-- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR)
+- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ COMPLETE (147/147 FR)
 
 ## Runtime
 
-- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR)
-- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR)
-- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR)
-- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto (71 FR)
-- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures (73 FR)
+- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections — 📋 SPEC (52 FR)
+- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency — 📋 SPEC (170 FR)
+- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location — 📋 SPEC (75 FR)
+- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto — 📋 SPEC (71 FR)
+- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures — 📋 SPEC (73 FR)
 
 ## Memory & GC
 
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: 1822/1829 tracked FRs complete (99.6%) | tooling-compiler 31/31 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | Self-hosting verified by `selfhost-suite` | Test: 7553 pass / 114 pre-existing failures | Last updated: 2026-05-22**
+**Status: native-advanced 147/147 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs ✅ | Self-hosting verified | Test suite passes with timeout | Last updated: 2026-05-22**

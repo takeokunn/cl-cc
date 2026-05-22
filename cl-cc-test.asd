@@ -478,7 +478,12 @@
    (:module "migration-safety"
     :pathname "packages/umbrella-tests"
     :components
-    ((:file "migration-safety-tests"))))
+     ((:file "migration-safety-tests")))
+    (:module "native-advanced-evidence"
+     :pathname "tests"
+     :serial t
+     :components
+     ((:file "native-advanced-evidence-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
