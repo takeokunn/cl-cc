@@ -35,7 +35,7 @@
 
 ## Tooling
 
-- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR)
+- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security, pass infra (31 FR) — ✅ COMPLETE (31 / 31 FR)
 - [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR)
 - [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR)
 - [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR)
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: 1791/1798 tracked FRs complete (99.6%) | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | Self-hosting verified by `selfhost-suite` | Test: 7553 pass / 114 pre-existing failures | Last updated: 2026-05-20**
+**Status: 1822/1829 tracked FRs complete (99.6%) | tooling-compiler 31/31 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | Self-hosting verified by `selfhost-suite` | Test: 7553 pass / 114 pre-existing failures | Last updated: 2026-05-22**
