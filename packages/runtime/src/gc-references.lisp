@@ -288,61 +288,15 @@ sweep clears those bits."
 ;;; Finalizer Support (FR-337, FR-459, FR-460, FR-471)
 ;;; ------------------------------------------------------------
 
-(defvar *rt-finalizer-registry* nil
-  "Alist of (object . finalizer-function) for objects that should have
-finalizers run before they are reclaimed.")
-
-(defvar *rt-finalization-queue* nil
-  "Objects whose finalizers were scheduled during the current GC cycle.")
-
-(defun rt-register-finalizer (object-addr finalizer-fn)
-  "Register FINALIZER-FN to be called when OBJECT-ADDR becomes unreachable."
-  (check-type finalizer-fn function)
-  (rt-unregister-finalizer object-addr)
-  (push (cons object-addr finalizer-fn) *rt-finalizer-registry*)
-  object-addr)
-
-(defun rt-unregister-finalizer (object-addr)
-  "Remove any finalizer registered for OBJECT-ADDR."
-  (setf *rt-finalizer-registry*
-        (delete object-addr *rt-finalizer-registry* :key #'car :test #'eql))
-  object-addr)
-
-(defun rt-finalize (object function)
-  "Register FUNCTION to run with OBJECT when OBJECT becomes unreachable."
-  (rt-register-finalizer object function))
-
-(defun rt-cancel-finalization (object)
-  "Cancel any pending finalization for OBJECT."
-  (rt-unregister-finalizer object))
-
 (defun rt-register-stream-finalizer (stream-obj)
   "Register a finalizer that closes STREAM-OBJ when it becomes unreachable.
    This is a safety net; explicit WITH-OPEN-FILE is preferred."
   (rt-register-finalizer stream-obj
                          (lambda (obj)
                            (declare (ignore obj))
-                           (format *error-output*
-                                   "WARNING: GC finalized unclosed stream ~S~%"
-                                   stream-obj))))
-
-(defun %rt-gc-process-finalizers (heap marked-set)
-  "Run finalizers for unreachable objects before sweep reclaims them."
-  (let ((remaining nil)
-        (scheduled nil))
-    (dolist (entry *rt-finalizer-registry*)
-      (destructuring-bind (object . function) entry
-        (if (%rt-gc-reference-live-p heap marked-set object)
-            (push entry remaining)
-            (progn
-              (push object scheduled)
-              (handler-case
-                  (funcall function object)
-                (error (e)
-                  (format *error-output*
-                          "WARNING: Finalizer for ~S failed: ~A~%" object e)))))))
-    (setf *rt-finalization-queue* (nreverse scheduled)
-          *rt-finalizer-registry* (nreverse remaining))))
+                            (format *error-output*
+                                    "WARNING: GC finalized unclosed stream ~S~%"
+                                    stream-obj))))
 
 ;;; ------------------------------------------------------------
 ;;; Weak Hash Table Support (FR-448, FR-449)

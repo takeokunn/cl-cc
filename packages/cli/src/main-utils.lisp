@@ -232,8 +232,11 @@ Returns :lisp or :php."
     seconds))
 
 (defun %get-timeout (parsed)
-  (let ((raw (flag parsed "--timeout")))
-    (when raw (%parse-timeout-seconds raw))))
+  (unless (flag parsed "--no-timeout")
+    (let ((raw (flag parsed "--timeout")))
+      (if raw
+          (%parse-timeout-seconds raw)
+          30))))
 
 (defun %call-with-cli-timeout (seconds thunk command-name)
   (if seconds

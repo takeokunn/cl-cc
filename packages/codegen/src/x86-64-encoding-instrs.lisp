@@ -600,6 +600,34 @@ SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
   (emit-dword disp stream)
   (emit-byte imm stream))
 
+(defun emit-mov-m64-imm32 (base offset imm stream)
+  "MOV qword ptr [BASE+OFFSET], sign-extended IMM32."
+  (emit-byte (rex-prefix :w 1 :b (ash base -3)) stream)
+  (emit-byte #xC7 stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) 0 base offset stream)
+  (emit-dword imm stream))
+
+(defun emit-x86-64-lfence (stream)
+  "Emit LFENCE."
+  (emit-byte #x0F stream)
+  (emit-byte #xAE stream)
+  (emit-byte #xE8 stream))
+
+(defun emit-x86-64-safe-stack-load-pointer (dst stream)
+  "Load the SafeStack unsafe-stack pointer from FS TLS into DST when enabled."
+  (when *x86-64-safe-stack-enabled*
+    (emit-mov-rm64-fs-disp32 dst +x86-64-safe-stack-tls-disp32+ stream)))
+
+(defun emit-x86-64-safe-stack-store-pointer (src stream)
+  "Store SRC as the SafeStack unsafe-stack pointer in FS TLS when enabled."
+  (when *x86-64-safe-stack-enabled*
+    (emit-byte #x64 stream)
+    (emit-byte (rex-prefix :w 1 :r (ash src -3)) stream)
+    (emit-byte #x89 stream)
+    (emit-byte (modrm 0 src 4) stream)
+    (emit-byte (sib 0 4 5) stream)
+    (emit-dword +x86-64-safe-stack-tls-disp32+ stream)))
+
 (defun emit-call-r64 (reg stream)
   "CALL r/m64 (indirect call through register).
 
@@ -771,3 +799,71 @@ SCALE must be one of 1, 2, 4, or 8 when INDEX is non-NIL."
   (emit-byte #x0F stream)
   (emit-byte #xBD stream)
   (emit-byte (modrm 3 dst src) stream))
+
+;;; ── AVX-512 / APX experimental emitters ─────────────────────────────────────
+
+(defun emit-avx512-evex-zzz (opcode map dst-zmm src1-zmm src2-zmm stream &key (w 0) (mask +k0+))
+  "Emit an EVEX.512 register-register vector instruction."
+  (emit-evex-prefix stream :map map :w w :vvvv src1-zmm :pp +vex-pp-66+
+                    :r (ash dst-zmm -3) :b (ash src2-zmm -3)
+                    :r2 (ash dst-zmm -4) :ll 2 :aaa mask)
+  (emit-byte opcode stream)
+  (emit-byte (modrm 3 dst-zmm src2-zmm) stream))
+
+(defun emit-vpaddd-zmm (dst src1 src2 stream &key (mask +k0+))
+  "VPADDD zmm{k}, zmm, zmm."
+  (emit-avx512-evex-zzz #xFE +evex-map-0f+ dst src1 src2 stream :mask mask))
+
+(defun emit-vmovdqu64-zmm-load (dst base offset stream &key (mask +k0+))
+  "VMOVDQU64 zmm{k}, [base+offset]."
+  (emit-evex-prefix stream :map +evex-map-0f+ :w 1 :vvvv #xF :pp +vex-pp-f3+
+                    :r (ash dst -3) :b (ash base -3) :r2 (ash dst -4)
+                    :ll 2 :aaa mask)
+  (emit-byte #x6F stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) dst base offset stream))
+
+(defun emit-vmovdqu64-zmm-store (base offset src stream &key (mask +k0+))
+  "VMOVDQU64 [base+offset]{k}, zmm."
+  (emit-evex-prefix stream :map +evex-map-0f+ :w 1 :vvvv #xF :pp +vex-pp-f3+
+                    :r (ash src -3) :b (ash base -3) :r2 (ash src -4)
+                    :ll 2 :aaa mask)
+  (emit-byte #x7F stream)
+  (%emit-modrm-address (x86-64-memory-mod base offset) src base offset stream))
+
+(defun emit-vpxord-zmm (dst src1 src2 stream &key (mask +k0+))
+  "VPXORD zmm{k}, zmm, zmm."
+  (emit-avx512-evex-zzz #xEF +evex-map-0f+ dst src1 src2 stream :mask mask))
+
+(defun emit-vpbroadcastd-zmm-r32 (dst src-gpr stream &key (mask +k0+))
+  "VPBROADCASTD zmm{k}, r32."
+  (emit-evex-prefix stream :map +evex-map-0f38+ :w 0 :vvvv #xF :pp +vex-pp-66+
+                    :r (ash dst -3) :b (ash src-gpr -3) :r2 (ash dst -4)
+                    :ll 2 :aaa mask)
+  (emit-byte #x58 stream)
+  (emit-byte (modrm 3 dst src-gpr) stream))
+
+(defun emit-vpaddb-zmm (dst src1 src2 stream &key (mask +k0+))
+  "VPADDB zmm{k}, zmm, zmm."
+  (emit-avx512-evex-zzz #xFC +evex-map-0f+ dst src1 src2 stream :mask mask))
+
+(defun emit-vpaddw-zmm (dst src1 src2 stream &key (mask +k0+))
+  "VPADDW zmm{k}, zmm, zmm."
+  (emit-avx512-evex-zzz #xFD +evex-map-0f+ dst src1 src2 stream :mask mask))
+
+(defun emit-apx-add-ndd-rrr64 (dst src1 src2 stream &key no-flags-p)
+  "Experimental APX NDD/NF ADD lowering.  Falls back to MOV+ADD unless APX is enabled."
+  (declare (ignore no-flags-p))
+  (unless *x86-64-apx-enabled* (emit-mov-rr64 dst src1 stream))
+  (emit-add-rr64 dst src2 stream))
+
+(defun emit-apx-sub-ndd-rrr64 (dst src1 src2 stream &key no-flags-p)
+  "Experimental APX NDD/NF SUB lowering.  Falls back to MOV+SUB unless APX is enabled."
+  (declare (ignore no-flags-p))
+  (unless *x86-64-apx-enabled* (emit-mov-rr64 dst src1 stream))
+  (emit-sub-rr64 dst src2 stream))
+
+(defun emit-apx-imul-ndd-rrr64 (dst src1 src2 stream &key no-flags-p)
+  "Experimental APX NDD/NF IMUL lowering.  Falls back to MOV+IMUL unless APX is enabled."
+  (declare (ignore no-flags-p))
+  (unless *x86-64-apx-enabled* (emit-mov-rr64 dst src1 stream))
+  (emit-imul-rr64 dst src2 stream))

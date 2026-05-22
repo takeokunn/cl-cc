@@ -8,6 +8,34 @@
 
 (in-suite cl-cc-unit-suite)
 
+(deftest vm-execute-safety-level-bounds-checking
+  "Safety level 1 signals TYPE-ERROR for invalid string/array indexes; safety 0 skips explicit checks."
+  (let ((cl-cc/vm::*safety-level* 1))
+    (assert-signals type-error (cl-cc/vm::vm-check-index "abc" 3 'char)))
+  (let ((cl-cc/vm::*safety-level* 0))
+    (assert-equal 99 (cl-cc/vm::vm-check-index "abc" 99 'char))))
+
+(deftest vm-execute-stack-canary-verification
+  "Stack canary mismatch signals MEMORY-FAULT when canaries are enabled."
+  (let ((cl-cc/vm::*security-canaries* t)
+        (snapshot (make-hash-table :test #'eq)))
+    (setf (gethash :__stack-canary__ snapshot) 1
+          (gethash :__stack-canary-check__ snapshot) 2)
+    (assert-signals cl-cc/vm::memory-fault
+      (cl-cc/vm::vm-verify-stack-canary snapshot))))
+
+(deftest vm-execute-cow-array-make-and-adjust
+  "make-array supports copy-on-write wrappers and adjust-array resolves them."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s :R1 3)
+    (cl-cc:vm-reg-set s :R2 9)
+    (exec1 (cl-cc:make-vm-make-array :dst :R0 :size-reg :R1 :initial-element :R2
+                                      :adjustable t :copy-on-write t) s)
+    (assert-true (cl-cc/vm::vm-cow-vector-p (cl-cc:vm-reg-get s :R0)))
+    (cl-cc:vm-reg-set s :R3 5)
+    (exec1 (cl-cc:make-vm-adjust-array :dst :R4 :arr :R0 :dims :R3 :initial-element nil) s)
+    (assert-equal 5 (array-total-size (cl-cc:vm-reg-get s :R4)))))
+
 ;;; ─── vm-falsep ──────────────────────────────────────────────────────────────
 
 (deftest vm-execute-vm-falsep-semantics
@@ -170,5 +198,70 @@ expansions, which previously fell back to bogus local closures."
       (assert-true (functionp fn))
       (assert-= 42 (funcall fn 41)))))
 
+(deftest vm-execute-call/cc-restores-copied-stack
+  "FR-800: call/cc captures a reusable heap copy of the VM stack and resumes at the saved PC."
+  (let* ((program (cl-cc:make-vm-program
+                   :instructions
+                   (list (cl-cc:make-vm-closure :dst :FN :label "fn" :params '(:K)
+                                               :optional-params nil :rest-param nil
+                                               :key-params nil :rest-stack-alloc-p nil
+                                               :inline-policy nil :dispatch-tag nil :captured nil)
+                         (cl-cc:make-vm-call/cc :dst :R0 :func :FN)
+                         (cl-cc:make-vm-halt :reg :R0)
+                         (cl-cc:make-vm-label :name "fn")
+                         (cl-cc:make-vm-const :dst :V :value 42)
+                         (cl-cc:make-vm-call :dst :IGNORED :func :K :args '(:V))
+                         (cl-cc:make-vm-const :dst :BAD :value 9)
+                         (cl-cc:make-vm-ret :reg :BAD))
+                   :result-register :R0)))
+    (assert-= 42 (cl-cc:run-compiled program))))
 
+(deftest vm-execute-abort-to-prompt-jumps-to-delimiter
+  "FR-914: abort-to-prompt unwinds to the named prompt and returns the supplied value."
+  (let* ((program (cl-cc:make-vm-program
+                   :instructions
+                   (list (cl-cc:make-vm-closure :dst :FN :label "fn" :params nil
+                                               :optional-params nil :rest-param nil
+                                               :key-params nil :rest-stack-alloc-p nil
+                                               :inline-policy nil :dispatch-tag nil :captured nil)
+                         (cl-cc:make-vm-const :dst :PROMPT :value 'p)
+                         (cl-cc:make-vm-call-with-prompt :dst :R0 :func :FN :prompt :PROMPT)
+                         (cl-cc:make-vm-halt :reg :R0)
+                         (cl-cc:make-vm-label :name "fn")
+                         (cl-cc:make-vm-const :dst :P2 :value 'p)
+                         (cl-cc:make-vm-const :dst :V :value 77)
+                         (cl-cc:make-vm-abort-to-prompt :prompt :P2 :value :V)
+                         (cl-cc:make-vm-const :dst :BAD :value 9)
+                         (cl-cc:make-vm-ret :reg :BAD))
+                   :result-register :R0)))
+    (assert-= 77 (cl-cc:run-compiled program))))
 
+(deftest vm-execute-mv-buffer-frame-protocol
+  "vm-values populates the fixed MV buffer; vm-nth-value and mv-bind read it in O(1)."
+  (let ((s (make-test-vm))
+        (labels nil))
+    (cl-cc:vm-reg-set s :A 10)
+    (cl-cc:vm-reg-set s :B 20)
+    (cl-cc:vm-reg-set s :C 30)
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-values :dst :R :src-regs '(:A :B :C)) s 0 labels)
+    (assert-= 3 (cl-cc/vm::vm-mv-count s))
+    (assert-= 20 (aref (cl-cc/vm::vm-mv-buffer s) 1))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-nth-value :dst :N :index 2) s 1 labels)
+    (assert-= 30 (cl-cc:vm-reg-get s :N))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-mv-bind :dst-regs '(:X :Y :Z :MISSING)) s 2 labels)
+    (assert-= 10 (cl-cc:vm-reg-get s :X))
+    (assert-= 20 (cl-cc:vm-reg-get s :Y))
+    (assert-= 30 (cl-cc:vm-reg-get s :Z))
+    (assert-eq nil (cl-cc:vm-reg-get s :MISSING))))
+
+(deftest vm-execute-empty-values-buffer
+  "(values) is represented as mv-count=0 with mv-buffer[0]=NIL."
+  (let ((s (make-test-vm)))
+    (cl-cc/vm::execute-instruction
+     (cl-cc:make-vm-values :dst :R :src-regs nil) s 0 nil)
+    (assert-= 0 (cl-cc/vm::vm-mv-count s))
+    (assert-eq nil (aref (cl-cc/vm::vm-mv-buffer s) 0))
+    (assert-eq nil (cl-cc:vm-reg-get s :R))))

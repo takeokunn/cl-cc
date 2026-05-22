@@ -225,6 +225,26 @@
     (assert-output-contains get "array.get $eqref_array_t")
     (assert-output-contains set "array.set $eqref_array_t")))
 
+(deftest wasm-gc-predefined-type-section-wat-level
+  "FR-721: WAT output declares GC array/struct/ref types used by Lisp objects."
+  (let ((wat (%wat-for "(cons 1 2)")))
+    (assert-true wat)
+    (assert-output-contains wat "(type $bytes_array_t (array (mut i8)))")
+    (assert-output-contains wat "(type $string_t (struct")
+    (assert-output-contains wat "(type $cons_t (struct (field $car (mut eqref))")
+    (assert-output-contains wat "(type $eqref_array_t (array (mut eqref)))")
+    (assert-output-contains wat "(type $closure_t (struct")
+    (assert-output-contains wat "(struct.new $cons_t")))
+
+(deftest wasm-relaxed-simd-byte-encoding-wat-level-fixture
+  "FR-720: Relaxed SIMD opcode bytes can be embedded beside WAT-level SIMD feature fixtures."
+  (let* ((bytes (coerce (cl-cc/codegen::wasm-encode-simd-op
+                         cl-cc/codegen::+wasm-f32x4-relaxed-madd+)
+                        'list))
+         (fixture "(module (func (param v128 v128 v128) (result v128) f32x4.relaxed_madd))"))
+    (assert-equal '(#xfd #x85 #x01) bytes)
+    (assert-true (search "f32x4.relaxed_madd" fixture :test #'char=))))
+
 (deftest wasm-gc-array-bce-metadata-emits-elision-marker
   "BCE metadata is consumed by Wasm array emitters while preserving spec traps."
   (let ((get-inst (cl-cc:make-vm-aref :dst :r0 :array-reg :r1 :index-reg :r2))

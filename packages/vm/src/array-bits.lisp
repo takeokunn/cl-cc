@@ -111,7 +111,8 @@
          (displaced-index-offset (if (vm-displaced-index-offset-reg inst)
                                      (vm-reg-get state (vm-displaced-index-offset-reg inst))
                                      0))
-         (args (append (list arr new-dims)
+         (base-arr (%vm-cow-vector-ensure-writable arr))
+         (args (append (list base-arr new-dims)
                        (when init-present-p
                          (list :initial-element
                                (vm-reg-get state (vm-initial-element inst))))
@@ -132,7 +133,7 @@
 (defmethod execute-instruction ((inst vm-array-displacement) state pc labels)
   (declare (ignore labels))
   (multiple-value-bind (displaced-to offset)
-      (array-displacement (vm-reg-get state (vm-src inst)))
+      (array-displacement (%vm-cow-vector-materialize (vm-reg-get state (vm-src inst))))
     (vm-reg-set state (vm-dst inst) displaced-to)
     (setf (vm-values-list state) (list displaced-to offset))
     (values (1+ pc) nil nil)))

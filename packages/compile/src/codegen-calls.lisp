@@ -246,7 +246,32 @@ first-class function values here."
           (when (= (length args) (length params))
             (let ((arg-regs (%compile-call-arg-registers args ctx)))
               (%emit-argument-rebinds-and-jump arg-regs params param-regs target-label ctx)
-               result-reg)))))))
+                result-reg)))))))
+
+(defun %try-compile-continuation-operator (func-sym args result-reg ctx)
+  "Lower continuation operators to dedicated VM control instructions."
+  (when func-sym
+    (let ((name (symbol-name func-sym)))
+      (cond
+        ((and (member name '("CALL-WITH-CURRENT-CONTINUATION" "CALL/CC") :test #'string=)
+              (= (length args) 1))
+         (let ((fn-reg (compile-ast (first args) ctx)))
+           (emit ctx (make-vm-call/cc :dst result-reg :func fn-reg))
+           result-reg))
+        ((and (string= name "CALL-WITH-CONTINUATION-PROMPT")
+              (= (length args) 2))
+         (let ((fn-reg (compile-ast (first args) ctx))
+               (prompt-reg (compile-ast (second args) ctx)))
+           (emit ctx (make-vm-call-with-prompt :dst result-reg
+                                               :func fn-reg
+                                               :prompt prompt-reg))
+           result-reg))
+        ((and (string= name "ABORT-TO-PROMPT")
+              (= (length args) 2))
+         (let ((prompt-reg (compile-ast (first args) ctx))
+               (value-reg (compile-ast (second args) ctx)))
+           (emit ctx (make-vm-abort-to-prompt :prompt prompt-reg :value value-reg))
+           result-reg))))))
 
 (defun %try-compile-equality-predicate (func-sym args result-reg ctx)
   "Lower EQ/EQL/EQUAL through a type-specialized equality constructor when possible."
@@ -338,6 +363,11 @@ Each handler form must return RESULT-REG on success or NIL to continue."
   (%try-compile-noescape-cons    func-sym  args result-reg      ctx)
   (%try-compile-noescape-array   func-sym  args result-reg      ctx)
   (%try-compile-local-tail-jump  func-sym  args result-reg tail ctx)
+  (%try-compile-continuation-operator func-sym args result-reg ctx)
+  (and (member (symbol-name func-sym) '("LOAD-TIME-VALUE" "%LOAD-TIME-VALUE") :test #'string=)
+       (%compile-load-time-value-call args result-reg ctx))
+  (and (member (symbol-name func-sym) '("NTH-VALUE" "%NTH-VALUE") :test #'string=)
+       (%compile-nth-value-call args result-reg ctx))
   (%try-compile-builtin          func-sym  args result-reg      ctx))
 
 (defmethod compile-ast ((node ast-call) ctx)

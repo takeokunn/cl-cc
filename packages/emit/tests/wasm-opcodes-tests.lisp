@@ -94,6 +94,16 @@
   "GC opcode prefix byte."
   (assert-equal #xfb cl-cc/codegen::+wasm-gc-prefix+))
 
+(deftest-each wasm-relaxed-simd-opcodes
+  "FR-720: Relaxed SIMD representatives live in the 0xFD prefixed SIMD space."
+  :cases (("swizzle"     cl-cc/codegen::+wasm-i8x16-relaxed-swizzle+       '(#xfd #x80 #x01))
+          ("f32x4-madd"  cl-cc/codegen::+wasm-f32x4-relaxed-madd+         '(#xfd #x85 #x01))
+          ("i32x4-select" cl-cc/codegen::+wasm-i32x4-relaxed-lane-select+ '(#xfd #x8b #x01))
+          ("f64x2-max"   cl-cc/codegen::+wasm-f64x2-relaxed-max+          '(#xfd #x90 #x01)))
+  (opcode expected-bytes)
+  (assert-equal expected-bytes
+                (coerce (cl-cc/codegen::wasm-encode-simd-op opcode) 'list)))
+
 (deftest-each wasm-gc-struct-opcodes
   "GC struct manipulation opcodes."
   :cases (("new"         cl-cc/codegen::+wasm-gc-struct-new+         0)

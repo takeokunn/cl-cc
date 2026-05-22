@@ -8,6 +8,9 @@
   (:export
    ;; Mach-O constants
    #:+mh-magic-64+
+   #:+fat-magic+
+   #:+fat-cputype-x86-64+
+   #:+fat-cputype-arm64+
    #:+cpu-type-x86-64+
    #:+cpu-type-arm64+
    #:+cpu-subtype-x86-64-all+
@@ -47,6 +50,12 @@
     #:relocation-info
     #:entry-point-command
    #:nlist
+   #:mach-o-fat-slice
+   #:make-mach-o-fat-slice
+   #:mach-o-fat-slice-cputype
+   #:mach-o-fat-slice-cpusubtype
+   #:mach-o-fat-slice-align
+   #:mach-o-fat-slice-bytes
 
    ;; Accessors
    #:mach-header-magic
@@ -103,6 +112,8 @@
     #:add-entry-point
    #:build-mach-o
    #:write-mach-o-file
+   #:build-mach-o-fat-binary
+   #:write-mach-o-fat-file
 
    ;; Utilities
    #:align-up
@@ -111,9 +122,27 @@
    #:with-output-to-vector
 
    ;; ELF64 backend
-    #:compile-to-elf64
-    #:elf64-add-rodata-bytes
-    #:compile-to-elf64-exec
+     #:compile-to-elf64
+     #:elf64-add-rodata-bytes
+     #:elf64-add-rodata-string
+     #:elf64-add-got-entry
+     #:elf64-add-plt-stub
+     #:elf64-verify-wx
+     #:*icf-enabled*
+     #:icf-merge-identical-functions
+      #:build-dwarf-debug-sections
+       #:build-dwarf-eh-frame
+       #:make-dwarf-eh-fde
+       #:dwarf-eh-fde-lsda
+       #:dwarf-eh-fde-personality
+       #:make-dwarf-eh-call-site
+       #:dwarf-eh-call-site-start
+       #:dwarf-eh-call-site-length
+       #:dwarf-eh-call-site-landing-pad
+       #:dwarf-eh-call-site-action
+       #:dwarf-eh-call-site-type
+       #:build-dwarf-eh-lsda
+       #:compile-to-elf64-exec
     #:make-elf64-executable
     #:elf64-add-load-segment
     #:elf64-add-gnu-stack-segment

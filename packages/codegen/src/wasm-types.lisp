@@ -175,6 +175,44 @@
 ;;; GC opcode prefix
 (defconstant +wasm-gc-prefix+ #xfb)
 
+;;; SIMD128 opcode prefix and representative SIMD opcodes (0xFD prefix space).
+(defconstant +wasm-simd-prefix+ #xfd)
+(defconstant +wasm-v128-load+ 0)
+(defconstant +wasm-v128-store+ 11)
+(defconstant +wasm-v128-const+ 12)
+(defconstant +wasm-i8x16-add+ 110)
+(defconstant +wasm-i16x8-add+ 128)
+(defconstant +wasm-i32x4-add+ 174)
+(defconstant +wasm-i64x2-add+ 192)
+(defconstant +wasm-v128-and+ 78)
+(defconstant +wasm-v128-or+ 80)
+(defconstant +wasm-v128-xor+ 81)
+
+;;; Relaxed SIMD opcodes in the 0xFD prefixed relaxed-SIMD range.
+(defconstant +wasm-i8x16-relaxed-swizzle+ 128)
+(defconstant +wasm-i32x4-relaxed-trunc-f32x4-s+ 129)
+(defconstant +wasm-i32x4-relaxed-trunc-f32x4-u+ 130)
+(defconstant +wasm-i32x4-relaxed-trunc-f64x2-s-zero+ 131)
+(defconstant +wasm-i32x4-relaxed-trunc-f64x2-u-zero+ 132)
+(defconstant +wasm-f32x4-relaxed-madd+ 133)
+(defconstant +wasm-f32x4-relaxed-nmadd+ 134)
+(defconstant +wasm-f64x2-relaxed-madd+ 135)
+(defconstant +wasm-f64x2-relaxed-nmadd+ 136)
+(defconstant +wasm-i8x16-relaxed-lane-select+ 137)
+(defconstant +wasm-i16x8-relaxed-lane-select+ 138)
+(defconstant +wasm-i32x4-relaxed-lane-select+ 139)
+(defconstant +wasm-i64x2-relaxed-lane-select+ 140)
+(defconstant +wasm-f32x4-relaxed-min+ 141)
+(defconstant +wasm-f32x4-relaxed-max+ 142)
+(defconstant +wasm-f64x2-relaxed-min+ 143)
+(defconstant +wasm-f64x2-relaxed-max+ 144)
+
+(defun wasm-encode-simd-op (simd-opcode)
+  "Encode a prefixed SIMD/relaxed-SIMD opcode."
+  (concatenate '(simple-array (unsigned-byte 8) (*))
+               (vector +wasm-simd-prefix+)
+               (wasm-encode-u32-leb128 simd-opcode)))
+
 ;;; GC opcodes (following +wasm-gc-prefix+)
 (defconstant +wasm-gc-struct-new+         0)
 (defconstant +wasm-gc-struct-new-default+ 1)
@@ -197,6 +235,10 @@
 (defconstant +wasm-gc-ref-i31+           28)
 (defconstant +wasm-gc-i31-get-s+         29)
 (defconstant +wasm-gc-i31-get-u+         30)
+(defconstant +wasm-gc-br-on-cast+        31)
+(defconstant +wasm-gc-br-on-cast-fail+   32)
+(defconstant +wasm-gc-any-convert-extern+ 33)
+(defconstant +wasm-gc-extern-convert-any+ 34)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Section 2: Named GC Type Indices

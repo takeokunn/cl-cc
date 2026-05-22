@@ -17,6 +17,36 @@
 
 ;;; ── Multiple Values and Apply ────────────────────────────────────────────
 
+(defun vm-store-multiple-values (state values)
+  "Store VALUES in STATE's fixed MV buffer and compatibility VALUES-LIST slot."
+  (let* ((buffer (vm-mv-buffer state))
+         (count (min (length values) +maximum-multiple-values+)))
+    (dotimes (i +maximum-multiple-values+)
+      (setf (aref buffer i) nil))
+    (loop for value in values
+          for i below count
+          do (setf (aref buffer i) value))
+    (when (zerop count)
+      (setf (aref buffer 0) nil))
+    (setf (vm-mv-count state) count
+          (slot-value state 'values-list) (subseq values 0 count))
+    count))
+
+(defmethod (setf vm-values-list) :after (value (state vm-state))
+  (let* ((values (cond ((null value) nil)
+                       ((listp value) value)
+                       (t (list value))))
+         (buffer (vm-mv-buffer state))
+         (count (min (length values) +maximum-multiple-values+)))
+    (dotimes (i +maximum-multiple-values+)
+      (setf (aref buffer i) nil))
+    (loop for item in values
+          for i below count
+          do (setf (aref buffer i) item))
+    (when (zerop count)
+      (setf (aref buffer 0) nil))
+    (setf (vm-mv-count state) count)))
+
 (defun %vm-apply-spread-args (state arg-values)
   "Return APPLIED arguments with the last VM argument spliced as a list."
   (cond
@@ -36,8 +66,7 @@
   (declare (ignore labels))
   (let* ((src-regs (vm-src-regs inst))
          (all-values (mapcar (lambda (reg) (vm-reg-get state reg)) src-regs)))
-    ;; Store all values in state
-    (setf (vm-values-list state) all-values)
+    (vm-store-multiple-values state all-values)
     ;; Primary value goes to dst
     (vm-reg-set state (vm-dst inst) (if all-values (first all-values) nil))
     (values (1+ pc) nil nil)))
@@ -90,30 +119,40 @@
 
 (defmethod execute-instruction ((inst vm-mv-bind) state pc labels)
   (declare (ignore labels))
-  (let ((vals (vm-values-list state))
-        (dst-regs (vm-dst-regs inst)))
+  (let ((dst-regs (vm-dst-regs inst)))
     (loop for reg in dst-regs
           for i from 0
-          do (vm-reg-set state reg (if (< i (length vals))
-                                       (nth i vals)
+          do (vm-reg-set state reg (if (< i (vm-mv-count state))
+                                       (aref (vm-mv-buffer state) i)
                                        nil)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-values-to-list) state pc labels)
   (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst) (copy-list (vm-values-list state)))
+  (vm-reg-set state (vm-dst inst)
+              (loop for i below (vm-mv-count state)
+                    collect (aref (vm-mv-buffer state) i)))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-nth-value) state pc labels)
+  (declare (ignore labels))
+  (let ((index (vm-index inst)))
+    (vm-reg-set state (vm-dst inst)
+                (if (and (integerp index) (<= 0 index) (< index (vm-mv-count state)))
+                    (aref (vm-mv-buffer state) index)
+                    nil)))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-spread-values) state pc labels)
   (declare (ignore labels))
   (let ((lst (vm-reg-get state (vm-src inst))))
-    (setf (vm-values-list state) (if (listp lst) lst (list lst)))
+    (vm-store-multiple-values state (if (listp lst) lst (list lst)))
     (vm-reg-set state (vm-dst inst) (if (listp lst) (first lst) lst))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-clear-values) state pc labels)
   (declare (ignore labels))
-  (setf (vm-values-list state) nil)
+  (vm-store-multiple-values state nil)
   (values (1+ pc) nil nil))
 
 ;;; FR-073: Multiple values via registers (≤3)
@@ -121,29 +160,30 @@
   "Store up to 3 values in the VM values buffer without heap allocation.
    The native codegen maps these to physical return registers (RAX/RDX/RCX)."
   (declare (ignore labels))
-  (let ((vals (list (vm-reg-get state (vm-vr0 inst)))))
+  (let ((vals nil))
+    (when (>= (vm-vr-count inst) 1)
+      (push (vm-reg-get state (vm-vr0 inst)) vals))
     (when (>= (vm-vr-count inst) 2)
       (push (vm-reg-get state (vm-vr1 inst)) vals))
     (when (>= (vm-vr-count inst) 3)
       (push (vm-reg-get state (vm-vr2 inst)) vals))
-    (setf (vm-values-list state) (nreverse vals)))
+    (vm-store-multiple-values state (nreverse vals)))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-mv-bind-regs) state pc labels)
   "Interpreter compatibility for register-return multiple-value binding."
   (declare (ignore labels))
-  (let ((vals (vm-values-list state)))
+  (let ((buffer (vm-mv-buffer state))
+        (count (vm-mv-count state)))
     (loop for reg in (vm-dst-regs inst)
           for i below (vm-mv-bind-regs-count inst)
-          do (vm-reg-set state reg (if (< i (length vals))
-                                       (nth i vals)
-                                       nil))))
+          do (vm-reg-set state reg (if (< i count) (aref buffer i) nil))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-ensure-values) state pc labels)
   (declare (ignore labels))
-  (unless (vm-values-list state)
-    (setf (vm-values-list state) (list (vm-reg-get state (vm-src inst)))))
+  (when (zerop (vm-mv-count state))
+    (vm-store-multiple-values state (list (vm-reg-get state (vm-src inst)))))
   (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-next-method-p) state pc labels)
@@ -228,11 +268,21 @@
                             func)))
           ;; Generic dispatch keeps the conservative non-tail path, matching
           ;; %vm-dispatch-call. Plain closure APPLY can reuse the current frame.
-          (unless (and tail-p (not generic-p))
-            (vm-push-call-frame state (1+ pc) dst-reg)
-            (push nil (vm-method-call-stack state)))
-          (vm-bind-closure-args closure state spread-args)
-          (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
+           (unless (and tail-p (not generic-p))
+             (vm-push-call-frame state (1+ pc) dst-reg)
+             (push nil (vm-method-call-stack state)))
+           (vm-store-multiple-values state nil)
+           (vm-bind-closure-args closure state spread-args)
+           (values (vm-label-table-lookup labels (vm-closure-entry-label closure)) nil nil))))))
+
+(defmethod execute-instruction ((inst vm-load-time-value) state pc labels)
+  (declare (ignore labels))
+  (multiple-value-bind (value found-p)
+      (gethash (vm-load-time-value-cell-id inst) (vm-load-time-values state))
+    (unless found-p
+      (error "Unresolved load-time-value cell: ~D" (vm-load-time-value-cell-id inst)))
+    (vm-reg-set state (vm-dst inst) value)
+    (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-register-function) state pc labels)
   (let ((name (vm-func-name inst))

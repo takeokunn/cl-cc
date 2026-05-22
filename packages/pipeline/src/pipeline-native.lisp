@@ -123,7 +123,9 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
         :stack-protector (getf opts :stack-protector)
         :shadow-stack (getf opts :shadow-stack)
          :compress (getf opts :compress)
-         :mir-isel (getf opts :mir-isel)
+         :bolt (getf opts :bolt)
+         :bolt-profile (getf opts :bolt-profile)
+          :mir-isel (getf opts :mir-isel)
         :asan (getf opts :asan)
         :msan (getf opts :msan)
         :tsan (getf opts :tsan)
@@ -162,8 +164,9 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
 ;;; Internal functions accept (target opts) and apply opts directly as &key args.
 
 (defun %make-native-opts (&key pass-pipeline speed (inline-threshold-scale 1)
-                                 block-compile
-                                  print-pass-timings timing-stream coverage
+                                   block-compile debug-info sanitize lto eh-model incremental perf-map bolt bolt-profile parallel
+                                   verify-transforms
+                                   print-pass-timings timing-stream coverage
                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                  print-pass-stats stats-stream trace-json-stream
                                    retpoline spectre-mitigations stack-protector shadow-stack
@@ -172,8 +175,18 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
   (append (list :pass-pipeline pass-pipeline)
           (if speed (list :speed speed) nil)
-           (list :inline-threshold-scale inline-threshold-scale
-                 :block-compile     block-compile
+            (list :inline-threshold-scale inline-threshold-scale
+                  :block-compile     block-compile
+                  :debug-info        debug-info
+                  :sanitize          sanitize
+                  :lto               lto
+                  :eh-model          eh-model
+                  :incremental       incremental
+                   :perf-map          perf-map
+                    :bolt              bolt
+                    :bolt-profile      bolt-profile
+                    :verify-transforms verify-transforms
+                    :parallel          parallel
                 :print-pass-timings  print-pass-timings
                 :coverage            coverage
                 :timing-stream       timing-stream
@@ -457,10 +470,11 @@ Returns PROGRAM unchanged if it is not a VM-PROGRAM."
                        :shadow-stack (getf opts :shadow-stack)
                        :asan (getf opts :asan)
                        :msan (getf opts :msan)
-                       :tsan (getf opts :tsan)
-                       :ubsan (getf opts :ubsan)
-                       :hwasan (getf opts :hwasan))
-                 nil))
+                        :tsan (getf opts :tsan)
+                        :ubsan (getf opts :ubsan)
+                        :hwasan (getf opts :hwasan)
+                        :eh-model (getf opts :eh-model))
+                  nil))
       (if (eq arch :arm64)
           (apply #'compile-to-aarch64-bytes
                  program
@@ -505,17 +519,20 @@ don't accept as keyword arguments."
     ;; and must not reach compile-string / compile-expression / compile-toplevel-forms.
     (remf stripped :target-os)
     (remf stripped :compress)
+    (remf stripped :bolt)
+    (remf stripped :bolt-profile)
     (remf stripped :mir-isel)
     stripped))
 
 (defun compile-to-native (source &key (arch :x86-64) (output-file "a.out") (language :lisp)
-                                    pass-pipeline speed (inline-threshold-scale 1)
-                                    print-pass-timings timing-stream coverage
+                                     pass-pipeline speed (inline-threshold-scale 1)
+                                      debug-info sanitize lto eh-model incremental perf-map parallel
+                                     print-pass-timings timing-stream coverage
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
                                     retpoline spectre-mitigations stack-protector shadow-stack
                                      compress asan msan tsan ubsan hwasan
-                                      target-os mir-isel)
+                                      target-os mir-isel bolt bolt-profile)
   "Compile SOURCE to a native executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -530,8 +547,17 @@ Returns the output file path on success."
          (binary-format (%native-binary-format effective-target-os))
          (native-target (%native-target-for-arch arch))
             (opts (%make-native-opts :pass-pipeline pass-pipeline
-                                     :speed speed
-                                     :inline-threshold-scale inline-threshold-scale
+                                      :speed speed
+                                      :inline-threshold-scale inline-threshold-scale
+                                      :debug-info debug-info
+                                      :sanitize sanitize
+                                      :lto lto
+                                      :eh-model eh-model
+                                      :incremental incremental
+                                       :perf-map perf-map
+                                       :bolt bolt
+                                       :bolt-profile bolt-profile
+                                       :parallel parallel
                                       :print-pass-timings print-pass-timings
                                       :coverage coverage
                                      :timing-stream timing-stream
@@ -555,9 +581,11 @@ Returns the output file path on success."
                                        :target-os effective-target-os))
          (compile-opts (%strip-internal-opts opts))
          (result (%compile-native-source source native-target language compile-opts))
-           (program (pipeline-reorder-functions
-                     (%maybe-route-program-through-mir
-                      (compilation-result-program result) arch opts)))
+            (program (maybe-pipeline-bolt-optimize-program
+                      (pipeline-reorder-functions
+                       (%maybe-route-program-through-mir
+                        (compilation-result-program result) arch opts))
+                      opts))
          (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
                              (or (getf opts :retpoline)
                                  (getf opts :spectre-mitigations)
@@ -570,8 +598,11 @@ Returns the output file path on success."
                                  cl-cc/codegen::*x86-64-stack-protector-enabled*))
                             (cl-cc/codegen::*x86-64-shadow-stack-enabled*
                              (or (getf opts :shadow-stack)
-                                 cl-cc/codegen::*x86-64-shadow-stack-enabled*)))
-                        (%native-code-bytes-for-arch arch program opts)))
+                                  cl-cc/codegen::*x86-64-shadow-stack-enabled*))
+                             (cl-cc/codegen::*eh-model*
+                              (cl-cc/codegen:normalize-x86-64-eh-model
+                               (or (getf opts :eh-model) cl-cc/codegen::*eh-model*))))
+                         (%native-code-bytes-for-arch arch program opts)))
          (compilation-result (compilation-result-program result))
          (reloc-entries (and compilation-result
                              (ignore-errors
@@ -641,14 +672,14 @@ Returns the output file path on success."
       (%compile-native-lisp-forms source target opts)))
 
 (defun compile-file-to-native (input-file &key (arch :x86-64) (output-file nil) (language nil)
-                                              pass-pipeline speed (inline-threshold-scale 1)
-                                              block-compile
+                                               pass-pipeline speed (inline-threshold-scale 1)
+                                                block-compile debug-info sanitize lto eh-model incremental perf-map parallel
                                               print-pass-timings timing-stream coverage
                                              print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                              print-pass-stats stats-stream trace-json-stream
                                                retpoline spectre-mitigations stack-protector shadow-stack
                                                compress asan msan tsan ubsan hwasan
-                                               target-os mir-isel (compilation-tier *compilation-tier*))
+                                                target-os mir-isel bolt bolt-profile (compilation-tier *compilation-tier*))
   "Compile a CL-CC source file to a native executable.
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
@@ -659,10 +690,19 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
          (source (%native-read-file-source input-file effective-language))
          (effective-target-os (or target-os (%native-host-os)))
          (binary-format (%native-binary-format effective-target-os))
-           (opts (%make-native-opts :pass-pipeline pass-pipeline
-                                     :speed speed
-                                     :inline-threshold-scale inline-threshold-scale
-                                     :block-compile block-compile
+            (opts (%make-native-opts :pass-pipeline pass-pipeline
+                                      :speed speed
+                                      :inline-threshold-scale inline-threshold-scale
+                                      :block-compile block-compile
+                                      :debug-info debug-info
+                                      :sanitize sanitize
+                                      :lto lto
+                                      :eh-model eh-model
+                                      :incremental incremental
+                                       :perf-map perf-map
+                                       :bolt bolt
+                                       :bolt-profile bolt-profile
+                                       :parallel parallel
                                      :print-pass-timings print-pass-timings
                                      :coverage coverage
                                     :timing-stream timing-stream
@@ -697,9 +737,11 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
         (let* ((native-target (%native-target-for-arch arch))
                (compile-opts (%strip-internal-opts opts))
                (result (%compile-native-file-source source native-target effective-language compile-opts))
-                 (program (pipeline-reorder-functions
-                           (%maybe-route-program-through-mir
-                            (compilation-result-program result) arch opts)))
+                  (program (maybe-pipeline-bolt-optimize-program
+                            (pipeline-reorder-functions
+                             (%maybe-route-program-through-mir
+                              (compilation-result-program result) arch opts))
+                            opts))
                 (code-bytes (let ((cl-cc/codegen::*x86-64-use-retpoline*
                                     (or (getf opts :retpoline)
                                         (getf opts :spectre-mitigations)
@@ -710,10 +752,13 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
                                   (cl-cc/codegen::*x86-64-stack-protector-enabled*
                                    (or (getf opts :stack-protector)
                                        cl-cc/codegen::*x86-64-stack-protector-enabled*))
-                                  (cl-cc/codegen::*x86-64-shadow-stack-enabled*
-                                   (or (getf opts :shadow-stack)
-                                       cl-cc/codegen::*x86-64-shadow-stack-enabled*)))
-                              (%native-code-bytes-for-arch arch program opts))))
+                                   (cl-cc/codegen::*x86-64-shadow-stack-enabled*
+                                    (or (getf opts :shadow-stack)
+                                        cl-cc/codegen::*x86-64-shadow-stack-enabled*))
+                                   (cl-cc/codegen::*eh-model*
+                                    (cl-cc/codegen:normalize-x86-64-eh-model
+                                     (or (getf opts :eh-model) cl-cc/codegen::*eh-model*))))
+                               (%native-code-bytes-for-arch arch program opts))))
           (%write-native-output code-bytes nil output
                                :format binary-format :arch arch
                                :compress (getf opts :compress))

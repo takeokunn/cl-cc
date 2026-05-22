@@ -164,21 +164,21 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
   (member weakness +rt-hash-table-weakness-modes+ :test #'eq))
 
 (defun %rt-make-backing-hash-table (test size weakness)
-  "Create a host hash table, requesting WEAKNESS on implementations that support it."
+  "Create a strong host hash table for RT hash-table wrappers.
+
+Weakness is represented by RT-WEAK-HASH-TABLE metadata and GC cleanup rather
+than by host weak tables.  Keeping the backing table strong makes behavior
+portable and lets tests drive liveness through the runtime marked-set model."
   #+sbcl
   (if size
-      (if weakness
-          (make-hash-table :test test :size size :weakness weakness)
-          (make-hash-table :test test :size size))
-      (if weakness
-          (make-hash-table :test test :weakness weakness)
-          (make-hash-table :test test)))
+      (cl:make-hash-table :test test :size size)
+      (cl:make-hash-table :test test))
   #-sbcl
   (progn
     (declare (ignore weakness))
     (if size
-        (make-hash-table :test test :size size)
-        (make-hash-table :test test))))
+        (cl:make-hash-table :test test :size size)
+        (cl:make-hash-table :test test))))
 
 (defun %rt-hash-table-backing (ht)
   (etypecase ht
@@ -194,8 +194,9 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
 (defun rt-hash-table-p (x)
   (if (or (hash-table-p x) (rt-weak-hash-table-p x)) 1 0))
 
-(defun rt-make-hash-table (&key (test #'eql) size weakness)
+(defun rt-make-hash-table (&rest args &key (test #'eql) size weakness &allow-other-keys)
   "Create a runtime hash table with optional weak-key/value semantics."
+  (declare (ignore args))
   (unless (%rt-valid-hash-weakness-p weakness)
     (error "Unsupported hash-table weakness mode: ~S" weakness))
   (let ((table (%rt-make-backing-hash-table test size weakness)))
@@ -206,6 +207,8 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
                            :entries (make-hash-table :test test))))
           (when (boundp '*rt-weak-hash-table-registry*)
             (pushnew weak-table *rt-weak-hash-table-registry* :test #'eq))
+          (when (boundp '*weak-hash-tables*)
+            (pushnew weak-table *weak-hash-tables* :test #'eq))
           weak-table)
         table)))
 

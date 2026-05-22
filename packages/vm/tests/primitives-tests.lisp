@@ -233,19 +233,51 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
 
 (deftest-each prim-rounding-behavior
   "Rounding instructions (7 / 2): quotient in dst and (quotient remainder) in vm-values-list.
-Round is excluded from the values-list check (nil means skip)."
+Round (banker's rounding) returns q=4 r=-1 for 7/2 (halfway, nearest even)."
   :cases (("truncate" #'cl-cc:make-vm-truncate     3 '(3  1))
           ("floor"    #'cl-cc:make-vm-floor-inst   3 '(3  1))
           ("ceiling"  #'cl-cc:make-vm-ceiling-inst 4 '(4 -1))
-          ("round"    #'cl-cc:make-vm-round-inst   4 nil))
+          ("round"    #'cl-cc:make-vm-round-inst   4 '(4 -1)))
   (make-inst expected-q expected-vals)
   (%with-binary-vm-state
    7 2
    (lambda (state)
      (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)
-     (assert-= expected-q (cl-cc:vm-reg-get state 0))
+      (assert-= expected-q (cl-cc:vm-reg-get state 0))
       (when expected-vals
         (assert-equal expected-vals (cl-cc:vm-values-list state))))))
+
+;;; ═══════════════════════════════════════════════════════════════════════════
+;;; FR-885: Float Rounding (ffloor/fceiling/ftruncate/fround)
+;;; ═══════════════════════════════════════════════════════════════════════════
+
+(deftest-each prim-float-rounding-behavior
+  "Float rounding (7 / 3): float quotient in dst, (quotient remainder) in vm-values-list."
+  :cases (("ffloor"     #'cl-cc:make-vm-ffloor    2.0 '(2.0 1))
+          ("fceiling"   #'cl-cc:make-vm-fceiling  3.0 '(3.0 -2))
+          ("ftruncate"  #'cl-cc:make-vm-ftruncate 2.0 '(2.0 1))
+          ("fround"     #'cl-cc:make-vm-fround    2.0 '(2.0 1)))
+  (make-inst expected-q expected-vals)
+  (%with-binary-vm-state
+   7 3
+   (lambda (state)
+     (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)
+     (assert-= expected-q (cl-cc:vm-reg-get state 0))
+     (assert-equal expected-vals (cl-cc:vm-values-list state)))))
+
+(deftest-each prim-float-rounding-negative
+  "Float rounding with negative arguments (FR-885 edge cases)."
+  :cases (("ffloor-neg-denom"    #'cl-cc:make-vm-ffloor    -3.0 '(-3.0  2))
+          ("fceiling-neg-denom"  #'cl-cc:make-vm-fceiling  -2.0 '(-2.0 -1))
+          ("ftruncate-neg-denom" #'cl-cc:make-vm-ftruncate -2.0 '(-2.0 -1))
+          ("fround-neg-denom"    #'cl-cc:make-vm-fround    -2.0 '(-2.0 -1)))
+  (make-inst expected-q expected-vals)
+  (%with-binary-vm-state
+   -7 3
+   (lambda (state)
+     (exec1 (funcall make-inst :dst 0 :lhs 1 :rhs 2) state)
+     (assert-= expected-q (cl-cc:vm-reg-get state 0))
+     (assert-equal expected-vals (cl-cc:vm-values-list state)))))
 
 (deftest prim-truncate-bignum-uses-vm-bignum-division-path
   "vm-truncate on bignum operands routes through vm-bignum-burnikel-ziegler-divide."

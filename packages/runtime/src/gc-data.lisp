@@ -36,6 +36,15 @@ FR-089/FR-213: sliding compaction is implemented.  See
 rt-gc-compact-old-space for details.  Pinned objects are hard relocation
 barriers and must not be moved by compaction.")
 
+(define-symbol-macro *compacting-gc-enabled* *gc-compaction-enabled*)
+
+(defparameter *gc-compact-after-major-cycles* 0
+  "Run old-generation mark-compact after every N major GC cycles when positive.
+
+The default 0 disables periodic compaction.  Fragmentation-driven compaction
+still uses RT-HEAP-SHOULD-COMPACT-P, and both paths remain gated by
+*COMPACTING-GC-ENABLED* / *GC-COMPACTION-ENABLED*.")
+
 (defparameter *gc-threads* '((:name :main :stack nil :frames nil))
   "Thread states scanned by the GC.  Each state may be a plist containing :STACK
 and/or :FRAMES, a VM-FRAME, a vector, or a list of raw stack words.")

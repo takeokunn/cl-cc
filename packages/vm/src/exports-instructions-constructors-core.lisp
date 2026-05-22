@@ -59,8 +59,11 @@
    make-vm-butlast
    make-vm-sbit
     make-vm-call
-     make-vm-tail-call
-     make-vm-trampoline
+      make-vm-tail-call
+      make-vm-call/cc
+      make-vm-call-with-prompt
+      make-vm-abort-to-prompt
+      make-vm-trampoline
      make-vm-recompile
      make-vm-call-next-method
    make-vm-car

@@ -49,9 +49,20 @@
            #:copy-readtable
            #:set-macro-character
            #:get-macro-character
-           #:set-dispatch-macro-character
-           #:get-dispatch-macro-character
-           #:readtable-case))
+            #:set-dispatch-macro-character
+            #:get-dispatch-macro-character
+            #:readtable-case
+            #:sequence
+            #:elt
+            #:length
+            #:subseq
+            #:copy-structure
+            #:method-qualifiers
+            #:compute-applicable-methods
+            #:find-method
+            #:add-method
+            #:remove-method
+            #:ensure-generic-function))
 
 (in-package :cl-cc/vm)
 

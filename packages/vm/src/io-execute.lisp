@@ -46,7 +46,9 @@
                                     (list :element-type element-type))
                                   (when normalized-external-format
                                     (list :external-format normalized-external-format))))
-              (stream (apply #'open open-args)))
+              (stream (progn
+                        (vm-check-tainted-usage path-str :path)
+                        (apply #'open open-args))))
          (when stream
            (setf (gethash handle (vm-open-files state)) stream))
         (vm-reg-set state (vm-dst inst) (if stream handle nil))
@@ -138,8 +140,8 @@
     (if position-reg
         ;; Set position
         (let ((new-pos (vm-reg-get state position-reg)))
-          (file-position stream new-pos)
-          (vm-reg-set state (vm-dst inst) new-pos)
+          (vm-reg-set state (vm-dst inst)
+                      (if (file-position stream new-pos) t nil))
           (values (1+ pc) nil nil))
         ;; Get position
         (let ((current-pos (file-position stream)))

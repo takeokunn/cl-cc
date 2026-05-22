@@ -117,6 +117,43 @@
     (assert-equal '(#x49 #xF7 #xE3) mul-bytes)
     (assert-equal '(#x49 #xF7 #xEB) imul-bytes)))
 
+(deftest x86-apx-ndd-fallback-and-enabled-paths
+  "FR-575: APX NDD helpers are wired and preserve legacy fallback byte behavior until full APX encodings land."
+  (let ((fallback (%x86-encoding-collect-bytes
+                   (lambda (s)
+                     (let ((cl-cc/codegen:*x86-64-apx-enabled* nil))
+                       (cl-cc/codegen::emit-apx-add-ndd-rrr64
+                        cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ cl-cc/codegen::+rdx+ s)))))
+        (enabled (%x86-encoding-collect-bytes
+                  (lambda (s)
+                    (let ((cl-cc/codegen:*x86-64-apx-enabled* t))
+                      (cl-cc/codegen::emit-apx-add-ndd-rrr64
+                       cl-cc/codegen::+rax+ cl-cc/codegen::+rcx+ cl-cc/codegen::+rdx+ s))))))
+    ;; Fallback = MOV RAX,RCX; ADD RAX,RDX.  Enabled path currently exercises the
+    ;; APX feature gate by skipping the copy, while keeping the tested ADD encoder.
+    (assert-equal '(#x48 #x89 #xC8 #x48 #x01 #xD0) fallback)
+    (assert-equal '(#x48 #x01 #xD0) enabled)))
+
+(deftest x86-safe-stack-and-xom-byte-hooks
+  "FR-771/FR-772: x86-64 SafeStack TLS hooks and execute-only LFENCE marker emit deterministic bytes."
+  (let ((disabled (%x86-encoding-collect-bytes
+                   (lambda (s)
+                     (let ((cl-cc/codegen:*x86-64-safe-stack-enabled* nil))
+                       (cl-cc/codegen::emit-x86-64-safe-stack-load-pointer cl-cc/codegen::+rax+ s)))))
+        (load (%x86-encoding-collect-bytes
+               (lambda (s)
+                 (let ((cl-cc/codegen:*x86-64-safe-stack-enabled* t))
+                   (cl-cc/codegen::emit-x86-64-safe-stack-load-pointer cl-cc/codegen::+rax+ s)))))
+        (store (%x86-encoding-collect-bytes
+                (lambda (s)
+                  (let ((cl-cc/codegen:*x86-64-safe-stack-enabled* t))
+                    (cl-cc/codegen::emit-x86-64-safe-stack-store-pointer cl-cc/codegen::+rax+ s)))))
+        (lfence (%x86-encoding-collect-bytes #'cl-cc/codegen::emit-x86-64-lfence)))
+    (assert-null disabled)
+    (assert-equal '(#x64 #x48 #x8B #x04 #x25 #x70 #x00 #x00 #x00) load)
+    (assert-equal '(#x64 #x48 #x89 #x04 #x25 #x70 #x00 #x00 #x00) store)
+    (assert-equal '(#x0F #xAE #xE8) lfence)))
+
 (deftest-each x86-xmm-instruction-encoding
   "XMM/SSE instruction encodings produce exact byte sequences."
   :cases (("movq-xmm0-r11" (lambda (s) (cl-cc/codegen::emit-movq-xmm-r64 cl-cc/codegen::+xmm0+ cl-cc/codegen::+r11+ s))

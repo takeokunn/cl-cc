@@ -187,6 +187,28 @@ lane/type/op combinations must signal a clear error."
   (:sexp-tag :tail-call)
   (:sexp-slots dst func args))
 
+(define-vm-instruction vm-call/cc (vm-instruction)
+  "Capture the current continuation and call FUNC with it."
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (:sexp-tag :call/cc)
+  (:sexp-slots dst func))
+
+(define-vm-instruction vm-call-with-prompt (vm-instruction)
+  "Install PROMPT-NAME while calling FUNC with no arguments."
+  (dst nil :reader vm-dst)
+  (func nil :reader vm-func-reg)
+  (prompt nil :reader vm-prompt-reg)
+  (:sexp-tag :call-with-prompt)
+  (:sexp-slots dst func prompt))
+
+(define-vm-instruction vm-abort-to-prompt (vm-instruction)
+  "Abort to PROMPT-NAME with VALUE."
+  (prompt nil :reader vm-prompt-reg)
+  (value nil :reader vm-value-reg)
+  (:sexp-tag :abort-to-prompt)
+  (:sexp-slots prompt value))
+
 (define-vm-instruction vm-trampoline (vm-instruction)
   "Create a zero-argument thunk for an external trampoline loop to execute."
   (dst nil :reader vm-dst)
@@ -242,6 +264,20 @@ lane/type/op combinations must signal a clear error."
   "Convert vm-values-list to a list in DST register."
   (dst nil :reader vm-dst)
   (:sexp-tag :values-to-list))
+
+(define-vm-instruction vm-nth-value (vm-instruction)
+  "Read INDEX from the current MV buffer into DST in O(1)."
+  (dst nil :reader vm-dst)
+  (index nil :reader vm-index)
+  (:sexp-tag :nth-value)
+  (:sexp-slots dst index))
+
+(define-vm-instruction vm-load-time-value (vm-instruction)
+  "Load resolved load-time-value cell CELL-ID into DST."
+  (dst nil :reader vm-dst)
+  (cell-id nil :reader vm-load-time-value-cell-id)
+  (:sexp-tag :load-time-value)
+  (:sexp-slots dst cell-id))
 
 (define-vm-instruction vm-spread-values (vm-instruction)
   "Spread a list from SRC register as multiple values. DST gets primary value."

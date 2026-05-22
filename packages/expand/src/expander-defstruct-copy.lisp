@@ -45,7 +45,12 @@
                                                                     (list 'slot-value 'copy (list 'quote slot-name))
                                                                     (list 'slot-value s (list 'quote slot-name))))
                                                 (list 'copy)))))))
-                   (list (list 't (list 'error "copy-structure: unsupported object ~S" s)))))))))
+                    (list (list 't (list 'error "copy-structure: unsupported object ~S" s)))))))))
+
+(register-macro 'deep-copy
+  (lambda (form env)
+    (declare (ignore env))
+    `(cl-cc/vm::deep-copy ,(second form))))
 
 ;;; FR-446: defstruct :copier — generates a COPY-<NAME> function (shallow copy).
 (defun %defstruct-copier-form (copier-name name all-slots struct-type)

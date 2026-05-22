@@ -270,3 +270,144 @@
     (registry-add-class reg 'b :superclasses '(c))
     (registry-add-class reg 'a :superclasses '(b))
     (assert-equal '(a b c) (cl-cc/vm::%cpl-linearize 'a reg))))
+
+;;; FR-821: copy operations
+
+(defclass vm-copy-host-object ()
+  ((items :initarg :items :accessor vm-copy-host-object-items)
+   (flag :initarg :flag :accessor vm-copy-host-object-flag)))
+
+(deftest fr-821-copy-instance-host-standard-object
+  "copy-instance copies host CLOS instances and preserves shallow slot values."
+  (let* ((items (list 1 2 3))
+         (object (make-instance 'vm-copy-host-object :items items :flag :original))
+         (copy (cl-cc/vm::copy-instance object)))
+    (setf (vm-copy-host-object-flag copy) :changed)
+    (assert-false (eq object copy))
+    (assert-eq items (vm-copy-host-object-items copy))
+    (assert-eq :original (vm-copy-host-object-flag object))
+    (assert-eq :changed (vm-copy-host-object-flag copy))))
+
+(deftest fr-821-deep-copy-recursive-conses-and-vectors
+  "deep-copy recursively copies nested mutable containers."
+  (let* ((nested (vector (list :a :b)))
+         (copy (cl-cc/vm::deep-copy nested)))
+    (setf (car (aref nested 0)) :changed)
+    (assert-false (eq nested copy))
+    (assert-false (eq (aref nested 0) (aref copy 0)))
+    (assert-eq :a (car (aref copy 0)))))
+
+;;; FR-838: extensible sequence protocol
+
+(defclass vm-test-deque (cl-cc/vm::sequence)
+  ((storage :initarg :storage :accessor vm-test-deque-storage)))
+
+(defmethod cl-cc/vm::length ((sequence vm-test-deque))
+  (length (vm-test-deque-storage sequence)))
+
+(defmethod cl-cc/vm::elt ((sequence vm-test-deque) index)
+  (aref (vm-test-deque-storage sequence) index))
+
+(defmethod (setf cl-cc/vm::elt) (value (sequence vm-test-deque) index)
+  (setf (aref (vm-test-deque-storage sequence) index) value))
+
+(defmethod cl-cc/vm::make-sequence-like ((sequence vm-test-deque) size &key initial-element)
+  (declare (ignore sequence))
+  (make-instance 'vm-test-deque
+                 :storage (make-array size :initial-element initial-element)))
+
+(deftest fr-838-extensible-sequence-subseq-and-setf-elt
+  "User subclasses of cl-cc/vm::sequence participate in length/elt/subseq."
+  (let* ((deque (make-instance 'vm-test-deque :storage (vector 10 20 30 40)))
+         (slice (cl-cc/vm::subseq deque 1 3)))
+    (setf (cl-cc/vm::elt deque 2) 99)
+    (assert-true (cl-cc/vm::sequence-protocol-p deque))
+    (assert-= 4 (cl-cc/vm::length deque))
+    (assert-= 99 (cl-cc/vm::elt deque 2))
+    (assert-= 2 (cl-cc/vm::length slice))
+    (assert-= 20 (cl-cc/vm::elt slice 0))
+    (assert-= 30 (cl-cc/vm::elt slice 1))))
+
+;;; 8. FR-888 allocate-instance fast path
+
+(deftest fr-888-finalize-class-builds-slot-vector-index
+  "finalize-class-allocation-cache builds an O(1) slot-name→vector-index cache."
+  (let ((class (registry-add-class (make-test-registry) 'point :slots '(x y))))
+    (cl-cc/vm::finalize-class-allocation-cache class)
+    (assert-= 1 (cl-cc/vm::class-slot-vector-index class 'x))
+    (assert-= 2 (cl-cc/vm::class-slot-vector-index class 'y))
+    (assert-null (cl-cc/vm::class-slot-vector-index class 'z))))
+
+(deftest fr-888-allocate-instance-vector-uses-class-header-and-class-id
+  "allocate-instance-vector creates vector storage with a class header and class-id tag."
+  (let* ((class (registry-add-class (make-test-registry) 'point :slots '(x y)))
+         (instance (progn
+                     (cl-cc/vm::finalize-class-allocation-cache class)
+                     (cl-cc/vm::allocate-instance-vector class))))
+    (assert-true (vectorp instance))
+    (assert-eq class (aref instance 0))
+    (assert-= 3 (length instance))
+    (assert-true (integerp (gethash :__class-id__ class)))
+    (assert-= (gethash :__class-id__ class)
+              (cl-cc/vm::%vm-vector-instance-class-id instance))))
+
+(deftest fr-888-slot-value-by-index-reads-and-writes-in-constant-time
+  "slot-value-by-index and its SETF writer operate directly on vector indexes."
+  (let* ((class (registry-add-class (make-test-registry) 'point :slots '(x y)))
+         (instance (progn
+                     (cl-cc/vm::finalize-class-allocation-cache class)
+                     (cl-cc/vm::allocate-instance-vector class)))
+         (x-index (cl-cc/vm::class-slot-vector-index class 'x)))
+    (setf (cl-cc/vm::slot-value-by-index instance x-index) 42)
+    (assert-= 42 (cl-cc/vm::slot-value-by-index instance x-index))))
+
+(deftest fr-888-dynamic-layout-falls-back-from-vector-allocation
+  "Dynamic slot layout metadata prevents vector fast-path allocation."
+  (let ((class (registry-add-class (make-test-registry) 'dynamic :slots '(x))))
+    (setf (gethash :__dynamic-slot-layout__ class) t)
+    (assert-signals error
+      (cl-cc/vm::allocate-instance-vector class))))
+
+;;; 9. FR-889 default-initargs / make-instance caching
+
+(deftest fr-889-finalize-caches-evaluated-default-initargs
+  "finalize-class-allocation-cache records the evaluated default-initargs list."
+  (let ((class (registry-add-class (make-test-registry)
+                                   'shape
+                                   :slots '(color radius)
+                                   :initargs '((:color . color) (:radius . radius)))))
+    (setf (gethash :__default-initargs__ class) '((:color . :red) (:radius . 5)))
+    (cl-cc/vm::finalize-class-allocation-cache class)
+    (assert-equal '((:color . :red) (:radius . 5))
+                  (gethash :__cached-default-initargs__ class))))
+
+(deftest fr-889-merge-cached-defaults-preserves-explicit-initargs
+  "merge-cached-default-initargs applies defaults while preserving explicit keys."
+  (let ((merged (cl-cc/vm::merge-cached-default-initargs
+                 '((:color . :red) (:radius . 5))
+                 '((:radius . 9) (:name . circle)))))
+    (assert-equal '((:radius . 9) (:name . circle) (:color . :red)) merged)))
+
+(deftest fr-889-zero-arg-template-copy-produces-fresh-vector
+  "The zero-arg shortcut copies a cached template instead of reusing it."
+  (let* ((class (registry-add-class (make-test-registry) 'point :slots '(x)))
+         (first nil)
+         (second nil))
+    (cl-cc/vm::finalize-class-allocation-cache class)
+    (setf first (cl-cc/vm::%vm-copy-instance-template class)
+          second (cl-cc/vm::%vm-copy-instance-template class))
+    (assert-false (eq first second))
+    (setf (cl-cc/vm::slot-value-by-index first 1) 10)
+    (assert-null (cl-cc/vm::slot-value-by-index second 1))))
+
+(deftest fr-889-make-instance-cache-specializes-by-initarg-signature
+  "Constructor cache keys on the class and initarg signature, not values."
+  (let ((class (registry-add-class (make-test-registry) 'point :slots '(x y))))
+    (cl-cc/vm::finalize-class-allocation-cache class)
+    (assert-eq :zero-arg-template
+               (cl-cc/vm::%vm-cached-constructor-path class nil))
+    (assert-eq :standard-vector
+               (cl-cc/vm::%vm-cached-constructor-path class '((:x . :r0))))
+    (assert-eq :standard-vector
+               (cl-cc/vm::%vm-cached-constructor-path class '((:x . :r1))))
+    (assert-= 2 (hash-table-count (gethash :__make-instance-cache__ class)))))

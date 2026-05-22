@@ -7,6 +7,10 @@
   (%with-compiled-registers (src-regs (ast-values-forms node) ctx)
     (let ((count (length src-regs)))
       (cond
+        ((zerop count)
+         (let ((dst (make-register ctx)))
+           (emit ctx (make-vm-values :dst dst :src-regs nil))
+           dst))
         ((= count 1)
          (first src-regs))
         ((%small-values-count-p count)
@@ -119,10 +123,13 @@
     result-reg))
 
 (defmethod compile-ast ((node ast-multiple-value-prog1) ctx)
-  "Save result of first form, evaluate remaining forms, return saved result."
+  "Save all values of first form, evaluate remaining forms, restore saved values."
   (setf (ctx-tail-position ctx) nil)
+  (emit ctx (make-vm-clear-values))
   (let ((first-reg (compile-ast (ast-mv-prog1-first node) ctx))
-        (result-reg (make-register ctx)))
-    (emit ctx (make-vm-move :dst result-reg :src first-reg))
+        (saved-list-reg (make-register ctx)))
+    (emit ctx (make-vm-ensure-values :src first-reg))
+    (emit ctx (make-vm-values-to-list :dst saved-list-reg))
     (%compile-body/k (ast-mv-prog1-forms node) ctx #'identity)
-    result-reg))
+    (emit ctx (make-vm-spread-values :dst first-reg :src saved-list-reg))
+    first-reg))

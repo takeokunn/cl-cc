@@ -95,6 +95,91 @@
 (defparameter *max-call-stack-depth* 10000
   "Maximum native/runtime logical call stack depth before stack overflow.")
 
+(defparameter *stack-segment-size* 8192
+  "Default logical stack segment size. Native backends map this as an 8KB mmap segment.")
+
+(defparameter *initial-stack-size* 16384
+  "Initial copying-stack size used by native stack growth metadata.")
+
+(defparameter *max-stack-size* (* 64 1024 1024)
+  "Maximum copying-stack size before RT-STACK-OVERFLOW is signaled.")
+
+(defstruct (stack-segment (:constructor make-stack-segment
+                            (&key (base 0) (size *stack-segment-size*) next prev
+                                  (used 0) guard-page-p)))
+  "Logical/native stack segment descriptor for green-thread stacks."
+  base
+  (size *stack-segment-size* :type integer)
+  next
+  prev
+  (used 0 :type integer)
+  guard-page-p)
+
+(defvar *stack-segment-pool* nil
+  "Reusable stack segments retired by green threads.")
+
+(defun %reuse-or-make-stack-segment (&key prev (size *stack-segment-size*))
+  (let ((segment (or (pop *stack-segment-pool*)
+                     (make-stack-segment :size size))))
+    (setf (stack-segment-size segment) size
+          (stack-segment-used segment) 0
+          (stack-segment-prev segment) prev
+          (stack-segment-next segment) nil)
+    (when prev
+      (setf (stack-segment-next prev) segment))
+    segment))
+
+(defun grow-stack-segment (segment &key (size *stack-segment-size*))
+  "Return a fresh/reused segment linked after SEGMENT."
+  (%reuse-or-make-stack-segment :prev segment :size size))
+
+(defun release-stack-segment (segment)
+  "Detach SEGMENT and put it back into *STACK-SEGMENT-POOL*."
+  (when segment
+    (let ((prev (stack-segment-prev segment))
+          (next (stack-segment-next segment)))
+      (when prev (setf (stack-segment-next prev) next))
+      (when next (setf (stack-segment-prev next) prev))
+      (setf (stack-segment-next segment) nil
+            (stack-segment-prev segment) nil
+            (stack-segment-used segment) 0)
+      (push segment *stack-segment-pool*)))
+  segment)
+
+(defun stack-segment-ensure-space (segment bytes)
+  "Ensure SEGMENT has BYTES free, growing a new segment when necessary."
+  (check-type bytes (integer 0 *))
+  (let ((current (or segment (%reuse-or-make-stack-segment))))
+    (if (> (+ (stack-segment-used current) bytes)
+           (stack-segment-size current))
+        (grow-stack-segment current)
+        current)))
+
+(defun stack-segment-note-frame (segment bytes)
+  "Account for BYTES in SEGMENT and return the segment that owns the frame."
+  (let ((current (stack-segment-ensure-space segment bytes)))
+    (incf (stack-segment-used current) bytes)
+    current))
+
+(defun relocate-stack-pointers (frames old-base new-base)
+  "Relocate pointer-like integer slots in FRAMES from OLD-BASE to NEW-BASE."
+  (labels ((relocate (value)
+             (cond
+               ((and (integerp value) (integerp old-base) (integerp new-base)
+                     (>= value old-base))
+                (+ new-base (- value old-base)))
+               ((consp value) (cons (relocate (car value)) (relocate (cdr value))))
+               (t value))))
+    (mapcar #'relocate frames)))
+
+(defun copying-stack-grow (frames current-size)
+  "Double stack size, copy FRAMES, and relocate frame-pointer-like values."
+  (let ((new-size (* 2 current-size)))
+    (when (> new-size *max-stack-size*)
+      (error 'rt-stack-overflow :depth new-size :limit *max-stack-size*))
+    (values (relocate-stack-pointers (copy-tree frames) 0 current-size)
+            new-size)))
+
 (defvar *rt-call-stack-depth* 0
   "Current logical runtime call depth for stack guard instrumentation.")
 

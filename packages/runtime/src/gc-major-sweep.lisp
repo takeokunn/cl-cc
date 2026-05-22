@@ -157,8 +157,13 @@ Returns a plist describing the compaction result."
                      (setf (gethash addr forwarding) new-addr)
                      (incf moved-count))
                    (incf live-count)
-                   (when (not pinned)
-                     (setf compact-cursor (+ new-addr size)))
+                    (setf compact-cursor
+                          (if pinned
+                              ;; Pinned FFI objects are relocation barriers for
+                              ;; the Lisp2 slide: subsequent objects must not be
+                              ;; assigned into the pinned object's address range.
+                              (max compact-cursor (+ addr size))
+                              (+ new-addr size)))
                    (incf addr size)))
                 (t
                  (let ((size (header-size h)))
@@ -319,16 +324,20 @@ Returns a plist describing the compaction result."
           (unless ok
             (error "FR-339: tri-color invariant violated at old object ~D"
                    violating-addr)))
-        ;; Phase 4: sweep old space.
-        (if *gc-lazy-sweep-enabled*
-            (progn
-              (%rt-free-list-rebuild-bins heap nil)
-              (setf (rt-heap-lazy-sweep-cursor heap) (rt-heap-old-base heap)
-                    (rt-heap-lazy-sweep-limit heap) (rt-heap-old-free heap))
-              (rt-gc-lazy-sweep-step heap (rt-heap-lazy-sweep-cursor heap)))
-            (if (plusp *gc-worker-count*)
-                (rt-gc-parallel-sweep heap *gc-worker-count*)
-                (%gc-sweep-old-space heap)))
+        ;; Phase 4: sweep old space.  Concurrent mode uses the same sweep worker
+        ;; entry point as the background/lazy path; the portable Pure CL runtime
+        ;; joins before returning so the public heap invariants remain unchanged.
+        (if *rt-concurrent-gc-enabled-p*
+            (rt-gc-concurrent-sweep heap)
+            (if *gc-lazy-sweep-enabled*
+                (progn
+                  (%rt-free-list-rebuild-bins heap nil)
+                  (setf (rt-heap-lazy-sweep-cursor heap) (rt-heap-old-base heap)
+                        (rt-heap-lazy-sweep-limit heap) (rt-heap-old-free heap))
+                  (rt-gc-lazy-sweep-step heap (rt-heap-lazy-sweep-cursor heap)))
+                (if (plusp *gc-worker-count*)
+                    (rt-gc-parallel-sweep heap *gc-worker-count*)
+                    (%gc-sweep-old-space heap))))
         ;; FR-438: integrated class/code unload pass-through after sweeping.
         (rt-gc-run-unload-pass heap)
         (when (fboundp '%rt-gc-clean-adjustable-array-registry)
@@ -343,13 +352,60 @@ Returns a plist describing the compaction result."
   ;; FR-391: Heap Growth Policy / FR-392: Heap Shrink Policy — resize only
   ;; after a full old-generation collection has had a chance to reclaim garbage.
   ;; Growth wins over shrink if occupancy remains critically high after sweeping.
-  (when (and *gc-compaction-enabled* (rt-heap-should-compact-p heap))
+  (when (rt-gc-should-run-compaction-p heap)
     (rt-gc-compact-old-space heap))
   (unless (rt-heap-maybe-grow heap)
     (rt-heap-maybe-shrink heap))
   (when *gc-verify-after-collect*
     (rt-gc-verify-heap heap))
   heap))
+
+(defun rt-gc-concurrent-sweep-worker (heap)
+  "Sweep old space for FR-620 concurrent sweeping infrastructure."
+  (check-type heap rt-heap)
+  (if *gc-lazy-sweep-enabled*
+      (progn
+        (%rt-free-list-rebuild-bins heap nil)
+        (setf (rt-heap-lazy-sweep-cursor heap) (rt-heap-old-base heap)
+              (rt-heap-lazy-sweep-limit heap) (rt-heap-old-free heap))
+        (loop while (< (rt-heap-lazy-sweep-cursor heap)
+                       (rt-heap-lazy-sweep-limit heap)) do
+          (rt-gc-lazy-sweep-step heap (rt-heap-lazy-sweep-cursor heap))))
+      (%gc-sweep-old-space heap))
+  heap)
+
+(defun rt-gc-concurrent-sweep (heap)
+  "Run the old-generation sweep worker on a host thread when available.
+
+The worker function is separate so native runtimes can schedule it truly
+concurrently with mutators.  The SBCL-hosted infrastructure joins before the
+collector returns, preserving existing test-suite and allocation invariants while
+still exercising the same concurrent sweep entry point."
+  (check-type heap rt-heap)
+  (let ((make-thread (%rt-gc-mark-sb-thread-function "MAKE-THREAD"))
+        (join-thread (%rt-gc-mark-sb-thread-function "JOIN-THREAD")))
+    (if (and make-thread join-thread)
+        (let ((thread (ignore-errors
+                        (funcall make-thread
+                                 (lambda () (rt-gc-concurrent-sweep-worker heap))
+                                 :name "cl-cc concurrent sweep"))))
+          (if thread
+              (unwind-protect
+                   (progn
+                     (setf *rt-concurrent-sweep-thread* thread)
+                     (funcall join-thread thread))
+                (setf *rt-concurrent-sweep-thread* nil))
+              (rt-gc-concurrent-sweep-worker heap)))
+        (rt-gc-concurrent-sweep-worker heap))))
+
+(defun rt-gc-should-run-compaction-p (heap)
+  "Return true when FR-621 old-generation mark-compact should run."
+  (and *compacting-gc-enabled*
+       (or (rt-heap-should-compact-p heap)
+           (and (plusp *gc-compact-after-major-cycles*)
+                (plusp (rt-heap-major-gc-count heap))
+                (zerop (mod (rt-heap-major-gc-count heap)
+                            *gc-compact-after-major-cycles*))))))
 
 ;;; Section 6: GC Statistics
 

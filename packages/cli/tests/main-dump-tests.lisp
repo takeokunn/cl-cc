@@ -92,9 +92,10 @@
                           ("--time-passes" . t)
                           ("--trace-json" . "trace.json")
                           ("--flamegraph" . "fg.svg")
-                          ("--stats" . t)
-                          ("--trace-emit" . t)
-                          ("--shadow-stack" . t)
+                           ("--stats" . t)
+                           ("--trace-emit" . t)
+                           ("--verify-transforms" . t)
+                           ("--shadow-stack" . t)
                           ("--opt-remarks" . "changed"))))
          (opts (cl-cc/cli::%parse-compile-opts parsed)))
     (assert-true (cl-cc/cli::compile-opts-pass-pipeline opts))
@@ -103,6 +104,7 @@
     (assert-string= "fg.svg" (cl-cc/cli::compile-opts-flamegraph-path opts))
     (assert-true (cl-cc/cli::compile-opts-print-pass-stats opts))
     (assert-true (cl-cc/cli::compile-opts-trace-emit opts))
+    (assert-true (cl-cc/cli::compile-opts-verify-transforms opts))
     (assert-true (cl-cc/cli::compile-opts-shadow-stack opts))
     (assert-eq :changed (cl-cc/cli::compile-opts-opt-remarks-mode opts))))
 
@@ -112,15 +114,17 @@
                 :print-pass-timings t
                 :trace-json-path "trace.json"
                 :print-pass-stats t
-                :trace-emit t
-                :shadow-stack t
+                 :trace-emit t
+                 :verify-transforms t
+                 :shadow-stack t
                 :opt-remarks-mode :missed))
          (kwargs (cl-cc/cli::%compile-opts-kwargs opts :trace-stream)))
     (assert-equal '(:trace-json-stream :trace-stream
                     :print-pass-stats t
                     :pass-pipeline t
-                    :inline-threshold-scale 1
-                    :shadow-stack t
+                     :inline-threshold-scale 1
+                     :verify-transforms t
+                     :shadow-stack t
                     :print-pass-timings t
                     :print-opt-remarks t
                     :opt-remarks-mode :missed)

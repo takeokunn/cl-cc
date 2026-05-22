@@ -30,10 +30,30 @@
     vm-type-check-deopt-id
     vm-deopt-label
     vm-deopt-id
-    vm-deopt-reason
-    vm-osr-label
-    vm-osr-id
-    vm-binop
+     vm-deopt-reason
+     vm-osr-label
+     vm-osr-id
+     vm-deopt-info
+     make-vm-deopt-info
+     vm-deopt-info-pc
+     vm-deopt-info-label
+     vm-deopt-info-live-regs
+     vm-deopt-info-vreg->preg
+     vm-deopt-info-inline-stack
+     vm-deopt-info-env
+     vm-deopt-info-description
+     vm-deopt-frame
+     make-vm-deopt-frame
+     vm-deopt-frame-pc
+     vm-deopt-frame-reason
+     vm-deopt-frame-registers
+     vm-deopt-frame-physical-registers
+     vm-deopt-frame-call-stack
+     vm-deopt-frame-closure-env
+     vm-deopt-frame-values-list
+     vm-deopt-frame-inline-stack
+     vm-deopt-frame-info
+     vm-binop
    vm-add
    vm-integer-add
    vm-integer-sub
@@ -67,7 +87,10 @@
    vm-closure
     vm-call
      vm-tail-call
-     vm-trampoline
+     vm-call/cc
+     vm-call-with-prompt
+     vm-abort-to-prompt
+      vm-trampoline
      vm-recompile
      vm-ret
     vm-func-ref
@@ -81,8 +104,21 @@
      vm-vr2
      vm-vr-count
      vm-mv-bind-regs-count
-     vm-values-typep
-    vm-spread-values
+      vm-values-typep
+      vm-nth-value
+      vm-load-time-value
+      vm-mv-buffer
+      vm-mv-count
+      vm-load-time-values
+      vm-load-time-value-cell
+      make-vm-load-time-value-cell
+      vm-load-time-value-cell-id
+      vm-load-time-value-cell-form
+      vm-load-time-value-cell-read-only-p
+      vm-load-time-value-cell-resolved-p
+      vm-load-time-value-cell-value
+      +maximum-multiple-values+
+     vm-spread-values
    vm-mv-bind
    vm-dst-regs
    vm-lcm
@@ -205,8 +241,14 @@
    vm-catch-handler-label
    vm-catch-result-reg
    vm-throw-tag-reg
-   vm-throw-value-reg
-   vm-handler-stack
+    vm-throw-value-reg
+    vm-prompt-reg
+    vm-value-reg
+    vm-continuation
+    vm-continuation-p
+    vm-capture-continuation
+    vm-invoke-continuation
+    vm-handler-stack
    vm-closure-p
    vm-const-p
    vm-jump-p

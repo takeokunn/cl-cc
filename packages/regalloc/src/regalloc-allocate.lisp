@@ -39,6 +39,40 @@ Valid values are :LINEAR-SCAN and :COLOR.  Linear scan remains the default;
 graph coloring can be selected by binding this variable or by passing
 :ALLOCATOR :COLOR in ALLOCATION-POLICY to ALLOCATE-REGISTERS.")
 
+(defparameter *ml-regalloc-enabled* nil
+  "When non-NIL, use FR-581 ML-style spill-cost prediction for spill choices.")
+
+(defvar *current-regalloc-loop-depths* nil
+  "Position -> loop-depth table bound while FR-581 spill decisions are made.")
+
+(defun regalloc-loop-depths (instructions)
+  "Return a position -> loop-depth table from backward branches in INSTRUCTIONS."
+  (let ((label-pos (make-hash-table :test #'equal))
+        (depths (make-hash-table :test #'eql)))
+    (loop for inst in instructions
+          for i from 0
+          when (typep inst 'vm-label)
+            do (setf (gethash (vm-name inst) label-pos) i))
+    (loop for inst in instructions
+          for i from 0
+          when (typep inst '(or vm-jump vm-jump-zero))
+            do (let ((target (gethash (vm-label-name inst) label-pos)))
+                 (when (and target (< target i))
+                   (loop for j from target to i do (incf (gethash j depths 0))))))
+    depths))
+
+(defun regalloc-ml-spill-cost (interval &optional (loop-depths *current-regalloc-loop-depths*))
+  "Predict spill cost for INTERVAL using frequency × loop-depth weighted uses.
+Higher scores mean the interval should be kept in a register when possible." 
+  (let ((weighted-uses
+          (loop for pos in (interval-use-positions interval)
+                sum (+ 1 (* 8 (if loop-depths (gethash pos loop-depths 0) 0))))))
+    (+ weighted-uses
+       (if (interval-crosses-call-p interval) 2 0)
+       (if (interval-return-value-p interval) 4 0)
+       (if (interval-remat-const interval) -6 0)
+       (if (interval-remat-inst interval) -3 0))))
+
 (defun %lsa-interval-pool (state interval)
   "Return the free-register pool for INTERVAL's register class."
   (if (interval-fp-p interval) (lsa-free-fp-regs state) (lsa-free-regs state)))
@@ -70,18 +104,29 @@ graph coloring can be selected by binding this variable or by passing
 (defun %lsa-best-spill-candidate (state interval)
   "Return the active interval (or INTERVAL itself) with the farthest next use."
   (let ((same-class (remove-if-not (lambda (cand)
-                                     (eq (interval-fp-p cand) (interval-fp-p interval)))
-                                   (lsa-active state))))
-    (reduce (lambda (best candidate)
-              (let ((best-next (%interval-next-use-after best (interval-start interval)))
-                    (cand-next (%interval-next-use-after candidate (interval-start interval))))
-                (cond ((null best) candidate)
-                      ((null cand-next) candidate)
-                      ((null best-next) best)
-                      ((> cand-next best-next) candidate)
-                      (t best))))
-            same-class
-            :initial-value interval)))
+                                      (eq (interval-fp-p cand) (interval-fp-p interval)))
+                                    (lsa-active state))))
+    (if *ml-regalloc-enabled*
+        (reduce (lambda (best candidate)
+                  (let ((best-cost (regalloc-ml-spill-cost best))
+                        (cand-cost (regalloc-ml-spill-cost candidate)))
+                    (cond ((< cand-cost best-cost) candidate)
+                          ((and (= cand-cost best-cost)
+                                (< (interval-end candidate) (interval-end best)))
+                           candidate)
+                          (t best))))
+                same-class
+                :initial-value interval)
+        (reduce (lambda (best candidate)
+                  (let ((best-next (%interval-next-use-after best (interval-start interval)))
+                        (cand-next (%interval-next-use-after candidate (interval-start interval))))
+                    (cond ((null best) candidate)
+                          ((null cand-next) candidate)
+                          ((null best-next) best)
+                          ((> cand-next best-next) candidate)
+                          (t best))))
+                same-class
+                :initial-value interval))))
 
 ;;; Linear Scan Allocation — named helpers
 
@@ -298,11 +343,13 @@ Safety guard: do not force caller-saved for call-crossing intervals."
 
 (defun %color-spill-priority (interval)
   "Return lower-is-better optimistic spill priority for INTERVAL."
-  (let ((length (max 1 (- (interval-end interval) (interval-start interval))))
-        (uses (length (interval-use-positions interval))))
-    (+ (/ uses length)
-       (if (interval-crosses-call-p interval) 1 0)
-       (if (interval-return-value-p interval) 1 0))))
+  (if *ml-regalloc-enabled*
+      (regalloc-ml-spill-cost interval)
+      (let ((length (max 1 (- (interval-end interval) (interval-start interval))))
+            (uses (length (interval-use-positions interval))))
+        (+ (/ uses length)
+           (if (interval-crosses-call-p interval) 1 0)
+           (if (interval-return-value-p interval) 1 0)))))
 
 (defun %color-spill-candidate (graph interval-map)
   "Pick a deterministic optimistic spill candidate from GRAPH."
@@ -784,9 +831,11 @@ float-vreg map updated with split children."
          (split-instructions instructions)
          (split-slot-count 0)
          (intervals raw-intervals)
-          (effective-policy (or allocation-policy
-                                (%derive-single-function-policy instructions)))
-          (*current-allocation-policy* effective-policy))
+           (effective-policy (or allocation-policy
+                                 (%derive-single-function-policy instructions)))
+           (*current-allocation-policy* effective-policy)
+           (*current-regalloc-loop-depths* (and *ml-regalloc-enabled*
+                                                (regalloc-loop-depths instructions))))
     (multiple-value-setq (split-instructions intervals split-slot-count float-vregs)
       (split-live-ranges instructions raw-intervals float-vregs))
     (multiple-value-bind (assignment spill-map spill-count)

@@ -101,6 +101,45 @@
                 (cons 'retry "outer_tag_1")))
     (assert-equal "inner_tag_5" (cl-cc/compile::lookup-tag ctx 'retry))))
 
+;;; ─── FR-920 / FR-902 utility hooks ──────────────────────────────────────────
+
+(deftest codegen-forward-reference-resolves-and-patches
+  "FR-920 forward-reference table resolves known refs and invokes patch hooks."
+  (let ((cl-cc/compile:*forward-reference-patch-table* (make-hash-table :test #'equal))
+        (patched nil)
+        (defs (make-hash-table :test #'equal)))
+    (setf (gethash 'later defs) :resolved)
+    (cl-cc/compile:record-forward-reference
+     'later 12
+     :kind :call
+     :patch-fn (lambda (name value fixup)
+                 (setf patched (list name value (getf fixup :location)))))
+    (multiple-value-bind (resolved unresolved)
+        (cl-cc/compile:resolve-forward-references defs)
+      (assert-equal '(later) resolved)
+      (assert-null unresolved)
+      (assert-equal '(later :resolved 12) patched))))
+
+(deftest codegen-forward-reference-errors-when-unresolved
+  "FR-920 unresolved refs signal at EOF when requested."
+  (let ((cl-cc/compile:*forward-reference-patch-table* (make-hash-table :test #'equal)))
+    (cl-cc/compile:record-forward-reference 'missing 99)
+    (assert-signals cl-cc/compile:unresolved-forward-reference-error
+      (cl-cc/compile:resolve-forward-references nil :errorp t))))
+
+(deftest vm-pgo-data-roundtrips-basic-hash-table
+  "FR-902 PGO persistence round-trips a small hash table payload."
+  (let* ((path (merge-pathnames (format nil "clcc-pgo-~A.msgpack" (gensym))
+                                (uiop:temporary-directory)))
+         (data (make-hash-table :test #'equal)))
+    (unwind-protect
+         (progn
+           (setf (gethash "calls" data) 7)
+           (cl-cc/vm:save-pgo-data data path)
+           (let ((loaded (cl-cc/vm:load-pgo-data path)))
+             (assert-equal 7 (gethash "calls" loaded))))
+      (ignore-errors (delete-file path)))))
+
 ;;; ─── type-error-message-from-mismatch ────────────────────────────────────────
 
 (deftest type-error-message-contains-expected-and-got

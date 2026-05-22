@@ -42,132 +42,141 @@ branch is encoded as rel8.")
 (defun instruction-size (inst)
   "Estimate the size in bytes of the x86-64 encoding for a VM instruction.
    Used in first pass to build label offset table."
-  (typecase inst
-    (x86-64-lea-address
-      (x86-64-lea-address-byte-size inst))
-    (x86-64-bextr-field
-     16)
-    (x86-64-shrink-save
-     (push-r64-byte-size (x86-64-shrink-save-reg inst)))
-    (x86-64-shrink-restore
-     (pop-r64-byte-size (x86-64-shrink-restore-reg inst)))
-    (vm-const
-     (if (floatp (vm-value inst)) 15 10))
-    (vm-move
-     (if (or (x86-64-float-vreg-p (vm-dst inst))
-             (x86-64-float-vreg-p (vm-src inst)))
-         (let ((dst (vm-reg-to-xmm (vm-dst inst)))
-               (src (vm-reg-to-xmm (vm-src inst))))
-           (if (= dst src) 0 4))
-         (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-               (src (vm-reg-to-x86 (vm-src inst))))
-           (if (= dst src) 0 3))))
-    (vm-halt
-      (if (x86-64-float-vreg-p (vm-reg inst))
-         (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
-           (if (= result-reg +xmm0+) 0 4))
-          (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
-            (if (= result-reg +rax+) 0 3))))
-    (vm-call
-      (+ (if *x86-64-use-retpoline* 44 6)
-         (if (and (not *x86-64-use-retpoline*)
-                  (x86-64-float-vreg-p (vm-dst inst)))
-             1
-             0)
-         (if *x86-64-cfi-enabled* 28 0)))
-    (vm-tail-call
-     (+ (if *x86-64-use-retpoline* 20 3)
-     (if *x86-64-cfi-enabled* 28 0)))
-     (vm-jump-zero
-      (x86-64-conditional-branch-size inst))
-      ((or vm-spill-store vm-spill-load)
-       (let* ((phys (if (typep inst 'vm-spill-store)
-                        (vm-spill-src inst)
-                        (vm-spill-dst inst)))
-              (fp-entry (assoc phys *phys-fp-reg-to-x86-code*))
-              (fp-code (cdr fp-entry))
-              (offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
-             (mod (cond
-                   ((and (zerop offset)
-                         (/= (logand *current-spill-base-reg* #x7) 5))
-                    0)
-                   ((typep offset '(signed-byte 8))
-                    1)
-                   (t
-                    2)))
-            (sib-p (= (logand *current-spill-base-reg* #x7) 4))
-            (addr-size (+ 1
-                          (if sib-p 1 0)
-                           (ecase mod
-                             (0 0)
-                             (1 1)
-                             (2 4)))))
-         (+ (if fp-entry 3 2)
-            (if (and fp-entry
-                     (or (>= fp-code 8)
-                         (>= *current-spill-base-reg* 8)))
-                1
-                0)
-            addr-size)))
-      ((or vm-aref vm-aset)
-       (let ((index (vm-reg-to-x86 (vm-index-reg inst))))
-         (+ (if (= (logand index #x7) 4) 3 0)
-            (gethash (type-of inst) *x86-64-instruction-sizes*))))
-      (vm-prefetch
-       (let* ((base (vm-reg-to-x86 (vm-prefetch-base-reg inst)))
-              (index-reg (vm-prefetch-index-reg inst))
-              (raw-index (and index-reg (vm-reg-to-x86 index-reg)))
-              (index (and raw-index
-                          (if (= (logand raw-index #x7) 4) +r11+ raw-index)))
-              (offset (vm-prefetch-offset inst))
-              (index-fixup-size (if (and raw-index (= (logand raw-index #x7) 4)) 3 0))
-              (rex-size (if (or (>= base 8) (and index (>= index 8))) 1 0)))
-          (+ index-fixup-size rex-size 2
-             (x86-64-memory-address-byte-size base offset :index index))))
-      (vm-simd-vector-op
-       (x86-64-validate-simd-vector-op inst)
-       (let* ((raw-index (vm-reg-to-x86 (vm-simd-vector-op-index-reg inst)))
-              (index-fixup-size (if (= (logand raw-index #x7) 4) 3 0))
-              (index (if (= (logand raw-index #x7) 4) +r11+ raw-index))
-              (element-type (vm-simd-vector-op-element-type inst))
-              (addr-size (lambda (base)
-                           (x86-64-lea-address-byte-size
-                            (make-x86-64-lea-address
-                             :dst +r11+ :base base :index index
-                             :scale (x86-64-simd-element-scale element-type)
-                             :displacement +x86-64-array-data-offset+))))
-              (lhs (vm-reg-to-x86 (vm-simd-vector-op-lhs-array inst)))
-              (rhs (vm-reg-to-x86 (vm-simd-vector-op-rhs-array inst)))
-              (dst (vm-reg-to-x86 (vm-simd-vector-op-dst-array inst)))
-              (mov-size 5)
-              (op-size (if (= (vm-simd-vector-op-lanes inst) 4)
-                           (if (eq (vm-simd-vector-op-op inst) :mul) 5 4)
-                           4)))
-         (+ index-fixup-size
-            (funcall addr-size lhs) mov-size
-            (funcall addr-size rhs) mov-size
-            op-size
-            (funcall addr-size dst) mov-size)))
-      (t
-     (let ((tp (string-downcase (symbol-name (type-of inst)))))
-       (if (member tp
-                   '("vm-push-handler"
-                     "vm-pop-handler"
-                     "vm-bind-restart"
-                     "vm-invoke-restart"
-                     "vm-signal"
-                     "vm-error-instruction"
-                     "vm-cerror"
-                     "vm-warn"
-                     "vm-establish-handler"
-                     "vm-remove-handler"
-                     "vm-sync-handler-regs"
-                     "vm-signal-error"
-                     "vm-establish-catch"
-                     "vm-throw")
-                    :test #'string=)
-            (if *x86-64-shadow-stack-enabled* 6 2)
-             (or (x86-64-dynamic-instruction-size inst) 0))))))
+  (let ((base-size
+          (typecase inst
+            (x86-64-lea-address
+              (x86-64-lea-address-byte-size inst))
+            (x86-64-bextr-field
+             16)
+            (x86-64-shrink-save
+             (push-r64-byte-size (x86-64-shrink-save-reg inst)))
+            (x86-64-shrink-restore
+             (pop-r64-byte-size (x86-64-shrink-restore-reg inst)))
+            (vm-const
+             (if (floatp (vm-value inst)) 15 10))
+            (vm-move
+             (if (or (x86-64-float-vreg-p (vm-dst inst))
+                     (x86-64-float-vreg-p (vm-src inst)))
+                 (let ((dst (vm-reg-to-xmm (vm-dst inst)))
+                       (src (vm-reg-to-xmm (vm-src inst))))
+                   (if (= dst src) 0 4))
+                 (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+                       (src (vm-reg-to-x86 (vm-src inst))))
+                   (if (= dst src) 0 3))))
+            (vm-halt
+              (if (x86-64-float-vreg-p (vm-reg inst))
+                 (let ((result-reg (vm-reg-to-xmm (vm-reg inst))))
+                   (if (= result-reg +xmm0+) 0 4))
+                  (let ((result-reg (vm-reg-to-x86 (vm-reg inst))))
+                    (if (= result-reg +rax+) 0 3))))
+            (vm-call
+              (+ (if *x86-64-use-retpoline* 44 6)
+                 (if (and (not *x86-64-use-retpoline*)
+                          (x86-64-float-vreg-p (vm-dst inst)))
+                     1
+                     0)
+                 (if *x86-64-cfi-enabled* 28 0)))
+            (vm-tail-call
+             (+ (if *x86-64-use-retpoline* 20 3)
+             (if *x86-64-cfi-enabled* 28 0)))
+             (vm-jump-zero
+              (x86-64-conditional-branch-size inst))
+              ((or vm-spill-store vm-spill-load)
+               (let* ((phys (if (typep inst 'vm-spill-store)
+                                (vm-spill-src inst)
+                                (vm-spill-dst inst)))
+                      (fp-entry (assoc phys *phys-fp-reg-to-x86-code*))
+                      (fp-code (cdr fp-entry))
+                      (offset (x86-64-spill-slot-offset (vm-spill-slot inst)))
+                      (mod (cond
+                            ((and (zerop offset)
+                                  (/= (logand *current-spill-base-reg* #x7) 5))
+                             0)
+                            ((typep offset '(signed-byte 8))
+                             1)
+                            (t
+                             2)))
+                     (sib-p (= (logand *current-spill-base-reg* #x7) 4))
+                     (addr-size (+ 1
+                                   (if sib-p 1 0)
+                                    (ecase mod
+                                      (0 0)
+                                      (1 1)
+                                      (2 4)))))
+                 (+ (if fp-entry 3 2)
+                    (if (and fp-entry
+                             (or (>= fp-code 8)
+                                 (>= *current-spill-base-reg* 8)))
+                        1
+                        0)
+                    addr-size)))
+              ((or vm-aref vm-aset)
+               (let ((index (vm-reg-to-x86 (vm-index-reg inst))))
+                 (+ (if (= (logand index #x7) 4) 3 0)
+                    (gethash (type-of inst) *x86-64-instruction-sizes*))))
+              (vm-prefetch
+               (let* ((base (vm-reg-to-x86 (vm-prefetch-base-reg inst)))
+                      (index-reg (vm-prefetch-index-reg inst))
+                      (raw-index (and index-reg (vm-reg-to-x86 index-reg)))
+                      (index (and raw-index
+                                  (if (= (logand raw-index #x7) 4) +r11+ raw-index)))
+                      (offset (vm-prefetch-offset inst))
+                      (index-fixup-size (if (and raw-index (= (logand raw-index #x7) 4)) 3 0))
+                      (rex-size (if (or (>= base 8) (and index (>= index 8))) 1 0)))
+                  (+ index-fixup-size rex-size 2
+                     (x86-64-memory-address-byte-size base offset :index index))))
+              (vm-simd-vector-op
+               (x86-64-validate-simd-vector-op inst)
+               (let* ((raw-index (vm-reg-to-x86 (vm-simd-vector-op-index-reg inst)))
+                      (index-fixup-size (if (= (logand raw-index #x7) 4) 3 0))
+                      (index (if (= (logand raw-index #x7) 4) +r11+ raw-index))
+                      (element-type (vm-simd-vector-op-element-type inst))
+                      (addr-size (lambda (base)
+                                   (x86-64-lea-address-byte-size
+                                    (make-x86-64-lea-address
+                                     :dst +r11+ :base base :index index
+                                     :scale (x86-64-simd-element-scale element-type)
+                                     :displacement +x86-64-array-data-offset+))))
+                      (lhs (vm-reg-to-x86 (vm-simd-vector-op-lhs-array inst)))
+                      (rhs (vm-reg-to-x86 (vm-simd-vector-op-rhs-array inst)))
+                      (dst (vm-reg-to-x86 (vm-simd-vector-op-dst-array inst)))
+                      (mov-size 5)
+                      (op-size (if (= (vm-simd-vector-op-lanes inst) 4)
+                                   (if (eq (vm-simd-vector-op-op inst) :mul) 5 4)
+                                   4)))
+                 (+ index-fixup-size
+                    (funcall addr-size lhs) mov-size
+                    (funcall addr-size rhs) mov-size
+                    op-size
+                    (funcall addr-size dst) mov-size)))
+              (t
+             (let ((tp (string-downcase (symbol-name (type-of inst)))))
+               (if (member tp
+                           '("vm-push-handler"
+                             "vm-pop-handler"
+                             "vm-bind-restart"
+                             "vm-invoke-restart"
+                             "vm-signal"
+                             "vm-error-instruction"
+                             "vm-cerror"
+                             "vm-warn"
+                             "vm-establish-handler"
+                             "vm-remove-handler"
+                             "vm-sync-handler-regs"
+                             "vm-signal-error"
+                             "vm-establish-catch"
+                             "vm-throw")
+                            :test #'string=)
+                    (if *x86-64-shadow-stack-enabled* 6 2)
+                     (or (x86-64-dynamic-instruction-size inst) 0)))))))
+    (+ base-size
+       (if (and (fboundp 'sanitizer-instrumentation-size)
+                (or (and (boundp '*asan-instrumentation-enabled*)
+                         *asan-instrumentation-enabled*)
+                    (and (boundp '*ubsan-instrumentation-enabled*)
+                         *ubsan-instrumentation-enabled*)))
+           (funcall (symbol-function 'sanitizer-instrumentation-size) inst)
+           0))))
 
 (defun x86-64-lea-address-byte-size (inst)
   "Return the exact byte size of internal LEA instruction INST."
@@ -205,6 +214,18 @@ branch is encoded as rel8.")
   "Return conservative stack-frame bytes represented by saves plus allocated spill space."
   (+ (* 8 (length save-regs))
      spill-frame-size))
+
+(defun x86-64-safe-stack-pointer-size ()
+  "Return byte size of gated x86-64 SafeStack FS load/store support."
+  (if *x86-64-safe-stack-enabled* 18 0))
+
+(defun x86-64-safe-stack-prologue-size ()
+  "Return byte size of the x86-64 SafeStack unsafe-stack pointer load."
+  (if *x86-64-safe-stack-enabled* 9 0))
+
+(defun x86-64-safe-stack-epilogue-size ()
+  "Return byte size of the x86-64 SafeStack unsafe-stack pointer store."
+  (if *x86-64-safe-stack-enabled* 9 0))
 
 (defun x86-64-tls-base-register ()
   "Return the selected x86-64 TLS base register from optimizer planning."

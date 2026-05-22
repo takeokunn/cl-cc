@@ -112,6 +112,57 @@
   (assert-equal #x4C407820 (cl-cc/codegen::encode-neon-ld1-4s 0 1))
   (assert-equal #x4C007820 (cl-cc/codegen::encode-neon-st1-4s 0 1)))
 
+(deftest a64-sve-and-sve2-representative-encoders
+  "FR-572: SVE/SVE2 representative encoders preserve vector/predicate register fields."
+  (let ((rdvl (cl-cc/codegen::encode-rdvl 3 4))
+        (whilelt (cl-cc/codegen::encode-whilelt-d 2 5 6))
+        (sve-add (cl-cc/codegen::encode-sve-add-z 7 3 8 9))
+        (sve2-eor (cl-cc/codegen::encode-sve2-eor-z 10 4 11 12)))
+    (assert-equal #x04BF5000 (logand rdvl #xFFFFF000))
+    (assert-equal 3 (logand rdvl #x1F))
+    (assert-equal 4 (logand (ash rdvl -5) #x3F))
+    (assert-equal 2 (logand whilelt #xF))
+    (assert-equal 5 (logand (ash whilelt -5) #x1F))
+    (assert-equal 6 (logand (ash whilelt -16) #x1F))
+    (assert-equal 7 (logand sve-add #x1F))
+    (assert-equal 3 (logand (ash sve-add -10) #x7))
+    (assert-equal 8 (logand (ash sve-add -5) #x1F))
+    (assert-equal 9 (logand (ash sve-add -16) #x1F))
+    (assert-equal #x04C30000 (logand sve2-eor #xFFE00000))
+    (assert-equal 10 (logand sve2-eor #x1F))))
+
+(deftest a64-sme-representative-encoders-and-gate
+  "FR-574: SME encoder stubs expose SMSTART/SMSTOP/FMOPA and remain feature-gated."
+  (assert-equal #xD503437F (cl-cc/codegen:encode-smstart :sm))
+  (assert-equal #xD503457F (cl-cc/codegen:encode-smstart :za))
+  (assert-equal #xD503477F (cl-cc/codegen:encode-smstart :both))
+  (assert-equal #xD503427F (cl-cc/codegen:encode-smstop :sm))
+  (let ((fmopa (cl-cc/codegen:encode-fmopa 1 2 3 4 5)))
+    (assert-equal 1 (logand fmopa #x1F))
+    (assert-equal 2 (logand (ash fmopa -10) #x7))
+    (assert-equal 3 (logand (ash fmopa -13) #x7))
+    (assert-equal 4 (logand (ash fmopa -5) #x1F))
+    (assert-equal 5 (logand (ash fmopa -16) #x1F)))
+  (let ((cl-cc/codegen:*sme-enabled* nil))
+    (assert-false (cl-cc/codegen:aarch64-supports-sme-p)))
+  (let ((cl-cc/codegen:*sme-enabled* t))
+    (assert-true (cl-cc/codegen:aarch64-supports-sme-p))))
+
+(deftest a64-mte-safe-stack-and-xom-marker-encoders
+  "FR-693/FR-771/FR-772: AArch64 security hooks emit MTE-ish BRK markers and SafeStack TLS loads/stores."
+  (let ((load-bytes nil)
+        (store-bytes nil))
+    (let ((cl-cc/codegen:*aarch64-safe-stack-enabled* nil))
+      (cl-cc/codegen::emit-a64-safe-stack-load-pointer 0 (lambda (b) (push b load-bytes))))
+    (assert-null load-bytes)
+    (let ((cl-cc/codegen:*aarch64-safe-stack-enabled* t))
+      (cl-cc/codegen::emit-a64-safe-stack-load-pointer 0 (lambda (b) (push b load-bytes)))
+      (cl-cc/codegen::emit-a64-safe-stack-store-pointer 1 (lambda (b) (push b store-bytes))))
+    (assert-equal 8 (length load-bytes))
+    (assert-equal 8 (length store-bytes)))
+  (assert-equal #xD4200000 (logand (cl-cc/codegen::encode-brk 0) #xFFE0001F))
+  (assert-equal #xD4200020 (cl-cc/codegen::encode-brk 1)))
+
 (deftest a64-simd-marker-lowers-to-neon-sequence
   "vm-simd-vector-op lowers to fixed-width NEON LD1/ADD/ST1 sequence."
   (let ((bytes nil)

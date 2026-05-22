@@ -58,6 +58,9 @@
 (defparameter *current-riscv64-float-vregs* nil
   "When non-nil, hash table of virtual registers known to hold unboxed floats.")
 
+(defparameter *riscv64-zicond-enabled* nil
+  "When true, lower integer select through Zicond CZERO.EQZ/CZERO.NEZ.")
+
 (defun riscv64-codegen-target ()
   "Return the RISC-V target descriptor for the active frame-pointer policy."
   (if *riscv64-omit-frame-pointer*
@@ -222,6 +225,7 @@
 (defun encode-rv-rem (rd rs1 rs2) (encode-rv-r +rv-op+ rd 6 rs1 rs2 1))
 (defun encode-rv-slt (rd rs1 rs2) (encode-rv-r +rv-op+ rd 2 rs1 rs2 0))
 (defun encode-rv-addi (rd rs1 imm) (encode-rv-i +rv-op-imm+ rd 0 rs1 imm))
+(defun encode-rv-slli (rd rs1 shamt) (encode-rv-i +rv-op-imm+ rd 1 rs1 shamt))
 (defun encode-rv-slti (rd rs1 imm) (encode-rv-i +rv-op-imm+ rd 2 rs1 imm))
 (defun encode-rv-ld (rd rs1 imm) (encode-rv-i +rv-load+ rd 3 rs1 imm))
 (defun encode-rv-sd (rs2 rs1 imm) (encode-rv-s +rv-store+ 3 rs1 rs2 imm))
@@ -260,6 +264,14 @@
 (defun encode-rv-amoswap-d (rd rs1 rs2 &key (aq 0) (rl 0)) (encode-rv-amo #b00001 rd rs1 rs2 :aq aq :rl rl))
 (defun encode-rv-amoand-d (rd rs1 rs2 &key (aq 0) (rl 0)) (encode-rv-amo #b01100 rd rs1 rs2 :aq aq :rl rl))
 (defun encode-rv-amoor-d (rd rs1 rs2 &key (aq 0) (rl 0)) (encode-rv-amo #b01000 rd rs1 rs2 :aq aq :rl rl))
+
+(defun encode-rv-czero-eqz (rd rs1 rs2)
+  "Encode Zicond CZERO.EQZ rd, rs1, rs2."
+  (encode-rv-r +rv-op+ rd #b101 rs1 rs2 #b0000111))
+
+(defun encode-rv-czero-nez (rd rs1 rs2)
+  "Encode Zicond CZERO.NEZ rd, rs1, rs2."
+  (encode-rv-r +rv-op+ rd #b111 rs1 rs2 #b0000111))
 
 ;;; Compressed extension helpers for common patterns
 
@@ -434,13 +446,20 @@
     (emit-riscv32 (encode-rv-beq rs +rv-zero+ offset) stream)))
 
 (defun emit-riscv64-vm-select (inst stream)
-  "Emit a simple branchless integer select using SLT-style zero test expansion."
+  "Emit select; use Zicond when enabled, otherwise preserve existing placeholder."
   (let ((rd (riscv64-reg (vm-dst inst)))
+        (cond-reg (riscv64-reg (vm-select-cond-reg inst)))
         (then (riscv64-reg (vm-select-then-reg inst)))
         (else (riscv64-reg (vm-select-else-reg inst))))
-    ;; Minimal correctness placeholder: prefer THEN. A full lowering needs masks.
-    (declare (ignore else))
-    (emit-riscv32 (encode-rv-addi rd then 0) stream)))
+    (declare (ignorable cond-reg else))
+    (if *riscv64-zicond-enabled*
+        (progn
+          ;; rd = (cond != 0) ? then : else
+          (emit-riscv32 (encode-rv-czero-eqz +rv-t0+ then cond-reg) stream)
+          (emit-riscv32 (encode-rv-czero-nez rd else cond-reg) stream)
+          (emit-riscv32 (encode-rv-add rd rd +rv-t0+) stream))
+        (progn
+          (emit-riscv32 (encode-rv-addi rd then 0) stream)))))
 
 (defparameter *riscv64-emitter-table*
   (let ((ht (make-hash-table :test #'eq)))

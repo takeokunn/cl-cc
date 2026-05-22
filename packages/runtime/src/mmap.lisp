@@ -18,6 +18,9 @@
   (flags +rt-map-private+ :type integer)
   (fd nil)
   (offset 0 :type integer)
+  (path nil)
+  (array nil)
+  (dirty-p nil)
   (buffer nil)
   (released-p nil))
 
@@ -96,7 +99,100 @@
 (defun rt-mmap-set (region index value)
   (unless (not (zerop (logand (rt-mmap-region-prot region) +rt-prot-write+)))
     (error "mmap region is not writable"))
-  (setf (aref (rt-mmap-buffer region) index) value))
+  (setf (rt-mmap-region-dirty-p region) t
+        (aref (rt-mmap-buffer region) index) value))
+
+(defun %rt-mmap-prot (protection)
+  (ecase protection
+    (:read +rt-prot-read+)
+    (:read-write (logior +rt-prot-read+ +rt-prot-write+))
+    (:exec (logior +rt-prot-read+ +rt-prot-exec+))))
+
+(defun %rt-mmap-flags (flags)
+  (ecase flags
+    (:private +rt-map-private+)
+    (:shared +rt-map-shared+)))
+
+(defun %rt-mmap-writable-p (region)
+  (not (zerop (logand (rt-mmap-region-prot region) +rt-prot-write+))))
+
+(defun %rt-mmap-shared-p (region)
+  (not (zerop (logand (rt-mmap-region-flags region) +rt-map-shared+))))
+
+(defun mmap-file (path &key (protection :read) (flags :private) length (offset 0))
+  "Map PATH into a portable byte-backed mmap region descriptor."
+  (let* ((name (namestring (pathname path)))
+         (file-size (with-open-file (in name :direction :input
+                                            :element-type '(unsigned-byte 8)
+                                            :if-does-not-exist (if (eq protection :read)
+                                                                    :error
+                                                                    :create))
+                      (file-length in)))
+         (size (or length (max 0 (- file-size offset))))
+         (region (rt-mmap nil (max 1 size)
+                          (%rt-mmap-prot protection)
+                          (%rt-mmap-flags flags)
+                          nil offset)))
+    (setf (rt-mmap-region-path region) name
+          (rt-mmap-region-length region) size)
+    (when (plusp size)
+      (with-open-file (in name :direction :input :element-type '(unsigned-byte 8))
+        (file-position in offset)
+        (read-sequence (rt-mmap-region-buffer region) in :end (min size file-size))))
+    (setf (rt-mmap-region-array region)
+          (make-array size :element-type '(unsigned-byte 8)
+                           :displaced-to (rt-mmap-region-buffer region)))
+    region))
+
+(defun mmap-array (region)
+  "Return REGION's displaced byte array for direct byte access."
+  (when (rt-mmap-region-released-p region)
+    (error "mmap region released"))
+  (or (rt-mmap-region-array region)
+      (setf (rt-mmap-region-array region)
+            (make-array (rt-mmap-region-length region)
+                        :element-type '(unsigned-byte 8)
+                        :displaced-to (rt-mmap-region-buffer region)))))
+
+(defun mmap-sync (region &key start end)
+  "Flush shared writable REGION bytes back to disk."
+  (when (and (rt-mmap-region-path region)
+             (%rt-mmap-shared-p region)
+             (%rt-mmap-writable-p region))
+    (with-open-file (out (rt-mmap-region-path region)
+                         :direction :output
+                         :element-type '(unsigned-byte 8)
+                         :if-exists :overwrite
+                         :if-does-not-exist :create)
+      (write-sequence (rt-mmap-region-buffer region) out
+                      :start (or start 0)
+                      :end (or end (rt-mmap-region-length region)))))
+  (setf (rt-mmap-region-dirty-p region) nil)
+  t)
+
+(defun mmap-close (region)
+  "Close REGION, flushing shared writable mappings."
+  (unless (rt-mmap-region-released-p region)
+    (mmap-sync region)
+    (rt-munmap region (rt-mmap-region-length region)))
+  t)
+
+(defmacro with-mmap ((var path &rest options) &body body)
+  "Evaluate BODY with VAR bound to an mmap-file region and auto-cleaned up."
+  `(let ((,var (mmap-file ,path ,@options)))
+     (unwind-protect (progn ,@body)
+       (mmap-close ,var))))
+
+(defun mmap-advice (region advice &key start end)
+  "Portable madvise hook. Native backends may use REGION, ADVICE, START, END."
+  (declare (ignore region advice start end))
+  t)
+
+(defun rt-mmap-file (&rest args) (apply #'mmap-file args))
+(defun rt-mmap-array (region) (mmap-array region))
+(defun rt-mmap-close (region) (mmap-close region))
+(defun rt-mmap-sync (region &rest args) (apply #'mmap-sync region args))
+(defun rt-mmap-advice (region advice &rest args) (apply #'mmap-advice region advice args))
 
 (defun rt-allocate-code-memory (size)
   (rt-mmap nil size (logior +rt-prot-read+ +rt-prot-write+ +rt-prot-exec+)

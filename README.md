@@ -436,13 +436,24 @@ rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/
 ```
 cl-cc run <file>          Compile and run a .lisp file
   --timeout <seconds>     Maximum execution time (default: 30)
+  --no-timeout            Disable CLI timeout for debugging
 cl-cc compile <file>      Compile to native Mach-O binary
   --arch x86-64|arm64
   -o <output>
+  --timeout <seconds>     Maximum execution time (default: 30)
+  --no-timeout            Disable CLI timeout for debugging
 cl-cc eval "<expr>"       Evaluate a single expression
   --timeout <seconds>     Maximum execution time (default: 30)
+  --no-timeout            Disable CLI timeout for debugging
 cl-cc repl                Interactive REPL (definitions persist)
   --stdlib                Include higher-order function library
+  --timeout <seconds>     Per-form execution timeout (default: 30)
+  --no-timeout            Disable REPL form timeout for debugging
 cl-cc check <file>        Type-check without executing
   --strict                Treat type warnings as errors
+  --timeout <seconds>     Maximum execution time (default: 30)
+  --no-timeout            Disable CLI timeout for debugging
+cl-cc selfhost [file]     Run the self-hosting workload
+  --timeout <seconds>     Maximum execution time (default: 30)
+  --no-timeout            Disable CLI timeout for debugging
 ```

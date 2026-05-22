@@ -208,6 +208,102 @@
     (cl-cc/runtime:rt-gc-minor-collect heap)
     (assert-true (cl-cc/runtime:rt-gc-verify-heap heap))))
 
+(deftest fr-700-heap-profiler-report-has-stable-output-format
+  "FR-700: heap allocation profiler emits the documented plist report shape."
+  (let ((cl-cc/runtime:*gc-profile-enabled* t)
+        (cl-cc/runtime::*gc-profile-interval* 16)
+        (cl-cc/runtime::*gc-profile-bytes-since-sample* 0)
+        (cl-cc/runtime::*gc-profile-samples* (make-hash-table :test #'equal))
+        (cl-cc/runtime::*gc-profile-current-function* 'test-allocation-site))
+    (cl-cc/runtime:rt-gc-profile-sample 48)
+    (let ((report (cl-cc/runtime:rt-gc-profile-report)))
+      (assert-eq t (getf report :enabled-p))
+      (assert-= 16 (getf report :interval-bytes))
+      (assert-true (listp (getf report :hot-spots)))
+      (let ((spot (first (getf report :hot-spots))))
+        (assert-eq 'test-allocation-site (getf spot :function))
+        (assert-= 3 (getf spot :count))))))
+
+;;; ------------------------------------------------------------
+;;; FR-730..734: GC lifecycle references, finalizers, pinning
+;;; ------------------------------------------------------------
+
+(defun %gc-fr-marked-set (&rest addrs)
+  (let ((marked (make-hash-table :test #'eql)))
+    (dolist (addr addrs marked)
+      (setf (gethash addr marked) t))))
+
+(deftest fr-730-weak-pointer-clears-unmarked-heap-referent
+  "FR-730: Weak pointers do not keep an unreachable heap referent alive."
+  (let* ((heap (%make-small-heap-fr))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (weak (cl-cc/runtime:make-weak-pointer addr))
+         (cl-cc/runtime::*rt-reference-registry* (list weak)))
+    (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime::%rt-gc-process-weak-pointers heap (%gc-fr-marked-set))
+    (assert-false (cl-cc/runtime:weak-pointer-value weak))))
+
+(deftest fr-730-weak-pointer-keeps-marked-referent
+  "FR-730: Weak pointer values survive when the strong graph marks their referent."
+  (let* ((heap (%make-small-heap-fr))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (weak (cl-cc/runtime:rt-make-weak-pointer addr))
+         (cl-cc/runtime::*rt-reference-registry* (list weak)))
+    (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime::%rt-gc-process-weak-references heap (%gc-fr-marked-set addr))
+    (assert-= addr (cl-cc/runtime:rt-weak-pointer-value weak))))
+
+(deftest fr-731-ephemeron-marks-value-when-key-is-live
+  "FR-731: Ephemeron processing conditionally marks the value when the key is live."
+  (let* ((heap (%make-small-heap-fr))
+         (key (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (value (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (marked (%gc-fr-marked-set key))
+         (cl-cc/runtime:*rt-ephemeron-registry* nil))
+    (%fr-write-object heap key 3 cl-cc/runtime:+rt-tag-cons+)
+    (%fr-write-object heap value 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime:rt-make-ephemeron key value)
+    (cl-cc/runtime::%rt-gc-process-ephemerons heap marked)
+    (assert-true (gethash value marked))))
+
+(deftest fr-732-finalizer-is-scheduled-after-gc-and-runs-outside-gc-pause
+  "FR-732: Unreachable finalized objects are queued and finalized explicitly after GC."
+  (let* ((heap (%make-small-heap-fr))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (seen nil)
+         (cl-cc/runtime:*rt-finalizer-registry* nil)
+         (cl-cc/runtime:*pending-finalizers* nil)
+         (cl-cc/runtime:*rt-finalization-queue* nil))
+    (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime:rt-register-finalizer addr (lambda (obj) (push obj seen)))
+    (cl-cc/runtime::%rt-gc-process-finalizers heap (%gc-fr-marked-set))
+    (assert-equal (list addr) cl-cc/runtime:*rt-finalization-queue*)
+    (assert-= 1 (cl-cc/runtime:rt-run-pending-finalizers))
+    (assert-equal (list addr) seen)))
+
+(deftest fr-733-pinning-registers-and-cleans-up-relocation-barriers
+  "FR-733: Pinned objects are recorded for compaction and unpinned on exit."
+  (let* ((heap (%make-small-heap-fr))
+         (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
+    (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime:with-pinned-objects ((pinned heap addr))
+      (assert-= addr pinned)
+      (assert-true (cl-cc/runtime:rt-object-pinned-p heap addr)))
+    (assert-false (cl-cc/runtime:rt-object-pinned-p heap addr))))
+
+(deftest fr-734-weak-hash-table-removes-dead-weak-keys
+  "FR-734: Runtime weak hash tables remove entries whose weak key is unreachable."
+  (let* ((heap (%make-small-heap-fr))
+         (key (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
+         (value :payload)
+         (ht (cl-cc/runtime:rt-make-hash-table :weakness :key))
+         (cl-cc/runtime::*rt-weak-hash-table-registry* (list ht)))
+    (%fr-write-object heap key 3 cl-cc/runtime:+rt-tag-cons+)
+    (cl-cc/runtime:rt-sethash key ht value)
+    (assert-= 1 (cl-cc/runtime:rt-hash-count ht))
+    (cl-cc/runtime::%rt-gc-process-weak-hash-tables heap (%gc-fr-marked-set))
+    (assert-= 0 (cl-cc/runtime:rt-hash-count ht))))
+
 ;;; ------------------------------------------------------------
 ;;; FR-373: Heap ASLR (⚠️ Pure CL interface)
 ;;; ------------------------------------------------------------
@@ -445,4 +541,3 @@
       (cl-cc/runtime:rt-heap-maybe-shrink heap)
       (assert-true (cl-cc/runtime:rt-heap-maybe-shrink heap))
       (assert-true (< (length (cl-cc/runtime::rt-heap-words heap)) words-before)))))
-

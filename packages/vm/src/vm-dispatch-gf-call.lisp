@@ -136,6 +136,12 @@ preserving existing closure semantics."
    TAIL-P suppresses frame push for TCO: the current frame's return address
    is reused, keeping the call stack O(1) for tail-recursive functions."
   (cond
+    ;; Full and delimited continuations are callable VM objects. Invoking one
+    ;; restores the heap-copied interpreter stack snapshot and resumes at the
+    ;; saved PC. The object is reusable, so call/cc supports multi-shot use.
+    ((vm-continuation-p func)
+     (let ((value (if arg-regs (vm-reg-get state (first arg-regs)) nil)))
+       (values (vm-invoke-continuation state func value) nil nil)))
     ;; Generic function: delegate to multi-dispatch resolver (always non-tail for safety)
     ((vm-generic-function-p func)
      (vm-dispatch-generic-call func state pc arg-regs dst-reg labels))
@@ -165,6 +171,7 @@ preserving existing closure semantics."
               (unless (and tail-p (vm-tail-call-optimization-enabled-p state))
                 (vm-push-call-frame state (1+ pc) dst-reg live-regs)
                 (push nil (vm-method-call-stack state)))
+              (vm-store-multiple-values state nil)
               (vm-profile-enter-call state (vm-closure-entry-label resolved-func) :tail-p tail-p)
               (vm-bind-closure-args resolved-func state arg-values)
               (values (vm-label-table-lookup labels (vm-closure-entry-label resolved-func)) nil nil)))))))

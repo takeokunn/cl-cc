@@ -11,7 +11,8 @@
   :components
   ((:file "package")
    (:file "calling-convention")
-   ;; x86-64 backend
+   (:file "stack-maps")
+    ;; x86-64 backend
    (:file "x86-64")
    (:file "x86-64-encoding")
    (:file "x86-64-encoding-instrs")
@@ -22,19 +23,24 @@
    (:file "x86-64-emit-ops-bits")
    (:file "x86-64-emit-ops-logical")
       (:file "x86-64-codegen-helpers")
-      (:file "x86-64-codegen-data")
-       (:file "x86-64-codegen-core")
-      (:file "x86-64-codegen-emitters")
-     (:file "x86-64-codegen-dispatch")
-     (:file "x86-64-peephole")
+       (:file "x86-64-codegen-data")
+         (:file "x86-64-codegen-core")
+        (:file "x86-64-codegen-emitters")
+        (:file "aarch64-codegen")
+        (:file "ppc64-codegen")
+        (:file "win-cfg")
+        (:file "atomics")
+       (:file "x86-64-codegen-dispatch")
+       (:file "sanitizer")
+       (:file "x86-64-eh")
+      (:file "x86-64-peephole")
      ;; isel rules
      (:file "isel/isel-core")
      (:file "isel/x86-64-rules")
      (:file "isel/aarch64-rules")
-    ;; AArch64 backend
-   (:file "aarch64")
-   (:file "aarch64-codegen")
-    (:file "aarch64-codegen-labels")
+     ;; AArch64 backend
+    (:file "aarch64")
+     (:file "aarch64-codegen-labels")
     (:file "aarch64-emitters")
     (:file "aarch64-program")
     ;; RISC-V backend

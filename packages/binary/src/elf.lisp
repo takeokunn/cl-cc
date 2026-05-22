@@ -42,6 +42,8 @@
 (defconstant +shf-write+      1)
 (defconstant +shf-alloc+      2)
 (defconstant +shf-execinstr+  4)
+(defconstant +shf-merge+      #x10)
+(defconstant +shf-strings+    #x20)
 (defconstant +shf-compressed+ #x800)
 
 ;;; Compression algorithms for Elf64_Chdr.
@@ -90,6 +92,8 @@
 (defconstant +dt-jmprel+  23)
 (defconstant +dt-pltrelsz+ 2)
 (defconstant +dt-pltrel+  20)
+(defconstant +dt-flags+   30)
+(defconstant +df-bind-now+ #x8)
 
 ;;; Program header flags
 (defconstant +pf-x+ 1)          ; executable
@@ -170,6 +174,9 @@ FR-291: Extended with program header and entry point support for executables."
   ;; and without SHF_WRITE so final linked images may be mapped read-only by
   ;; the operating system; attempted writes should fault at the OS level.
   (rodata-buf  (elf-make-buffer))
+  (rodata-str-buf (elf-make-buffer))
+  (const-pool (make-hash-table :test #'equal))
+  (rodata-string-pool (make-hash-table :test #'equal))
   ;; .data section data for ET_EXEC/ET_DYN outputs.
   (data-buf    (elf-make-buffer))
   ;; .bss section size in bytes (NOBITS, occupies memory only)
@@ -189,6 +196,10 @@ FR-291: Extended with program header and entry point support for executables."
   (phdrs nil)
   ;; FR-406: whether .text should be serialized as an ELF compressed section.
   (compress-text nil :type boolean))
+
+(defun %elf64-bytes-key (bytes)
+  "Return an EQUAL hash-table key for BYTES."
+  (coerce bytes 'list))
 
 (defun make-elf64-object (&key (machine +elf-machine-x86-64+))
   "Create a fresh ELF64 builder for ET_REL (.o file)."
@@ -220,9 +231,47 @@ FR-291: Extended with program header and entry point support for executables."
 String literals and constant pools should use this API rather than .data.  The
 serialized ELF section is allocated but not writable (SHF_ALLOC without
 SHF_WRITE), allowing the final OS mapping to protect constants from writes."
-  (let ((offset (length (elf64-rodata-buf builder))))
-    (binary-buffer-write-bytes (elf64-rodata-buf builder) bytes)
+  (let* ((key (%elf64-bytes-key bytes))
+         (cached (gethash key (elf64-const-pool builder))))
+    (if cached
+        cached
+        (let ((offset (length (elf64-rodata-buf builder))))
+          (binary-buffer-write-bytes (elf64-rodata-buf builder) bytes)
+          (setf (gethash key (elf64-const-pool builder)) offset)
+          offset))))
+
+(defun elf64-add-rodata-string (builder string)
+  "Add STRING to mergeable .rodata.str and return its section offset."
+  (or (gethash string (elf64-rodata-string-pool builder))
+      (let ((offset (length (elf64-rodata-str-buf builder))))
+        (loop for ch across string do (elf-buf-u8 (elf64-rodata-str-buf builder) (char-code ch)))
+        (elf-buf-u8 (elf64-rodata-str-buf builder) 0)
+        (setf (gethash string (elf64-rodata-string-pool builder)) offset)
+        offset)))
+
+(defun elf64-add-got-entry (builder symbol-name)
+  "Reserve an 8-byte GOT slot for SYMBOL-NAME in .data and return its offset."
+  (let ((offset (elf64-add-data-bytes builder #(0 0 0 0 0 0 0 0))))
+    (elf64-add-global-symbol builder symbol-name :section-idx 0 :value 0 :size 0)
     offset))
+
+(defun elf64-add-plt-stub (builder symbol-name)
+  "Append a conservative x86-64 PLT-style jump stub for SYMBOL-NAME."
+  (let ((offset (elf64-text-size builder)))
+    (elf64-add-text-bytes builder #(#xff #x25 #x00 #x00 #x00 #x00 #x0f #x1f #x40 #x00))
+    (elf64-add-global-symbol builder symbol-name :section-idx 0 :value 0 :size 0)
+    (elf64-add-reloc builder (+ offset 2) symbol-name :type +r-x86-64-pc32+ :addend -4)
+    offset))
+
+(defun elf64-verify-wx (segments)
+  "Signal an error if any PT_LOAD segment is both writable and executable."
+  (dolist (segment segments t)
+    (destructuring-bind (type flags &rest _) segment
+      (declare (ignore _))
+      (when (and (= type +pt-load+)
+                 (not (zerop (logand flags +pf-w+)))
+                 (not (zerop (logand flags +pf-x+))))
+        (error "ELF W^X violation: writable executable PT_LOAD segment ~S" segment)))))
 
 (defun elf64-add-data-bytes (builder bytes)
   "Append initialized writable BYTES to .data and return their section offset."

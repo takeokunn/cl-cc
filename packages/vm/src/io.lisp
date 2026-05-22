@@ -28,6 +28,127 @@
 (defparameter *print-circle* nil
   "When true, detect and mark circular/shared printed structure.")
 
+(defstruct vm-circle-print-context
+  (counts (make-hash-table :test #'eq))
+  (labels (make-hash-table :test #'eq))
+  (printed (make-hash-table :test #'eq))
+  (next-label 0 :type fixnum))
+
+(defun %vm-circle-trackable-p (object)
+  (or (consp object) (vectorp object) (hash-table-p object)
+      (typep object 'standard-object)))
+
+(defun %vm-circle-object-slots (object)
+  #+sbcl
+  (handler-case
+      (loop for slot in (sb-mop:class-slots (class-of object))
+            for name = (sb-mop:slot-definition-name slot)
+            when (slot-boundp object name) collect (cons name (slot-value object name)))
+    (error () nil))
+  #-sbcl (declare (ignore object))
+  #-sbcl nil)
+
+(defun %vm-circle-labeling-visit (object ctx seen)
+  "Phase 1: DFS through compound objects and count repeated visits."
+  (when (%vm-circle-trackable-p object)
+    (incf (gethash object (vm-circle-print-context-counts ctx) 0))
+    (unless (gethash object seen)
+      (setf (gethash object seen) t)
+      (cond
+        ((consp object)
+         (loop for tail = object then (cdr tail)
+               while (consp tail)
+               do (%vm-circle-labeling-visit (car tail) ctx seen)
+               finally (when tail (%vm-circle-labeling-visit tail ctx seen))))
+        ((vectorp object)
+         (loop for element across object do (%vm-circle-labeling-visit element ctx seen)))
+        ((hash-table-p object)
+         (maphash (lambda (key value)
+                    (%vm-circle-labeling-visit key ctx seen)
+                    (%vm-circle-labeling-visit value ctx seen))
+                  object))
+        ((typep object 'standard-object)
+         (dolist (slot (%vm-circle-object-slots object))
+           (%vm-circle-labeling-visit (cdr slot) ctx seen))))))
+  object)
+
+(defun %vm-circle-assign-labels (ctx)
+  (maphash (lambda (object count)
+             (when (> count 1)
+               (setf (gethash object (vm-circle-print-context-labels ctx))
+                     (prog1 (vm-circle-print-context-next-label ctx)
+                       (incf (vm-circle-print-context-next-label ctx))))))
+           (vm-circle-print-context-counts ctx))
+  ctx)
+
+(defun %vm-circle-write-atom (object stream escape-p)
+  (let ((cl:*print-escape* escape-p))
+    (write object :stream stream)))
+
+(defun %vm-circle-write-object (object stream ctx escape-p)
+  "Phase 2: emit #n= at first occurrence and #n# for later occurrences."
+  (let ((label (and (%vm-circle-trackable-p object)
+                    (gethash object (vm-circle-print-context-labels ctx)))))
+    (when label
+      (if (gethash object (vm-circle-print-context-printed ctx))
+          (progn (format stream "#~D#" label)
+                 (return-from %vm-circle-write-object object))
+          (progn (setf (gethash object (vm-circle-print-context-printed ctx)) t)
+                 (format stream "#~D=" label))))
+    (cond
+      ((consp object)
+       (write-char #\( stream)
+       (loop for tail = object then (cdr tail)
+             for firstp = t then nil
+             while (consp tail)
+             do (unless firstp (write-char #\Space stream))
+                (%vm-circle-write-object (car tail) stream ctx escape-p)
+                (let* ((next (cdr tail))
+                       (next-label (and (%vm-circle-trackable-p next)
+                                        (gethash next (vm-circle-print-context-labels ctx)))))
+                  (when (and next-label
+                             (gethash next (vm-circle-print-context-printed ctx)))
+                    (write-string " . " stream)
+                    (%vm-circle-write-object next stream ctx escape-p)
+                    (return)))
+             finally (when tail
+                       (write-string " . " stream)
+                       (%vm-circle-write-object tail stream ctx escape-p)))
+       (write-char #\) stream))
+      ((vectorp object)
+       (write-string "#(" stream)
+       (loop for i from 0 below (length object)
+             do (when (plusp i) (write-char #\Space stream))
+                (%vm-circle-write-object (aref object i) stream ctx escape-p))
+       (write-char #\) stream))
+      ((hash-table-p object)
+       (write-string "#<HASH-TABLE" stream)
+       (maphash (lambda (key value)
+                  (write-char #\Space stream)
+                  (%vm-circle-write-object key stream ctx escape-p)
+                  (write-string " => " stream)
+                  (%vm-circle-write-object value stream ctx escape-p))
+                object)
+       (write-char #\> stream))
+      ((typep object 'standard-object)
+       (format stream "#<~A" (class-name (class-of object)))
+       (dolist (slot (%vm-circle-object-slots object))
+         (format stream " ~S " (car slot))
+         (%vm-circle-write-object (cdr slot) stream ctx escape-p))
+       (write-char #\> stream))
+      (t (%vm-circle-write-atom object stream escape-p))))
+  object)
+
+(defun vm-write-object-to-string (object &key (escape t) (circle *print-circle*))
+  "Return OBJECT's printed representation, using the host fast path unless CIRCLE is true."
+  (if (not circle)
+      (let ((cl:*print-escape* escape)) (write-to-string object))
+      (let ((ctx (make-vm-circle-print-context)))
+        (%vm-circle-labeling-visit object ctx (make-hash-table :test #'eq))
+        (%vm-circle-assign-labels ctx)
+        (with-output-to-string (out)
+          (%vm-circle-write-object object out ctx escape)))))
+
 (defparameter *print-readably* nil
   "When true, signal if an object cannot be printed readably.")
 
@@ -41,6 +162,402 @@
   "When true, use the pretty printer for structured output.")
 
 (declaim (special *print-pprint-dispatch* *readtable*))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  #+sbcl (ignore-errors (require :sb-bsd-sockets))
+  #+sbcl (ignore-errors (require :sb-posix)))
+
+;;; ─── Host-backed sockets, DNS, TLS, and mmap FR helpers ─────────────────────
+
+(define-condition tls-unsupported (error)
+  ((reason :initarg :reason :reader tls-unsupported-reason))
+  (:report (lambda (condition stream)
+             (format stream "TLS backend unsupported: ~a"
+                     (tls-unsupported-reason condition)))))
+
+(defstruct vm-socket
+  "Host-backed socket descriptor for FR-851."
+  backend
+  (family :ipv4)
+  (type :tcp)
+  stream)
+
+(defstruct dns-cache-entry value expires-at)
+(defstruct dns-async-result thread result error done-p)
+(defstruct (tls-context (:constructor %make-tls-context))
+  verify-peer ca-bundle cert-file key-file server-p)
+
+(defstruct vm-mmap-region
+  path protection flags length buffer array stream dirty-p closed-p)
+
+(defvar *dns-cache* (make-hash-table :test #'equal)
+  "DNS cache keyed by operation and input, with per-entry TTLs.")
+
+(defparameter *dns-default-ttl* 60
+  "Default DNS cache TTL in seconds.")
+
+(defun %unsupported (feature)
+  (error "~a is unsupported on this host Lisp" feature))
+
+(defun %socket-class (family)
+  #+sbcl
+  (ecase family
+    ((:ipv4 :inet 4) 'sb-bsd-sockets:inet-socket)
+    ((:ipv6 :inet6 6) 'sb-bsd-sockets:inet6-socket))
+  #-sbcl (declare (ignore family))
+  #-sbcl (%unsupported "sockets"))
+
+(defun %socket-type (type)
+  (ecase type
+    ((:tcp :stream) :stream)
+    ((:udp :datagram :dgram) :datagram)))
+
+(defun %socket-protocol (type)
+  (ecase type
+    ((:tcp :stream) :tcp)
+    ((:udp :datagram :dgram) :udp)))
+
+(defun %parse-ipv4 (host)
+  (let ((parts nil) (start 0) (text (string host)))
+    (loop for pos = (position #\. text :start start)
+          do (push (parse-integer text :start start :end pos) parts)
+          if pos do (setf start (1+ pos)) else do (return))
+    (let ((octets (nreverse parts)))
+      (unless (= (length octets) 4)
+        (error "Invalid IPv4 address: ~a" host))
+      (make-array 4 :element-type '(unsigned-byte 8)
+                    :initial-contents octets))))
+
+(defun %host-address (host family)
+  #+sbcl
+  (cond
+    ((vectorp host) host)
+    ((member family '(:ipv6 :inet6 6))
+     (sb-bsd-sockets:make-inet6-address (string host)))
+    (t
+     (handler-case
+         (sb-bsd-sockets:make-inet-address (string host))
+        (error ()
+          (let ((entry (sb-bsd-sockets:get-host-by-name (string host))))
+            (or (first (sb-bsd-sockets:host-ent-addresses entry))
+                (sb-bsd-sockets:host-ent-address entry)))))))
+  #-sbcl (declare (ignore host family))
+  #-sbcl (%unsupported "socket address conversion"))
+
+(defun %ip-string (address)
+  (cond
+    ((and (vectorp address) (= (length address) 4))
+     (format nil "~{~d~^.~}" (coerce address 'list)))
+    ((vectorp address)
+     (format nil "~{~x~^:~}"
+             (loop for i from 0 below (length address) by 2
+                   collect (+ (ash (aref address i) 8)
+                              (aref address (1+ i))))))
+    (t (string address))))
+
+(defun make-tcp-socket (&key (family :ipv4)
+                             reuse-address tcp-nodelay keepalive dual-stack)
+  "Create a TCP socket object backed by SBCL sb-bsd-sockets."
+  #+sbcl
+  (let ((socket (make-instance (%socket-class family)
+                               :type :stream :protocol :tcp)))
+    (declare (ignore dual-stack))
+    (when reuse-address
+      (setf (sb-bsd-sockets:sockopt-reuse-address socket) t))
+    (when tcp-nodelay
+      (ignore-errors (setf (sb-bsd-sockets:sockopt-tcp-nodelay socket) t)))
+    (when keepalive
+      (ignore-errors (setf (sb-bsd-sockets:sockopt-keep-alive socket) t)))
+    (make-vm-socket :backend socket :family family :type :tcp))
+  #-sbcl (declare (ignore family reuse-address tcp-nodelay keepalive dual-stack))
+  #-sbcl (%unsupported "TCP sockets"))
+
+(defun make-udp-socket (&key (family :ipv4) reuse-address dual-stack)
+  "Create a UDP socket object backed by SBCL sb-bsd-sockets."
+  #+sbcl
+  (let ((socket (make-instance (%socket-class family)
+                               :type :datagram :protocol :udp)))
+    (declare (ignore dual-stack))
+    (when reuse-address
+      (setf (sb-bsd-sockets:sockopt-reuse-address socket) t))
+    (make-vm-socket :backend socket :family family :type :udp))
+  #-sbcl (declare (ignore family reuse-address dual-stack))
+  #-sbcl (%unsupported "UDP sockets"))
+
+(defun socket-bind (socket host port)
+  "Bind SOCKET to HOST and PORT. Use port 0 for an ephemeral localhost port."
+  #+sbcl
+  (progn
+    (sb-bsd-sockets:socket-bind (vm-socket-backend socket)
+                                (%host-address host (vm-socket-family socket))
+                                port)
+    socket)
+  #-sbcl (declare (ignore socket host port))
+  #-sbcl (%unsupported "socket-bind"))
+
+(defun socket-listen (socket &optional (backlog 5))
+  "Mark SOCKET as a TCP listener."
+  #+sbcl (progn (sb-bsd-sockets:socket-listen (vm-socket-backend socket) backlog) socket)
+  #-sbcl (declare (ignore socket backlog))
+  #-sbcl (%unsupported "socket-listen"))
+
+(defun socket-connect (socket host port)
+  "Connect SOCKET to HOST and PORT."
+  #+sbcl
+  (progn
+    (sb-bsd-sockets:socket-connect (vm-socket-backend socket)
+                                   (%host-address host (vm-socket-family socket))
+                                   port)
+    socket)
+  #-sbcl (declare (ignore socket host port))
+  #-sbcl (%unsupported "socket-connect"))
+
+(defun socket-accept (socket)
+  "Accept one TCP connection from listener SOCKET and return a socket object."
+  #+sbcl
+  (make-vm-socket :backend (sb-bsd-sockets:socket-accept (vm-socket-backend socket))
+                  :family (vm-socket-family socket)
+                  :type :tcp)
+  #-sbcl (declare (ignore socket))
+  #-sbcl (%unsupported "socket-accept"))
+
+(defun make-socket-stream (socket &key (element-type '(unsigned-byte 8))
+                                    (input t) (output t) buffering)
+  "Create a bidirectional Gray/binary stream from SOCKET."
+  #+sbcl
+  (or (vm-socket-stream socket)
+      (setf (vm-socket-stream socket)
+            (sb-bsd-sockets:socket-make-stream
+             (vm-socket-backend socket)
+             :element-type element-type
+             :input input :output output
+             :buffering (or buffering :full))))
+  #-sbcl (declare (ignore socket element-type input output buffering))
+  #-sbcl (%unsupported "make-socket-stream"))
+
+(defun socket-send (socket data &key (start 0) end host port)
+  "Send octets or a string over SOCKET. UDP may pass HOST and PORT."
+  #+sbcl
+  (let* ((end (or end (length data)))
+         (payload (make-array (- end start) :element-type '(unsigned-byte 8))))
+    (loop for src from start below end
+          for dst from 0
+          do (setf (aref payload dst)
+                   (etypecase data
+                     (string (char-code (char data src)))
+                     (vector (aref data src)))))
+    (if (and host port)
+        (sb-bsd-sockets:socket-send (vm-socket-backend socket) payload (length payload)
+                                    :address (list (%host-address host (vm-socket-family socket)) port))
+        (sb-bsd-sockets:socket-send (vm-socket-backend socket) payload (length payload))))
+  #-sbcl (declare (ignore socket data start end host port))
+  #-sbcl (%unsupported "socket-send"))
+
+(defun socket-receive (socket &key (size 4096) stringp)
+  "Receive up to SIZE bytes from SOCKET. Return data, count, peer address, and peer port."
+  #+sbcl
+  (let ((buffer (make-array size :element-type '(unsigned-byte 8))))
+    (multiple-value-bind (data count address port)
+        (sb-bsd-sockets:socket-receive (vm-socket-backend socket) buffer size)
+      (let* ((payload (subseq data 0 count))
+             (peer-address (if (consp address) (first address) address))
+             (peer-port (if (consp address) (second address) port)))
+        (values (if stringp (map 'string #'code-char payload) payload)
+                count
+                (and peer-address (%ip-string peer-address))
+                peer-port))))
+  #-sbcl (declare (ignore socket size stringp))
+  #-sbcl (%unsupported "socket-receive"))
+
+(defun socket-close (socket)
+  "Close SOCKET and any stream created for it."
+  #+sbcl
+  (progn
+    (when (vm-socket-stream socket)
+      (ignore-errors (close (vm-socket-stream socket))))
+    (ignore-errors (sb-bsd-sockets:socket-close (vm-socket-backend socket)))
+    t)
+  #-sbcl (declare (ignore socket))
+  #-sbcl (%unsupported "socket-close"))
+
+(defmacro with-socket ((var socket-form) &body body)
+  "Bind VAR to SOCKET-FORM and always close it after BODY."
+  `(let ((,var ,socket-form))
+     (unwind-protect (progn ,@body)
+       (when ,var (socket-close ,var)))))
+
+(defun socket-local-address (socket)
+  "Return SOCKET's local address and port as two values."
+  #+sbcl
+  (multiple-value-bind (address port)
+      (sb-bsd-sockets:socket-name (vm-socket-backend socket))
+    (values (%ip-string address) port))
+  #-sbcl (declare (ignore socket))
+  #-sbcl (%unsupported "socket-local-address"))
+
+(defun %dns-cache-lookup (key)
+  (let ((entry (gethash key *dns-cache*)))
+    (when (and entry (> (dns-cache-entry-expires-at entry) (get-universal-time)))
+      (dns-cache-entry-value entry))))
+
+(defun %dns-cache-store (key value ttl)
+  (setf (gethash key *dns-cache*)
+        (make-dns-cache-entry :value value
+                              :expires-at (+ (get-universal-time) ttl)))
+  value)
+
+(defun dns-resolve (host &key (ttl *dns-default-ttl*))
+  "Resolve HOST to a cached list of A/AAAA textual addresses."
+  #+sbcl
+  (let ((key (list :resolve (string host))))
+    (or (%dns-cache-lookup key)
+        (%dns-cache-store
+         key
+         (delete-duplicates
+          (mapcar #'%ip-string
+                  (sb-bsd-sockets:host-ent-addresses
+                   (sb-bsd-sockets:get-host-by-name (string host))))
+          :test #'string=)
+         ttl)))
+  #-sbcl (declare (ignore host ttl))
+  #-sbcl (%unsupported "dns-resolve"))
+
+(defun dns-reverse-resolve (ip &key (ttl *dns-default-ttl*))
+  "Resolve IP to a cached PTR hostname."
+  #+sbcl
+  (let ((key (list :reverse (string ip))))
+    (or (%dns-cache-lookup key)
+        (%dns-cache-store
+         key
+         (sb-bsd-sockets:host-ent-name
+          (sb-bsd-sockets:get-host-by-address (%parse-ipv4 ip)))
+         ttl)))
+  #-sbcl (declare (ignore ip ttl))
+  #-sbcl (%unsupported "dns-reverse-resolve"))
+
+(defun getaddrinfo (host &key service (family :ipv4))
+  "Small POSIX-like getaddrinfo wrapper returning plist entries."
+  (mapcar (lambda (ip) (list :address ip :service service :family family))
+          (dns-resolve host)))
+
+(defun dns-resolve-async (host &key (ttl *dns-default-ttl*))
+  "Resolve HOST on a background thread. Poll with DNS-ASYNC-RESULT-DONE-P."
+  #+sbcl
+  (let ((result (make-dns-async-result)))
+    (setf (dns-async-result-thread result)
+          (sb-thread:make-thread
+           (lambda ()
+             (handler-case
+                 (setf (dns-async-result-result result) (dns-resolve host :ttl ttl))
+               (error (e) (setf (dns-async-result-error result) e)))
+             (setf (dns-async-result-done-p result) t))
+           :name "cl-cc dns-resolve-async"))
+    result)
+  #-sbcl (declare (ignore host ttl))
+  #-sbcl (%unsupported "dns-resolve-async"))
+
+(defun make-tls-context (&key verify-peer ca-bundle)
+  "Create a client TLS context descriptor."
+  (%make-tls-context :verify-peer verify-peer :ca-bundle ca-bundle :server-p nil))
+
+(defun tls-server-context (cert-file key-file &key ca-bundle verify-peer)
+  "Create a server TLS context descriptor."
+  (%make-tls-context :verify-peer verify-peer :ca-bundle ca-bundle
+                     :cert-file cert-file :key-file key-file :server-p t))
+
+(defun %cl+ssl-package ()
+  (or (find-package :cl+ssl)
+      (ignore-errors (require :cl+ssl) (find-package :cl+ssl))))
+
+(defun tls-wrap-socket (socket context &key hostname sni)
+  "Wrap SOCKET with CL+SSL when available, otherwise signal TLS-UNSUPPORTED."
+  (let ((pkg (%cl+ssl-package)))
+    (unless pkg
+      (error 'tls-unsupported :reason "CL+SSL is not loadable"))
+    (let* ((stream (make-socket-stream socket :element-type '(unsigned-byte 8)))
+           (client-fn (find-symbol "MAKE-SSL-CLIENT-STREAM" pkg))
+           (server-fn (find-symbol "MAKE-SSL-SERVER-STREAM" pkg))
+           (wrapper (if (tls-context-server-p context) server-fn client-fn)))
+      (unless (and wrapper (fboundp wrapper))
+        (error 'tls-unsupported :reason "CL+SSL stream wrapper is unavailable"))
+      (setf (vm-socket-stream socket)
+            (if (tls-context-server-p context)
+                (funcall wrapper stream
+                         :certificate (tls-context-cert-file context)
+                         :key (tls-context-key-file context))
+                (funcall wrapper stream
+                         :hostname (or sni hostname)
+                         :verify (tls-context-verify-peer context))))
+      socket)))
+
+(defun tls-socket-stream (socket)
+  "Return SOCKET's TLS stream; signal when the socket has not been wrapped."
+  (or (vm-socket-stream socket)
+      (error "Socket has no TLS stream")))
+
+(defun %mmap-protection-writable-p (protection)
+  (member protection '(:read-write :write) :test #'eq))
+
+(defun mmap-file (path &key (protection :read) (flags :private) length)
+  "Map PATH into a byte array descriptor. Portable backend mirrors file bytes."
+  (let* ((truename (namestring (pathname path)))
+         (file-length (with-open-file (in truename :direction :input
+                                               :element-type '(unsigned-byte 8)
+                                               :if-does-not-exist (if (%mmap-protection-writable-p protection)
+                                                                       :create
+                                                                       :error))
+                        (file-length in)))
+         (size (or length file-length))
+         (buffer (make-array size :element-type '(unsigned-byte 8) :initial-element 0)))
+    (when (plusp file-length)
+      (with-open-file (in truename :direction :input :element-type '(unsigned-byte 8))
+        (read-sequence buffer in :end (min size file-length))))
+    (make-vm-mmap-region
+     :path truename
+     :protection protection
+     :flags flags
+     :length size
+     :buffer buffer
+     :array (make-array size :element-type '(unsigned-byte 8) :displaced-to buffer))))
+
+(defun mmap-array (region)
+  "Return REGION's displaced byte array for direct access."
+  (when (vm-mmap-region-closed-p region)
+    (error "mmap region is closed"))
+  (vm-mmap-region-array region))
+
+(defun mmap-sync (region &key start end)
+  "Flush REGION bytes back to its file when it is shared and writable."
+  (when (and (eq (vm-mmap-region-flags region) :shared)
+             (%mmap-protection-writable-p (vm-mmap-region-protection region)))
+    (with-open-file (out (vm-mmap-region-path region)
+                         :direction :output
+                         :element-type '(unsigned-byte 8)
+                         :if-exists :overwrite
+                         :if-does-not-exist :create)
+      (write-sequence (vm-mmap-region-buffer region) out
+                      :start (or start 0)
+                      :end (or end (vm-mmap-region-length region)))))
+  (setf (vm-mmap-region-dirty-p region) nil)
+  t)
+
+(defun mmap-close (region)
+  "Unmap REGION and flush shared writable data before marking it closed."
+  (unless (vm-mmap-region-closed-p region)
+    (mmap-sync region)
+    (setf (vm-mmap-region-closed-p region) t))
+  t)
+
+(defmacro with-mmap ((var path &rest options) &body body)
+  "Map PATH as VAR and close it after BODY."
+  `(let ((,var (mmap-file ,path ,@options)))
+     (unwind-protect (progn ,@body)
+       (mmap-close ,var))))
+
+(defun mmap-advice (region advice &key start end)
+  "Record a portable madvise-style request. Native backends may use ADVICE."
+  (declare (ignore region advice start end))
+  t)
 
 (defmacro with-standard-io-syntax (&body body)
   "Execute BODY with ANSI standard I/O control variables bound to defaults."
@@ -209,6 +726,62 @@ the VM bridge resolves the current VM symbol value to its underlying stream."
 (defun %vm-bridge-make-concatenated-stream (&rest streams)
   (apply #'make-concatenated-stream (mapcar #'%vm-bridge-stream-arg streams)))
 
+(defun %vm-bridge-file-position (stream &optional (position nil position-p))
+  "Host bridge for ANSI FILE-POSITION that accepts VM stream handles."
+  (let ((resolved (%vm-bridge-stream-arg stream)))
+    (if position-p
+        (if (file-position resolved position) t nil)
+        (file-position resolved))))
+
+(defun %vm-bridge-file-length (stream)
+  "Host bridge for ANSI FILE-LENGTH that accepts VM stream handles."
+  (file-length (%vm-bridge-stream-arg stream)))
+
+(defun make-buffered-stream (stream &key (buffer-size 4096) (strategy :full))
+  "Return STREAM with host buffering semantics.
+
+CL-CC delegates concrete stream buffering to the host Common Lisp stream.  This
+helper validates the ANSI-facing buffering options used by the VM surface and
+returns the underlying stream, so FINISH-OUTPUT, FORCE-OUTPUT, CLEAR-INPUT, and
+CLEAR-OUTPUT operate on the same host buffer.  STRATEGY is one of :FULL, :LINE,
+or :NONE."
+  (check-type buffer-size (integer 1 *))
+  (unless (member strategy '(:full :line :none))
+    (error "Invalid buffering strategy: ~S" strategy))
+  (%vm-bridge-stream-arg stream))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %remove-binary-file-default-keys (plist)
+    "Return PLIST without :DIRECTION and :ELEMENT-TYPE for WITH-BINARY-FILE."
+    (loop for (key value) on plist by #'cddr
+          unless (member key '(:direction :element-type))
+            append (list key value))))
+
+(defmacro with-binary-file ((stream filespec &rest options
+                                    &key (direction :io) (element-type ''(unsigned-byte 8))
+                                    &allow-other-keys)
+                            &body body)
+  "Open FILESPEC as a binary file and execute BODY with STREAM bound.
+
+Defaults to :DIRECTION :IO and ELEMENT-TYPE '(UNSIGNED-BYTE 8), matching the VM
+random-access binary I/O use case."
+  (declare (ignore direction element-type))
+  `(with-open-file (,stream ,filespec
+                    :direction ,(or (getf options :direction) :io)
+                    :element-type ,(or (getf options :element-type) ''(unsigned-byte 8))
+                    ,@(%remove-binary-file-default-keys options))
+     ,@body))
+
+(defun get-output-string-stream (stream)
+  "Compatibility alias for GET-OUTPUT-STREAM-STRING."
+  (get-output-stream-string (%vm-bridge-stream-arg stream)))
+
+(defun %vm-bridge-get-output-stream-string (stream)
+  (get-output-stream-string (%vm-bridge-stream-arg stream)))
+
+(defun %vm-bridge-stream-control (function stream)
+  (funcall function (%vm-bridge-stream-arg stream)))
+
 (defun %vm-bridge-broadcast-stream-streams (stream)
   (mapcar #'%vm-bridge-stream-result (broadcast-stream-streams stream)))
 
@@ -238,6 +811,27 @@ the VM bridge resolves the current VM symbol value to its underlying stream."
   (vm-register-host-bridge 'set-dispatch-macro-character #'set-dispatch-macro-character)
   (vm-register-host-bridge 'get-dispatch-macro-character #'get-dispatch-macro-character)
   (vm-register-host-bridge 'readtable-case #'readtable-case)
+  (vm-register-host-bridge 'file-position #'%vm-bridge-file-position)
+  (vm-register-host-bridge 'file-length #'%vm-bridge-file-length)
+  (vm-register-host-bridge 'make-buffered-stream #'make-buffered-stream)
+  (vm-register-host-bridge 'finish-output (lambda (&optional (stream *standard-output*))
+                                           (%vm-bridge-stream-control #'finish-output stream)))
+  (vm-register-host-bridge 'force-output (lambda (&optional (stream *standard-output*))
+                                          (%vm-bridge-stream-control #'force-output stream)))
+  (vm-register-host-bridge 'clear-input (lambda (&optional (stream *standard-input*))
+                                         (%vm-bridge-stream-control #'clear-input stream)))
+  (vm-register-host-bridge 'clear-output (lambda (&optional (stream *standard-output*))
+                                          (%vm-bridge-stream-control #'clear-output stream)))
+  (vm-register-host-bridge 'stream-element-type (lambda (stream)
+                                                 (stream-element-type (%vm-bridge-stream-arg stream))))
+  (vm-register-host-bridge 'open-stream-p (lambda (stream)
+                                           (open-stream-p (%vm-bridge-stream-arg stream))))
+  (vm-register-host-bridge 'interactive-stream-p (lambda (stream)
+                                                  (interactive-stream-p (%vm-bridge-stream-arg stream))))
+  (vm-register-host-bridge 'make-string-input-stream #'make-string-input-stream)
+  (vm-register-host-bridge 'make-string-output-stream #'make-string-output-stream)
+  (vm-register-host-bridge 'get-output-stream-string #'%vm-bridge-get-output-stream-string)
+  (vm-register-host-bridge 'get-output-string-stream #'get-output-string-stream)
   (vm-register-host-bridge 'make-synonym-stream #'%vm-bridge-make-synonym-stream)
   (vm-register-host-bridge 'make-broadcast-stream #'%vm-bridge-make-broadcast-stream)
   (vm-register-host-bridge 'make-two-way-stream #'%vm-bridge-make-two-way-stream)

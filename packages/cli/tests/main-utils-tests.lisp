@@ -44,6 +44,27 @@
       (assert-string= "hello" (cl-cc/cli::%read-file path))
       (ignore-errors (delete-file path)))))
 
+(deftest cli-get-timeout-defaults-to-30-seconds
+  "Non-interactive commands receive the documented 30s timeout by default."
+  (let ((parsed (cl-cc/cli:parse-args '("eval" "(+ 1 2)"))))
+    (assert-= 30 (cl-cc/cli::%get-timeout parsed))))
+
+(deftest cli-get-timeout-uses-explicit-positive-value
+  "An explicit --timeout value overrides the default."
+  (let ((parsed (cl-cc/cli:parse-args '("eval" "(+ 1 2)" "--timeout" "9"))))
+    (assert-= 9 (cl-cc/cli::%get-timeout parsed))))
+
+(deftest cli-get-timeout-no-timeout-disables-timeout
+  "--no-timeout disables the default timeout for debugging."
+  (let ((parsed (cl-cc/cli:parse-args '("eval" "(+ 1 2)" "--no-timeout"))))
+    (assert-null (cl-cc/cli::%get-timeout parsed))))
+
+(deftest cli-get-timeout-keeps-positive-integer-validation
+  "--timeout still rejects zero and non-positive values."
+  (let ((parsed (cl-cc/cli:parse-args '("eval" "(+ 1 2)" "--timeout" "0"))))
+    (assert-signals cl-cc/cli:arg-parse-error
+      (cl-cc/cli::%get-timeout parsed))))
+
 (deftest cli-svg-escape-escapes-special-characters
   (assert-string= "&lt;tag attr=&quot;a&amp;b&quot;&gt;"
                   (cl-cc/cli::%svg-escape "<tag attr=\"a&b\">") ))
@@ -88,6 +109,21 @@
         (assert-true (search "<svg" svg))
         (assert-true (search "top" svg))
         (assert-true (search "child" svg)))
+      (ignore-errors (delete-file path)))))
+
+(deftest fr-702-flamegraph-svg-generation-writes-rectangles-and-sample-titles
+  "FR-702: flamegraph SVG generation produces a renderable SVG with frame metadata."
+  (uiop:with-temporary-file (:pathname path :type "svg" :keep t)
+    (let ((samples (make-hash-table :test #'equal)))
+      (setf (gethash "compiler;optimizer;bolt" samples) 5)
+      (setf (gethash "compiler;gc" samples) 2)
+      (cl-cc/cli::%write-flamegraph-svg path samples)
+      (let ((svg (cl-cc/cli::%read-file path)))
+        (assert-true (search "<svg" svg))
+        (assert-true (search "<rect" svg))
+        (assert-true (search "optimizer" svg))
+        (assert-true (search "bolt (5 samples)" svg))
+        (assert-true (search "rgb(90,140,255)" svg)))
       (ignore-errors (delete-file path)))))
 
 ;;; ─── %flamegraph-depth-of (extracted helper) ────────────────────────────────

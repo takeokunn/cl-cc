@@ -145,13 +145,15 @@
              (%vm-read-print-var state '*print-pprint-dispatch*
                                  *print-pprint-dispatch*)))
           (cl:*print-case*    (%vm-read-print-var state '*print-case*   :upcase)))
-      (vm-reg-set state (vm-dst inst) (write-to-string val)))
+      (vm-reg-set state (vm-dst inst)
+                  (vm-write-object-to-string val :escape t :circle cl:*print-circle*)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-princ-to-string-inst) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (vm-reg-set state (vm-dst inst) (princ-to-string val))
+    (vm-reg-set state (vm-dst inst)
+                (vm-write-object-to-string val :escape nil :circle *print-circle*))
     (values (1+ pc) nil nil)))
 
 ;;; ─── Native FORMAT Directive Processor ───────────────────────────────────

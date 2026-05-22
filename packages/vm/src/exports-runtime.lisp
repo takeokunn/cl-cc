@@ -29,17 +29,36 @@
      vm-program-osr-entry-points
      vm-program-tier1-entry-points
      vm-program-compilation-tier
-   vm-state
-   vm-state-registers
+     *deopt-enabled*
+     *osr-enabled*
+    vm-state
+    make-vm-instance
+    transfer-value
+    vm-parent-environment
+    make-vm-parent-environment
+    vm-parent-environment-globals
+    vm-parent-environment-functions
+    vm-parent-environment-symbols
+    vm-instance-parent-env
+    vm-instance-lock
+    with-vm-instance-lock
+    vm-instance-global-value
+    vm-instance-function-value
+    vm-state-registers
    vm-state-heap
    vm-heap-counter
     vm-call-stack
     vm-current-deopt-frame
     vm-deopt-history
     vm-tier1-code
-    vm-capture-deopt-frame
-    vm-trigger-deopt
-    vm-register-tier1-osr-entry
+     vm-capture-deopt-frame
+     vm-reconstruct-interpreter-frame
+     vm-trigger-deopt
+     vm-register-tier1-osr-entry
+     vm-osr-register-map
+     vm-materialize-osr-frame
+     vm-compile-osr-entry-if-hot
+     vm-osr-stub-enter
    vm-method-call-stack
    vm-closure-env
    vm-heap-alloc
@@ -113,8 +132,42 @@
    vm-string-streams
    +stdin-handle+
    +stdout-handle+
-   +eof-value+
-   vm-get-stream
+    +eof-value+
+    vm-socket
+    vm-socket-p
+    make-tcp-socket
+    make-udp-socket
+    socket-connect
+    socket-bind
+    socket-listen
+    socket-accept
+    socket-send
+    socket-receive
+    socket-close
+    with-socket
+    make-socket-stream
+    socket-local-address
+    dns-resolve
+    dns-reverse-resolve
+    getaddrinfo
+    dns-resolve-async
+    dns-async-result
+    dns-async-result-p
+    dns-async-result-done-p
+    dns-async-result-result
+    dns-async-result-error
+    make-tls-context
+    tls-server-context
+    tls-wrap-socket
+    tls-socket-stream
+    tls-unsupported
+    mmap-file
+    mmap-array
+    mmap-close
+    with-mmap
+    mmap-sync
+    mmap-advice
+    vm-get-stream
    vm-allocate-file-handle
    vm-stream-open-p
    run-compiled-with-io

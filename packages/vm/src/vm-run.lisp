@@ -273,9 +273,9 @@ nearest preceding label in LABELS, which identifies the caller function region."
     (if frames
         (loop for frame in frames
               for index from 0
-              do (destructuring-bind (return-pc dst-reg _old-closure-env saved-regs)
-                     frame
-                   (declare (ignore _old-closure-env))
+              do (destructuring-bind (return-pc dst-reg _old-closure-env saved-regs &optional saved-mv-buffer saved-mv-count)
+                      frame
+                    (declare (ignore _old-closure-env saved-mv-buffer saved-mv-count))
                    (let ((function-name (or (%vm-label-for-return-pc labels return-pc)
                                             :unknown))
                          (args (%vm-frame-argument-values saved-regs)))
@@ -313,7 +313,13 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
   (let* ((instructions (vm-program-instructions program))
          (labels (build-label-table instructions))
          (flat (coerce instructions 'vector))
-         (state (or state (make-vm-state :output-stream output-stream))))
+          (state (or state (make-vm-state :output-stream output-stream))))
+    (dolist (cell (vm-program-load-time-value-cells program))
+      (unless (vm-ltv-cell-resolved-p cell)
+        (setf (vm-ltv-cell-value cell) (eval (vm-ltv-cell-form cell))
+              (vm-ltv-cell-resolved-p cell) t))
+      (setf (gethash (vm-ltv-cell-id cell) (vm-load-time-values state))
+            (vm-ltv-cell-value cell)))
     (when (and (%vm-profile-enabled-p state)
                 (null (%vm-profile-call-stack state)))
       (%set-vm-profile-call-stack state (list "<toplevel>"))

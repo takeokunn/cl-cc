@@ -31,6 +31,7 @@
   (dom-frontier nil :type list)        ; dominance frontier blocks
   (post-idom    nil)                   ; immediate post-dominator
   (post-children nil :type list)       ; blocks post-dominated by this block
+  (vm-osr-entry nil)                   ; FR-521 OSR loop-header metadata/plist
   (loop-depth   0   :type fixnum)      ; nesting depth (0 = not in any loop)
   (rpo-index    0   :type fixnum))     ; index in reverse post-order
 
@@ -185,6 +186,26 @@ full loop forests."
                  (when (and target (< target i))
                    (pushnew (cons target i) ranges :test #'equal))))
     (sort ranges #'< :key #'car)))
+
+(defun cfg-mark-osr-loop-headers (cfg)
+  "Annotate loop-header blocks with FR-521 VM OSR entry metadata.
+
+The metadata is kept on BASIC-BLOCK via BB-VM-OSR-ENTRY so lower pipeline stages
+can generate interpreter-vreg to JIT-preg mappings and OSR stubs only when
+CL-CC/VM:*OSR-ENABLED* is true."
+  (when cl-cc/vm:*osr-enabled*
+    (let ((headers (make-hash-table :test #'eq)))
+      (dolist (b (loop for block across (cfg-blocks cfg) collect block))
+        (dolist (succ (bb-successors b))
+          (when (cfg-dominates-p succ b)
+            (setf (gethash succ headers) t))))
+      (maphash (lambda (header _)
+                 (declare (ignore _))
+                 (setf (bb-vm-osr-entry header)
+                       (list :block-id (bb-id header)
+                             :label (and (bb-label header) (vm-name (bb-label header))))))
+               headers)))
+  cfg)
 
 ;;; ─── Reverse Post-Order ──────────────────────────────────────────────────
 

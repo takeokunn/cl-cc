@@ -91,6 +91,15 @@ virtual registers."
     (vm-spill-load                      4)  ; MOV reg, [rbp-disp8]
     ;; Array element access: MOV r/m64 with SIB [array + index*8 + data-offset]
     ((vm-aref vm-aset)                  5)
+    ;; Atomic operations (locked RMW/fences).  These occur only for explicit VM atomic ops.
+    (vm-atomic-cas                     21)
+    (vm-atomic-swap                    16)
+    (vm-atomic-incf                    16)
+    (vm-atomic-load                    10)
+    (vm-atomic-store                   10)
+    (vm-memory-barrier                  3)
+    (vm-load-fence                      3)
+    (vm-store-fence                     3)
     ;; Cache hint: 0F 18 /r with ModR/M memory operand
     (vm-prefetch                        4)
     ;; Comparison: CMP(3) + SETcc(3-4) + MOVZX(4) = 12 max
@@ -153,11 +162,14 @@ virtual registers."
 (defconstant +stack-probe-page-size+ 4096
   "Page stride used by native backend stack probing.")
 
-(defconstant +x86-64-stack-probe-size+ 9
-  "Byte size of one x86-64 OR [RSP-disp32], imm8 stack probe.")
+(defconstant +x86-64-stack-probe-size+ 18
+  "Byte size of one gated x86-64 stack-clash probe: SUB RSP,4096; MOV [RSP],0.")
 
 (defconstant +x86-64-tls-canary-disp32+ #x28
   "Linux/x86-64 TLS canary offset in FS segment.")
+
+(defconstant +x86-64-safe-stack-tls-disp32+ #x70
+  "Experimental FS TLS slot used for x86-64 SafeStack unsafe-stack pointer.")
 
 (defconstant +x86-64-array-data-offset+ 8
   "Byte offset from the staged native array base to the first payload word.")

@@ -24,4 +24,21 @@
     (assert-eq 'block (car prog*-result))
     (assert-eq 'let* (car (caddr prog*-result)))))
 
+(deftest fr-839-make-iterator-and-next-over-list
+  "MAKE-ITERATOR and ITERATOR-NEXT return values plus has-more-p."
+  (let ((iterator (cl-cc/expand:make-iterator '(a b))))
+    (multiple-value-bind (value morep) (cl-cc/expand:iterator-next iterator)
+      (assert-eq 'a value)
+      (assert-true morep))
+    (multiple-value-bind (value morep) (cl-cc/expand:iterator-next iterator)
+      (assert-eq 'b value)
+      (assert-true morep))
+    (multiple-value-bind (value morep) (cl-cc/expand:iterator-next iterator)
+      (assert-null value)
+      (assert-false morep))))
 
+(deftest fr-839-doiterator-expansion-uses-with-iterator
+  "DOITERATOR expands through WITH-ITERATOR and ITERATOR-NEXT."
+  (let ((result (our-macroexpand-1 '(doiterator (x '(1 2) :done) (print x)))))
+    (assert-eq 'cl-cc/expand:with-iterator (car result))
+    (assert-true (search "ITERATOR-NEXT" (prin1-to-string result)))))

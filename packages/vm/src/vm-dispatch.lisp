@@ -68,6 +68,7 @@ Saves and restores call stack around the sub-invocation."
 
 (defparameter *vm-direct-function-designator-resolvers*
   '((%vm-closure-object-p . identity)
+    (vm-continuation-p . identity)
     (vm-generic-function-p . identity)
     (functionp . identity))
   "Predicate/resolver pairs for non-symbol function designators accepted by `vm-resolve-function`."
@@ -155,11 +156,27 @@ helper for known-call snapshot trimming experiments."
   "Save current environment and push a call frame onto the call stack."
   (when (slot-exists-p state 'stack-depth)
     (incf (vm-stack-depth state)))
-  (push (list return-pc dst-reg (vm-closure-env state)
-              (if live-regs
-                  (vm-save-registers-subset state live-regs)
-                  (vm-save-registers state)))
-        (vm-call-stack state)))
+  (when (and (slot-exists-p state 'current-stack-segment)
+             (find-package :cl-cc/runtime))
+    (let ((note-frame (find-symbol "STACK-SEGMENT-NOTE-FRAME" :cl-cc/runtime)))
+      (when (and note-frame (fboundp note-frame))
+        (setf (vm-current-stack-segment state)
+              (funcall (symbol-function note-frame)
+                       (vm-current-stack-segment state)
+                       64)))))
+  (let ((saved-regs (if live-regs
+                        (vm-save-registers-subset state live-regs)
+                        (vm-save-registers state))))
+    (when (and (fboundp 'vm-stack-protection-enabled-p)
+               (vm-stack-protection-enabled-p))
+      (let ((canary (vm-random-canary)))
+        (setf (gethash :__stack-canary__ saved-regs) canary
+              (gethash :__stack-canary-check__ saved-regs) canary)))
+    (push (list return-pc dst-reg (vm-closure-env state)
+                saved-regs
+                (copy-seq (vm-mv-buffer state))
+                (vm-mv-count state))
+          (vm-call-stack state))))
 
 (defun vm-pop-call-frame (state)
   "Pop one VM call frame while maintaining the O(1) stack-depth counter."

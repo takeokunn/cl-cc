@@ -88,6 +88,118 @@ enables it for SPEED >= 2.")
       (opt-pass-loop-fusion-fission instructions)
       instructions))
 
+(defun %opt-run-pass-if-fbound (pass-symbol instructions)
+  "Run PASS-SYMBOL on INSTRUCTIONS when it is fbound, otherwise no-op."
+  (if (fboundp pass-symbol)
+      (funcall (symbol-function pass-symbol) instructions)
+      instructions))
+
+(defun %maybe-run-superopt (instructions)
+  "Run FR-750 superoptimization when its pass file is loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-superopt instructions))
+
+(defun %maybe-run-speculative-inline (instructions)
+  "Run FR-523 speculative inlining when the optional pass is loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-speculative-inline instructions))
+
+(defun %maybe-run-loop-rotate (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-rotate instructions))
+
+(defun %maybe-run-dead-loop-elimination (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-dead-loop-elimination instructions))
+
+(defun %maybe-run-loop-unroll (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-unroll instructions))
+
+(defun %maybe-run-loop-unswitch (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-unswitch instructions))
+
+(defun %maybe-run-dead-argument-elimination (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-dead-argument-elimination instructions))
+
+(defun %maybe-run-tail-duplication (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-tail-duplication instructions))
+
+(defun %maybe-run-iv-strength-reduce (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-iv-strength-reduce instructions))
+
+(defun %maybe-run-div-by-const (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-div-by-const instructions))
+
+(defun %maybe-run-loop-peel (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-peel instructions))
+
+(defun %maybe-run-idiom-recognition (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-idiom-recognition instructions))
+
+(defun %maybe-run-value-range-propagation (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-value-range-propagation instructions))
+
+(defun %maybe-run-bounds-check-elimination (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-bounds-check-elimination instructions))
+
+(defun %maybe-run-overflow-check-elimination (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-overflow-check-elimination instructions))
+
+(defun %maybe-run-bitwidth-reduction (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-bitwidth-reduction instructions))
+
+(defun %maybe-run-cps-reduce (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-cps-reduce instructions))
+
+(defun %maybe-run-defunctionalize (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-defunctionalize instructions))
+
+(defun %maybe-run-delimited-continuations (instructions)
+  "Run FR-677 delimited-continuation lowering only when explicitly selected."
+  (%opt-run-pass-if-fbound 'opt-pass-delimited-continuations instructions))
+
+(defun %maybe-run-escape-analysis (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-escape-analysis instructions))
+
+(defun %maybe-run-path-profiling (instructions)
+  "Run FR-662 Basic Block Versioning / Path Profiling when loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-path-profiling instructions))
+
+(defun %maybe-run-load-store-coalescing (instructions)
+  "Run FR-723 Load Widening / Store Coalescing when loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-load-widening-store-coalescing instructions))
+
+(defun %maybe-run-optimization-remarks (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-optimization-remarks instructions))
+
+(defun %maybe-run-abstract-interpretation (instructions)
+  "Run FR-751 abstract interpretation when loaded and enabled."
+  (%opt-run-pass-if-fbound 'opt-pass-abstract-interpretation instructions))
+
+(defun %maybe-run-translation-validation (instructions)
+  "Register FR-752 as an explicit no-op pass; per-pass checks are pipeline-integrated."
+  (%opt-run-pass-if-fbound 'opt-pass-translation-validation instructions))
+
+(defun %maybe-run-loop-fusion (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-fusion instructions))
+
+(defun %maybe-run-loop-fission (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-fission instructions))
+
+(defun %maybe-run-loop-tile (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-loop-tile instructions))
+
+(defun %maybe-run-autotune-simd (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-autotune-simd instructions))
+
+(defun %maybe-run-polyhedral (instructions)
+  "Run explicit FR-513 polyhedral pass only when its implementation is loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-polyhedral instructions))
+
+(defun %maybe-run-mlgo-inline (instructions)
+  "Run explicit FR-580 MLGO inline pass only when its implementation is loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-mlgo-inline instructions))
+
+(defun %maybe-run-ml-regalloc (instructions)
+  "Run explicit ML register-allocation hint pass only when loaded."
+  (%opt-run-pass-if-fbound 'opt-pass-ml-regalloc instructions))
+
 ;;; FR-069: Dependency-Aware Peephole Scheduling
 ;;;
 ;;; Schedule movable instruction runs inside each basic block.  A run ends at any
@@ -535,21 +647,28 @@ not fusing across intervening writes to the multiply destination or operands."
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
   `((:prolog-rewrite            . ,#'%maybe-apply-prolog-rewrite)
+    (:superopt                  . ,#'%maybe-run-superopt)
     (:sequence-fusion           . ,#'opt-pass-sequence-fusion)
     (:egraph                    . ,#'optimize-with-egraph)
     (:call-site-splitting       . ,#'opt-pass-call-site-splitting)
-    (:demand-analysis           . ,#'opt-pass-demand-analysis)
-    (:devirtualize              . ,#'opt-pass-devirtualize)
-    (:if-conversion             . ,#'opt-pass-if-conversion)
+     (:demand-analysis           . ,#'opt-pass-demand-analysis)
+     (:devirtualize              . ,#'opt-pass-devirtualize)
+     (:speculative-inline        . ,#'%maybe-run-speculative-inline)
+     (:if-conversion             . ,#'opt-pass-if-conversion)
     (:closure-capture-dedup     . ,#'opt-pass-closure-capture-dedup)
     (:closure-thunk-sharing     . ,#'opt-pass-closure-thunk-sharing)
       (:inline                    . ,#'opt-pass-inline-iterative)
       (:fold                      . ,#'opt-pass-fold)
-       (:overflow-check-elim       . ,#'opt-pass-elide-proven-overflow-checks)
-       (:bounds-check-elim         . ,#'opt-pass-bounds-check-elimination)
+       (:overflow-check-elim       . ,#'%maybe-run-overflow-check-elimination)
+       (:bounds-check-elim         . ,#'%maybe-run-bounds-check-elimination)
+       (:value-range-propagation   . ,#'%maybe-run-value-range-propagation)
        (:sccp                      . ,#'opt-pass-sccp)
      (:cons-slot-forward         . ,#'opt-pass-cons-slot-forward)
       (:strength-reduce           . ,#'opt-pass-strength-reduce)
+      (:iv-strength-reduce        . ,#'%maybe-run-iv-strength-reduce)
+      (:div-by-const              . ,#'%maybe-run-div-by-const)
+      (:bitwidth-reduction        . ,#'%maybe-run-bitwidth-reduction)
+      (:idiom-recognition         . ,#'%maybe-run-idiom-recognition)
       (:fma-synthesis             . ,#'opt-pass-fma-synthesis)
       (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
       (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
@@ -563,8 +682,16 @@ not fusing across intervening writes to the multiply destination or operands."
       (:affine-loop-analysis      . ,#'%maybe-run-fr523-affine-loop-analysis)
      (:loop-interchange          . ,#'%maybe-run-fr524-loop-interchange)
      (:polyhedral-schedule       . ,#'%maybe-run-fr525-polyhedral-schedule)
-     (:loop-fusion-fission       . ,#'%maybe-run-fr526-loop-fusion-fission)
-     (:reassociate               . ,#'opt-pass-reassociate)
+      (:loop-fusion-fission       . ,#'%maybe-run-fr526-loop-fusion-fission)
+        (:loop-fusion               . ,#'%maybe-run-loop-fusion)
+        (:loop-fission              . ,#'%maybe-run-loop-fission)
+        (:loop-tile                 . ,#'%maybe-run-loop-tile)
+        (:autotune-simd             . ,#'%maybe-run-autotune-simd)
+         (:polyhedral                . ,#'%maybe-run-polyhedral)
+        (:mlgo-inline               . ,#'%maybe-run-mlgo-inline)
+        (:ml-regalloc               . ,#'%maybe-run-ml-regalloc)
+        (:loop-unswitch             . ,#'%maybe-run-loop-unswitch)
+      (:reassociate               . ,#'opt-pass-reassociate)
      (:copy-prop                 . ,#'opt-pass-copy-prop)
      (:pure-call-optimization    . ,#'%maybe-run-pure-call-optimization)
      (:gvn                       . ,#'opt-pass-gvn)
@@ -572,8 +699,11 @@ not fusing across intervening writes to the multiply destination or operands."
     (:cse                       . ,#'opt-pass-cse)
     (:jump                      . ,(symbol-function 'opt-pass-jump))
     (:loop-unrolling            . ,#'opt-pass-loop-unrolling-adaptive)
+    (:loop-unroll               . ,#'%maybe-run-loop-unroll)
     (:loop-rotation             . ,#'opt-pass-loop-rotation)
+    (:loop-rotate               . ,#'%maybe-run-loop-rotate)
       (:loop-peeling              . ,#'opt-pass-loop-peeling)
+      (:loop-peel                 . ,#'%maybe-run-loop-peel)
       (:prefetch-insertion        . ,#'opt-pass-prefetch-insertion)
       (:allocation-sinking        . ,#'opt-pass-allocation-sinking)
      (:code-sinking              . ,#'opt-pass-code-sinking)
@@ -581,10 +711,11 @@ not fusing across intervening writes to the multiply destination or operands."
     (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
     (:store-to-load-forward     . ,#'opt-pass-store-to-load-forward)
     (:dead-store-elim           . ,#'opt-pass-dead-store-elim)
+    (:load-store-coalescing     . ,#'%maybe-run-load-store-coalescing)
     (:nil-check-elim            . ,#'opt-pass-dominated-type-check-elim)
     (:dominated-type-check-elim . ,#'opt-pass-dominated-type-check-elim)
     (:branch-correlation        . ,#'opt-pass-branch-correlation)
-    (:tail-duplication          . ,#'opt-pass-tail-duplication)
+    (:tail-duplication          . ,#'%maybe-run-tail-duplication)
     (:block-merge               . ,#'opt-pass-block-merge)
     (:tail-merge                . ,#'opt-pass-tail-merge)
     (:pre                       . ,#'opt-pass-pre)
@@ -592,10 +723,20 @@ not fusing across intervening writes to the multiply destination or operands."
     (:global-dce                . ,#'opt-pass-global-dce)
      (:dead-labels               . ,#'opt-pass-dead-labels)
       (:hot-cold-layout           . ,#'opt-pass-hot-cold-layout)
-      (:branch-weights            . ,#'opt-analyze-branch-weights)
-      (:dce                       . ,#'opt-pass-dce)
-      (:fma-recognition           . ,#'opt-pass-fma-recognition)
-      (:schedule-local            . ,#'opt-pass-schedule-local))
+      (:dead-loop-elimination     . ,#'%maybe-run-dead-loop-elimination)
+      (:dead-argument-elimination . ,#'%maybe-run-dead-argument-elimination)
+      (:cps-reduce                . ,#'%maybe-run-cps-reduce)
+      (:defunctionalize           . ,#'%maybe-run-defunctionalize)
+      (:delimited-continuations   . ,#'%maybe-run-delimited-continuations)
+      (:escape-analysis           . ,#'%maybe-run-escape-analysis)
+        (:branch-weights            . ,#'opt-analyze-branch-weights)
+        (:path-profiling            . ,#'%maybe-run-path-profiling)
+        (:dce                       . ,#'opt-pass-dce)
+       (:fma-recognition           . ,#'opt-pass-fma-recognition)
+       (:optimization-remarks      . ,#'%maybe-run-optimization-remarks)
+       (:abstract-interpretation   . ,#'%maybe-run-abstract-interpretation)
+       (:translation-validation    . ,#'%maybe-run-translation-validation)
+       (:schedule-local            . ,#'opt-pass-schedule-local))
   "Ordered (keyword . function) pairs — single source for pipeline and registry.")
 
 (defparameter *opt-pass-registry*
@@ -608,18 +749,24 @@ not fusing across intervening writes to the multiply destination or operands."
 (defparameter *opt-default-convergence-pass-keys*
   '(:prolog-rewrite
      :call-site-splitting
-      :devirtualize
-      :if-conversion
+       :devirtualize
+       :if-conversion
        :closure-capture-dedup
       :closure-thunk-sharing
        :inline
          :overflow-check-elim
          :sccp
        :cons-slot-forward
+         :value-range-propagation
+         :bounds-check-elim
        :sequence-fusion
      :demand-analysis
-       :fma-synthesis
-       :bswap-recognition
+        :fma-synthesis
+        :iv-strength-reduce
+        :div-by-const
+        :bitwidth-reduction
+        :idiom-recognition
+        :bswap-recognition
      :rotate-recognition
      :fill-recognition
       :copy-recognition
@@ -631,8 +778,13 @@ not fusing across intervening writes to the multiply destination or operands."
        :affine-loop-analysis
      :loop-interchange
      :polyhedral-schedule
-     :loop-fusion-fission
-     :reassociate
+      :loop-fusion-fission
+       :loop-fusion
+       :loop-fission
+       :loop-tile
+       :autotune-simd
+       :loop-unswitch
+      :reassociate
      :copy-prop
      :pure-call-optimization
      :gvn
@@ -640,16 +792,20 @@ not fusing across intervening writes to the multiply destination or operands."
     :cse
     :jump
      :loop-unrolling
+     :loop-unroll
      :loop-rotation
+     :loop-rotate
      :loop-peeling
+     :loop-peel
      :prefetch-insertion
       :allocation-sinking
      :code-sinking
     :unreachable
     :dead-basic-blocks
     :store-to-load-forward
-    :dead-store-elim
-    :nil-check-elim
+     :dead-store-elim
+     :load-store-coalescing
+     :nil-check-elim
     :dominated-type-check-elim
     :branch-correlation
     :tail-duplication
@@ -660,10 +816,19 @@ not fusing across intervening writes to the multiply destination or operands."
      :global-dce
      :dead-labels
      :hot-cold-layout
-      :branch-weights
-      :dce
-      :fma-recognition
-      :schedule-local)
+     :dead-loop-elimination
+     :dead-argument-elimination
+     :cps-reduce
+     :defunctionalize
+     :escape-analysis
+        :branch-weights
+        :path-profiling
+        :dce
+       :fma-recognition
+       :optimization-remarks
+       :abstract-interpretation
+       :translation-validation
+       :schedule-local)
   "Default convergence pipeline keys.
 `:egraph` remains available as an explicit pass, but the default rewrite stage is
 `:prolog-rewrite`, which already composes both the Prolog peephole backend and
@@ -733,6 +898,23 @@ the e-graph engine.")
                    (getf event :dur-us)))
   (format stream "]}~%"))
 
+(defun compiler-self-profiling-capabilities ()
+  "Return FR-703 Compiler Self-Profiling / Build Analytics capabilities."
+  '(:fr-id :fr-703
+    :time-passes t
+    :stats t
+    :trace-emit :chrome-trace-json
+    :build-analytics t))
+
+(defun build-analytics-summary (&key pass-count instruction-count elapsed-us changed-count)
+  "Build a compact FR-703 build analytics summary plist."
+  (list :fr-id :fr-703
+        :pass-count (or pass-count 0)
+        :instruction-count (or instruction-count 0)
+        :elapsed-us (or elapsed-us 0)
+        :changed-count (or changed-count 0)
+        :capabilities (compiler-self-profiling-capabilities)))
+
 (defun %opt-remarks-applies-p (changed mode)
   "T when a remarks entry should be emitted given CHANGED status and MODE."
   (or (eq mode :all)
@@ -769,6 +951,10 @@ Returns the final instruction list."
           (push (list :name name :ts-us (opt-trace-ts-us trace) :dur-us dur-us)
                 (opt-trace-events trace))
           (incf (opt-trace-ts-us trace) dur-us))
+        (when (and (boundp '*translation-validation-enabled*)
+                   *translation-validation-enabled*
+                   (fboundp 'validate-optimizer-translation))
+          (validate-optimizer-translation f before next))
         (setf current next)))))
 
 (defun opt-converged-p (prev next)

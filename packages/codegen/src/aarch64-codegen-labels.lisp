@@ -38,6 +38,18 @@
           ((not (zerop chunk1)) 2)
           (t 1))))
 
+(defun a64-safe-stack-pointer-size ()
+  "Return byte size of gated AArch64 SafeStack TPIDR_EL0 load/store support."
+  (if *aarch64-safe-stack-enabled* 8 0))
+
+(defun a64-safe-stack-prologue-size ()
+  "Return byte size of the AArch64 SafeStack unsafe-stack pointer load."
+  (if *aarch64-safe-stack-enabled* 8 0))
+
+(defun a64-safe-stack-epilogue-size ()
+  "Return byte size of the AArch64 SafeStack unsafe-stack pointer store."
+  (if *aarch64-safe-stack-enabled* 8 0))
+
 ;;; Instruction Size Estimation (for two-pass label resolution)
 
 (defparameter *a64-instruction-sizes*
@@ -102,6 +114,14 @@
     (setf (gethash 'vm-spill-load ht) 4)    ; LDUR
     (setf (gethash 'vm-prefetch ht) 4)      ; PRFM
     (setf (gethash 'vm-simd-vector-op ht) 40) ; 3 addresses + 2 loads + op + store
+    (setf (gethash 'vm-atomic-cas ht) 12)
+    (setf (gethash 'vm-atomic-swap ht) 16)
+    (setf (gethash 'vm-atomic-incf ht) 20)
+    (setf (gethash 'vm-atomic-load ht) 12)
+    (setf (gethash 'vm-atomic-store ht) 16)
+    (setf (gethash 'vm-memory-barrier ht) 4)
+    (setf (gethash 'vm-load-fence ht) 4)
+    (setf (gethash 'vm-store-fence ht) 4)
     (setf (gethash 'vm-print ht) 0)
     ht)
   "Maps VM instruction type symbols to their AArch64 encoded byte sizes.")

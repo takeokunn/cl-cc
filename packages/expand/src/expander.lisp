@@ -65,9 +65,13 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
      (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
     (t
      (let ((handler (or (gethash (car form) *expander-head-table*)
-                         (and (symbolp (car form))
-                              (let* ((local (intern (symbol-name (car form)) :cl-cc/expand)))
-                                (and local (gethash local *expander-head-table*)))))))
+                          (and (symbolp (car form))
+                               (let* ((pkg (find-package :cl-cc/expand))
+                                      (local (progn
+                                               (when (cl-cc/vm::package-locked-p pkg)
+                                                 (cl-cc/vm::check-package-lock pkg :intern))
+                                               (intern (symbol-name (car form)) pkg))))
+                                 (and local (gethash local *expander-head-table*)))))))
        (cond
          (handler
           (let ((expanded (funcall handler form)))

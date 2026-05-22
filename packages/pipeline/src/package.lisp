@@ -46,6 +46,31 @@
     #:pipeline-opts
     #:*compilation-tier*
     #:normalize-compilation-tier
+    #:*incremental-cache-directory*
+    #:pipeline-source-hash
+    #:pipeline-incremental-current-p
+    #:pipeline-record-incremental-state
+    #:write-perf-map-entry
+    #:write-perf-map-for-native-code
+    #:*lto-enabled*
+    #:lto-serialize-module
+    #:lto-deserialize-module
+    #:lto-merge-modules
+    #:lto-optimize-modules
+    #:thin-lto-build-summary
+    #:thin-lto-optimize-modules
+     #:read-autofdo-profile
+     #:load-autofdo-profile-data
+     #:read-perf-data-binary
+     #:autofdo-hot-cold-layout-decisions
+     #:autofdo-apply-layout-decisions
+     #:read-bolt-profile
+     #:pipeline-bolt-optimize-program
+     #:maybe-pipeline-bolt-optimize-program
+    #:make-compilation-arena
+    #:arena-alloc
+    #:with-compilation-arena
+    #:compile-files-to-native-parallel
    ;; Stdlib cache state
     #:*stdlib-vm-snapshot*
     #:*stdlib-accessor-slot-map*
@@ -94,7 +119,7 @@
    #:%compile-native-string
    #:%compile-native-toplevel-forms
     #:%compile-native-lisp-forms
-    #:pipeline-reorder-functions
+     #:pipeline-reorder-functions
     #:%maybe-compile-native-via-cps
    #:%make-native-opts
    #:%non-package-top-level-forms

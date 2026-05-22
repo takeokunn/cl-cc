@@ -162,8 +162,10 @@
      make-vm-values
      make-vm-values-regs
      make-vm-mv-bind-regs
-     make-vm-values-typep
-    make-vm-spread-values
+      make-vm-values-typep
+     make-vm-nth-value
+     make-vm-load-time-value
+     make-vm-spread-values
    make-vm-values-to-list
    make-vm-vector-pop
    make-vm-vector-push

@@ -34,6 +34,39 @@
 (defparameter *current-a64-literal-pool* nil
   "Literal-pool plan active during AArch64 machine-code emission.")
 
+(defun emit-a64-stack-canary-prologue (stream frame-pointer-p)
+  "Emit TPIDR_EL0 stack canary prologue when enabled."
+  (when (and *aarch64-stack-protector-enabled* frame-pointer-p)
+    (emit-a64-instr (encode-mrs-tpidr-el0 +a64-stack-probe-scratch+) stream)
+    (emit-a64-instr (encode-ldur +a64-scs-tmp+ +a64-stack-probe-scratch+
+                                 +a64-stack-canary-tls-offset+) stream)
+    (emit-a64-instr (encode-stur +a64-scs-tmp+ +a64-fp+ -8) stream)))
+
+(defun emit-a64-stack-canary-epilogue (stream frame-pointer-p)
+  "Emit TPIDR_EL0 stack canary epilogue check when enabled."
+  (when (and *aarch64-stack-protector-enabled* frame-pointer-p)
+    (emit-a64-instr (encode-mrs-tpidr-el0 +a64-stack-probe-scratch+) stream)
+    (emit-a64-instr (encode-ldur +a64-scs-tmp+ +a64-stack-probe-scratch+
+                                 +a64-stack-canary-tls-offset+) stream)
+    (emit-a64-instr (encode-ldur +a64-stack-probe-scratch+ +a64-fp+ -8) stream)
+    (emit-a64-instr (encode-cmp +a64-stack-probe-scratch+ +a64-scs-tmp+) stream)
+    (emit-a64-instr (encode-b-cond 2 0) stream)
+    (emit-a64-instr (encode-brk 2) stream)))
+
+(defun emit-a64-safe-stack-load-pointer (dst stream)
+  "Load experimental TPIDR_EL0 SafeStack pointer into DST when enabled."
+  (when *aarch64-safe-stack-enabled*
+    (emit-a64-instr (encode-mrs-tpidr-el0 +a64-stack-probe-scratch+) stream)
+    (emit-a64-instr (encode-ldur dst +a64-stack-probe-scratch+
+                                +a64-safe-stack-tls-offset+) stream)))
+
+(defun emit-a64-safe-stack-store-pointer (src stream)
+  "Store SRC as experimental TPIDR_EL0 SafeStack pointer when enabled."
+  (when *aarch64-safe-stack-enabled*
+    (emit-a64-instr (encode-mrs-tpidr-el0 +a64-stack-probe-scratch+) stream)
+    (emit-a64-instr (encode-stur src +a64-stack-probe-scratch+
+                                +a64-safe-stack-tls-offset+) stream)))
+
 (defmacro define-a64-unary-emitter (fn-name encode-fn)
   "Define an AArch64 unary VM instruction emitter using ENCODE-FN(rd rn)."
   `(defun ,fn-name (inst stream)

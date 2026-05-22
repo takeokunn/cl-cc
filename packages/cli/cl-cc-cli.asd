@@ -13,7 +13,8 @@
   :components
   ((:file "package")
    (:file "args")
-   (:file "main")         ; Help system (%print-global-help, %print-command-help)
-   (:file "main-utils")   ; Utilities, flamegraph, SSA block name helpers
-    (:file "main-dump")    ; ANSI colors, dump-*-phase functions, compile-opts struct
+    (:file "main")         ; Help system (%print-global-help, %print-command-help)
+    (:file "main-utils")   ; Utilities, flamegraph, SSA block name helpers
+    (:file "flamegraph")
+     (:file "main-dump")    ; ANSI colors, dump-*-phase functions, compile-opts struct
    (:file "handlers")))   ; Subcommand handlers only

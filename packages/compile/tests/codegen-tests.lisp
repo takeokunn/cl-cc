@@ -246,6 +246,24 @@ Note: identical non-string constants may coalesce to a single vm-const during co
       (assert-= 3 (cl-cc::vm-const-value const-inst)))
     (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call))))
 
+(deftest codegen-call/cc-emits-dedicated-instruction
+  "FR-800: CALL/CC lowers to VM-CALL/CC instead of an ordinary call."
+  (let* ((result (cl-cc:compile-expression '(call/cc (lambda (k) (funcall k 42))) :target :vm))
+         (instructions (cl-cc/compile:compilation-result-vm-instructions result)))
+    (assert-true (find-if (lambda (inst) (typep inst 'cl-cc/vm::vm-call/cc))
+                          instructions))))
+
+(deftest codegen-block-return-from-keeps-direct-jump
+  "FR-801: BLOCK/RETURN-FROM remains an escape-only direct jump path."
+  (let* ((ctx (make-codegen-ctx))
+         (node (make-ast-block :name nil
+                               :body (list (make-ast-return-from
+                                            :name nil
+                                            :value (make-ast-int :value 5))))))
+    (compile-ast node ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-jump))
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-call/cc))))
+
 ;;; ─── optimize-ast / %loc macro ───────────────────────────────────────────
 
 (deftest optimize-ast-preserves-source-location
@@ -362,3 +380,35 @@ Note: identical non-string constants may coalesce to a single vm-const during co
   "%let-noescape-cons-p returns NIL when the expression is not a cons call."
   (let ((expr (make-ast-int :value 5)))
     (assert-null (cl-cc/compile::%let-noescape-cons-p 'c expr nil nil nil nil))))
+
+;;; ─── FR-864/892 MV buffer and load-time-value codegen ─────────────────────
+
+(deftest codegen-nth-value-emits-o1-buffer-read
+  "Constant nth-value lowers to clear/ensure/nth-value instead of list allocation."
+  (let* ((ctx (make-codegen-ctx))
+         (node (make-ast-call :func '%nth-value
+                              :args (list (make-ast-int :value 1)
+                                          (cl-cc/ast:make-ast-values
+                                           :forms (list (make-ast-int :value 10)
+                                                        (make-ast-int :value 20)))))))
+    (compile-ast node ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-nth-value))
+    (assert-false (codegen-find-inst ctx 'cl-cc/vm::vm-values-to-list))))
+
+(deftest codegen-load-time-value-records-cell
+  "load-time-value records a cell and emits a constant-speed cell reference."
+  (let ((ctx (make-codegen-ctx))
+        (cl-cc/compile::*load-time-value-cells* nil)
+        (cl-cc/compile::*next-load-time-value-cell-id* 0))
+    (compile-ast (make-ast-call :func '%load-time-value
+                                :args (list (make-ast-call :func '+
+                                                          :args (list (make-ast-int :value 1)
+                                                                      (make-ast-int :value 2)))
+                                            (make-ast-var :name nil)))
+                 ctx)
+    (let ((inst (codegen-find-inst ctx 'cl-cc/vm::vm-load-time-value)))
+      (assert-true inst)
+      (assert-= 0 (cl-cc/vm::vm-load-time-value-cell-id inst))
+      (assert-equal '(+ 1 2)
+                    (cl-cc/vm::vm-load-time-value-cell-form
+                     (first cl-cc/compile::*load-time-value-cells*))))))

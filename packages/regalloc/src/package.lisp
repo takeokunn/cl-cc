@@ -48,10 +48,13 @@
      #:compute-live-intervals
      #:split-live-interval
       #:color-spill-slots
-      #:linear-scan-allocate
-      #:color-allocate
-      #:*regalloc-allocation-strategy*
-    #:allocate-registers
+       #:linear-scan-allocate
+       #:color-allocate
+       #:*regalloc-allocation-strategy*
+       #:*ml-regalloc-enabled*
+       #:regalloc-loop-depths
+       #:regalloc-ml-spill-cost
+     #:allocate-registers
 
    ;; ─── regalloc-allocate.lisp — spill instructions ──────────────────
    #:vm-spill-store

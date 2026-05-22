@@ -8,6 +8,49 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+(deftest optimize-formal-tooling-superopt-abstract-and-translation-validation
+  "FR-750/751/752: formal tooling has concrete superopt, AI, and translation-validation behavior."
+  (let* ((window (list (cl-cc:make-vm-move :dst :r1 :src :r0)
+                       (cl-cc:make-vm-move :dst :r1 :src :r0)))
+         (optimized (cl-cc/optimize:opt-pass-superopt window)))
+    (assert-= 1 (length optimized))
+    (assert-true (typep (first optimized) 'cl-cc/vm:vm-move))
+    (assert-eq :r1 (cl-cc/vm::vm-dst (first optimized)))
+    (assert-eq :r0 (cl-cc/vm::vm-src (first optimized))))
+  (let* ((program (list (cl-cc:make-vm-const :dst :r0 :value 2)
+                        (cl-cc:make-vm-const :dst :r1 :value 5)
+                        (cl-cc:make-vm-add :dst :r2 :lhs :r0 :rhs :r1)))
+         (state (cl-cc/optimize:ai-compute-fixed-point program))
+         (facts (cl-cc/optimize::ai-state-facts state))
+         (r2 (gethash :r2 facts)))
+    (assert-equal '(7 . 7) (getf r2 :interval))
+    (assert-eq :non-null (getf r2 :nullness)))
+  (let ((before (list (cl-cc:make-vm-const :dst :r0 :value 1)
+                      (cl-cc:make-vm-halt :reg :r0)))
+        (after (list (cl-cc:make-vm-const :dst :r0 :value 2)
+                     (cl-cc:make-vm-halt :reg :r0))))
+    (assert-true (cl-cc/optimize::translation-validation-equivalent-p before before))
+    (assert-false (cl-cc/optimize::translation-validation-equivalent-p before after))
+    (let ((cl-cc/optimize:*translation-validation-enabled* t))
+      (assert-eq after (cl-cc/optimize:validate-optimizer-translation :unit before after)))))
+
+(deftest optimize-differential-fuzzing-deterministic-smoke
+  "FR-753: differential fuzzing generator/interpreter is deterministic and catches mismatches without signaling."
+  (let* ((result (cl-cc/optimize:opt-run-compiler-fuzz
+                  :trials 8
+                  :seed 753
+                  :max-program-length 8
+                  :optimizer #'identity)))
+    (assert-true (getf result :ok))
+    (assert-= 8 (getf result :trials))
+    (assert-= 753 (getf result :seed)))
+  (let* ((program (cl-cc/optimize::opt-generate-random-ir-program
+                   :state (cl-cc/optimize::%opt-fuzz-random-state 9)
+                   :max-program-length 6))
+         (expected (multiple-value-list (cl-cc/optimize::opt-fuzz-interpret-ir program)))
+         (actual (multiple-value-list (cl-cc/optimize::opt-fuzz-interpret-ir (copy-list program)))))
+    (assert-equal expected actual)))
+
 (deftest optimize-roadmap-runtime-helpers-have-concrete-behavior
   "Roadmap helper APIs maintain concrete PIC, profile, deopt, shape, and tiering state."
   (let ((site (cl-cc/optimize::make-opt-ic-site :max-polymorphic-entries 2)))

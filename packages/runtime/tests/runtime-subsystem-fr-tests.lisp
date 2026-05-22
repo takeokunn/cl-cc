@@ -30,6 +30,62 @@
   (assert-true (asdf:find-system :cl-cc-runtime nil))
   (assert-true (asdf:find-system :cl-cc-vm nil)))
 
+(deftest runtime-subsystem-c-embedding-api-loaded
+  "FR-812: C embedding API exports state, value, error, eval, call, cleanup, and callbacks."
+  (assert-true (probe-file (asdf:system-relative-pathname :cl-cc-runtime "include/cl-cc.h")))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-init))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-eval))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-call))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-cleanup))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-last-error))
+  (assert-true (fboundp 'cl-cc/runtime:cl-cc-register-callback))
+  (assert-true (fboundp 'cl-cc/runtime:|cl_cc_init|))
+  (assert-true (fboundp 'cl-cc/runtime:|cl_cc_eval|))
+  (assert-true (fboundp 'cl-cc/runtime:|cl_cc_call|)))
+
+(deftest runtime-subsystem-c-embedding-api-eval-call-cleanup
+  "FR-812: embedding states evaluate strings, call functions, track errors, and clean up."
+  (let ((state (cl-cc/runtime:cl-cc-init)))
+    (unwind-protect
+         (progn
+           (let ((value (cl-cc/runtime:cl-cc-eval state "(+ 20 22)")))
+             (assert-eq :integer (cl-cc/runtime:cl-cc-value-kind value))
+             (assert-= 42 (cl-cc/runtime:cl-cc-value-payload value)))
+           (cl-cc/runtime:cl-cc-eval state "(defun embedded-add (a b) (+ a b))")
+           (let ((value (cl-cc/runtime:cl-cc-call state "embedded-add" 7 8)))
+             (assert-eq :integer (cl-cc/runtime:cl-cc-value-kind value))
+             (assert-= 15 (cl-cc/runtime:cl-cc-value-payload value)))
+           (let ((callback (cl-cc/runtime:cl-cc-register-callback
+                            state "identity" #'identity :arg-types '(:pointer) :return-type :pointer)))
+             (assert-true callback)
+             (assert-eq callback (cl-cc/runtime:cl-cc-callback state "identity")))
+           (let ((value (cl-cc/runtime:cl-cc-eval state "(/ 1 0)")))
+             (assert-eq :error (cl-cc/runtime:cl-cc-value-kind value))
+             (assert-= 1 (cl-cc/runtime:cl-cc-error-code
+                          (cl-cc/runtime:cl-cc-last-error state)))))
+      (cl-cc/runtime:cl-cc-cleanup state))
+    (assert-true (cl-cc/runtime:cl-cc-state-closed-p state))))
+
+(deftest runtime-subsystem-multiple-vm-instances-isolated
+  "FR-813: VM instances have independent stores and can share read-only parent environments."
+  (let* ((parent-globals (make-hash-table :test #'eq))
+         (parent-env (cl-cc/vm:make-vm-parent-environment :globals parent-globals))
+         (left (cl-cc/vm:make-vm-instance :parent-env parent-env))
+         (right (cl-cc/vm:make-vm-instance :parent-env parent-env)))
+    (setf (gethash 'shared parent-globals) 99)
+    (setf (gethash 'local (cl-cc/vm:vm-global-vars left)) :left)
+    (setf (gethash 'local (cl-cc/vm:vm-global-vars right)) :right)
+    (assert-false (eq left right))
+    (assert-false (eq (cl-cc/vm:vm-state-heap left)
+                      (cl-cc/vm:vm-state-heap right)))
+    (assert-eq :left (cl-cc/vm:vm-instance-global-value left 'local))
+    (assert-eq :right (cl-cc/vm:vm-instance-global-value right 'local))
+    (assert-= 99 (cl-cc/vm:vm-instance-global-value left 'shared))
+    (assert-= 99 (cl-cc/vm:vm-instance-global-value right 'shared))
+    (let ((transferred (cl-cc/vm:transfer-value '(1 2 3) left right)))
+      (assert-equal '(1 2 3) transferred)
+      (assert-false (eq transferred '(1 2 3))))))
+
 (deftest runtime-subsystem-sync-primitives-loaded
   "FR-370-373: Verify sync primitives are loaded."
   (assert-true (fboundp 'cl-cc/runtime:rt-make-mutex))
@@ -343,6 +399,64 @@
                 (cl-cc/runtime::rt-write-tvar cell 20))))
     (assert-true (= 2 attempts))
     (assert-true (= 20 (cl-cc/runtime::rt-tvar-value-unsafe cell)))))
+
+(deftest runtime-subsystem-fr-740-stm-isolates-staged-writes-until-commit
+  "FR-740: STM writes are staged in the transaction and become visible at commit."
+  (let ((cell (cl-cc/runtime:rt-make-tvar 1))
+        (observed-before-commit nil))
+    (assert-= 2
+              (cl-cc/runtime:rt-atomically
+                (cl-cc/runtime:rt-write-tvar cell 2)
+                (setf observed-before-commit
+                      (cl-cc/runtime:rt-tvar-value-unsafe cell))
+                (cl-cc/runtime:rt-read-tvar cell)))
+    (assert-= 1 observed-before-commit)
+    (assert-= 2 (cl-cc/runtime:rt-tvar-value-unsafe cell))))
+
+(deftest runtime-subsystem-fr-741-async-await-runs-through-scheduler
+  "FR-741: Async tasks resolve futures and await drains scheduler work."
+  (cl-cc/runtime:rt-scheduler-init)
+  (let ((future (cl-cc/runtime:rt-async (+ 20 22))))
+    (assert-= 42 (cl-cc/runtime:rt-await future :timeout 0.1))
+    (assert-true (cl-cc/runtime:rt-future-done-p future))))
+
+(deftest runtime-subsystem-fr-742-work-stealing-runs-local-and-stolen-tasks
+  "FR-742: Work-stealing workers execute own deque work and can steal from peers."
+  (let* ((scheduler (cl-cc/runtime:rt-make-work-stealing-scheduler :workers 2))
+         (workers (cl-cc/runtime::rt-work-stealing-scheduler-workers scheduler))
+         (w0 (first workers))
+         (w1 (second workers))
+         (events nil))
+    (cl-cc/runtime:rt-work-stealing-submit scheduler (lambda () (push :first events)))
+    (cl-cc/runtime:rt-work-stealing-submit scheduler (lambda () (push :second events)))
+    (assert-true (cl-cc/runtime:rt-worker-run-once w0))
+    (assert-true (cl-cc/runtime:rt-worker-run-once w1))
+    (assert-= 2 (length events))
+    (cl-cc/runtime:rt-work-deque-push-front
+     (cl-cc/runtime::rt-worker-deque w0)
+     (cl-cc/runtime::%make-rt-green-thread :thunk (lambda () (push :stolen events))))
+    (assert-true (cl-cc/runtime:rt-worker-run-once w1))
+    (assert-true (member :stolen events))
+    (assert-true (>= (cl-cc/runtime::rt-worker-steals w1) 1))))
+
+(deftest runtime-subsystem-fr-743-fiber-yield-and-resume-preserve-state
+  "FR-743: Fibers can suspend with a continuation and resume cooperatively."
+  (let ((steps nil)
+        (fiber nil))
+    (setf fiber
+          (cl-cc/runtime:rt-make-fiber
+           (lambda ()
+             (push :start steps)
+             (cl-cc/runtime:rt-fiber-block
+              (lambda ()
+                (push :resume steps)
+                :done)
+              :blocked))))
+    (assert-eq :blocked (cl-cc/runtime:rt-fiber-resume fiber))
+    (assert-eq :ready (cl-cc/runtime::rt-fiber-status fiber))
+    (assert-eq :done (cl-cc/runtime:rt-fiber-resume fiber))
+    (assert-true (cl-cc/runtime:rt-fiber-done-p fiber))
+    (assert-equal '(:resume :start) steps)))
 
 (deftest runtime-subsystem-lockfree-stack-is-lifo
   "FR-322: Lock-free stack pops the most recently pushed value first."

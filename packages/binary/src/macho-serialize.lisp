@@ -204,10 +204,13 @@ cmdsize must be 8-byte aligned for 64-bit Mach-O: 12 header + 13 string + 7 pad 
     (symbol-index :initform (make-hash-table :test #'equal)
                   :reader mach-o-builder-symbol-index
                   :documentation "Map from symbol name to nlist index.")
-    (relocations :initform nil
-                 :accessor mach-o-builder-relocations
-                 :documentation "Pending Mach-O relocation references.")
-    (bind-ordinal-table :initform (make-hash-table :test #'equal)
+     (relocations :initform nil
+                  :accessor mach-o-builder-relocations
+                  :documentation "Pending Mach-O relocation references.")
+     (data-const-dedup-table :initform (make-hash-table :test #'equalp)
+                             :reader mach-o-builder-data-const-dedup-table
+                             :documentation "Deduplicates __DATA_CONST payloads by byte content.")
+     (bind-ordinal-table :initform (make-hash-table :test #'equal)
                         :reader mach-o-builder-bind-ordinal-table
                         :documentation "Map from dylib path/name to dyld library ordinal."))
   (:documentation "Builder class for constructing Mach-O executables."))

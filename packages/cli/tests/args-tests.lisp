@@ -55,10 +55,13 @@
           ("verbose" '("run" "f.lisp" "--verbose") "--verbose")
           ("pass timings" '("eval" "(+ 1 2)" "--print-pass-timings") "--print-pass-timings")
           ("time-passes alias" '("eval" "(+ 1 2)" "--time-passes") "--time-passes")
-          ("stats" '("eval" "(+ 1 2)" "--stats") "--stats")
-          ("trace-emit" '("eval" "(+ 1 2)" "--trace-emit") "--trace-emit")
-          ("strict"  '("check" "f.lisp" "--strict") "--strict")
-          ("help"    '("--help")                   "--help"))
+           ("stats" '("eval" "(+ 1 2)" "--stats") "--stats")
+           ("trace-emit" '("eval" "(+ 1 2)" "--trace-emit") "--trace-emit")
+           ("verify-transforms" '("compile" "f.lisp" "--verify-transforms") "--verify-transforms")
+           ("deterministic" '("compile" "f.lisp" "--deterministic") "--deterministic")
+          ("no-timeout" '("eval" "(+ 1 2)" "--no-timeout") "--no-timeout")
+           ("strict"  '("check" "f.lisp" "--strict") "--strict")
+           ("help"    '("--help")                   "--help"))
   (argv flag-key)
   (let ((p (cl-cc/cli:parse-args argv)))
     (assert-true (%flags p flag-key))))
@@ -89,10 +92,16 @@
           ("pass pipeline" '("eval" "(+ 1 2)" "--pass-pipeline" "fold,dce") "--pass-pipeline" "fold,dce")
           ("opt remarks" '("eval" "(+ 1 2)" "--opt-remarks" "changed") "--opt-remarks" "changed")
           ("trace json" '("eval" "(+ 1 2)" "--trace-json" "trace.json") "--trace-json" "trace.json")
-          ("flamegraph" '("eval" "(+ 1 2)" "--flamegraph" "flame.svg") "--flamegraph" "flame.svg"))
+          ("build id" '("compile" "f.lisp" "--build-id" "auto") "--build-id" "auto")
+           ("flamegraph" '("eval" "(+ 1 2)" "--flamegraph" "flame.svg") "--flamegraph" "flame.svg"))
   (argv flag-key expected)
   (let ((p (cl-cc/cli:parse-args argv)))
     (assert-string= expected (%flags p flag-key))))
+
+(deftest cli-args-timeout-string-flag
+  "parse-args stores --timeout as a string value; semantic validation happens later."
+  (let ((p (cl-cc/cli:parse-args '("eval" "(+ 1 2)" "--timeout" "7"))))
+    (assert-string= "7" (%flags p "--timeout"))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; String flags — --key=value inline form

@@ -83,6 +83,7 @@ SHAPE is one of:
   (deopt-info nil)
   (osr-entry-points nil)
   (tier1-entry-points nil)
+  (load-time-value-cells nil)
   (compilation-tier 0 :type integer))
 
 (defclass vm-state ()
@@ -98,8 +99,16 @@ SHAPE is one of:
                  :documentation "Counter for allocating heap addresses")
    (class-registry :initform (make-hash-table :test #'eq) :reader vm-class-registry
                    :documentation "Global registry mapping class names to class descriptor HTs")
-   (values-list :initform nil :accessor vm-values-list
-                :documentation "List of multiple return values from last VALUES call")
+    (values-list :initform nil :accessor vm-values-list
+                 :documentation "List of multiple return values from last VALUES call")
+    (mv-buffer :initform (make-array +maximum-multiple-values+ :initial-element nil)
+               :accessor vm-mv-buffer
+               :documentation "Fixed-size multiple-values buffer for allocation-free MV transfer.")
+    (mv-count :initform 0 :accessor vm-mv-count
+              :documentation "Number of valid entries in MV-BUFFER.")
+    (load-time-values :initform (make-hash-table :test #'eql)
+                      :reader vm-load-time-values
+                      :documentation "Load-time-value cell id -> resolved value table.")
    (handler-stack :initform nil :accessor vm-handler-stack
                   :documentation "Stack of active error handlers for handler-case.
 Each entry is (handler-label result-reg error-type saved-call-stack saved-registers).")
@@ -151,10 +160,14 @@ Used by call-next-method and next-method-p.")
                           :documentation "Most recent deoptimization snapshot.")
      (deopt-history :initform nil :accessor vm-deopt-history
                     :documentation "List of deoptimization snapshots, newest first.")
-     (tier1-code :initform (make-hash-table :test #'equal) :accessor vm-tier1-code
-                 :documentation "OSR id/label -> simple Tier-1 entry metadata used by the OSR stub.")
-     (stack-depth :initform 0 :accessor vm-stack-depth
-                  :documentation "O(1) logical VM call-stack depth counter.")
+      (tier1-code :initform (make-hash-table :test #'equal) :accessor vm-tier1-code
+                  :documentation "OSR id/label -> simple Tier-1 entry metadata used by the OSR stub.")
+      (current-stack-segment :initform nil :accessor vm-current-stack-segment
+                             :documentation "Current logical VM stack segment for segmented-stack growth.")
+      (continuation-prompts :initform nil :accessor vm-continuation-prompts
+                            :documentation "Stack of active delimited-continuation prompt frames.")
+      (stack-depth :initform 0 :accessor vm-stack-depth
+                   :documentation "O(1) logical VM call-stack depth counter.")
      (tail-call-optimization-enabled-p :initform t :accessor vm-tail-call-optimization-enabled-p
                                        :documentation "When true, vm-tail-call reuses the current frame.")
      (clos-shadow-stack :initform nil :accessor vm-clos-shadow-stack

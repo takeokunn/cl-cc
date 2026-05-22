@@ -174,4 +174,126 @@
        (setf (gethash '*package* (cl-cc/vm::vm-global-vars s)) user)
        (let ((*package* user))
          (str-exec (cl-cc:make-vm-find-package :dst :R0 :src :R1) s))
-       (assert-eq target (cl-cc/vm::vm-reg-get s :R0))))))
+        (assert-eq target (cl-cc/vm::vm-reg-get s :R0))))))
+
+;;; ─── FR-895: Symbol Table Compaction ─────────────────────────────────────────
+
+(deftest sym-symbol-table-freeze-thaw
+  "freeze-symbol-table and thaw-symbol-table work correctly."
+  (let ((test-sym (gensym "FR895-TEST-")))
+    (setf (cl-cc/vm::lookup-symbol (symbol-name test-sym)) test-sym)
+    (assert-eq test-sym (cl-cc/vm::lookup-symbol (symbol-name test-sym)))
+    ;; Freeze — table becomes read-only
+    (cl-cc/vm::freeze-symbol-table)
+    (assert-true cl-cc/vm::*symbol-table-frozen*)
+    (assert-true (vectorp cl-cc/vm::*symbol-table-compact*))
+    (assert-eq test-sym (cl-cc/vm::lookup-symbol (symbol-name test-sym)))
+    ;; Frozen — adding new symbol should error
+    (let ((new-sym (gensym "FR895-FROZEN-")))
+      (assert-signals error
+        (setf (cl-cc/vm::lookup-symbol (symbol-name new-sym)) new-sym)))
+    ;; Thaw — back to dynamic
+    (cl-cc/vm::thaw-symbol-table)
+    (assert-null cl-cc/vm::*symbol-table-frozen*)
+    (assert-null cl-cc/vm::*symbol-table-compact*)
+    (let ((new-sym (gensym "FR895-THAWED-")))
+      (setf (cl-cc/vm::lookup-symbol (symbol-name new-sym)) new-sym)
+      (assert-eq new-sym (cl-cc/vm::lookup-symbol (symbol-name new-sym))))))
+
+(deftest sym-symbol-index
+  "symbol-index returns a sequential integer for each symbol."
+  (let ((a (gensym "FR895-IDX-A-"))
+        (b (gensym "FR895-IDX-B-"))
+        (c (gensym "FR895-IDX-C-")))
+    (let ((ia (cl-cc/vm::symbol-index a))
+          (ib (cl-cc/vm::symbol-index b))
+          (ic (cl-cc/vm::symbol-index c)))
+      (assert-true (integerp ia))
+      (assert-true (integerp ib))
+      (assert-true (integerp ic))
+      ;; Each gets a unique index
+      (assert-false (= ia ib))
+      (assert-false (= ib ic))
+      ;; Same symbol returns same index
+      (assert-equal ia (cl-cc/vm::symbol-index a)))))
+
+(deftest sym-register-weak-symbol
+  "register-weak-symbol registers a symbol in the weak table."
+  (let ((test-sym (gensym "FR895-WEAK-")))
+    (cl-cc/vm::register-weak-symbol test-sym)
+    (assert-eq test-sym
+               (gethash (symbol-name test-sym) cl-cc/vm::*symbol-table-weak*))))
+
+;;; ─── FR-896: Package Lock / Sealed ──────────────────────────────────────────
+
+(defun %str-delete-package-if-exists (designator)
+  "Delete DESIGNATOR's package when it exists."
+  (let ((pkg (find-package designator)))
+    (when pkg (delete-package pkg))))
+
+(deftest sym-lock-package
+  "lock-package prevents intern/lock-package-locked-p reflects state."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (%str-delete-package-if-exists :fr896-lock-test-a)
+    (unwind-protect
+         (let ((pkg (make-package :fr896-lock-test-a :use nil)))
+           (assert-null (cl-cc/vm::package-locked-p pkg))
+           (cl-cc/vm::lock-package pkg)
+           (assert-true (cl-cc/vm::package-locked-p pkg))
+           (cl-cc/vm::unlock-package pkg)
+           (assert-null (cl-cc/vm::package-locked-p pkg)))
+      (%str-delete-package-if-exists :fr896-lock-test-a))))
+
+(deftest sym-package-locked-error-on-intern
+  "Interning a symbol into a locked package signals package-locked-error."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (%str-delete-package-if-exists :fr896-lock-test-b)
+    (unwind-protect
+         (let ((pkg (make-package :fr896-lock-test-b :use nil)))
+           (cl-cc/vm::lock-package pkg)
+           (assert-signals cl-cc/vm::package-locked-error
+             (intern "LOCKED-SYMBOL" pkg))
+           ;; Package should remain locked
+           (assert-true (cl-cc/vm::package-locked-p pkg)))
+      (%str-delete-package-if-exists :fr896-lock-test-b))))
+
+(deftest sym-with-unlocked-packages
+  "with-unlocked-packages temporarily unlocks packages."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (%str-delete-package-if-exists :fr896-lock-test-c)
+    (unwind-protect
+         (let ((pkg (make-package :fr896-lock-test-c :use nil)))
+           (cl-cc/vm::lock-package pkg)
+           ;; Without unlock, intern should error
+           (assert-signals cl-cc/vm::package-locked-error
+             (intern "SHOULD-FAIL" pkg))
+           ;; With unlock, intern should succeed
+           (let ((result
+                   (cl-cc/vm::with-unlocked-packages (:fr896-lock-test-c)
+                     (intern "SHOULD-SUCCEED" pkg))))
+             (assert-true (symbolp result))
+             (assert-equal "SHOULD-SUCCEED" (symbol-name result)))
+           ;; After unlock block, package should be re-locked
+           (assert-true (cl-cc/vm::package-locked-p pkg))
+           (assert-signals cl-cc/vm::package-locked-error
+             (intern "SHOULD-FAIL-AGAIN" pkg)))
+      (%str-delete-package-if-exists :fr896-lock-test-c))))
+
+(deftest sym-default-locked-packages
+  "*locked-packages* includes :cl by default."
+  (assert-true (find-package :cl))
+  (assert-true (cl-cc/vm::package-locked-p (find-package :cl))))
+
+(deftest sym-check-package-lock-signals
+  "check-package-lock signals package-locked-error for locked packages."
+  (sb-thread:with-mutex (*str-package-lock*)
+    (%str-delete-package-if-exists :fr896-lock-test-d)
+    (unwind-protect
+         (let ((pkg (make-package :fr896-lock-test-d :use nil)))
+           (cl-cc/vm::lock-package pkg)
+           (assert-signals cl-cc/vm::package-locked-error
+             (cl-cc/vm::check-package-lock pkg :intern))
+           (cl-cc/vm::unlock-package pkg)
+           ;; Unlocked should not signal
+           (assert-true (null (cl-cc/vm::check-package-lock pkg :intern))))
+      (%str-delete-package-if-exists :fr896-lock-test-d))))

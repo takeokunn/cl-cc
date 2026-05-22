@@ -201,7 +201,12 @@ String literals and constant pools should use this segment instead of __DATA.
 It is emitted with read-only max/init protections (r--) so writes to mapped
 constant data are rejected by the operating system."
   (declare (type mach-o-builder builder)
-           (type (simple-array (unsigned-byte 8) (*)) const-bytes))
+            (type (simple-array (unsigned-byte 8) (*)) const-bytes))
+  (let* ((dedup-key (coerce const-bytes 'list))
+         (existing (gethash dedup-key (mach-o-builder-data-const-dedup-table builder))))
+    (when existing
+      (return-from add-data-const-segment builder))
+    (setf (gethash dedup-key (mach-o-builder-data-const-dedup-table builder)) base-addr))
   (let* ((const-size (length const-bytes))
          (const-section (make-section
                          :sectname "__const"

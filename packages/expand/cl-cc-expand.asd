@@ -17,7 +17,8 @@
   :components
   ((:file "package")
    (:file "macro-lambda-list")   ; shared lambda-list parsing + destructuring helpers
-   (:file "macro")               ; core: macro-env, defmacro machinery, macroexpansion
+   (:file "macro")
+                             (:file "syntax-rules")               ; core: macro-env, defmacro machinery, macroexpansion
    (:file "macros-basic")        ; bootstrap: check-type/setf/list + value helpers
    (:file "macros-control-flow") ; bootstrap control-flow macros (when/unless/cond/do*)
    (:file "macros-control-flow-case") ; case/typecase macro expansion

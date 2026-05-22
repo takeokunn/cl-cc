@@ -40,6 +40,101 @@
 (defvar *next-exception-table-entry-order* 0
   "Monotonic source-order counter for exception-table clause tie breaking.")
 
+(defvar *load-time-value-cells* nil
+  "Load-time-value cells recorded while compiling one toplevel program.")
+
+(defvar *next-load-time-value-cell-id* 0
+  "Monotonic load-time-value cell id for the current compilation unit.")
+
+(defvar *forward-reference-patch-table* (make-hash-table :test #'equal)
+  "FR-920 table mapping unresolved reference names to pending fixup plists.")
+
+(define-condition unresolved-forward-reference-error (error)
+  ((references :initarg :references :reader unresolved-forward-reference-error-references))
+  (:report (lambda (c s)
+             (format s "Unresolved forward references at EOF: ~{~S~^, ~}"
+                     (unresolved-forward-reference-error-references c)))))
+
+(defun record-forward-reference (name location &key kind patch-fn metadata)
+  "Record a pending forward reference NAME at LOCATION.
+PATCH-FN, when supplied, is called as (PATCH-FN NAME VALUE FIXUP) by
+RESOLVE-FORWARD-REFERENCES once NAME is defined."
+  (let ((fixup (list :name name
+                     :location location
+                     :kind kind
+                     :patch-fn patch-fn
+                     :metadata metadata)))
+    (push fixup (gethash name *forward-reference-patch-table*))
+    fixup))
+
+(defun %forward-reference-value (resolver name)
+  (cond
+    ((hash-table-p resolver) (multiple-value-bind (value present-p) (gethash name resolver)
+                              (values value present-p)))
+    ((functionp resolver) (multiple-value-bind (value present-p) (funcall resolver name)
+                          (values value present-p)))
+    ((listp resolver) (let ((entry (assoc name resolver :test #'equal)))
+                        (values (cdr entry) (not (null entry)))))
+    ((null resolver) (values nil nil))
+    (t (values resolver t))))
+
+(defun resolve-forward-references (&optional resolver &key (errorp t))
+  "Resolve all pending forward references using RESOLVER.
+RESOLVER may be a hash table, alist, function, or a single replacement value.
+Signals UNRESOLVED-FORWARD-REFERENCE-ERROR when ERRORP and refs remain."
+  (let ((unresolved nil)
+        (resolved nil))
+    (maphash
+     (lambda (name fixups)
+       (multiple-value-bind (value present-p) (%forward-reference-value resolver name)
+         (if present-p
+             (progn
+               (dolist (fixup fixups)
+                 (let ((patch-fn (getf fixup :patch-fn)))
+                   (when patch-fn
+                     (funcall patch-fn name value fixup))))
+               (push name resolved))
+             (push name unresolved))))
+     *forward-reference-patch-table*)
+    (dolist (name resolved)
+      (remhash name *forward-reference-patch-table*))
+    (when (and errorp unresolved)
+      (error 'unresolved-forward-reference-error :references (nreverse unresolved)))
+    (values (nreverse resolved) (nreverse unresolved))))
+
+(defun %record-load-time-value-cell (form read-only-p)
+  "Record FORM for load-time execution and return its cell id."
+  (let* ((id (prog1 *next-load-time-value-cell-id*
+               (incf *next-load-time-value-cell-id*)))
+         (cell (cl-cc/vm::make-vm-load-time-value-cell
+                :id id
+                :form form
+                :read-only-p read-only-p)))
+    (push cell *load-time-value-cells*)
+    id))
+
+(defun %compile-load-time-value-call (args result-reg ctx)
+  "Compile (LOAD-TIME-VALUE form &optional read-only-p) as a constant cell load."
+  (when (and (>= (length args) 1) (<= (length args) 2))
+    (let* ((form (ast-to-sexp (first args)))
+           (read-only-p (and (second args)
+                             (let ((sexp (ast-to-sexp (second args))))
+                               (not (null sexp)))))
+           (cell-id (%record-load-time-value-cell form read-only-p)))
+      (emit ctx (make-vm-load-time-value :dst result-reg :cell-id cell-id))
+      result-reg)))
+
+(defun %compile-nth-value-call (args result-reg ctx)
+  "Compile (NTH-VALUE n form) with O(1) MV buffer access when N is constant."
+  (when (= (length args) 2)
+    (let ((index-sexp (ast-to-sexp (first args))))
+      (when (and (integerp index-sexp) (<= 0 index-sexp))
+        (emit ctx (make-vm-clear-values))
+        (let ((primary-reg (compile-ast (second args) ctx)))
+          (emit ctx (make-vm-ensure-values :src primary-reg))
+          (emit ctx (make-vm-nth-value :dst result-reg :index index-sexp))
+          result-reg)))))
+
 (defstruct compile-exception-entry
   start-inst
   end-inst
@@ -94,20 +189,22 @@
 
 (defun %insert-osr-entry-markers (instructions)
   "Insert lightweight OSR markers immediately before loop back-edge jumps."
-  (let ((labels (cl-cc/vm::build-label-table instructions))
-        (marked nil))
-    (loop for inst in instructions
-          for pc from 0
-          do (when (typep inst 'vm-jump)
-               (let* ((label (vm-label-name inst))
-                      (target-pc (cl-cc/vm::vm-label-table-lookup labels label)))
-                 (when (and target-pc (<= target-pc pc))
-                   (push (cl-cc/vm::make-vm-osr-entry
-                          :label label
-                          :id (list :back-edge label pc))
-                         marked))))
-             (push inst marked))
-    (nreverse marked)))
+  (if cl-cc/vm:*osr-enabled*
+      (let ((labels (cl-cc/vm::build-label-table instructions))
+            (marked nil))
+        (loop for inst in instructions
+              for pc from 0
+              do (when (typep inst 'vm-jump)
+                   (let* ((label (vm-label-name inst))
+                          (target-pc (cl-cc/vm::vm-label-table-lookup labels label)))
+                     (when (and target-pc (<= target-pc pc))
+                       (push (cl-cc/vm::make-vm-osr-entry
+                              :label label
+                              :id (list :loop-header label :back-edge-pc pc))
+                             marked))))
+                 (push inst marked))
+        (nreverse marked))
+      instructions))
 
 (defun %build-deopt-info (instructions)
   "Build PC -> interpreter reconstruction metadata for FR-155 checkpoints."
@@ -116,25 +213,31 @@
     (loop for inst in instructions
           for pc from 0
           do (cond
-               ((typep inst 'cl-cc/vm::vm-type-check)
-                (setf (gethash pc table)
-                      (cl-cc/vm::make-vm-deopt-info
-                       :pc pc
-                       :label (cl-cc/vm::vm-type-check-deopt-label inst)
-                       :live-regs (list (vm-src inst))
-                       :description (list :type-check (cl-cc/vm::vm-type-name inst)
-                                          :id (cl-cc/vm::vm-type-check-deopt-id inst)))))
-               ((typep inst 'cl-cc/vm::vm-deopt)
-                (setf (gethash pc table)
-                      (cl-cc/vm::make-vm-deopt-info
-                       :pc pc
-                       :label (cl-cc/vm::vm-deopt-label inst)
-                       :description (list :deopt (cl-cc/vm::vm-deopt-reason inst)
-                                          :id (cl-cc/vm::vm-deopt-id inst)))))
-               ((typep inst 'cl-cc/vm::vm-osr-entry)
-                (push (list :pc pc
-                            :label (cl-cc/vm::vm-osr-label inst)
-                            :id (cl-cc/vm::vm-osr-id inst))
+                ((and cl-cc/vm:*deopt-enabled*
+                      (typep inst 'cl-cc/vm::vm-type-check))
+                 (setf (gethash pc table)
+                       (cl-cc/vm::make-vm-deopt-info
+                        :pc pc
+                        :label (cl-cc/vm::vm-type-check-deopt-label inst)
+                        :live-regs (list (vm-src inst))
+                        :vreg->preg (list (cons (vm-src inst) :p0))
+                        :description (list :type-check (cl-cc/vm::vm-type-name inst)
+                                           :id (cl-cc/vm::vm-type-check-deopt-id inst)))))
+                ((and cl-cc/vm:*deopt-enabled*
+                      (typep inst 'cl-cc/vm::vm-deopt))
+                 (setf (gethash pc table)
+                       (cl-cc/vm::make-vm-deopt-info
+                        :pc pc
+                        :label (cl-cc/vm::vm-deopt-label inst)
+                        :vreg->preg nil
+                        :inline-stack nil
+                        :description (list :deopt (cl-cc/vm::vm-deopt-reason inst)
+                                           :id (cl-cc/vm::vm-deopt-id inst)))))
+                ((and cl-cc/vm:*osr-enabled*
+                      (typep inst 'cl-cc/vm::vm-osr-entry))
+                 (push (list :pc pc
+                             :label (cl-cc/vm::vm-osr-label inst)
+                             :id (cl-cc/vm::vm-osr-id inst))
                       osr))))
     (values table (nreverse osr))))
 
@@ -542,9 +645,10 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                     :leaf-p          leaf-p
                                      :calling-convention program-convention
                                      :function-conventions function-conventions
-                                     :deopt-info deopt-info
-                                     :osr-entry-points osr-entry-points
-                                     :compilation-tier compilation-tier))
+                                      :deopt-info deopt-info
+                                      :osr-entry-points osr-entry-points
+                                      :load-time-value-cells (nreverse (copy-list *load-time-value-cells*))
+                                      :compilation-tier compilation-tier))
     (cl-cc/vm::vm-register-program-exception-table
      program
      (%build-exception-table (vm-program-instructions program)))
@@ -566,14 +670,14 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                           block-compile
                                          pass-pipeline print-pass-timings timing-stream coverage
                                         print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                        print-pass-stats stats-stream trace-json-stream
-                                         retpoline spectre-mitigations stack-protector shadow-stack
-                                         asan msan tsan ubsan hwasan (compilation-tier 1))
+                                         print-pass-stats stats-stream trace-json-stream
+                                          retpoline spectre-mitigations stack-protector shadow-stack
+                                          asan msan tsan ubsan hwasan verify-transforms (compilation-tier 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
-  (declare (ignore coverage retpoline spectre-mitigations stack-protector shadow-stack
-                   asan msan tsan ubsan hwasan))
+  (declare (ignore coverage verify-transforms retpoline spectre-mitigations stack-protector shadow-stack
+                    asan msan tsan ubsan hwasan))
   (let ((ctx           (make-instance 'compiler-context :safety safety :target target))
         (last-reg      nil)
         (last-type     nil)
@@ -595,9 +699,12 @@ Returns a compilation-result struct with program, assembly, and globals."
                                             :stats-stream stats-stream
                                             :trace-json-stream trace-json-stream)))
     (let ((*compile-time-value-env*    nil)
-          (*compile-time-function-env* nil)
-          (*pending-exception-table-entries* nil)
-          (*next-exception-table-entry-order* 0))
+           (*compile-time-function-env* nil)
+            (*pending-exception-table-entries* nil)
+            (*next-exception-table-entry-order* 0)
+            (*forward-reference-patch-table* (make-hash-table :test #'equal))
+            (*load-time-value-cells* nil)
+            (*next-load-time-value-cell-id* 0))
        (loop for form in forms
              for form-index from 0
              do (unless (%top-level-in-package-form-p form)
@@ -612,7 +719,99 @@ Returns a compilation-result struct with program, assembly, and globals."
                           (setf *string-literal-pool* string-literal-pool-snapshot)
                          (push (%make-toplevel-recovery-error form-index form e) errors))))))
        (setf (ctx-type-env ctx) type-env)
-         (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier))))
+        (resolve-forward-references (ctx-global-functions ctx) :errorp t)
+          (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).
+
+;;; ─── FR-860 / FR-861 Numeric Compile-Time Helpers ─────────────────────────
+;;;
+;;; Append-only helpers for numeric contagion inference and inline arithmetic
+;;; dispatch planning.  The existing AST binop compiler remains untouched; these
+;;; functions give later lowering passes and tests a stable codegen-facing API
+;;; for selecting the VM dispatch-table entry introduced in primitives.lisp.
+
+(defparameter *codegen-inline-arith-dispatch-enabled* t
+  "When true, FR-861 planning helpers may choose VM-ARITH-DISPATCH for VM code.")
+
+(defun %codegen-normalize-contagion-type (type-designator)
+  "Map compiler/CL numeric type designators to FR-860 contagion symbols."
+  (cond
+    ((member type-designator '(fixnum bignum integer) :test #'eq) 'integer)
+    ((member type-designator '(ratio rational) :test #'eq) 'rational)
+    ((eq type-designator 'single-float) 'single-float)
+    ((member type-designator '(double-float float) :test #'eq) 'double-float)
+    ((eq type-designator 'complex) 'complex)
+    ((and (consp type-designator) (eq (first type-designator) 'complex)) 'complex)
+    (t nil)))
+
+(defun codegen-infer-numeric-contagion-type (left-type right-type)
+  "Return the FR-860 result type for LEFT-TYPE × RIGHT-TYPE, or NIL if unknown."
+  (let ((left (%codegen-normalize-contagion-type left-type))
+        (right (%codegen-normalize-contagion-type right-type)))
+    (and left right (cl-cc/vm:infer-numeric-result-type left right))))
+
+(defun %codegen-arith-type-tag-from-type (type-designator)
+  "Return the FR-861 inline dispatch type tag implied by TYPE-DESIGNATOR."
+  (cond
+    ((eq type-designator 'fixnum) 0)
+    ((member type-designator '(bignum integer) :test #'eq) 1)
+    ((member type-designator '(ratio rational) :test #'eq) 2)
+    ((member type-designator '(single-float double-float float) :test #'eq) 3)
+    ((or (eq type-designator 'complex)
+         (and (consp type-designator) (eq (first type-designator) 'complex))) 4)
+    (t nil)))
+
+(defun codegen-inline-arith-dispatch-index (op left-type right-type)
+  "Return the flattened FR-861 dispatch-table index for OP and operand types."
+  (let ((left-tag (%codegen-arith-type-tag-from-type left-type))
+        (right-tag (%codegen-arith-type-tag-from-type right-type)))
+    (and left-tag right-tag
+         (cl-cc/vm:arithmetic-dispatch-index
+          (cl-cc/vm:arithmetic-op-tag op) left-tag right-tag))))
+
+(defun codegen-inline-arith-dispatch-entry (op left-type right-type)
+  "Return the VM inline arithmetic dispatch entry selected at compile time."
+  (let ((index (codegen-inline-arith-dispatch-index op left-type right-type)))
+    (and index (aref cl-cc/vm:*arith-dispatch-table* index))))
+
+(defun codegen-inline-arith-dispatch-plan (op left-type right-type &key (target :vm))
+  "Return a plist describing the FR-861 codegen plan for OP.
+
+The plan records the flattened dispatch-table INDEX and selected ENTRY.  When a
+specialized entry is present, VM backends can lower to VM-ARITH-DISPATCH; when
+absent, callers should keep the existing generic arithmetic lowering."
+  (let* ((index (codegen-inline-arith-dispatch-index op left-type right-type))
+         (entry (and index (aref cl-cc/vm:*arith-dispatch-table* index)))
+         (result-type (codegen-infer-numeric-contagion-type left-type right-type)))
+    (list :op op
+          :target target
+          :left-type left-type
+          :right-type right-type
+          :result-type result-type
+          :index index
+          :entry entry
+          :instruction (and *codegen-inline-arith-dispatch-enabled*
+                            (eq target :vm)
+                            entry
+                            'cl-cc/vm:vm-arith-dispatch))))
+
+(defun emit-inline-arith-dispatch (ctx op dst lhs-reg rhs-reg)
+  "Emit a VM-ARITH-DISPATCH instruction for OP and return DST.
+This helper is intentionally explicit so existing binop lowering is not changed
+unless a caller opts into FR-861 dispatch lowering."
+  (emit ctx (cl-cc/vm:make-vm-arith-dispatch
+             :dst dst :lhs lhs-reg :rhs rhs-reg :op op))
+  dst)
+
+(export '(codegen-infer-numeric-contagion-type
+          codegen-inline-arith-dispatch-index
+          codegen-inline-arith-dispatch-entry
+          codegen-inline-arith-dispatch-plan
+           emit-inline-arith-dispatch
+           *forward-reference-patch-table*
+           record-forward-reference
+           resolve-forward-references
+           unresolved-forward-reference-error
+           *codegen-inline-arith-dispatch-enabled*))

@@ -74,7 +74,14 @@
                                 :target :vm
                                 :speed 3
                                 :inline-threshold-scale 2)))
-    (assert-true (typep result 'cl-cc/compile:compilation-result))))
+     (assert-true (typep result 'cl-cc/compile:compilation-result))))
+
+(deftest pipeline-verify-transforms-flag-is-dynamically-scoped
+  "FR-752: :verify-transforms enables translation validation only during optimizer execution."
+  (let ((cl-cc/optimize:*translation-validation-enabled* nil))
+    (let ((result (compile-string "(+ 1 2)" :target :vm :verify-transforms t)))
+      (assert-true (typep result 'cl-cc/compile:compilation-result))
+      (assert-false cl-cc/optimize:*translation-validation-enabled*))))
 
 (deftest pipeline-compile-string-emits-pgo-counter-plan
   "compile-string returns a compilation-result carrying deterministic PGO counter plan metadata."
@@ -183,3 +190,84 @@
                     (cl-cc/type::type-scheme-type scheme))))))
 
 ;;; Additional eval/prescan/stdlib integration tests live in pipeline-eval-tests.lisp.
+
+;;; ─── LTO / post-link optimization integration evidence ─────────────────────
+
+(defun %fr501-thin-lto-hot-module ()
+  (cl-cc/pipeline::make-lto-module
+   :name "thin-hot"
+   :source-file "thin-hot.lisp"
+   :instructions
+   (list (cl-cc:make-vm-func-ref :dst :F
+                                 :label "hot-fn"
+                                 :params '(:X)
+                                 :dispatch-tag '(:known-function . hot-fn))
+         (cl-cc:make-vm-label :name "hot-fn")
+         (cl-cc:make-vm-const :dst :R :value 1)
+         (cl-cc:make-vm-ret :reg :R))
+   :metadata '(:test :fr-501)))
+
+(deftest fr-501-thin-lto-summaries-are-generated-and-used-for-imports
+  "FR-501: ThinLTO builds serializable summaries and uses them to select hot imports."
+  (let* ((module (%fr501-thin-lto-hot-module))
+         (summary (cl-cc/pipeline::thin-lto-generate-module-summary module))
+         (payload (cl-cc/pipeline::thin-lto-serialize-summary summary))
+         (summaries (cl-cc/pipeline::thin-lto-read-summaries (list payload))))
+    (assert-string= "thin-hot" (cl-cc/pipeline::thin-lto-module-summary-module-name summary))
+    (assert-true (cl-cc/pipeline::thin-lto-module-summary-functions summary))
+    (assert-equal '("thin-hot" . "hot-fn")
+                  (first (cl-cc/pipeline::thin-lto-select-imports summaries :threshold -1)))
+    (multiple-value-bind (optimized used-summaries)
+        (cl-cc/pipeline::thin-lto-optimize-modules (list module) :threshold -1)
+      (assert-true (first optimized))
+      (assert-true used-summaries)
+      (assert-equal '("hot-fn")
+                    (getf (cl-cc/pipeline::lto-module-metadata (first optimized)) :imports)))))
+
+(defun %fr660-function-layout-program ()
+  (cl-cc:make-vm-program
+   :instructions
+   (list (cl-cc:make-vm-func-ref :dst :H :label "hot-entry" :params nil
+                                 :dispatch-tag '(:known-function . hot-fn))
+         (cl-cc:make-vm-func-ref :dst :C :label "cold-entry" :params nil
+                                 :dispatch-tag '(:known-function . cold-fn))
+         (cl-cc:make-vm-jump :label "hot-end")
+         (cl-cc:make-vm-label :name "hot-entry")
+         (cl-cc:make-vm-const :dst :R :value :hot)
+         (cl-cc:make-vm-ret :reg :R)
+         (cl-cc:make-vm-label :name "hot-end")
+         (cl-cc:make-vm-jump :label "cold-end")
+         (cl-cc:make-vm-label :name "cold-entry")
+         (cl-cc:make-vm-const :dst :R :value :cold)
+         (cl-cc:make-vm-ret :reg :R)
+         (cl-cc:make-vm-label :name "cold-end")
+         (cl-cc:make-vm-halt :reg :R))
+   :result-register :R))
+
+(defun %label-position (instructions label)
+  (position-if (lambda (inst)
+                 (and (typep inst 'cl-cc/vm:vm-label)
+                      (string= (cl-cc/vm:vm-name inst) label)))
+               instructions))
+
+(deftest fr-660-bolt-flag-triggers-post-link-layout-path
+  "FR-660: :bolt option routes a VM program through the BOLT layout optimizer."
+  (let* ((program (%fr660-function-layout-program))
+         (opts '(:bolt t :bolt-profile nil :perf-map nil))
+         (optimized (cl-cc:maybe-pipeline-bolt-optimize-program program opts))
+         (instructions (cl-cc/vm:vm-program-instructions optimized)))
+    (assert-false (eq program optimized))
+    (assert-true (%label-position instructions "hot-entry"))
+    (assert-true (%label-position instructions "cold-entry"))))
+
+(deftest fr-661-autofdo-profile-guided-layout-moves-cold-blocks-after-hot-blocks
+  "FR-661: profile-guided layout decisions reorder cold labelled blocks after hot code."
+  (let* ((instructions (list (cl-cc:make-vm-label :name "cold-fn")
+                             (cl-cc:make-vm-const :dst :R :value :cold)
+                             (cl-cc:make-vm-label :name "hot-fn")
+                             (cl-cc:make-vm-const :dst :R :value :hot)))
+         (profile-data '(:layout-decisions ((:function "cold-fn" :count 1 :layout :cold)
+                                            (:function "hot-fn" :count 99 :layout :hot))))
+         (laid-out (cl-cc:autofdo-apply-layout-decisions instructions profile-data)))
+    (assert-true (< (%label-position laid-out "hot-fn")
+                    (%label-position laid-out "cold-fn")))))

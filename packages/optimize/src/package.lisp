@@ -55,8 +55,9 @@
    #:bb-id #:bb-label #:bb-instructions
    #:bb-predecessors #:bb-successors
    #:bb-idom #:bb-dom-children #:bb-dom-frontier
-   #:bb-post-idom #:bb-post-children
-    #:bb-loop-depth #:bb-rpo-index
+    #:bb-post-idom #:bb-post-children
+     #:bb-vm-osr-entry
+     #:bb-loop-depth #:bb-rpo-index
     #:opt-ddg-node #:make-opt-ddg-node #:opt-ddg-node-p
     #:opt-ddg-node-index #:opt-ddg-node-inst #:opt-ddg-node-latency
     #:opt-ddg-node-predecessors #:opt-ddg-node-successors
@@ -69,7 +70,8 @@
    #:cfg-compute-post-dominators
    #:cfg-compute-dominance-frontiers
    #:cfg-dominates-p #:cfg-post-dominates-p #:cfg-idf
-   #:cfg-flatten
+    #:cfg-flatten
+     #:cfg-mark-osr-loop-headers
     #:cfg-split-critical-edges
     #:cfg-build-ddg #:cfg-ddg-add-edge #:cfg-ddg-edges #:cfg-compute-mii
 
@@ -121,8 +123,9 @@
     #:opt-compute-available-expressions
     #:opt-compute-reaching-definitions
 
-    ;; ─── prolog-peephole.lisp — Prolog peephole rewriting ──────────────
-    #:apply-prolog-peephole
+     ;; ─── prolog-peephole.lisp — Prolog peephole rewriting ──────────────
+     #:apply-prolog-peephole
+     #:opt-pass-superopt #:*opt-superopt-max-length* #:*opt-superopt-input-space*
 
     ;; ─── optimizer-memory-alias.lisp — alias analysis ────────────────────────
     #:opt-compute-heap-aliases
@@ -189,10 +192,91 @@
 
      ;; ─── optimizer-flow-core.lisp ───────────────────────────────────────────
     #:opt-pass-dominated-type-check-elim
-    #:opt-pass-prefetch-insertion
+     #:opt-pass-prefetch-insertion
 
-    ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
+     ;; ─── extended optimizer pass files ──────────────────────────────────
+     #:opt-pass-loop-rotate
+     #:opt-pass-dead-loop-elimination
+     #:opt-pass-loop-unroll
+     #:opt-pass-loop-unswitch
+     #:opt-pass-dead-argument-elimination
+     #:opt-pass-ipcp
+     #:opt-pass-tail-duplication
+     #:opt-pass-iv-strength-reduce
+     #:opt-pass-div-by-const
+     #:opt-pass-loop-peel
+     #:opt-pass-idiom-recognition
+     #:opt-pass-value-range-propagation
+     #:opt-pass-bounds-check-elimination
+      #:opt-pass-overflow-check-elimination
+      #:opt-pass-bitwidth-reduction
+      #:opt-pass-cps-reduce
+      #:opt-pass-defunctionalize
+      #:opt-pass-delimited-continuations
+       #:opt-pass-escape-analysis
+        #:opt-path-profile-block #:make-opt-path-profile-block #:opt-path-profile-block-p
+        #:opt-path-profile-block-block-id #:opt-path-profile-block-label
+        #:opt-path-profile-block-path-id #:opt-path-profile-block-successor-count
+        #:opt-path-profile-block-execution-count
+        #:opt-path-profile-block-path-count
+        #:opt-ball-larus-edge #:make-opt-ball-larus-edge #:opt-ball-larus-edge-p
+        #:opt-ball-larus-edge-from #:opt-ball-larus-edge-to
+        #:opt-ball-larus-edge-value #:opt-ball-larus-edge-backedge-p
+        #:opt-ball-larus-edge-exit-p
+        #:opt-ball-larus-profile #:make-opt-ball-larus-profile #:opt-ball-larus-profile-p
+        #:opt-ball-larus-profile-cfg #:opt-ball-larus-profile-blocks
+        #:opt-ball-larus-profile-edges #:opt-ball-larus-profile-paths
+        #:opt-ball-larus-profile-instrumented-instructions
+        #:opt-block-version-plan #:make-opt-block-version-plan #:opt-block-version-plan-p
+        #:opt-block-version-plan-hot-threshold #:opt-block-version-plan-versions
+        #:opt-compute-path-profile #:opt-build-ball-larus-profile
+        #:opt-instrument-path-profile #:opt-identify-hot-paths
+        #:opt-build-block-version-plan #:opt-duplicate-hot-paths #:opt-pass-path-profiling
+       #:opt-load-widening-candidate-p
+       #:opt-pass-store-coalescing #:opt-pass-load-widening-store-coalescing
+      #:opt-pass-optimization-remarks
+        #:opt-pass-loop-fusion
+        #:opt-pass-loop-fission
+        #:opt-pass-loop-tile
+        #:*autotune-simd-enabled*
+        #:autotune-simd-cache-info
+        #:autotune-simd-tile-sizes
+        #:opt-pass-autotune-simd
+        #:*abstract-interp-enabled*
+       #:*abstract-interp-last-state*
+       #:ai-alpha
+       #:ai-gamma
+       #:ai-compute-fixed-point
+       #:opt-pass-abstract-interpretation
+       #:*translation-validation-enabled*
+       #:tv-symbolic-execute-block
+       #:validate-optimizer-translation
+       #:opt-pass-translation-validation
+       #:*polyhedral-enabled*
+      #:polyhedral-domain #:make-polyhedral-domain #:polyhedral-domain-p
+      #:poly-domain-dimensions #:poly-domain-constraints
+      #:polyhedral-access #:make-polyhedral-access #:polyhedral-access-p
+      #:poly-access-array-reg #:poly-access-write-p
+      #:poly-access-coefficients #:poly-access-offset
+      #:polyhedral-statement #:make-polyhedral-statement #:polyhedral-statement-p
+      #:poly-stmt-loops #:poly-stmt-domain #:poly-stmt-accesses
+       #:poly-stmt-schedule #:poly-stmt-body
+       #:polyhedral-build-domain #:polyhedral-loop-interchange
+       #:polyhedral-tile #:polyhedral-fuse #:opt-pass-polyhedral
+       #:opt-run-compiler-fuzz
+       #:*mlgo-enabled*
+      #:*mlgo-inline-weights*
+      #:opt-mlgo-function-features
+      #:opt-mlgo-inline-benefit
+       #:opt-mlgo-inline-threshold
+       #:opt-ml-inline-score-plan
+       #:opt-pass-mlgo-inline
+       #:opt-pass-ml-regalloc
+
+       ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
        #:optimize-instructions
+       #:compiler-self-profiling-capabilities
+       #:build-analytics-summary
       #:*optimization-report-stream*
        #:*block-compile*
        #:*max-inline-size*
@@ -232,9 +316,14 @@
     #:opt-mega-cache-get
     #:opt-ic-resolve-target
     #:make-opt-ic-patch-plan
-    #:opt-ic-make-patch-plan
-    #:opt-build-inline-polymorphic-dispatch
-    #:make-opt-speculation-log
+     #:opt-ic-make-patch-plan
+     #:opt-build-inline-polymorphic-dispatch
+     #:*opt-speculative-inline-dominance-threshold*
+     #:opt-ic-dominant-type
+     #:opt-speculative-inline-eligible-p
+     #:opt-annotate-speculative-inline
+     #:opt-pass-speculative-inline
+     #:make-opt-speculation-log
     #:*opt-speculation-log*
     #:opt-record-speculation-failure
     #:opt-speculation-failed-p

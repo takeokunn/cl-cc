@@ -75,8 +75,11 @@
      (:file "symbols-tests")
      (:file "strings-tests")
      (:file "format-tests")
-     (:file "io-tests")
-     (:file "io-runners-tests")))
+      (:file "io-tests")
+      (:file "io-runners-tests")
+      (:file "string-builder-tests")
+      (:file "runtime-stdlib-2-vm-tests")
+      (:file "vm-mop-tests")))
     (:module "ast-tests"
      :pathname "packages/ast/tests"
      :serial t
@@ -214,7 +217,9 @@
      (:file "macros-mutation-tests")
      (:file "macros-sequence-fold-tests")
      (:file "macros-stdlib-list-set-tests")
-     (:file "fr-555-copy-structure-tests")))
+      (:file "fr-555-copy-structure-tests")
+      (:file "syntax-rules-tests")
+      (:file "runtime-stdlib-2-expand-tests")))
    (:module "type-tests"
     :pathname "packages/type/tests"
     :serial t
@@ -403,8 +408,9 @@
      (:file "optimizer-lowlevel-tests")
      (:file "optimizer-lowlevel-dce-tests")
      (:file "optimizer-dataflow-passes-tests")
-     (:file "optimizer-store-analysis-tests")
-     (:file "optimizer-strength-inline-tests")))
+      (:file "optimizer-store-analysis-tests")
+      (:file "native-advanced-optimizer-tests")
+      (:file "optimizer-strength-inline-tests")))
    (:module "emit-tests"
     :pathname "packages/emit/tests"
     :serial t
@@ -428,14 +434,20 @@
      (:file "x86-64-sequences-tests")
      (:file "x86-64-codegen-tests")
      (:file "x86-64-codegen-emitter-tests")
-     (:file "x86-64-codegen-insn-tests")
-     (:file "x86-64-encoding-tests")
-     (:file "x86-64-vm-emitter-tests")
-     (:file "x86-64-encoding-size-tests")
-     (:file "x86-64-emit-tests")
-     (:file "x86-64-emit-logical-tests")
-     (:file "x86-64-emit-ops-tests")
-      (:file "ebpf-tests")
+      (:file "x86-64-codegen-insn-tests")
+      (:file "x86-64-encoding-tests")
+      (:file "x86-64-vm-emitter-tests")
+      (:file "x86-64-encoding-size-tests")
+       (:file "x86-64-emit-tests")
+       (:file "x86-64-emit-logical-tests")
+       (:file "x86-64-emit-ops-tests")
+         (:file "llvm-ir-tests")
+         (:file "mlir-tests")
+         (:file "native-advanced-bridge-tests")
+       (:file "security-hardening-tests")
+        (:file "ppc64-codegen-tests")
+       (:file "ebpf-tests")
+       (:file "riscv64-tests")
       (:file "elf-tests")
       (:file "elf-extended-tests")
       (:file "macho-tests")
@@ -444,8 +456,9 @@
       :pathname "packages/binary/tests"
       :serial t
       :components
-      ((:file "binary-buffer-tests")
-       (:file "binary-fr-tests")))
+       ((:file "binary-buffer-tests")
+        (:file "macho-fat-tests")
+        (:file "binary-fr-tests")))
     (:module "runtime-tests"
      :pathname "packages/runtime/tests"
      :serial t
@@ -465,8 +478,10 @@
      (:file "heap-gc-tests")
      (:file "heap-trace-tests")
       (:file "gc-write-barrier-tests")
-      (:file "runtime-subsystem-fr-tests")
-      (:file "value-tests")
+       (:file "runtime-subsystem-fr-tests")
+       (:file "runtime-stdlib-2-runtime-tests")
+       (:file "continuous-profile-tests")
+       (:file "value-tests")
       (:file "frame-tests")))
    (:module "bytecode-tests"
     :pathname "packages/bytecode/tests"
@@ -475,10 +490,14 @@
     ((:file "encode-tests")
      (:file "encode-ops-objects-tests")
      (:file "decode-tests")))
-   (:module "migration-safety"
-    :pathname "packages/umbrella-tests"
-    :components
-    ((:file "migration-safety-tests"))))
+    (:module "migration-safety"
+     :pathname "packages/umbrella-tests"
+     :components
+     ((:file "migration-safety-tests")))
+    (:module "coverage-tests"
+     :pathname "tests"
+     :components
+     ((:file "runtime-stdlib-2-coverage-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))

@@ -239,3 +239,174 @@
   "vm-complex-add-with-unboxing falls back to boxed addition when local unboxing is not allowed."
   (assert-equal #C(4 6)
                 (cl-cc/vm::vm-complex-add-with-unboxing #C(1 2) #C(3 4) :local-p nil)))
+
+;;; ═══════════════════════════════════════════════════════════════════════════
+;;; FR-842: Kahan Summation
+;;; ═══════════════════════════════════════════════════════════════════════════
+
+(deftest kahan-accumulator-basics
+  "kahan-accumulator: empty accumulator returns 0.0; predicate works."
+  (let ((acc (cl-cc/vm::make-kahan-accumulator)))
+    (assert-true (cl-cc/vm::kahan-accumulator-p acc))
+    (assert-= 0.0d0 (cl-cc/vm::kahan-result acc))))
+
+(deftest kahan-accumulator-seeded
+  "kahan-accumulator: seeded with an initial value returns that value."
+  (let ((acc (cl-cc/vm::make-kahan-accumulator 3.5d0)))
+    (assert-= 3.5d0 (cl-cc/vm::kahan-result acc))))
+
+(deftest kahan-sum-empty
+  "kahan-sum: empty sequence returns 0.0."
+  (assert-= 0.0d0 (cl-cc/vm::kahan-sum '())))
+
+(deftest kahan-sum-single
+  "kahan-sum: single element returns that element."
+  (assert-= 3.14d0 (cl-cc/vm::kahan-sum '(3.14d0))))
+
+(deftest kahan-sum-basic
+  "kahan-sum: basic summation of multiple values."
+  (assert-= 6.0d0 (cl-cc/vm::kahan-sum '(1.0d0 2.0d0 3.0d0))))
+
+(deftest kahan-sum-vector
+  "kahan-sum: accepts vectors as well as lists."
+  (assert-= 6.0d0 (cl-cc/vm::kahan-sum #(1.0d0 2.0d0 3.0d0))))
+
+(deftest kahan-sum-integers
+  "kahan-sum: accepts integer sequences, returning a double-float."
+  (assert-= 6.0d0 (cl-cc/vm::kahan-sum '(1 2 3))))
+
+(deftest kahan-sum-precision-advantage
+  "kahan-sum preserves small terms lost by naive addition through
+catastrophic cancellation."
+  (let* ((large 1.0d0)
+         (small 1.0d-12)
+         (c -1.0d0)
+         (naive (+ (+ large small) c))
+         (kahan (cl-cc/vm::kahan-sum (list large small c))))
+    (assert-true (>= (abs kahan) (abs naive)))))
+
+(deftest kahan-add-accumulates
+  "kahan-add!: accumulator API correctly accumulates multiple values."
+  (let ((acc (cl-cc/vm::make-kahan-accumulator 10.0d0)))
+    (cl-cc/vm::kahan-add! acc 20.0d0)
+    (cl-cc/vm::kahan-add! acc 30.0d0)
+    (assert-= 60.0d0 (cl-cc/vm::kahan-result acc))))
+
+(deftest pairwise-sum-empty
+  "pairwise-sum: empty sequence returns 0.0."
+  (assert-= 0.0d0 (cl-cc/vm::pairwise-sum '())))
+
+(deftest pairwise-sum-basic
+  "pairwise-sum: basic summation."
+  (assert-= 10.0d0 (cl-cc/vm::pairwise-sum '(1.0d0 2.0d0 3.0d0 4.0d0))))
+
+(deftest pairwise-sum-vector
+  "pairwise-sum: works with vectors."
+  (assert-= 10.0d0 (cl-cc/vm::pairwise-sum #(1.0d0 2.0d0 3.0d0 4.0d0))))
+
+(deftest pairwise-sum-integers
+  "pairwise-sum: accepts integers, returning double-float."
+  (assert-= 10.0d0 (cl-cc/vm::pairwise-sum '(1 2 3 4))))
+
+(deftest pairwise-sum-single
+  "pairwise-sum: single element returns that element."
+  (assert-= 3.14d0 (cl-cc/vm::pairwise-sum '(3.14d0))))
+
+(deftest pairwise-sum-matches-kahan
+  "pairwise-sum and kahan-sum agree for well-conditioned data."
+  (let* ((rng (make-random-state t))
+         (data (loop repeat 200 collect (random 1.0d0 rng)))
+         (kahan (cl-cc/vm::kahan-sum data))
+         (pair (cl-cc/vm::pairwise-sum data)))
+    (assert-true (< (abs (- kahan pair)) 1.0d-10))))
+
+;;; ═══════════════════════════════════════════════════════════════════════════
+;;; FR-843: Float Exception Control
+;;; ═══════════════════════════════════════════════════════════════════════════
+
+#+sbcl
+(deftest get-float-traps-returns-list
+  "get-float-traps returns a list (possibly empty) of keyword symbols."
+  (let ((traps (cl-cc/vm::get-float-traps)))
+    (assert-true (listp traps))
+    (dolist (trap traps)
+      (assert-true (keywordp trap)))))
+
+#+sbcl
+(deftest with-float-traps-masked-suppresses-divide-by-zero
+  "with-float-traps-masked suppresses :divide-by-zero trap within the mask body."
+  (let ((result :unset))
+    (cl-cc/vm::with-float-traps-masked (:divide-by-zero)
+      (setf result (/ 1.0d0 0.0d0)))
+    (assert-true (sb-ext:float-infinity-p result))))
+
+#+sbcl
+(deftest with-float-traps-masked-multiple
+  "with-float-traps-masked masks multiple trap types simultaneously."
+  (let ((result :unset))
+    (cl-cc/vm::with-float-traps-masked (:divide-by-zero :overflow :underflow :inexact)
+      (setf result (/ 1.0d0 0.0d0)))
+    (assert-true (sb-ext:float-infinity-p result))))
+
+(deftest floating-point-modes-variable
+  "*floating-point-modes* is bound to a plist with :rounding-mode."
+  (assert-true (listp cl-cc/vm::*floating-point-modes*))
+  (assert-true (getf cl-cc/vm::*floating-point-modes* :rounding-mode)))
+
+;;; ═══════════════════════════════════════════════════════════════════════════
+;;; FR-844 / FR-860 / FR-861 / FR-829: Numeric runtime extensions
+;;; ═══════════════════════════════════════════════════════════════════════════
+
+(deftest double-double-add-preserves-low-word
+  "dd+ preserves a small addend that host double addition loses."
+  (let ((sum (cl-cc/vm:dd+ (cl-cc/vm:make-double-double 10000000000000000.0d0)
+                           1.0d0)))
+    (assert-true (cl-cc/vm:double-double-p sum))
+    (assert-equal "10000000000000001" (cl-cc/vm:dd-to-string sum 0))))
+
+(deftest double-double-multiply-normalizes-result
+  "dd* returns a normalized double-double product."
+  (let ((product (cl-cc/vm:dd* (cl-cc/vm:make-double-double 1.5d0) 2.0d0)))
+    (assert-true (cl-cc/vm:double-double-p product))
+    (assert-equal "3.000" (cl-cc/vm:dd-to-string product 3))))
+
+(deftest with-precision-binds-dynamic-precision
+  "with-precision dynamically binds the VM numeric precision knob."
+  (let ((outer cl-cc/vm:*numeric-precision*))
+    (assert-= 113 (cl-cc/vm:with-precision 113 cl-cc/vm:*numeric-precision*))
+    (assert-= outer cl-cc/vm:*numeric-precision*)))
+
+(deftest numeric-contagion-table-follows-ansi-hierarchy
+  "FR-860 contagion follows integer < rational < single < double < complex."
+  (assert-eq 'rational (cl-cc/vm:infer-numeric-result-type 'integer 'rational))
+  (assert-eq 'double-float (cl-cc/vm:infer-numeric-result-type 'single-float 'double-float))
+  (assert-eq 'complex (cl-cc/vm:infer-numeric-result-type 'double-float 'complex)))
+
+(deftest inline-arithmetic-dispatch-selects-specialized-entry
+  "FR-861 dispatch maps tag extraction to a specialized table entry."
+  (let ((entry (cl-cc/vm:arithmetic-dispatch-entry '+ 1 2.0d0)))
+    (assert-true entry)
+    (assert-equal '(fixnum float) (car entry))
+    (assert-= 3.0d0 (cl-cc/vm:inline-arithmetic-dispatch '+ 1 2.0d0))))
+
+(deftest vm-arith-dispatch-instruction-executes-through-table
+  "vm-arith-dispatch executes arithmetic through *arith-dispatch-table*."
+  (let ((s (make-test-vm)))
+    (cl-cc:vm-reg-set s 1 6)
+    (cl-cc:vm-reg-set s 2 7)
+    (exec1 (cl-cc/vm:make-vm-arith-dispatch :dst 0 :lhs 1 :rhs 2 :op '*) s)
+    (assert-= 42 (cl-cc:vm-reg-get s 0))))
+
+(deftest fixnum-overflow-detection-promotes-past-host-fixnum
+  "FR-829 helpers detect fixnum overflow and return the promoted integer result."
+  (let ((result (cl-cc/vm:vm-fixnum-add-with-overflow-detection
+                 most-positive-fixnum 1)))
+    (assert-true (integerp result))
+    (assert-true (typep result 'bignum))
+    (assert-= (+ most-positive-fixnum 1) result)))
+
+(deftest fixnum-overflow-detection-can-skip-explicit-check
+  "SAFETY 0 keeps the arithmetic result while skipping the explicit check path."
+  (assert-= (+ most-positive-fixnum 1)
+            (cl-cc/vm:vm-fixnum-add-with-overflow-detection
+             most-positive-fixnum 1 :safety 0)))

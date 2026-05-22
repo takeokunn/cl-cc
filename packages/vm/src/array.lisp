@@ -2,7 +2,8 @@
 
 (defstruct (vm-cow-vector (:constructor %make-vm-cow-vector))
   (backing #() :type vector)
-  (refcount 1 :type integer))
+  (refcount 1 :type integer)
+  (adjustable-p nil :type boolean))
 
 (defparameter *vm-cow-vector-enabled* t)
 
@@ -149,8 +150,11 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
       (progn
         (incf (vm-cow-vector-refcount value))
         (%make-vm-cow-vector :backing (vm-cow-vector-backing value)
-                             :refcount (vm-cow-vector-refcount value))))
-    (t (%make-vm-cow-vector :backing value :refcount 2))))
+                             :refcount (vm-cow-vector-refcount value)
+                             :adjustable-p (vm-cow-vector-adjustable-p value))))
+    (t (%make-vm-cow-vector :backing value
+                            :refcount 2
+                            :adjustable-p (adjustable-array-p value)))))
 
 (defun %vm-cow-vector-ensure-writable (value)
   (if (vm-cow-vector-p value)
@@ -224,6 +228,16 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
         (otherwise (vm-specialized-array-element-type array)))
       (array-element-type (%vm-array-object array))))
 
+(defun vm-adjustable-array-p-value (array)
+  "VM-aware ADJUSTABLE-ARRAY-P that treats COW wrappers as adjustable when their backing was adjustable."
+  (if (vm-cow-vector-p array)
+      (vm-cow-vector-adjustable-p array)
+      (adjustable-array-p (%vm-array-object array))))
+
+(defun vm-array-has-fill-pointer-p-value (array)
+  "VM-aware ARRAY-HAS-FILL-POINTER-P for COW arrays."
+  (array-has-fill-pointer-p (%vm-array-object array)))
+
 (defun vm-array-in-bounds-p-value (array subscripts)
   "Return true when SUBSCRIPTS are within ARRAY bounds."
   (let ((dimensions (vm-array-dimensions-value array))
@@ -258,10 +272,12 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (element-type-reg nil :reader vm-element-type-reg)
   (displaced-to-reg nil :reader vm-displaced-to-reg)
   (displaced-index-offset-reg nil :reader vm-displaced-index-offset-reg)
+  (copy-on-write nil :reader vm-copy-on-write)
+  (copy-on-write-reg nil :reader vm-copy-on-write-reg)
   (:sexp-tag :make-array)
   (:sexp-slots dst size-reg initial-element fill-pointer adjustable element-type
                 fill-pointer-reg adjustable-reg element-type-reg displaced-to-reg
-                dimensions-reg displaced-index-offset-reg))
+                dimensions-reg displaced-index-offset-reg copy-on-write copy-on-write-reg))
 
 (define-vm-instruction vm-aref (vm-instruction)
   "Get element at INDEX from ARRAY, store in DST."
@@ -354,9 +370,12 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
                         (vm-element-type inst)))
           (displaced-to (and (vm-displaced-to-reg inst)
                               (vm-reg-get state (vm-displaced-to-reg inst))))
-          (displaced-index-offset (if (vm-displaced-index-offset-reg inst)
-                                      (vm-reg-get state (vm-displaced-index-offset-reg inst))
-                                      0))
+           (displaced-index-offset (if (vm-displaced-index-offset-reg inst)
+                                       (vm-reg-get state (vm-displaced-index-offset-reg inst))
+                                       0))
+           (copy-on-write (if (vm-copy-on-write-reg inst)
+                              (vm-reg-get state (vm-copy-on-write-reg inst))
+                              (vm-copy-on-write inst)))
           (default-init (case elt-type
                           (character #\Nul)
                           (single-float 0.0f0)
@@ -411,13 +430,15 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
                     (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem))
                    (t
                     (make-array dimensions-designator :element-type (or elt-type t) :initial-element init-elem)))))
-    (vm-reg-set state (vm-dst inst) arr)
+    (vm-reg-set state (vm-dst inst) (if copy-on-write (%vm-cow-vector-share arr) arr))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-aref) state pc labels)
   (declare (ignore labels))
   (let ((arr (%vm-cow-vector-materialize (vm-reg-get state (vm-array-reg inst))))
         (idx (vm-reg-get state (vm-index-reg inst))))
+    (unless (vm-specialized-array-p arr)
+      (vm-check-index arr idx 'aref))
     (vm-reg-set state (vm-dst inst)
                 (if (vm-specialized-array-p arr)
                     (vm-specialized-array-ref arr idx)
@@ -428,6 +449,9 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (declare (ignore labels))
   (let ((arr (%vm-cow-vector-materialize (vm-reg-get state (vm-array-reg inst))))
         (idxs (mapcar (lambda (r) (vm-reg-get state r)) (vm-index-regs inst))))
+    (when (vm-safety-checks-enabled-p)
+      (unless (apply #'array-in-bounds-p arr idxs)
+        (error 'type-error :datum idxs :expected-type 'valid-array-subscripts)))
     (vm-reg-set state (vm-dst inst) (apply #'aref arr idxs))
     (values (1+ pc) nil nil)))
 
@@ -436,6 +460,8 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (let ((arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst))))
         (idx (vm-reg-get state (vm-index-reg inst)))
         (val (vm-reg-get state (vm-val-reg inst))))
+    (unless (vm-specialized-array-p arr)
+      (vm-check-index arr idx 'aset))
     (if (vm-specialized-array-p arr)
         (setf (vm-specialized-array-ref arr idx) val)
         (setf (aref arr idx) val))
@@ -583,7 +609,9 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
     (vm-reg-set state (vm-dst inst)
                 (if (vm-specialized-array-p array)
                     (vm-specialized-array-ref array index)
-                    (row-major-aref (%vm-array-object array) index))))
+                    (let ((host (%vm-array-object array)))
+                      (vm-check-row-major-index host index)
+                      (row-major-aref host index)))))
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-array-row-major-index (vm-instruction)
@@ -594,7 +622,7 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (declare (ignore labels))
   (let ((arr (vm-reg-get state (vm-arr inst)))
         (subs (vm-reg-get state (vm-subs inst))))
-    (vm-reg-set state (vm-dst inst) (apply #'array-row-major-index arr subs))
+    (vm-reg-set state (vm-dst inst) (apply #'array-row-major-index (%vm-array-object arr) subs))
     (values (1+ pc) nil nil)))
 
 ;;; ─── FR-603: svref — simple-vector element access ────────────────────────
@@ -605,9 +633,10 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (:sexp-tag :svref) (:sexp-slots dst lhs rhs))
 (defmethod execute-instruction ((inst vm-svref) state pc labels)
   (declare (ignore labels))
-  (vm-reg-set state (vm-dst inst)
-              (svref (%vm-cow-vector-materialize (vm-reg-get state (vm-lhs inst)))
-                     (vm-reg-get state (vm-rhs inst))))
+  (let ((vector (%vm-cow-vector-materialize (vm-reg-get state (vm-lhs inst))))
+        (index (vm-reg-get state (vm-rhs inst))))
+    (vm-check-index vector index 'svref)
+    (vm-reg-set state (vm-dst inst) (svref vector index)))
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-svset (vm-instruction)
@@ -620,6 +649,7 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (let* ((arr (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-array-reg inst))))
          (idx (vm-reg-get state (vm-index-reg inst)))
          (val (vm-reg-get state (vm-val-reg inst))))
+    (vm-check-index arr idx 'svset)
     (setf (svref arr idx) val)
     (vm-reg-set state (vm-dst inst) val)
     (values (1+ pc) nil nil)))
@@ -642,25 +672,25 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   "Return fill pointer of vector."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :fill-pointer-inst) (:sexp-slots dst src))
-(define-simple-instruction vm-fill-pointer-inst :unary fill-pointer)
+(define-simple-instruction vm-fill-pointer-inst :unary (lambda (array) (fill-pointer (%vm-array-object array))))
 
 (define-vm-instruction vm-array-has-fill-pointer-p (vm-instruction)
   "Return T if array has a fill pointer."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-has-fill-pointer-p) (:sexp-slots dst src))
-(define-simple-instruction vm-array-has-fill-pointer-p :pred1 array-has-fill-pointer-p)
+(define-simple-instruction vm-array-has-fill-pointer-p :pred1 vm-array-has-fill-pointer-p-value)
 
 (define-vm-instruction vm-array-adjustable-p (vm-instruction)
   "Return T if array is adjustable."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :array-adjustable-p) (:sexp-slots dst src))
-(define-simple-instruction vm-array-adjustable-p :pred1 adjustable-array-p)
+(define-simple-instruction vm-array-adjustable-p :pred1 vm-adjustable-array-p-value)
 
 (define-vm-instruction vm-adjustable-array-p (vm-instruction)
   "Return T if array is adjustable. ANSI spelling alias."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :adjustable-array-p) (:sexp-slots dst src))
-(define-simple-instruction vm-adjustable-array-p :pred1 adjustable-array-p)
+(define-simple-instruction vm-adjustable-array-p :pred1 vm-adjustable-array-p-value)
 
 (define-vm-instruction vm-vector-push (vm-instruction)
   "Push VAL onto ARRAY if below fill-pointer limit. Returns new index or NIL."
@@ -671,14 +701,14 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-val-reg inst)))
         (arr (vm-reg-get state (vm-array-reg inst))))
-    (vm-reg-set state (vm-dst inst) (vector-push val arr))
+    (vm-reg-set state (vm-dst inst) (vector-push val (%vm-cow-vector-ensure-writable arr)))
     (values (1+ pc) nil nil)))
 
 (define-vm-instruction vm-vector-pop (vm-instruction)
   "Pop last element from ARRAY (decrement fill pointer). Returns element."
   (dst nil :reader vm-dst) (src nil :reader vm-src)
   (:sexp-tag :vector-pop) (:sexp-slots dst src))
-(define-simple-instruction vm-vector-pop :unary vector-pop)
+(define-simple-instruction vm-vector-pop :unary (lambda (array) (vector-pop (%vm-cow-vector-ensure-writable array))))
 
 (define-vm-instruction vm-set-fill-pointer (vm-instruction)
   "Set fill pointer of ARRAY to NEW-FP. Returns NEW-FP."
@@ -689,7 +719,7 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (declare (ignore labels))
   (let* ((arr (vm-reg-get state (vm-array-reg inst)))
          (fp (vm-reg-get state (vm-val-reg inst))))
-    (setf (fill-pointer arr) fp)
+    (setf (fill-pointer (%vm-cow-vector-ensure-writable arr)) fp)
     (vm-reg-set state (vm-dst inst) fp)
     (values (1+ pc) nil nil)))
 

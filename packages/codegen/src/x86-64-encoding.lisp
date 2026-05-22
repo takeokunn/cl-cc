@@ -8,6 +8,24 @@
 
 (in-package :cl-cc/codegen)
 
+(defparameter *x86-64-stack-clash-protection-enabled* nil
+  "When true, emit destructive x86-64 stack-clash probe steps during frame setup.")
+
+(defparameter *x86-64-safe-stack-enabled* nil
+  "When true, emit experimental x86-64 SafeStack TLS shadow-stack-pointer sequences.")
+
+(defparameter *x86-64-avx512-enabled* nil
+  "When true, AVX-512 EVEX emitters may be selected by higher-level lowering.")
+
+(defparameter *x86-64-apx-enabled* nil
+  "When true, experimental APX NDD/NF encoders may be selected.")
+
+(defparameter *x86-64-atomics-enabled* nil
+  "When true, VM atomic operations are lowered to x86-64 locked instructions.")
+
+(defparameter *amx-enabled* nil
+  "When true, experimental Intel AMX tile encoders may be selected.")
+
 ;;; x86-64 Register Encoding
 
 ;; Register codes (4-bit values)
@@ -29,6 +47,13 @@
 (defconstant +r13+ 13)
 (defconstant +r14+ 14)
 (defconstant +r15+ 15)
+
+;; APX extended GPR register numbers.  Legacy REX encoders cannot address these;
+;; APX helpers below keep them gated behind *X86-64-APX-ENABLED*.
+(defconstant +r16+ 16) (defconstant +r17+ 17) (defconstant +r18+ 18) (defconstant +r19+ 19)
+(defconstant +r20+ 20) (defconstant +r21+ 21) (defconstant +r22+ 22) (defconstant +r23+ 23)
+(defconstant +r24+ 24) (defconstant +r25+ 25) (defconstant +r26+ 26) (defconstant +r27+ 27)
+(defconstant +r28+ 28) (defconstant +r29+ 29) (defconstant +r30+ 30) (defconstant +r31+ 31)
 
 ;; XMM register encodings use the same 4-bit register ids.
 (defconstant +xmm0+ 0)
@@ -65,6 +90,24 @@
 (defconstant +ymm13+ 13)
 (defconstant +ymm14+ 14)
 (defconstant +ymm15+ 15)
+
+;; AVX-512 architectural register ids.
+(defconstant +zmm0+ 0) (defconstant +zmm1+ 1) (defconstant +zmm2+ 2) (defconstant +zmm3+ 3)
+(defconstant +zmm4+ 4) (defconstant +zmm5+ 5) (defconstant +zmm6+ 6) (defconstant +zmm7+ 7)
+(defconstant +zmm8+ 8) (defconstant +zmm9+ 9) (defconstant +zmm10+ 10) (defconstant +zmm11+ 11)
+(defconstant +zmm12+ 12) (defconstant +zmm13+ 13) (defconstant +zmm14+ 14) (defconstant +zmm15+ 15)
+(defconstant +zmm16+ 16) (defconstant +zmm17+ 17) (defconstant +zmm18+ 18) (defconstant +zmm19+ 19)
+(defconstant +zmm20+ 20) (defconstant +zmm21+ 21) (defconstant +zmm22+ 22) (defconstant +zmm23+ 23)
+(defconstant +zmm24+ 24) (defconstant +zmm25+ 25) (defconstant +zmm26+ 26) (defconstant +zmm27+ 27)
+(defconstant +zmm28+ 28) (defconstant +zmm29+ 29) (defconstant +zmm30+ 30) (defconstant +zmm31+ 31)
+
+(defconstant +k0+ 0) (defconstant +k1+ 1) (defconstant +k2+ 2) (defconstant +k3+ 3)
+(defconstant +k4+ 4) (defconstant +k5+ 5) (defconstant +k6+ 6) (defconstant +k7+ 7)
+
+;; Intel AMX tile register ids (TMM0-TMM7).  These are inert unless
+;; *AMX-ENABLED* or host feature detection enables AMX lowering.
+(defconstant +tmm0+ 0) (defconstant +tmm1+ 1) (defconstant +tmm2+ 2) (defconstant +tmm3+ 3)
+(defconstant +tmm4+ 4) (defconstant +tmm5+ 5) (defconstant +tmm6+ 6) (defconstant +tmm7+ 7)
 
 ;; Calling convention (System V AMD64 ABI)
 ;; Arguments: RDI, RSI, RDX, RCX, R8, R9
@@ -257,7 +300,89 @@ form is used for VEX.0F.W0 encodings that do not need X/B extensions."
                              (ash vvvv* 3)
                              (ash (logand l 1) 2)
                              (logand pp #x3))
-                     stream)))))
+                      stream)))))
+
+;;; EVEX prefix (AVX-512)
+
+(defconstant +evex-map-0f+ #b00001)
+(defconstant +evex-map-0f38+ #b00010)
+(defconstant +evex-map-0f3a+ #b00011)
+
+(defun emit-evex-prefix (stream &key (map +evex-map-0f+) (w 0) (vvvv #xF)
+                                (pp +vex-pp-none+) (r 0) (x 0) (b 0) (r2 0)
+                                (aaa 0) (z 0) (ll 2) (bb 0) (v2 1))
+  "Emit an EVEX prefix.  R/X/B/R2 are non-inverted extension bits."
+  (emit-byte #x62 stream)
+  (emit-byte (logior (ash (logxor (logand r 1) 1) 7)
+                     (ash (logxor (logand x 1) 1) 6)
+                     (ash (logxor (logand b 1) 1) 5)
+                     (ash (logxor (logand r2 1) 1) 4)
+                     (logand map #x3))
+             stream)
+  (emit-byte (logior (ash (logand w 1) 7)
+                     (ash (logand (logxor vvvv #xF) #xF) 3)
+                     4
+                     (logand pp #x3))
+             stream)
+  (emit-byte (logior (ash (logand z 1) 7)
+                     (ash (logand ll #x3) 5)
+                     (ash (logand bb 1) 4)
+                     (ash (logand v2 1) 3)
+                      (logand aaa #x7))
+              stream))
+
+;;; Intel AMX representative encoders (FR-571)
+
+(defun %x86-64-amx-check-tmm (reg context)
+  "Validate an AMX tile register id for CONTEXT."
+  (unless (and (integerp reg) (<= 0 reg 7))
+    (error "~A requires TMM0-TMM7, got ~S" context reg))
+  reg)
+
+(defun emit-tileloadd (dst-tmm base offset stream &key (index +rax+) (scale 1))
+  "Emit TILELOADD DST-TMM,[BASE+INDEX*SCALE+OFFSET] representative encoding.
+
+The encoder is present for feature plumbing but is selected only when AMX is
+enabled by higher-level code."
+  (%x86-64-amx-check-tmm dst-tmm "TILELOADD")
+  (emit-vex-prefix stream :map +vex-map-0f38+ :pp +vex-pp-f2+
+                   :vvvv index :b (if (>= base 8) 1 0)
+                   :x (if (>= index 8) 1 0))
+  (emit-byte #x4B stream)
+  (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
+                               dst-tmm base index scale offset stream))
+
+(defun emit-tilestored (src-tmm base offset stream &key (index +rax+) (scale 1))
+  "Emit TILESTORED [BASE+INDEX*SCALE+OFFSET],SRC-TMM representative encoding."
+  (%x86-64-amx-check-tmm src-tmm "TILESTORED")
+  (emit-vex-prefix stream :map +vex-map-0f38+ :pp +vex-pp-66+
+                   :vvvv index :b (if (>= base 8) 1 0)
+                   :x (if (>= index 8) 1 0))
+  (emit-byte #x4B stream)
+  (%emit-modrm-indexed-address (x86-64-memory-mod base offset)
+                               src-tmm base index scale offset stream))
+
+(defun emit-tdpbssd (dst-tmm lhs-tmm rhs-tmm stream)
+  "Emit TDPBSSD DST-TMM,LHS-TMM,RHS-TMM representative register encoding."
+  (%x86-64-amx-check-tmm dst-tmm "TDPBSSD destination")
+  (%x86-64-amx-check-tmm lhs-tmm "TDPBSSD left source")
+  (%x86-64-amx-check-tmm rhs-tmm "TDPBSSD right source")
+  (emit-vex-prefix stream :map +vex-map-0f38+ :pp +vex-pp-f2+ :vvvv lhs-tmm)
+  (emit-byte #x5E stream)
+  (emit-byte (modrm 3 dst-tmm rhs-tmm) stream))
+
+(defun x86-64-supports-avx512-p ()
+  "Return T when AVX-512 support is enabled by flag or visible in host feature text."
+  (or *x86-64-avx512-enabled*
+      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_AVX512")))
+      (x86-64-host-supports-cpu-feature-p "avx512f")))
+
+(defun x86-64-supports-amx-p ()
+  "Return T when Intel AMX support is enabled or detected via host CPUID text."
+  (or *amx-enabled*
+      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_AMX")))
+      (x86-64-host-supports-cpu-feature-p "amx_tile")
+      (x86-64-host-supports-cpu-feature-p "amx-tile")))
 
 ;;; Instruction emitters (emit-mov-*, emit-add-*, emit-cmp-*, etc.) are in
 ;;; x86-64-encoding-instrs.lisp (loaded immediately after this file).

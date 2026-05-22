@@ -19,7 +19,7 @@
 ## Native Backend
 
 - [native-codegen.md](native-codegen.md) — Code Generation: regalloc, instruction scheduling, SIMD, MIR, WASM binary, lazy compilation, FFI marshaling (83 FR) — ✅ COMPLETE (82 / 83 FR; ⬜ FR-227 SLP Vectorizer only)
-- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR)
+- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 91+ / 🔶 56 (~62% complete, ~100% addressed)
 
 ## Runtime
 
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: 1843/1850 tracked FRs complete (99.6%) | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs verified ✅ | runtime-core 52/52 FRs ✅ | runtime-subsystem 170/170 FRs ✅ | Self-hosting verified by `selfhost-suite` | Test: 7744 pass / 2 pre-existing failures | Last updated: 2026-05-21**
+**Status: ~1944/1997 tracked FRs complete (~97.3%) | native-advanced ~91+ complete, 100% addressed | Test: target coverage matrix generated | CLI timeout default: 30s | Last updated: 2026-05-22**

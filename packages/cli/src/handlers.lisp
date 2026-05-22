@@ -13,7 +13,14 @@
 ;; `compile-opts` is defined in main-dump.lisp, which loads after this file.
 ;; Prevent premature inlining warnings for its accessors during compile-file.
 (declaim (notinline compile-opts-flamegraph-path
-                     compile-opts-profile
+                      compile-opts-profile
+                      compile-opts-debug-info
+                      compile-opts-sanitize
+                      compile-opts-lto
+                      compile-opts-eh-model
+                      compile-opts-incremental
+                      compile-opts-perf-map
+                      compile-opts-parallel
                       compile-opts-pgo-generate-path
                       compile-opts-pgo-use-path
                       compile-opts-block-compile
@@ -23,8 +30,10 @@
                      compile-opts-trace-emit
                      compile-opts-retpoline
                      compile-opts-stack-protector
-                     compile-opts-shadow-stack
-                     compile-opts-asan
+                      compile-opts-shadow-stack
+                      compile-opts-deterministic
+                      compile-opts-build-id
+                      compile-opts-asan
                      compile-opts-msan
                      compile-opts-tsan
                      compile-opts-ubsan
@@ -226,8 +235,10 @@ around the execution. Returns the value produced by RUN-COMPILED."
         (when (compile-opts-profile opts)
           (print-profile vm-state))
         (when (compile-opts-flamegraph-path opts)
-         (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                 (cl-cc/vm:vm-get-profile-samples vm-state)))))))
+          (let ((samples (cl-cc/vm:vm-get-profile-samples vm-state)))
+            (if (plusp (hash-table-count samples))
+                (%write-flamegraph-svg (compile-opts-flamegraph-path opts) samples)
+                (%write-flamegraph-from-perf-data (compile-opts-flamegraph-path opts)))))))))
 
 (defun %compile-lisp-with-auto-stdlib (source kwargs stdlib no-stdlib)
   "Compile Lisp SOURCE, lazily falling back to stdlib on first unresolved use.
@@ -240,8 +251,169 @@ around the execution. Returns the value produced by RUN-COMPILED."
     (t
      (handler-case
          (apply #'compile-string source :target :vm kwargs)
-       (error ()
-         (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
+        (error ()
+          (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Local Quicklisp/ASDF integration (FR-763)
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %cl-cc-registry-path ()
+  (merge-pathnames #P".cl-cc-systems.sexp" (user-homedir-pathname)))
+
+(defun %read-system-registry ()
+  (let ((path (%cl-cc-registry-path)))
+    (if (probe-file path)
+        (with-open-file (in path :direction :input)
+          (or (read in nil nil) nil))
+        nil)))
+
+(defun %write-system-registry (registry)
+  (let ((path (%cl-cc-registry-path)))
+    (ensure-directories-exist path)
+    (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (write registry :stream out :pretty t))
+    registry))
+
+(defun %normalize-system-name (thing)
+  (string-downcase (string thing)))
+
+(defun %read-asd-forms (path)
+  (with-open-file (in path :direction :input)
+    (loop for form = (read in nil :eof)
+          until (eq form :eof)
+          collect form)))
+
+(defun %asd-defsystem-form (path)
+  (find-if (lambda (form)
+             (and (consp form)
+                  (member (car form) '(asdf:defsystem defsystem) :test #'eq)))
+           (%read-asd-forms path)))
+
+(defun %plist-value (plist key)
+  (loop for (k v) on plist by #'cddr
+        when (eq k key) do (return v)))
+
+(defun %asd-system-name (path)
+  (let ((form (%asd-defsystem-form path)))
+    (or (and form (second form)) (pathname-name path))))
+
+(defun %asd-dependencies (path)
+  "Parse PATH's DEFSYSTEM :DEPENDS-ON without invoking Quicklisp shell commands."
+  (let ((form (%asd-defsystem-form path)))
+    (mapcar #'%normalize-system-name
+            (or (and form (%plist-value (cddr form) :depends-on)) nil))))
+
+(defun %register-asd (path)
+  (let* ((truename (namestring (truename path)))
+         (name (%normalize-system-name (%asd-system-name path)))
+         (entry (list :name name :path truename :depends-on (%asd-dependencies path)))
+         (registry (remove name (%read-system-registry)
+                           :key (lambda (e) (getf e :name))
+                           :test #'string=)))
+    (%write-system-registry (cons entry registry))
+    entry))
+
+(defun %unregister-system (name)
+  (let* ((normalized (%normalize-system-name name))
+         (old (%read-system-registry))
+         (new (remove normalized old :key (lambda (e) (getf e :name)) :test #'string=)))
+    (%write-system-registry new)
+    (/= (length old) (length new))))
+
+(defun %registry-system-entry (name)
+  (find (%normalize-system-name name) (%read-system-registry)
+        :key (lambda (e) (getf e :name)) :test #'string=))
+
+(defun %ensure-registered-systems-visible ()
+  (dolist (entry (%read-system-registry))
+    (let ((path (getf entry :path)))
+      (when (probe-file path)
+        (pushnew (uiop:pathname-directory-pathname (pathname path))
+                 asdf:*central-registry* :test #'equal)))))
+
+(defun %toposort-systems (names)
+  (let ((seen (make-hash-table :test #'equal))
+        (visiting (make-hash-table :test #'equal))
+        (out nil))
+    (labels ((deps (name)
+               (or (getf (%registry-system-entry name) :depends-on)
+                   (ignore-errors
+                     (mapcar #'%normalize-system-name
+                             (asdf:system-depends-on (asdf:find-system name nil))))
+                   nil))
+             (visit (name)
+               (let ((n (%normalize-system-name name)))
+                 (unless (gethash n seen)
+                   (when (gethash n visiting)
+                     (error "Cyclic ASDF dependency involving ~A" n))
+                   (setf (gethash n visiting) t)
+                   (dolist (dep (deps n)) (visit dep))
+                   (remhash n visiting)
+                   (setf (gethash n seen) t)
+                   (push n out)))))
+      (dolist (name names) (visit name))
+      (nreverse out))))
+
+(defun %asdf-component-source-files (component)
+  (let ((children (ignore-errors (asdf:component-children component))))
+    (if children
+        (mapcan #'%asdf-component-source-files children)
+        (let ((path (ignore-errors (asdf:component-pathname component))))
+          (if (and path (string= (or (pathname-type path) "") "lisp"))
+              (list (namestring path))
+              nil)))))
+
+(defun %system-source-files (system-name)
+  (let ((system (asdf:find-system system-name nil)))
+    (when system
+      (remove-duplicates (%asdf-component-source-files system) :test #'equal))))
+
+(defun %concatenate-system-source (system-name)
+  (%ensure-registered-systems-visible)
+  (with-output-to-string (out)
+    (dolist (name (%toposort-systems (list system-name)))
+      (ignore-errors (asdf:load-system name))
+      (dolist (file (%system-source-files name))
+        (format out "~%;;; system ~A file ~A~%" name file)
+        (write-string (%read-file file) out)
+        (terpri out)))))
+
+(defun %compile-system-to-native (system-name output arch compress kwargs &key bolt bolt-profile)
+  (let* ((source (%concatenate-system-source system-name))
+         (tmp (merge-pathnames (make-pathname :name (format nil "cl-cc-system-~A" (gensym))
+                                             :type "lisp")
+                               (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+            (with-open-file (out tmp :direction :output :if-exists :supersede :if-does-not-exist :create)
+              (write-string source out))
+            (apply #'compile-file-to-native (namestring tmp)
+                   :arch arch :output-file output :language :lisp :compress compress
+                   (append (if bolt (list :bolt t :bolt-profile bolt-profile) nil)
+                           kwargs)))
+      (ignore-errors (delete-file tmp)))))
+
+(defun %do-install (parsed)
+  "Handle `cl-cc install' for local ASDF system files."
+  (let ((file (%required-file-arg parsed "install")))
+    (%with-cli-error-handler
+      (let* ((entry (%register-asd file))
+             (order (%toposort-systems (list (getf entry :name)))))
+        (dolist (system order) (ignore-errors (asdf:load-system system)))
+        (format t "Installed ~A from ~A~%" (getf entry :name) (getf entry :path))
+        (when (getf entry :depends-on)
+          (format t "Dependencies: ~{~A~^, ~}~%" (getf entry :depends-on)))
+        (uiop:quit 0)))))
+
+(defun %do-uninstall (parsed)
+  "Handle `cl-cc uninstall' for local ASDF system registry entries."
+  (let ((name (%required-file-arg parsed "uninstall")))
+    (%with-cli-error-handler
+      (if (%unregister-system name)
+          (format t "Uninstalled ~A~%" name)
+          (format t "System not registered: ~A~%" name))
+      (uiop:quit 0))))
 
 (defun %do-run (parsed)
   "Handle the `cl-cc run' subcommand using PARSED command-line arguments.
@@ -336,7 +508,8 @@ exits with status 0 on success."
 Reads the source file, applies target architecture and compile options, either
 dumps the requested IR phase or writes a native binary, prints the output path,
 and exits with status 0 on success."
-  (let* ((file (%required-file-arg parsed "compile"))
+  (let* ((system-name (flag parsed "--system"))
+         (file (or system-name (%required-file-arg parsed "compile")))
          (arch-str (or (flag parsed "--arch") "x86-64"))
          (arch (%arch-keyword arch-str))
          (output (flag-or parsed "--output" "-o"))
@@ -400,12 +573,16 @@ and exits with status 0 on success."
                                             (apply #'compile-source source
                                                    :target (%compile-target-keyword arch-str)
                                                    kwargs)))
-                             (result (apply #'compile-file-to-native file
-                                            :arch arch
-                                            :output-file output
-                                            :language language
-                                            :compress compress
-                                            kwargs)))
+                              (result (apply #'compile-file-to-native file
+                                             :arch arch
+                                             :output-file output
+                                             :language language
+                                             :compress compress
+                                             (append (if (compile-opts-bolt opts)
+                                                         (list :bolt t
+                                                               :bolt-profile (compile-opts-pgo-use-path opts))
+                                                         nil)
+                                                     kwargs))))
                        (when (and (compile-opts-pgo-generate-path opts)
                                   (null trace-result))
                          (setf trace-result
@@ -414,10 +591,13 @@ and exits with status 0 on success."
                                       kwargs)))
                        (when trace-result
                          (%maybe-write-pgo-profile opts trace-result))
-                       (when trace-result
-                         (%trace-emit-stages trace-result *standard-output* :annotate-source annotate))
-                       (format t "~A~%" result)
-                       (uiop:quit 0))))))))
+                        (when trace-result
+                          (%trace-emit-stages trace-result *standard-output* :annotate-source annotate))
+                        (when (or (compile-opts-deterministic opts)
+                                  (compile-opts-build-id opts))
+                          (%apply-reproducible-build-options result parsed))
+                        (format t "~A~%" result)
+                        (uiop:quit 0))))))))
         "compile"))))
 
 (defun %compile-and-run-eval-form (expr stdlib no-stdlib kwargs vm-state opts)
@@ -439,7 +619,17 @@ compilation-result object used to produce it."
        (compile-and-run #'cl-cc:compile-string-with-stdlib))
       (no-stdlib
        (compile-and-run #'compile-string))
-      (t
+                  (system-name
+                   (%call-with-optional-output-file
+                    (compile-opts-trace-json-path opts)
+                    (lambda (stream)
+                      (let* ((kwargs (%compile-opts-kwargs opts stream))
+                              (result (%compile-system-to-native system-name output arch compress kwargs
+                                                                 :bolt (compile-opts-bolt opts)
+                                                                 :bolt-profile (compile-opts-pgo-use-path opts))))
+                        (format t "~A~%" result)
+                        (uiop:quit 0)))))
+                  (t
        (handler-case
            (compile-and-run #'compile-string)
          (error ()
@@ -483,8 +673,10 @@ status 0 on success or 2 when the expression is missing."
                 (when (compile-opts-trace-emit opts)
                   (%trace-emit-stages compiled *standard-output*))
                 (when (compile-opts-flamegraph-path opts)
-                  (%write-flamegraph-svg (compile-opts-flamegraph-path opts)
-                                         (cl-cc/vm:vm-get-profile-samples vm-state)))
+                  (let ((samples (cl-cc/vm:vm-get-profile-samples vm-state)))
+                    (if (plusp (hash-table-count samples))
+                        (%write-flamegraph-svg (compile-opts-flamegraph-path opts) samples)
+                        (%write-flamegraph-from-perf-data (compile-opts-flamegraph-path opts)))))
                 (format t "~S~%" result)
                 (uiop:quit 0)))))
           "eval")))))
@@ -555,6 +747,54 @@ inside strings for REPL input balancing."
     (%repl-set-global "//" previous-/)
     (%repl-set-global "/" values-list)))
 
+(defun %repl-history-file ()
+  (merge-pathnames #P".cl-cc_history" (user-homedir-pathname)))
+
+(defun %load-repl-history-file ()
+  "Load ~/.cl-cc_history into the in-memory REPL history ring."
+  (let ((path (%repl-history-file)))
+    (when (probe-file path)
+      (with-open-file (in path :direction :input)
+        (loop for line = (read-line in nil nil)
+              while line do
+                (cl-cc:%repl-record-history line))))))
+
+(defun %save-repl-history-file ()
+  "Save the current REPL history to ~/.cl-cc_history."
+  (let ((path (%repl-history-file)))
+    (ensure-directories-exist path)
+    (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (dolist (entry (cl-cc/repl:repl-history))
+        (write-line entry out)))))
+
+(defun %repl-inspect (expr)
+  "Evaluate EXPR and print object type plus slot/container details."
+  (let ((object (cl-cc:run-string-repl expr)))
+    (format t "Type: ~S~%" (type-of object))
+    (cond
+      ((hash-table-p object)
+       (format t "Hash table count: ~D~%" (hash-table-count object))
+       (maphash (lambda (k v) (format t "  ~S => ~S~%" k v)) object))
+      ((standard-object-p object)
+       (format t "Object: ~S~%" object)
+       (describe object *standard-output*))
+      (t
+       (format t "Value: ~S~%" object)))
+    (force-output)))
+
+(defun %repl-describe (expr)
+  "Describe a symbol or evaluated object and print available documentation."
+  (let* ((form (read-from-string expr nil nil))
+         (object (if (symbolp form) form (cl-cc:run-string-repl expr))))
+    (format t "~&~S~%" object)
+    (when (symbolp object)
+      (dolist (kind '(function variable type))
+        (let ((doc (documentation object kind)))
+          (when doc
+            (format t "~A documentation:~%~A~%" kind doc)))))
+    (describe object *standard-output*)
+    (force-output)))
+
 (defun %do-repl (parsed)
   "Handle the `cl-cc repl' subcommand using PARSED arguments.
 
@@ -567,6 +807,7 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
     (cl-cc:reset-repl-state)
     (cl-cc:%ensure-repl-state)
     (%initialize-repl-completeness-globals)
+    (%load-repl-history-file)
     (when stdlib
       (handler-case (cl-cc:run-string-repl cl-cc:*standard-library-source*)
         (error () nil)))
@@ -600,6 +841,7 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
             (let ((line (handler-case (read-line *standard-input* nil nil)
                           (error () nil))))
               (when (null line)
+                (%save-repl-history-file)
                 (format t "~%Goodbye.~%")
                 (uiop:quit 0))
               (multiple-value-bind (edited-line candidates edited-p)
@@ -618,26 +860,35 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
           (let ((trimmed (string-trim '(#\Space #\Tab #\Newline) buffer)))
             (cond
               ((string= trimmed "") nil)
-              ((or (string= trimmed "(exit)")
-                   (string= trimmed ":quit")
-                   (string= trimmed ":q"))
-               (format t "Goodbye.~%")
-               (uiop:quit 0))
-              (t
+               ((or (string= trimmed "(exit)")
+                    (string= trimmed ":quit")
+                    (string= trimmed ":q"))
+                (%save-repl-history-file)
+                (format t "Goodbye.~%")
+                (uiop:quit 0))
+               ((uiop:string-prefix-p ":inspect " trimmed)
+                (handler-case
+                    (%repl-inspect (string-trim '(#\Space #\Tab) (subseq trimmed 9)))
+                  (error (e) (format t "; Error: ~A~%" e))))
+               ((uiop:string-prefix-p ":describe " trimmed)
+                (handler-case
+                    (%repl-describe (string-trim '(#\Space #\Tab) (subseq trimmed 10)))
+                  (error (e) (format t "; Error: ~A~%" e))))
+               (t
                (cl-cc:%repl-record-history trimmed)
-               (handler-case
-                   (if timeout
-                       (handler-case
-                           (sb-ext:with-timeout timeout
-                             (eval-and-print trimmed))
-                         (sb-ext:timeout (c)
-                           (declare (ignore c))
-                           (format t "; Timeout after ~A second~:P~%" timeout)
-                           (force-output)))
-                       (eval-and-print trimmed))
-                 (error (e)
-                   (format t "; Error: ~A~%" e)
-                    (force-output))))))))))))
+                (handler-case
+                    (if timeout
+                        (handler-case
+                            (sb-ext:with-timeout timeout
+                              (eval-and-print trimmed))
+                          (sb-ext:timeout (c)
+                            (declare (ignore c))
+                            (format t "; Timeout after ~A second~:P~%" timeout)
+                            (force-output)))
+                        (eval-and-print trimmed))
+                  (error (e)
+                    (format t "; Error: ~A~%" e)
+                     (force-output))))))))))))
 
 (defun %do-check (parsed)
   "Handle the `cl-cc check' subcommand using PARSED arguments.

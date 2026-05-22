@@ -47,6 +47,9 @@
 (define-vm-unary-instruction vm-namestring :namestring "Convert to namestring.")
 (define-vm-unary-instruction vm-file-namestring :file-namestring "Get file-namestring.")
 (define-vm-unary-instruction vm-directory-namestring :directory-namestring "Get directory-namestring.")
+(define-vm-unary-instruction vm-pathname-version :pathname-version "Get pathname version.")
+(define-vm-unary-instruction vm-parse-namestring :parse-namestring "Parse a namestring.")
+(define-vm-unary-instruction vm-wild-pathname-p :wild-pathname-p "Return true when pathname contains wild components.")
 
 (define-simple-instruction vm-pathname-host :unary cl:pathname-host)
 (define-simple-instruction vm-pathname-device :unary cl:pathname-device)
@@ -56,6 +59,9 @@
 (define-simple-instruction vm-namestring :unary cl:namestring)
 (define-simple-instruction vm-file-namestring :unary cl:file-namestring)
 (define-simple-instruction vm-directory-namestring :unary cl:directory-namestring)
+(define-simple-instruction vm-pathname-version :unary cl:pathname-version)
+(define-simple-instruction vm-parse-namestring :unary cl:parse-namestring)
+(define-simple-instruction vm-wild-pathname-p :unary cl:wild-pathname-p)
 
 (define-vm-instruction vm-merge-pathnames (vm-instruction)
   (dst nil :reader vm-dst) (path-reg nil :reader vm-mpn-path-reg)
@@ -77,6 +83,20 @@
   (vm-reg-set state (vm-dst inst)
               (cl:enough-namestring (vm-reg-get state (vm-ens-path-reg inst))
                                     (vm-reg-get state (vm-ens-defaults-reg inst))))
+  (values (1+ pc) nil nil))
+
+(define-vm-instruction vm-pathname-match-p (vm-instruction)
+  (dst nil :reader vm-dst)
+  (pathname-reg nil :reader vm-pmatch-pathname-reg)
+  (wildcard-reg nil :reader vm-pmatch-wildcard-reg)
+  (:sexp-tag :pathname-match-p)
+  (:sexp-slots dst pathname-reg wildcard-reg))
+
+(defmethod execute-instruction ((inst vm-pathname-match-p) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (cl:pathname-match-p (vm-reg-get state (vm-pmatch-pathname-reg inst))
+                                   (vm-reg-get state (vm-pmatch-wildcard-reg inst))))
   (values (1+ pc) nil nil))
 
 ;; FR-596: Logical pathnames

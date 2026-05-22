@@ -2,7 +2,7 @@
 
 (defpackage :cl-cc/runtime
   (:use :cl)
-  (:shadow #:compute-applicable-methods)
+  (:shadow #:compute-applicable-methods #:make-hash-table)
   (:export
    ;; Tagged pointer constants (3-bit native tag values, used by runtime.lisp / heap.lisp)
    #:+tag-fixnum+ #:+rt-tag-cons+ #:+rt-tag-symbol+ #:+rt-tag-function+
@@ -123,8 +123,20 @@
     #:rt-establish-restart #:rt-restart-bind #:rt-restart-case
     #:rt-dispatch-restart
      ;; Misc
-     #:rt-boundp #:rt-fboundp #:rt-makunbound
-   #:rt-random #:rt-make-random-state
+      #:rt-boundp #:rt-fboundp #:rt-makunbound
+      ;; C embedding API (FR-812)
+      #:cl-cc-state #:cl-cc-state-p #:make-cl-cc-state
+      #:cl-cc-state-id #:cl-cc-state-vm #:cl-cc-state-package
+      #:cl-cc-state-callbacks #:cl-cc-state-last-error #:cl-cc-state-closed-p
+      #:cl-cc-value #:cl-cc-value-p #:make-cl-cc-value
+      #:cl-cc-value-kind #:cl-cc-value-payload
+      #:cl-cc-error #:cl-cc-error-p #:make-cl-cc-error
+      #:cl-cc-error-code #:cl-cc-error-message
+      #:cl-cc-init #:cl-cc-eval #:cl-cc-call #:cl-cc-cleanup
+      #:cl-cc-last-error #:cl-cc-register-callback #:cl-cc-callback
+      #:|cl_cc_init| #:|cl_cc_eval| #:|cl_cc_call| #:|cl_cc_cleanup|
+      #:|cl_cc_last_error| #:|cl_cc_register_callback| #:|cl_cc_get_callback|
+    #:rt-random #:rt-make-random-state
    #:rt-get-universal-time #:rt-get-internal-real-time #:rt-get-internal-run-time
     #:rt-read-from-string #:rt-read-sexp
     #:rt-coerce
@@ -243,11 +255,13 @@
     #:rt-gc-configure-concurrent-mode
     #:rt-gc-concurrent-assist
      #:*rt-concurrent-gc-enabled-p*
-     #:*rt-concurrent-gc-write-barrier-mode*
-     #:*rt-concurrent-gc-stw-phases*
-      #:*rt-concurrent-gc-mutator-assist-p*
-      ;; Concurrent GC SATB (FR-339)
-      #:rt-gc-satb-enqueue #:rt-gc-drain-satb-thread-queues
+      #:*rt-concurrent-gc-write-barrier-mode*
+      #:*rt-concurrent-gc-stw-phases*
+       #:*rt-concurrent-gc-mutator-assist-p*
+       #:*concurrent-gc-enabled* #:concurrent-mark-worker
+       #:rt-gc-concurrent-sweep #:rt-gc-concurrent-sweep-worker
+       ;; Concurrent GC SATB (FR-339)
+       #:rt-gc-satb-enqueue #:rt-gc-drain-satb-thread-queues
     ;; New GC features (memory-gc.md)
     ;; Card summary (FR-084)
     #:rt-card-summary-update #:rt-card-summary-clean-block-p
@@ -269,6 +283,11 @@
       #:rt-gc-numa-affinity #:rt-heap-interleave
     ;; Fragmentation (FR-380)
     #:rt-heap-fragmentation-pct #:rt-heap-should-compact-p
+    #:*compacting-gc-enabled* #:*gc-compact-after-major-cycles*
+    #:rt-gc-compact-old-space #:rt-gc-should-run-compaction-p
+    ;; Object pinning for FFI / relocation barriers (FR-733)
+    #:rt-pin-object #:rt-unpin-object #:rt-object-pinned-p
+    #:with-pinned-objects #:*rt-current-pinning-heap*
     ;; GC inhibit (FR-428)
     #:without-gcing #:rt-gc-inhibit-p
      ;; Dynamic tenure (FR-085)
@@ -290,8 +309,14 @@
       #:rt-make-immortal #:rt-immortal-p #:rt-immortal-objects-count
      ;; Heap census (FR-446)
     #:rt-gc-heap-census
-    ;; Barrier batching (FR-453)
+     ;; Barrier batching (FR-453)
     #:rt-gc-flush-barrier-buffer #:*rt-use-barrier-batching*
+    ;; Write barrier optimization (FR-542)
+    #:*write-barrier-opt-enabled*
+    #:rt-gc-current-cycle
+    #:rt-gc-register-stack-allocated-object
+    #:rt-gc-stack-allocated-object-p
+    #:rt-gc-clear-stack-allocated-objects
     ;; Lifecycle hooks (FR-447)
     #:*rt-gc-alloc-hooks* #:*rt-gc-death-hooks*
     #:rt-gc-register-alloc-hook #:rt-gc-register-death-hook
@@ -305,6 +330,7 @@
      #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
      #:rt-make-soft-ref #:rt-make-weak-ref #:rt-make-phantom-ref
      #:rt-make-weak-pointer #:rt-weak-pointer-p #:rt-weak-pointer-value
+      #:make-weak-pointer #:weak-pointer-value #:*weak-references*
      #:rt-soft-ref-referent #:rt-weak-ref-referent #:%rt-phantom-ref-referent
      #:rt-ref-get #:rt-ref-clear-p #:rt-reference-queue-process
     ;; Ephemerons (FR-246)
@@ -314,9 +340,14 @@
     #:rt-gc-process-references
     ;; Finalization (FR-459/460/471)
      #:rt-register-finalizer #:rt-unregister-finalizer #:rt-register-stream-finalizer
+     #:register-finalizer #:*pending-finalizers* #:rt-run-pending-finalizers
      #:rt-finalize #:rt-cancel-finalization
      #:header-finalized-p #:header-set-finalized #:header-clear-finalized
      #:*rt-finalizer-registry* #:*rt-finalization-queue*
+     #:*large-object-threshold* #:rt-los-alloc #:rt-large-object-size-p
+     #:*use-huge-pages* #:rt-huge-page-mmap #:huge-pages-enabled-p #:try-enable-huge-pages
+     #:*xom-enabled* #:rt-allocate-xom-code-memory #:rt-finalize-xom-code-memory
+     #:rt-release-xom-code-memory #:rt-allocate-code-memory-xom-aware
     ;; Precise roots (FR-332)
      #:rt-gc-add-root-typed #:*gc-threads*
       #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
@@ -354,13 +385,25 @@
    #:rt-make-barrier #:rt-barrier-wait
    #:rt-make-once #:rt-once-call
    ;; ── Green-thread scheduler (scheduler.lisp) ───────────────────────
-   #:rt-make-scheduler #:rt-scheduler-init #:rt-scheduler-run
-   #:rt-spawn #:rt-yield
+    #:rt-make-scheduler #:rt-scheduler-init #:rt-scheduler-run
+    #:rt-spawn #:rt-yield #:rt-current-thread-id #:rt-sleep-task
+    #:rt-green-thread #:rt-green-thread-p #:rt-green-thread-status
+    #:rt-green-thread-result #:rt-green-thread-error
+    #:rt-work-deque #:rt-work-deque-p #:rt-work-deque-push-front
+    #:rt-work-deque-pop-front #:rt-work-deque-steal-back #:rt-work-deque-count
+    #:rt-worker #:rt-worker-p #:rt-worker-run-once
+    #:rt-work-stealing-scheduler #:rt-work-stealing-scheduler-p
+    #:rt-make-work-stealing-scheduler #:rt-work-stealing-init
+    #:rt-work-stealing-submit #:rt-work-stealing-run #:rt-work-stealing-maybe-grow
+    #:rt-scheduler-steal #:*rt-work-stealing-scheduler*
     ;; ── Futures / promises (future.lisp) ─────────────────────────────
-    #:rt-make-future #:rt-future-resolve #:rt-future-await #:rt-future-done-p
-    #:rt-future-then
-    ;; ── Async / async generators (async.lisp, async-generators.lisp) ──
-    #:rt-async #:rt-await
+     #:rt-make-future #:rt-future-resolve #:rt-future-await #:rt-future-done-p
+     #:rt-future-then
+     ;; ── Async / async generators (async.lisp, async-generators.lisp) ──
+     #:rt-async #:rt-await #:rt-await* #:rt-async-submit
+     #:rt-async-lambda #:rt-async-defun #:async #:await #:async-lambda #:async-defun
+     #:rt-async-cps-transform #:rt-async-cps
+     #:rt-async-channel #:rt-async-send #:rt-async-recv
     #:rt-aiter #:rt-aiter-p #:make-rt-aiter
     #:rt-aiter-next-fn #:rt-aiter-next
     #:rt-aiter-from-list #:rt-aiter-map #:rt-aiter-filter #:rt-aiter-take #:rt-aiter-collect
@@ -380,7 +423,14 @@
    ;; ── Actor model (actor.lisp) ─────────────────────────────────────
    #:rt-make-actor #:rt-actor-send #:rt-actor-receive
    ;; ── STM (stm.lisp) ───────────────────────────────────────────────
-   #:rt-atomically #:rt-retry
+    #:rt-tvar #:rt-tvar-p #:rt-make-tvar #:rt-read-tvar #:rt-write-tvar
+    #:rt-atomically #:atomic #:rt-retry #:rt-tvar-value-unsafe #:rt-tvar-version-unsafe
+    #:rt-stm-transaction #:rt-stm-conflict #:rt-stm-retry #:opt-pass-stm
+    ;; ── Fibers / green threads (fiber.lisp) ───────────────────────────
+    #:rt-fiber #:rt-fiber-p #:rt-make-fiber #:rt-fiber-spawn #:rt-fiber-schedule
+    #:rt-fiber-resume #:rt-fiber-yield #:rt-fiber-block #:rt-fiber-await
+    #:rt-fiber-done-p #:rt-fiber-status-failed-p #:rt-run-fibers
+    #:rt-fiber-local #:rt-fiber-async #:rt-green-thread-spawn #:rt-run-green-threads
    ;; ── Lock-free data structures (lockfree.lisp) ────────────────────
    #:rt-make-lfstack #:rt-lfstack-push #:rt-lfstack-pop
    #:rt-make-lfqueue #:rt-make-lfhash-map
@@ -394,8 +444,19 @@
    #:rt-qsbr-init #:rt-qsbr-register-thread #:rt-qsbr-synchronize
    ;; ── OS abstraction (os.lisp) ─────────────────────────────────────
    #:rt-open #:rt-close #:rt-getenv #:rt-argv #:rt-exit
-   ;; ── Network (net.lisp) ───────────────────────────────────────────
-   #:rt-socket #:rt-bind #:rt-listen #:rt-connect
+    ;; ── Network (net.lisp) ───────────────────────────────────────────
+    #:+rt-af-inet+ #:+rt-af-inet6+ #:+rt-sock-stream+ #:+rt-sock-dgram+
+    #:rt-socket-address #:make-rt-socket-address
+    #:rt-socket-address-host #:rt-socket-address-port #:rt-socket-address-family
+    #:rt-socket-entry #:rt-socket-entry-p
+    #:rt-socket #:rt-bind #:rt-listen #:rt-connect #:rt-accept
+    #:rt-socket-send #:rt-socket-recv #:rt-close-socket
+    #:rt-make-socket-stream #:rt-socket-name #:rt-resolve-address
+    ;; ── mmap files (mmap.lisp) ───────────────────────────────────────
+    #:rt-mmap-region #:rt-mmap-region-p #:rt-mmap-region-length
+    #:rt-mmap-region-address #:rt-mmap-region-released-p
+    #:mmap-file #:mmap-array #:mmap-close #:with-mmap #:mmap-sync #:mmap-advice
+    #:rt-mmap-file #:rt-mmap-array #:rt-mmap-close #:rt-mmap-sync #:rt-mmap-advice
    ;; ── GC safe-region depth table (gc-data.lisp) ────────────────────
    #:*rt-gc-safe-region-depths*
    ;; ── TLAB public API (exported; functions added in gc-tlab.lisp) ──
@@ -404,10 +465,39 @@
    #:rt-context-cancel #:rt-context-cancelled-p
    ;; ── SPSC ring buffer (spsc.lisp) ─────────────────────────────────
    #:rt-make-spsc-queue #:rt-spsc-try-push #:rt-spsc-try-pop
-   ;; ── Performance counters (perf.lisp) ─────────────────────────────
-   #:rt-perf-init #:rt-perf-enable-counter
-    ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
-    #:rt-otel-start-span #:rt-otel-end-span
+    ;; ── Performance counters (perf.lisp) ─────────────────────────────
+    #:rt-perf-init #:rt-perf-enable-counter
+    #:rdtsc #:rdtscp #:with-perf-counters #:perf-counters-unsupported
+    ;; ── Metrics (metrics.lisp) ────────────────────────────────────────
+    #:make-counter #:make-gauge #:make-histogram
+    #:increment! #:set-gauge! #:observe! #:prometheus-text-format
+     ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
+     #:rt-otel-start-span #:rt-otel-end-span
+     ;; ── Continuous profiling (continuous-profile.lisp) ───────────────
+      #:rt-continuous-profile-session #:make-rt-continuous-profile-session
+      #:rt-profile-frame #:make-rt-profile-frame
+      #:rt-profile-frame-function #:rt-profile-frame-source-file
+      #:rt-profile-frame-source-line #:rt-profile-frame-address
+      #:rt-profile-frame-perf-symbol
+      #:rt-profile-sample #:make-rt-profile-sample
+      #:rt-profile-sample-timestamp-nanos #:rt-profile-sample-thread-id
+      #:rt-profile-sample-trace-id #:rt-profile-sample-span-id
+      #:rt-profile-sample-stack #:rt-profile-sample-count
+      #:rt-continuous-profile-session-name
+      #:rt-continuous-profile-session-samples
+      #:rt-continuous-profile-session-sample-log
+      #:rt-continuous-profile-session-sample-rate-hz
+      #:rt-continuous-profile-session-output
+      #:rt-continuous-profile-session-endpoint
+      #:rt-continuous-profile-session-trace-id
+      #:rt-continuous-profile-session-span-id
+      #:rt-continuous-profile-session-running-p
+      #:*rt-continuous-profile-session*
+      #:rt-start-continuous-profile #:rt-stop-continuous-profile
+      #:rt-record-profile-sample #:rt-continuous-profile->otel-span
+      #:rt-continuous-profile-to-otel-json
+      #:rt-continuous-profile-to-pprof-json
+      #:rt-export-continuous-profile
     ;; ── Deadlock detector (deadlock.lisp) ────────────────────────────
     #:*rt-dl-enabled* #:*rt-dl-thread-locks* #:*rt-dl-thread-waits*
     #:rt-deadlock-before-lock #:rt-deadlock-after-lock
@@ -441,3 +531,9 @@
     #:rt-effect #:rt-handler-state
     #:rt-current-handler #:rt-resume #:rt-perform #:rt-handle
     #:rt-effect-state #:rt-effect-error #:rt-effect-read #:rt-effect-write))
+
+(in-package :cl-cc/runtime)
+
+(defun make-hash-table (&rest args)
+  "Bootstrap wrapper for CL:MAKE-HASH-TABLE; hash-weak.lisp adds :WEAKNESS."
+  (apply #'cl:make-hash-table args))

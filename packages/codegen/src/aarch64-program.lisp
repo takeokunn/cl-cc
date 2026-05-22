@@ -70,6 +70,14 @@
     (setf (gethash 'vm-spill-load ht) #'emit-a64-vm-spill-load)
     (setf (gethash 'vm-prefetch ht) #'emit-a64-vm-prefetch)
     (setf (gethash 'vm-simd-vector-op ht) #'emit-a64-vm-simd-vector-op)
+    (setf (gethash 'vm-atomic-cas ht) #'emit-a64-atomic-cas)
+    (setf (gethash 'vm-atomic-swap ht) #'emit-a64-atomic-swap)
+    (setf (gethash 'vm-atomic-incf ht) #'emit-a64-atomic-fetch-add)
+    (setf (gethash 'vm-atomic-load ht) #'emit-a64-atomic-load)
+    (setf (gethash 'vm-atomic-store ht) #'emit-a64-atomic-store)
+    (setf (gethash 'vm-memory-barrier ht) #'emit-a64-memory-barrier)
+    (setf (gethash 'vm-load-fence ht) #'emit-a64-memory-barrier)
+    (setf (gethash 'vm-store-fence ht) #'emit-a64-memory-barrier)
     ht)
   "Maps VM instruction type symbols to AArch64 emitter functions (inst stream).")
 
@@ -200,9 +208,13 @@ Result plist keys:
 
 (defun emit-aarch64-cfi-entry (stream cfi-plan)
   "Emit AArch64 CFI entry marker (BTI C) when enabled in CFI-PLAN."
-  (when (eq (getf cfi-plan :entry-opcode) :bti-c)
-    ;; BTI C = 0xD503245F
-    (emit-a64-instr #xD503245F stream)))
+  (when (or *aarch64-cfi-enabled* (eq (getf cfi-plan :entry-opcode) :bti-c))
+    (emit-a64-instr (encode-bti-c) stream)))
+
+(defun emit-aarch64-bti-j-entry (stream)
+  "Emit BTI J for indirect jump targets when AArch64 CFI is enabled."
+  (when *aarch64-cfi-enabled*
+    (emit-a64-instr (encode-bti-j) stream)))
 
 ;;; AArch64 callee-saved registers to save/restore (X19-X28, X29, X30)
 ;;; X29 = frame pointer (FP), X30 = link register (LR)
@@ -225,7 +237,9 @@ Result plist keys:
 
 (defun emit-a64-prologue (stream save-pairs)
   "Emit AArch64 function prologue: save FP/LR and the callee-saved pairs in SAVE-PAIRS."
-  ;; Shadow call stack: STR LR, [X18], #8
+  (when *aarch64-pac-enabled*
+    (emit-a64-instr (encode-paciasp) stream))
+  ;; Baseline shadow call stack: STR LR, [X18], #8
   (emit-a64-instr (encode-str-post +a64-lr+ +a64-scs+ 8) stream)
   (dolist (pair save-pairs)
     (destructuring-bind (rn rm) pair
@@ -237,15 +251,13 @@ Result plist keys:
   (dolist (pair (reverse save-pairs))
     (destructuring-bind (rn rm) pair
       (emit-a64-instr (encode-ldp-post rn rm +a64-sp+ 2) stream)))
-  ;; Shadow call stack verification:
-  ;;   LDR X17, [X18, #-8]!
-  ;;   CMP X17, X30
-  ;;   B.EQ +2 instructions
-  ;;   BRK #0
+  ;; Shadow call stack verification.
   (emit-a64-instr (encode-ldr-pre +a64-scs-tmp+ +a64-scs+ -8) stream)
   (emit-a64-instr (encode-cmp +a64-scs-tmp+ +a64-lr+) stream)
   (emit-a64-instr (encode-b-cond 2 0) stream)
   (emit-a64-instr (encode-brk 0) stream)
+  (when *aarch64-pac-enabled*
+    (emit-a64-instr (encode-autiasp) stream))
   ;; RET
   (emit-a64-instr +a64-ret+ stream))
 
@@ -374,7 +386,10 @@ Result plist keys:
                     (typep inst '(or vm-call vm-tail-call vm-generic-call)))
                   instructions))
           (cfi-plan (aarch64-cfi-plan :has-indirect-calls-p has-indirect-calls-p))
-          (cfi-entry-size (if (eq (getf cfi-plan :entry-opcode) :bti-c) 4 0))
+          (cfi-entry-size (if (or *aarch64-cfi-enabled*
+                                  (eq (getf cfi-plan :entry-opcode) :bti-c))
+                              4
+                              0))
            (leaf-p (vm-program-leaf-p program))
           (spill-count (regalloc-spill-count *current-a64-regalloc*))
           (frame-pointer-p (and (not *a64-omit-frame-pointer*)
@@ -414,22 +429,38 @@ Result plist keys:
                           shrink-final-pairs save-pairs)
                     ordered-body)))
             (probe-count (stack-probe-count
-                          (a64-stack-frame-size save-pairs
-                                                spill-count)))
-           ;; Shadow call stack prologue is 1 instruction; each STP/LDP pair is 1 instruction.
+                          (a64-stack-frame-size save-pairs spill-count)))
+           ;; Optional hardening sizes are all gated and default to zero.
            ;; Each stack probe is SUB-immediate + STUR, two 4-byte instructions.
-           (spill-frame-adjust-size (if (plusp spill-frame-size) 4 0))
-             (prologue-size (+ cfi-entry-size
-                               (* 8 probe-count)
-                               (* 4 (1+ (length shrink-entry-pairs)))
-                               spill-frame-adjust-size))
+            (spill-frame-adjust-size (if (plusp spill-frame-size) 4 0))
+             (pac-prologue-size (if *aarch64-pac-enabled* 4 0))
+             (scs-prologue-size 4)
+             (canary-prologue-size (if (and *aarch64-stack-protector-enabled* frame-pointer-p) 12 0))
+             (safe-stack-prologue-size (a64-safe-stack-prologue-size))
+               (prologue-size (+ cfi-entry-size
+                                 (* 8 probe-count)
+                                 pac-prologue-size
+                                 scs-prologue-size
+                                 (* 4 (length shrink-entry-pairs))
+                                 canary-prologue-size
+                                 safe-stack-prologue-size
+                                 spill-frame-adjust-size))
             (literal-pool (a64-collect-literal-pool ordered-instructions)))
       (multiple-value-bind (label-offsets island-sites island-bases body-end)
           (a64-compute-labels-and-islands ordered-instructions prologue-size literal-pool)
         (let* ((island-plan (a64-constant-island-plan ordered-instructions prologue-size
                                                       island-bases body-end))
             (stack-deallocate-size (if (plusp spill-frame-size) 4 0))
-            (epilogue-size (+ (* 4 (length shrink-final-pairs)) 20))
+             (canary-epilogue-size (if (and *aarch64-stack-protector-enabled* frame-pointer-p) 24 0))
+             (safe-stack-epilogue-size (a64-safe-stack-epilogue-size))
+             (scs-epilogue-size 16)
+             (pac-epilogue-size (if *aarch64-pac-enabled* 4 0))
+             (epilogue-size (+ (* 4 (length shrink-final-pairs))
+                               canary-epilogue-size
+                               safe-stack-epilogue-size
+                               scs-epilogue-size
+                               pac-epilogue-size
+                               4))
                (pool-input-offset (+ body-end
                                   stack-deallocate-size epilogue-size)))
       (declare (ignore island-plan))
@@ -442,6 +473,12 @@ Result plist keys:
         (emit-a64-stack-probes stream probe-count)
         ;; Prologue
         (emit-a64-prologue stream shrink-entry-pairs)
+        (emit-a64-stack-canary-prologue stream frame-pointer-p)
+        ;; SafeStack dual-stack layout (FR-771): load the unsafe-stack pointer
+        ;; from TPIDR_EL0 into an IP scratch register.  The current backend keeps
+        ;; legacy SP-relative spills for binary compatibility while exposing the
+        ;; ABI-visible unsafe-stack root for hardened native frames.
+        (emit-a64-safe-stack-load-pointer +a64-scs-tmp+ stream)
         (when (plusp spill-frame-size)
           (emit-a64-stack-allocate stream spill-frame-size))
         ;; Second pass: emit instructions
@@ -458,6 +495,8 @@ Result plist keys:
             (incf pos (a64-instruction-size inst))))
         (when (plusp spill-frame-size)
           (emit-a64-stack-deallocate stream spill-frame-size))
+        (emit-a64-stack-canary-epilogue stream frame-pointer-p)
+        (emit-a64-safe-stack-store-pointer +a64-scs-tmp+ stream)
         ;; Epilogue
         (emit-a64-epilogue stream shrink-final-pairs)
         (loop repeat (/ (- (a64-literal-pool-base-offset literal-pool)
@@ -469,11 +508,15 @@ Result plist keys:
 ;;; Public API
 
 (defun compile-to-aarch64-bytes (program &key retpoline stack-protector shadow-stack
-                                         asan msan tsan ubsan hwasan)
+                                          asan msan tsan ubsan hwasan)
   "Compile VM program to AArch64 machine code bytes.
    Returns: (simple-array (unsigned-byte 8) (*))"
-  (declare (ignore retpoline stack-protector shadow-stack asan msan tsan ubsan hwasan))
-  (let ((*current-calling-convention* (vm-program-calling-convention-object program)))
+  (declare (ignore retpoline asan msan tsan ubsan hwasan))
+  (let ((*current-calling-convention* (vm-program-calling-convention-object program))
+        (*aarch64-stack-protector-enabled*
+          (or stack-protector *aarch64-stack-protector-enabled*))
+        (*aarch64-shadow-call-stack-enabled*
+          (or shadow-stack *aarch64-shadow-call-stack-enabled*)))
   (let* ((instructions (schedule-pre-ra (vm-program-instructions program)))
              (ra (allocate-registers instructions (a64-codegen-target)))
           (post-ra-instructions (schedule-post-ra (regalloc-instructions ra) ra))

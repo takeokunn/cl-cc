@@ -415,6 +415,15 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-logeqv       . emit-vm-logeqv)
     (vm-logtest      . emit-vm-logtest)
     (vm-logbitp      . emit-vm-logbitp)
+    ;; Atomics
+    (vm-atomic-cas   . emit-x86-64-atomic-cas)
+    (vm-atomic-swap  . emit-x86-64-atomic-swap)
+    (vm-atomic-incf  . emit-x86-64-atomic-fetch-add)
+    (vm-atomic-load  . emit-x86-64-atomic-load)
+    (vm-atomic-store . emit-x86-64-atomic-store)
+    (vm-memory-barrier . emit-x86-64-memory-barrier)
+    (vm-load-fence   . emit-x86-64-memory-barrier)
+    (vm-store-fence  . emit-x86-64-memory-barrier)
     ;; Type predicates
     (vm-null-p       . emit-vm-null-p)
     (vm-number-p     . emit-vm-true-pred)

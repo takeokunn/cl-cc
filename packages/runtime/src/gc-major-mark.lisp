@@ -14,6 +14,8 @@
 (defparameter *rt-concurrent-gc-enabled-p* nil
   "When true, major collection enters :major-gc-concurrent state.")
 
+(define-symbol-macro *concurrent-gc-enabled* *rt-concurrent-gc-enabled-p*)
+
 (defparameter *rt-concurrent-gc-write-barrier-mode* :satb
   "Concurrent-GC barrier mode (:satb or :incremental-update).")
 
@@ -29,6 +31,9 @@
 FR-339 foundation: SBCL hosts may run phase-2 marking on SB-THREAD while mutators
 continue through SATB pre-write barriers. Implementations without threads drain
 the same grey queue synchronously while preserving the four-phase protocol.")
+
+(defparameter *rt-concurrent-sweep-thread* nil
+  "Host thread object for a concurrent old-space sweep worker, or NIL.")
 
 ;;; FR-088: Incremental GC Marking — bounded mark steps interleaved with mutator work; 4-phase protocol (initial-mark, incremental-mark, final-remark, sweep)
 (defparameter *gc-incremental-mark-enabled* nil
@@ -79,13 +84,22 @@ the future compacting collector.")
 
 (defmacro with-gc-mark-queue-locked (() &body body)
   "Execute BODY while holding the incremental mark-queue hash-table mutex."
-  (let ((fn (gensym "CALL-WITH-MUTEX"))
-        (lock (gensym "LOCK")))
+  (let ((grab (gensym "GRAB-MUTEX"))
+        (release (gensym "RELEASE-MUTEX"))
+        (lock (gensym "LOCK"))
+        (locked (gensym "LOCKED")))
     `(let ((,lock *rt-gc-incremental-mark-queues-lock*))
        (if ,lock
-           (let ((,fn (%rt-gc-mark-sb-thread-function "CALL-WITH-MUTEX")))
-             (if ,fn
-                 (funcall ,fn (lambda () ,@body) ,lock)
+           (let ((,grab (%rt-gc-mark-sb-thread-function "GRAB-MUTEX"))
+                 (,release (%rt-gc-mark-sb-thread-function "RELEASE-MUTEX"))
+                 (,locked nil))
+             (if (and ,grab ,release)
+                 (unwind-protect
+                      (progn
+                        (funcall ,grab ,lock)
+                        (setf ,locked t)
+                        ,@body)
+                   (when ,locked (funcall ,release ,lock)))
                  (progn ,@body)))
            (progn ,@body)))))
 
@@ -337,10 +351,7 @@ is launched with SB-THREAD; otherwise the Pure CL fallback executes the same wor
 synchronously. SATB queues are drained only by final remark to close the snapshot
 created by the initial STW root scan."
   (labels ((mark-work ()
-             (if *gc-incremental-mark-enabled*
-                 (%rt-gc-drain-incremental-mark heap queue-cell)
-                 (loop while (car queue-cell) do
-                   (%rt-gc-mark-one-grey heap queue-cell (pop (car queue-cell)))))))
+             (concurrent-mark-worker heap queue-cell)))
     (if (and (find-package :sb-thread)
              (fboundp (find-symbol "MAKE-THREAD" :sb-thread))
              (fboundp (find-symbol "JOIN-THREAD" :sb-thread)))
@@ -357,3 +368,27 @@ created by the initial STW root scan."
               (mark-work)))
         (mark-work)))
   queue-cell)
+
+(defun concurrent-mark-worker (heap queue-cell &key (budget nil))
+  "Concurrent mark worker for FR-620.
+
+The worker drains the old-generation grey queue while mutators continue running
+under the SATB pre-write barrier.  BUDGET, when supplied, limits the number of
+objects processed and is used by mutator assist / idle work paths; NIL drains to
+completion.  The initial root scan and final SATB remark remain short STW
+phases coordinated by RT-GC-MAJOR-COLLECT and the safepoint API."
+  (check-type heap rt-heap)
+  (let ((processed 0))
+    (cond
+      (*gc-incremental-mark-enabled*
+       (if budget
+           (second (rt-gc-incremental-mark-step heap budget))
+           (progn
+             (%rt-gc-drain-incremental-mark heap queue-cell)
+             0)))
+      (t
+       (loop while (and (car queue-cell)
+                        (or (null budget) (< processed budget))) do
+         (%rt-gc-mark-one-grey heap queue-cell (pop (car queue-cell)))
+         (incf processed))
+       processed))))

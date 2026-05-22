@@ -5,6 +5,17 @@
   (loop for page from 1 to probe-count
         do (emit-or-mem-rsp-disp32-imm8 (- (* page +stack-probe-page-size+)) 0 stream)))
 
+(defun emit-x86-64-speculation-barrier (stream)
+  "Emit an LFENCE speculation barrier for FR-534 speculative execution mitigation."
+  (emit-byte #x0F stream)
+  (emit-byte #xAE stream)
+  (emit-byte #xE8 stream))
+
+(defun x86-64-speculative-execution-mitigation-enabled-p ()
+  "Return true when x86-64 speculative execution mitigation is enabled."
+  (or *x86-64-spectre-mitigations-enabled*
+      *x86-64-use-retpoline*))
+
 (defun emit-x86-64-cfi-entry (stream cfi-plan)
   "Emit x86-64 CFI entry marker (ENDBR64) when enabled in CFI-PLAN."
   (when (eq (getf cfi-plan :entry-opcode) :endbr64)
@@ -532,7 +543,8 @@ which makes the process monotonic and bounded by the number of branches."
              :has-nonlocal-control-p (x86-64-program-has-nonlocal-control-p instructions)
              :has-setjmp-longjmp-p nil))
           (has-stack-buffer-p (and *x86-64-stack-protector-enabled*
-                                   (x86-64-program-has-stack-buffer-p instructions)))
+                                   (or *x86-64-stack-protector-enabled*
+                                       (x86-64-program-has-stack-buffer-p instructions))))
           (canary-plan (x86-64-stack-canary-plan
                         :has-stack-buffer-p has-stack-buffer-p))
            (shrink-wrap-p (and *shrink-wrap-enabled*
@@ -562,18 +574,20 @@ which makes the process monotonic and bounded by the number of branches."
                                 (cons +rbp+ shrink-final-regs)
                                 shrink-final-regs))
            (probe-count (stack-probe-count
-                           (x86-64-stack-frame-size save-regs spill-frame-size)))
+                         (x86-64-stack-frame-size save-regs spill-frame-size)))
           (probe-size (* probe-count +x86-64-stack-probe-size+))
-           (canary-prologue-size (if (and frame-pointer-p (getf canary-plan :enabled-p)) 13 0))
-           (frame-pointer-establish-size (if frame-pointer-p 3 0))
-           (spill-frame-adjust-size (if (plusp spill-frame-size) 7 0))
+            (canary-prologue-size (if (and frame-pointer-p (getf canary-plan :enabled-p)) 13 0))
+            (safe-stack-prologue-size (x86-64-safe-stack-prologue-size))
+            (frame-pointer-establish-size (if frame-pointer-p 3 0))
+            (spill-frame-adjust-size (if (plusp spill-frame-size) 7 0))
           ;; Push sizes: 1 byte for RAX-RDI, 2 bytes for R8-R15 (REX.B prefix).
            (prologue-size (+ cfi-entry-size
                               probe-size
-                               (reduce #'+ entry-save-regs :key #'push-r64-byte-size :initial-value 0)
-                               frame-pointer-establish-size
-                               canary-prologue-size
-                               spill-frame-adjust-size))
+                                (reduce #'+ entry-save-regs :key #'push-r64-byte-size :initial-value 0)
+                                frame-pointer-establish-size
+                                canary-prologue-size
+                                safe-stack-prologue-size
+                                spill-frame-adjust-size))
              (branch-encodings nil)
            ;; First pass: relax branches and build label offset table
             (label-offsets
@@ -585,7 +599,9 @@ which makes the process monotonic and bounded by the number of branches."
                 (multiple-value-bind (offsets encodings)
                     (x86-64-relax-branch-encodings ordered-instructions prologue-size)
                   (setf branch-encodings encodings)
-                  offsets))))
+                  offsets)))
+            (landing-pads
+              (x86-64-build-landing-pad-table ordered-instructions label-offsets prologue-size)))
 
     ;; CFI entry marker (FR-315): must be at function entry.
     (emit-x86-64-cfi-entry stream cfi-plan)
@@ -602,6 +618,13 @@ which makes the process monotonic and bounded by the number of branches."
     ;; Stack protector prologue (FR-317)
     (emit-x86-64-stack-canary-prologue stream canary-plan frame-pointer-p)
 
+    ;; SafeStack dual-stack layout (FR-771): materialize the unsafe-stack pointer
+    ;; from TLS before stack-memory operations can be lowered to it.  The minimal
+    ;; pure-CL backend keeps ordinary spills on the architectural stack for
+    ;; compatibility, but emits the ABI-visible load/store hooks so native frames
+    ;; have a distinct unsafe-stack root when the feature is enabled.
+    (emit-x86-64-safe-stack-load-pointer +r11+ stream)
+
     ;; Second pass: emit instructions with resolved jumps
     (let ((pos prologue-size)
           (*x86-64-use-retpoline* (or *x86-64-use-retpoline* use-retpoline-p))
@@ -613,7 +636,7 @@ which makes the process monotonic and bounded by the number of branches."
       (dolist (inst ordered-instructions)
         (if (typep inst '(or x86-64-shrink-save x86-64-shrink-restore))
             (emit-x86-64-shrink-pseudo inst stream)
-            (emit-vm-instruction-with-labels inst stream pos label-offsets))
+            (emit-sanitized-vm-instruction-with-labels inst stream pos label-offsets))
         (incf pos (instruction-size inst))))
 
     (when (plusp spill-frame-size)
@@ -622,14 +645,22 @@ which makes the process monotonic and bounded by the number of branches."
     ;; Stack protector epilogue (FR-317)
     (emit-x86-64-stack-canary-epilogue stream canary-plan frame-pointer-p)
 
+    ;; Preserve the current unsafe-stack pointer back to TLS on return.
+    (emit-x86-64-safe-stack-store-pointer +r11+ stream)
+
     ;; Epilogue: restore callee-saved registers and return.
-    (emit-x86-64-function-epilogue stream frame-pointer-p final-save-regs)))
+    (emit-x86-64-function-epilogue stream frame-pointer-p final-save-regs)
+
+    ;; Opt-in zero-cost EH landing-pad code.  Appended after the normal epilogue
+    ;; so existing binary text layout stays compatible when the flag is disabled.
+    (emit-x86-64-landing-pads landing-pads stream)))
 
 ;;; Public API
 
 (defun compile-to-x86-64-bytes (program &key retpoline spectre-mitigations
-                                           stack-protector shadow-stack
-                                           asan msan tsan ubsan hwasan)
+                                            stack-protector shadow-stack
+                                            asan msan tsan ubsan hwasan
+                                            eh-model)
   "Compile VM program to x86-64 machine code bytes.
 
    Returns: (simple-array (unsigned-byte 8) (*))"
@@ -652,15 +683,21 @@ which makes the process monotonic and bounded by the number of branches."
     ;; Store the regalloc result for use during code generation
     (let ((*current-regalloc* ra)
           (*current-float-vregs* float-vregs)
+          (*asan-instrumentation-enabled* (or asan hwasan *asan-instrumentation-enabled*))
+          (*ubsan-instrumentation-enabled* (or ubsan msan tsan *ubsan-instrumentation-enabled*))
           (*x86-64-stack-protector-enabled*
             (or stack-protector sanitizer-enabled *x86-64-stack-protector-enabled*))
           (*x86-64-omit-frame-pointer*
             (if (or stack-protector sanitizer-enabled *x86-64-stack-protector-enabled*)
                 nil
                 *x86-64-omit-frame-pointer*))
-          (*x86-64-use-retpoline* (or retpoline spectre-mitigations *x86-64-use-retpoline*))
-          (*x86-64-spectre-mitigations-enabled*
-            (or spectre-mitigations *x86-64-spectre-mitigations-enabled*)))
+           (*x86-64-use-retpoline* (or retpoline spectre-mitigations *x86-64-use-retpoline*))
+           (*x86-64-spectre-mitigations-enabled*
+            (or spectre-mitigations *x86-64-spectre-mitigations-enabled*))
+           (*eh-model* (normalize-x86-64-eh-model (or eh-model *eh-model*)))
+           (*zero-cost-eh-enabled* (or *zero-cost-eh-enabled*
+                                       (eq (normalize-x86-64-eh-model (or eh-model *eh-model*))
+                                           :table))))
       (x86-64-peephole-optimize
        (with-output-to-vector (stream)
          (emit-vm-program allocated-program stream)))))))

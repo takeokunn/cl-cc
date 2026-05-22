@@ -11,6 +11,30 @@
 
 (in-suite strings-suite)
 
+(deftest strings-cow-copy-set-isolates-shared-backing
+  "vm-string-copy is shallow, and vm-string-set-char resolves copy-on-write."
+  (let* ((original (cl-cc/vm::vm-string-copy (copy-seq "abc")))
+         (copy (cl-cc/vm::vm-string-copy original)))
+    (cl-cc/vm::vm-string-set-char copy 0 #\z)
+    (assert-equal "abc" (cl-cc/vm::vm-string-materialize original))
+    (assert-equal "zbc" (cl-cc/vm::vm-string-materialize copy))))
+
+(deftest strings-cow-subseq-is-displaced-and-freeze-protects
+  "vm-string-subseq uses displaced COW metadata; string-freeze rejects writes."
+  (let ((slice (cl-cc/vm::vm-string-subseq "abcdef" 2 5)))
+    (assert-equal "cde" (cl-cc/vm::vm-string-materialize slice))
+    (assert-equal 2 (cl-cc/vm::vm-cow-string-start slice))
+    (cl-cc/vm::string-freeze slice)
+    (assert-signals error (cl-cc/vm::vm-string-set-char slice 0 #\X))))
+
+(deftest strings-taint-mark-untaint
+  "taint-mark sets taint and untaint clears it for host strings."
+  (let ((s (copy-seq "unsafe")))
+    (cl-cc/vm::taint-mark s)
+    (assert-true (cl-cc/vm::tainted-p s))
+    (cl-cc/vm::untaint s)
+    (assert-false (cl-cc/vm::tainted-p s))))
+
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun str-vm ()

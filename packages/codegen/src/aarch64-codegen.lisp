@@ -26,6 +26,56 @@
 (defconstant +a64-scs-tmp+ 17 "Scratch register used for shadow call stack checks / X17.")
 (defconstant +a64-stack-probe-scratch+ 16 "Scratch register used for stack probing / X16.")
 
+(defparameter *aarch64-cfi-enabled* nil
+  "When true, emit BTI landing-pad instructions.")
+
+(defparameter *aarch64-pac-enabled* nil
+  "When true, emit PACIASP/AUTIASP return-address signing instructions.")
+
+(defparameter *aarch64-shadow-call-stack-enabled* nil
+  "When true, emit X18 shadow-call-stack save/verify sequences.")
+
+(defparameter *aarch64-stack-protector-enabled* nil
+  "When true, emit TPIDR_EL0 stack-canary load/check sequences.")
+
+(defparameter *aarch64-stack-clash-protection-enabled* nil
+  "When true, emit AArch64 stack-clash page probes.")
+
+(defparameter *aarch64-safe-stack-enabled* nil
+  "When true, emit experimental TPIDR_EL0 SafeStack pointer sequences.")
+
+(defparameter *aarch64-sve-enabled* nil
+  "When true, SVE encoders may be selected by higher-level lowering.")
+
+(defparameter *aarch64-sve2-enabled* nil
+  "When true, SVE2 encoders may be selected by higher-level lowering.")
+
+(defparameter *aarch64-atomics-enabled* nil
+  "When true, VM atomic operations may be lowered to AArch64 atomics.")
+
+(defparameter *sme-enabled* nil
+  "When true, experimental ARM SME encoders may be selected by higher-level lowering.")
+
+(defconstant +a64-za+ 0
+  "ARM SME ZA matrix storage architectural identifier used by encoder stubs.")
+
+(defconstant +a64-tpidr-el0-reg+ #b110111000010000
+  "System register encoding for TPIDR_EL0.")
+
+(defconstant +a64-stack-canary-tls-offset+ 40
+  "Experimental TPIDR_EL0-relative stack-canary offset.")
+
+(defconstant +a64-safe-stack-tls-offset+ 112
+  "Experimental TPIDR_EL0-relative SafeStack pointer offset.")
+
+(defparameter *aarch64-sve-z-regs*
+  (loop for i below 32 collect (intern (format nil "Z~D" i) :keyword))
+  "SVE Z0-Z31 register names.")
+
+(defparameter *aarch64-sve-p-regs*
+  (loop for i below 16 collect (intern (format nil "P~D" i) :keyword))
+  "SVE predicate P0-P15 register names.")
+
 ;;; Dynamic variable holding current regalloc during code generation
 
 (defparameter *current-a64-regalloc* nil
@@ -343,6 +393,70 @@
 (defenc br #xD61F0000 (rn)
   "BR Xn (indirect tail jump through register)."
   (rn #x1F 5))
+
+(defun encode-bti-c () #xD503245F)
+(defun encode-bti-j () #xD503249F)
+(defun encode-paciasp () #xD503233F)
+(defun encode-autiasp () #xD50323BF)
+
+(defun encode-mrs-tpidr-el0 (rt)
+  "MRS Rt, TPIDR_EL0."
+  (logior #xD53BD040 (logand rt #x1F)))
+
+(defun encode-msr-tpidr-el0 (rt)
+  "MSR TPIDR_EL0, Rt."
+  (logior #xD51BD040 (logand rt #x1F)))
+
+(defun encode-rdvl (rd imm6)
+  "RDVL Xd, #imm6 (SVE)."
+  (logior #x04BF5000 (ash (logand imm6 #x3F) 5) (logand rd #x1F)))
+
+(defun encode-whilelt-d (pd rn rm)
+  "WHILELT Pd.D, Xn, Xm (SVE)."
+  (logior #x2520E000 (ash (logand rm #x1F) 16) (ash (logand rn #x1F) 5)
+          (logand pd #xF)))
+
+(defun encode-sve-add-z (zd pg zn zm)
+  "ADD Zd.D, Pg/M, Zn.D, Zm.D (SVE/SVE2 representative encoder)."
+  (logior #x04C00000 (ash (logand zm #x1F) 16) (ash (logand pg #x7) 10)
+          (ash (logand zn #x1F) 5) (logand zd #x1F)))
+
+(defun encode-sve2-eor-z (zd pg zn zm)
+  "EOR Zd.D, Pg/M, Zn.D, Zm.D (SVE2 representative encoder)."
+  (logior #x04C30000 (ash (logand zm #x1F) 16) (ash (logand pg #x7) 10)
+          (ash (logand zn #x1F) 5) (logand zd #x1F)))
+
+;;; --- SME representative encoders (FR-574) ---
+
+(defun encode-smstart (&optional (mode :sm))
+  "Encode SMSTART for MODE (:SM, :ZA, or :BOTH).
+
+These encoders are default-disabled through *SME-ENABLED* and exist to keep SME
+feature plumbing explicit until full lowering is implemented."
+  (ecase mode
+    (:sm #xD503437F)
+    (:za #xD503457F)
+    (:both #xD503477F)))
+
+(defun encode-smstop (&optional (mode :sm))
+  "Encode SMSTOP for MODE (:SM, :ZA, or :BOTH)."
+  (ecase mode
+    (:sm #xD503427F)
+    (:za #xD503447F)
+    (:both #xD503467F)))
+
+(defun encode-fmopa (za-slice pn pm zn zm)
+  "Encode a representative SME FMOPA ZA slice, Pn/M, Pm/M, Zn, Zm instruction."
+  (logior #x80800000
+          (ash (logand zm #x1F) 16)
+          (ash (logand pm #x7) 13)
+          (ash (logand pn #x7) 10)
+          (ash (logand zn #x1F) 5)
+          (logand za-slice #x1F)))
+
+(defun aarch64-supports-sme-p ()
+  "Return true only when experimental ARM SME support is enabled."
+  (and *sme-enabled* t))
 
 ;;; --- RET (fixed encoding, no variable fields) ---
 

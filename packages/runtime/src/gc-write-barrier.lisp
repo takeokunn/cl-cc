@@ -20,6 +20,49 @@ Each nested table maps logical thread ids to a private LIFO queue.  In native
 backends these queues can be thread-local lock-free buffers; the Pure CL runtime
   uses ordinary lists because mutation is cooperative and serialized by the host.")
 
+(defparameter *write-barrier-opt-enabled* nil
+  "When true, enable FR-542 write-barrier optimizations.
+
+The default is NIL to preserve the historical barrier path and the 7746/0 test
+baseline unless a runtime explicitly opts in.  When enabled the barrier elides
+stack-allocated objects, merges consecutive barriers for the same object within a
+GC cycle, and avoids repeatedly marking the same card in one GC cycle.")
+
+(defvar *rt-stack-allocated-object-registry* (make-hash-table :test #'eq)
+  "Heap -> EQL table of object addresses proven stack-allocated by FR-516.")
+
+(defvar *rt-gc-barrier-last-object* (make-hash-table :test #'eq)
+  "Heap -> (OBJ-ADDR . GC-CYCLE) for FR-542 consecutive barrier merging.")
+
+(defvar *rt-gc-card-mark-cycle-table* (make-hash-table :test #'eq)
+  "Heap -> EQL table mapping card indexes to the GC cycle they were marked in.")
+
+(defun rt-gc-current-cycle (heap)
+  "Return a monotonically nondecreasing GC cycle token for HEAP."
+  (+ (rt-heap-minor-gc-count heap)
+     (rt-heap-major-gc-count heap)))
+
+(defun rt-gc-register-stack-allocated-object (heap obj-addr)
+  "Record OBJ-ADDR as stack-allocated for FR-542 barrier elision."
+  (check-type heap rt-heap)
+  (check-type obj-addr integer)
+  (let ((table (or (gethash heap *rt-stack-allocated-object-registry*)
+                   (setf (gethash heap *rt-stack-allocated-object-registry*)
+                         (make-hash-table :test #'eql)))))
+    (setf (gethash obj-addr table) t)
+    obj-addr))
+
+(defun rt-gc-stack-allocated-object-p (heap obj-addr)
+  "Return true when OBJ-ADDR is known to be stack allocated in HEAP."
+  (let ((table (and heap (gethash heap *rt-stack-allocated-object-registry*))))
+    (and table (integerp obj-addr) (gethash obj-addr table))))
+
+(defun rt-gc-clear-stack-allocated-objects (heap)
+  "Clear FR-516/FR-542 stack-allocation barrier-elision records for HEAP."
+  (let ((table (gethash heap *rt-stack-allocated-object-registry*)))
+    (when table (clrhash table)))
+  heap)
+
 (defun %rt-gc-satb-sb-thread-function (name)
   "Return the SB-THREAD function named NAME, or NIL when unavailable."
   (ignore-errors
@@ -40,13 +83,22 @@ backends these queues can be thread-local lock-free buffers; the Pure CL runtime
 
 (defmacro with-gc-satb-thread-queues-locked (() &body body)
   "Execute BODY while holding the SATB thread-queue hash-table mutex."
-  (let ((fn (gensym "CALL-WITH-MUTEX"))
-        (lock (gensym "LOCK")))
+  (let ((grab (gensym "GRAB-MUTEX"))
+        (release (gensym "RELEASE-MUTEX"))
+        (lock (gensym "LOCK"))
+        (locked (gensym "LOCKED")))
     `(let ((,lock *rt-gc-satb-thread-queues-lock*))
        (if ,lock
-           (let ((,fn (%rt-gc-satb-sb-thread-function "CALL-WITH-MUTEX")))
-             (if ,fn
-                 (funcall ,fn (lambda () ,@body) ,lock)
+           (let ((,grab (%rt-gc-satb-sb-thread-function "GRAB-MUTEX"))
+                 (,release (%rt-gc-satb-sb-thread-function "RELEASE-MUTEX"))
+                 (,locked nil))
+             (if (and ,grab ,release)
+                 (unwind-protect
+                      (progn
+                        (funcall ,grab ,lock)
+                        (setf ,locked t)
+                        ,@body)
+                   (when ,locked (funcall ,release ,lock)))
                  (progn ,@body)))
            (progn ,@body)))))
 
@@ -58,9 +110,30 @@ backends these queues can be thread-local lock-free buffers; the Pure CL runtime
   "Apply pending batched card marks and clear the barrier buffer."
   (dolist (old-addr (rt-heap-barrier-buffer heap))
     (when (and (integerp old-addr) (rt-old-addr-p heap old-addr))
-      (rt-card-mark-dirty heap old-addr)))
+      (%rt-gc-mark-card-once heap old-addr)))
   (setf (rt-heap-barrier-buffer heap) nil)
   t)
+
+(defun %rt-gc-barrier-merged-p (heap obj-addr)
+  "Return true if OBJ-ADDR already had the immediately preceding barrier."
+  (when (and *write-barrier-opt-enabled* (integerp obj-addr))
+    (let* ((cycle (rt-gc-current-cycle heap))
+           (last (gethash heap *rt-gc-barrier-last-object*)))
+      (setf (gethash heap *rt-gc-barrier-last-object*) (cons obj-addr cycle))
+      (and last (= (car last) obj-addr) (= (cdr last) cycle)))))
+
+(defun %rt-gc-mark-card-once (heap obj-addr)
+  "Mark OBJ-ADDR's card dirty, at most once per GC cycle when FR-542 is enabled."
+  (if (not *write-barrier-opt-enabled*)
+      (rt-card-mark-dirty heap obj-addr)
+      (let* ((card-index (rt-card-index heap obj-addr))
+             (cycle (rt-gc-current-cycle heap))
+             (table (or (gethash heap *rt-gc-card-mark-cycle-table*)
+                        (setf (gethash heap *rt-gc-card-mark-cycle-table*)
+                              (make-hash-table :test #'eql)))))
+        (unless (= (gethash card-index table -1) cycle)
+          (setf (gethash card-index table) cycle)
+          (rt-card-mark-dirty heap obj-addr)))))
 
 (defun %rt-gc-satb-thread-table (heap &key create)
   (with-gc-satb-thread-queues-locked ()
@@ -124,6 +197,12 @@ Both NaN-boxed pointer values and canonical internal heap addresses are recogniz
    Then performs the actual write."
   (let ((slot-addr (+ obj-addr slot-offset))
         (state     (rt-heap-gc-state heap)))
+    ;; FR-542: objects proven stack-allocated by FR-516 are invisible to the heap
+    ;; remembered set and SATB snapshot, so only the actual store is required.
+    (when (and *write-barrier-opt-enabled*
+               (rt-gc-stack-allocated-object-p heap obj-addr))
+      (return-from rt-gc-write-barrier
+        (rt-heap-set heap slot-addr new-val)))
     ;; Young-to-young writes cannot violate SATB or old->young remembered-set
     ;; invariants, so bypass all barrier bookkeeping.
     ;;; FR-335: Write Barrier Young-to-Young Elision — skips SATB and card marking when both old and new values are in young space
@@ -132,24 +211,27 @@ Both NaN-boxed pointer values and canonical internal heap addresses are recogniz
                  (and target (rt-young-addr-p heap target))))
       (return-from rt-gc-write-barrier
         (rt-heap-set heap slot-addr new-val)))
-    ;; SATB snapshot: during major GC, preserve old pointer before overwrite
-    (when (member state '(:major-gc :major-gc-concurrent) :test #'eq)
-      (let ((old-val (rt-heap-ref heap slot-addr))
-            (h       (rt-heap-object-header heap obj-addr)))
-        (let ((old-addr (%rt-gc-write-barrier-addr-p heap old-val)))
-          (when (and (integerp h)
-                     (header-marked-p h)
-                     old-addr)
-             (if (eq state :major-gc-concurrent)
-                 (rt-gc-satb-enqueue heap old-val)
-                 (push old-val (rt-heap-satb-queue heap)))))))
+    ;; SATB snapshot: during major GC, preserve old pointer before overwrite.
+    ;; FR-542 merges consecutive barriers for the same object in a single GC
+    ;; cycle; the card-table path below is merged by %RT-GC-MARK-CARD-ONCE.
+    (unless (%rt-gc-barrier-merged-p heap obj-addr)
+      (when (member state '(:major-gc :major-gc-concurrent) :test #'eq)
+        (let ((old-val (rt-heap-ref heap slot-addr))
+              (h       (rt-heap-object-header heap obj-addr)))
+          (let ((old-addr (%rt-gc-write-barrier-addr-p heap old-val)))
+            (when (and (integerp h)
+                       (header-marked-p h)
+                       old-addr)
+              (if (eq state :major-gc-concurrent)
+                  (rt-gc-satb-enqueue heap old-val)
+                  (push old-val (rt-heap-satb-queue heap))))))))
     ;; Card table: record old->young pointer
     (when (and (integerp obj-addr) (rt-old-addr-p heap obj-addr))
       (when (let ((target (%rt-gc-write-barrier-addr-p heap new-val)))
               (and target (rt-young-addr-p heap target)))
         (if *rt-use-barrier-batching*
             (push obj-addr (rt-heap-barrier-buffer heap))
-            (rt-card-mark-dirty heap obj-addr))))
+            (%rt-gc-mark-card-once heap obj-addr))))
     ;; Perform the write
     (rt-heap-set heap slot-addr new-val)))
 

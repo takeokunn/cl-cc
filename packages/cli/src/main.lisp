@@ -27,6 +27,8 @@ Commands:
   repl                    Start interactive REPL
   check    <file>         Type-check only, no execution
   selfhost [file]         Run the self-hosting profile workload
+  install  <system.asd>   Register/compile a local ASDF system
+  uninstall <system>      Remove a registered local system
   help     [command]      Show this help or command-specific help
 
 Options:
@@ -41,6 +43,7 @@ Options:
   --jit-cache-stats       Print JIT code-cache hit/eviction statistics
   --stack-protector       Enable stack canary checks in native prologue/epilogue
   --shadow-stack          Enable CET shadow-stack planning/integration path
+  --eh-model sjlj|table   Select legacy SJLJ or DWARF table zero-cost EH
   --compress              Add compressed code payload sections when supported
   --no-compress           Disable code payload compression (default)
   --stdlib                Eagerly prepend standard library (run/eval/repl)
@@ -56,13 +59,16 @@ Options:
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
   --pgo-generate <file>   Write lightweight optimizer profile data
   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+  --bolt                  Enable BOLT-style native binary layout optimization
   --profile               Enable VM profile collection/reporting
   --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
-  --timeout <seconds>     Maximum execution time (run/compile/eval/repl)
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
   --dump-image <file>     Dump an initialized SBCL image/executable
+  --system <name>         Compile an ASDF system and dependencies
 
 Version: ~A~%" *version*))
 
@@ -87,11 +93,14 @@ Options:
   --time-passes          Alias for --print-pass-timings
    --trace-json <file>     Write Chrome trace JSON for optimizer passes
    --pgo-generate <file>   Write lightweight optimizer profile data
-    --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+     --pgo-use <file>        Load optimizer profile data (speed/policy hint)
+     --bolt                  Enable BOLT-style native binary layout optimization
    --profile               Print a sampled VM frame report
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
  ")
     ("compile" . "Usage: cl-cc compile [options] <file>
 
@@ -99,6 +108,7 @@ Options:
 
 Options:
   -o, --output <file>   Output file (default: input without extension)
+  --system <name>       Compile ASDF system NAME instead of a single file
   --arch x86-64|arm64   Target architecture (default: x86-64)
   --lang lisp|php       Source language (auto-detect from .php extension)
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
@@ -109,8 +119,11 @@ Options:
   --jit-cache-stats     Print JIT code-cache hit/eviction statistics
   --stack-protector     Enable stack canary checks in native prologue/epilogue
   --shadow-stack        Enable CET shadow-stack planning/integration path
+  --eh-model sjlj|table Select legacy SJLJ or DWARF table zero-cost EH
   --compress            Add compressed code payload sections when supported
   --no-compress         Disable code payload compression (default)
+  --deterministic       Strip volatile build timestamps where possible
+  --build-id <id|auto>  Embed a build id/hash marker in native output
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --optimization-report Print per-optimization debugging report lines
   --tier N              Compilation tier: 0 fast, 1 optimized
@@ -126,6 +139,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
  ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
 
@@ -149,6 +164,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
  ")
     ("repl" . "Usage: cl-cc repl [options]
 
@@ -159,6 +176,12 @@ Options:
 Options:
   --stdlib   Prepend standard library on startup
   --no-stdlib Disable lazy stdlib auto-require
+  --timeout <seconds>     Per-form execution timeout (default: 30 seconds)
+  --no-timeout            Disable REPL form timeout for debugging
+
+Commands:
+  :inspect <expr>    Print the evaluated object's type and slots/contents
+  :describe <name>   Print documentation and host description
 
 Examples:
   * (defun square (x) (* x x))
@@ -174,7 +197,9 @@ Examples:
   --lang lisp|php   Source language
   --strict          Treat type warnings as errors (exit 1)
   --verbose         Show type-inference details on stderr
-  ")
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
+   ")
     ("selfhost" . "Usage: cl-cc selfhost [options] [file]
 
   Run a self-hosting workload through the CL-CC VM.
@@ -185,8 +210,17 @@ Options:
   --stdlib          Eagerly prepend standard library
   --no-stdlib       Disable lazy stdlib auto-require
   --verbose         Show compilation details on stderr
-  --timeout <sec>   Maximum execution time
+  --timeout <seconds>     Maximum execution time (default: 30 seconds)
+  --no-timeout            Disable CLI timeout for debugging
  ")
+    ("install" . "Usage: cl-cc install <system.asd>
+
+  Register a local ASDF system file for cl-cc system compilation.
+")
+    ("uninstall" . "Usage: cl-cc uninstall <system>
+
+  Remove a previously registered local ASDF system from the cl-cc registry.
+")
   )
   "Alist mapping command name strings to their help text strings.")
 
@@ -211,10 +245,10 @@ Options:
 (defparameter *cli-command-dispatch*
   '(("run"      . %do-run)
     ("compile"  . %do-compile)
-    ("eval"     . %do-eval)
-    ("repl"     . %do-repl)
-    ("check"    . %do-check)
-    ("selfhost" . %do-selfhost))
+     ("eval"     . %do-eval)
+     ("repl"     . %do-repl)
+     ("check"    . %do-check)
+     ("selfhost" . %do-selfhost))
   "Alist mapping command name strings to their handler functions.")
 
 (defun main ()
@@ -242,9 +276,13 @@ subcommands, then dispatches to the appropriate handler."
          (%print-global-help)
          (uiop:quit 0))
         ((string= command "help")
-         (%print-help (car (parsed-args-positional parsed)))
-         (uiop:quit 0))
-         (t
+          (%print-help (car (parsed-args-positional parsed)))
+          (uiop:quit 0))
+        ((string= command "install")
+         (%do-install parsed))
+        ((string= command "uninstall")
+         (%do-uninstall parsed))
+          (t
           (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
             (if entry
                 (let ((cl-cc/optimize:*optimization-report-stream*

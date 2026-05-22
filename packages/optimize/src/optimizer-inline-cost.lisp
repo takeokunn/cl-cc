@@ -224,9 +224,17 @@ does not weaken any structural safety checks."
 
 (defun %opt-inline-effective-threshold (def threshold profile-data)
   "Resolve THRESHOLD for DEF, honoring the adaptive policy when requested."
-  (if (eq threshold :adaptive)
-      (opt-adaptive-inline-threshold def :profile-data profile-data)
-      threshold))
+  (cond
+    ((eq threshold :adaptive)
+     (opt-adaptive-inline-threshold def :profile-data profile-data))
+    ((and (eq threshold :mlgo)
+          (boundp '*mlgo-enabled*)
+          (symbol-value '*mlgo-enabled*)
+          (fboundp 'opt-mlgo-inline-threshold))
+     (opt-mlgo-inline-threshold def :profile-data profile-data))
+    ((eq threshold :mlgo)
+     (opt-adaptive-inline-threshold def :profile-data profile-data))
+    (t threshold)))
 
 (defun %opt-inline-candidate-labels (bottom-up-labels func-defs recursive-labels
                                        threshold profile-data)
@@ -449,9 +457,8 @@ left untouched, preserving references to the enclosing compilation unit."
          (vm-call
           (let* ((label (gethash (vm-func-reg inst) reg-track))
                  (def   (and label (gethash label func-defs)))
-                 (effective-threshold (if (and def (eq threshold :adaptive))
-                                           (opt-adaptive-inline-threshold def :profile-data profile-data)
-                                           threshold)))
+                  (effective-threshold (and def
+                                            (%opt-inline-effective-threshold def threshold profile-data))))
             (if (and def
                      (gethash label candidates))
                  (multiple-value-bind (replacement next-base)

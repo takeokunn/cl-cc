@@ -12,6 +12,22 @@
 
 (in-suite io-suite)
 
+(deftest io-print-circle-circular-list
+  "*print-circle* prints circular lists with #n=/#n# labels."
+  (let ((x (list 'a)))
+    (setf (cdr x) x)
+    (let ((printed (cl-cc/vm::vm-write-object-to-string x :circle t)))
+      (assert-true (search "#0=" printed))
+      (assert-true (search "#0#" printed)))))
+
+(deftest io-print-circle-shared-vector
+  "*print-circle* labels shared substructure in vectors."
+  (let* ((shared (list 1 2))
+         (vec (vector shared shared))
+         (printed (cl-cc/vm::vm-write-object-to-string vec :circle t)))
+    (assert-true (search "#0=" printed))
+    (assert-true (search "#0#" printed))))
+
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────
 
 (defun io-vm (&optional (out (make-string-output-stream)))
@@ -309,3 +325,223 @@
       (assert-= 42 (gethash "x" (cl-cc/vm::vm-global-vars clone)))
       (assert-false (eq (cl-cc/vm::vm-global-vars source)
                         (cl-cc/vm::vm-global-vars clone))))))
+
+;;; ─── FR-868: file-position / file-length / with-binary-file ───────────────
+
+(deftest io-file-position-set-returns-boolean
+  "vm-file-position gets the current position and returns T/NIL when setting it."
+  (let ((s (io-vm-full)))
+    (with-input-from-string (stream "abcdef")
+      (cl-cc/vm::vm-reg-set s :stream stream)
+      (io-exec (cl-cc:make-vm-file-position :dst :pos :handle :stream) s)
+      (assert-= 0 (cl-cc/vm::vm-reg-get s :pos))
+      (cl-cc/vm::vm-reg-set s :new-pos 3)
+      (io-exec (cl-cc:make-vm-file-position :dst :ok :handle :stream :position :new-pos) s)
+      (assert-equal t (cl-cc/vm::vm-reg-get s :ok))
+      (assert-equal #\d (read-char stream)))))
+
+(deftest io-file-length-binary-stream
+  "vm-file-length reports byte length for a binary file stream."
+  (let ((path (merge-pathnames (format nil "clcc-io-file-length-~A.bin" (gensym))
+                               (uiop:temporary-directory)))
+        (s (io-vm-full)))
+    (unwind-protect
+         (progn
+           (with-open-file (out path :direction :output :element-type '(unsigned-byte 8)
+                                :if-exists :supersede :if-does-not-exist :create)
+             (write-byte 1 out)
+             (write-byte 2 out)
+             (write-byte 3 out))
+           (with-open-file (in path :direction :input :element-type '(unsigned-byte 8))
+             (cl-cc/vm::vm-reg-set s :stream in)
+             (io-exec (cl-cc:make-vm-file-length :dst :len :handle :stream) s)
+             (assert-= 3 (cl-cc/vm::vm-reg-get s :len))))
+      (when (probe-file path) (delete-file path)))))
+
+(deftest io-with-binary-file-defaults-to-io
+  "with-binary-file opens an unsigned-byte stream suitable for random-access :io."
+  (let ((path (merge-pathnames (format nil "clcc-with-binary-file-~A.bin" (gensym))
+                               (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (cl-cc/vm::with-binary-file (stream path :if-exists :supersede :if-does-not-exist :create)
+             (write-byte 65 stream)
+             (assert-equal t (file-position stream 0))
+             (assert-= 65 (read-byte stream)))
+           (assert-true (probe-file path)))
+      (when (probe-file path) (delete-file path)))))
+
+;;; ─── FR-923: buffered I/O and stream predicates ───────────────────────────
+
+(deftest io-make-buffered-stream-validates-options-and-flushes
+  "make-buffered-stream returns a stream compatible with output control APIs."
+  (let* ((raw (make-string-output-stream))
+         (stream (cl-cc/vm::make-buffered-stream raw :buffer-size 16 :strategy :line)))
+    (assert-eq raw stream)
+    (write-string "abc" stream)
+    (force-output stream)
+    (finish-output stream)
+    (assert-equal "abc" (get-output-stream-string stream))))
+
+(deftest io-stream-query-instructions-on-handle
+  "stream-element-type/open-stream-p/interactive-stream-p work through VM handles."
+  (let ((s (io-vm-full)))
+    (io-exec (cl-cc:make-vm-make-string-stream :dst :handle :direction :input
+                                                :initial-string nil) s)
+    (io-exec (cl-cc:make-vm-stream-element-type-inst :dst :type :src :handle) s)
+    (io-exec (cl-cc:make-vm-open-stream-p :dst :open :src :handle) s)
+    (io-exec (cl-cc:make-vm-interactive-stream-p :dst :interactive :src :handle) s)
+    (assert-equal 'character (cl-cc/vm::vm-reg-get s :type))
+    (assert-equal t (cl-cc/vm::vm-reg-get s :open))
+    (assert-equal nil (cl-cc/vm::vm-reg-get s :interactive))))
+
+;;; ─── FR-924: special streams ───────────────────────────────────────────────
+
+(deftest io-special-string-stream-bridge-alias
+  "String output streams can be read via both ANSI and compatibility aliases."
+  (let ((stream (make-string-output-stream)))
+    (write-string "hello" stream)
+    (assert-equal "hello" (cl-cc/vm::get-output-string-stream stream))))
+
+(deftest io-special-composite-streams
+  "Broadcast, two-way, echo, concatenated, and synonym stream bridges are usable."
+  (let* ((out-a (make-string-output-stream))
+         (out-b (make-string-output-stream))
+         (broadcast (cl-cc/vm::%vm-bridge-make-broadcast-stream out-a out-b))
+         (two-way (cl-cc/vm::%vm-bridge-make-two-way-stream
+                   (make-string-input-stream "x") broadcast))
+         (echo (cl-cc/vm::%vm-bridge-make-echo-stream
+                (make-string-input-stream "y") broadcast))
+         (concat (cl-cc/vm::%vm-bridge-make-concatenated-stream
+                  (make-string-input-stream "ab")
+                  (make-string-input-stream "cd")))
+         (*standard-output* broadcast)
+         (synonym (cl-cc/vm::%vm-bridge-make-synonym-stream '*standard-output*)))
+    (write-char #\A two-way)
+    (assert-equal #\y (read-char echo))
+    (write-char #\B synonym)
+    (assert-equal "abcd" (loop repeat 4 collect (read-char concat) into chars
+                                finally (return (coerce chars 'string))))
+    (finish-output broadcast)
+    (assert-equal "AyB" (get-output-stream-string out-a))
+    (assert-equal "AyB" (get-output-stream-string out-b))))
+
+;;; ─── FR-927: pathname operations ───────────────────────────────────────────
+
+(deftest io-pathname-operations-host-backed
+  "ANSI pathname constructors, accessors, merging, parsing, wildcards, and directory glob work."
+  (let* ((root (uiop:ensure-directory-pathname
+                (merge-pathnames (format nil "clcc-path-fr927-~A/" (gensym))
+                                 (uiop:temporary-directory))))
+         (file (merge-pathnames "alpha.txt" root))
+         (wild (merge-pathnames "*.txt" root)))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist file)
+           (with-open-file (out file :direction :output :if-exists :supersede :if-does-not-exist :create)
+             (write-string "x" out))
+           (let* ((pn (make-pathname :directory (pathname-directory root)
+                                     :name "alpha" :type "txt"))
+                  (merged (merge-pathnames "alpha.txt" root))
+                  (parsed (parse-namestring (namestring file))))
+             (assert-equal (pathname-directory root) (pathname-directory pn))
+             (assert-equal "alpha" (pathname-name pn))
+             (assert-equal "txt" (pathname-type pn))
+             (assert-equal (namestring file) (namestring merged))
+             (assert-equal "alpha.txt" (file-namestring parsed))
+             (assert-true (plusp (length (directory-namestring parsed))))
+             (assert-equal "alpha.txt" (enough-namestring file root))
+             (assert-true (wild-pathname-p wild))
+             (assert-true (pathname-match-p file wild))
+             (assert-= 1 (length (directory wild)))))
+      (when (probe-file file) (delete-file file))
+      (when (probe-file root) (uiop:delete-directory-tree root :validate t)))))
+
+;;; ─── FR-851/852/853/869: networking, DNS, TLS, mmap ───────────────────────
+
+(deftest io-fr851-tcp-localhost-roundtrip
+  "TCP sockets connect, accept, send, receive, and close on localhost only."
+  (let ((listener nil) (client nil) (accepted nil))
+    (unwind-protect
+         (progn
+           (setf listener (cl-cc/vm:make-tcp-socket :reuse-address t :tcp-nodelay t :keepalive t))
+           (cl-cc/vm:socket-bind listener "127.0.0.1" 0)
+           (cl-cc/vm:socket-listen listener 1)
+           (multiple-value-bind (host port) (cl-cc/vm:socket-local-address listener)
+             (assert-equal "127.0.0.1" host)
+             (setf client (cl-cc/vm:make-tcp-socket :tcp-nodelay t))
+             (cl-cc/vm:socket-connect client "127.0.0.1" port)
+             (setf accepted (cl-cc/vm:socket-accept listener))
+             (assert-= 4 (cl-cc/vm:socket-send client #(112 105 110 103)))
+             (multiple-value-bind (payload count) (cl-cc/vm:socket-receive accepted :size 4 :stringp t)
+               (assert-= 4 count)
+               (assert-equal "ping" payload))))
+      (when accepted (cl-cc/vm:socket-close accepted))
+      (when client (cl-cc/vm:socket-close client))
+      (when listener (cl-cc/vm:socket-close listener)))))
+
+(deftest io-fr851-udp-localhost-roundtrip
+  "UDP sockets send and receive datagrams on localhost only."
+  (let ((receiver nil) (sender nil))
+    (unwind-protect
+         (progn
+           (setf receiver (cl-cc/vm:make-udp-socket :reuse-address t))
+           (cl-cc/vm:socket-bind receiver "127.0.0.1" 0)
+           (multiple-value-bind (_host port) (cl-cc/vm:socket-local-address receiver)
+             (declare (ignore _host))
+             (setf sender (cl-cc/vm:make-udp-socket))
+             (cl-cc/vm:socket-connect sender "127.0.0.1" port)
+             (assert-= 3 (cl-cc/vm:socket-send sender #(117 100 112)))
+             (multiple-value-bind (payload count) (cl-cc/vm:socket-receive receiver :size 3 :stringp t)
+               (assert-= 3 count)
+               (assert-equal "udp" payload))))
+      (when sender (cl-cc/vm:socket-close sender))
+      (when receiver (cl-cc/vm:socket-close receiver)))))
+
+(deftest io-fr852-dns-localhost-cache-and-async
+  "DNS resolves localhost, exposes getaddrinfo-style data, and async result completes."
+  (let ((addresses (cl-cc/vm:dns-resolve "localhost" :ttl 60)))
+    (assert-true (member "127.0.0.1" addresses :test #'string=))
+    (assert-true (plusp (length (cl-cc/vm:getaddrinfo "localhost" :service 80))))
+    (let ((async (cl-cc/vm:dns-resolve-async "localhost")))
+      (loop repeat 100
+            until (cl-cc/vm:dns-async-result-done-p async)
+            do (sleep 0.01))
+      (assert-true (cl-cc/vm:dns-async-result-done-p async))
+      (assert-equal nil (cl-cc/vm:dns-async-result-error async))
+      (assert-true (member "127.0.0.1" (cl-cc/vm:dns-async-result-result async)
+                           :test #'string=)))))
+
+(deftest io-fr853-tls-context-and-unsupported-condition
+  "TLS contexts are constructible; wrapping reports TLS-UNSUPPORTED when CL+SSL is absent."
+  (let ((context (cl-cc/vm:make-tls-context :verify-peer t)))
+    (assert-true (cl-cc/vm::tls-context-p context))
+    (unless (find-package :cl+ssl)
+      (let ((socket (cl-cc/vm:make-tcp-socket)))
+        (unwind-protect
+             (assert-signals cl-cc/vm:tls-unsupported
+               (cl-cc/vm:tls-wrap-socket socket context :hostname "localhost"))
+          (cl-cc/vm:socket-close socket))))))
+
+(deftest io-fr869-mmap-file-shared-sync
+  "mmap-file exposes a displaced byte array, syncs shared writable mappings, and auto-closes."
+  (let ((path (merge-pathnames (format nil "clcc-mmap-~A.bin" (gensym))
+                               (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (with-open-file (out path :direction :output :element-type '(unsigned-byte 8)
+                                :if-exists :supersede :if-does-not-exist :create)
+             (write-sequence #(65 66 67) out))
+           (cl-cc/vm:with-mmap (region path :protection :read-write :flags :shared)
+             (let ((array (cl-cc/vm:mmap-array region)))
+               (multiple-value-bind (base offset) (array-displacement array)
+                 (assert-true base)
+                 (assert-= 0 offset))
+               (assert-= 65 (aref array 0))
+               (setf (aref array 1) 90)
+               (cl-cc/vm:mmap-sync region)))
+           (with-open-file (in path :direction :input :element-type '(unsigned-byte 8))
+             (let ((bytes (make-array 3 :element-type '(unsigned-byte 8))))
+               (read-sequence bytes in)
+               (assert-true (equalp #(65 90 67) bytes)))))
+      (when (probe-file path) (delete-file path)))))

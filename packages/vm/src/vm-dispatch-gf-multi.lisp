@@ -26,8 +26,9 @@
   "Pop the top call frame and resume the caller, returning RESULT.
 Returns (values new-pc halt-p halt-result)."
   (if (vm-call-stack state)
-      (destructuring-bind (return-pc dst-reg old-closure-env saved-regs)
+      (destructuring-bind (return-pc dst-reg old-closure-env saved-regs &optional saved-mv-buffer saved-mv-count)
         (vm-pop-call-frame state)
+        (declare (ignore saved-mv-buffer saved-mv-count))
         (vm-profile-return state)
         (vm-restore-registers state saved-regs)
         (vm-reg-set state dst-reg result)

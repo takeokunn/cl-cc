@@ -13,6 +13,137 @@
 Provides a common supertype for heap-allocated VM objects like cons cells,
 closures, and reader states."))
 
+(defun vm-getenv (name)
+  "Return environment variable NAME marked as tainted external input."
+  (let ((value (uiop:getenv (string name))))
+    (and value (taint-mark value :environment))))
+
+;;; ─── FR-899/FR-902: FASL paging hooks and PGO persistence ────────────────
+
+(defvar *fasl-toc-enabled* nil
+  "When true, FASL loading may consult a table-of-contents for demand paging.")
+
+(defvar *fasl-preload-forms* nil
+  "List of FASL TOC keys/forms to eagerly preload before demand paging.")
+
+(defvar *pgo-data-path* #P".cl-cc-pgo.msgpack"
+  "Default path for lightweight persisted PGO data.")
+
+(defstruct fasl-toc
+  "Minimal FASL table-of-contents descriptor for demand-loading hooks."
+  (path nil)
+  (entries (make-hash-table :test #'equal))
+  (mapping nil))
+
+(defun fasl-toc-read (path)
+  "Return a minimal FASL TOC for PATH.
+This intentionally accepts a simple leading plist `(:toc ((key offset length) ...))'
+when present and otherwise returns an empty TOC descriptor."
+  (let ((entries (make-hash-table :test #'equal)))
+    (when (probe-file path)
+      (ignore-errors
+        (with-open-file (in path :direction :input :element-type 'character)
+          (let* ((header (read in nil nil))
+                 (toc-entries (and (consp header)
+                                   (or (getf header :toc) (getf header :entries)))))
+            (when toc-entries
+              (dolist (entry toc-entries)
+                (destructuring-bind (key offset length &rest metadata) entry
+                  (setf (gethash key entries)
+                        (list :offset offset :length length :metadata metadata)))))))))
+    (make-fasl-toc :path path :entries entries)))
+
+(defun fasl-page-fault (toc key)
+  "Demand-load KEY from TOC and return its byte vector, or NIL if unavailable."
+  (let ((entry (and toc (gethash key (fasl-toc-entries toc)))))
+    (when entry
+      (let ((offset (getf entry :offset))
+            (length (getf entry :length)))
+        (when (and (integerp offset) (integerp length) (probe-file (fasl-toc-path toc)))
+          (with-open-file (in (fasl-toc-path toc) :direction :input :element-type '(unsigned-byte 8))
+            (file-position in offset)
+            (let ((buffer (make-array length :element-type '(unsigned-byte 8))))
+              (read-sequence buffer in)
+              buffer)))))))
+
+(defun load-fasl-demand-paged (path &key (preload *fasl-preload-forms*))
+  "Open PATH through the VM mmap abstraction and return a FASL TOC descriptor.
+This is a configuration hook only; callers can use FASL-PAGE-FAULT for actual
+lazy byte retrieval."
+  (let* ((toc (fasl-toc-read path))
+         (mapping (and *fasl-toc-enabled* (probe-file path)
+                       (mmap-file path :protection :read :flags :private))))
+    (setf (fasl-toc-mapping toc) mapping)
+    (dolist (key preload)
+      (fasl-page-fault toc key))
+    toc))
+
+(defun %pgo-write-object (object stream)
+  "Write OBJECT using a tiny MessagePack-inspired tagged text encoding."
+  (cond
+    ((hash-table-p object)
+     (write-char #\H stream)
+     (write (hash-table-count object) :stream stream)
+     (write-char #\Space stream)
+     (maphash (lambda (k v)
+                (%pgo-write-object k stream)
+                (%pgo-write-object v stream))
+              object))
+    ((stringp object) (write-char #\S stream) (write object :stream stream))
+    ((integerp object) (write-char #\I stream) (write object :stream stream))
+    ((symbolp object) (write-char #\Y stream) (write object :stream stream))
+    ((consp object)
+     (write-char #\L stream)
+     (write (length object) :stream stream)
+     (write-char #\Space stream)
+     (dolist (item object) (%pgo-write-object item stream)))
+    ((null object) (write-char #\N stream))
+    (t (write-char #\R stream) (write object :stream stream)))
+  (write-char #\Newline stream))
+
+(defun %pgo-read-object (stream)
+  "Read an object written by %PGO-WRITE-OBJECT."
+  (loop for ch = (peek-char nil stream nil nil)
+        while (and ch (member ch '(#\Space #\Tab #\Return #\Newline)))
+        do (read-char stream nil nil))
+  (let ((tag (read-char stream nil nil)))
+    (case tag
+      (#\H (let ((count (read stream nil 0))
+                 (table (make-hash-table :test #'equal)))
+             (dotimes (_ count table)
+               (declare (ignore _))
+               (setf (gethash (%pgo-read-object stream) table)
+                     (%pgo-read-object stream)))))
+      (#\L (loop repeat (read stream nil 0) collect (%pgo-read-object stream)))
+      (#\S (read stream nil ""))
+      (#\I (read stream nil 0))
+      (#\Y (read stream nil nil))
+      (#\N nil)
+      (#\R (read stream nil nil))
+      ((nil) nil)
+      (otherwise (read stream nil nil)))))
+
+(defun save-pgo-data (data &optional (path *pgo-data-path*))
+  "Persist DATA to PATH using the lightweight PGO tagged encoding."
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (write-line "CLCC-PGO-MSGPACK-1" out)
+    (%pgo-write-object data out))
+  path)
+
+(defun load-pgo-data (&optional (path *pgo-data-path*))
+  "Load PGO data previously written by SAVE-PGO-DATA, or NIL when absent."
+  (when (probe-file path)
+    (with-open-file (in path :direction :input)
+      (let ((magic (read-line in nil nil)))
+        (unless (string= magic "CLCC-PGO-MSGPACK-1")
+          (error "Unsupported PGO data file: ~A" path))
+        (%pgo-read-object in)))))
+
+(export '(*fasl-toc-enabled* *fasl-preload-forms* *pgo-data-path*
+          fasl-toc-read fasl-page-fault load-fasl-demand-paged
+          save-pgo-data load-pgo-data))
+
 ;;; VM Heap Address Wrapper
 
 (defstruct vm-heap-address
@@ -190,6 +321,106 @@ serialized bytecode/tests that constructed closures with :CAPTURED-VALUES."
                   (and (>= (length name) 6)
                        (string= name "CL-CC/" :end1 6)))))))
 
+;;; ─── Multi-VM instance support (FR-813) ─────────────────────────────────────
+
+(defstruct vm-parent-environment
+  "Read-only shared environment used as a parent for VM instances."
+  (globals (make-hash-table :test #'eq) :read-only t)
+  (functions (make-hash-table :test #'eq) :read-only t)
+  (symbols (make-hash-table :test #'eq) :read-only t))
+
+(defvar *vm-instance-parent-envs* (make-hash-table :test #'eq :weakness :key)
+  "Weak map from vm-state objects to their optional shared parent environment.")
+
+(defvar *vm-instance-locks* (make-hash-table :test #'eq :weakness :key)
+  "Weak map from vm-state objects to per-instance mutexes.")
+
+(defun vm-instance-parent-env (state)
+  "Return STATE's read-only parent environment, if any."
+  (gethash state *vm-instance-parent-envs*))
+
+(defun vm-instance-lock (state)
+  "Return STATE's isolation mutex, creating it lazily when needed."
+  (or (gethash state *vm-instance-locks*)
+      (setf (gethash state *vm-instance-locks*)
+            (sb-thread:make-mutex :name "cl-cc/vm instance lock"))))
+
+(defmacro with-vm-instance-lock ((state) &body body)
+  "Execute BODY while holding STATE's per-instance isolation mutex."
+  `(sb-thread:with-mutex ((vm-instance-lock ,state))
+     ,@body))
+
+(defun %vm-copy-hash-table (source &key (test #'eq))
+  "Return a shallow copy of SOURCE using TEST."
+  (let ((copy (make-hash-table :test test)))
+    (when source
+      (maphash (lambda (key value)
+                 (setf (gethash key copy) value))
+               source))
+    copy))
+
+(defun %vm-parent-hash (parent-env reader)
+  "Return one hash table from PARENT-ENV using READER, accepting raw tables too."
+  (cond
+    ((null parent-env) nil)
+    ((typep parent-env 'vm-parent-environment) (funcall reader parent-env))
+    ((hash-table-p parent-env) parent-env)
+    (t nil)))
+
+(defun make-vm-instance (&key parent-env)
+  "Create an independent vm-state with optional read-only PARENT-ENV.
+
+Each instance receives fresh heap, register, global, function, class, and symbol
+tables through vm-state initialization.  PARENT-ENV is recorded separately and is
+consulted by helper lookups without mutating the shared environment."
+  (let ((state (make-instance 'vm-state)))
+    (when parent-env
+      (setf (gethash state *vm-instance-parent-envs*) parent-env))
+    (setf (gethash state *vm-instance-locks*)
+          (sb-thread:make-mutex :name "cl-cc/vm instance lock"))
+    state))
+
+(defun vm-instance-global-value (state symbol &optional default)
+  "Return SYMBOL's value from STATE or its read-only parent environment."
+  (multiple-value-bind (value present-p)
+      (gethash symbol (vm-global-vars state))
+    (if present-p
+        (values value t)
+        (let ((parent-globals (%vm-parent-hash (vm-instance-parent-env state)
+                                               #'vm-parent-environment-globals)))
+          (if parent-globals
+              (gethash symbol parent-globals default)
+              (values default nil))))))
+
+(defun vm-instance-function-value (state symbol &optional default)
+  "Return SYMBOL's function from STATE or its read-only parent environment."
+  (multiple-value-bind (value present-p)
+      (gethash symbol (vm-function-registry state))
+    (if present-p
+        (values value t)
+        (let ((parent-functions (%vm-parent-hash (vm-instance-parent-env state)
+                                                 #'vm-parent-environment-functions)))
+          (if parent-functions
+              (gethash symbol parent-functions default)
+              (values default nil))))))
+
+(defun transfer-value (value from-vm to-vm)
+  "Transfer VALUE from FROM-VM to TO-VM through readable serialization.
+
+The current VM stores host-readable values, so a write/read round trip provides a
+stable ownership boundary and avoids sharing mutable cons/vector/hash instances
+between VM heaps.  Heap addresses are serialized as tagged address descriptors so
+callers do not accidentally dereference addresses from another instance."
+  (declare (ignore to-vm))
+  (with-vm-instance-lock (from-vm)
+    (let ((*print-readably* t)
+          (*read-eval* nil))
+      (read-from-string
+       (write-to-string
+        (typecase value
+          (vm-heap-address (list :vm-heap-address (vm-heap-address-value value)))
+          (t value)))))))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %vm-instruction-sexp-position-form (position)
     "Return the SEXP accessor form for the 1-based instruction operand POSITION."
@@ -342,6 +573,8 @@ Options:
   (pc nil)
   (label nil)
   (live-regs nil)
+  (vreg->preg nil)
+  (inline-stack nil)
   (env nil)
   (description nil))
 
@@ -350,10 +583,31 @@ Options:
   (pc nil)
   (reason nil)
   (registers nil)
+  (physical-registers nil)
   (call-stack nil)
   (closure-env nil)
   (values-list nil)
+  (inline-stack nil)
   (info nil))
+
+(defconstant +maximum-multiple-values+ 64
+  "Maximum number of multiple values preserved in the VM MV frame buffer.")
+
+(defstruct vm-load-time-value-cell
+  "Serialized load-time-value cell metadata stored in VM programs/FASLs."
+  (id 0 :type integer)
+  (form nil)
+  (read-only-p nil)
+  (resolved-p nil)
+  (value nil))
+
+(defvar *deopt-enabled* nil
+  "When true, optimistic guards capture FR-522 deoptimization maps and frames.
+When NIL, guards still take their safe interpreter fallback edge without storing
+deoptimization history.")
+
+(defvar *osr-enabled* nil
+  "When true, loop-header OSR entries may transfer hot interpreter loops to Tier-1 code.")
 
 (defvar *vm-current-program-deopt-info* nil
   "Dynamically bound PC -> deoptimization metadata for the currently running program.")
@@ -545,8 +799,13 @@ Options:
                                              (gethash :host readtable)))
         (cl:get-dispatch-macro-character (car key) (cdr key) readtable))))
 
-;; FR-622: Package locks
+;; FR-622: Package locks (enhanced by FR-896)
 (defvar *vm-package-locks* (make-hash-table :test #'eq))
+
+(eval-when (:load-toplevel :execute)
+  (let ((cl-package (find-package :cl)))
+    (when cl-package
+      (setf (gethash cl-package *vm-package-locks*) t))))
 
 (defun vm-lock-package (package)
   (setf (gethash package *vm-package-locks*) t) package)
@@ -560,3 +819,139 @@ Options:
 (define-condition vm-package-locked-error (error)
   ((package :initarg :package :reader vm-package-locked-error-package))
   (:report (lambda (c s) (format s "Package ~S is locked" (vm-package-locked-error-package c)))))
+
+;;; ─── FR-895: Symbol Table Compaction ─────────────────────────────────────────
+
+(defvar *symbol-table* (make-hash-table :test #'equal)
+  "Dynamic symbol table mapping string-name -> symbol.
+Used by the runtime package layer for intern operations.")
+
+(defvar *symbol-table-frozen* nil
+  "When non-NIL, *symbol-table* is frozen and no new symbols may be added.")
+
+(defvar *symbol-table-compact* nil
+  "When frozen, a sorted vector of (name-string . symbol) pairs for compact
+binary-search lookups. NIL when thawed.")
+
+(defvar *symbol-table-weak* (make-hash-table :test #'equal :weakness :key)
+  "Weak hash-table for GC-collectible symbol tracking.
+Entries are removed when the symbol is no longer referenced elsewhere.")
+
+(defun freeze-symbol-table ()
+  "Freeze *symbol-table*, switching to a read-only compact sorted vector.
+Returns the compact table.  While frozen, `(setf lookup-symbol)` signals an error."
+  (let* ((pairs (loop for name being the hash-keys of *symbol-table*
+                      for sym being the hash-values of *symbol-table*
+                      collect (cons name sym)))
+         (sorted (sort pairs #'string< :key #'car)))
+    (setf *symbol-table-compact* (coerce sorted 'vector))
+    (setf *symbol-table-frozen* t)
+    (values *symbol-table-compact* (hash-table-count *symbol-table*))))
+
+(defun thaw-symbol-table ()
+  "Unfreeze *symbol-table*, restoring dynamic hash-table-based operation."
+  (setf *symbol-table-frozen* nil)
+  (setf *symbol-table-compact* nil)
+  *symbol-table*)
+
+(defun lookup-symbol (name)
+  "Look up a symbol by its NAME string.
+Uses binary search on the compact vector when frozen, otherwise the hash-table."
+  (if *symbol-table-compact*
+      (let* ((pairs *symbol-table-compact*)
+             (len (length pairs))
+             (low 0)
+             (high (1- len)))
+        (loop
+          (when (> low high) (return nil))
+          (let* ((mid (floor (+ low high) 2))
+                 (pair (aref pairs mid))
+                 (key (car pair)))
+            (cond ((string= key name)
+                   (return (cdr pair)))
+                  ((string< key name)
+                   (setf low (1+ mid)))
+                  (t
+                   (setf high (1- mid)))))))
+      (gethash name *symbol-table*)))
+
+(defun (setf lookup-symbol) (sym name)
+  "Register SYM under NAME.  Signals an error when the table is frozen."
+  (when *symbol-table-frozen*
+    (error "Cannot intern new symbol ~S: symbol table is frozen" name))
+  (setf (gethash name *symbol-table*) sym))
+
+(defun register-weak-symbol (sym)
+  "Register SYM in the weak symbol table for GC-collectible tracking.
+Returns SYM."
+  (setf (gethash (symbol-name sym) *symbol-table-weak*) sym)
+  sym)
+
+(defvar *symbol-index-table* nil
+  "Lazily-built hash-table mapping symbol -> sequential index for profiling.")
+
+(defun symbol-index (sym)
+  "Return a sequential integer index for SYM, suitable for profiler/debugger
+metadata.  Indexes are assigned monotonically starting from 0."
+  (unless *symbol-index-table*
+    (setf *symbol-index-table* (make-hash-table :test #'eq)))
+  (or (gethash sym *symbol-index-table*)
+      (let ((idx (hash-table-count *symbol-index-table*)))
+        (setf (gethash sym *symbol-index-table*) idx)
+        idx)))
+
+;;; ─── FR-896: Package Lock / Sealed ──────────────────────────────────────────
+
+(defvar *locked-packages* (list (find-package :cl))
+  "List of locked packages.  Defaults to COMMON-LISP.
+Use LOCK-PACKAGE / UNLOCK-PACKAGE to manage.")
+
+(defun lock-package (package &optional (lock t))
+  "Lock PACKAGE (when LOCK is non-NIL) or unlock it.
+Locked packages prevent new symbol internment, export, import, and shadowing."
+  (if lock
+      (progn (pushnew package *locked-packages* :test #'eq)
+             (vm-lock-package package))
+      (progn (setf *locked-packages* (remove package *locked-packages* :test #'eq))
+             (vm-unlock-package package)))
+  package)
+
+(defun unlock-package (package)
+  "Unlock PACKAGE (convenience wrapper)."
+  (lock-package package nil))
+
+(defun package-locked-p (package)
+  "Return T when PACKAGE is locked."
+  (vm-package-locked-p package))
+
+(define-condition package-locked-error (vm-package-locked-error)
+  ()
+  (:report (lambda (c s)
+             (format s "Package ~S is locked: no modifications permitted"
+                     (vm-package-locked-error-package c)))))
+
+(defun check-package-lock (package &optional (operation :intern))
+  "Signal PACKAGE-LOCKED-ERROR when PACKAGE is locked.
+OPERATION is :INTERN, :EXPORT, :IMPORT, or :SHADOW (for error messages)."
+  (when (vm-package-locked-p package)
+    (cerror (format nil "Ignore the lock and ~(~A~) anyway" operation)
+            'package-locked-error :package package)))
+
+(defmacro with-unlocked-packages ((&rest packages) &body body)
+  "Execute BODY with PACKAGES temporarily unlocked.
+Each element of PACKAGES is a package designator (symbol or string).
+Packages are re-locked when BODY exits (via UNWIND-PROTECT)."
+  (let ((pkg-vars (mapcar (lambda (p) (gensym (format nil "~A-UNLOCK" p))) packages))
+        (thunk (gensym "WITH-UNLOCKED-THUNK")))
+    `(flet ((,thunk () ,@body))
+       (let ,(mapcar (lambda (pv pd) `(,pv (find-package ,pd))) pkg-vars packages)
+         (unwind-protect
+              (progn
+                ,@(mapcar (lambda (pv)
+                            `(when (and ,pv (vm-package-locked-p ,pv))
+                               (vm-unlock-package ,pv)))
+                          pkg-vars)
+                (,thunk))
+           ,@(mapcar (lambda (pv)
+                        `(when ,pv (vm-lock-package ,pv)))
+                      pkg-vars))))))

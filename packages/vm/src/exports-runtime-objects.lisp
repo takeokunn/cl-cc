@@ -153,7 +153,18 @@
    *vm-macroexpand-1-hook*
    *vm-macroexpand-hook*
     *vm-compile-string-hook*
-    *tier-upgrade-threshold*
-    *vm-recompile-function-hook*
-   *vm-parse-forms-hook*
+     *tier-upgrade-threshold*
+     *vm-recompile-function-hook*
+     *vm-state*
+     *vm-tier-call-counters*
+     *vm-value-profile*
+     vm-tier-note-call
+     vm-tier-hot-p
+     vm-tier-reset-counters
+     vm-record-value-profile
+     vm-value-profile-snapshot
+     with-vm-state-dispatch
+     vm-current-state
+     vm-dispatch-lock-free
+    *vm-parse-forms-hook*
    refine))

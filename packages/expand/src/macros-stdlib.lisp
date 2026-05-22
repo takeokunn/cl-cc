@@ -42,6 +42,15 @@
   "Return VALUE from the nearest NIL block."
   `(return-from nil ,value))
 
+(our-defmacro reset (&body body)
+  "Evaluate BODY under the default delimited-continuation prompt."
+  `(call-with-continuation-prompt (lambda () ,@body) 'reset))
+
+(our-defmacro shift (k &body body)
+  "Capture the continuation up to the nearest RESET prompt and bind it to K."
+  `(call/cc (lambda (,k)
+              (abort-to-prompt 'reset (progn ,@body)))))
+
 ;; ROTATEF macro
 (our-defmacro rotatef (&rest places)
   (labels ((shift-forms (remaining acc)
@@ -97,7 +106,67 @@ ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
                                        `(,(first slot) (slot-value ,inst-var ',(second slot)))
                                        `(,slot (slot-value ,inst-var ',slot))))
                                  slot-names)
-         ,@body))))
+          ,@body))))
+
+;;; FR-839: Iteration protocol.
+;;;
+;;; The host-side iterator object gives macro tests and expander clients a small
+;;; protocol object. DOITERATOR/WITH-ITERATOR expand to public names so the same
+;;; surface protocol can be provided by the VM standard library.
+
+(defstruct (%iterator (:constructor %make-iterator (sequence index limit elt-fn)))
+  sequence
+  (index 0 :type fixnum)
+  (limit 0 :type fixnum)
+  elt-fn)
+
+(defun %iterator-protocol-length (sequence)
+  "Return SEQUENCE length using the extensible protocol when available."
+  (if (and (fboundp 'cl-cc/vm::sequence-protocol-p)
+           (cl-cc/vm::sequence-protocol-p sequence))
+      (cl-cc/vm::length sequence)
+      (length sequence)))
+
+(defun %iterator-protocol-elt (sequence index)
+  "Return SEQUENCE element INDEX using the extensible protocol when available."
+  (if (and (fboundp 'cl-cc/vm::sequence-protocol-p)
+           (cl-cc/vm::sequence-protocol-p sequence))
+      (cl-cc/vm::elt sequence index)
+      (elt sequence index)))
+
+(defun make-iterator (sequence)
+  "Create an iterator object over SEQUENCE."
+  (%make-iterator sequence 0 (%iterator-protocol-length sequence)
+                  #'%iterator-protocol-elt))
+
+(defun iterator-next (iterator)
+  "Return (values VALUE HAS-MORE-P) for ITERATOR."
+  (let ((index (%iterator-index iterator))
+        (limit (%iterator-limit iterator)))
+    (if (>= index limit)
+        (values nil nil)
+        (multiple-value-prog1
+            (values (funcall (%iterator-elt-fn iterator)
+                             (%iterator-sequence iterator)
+                             index)
+                    t)
+          (setf (%iterator-index iterator) (+ index 1))))))
+
+(our-defmacro with-iterator ((iterator sequence) &body body)
+  "Bind ITERATOR to an iterator over SEQUENCE while evaluating BODY."
+  `(let ((,iterator (make-iterator ,sequence)))
+     ,@body))
+
+(our-defmacro doiterator ((var sequence &optional result) &body body)
+  "Iterate VAR over SEQUENCE using MAKE-ITERATOR/ITERATOR-NEXT."
+  (let ((iterator (gensym "ITERATOR"))
+        (has-more-p (gensym "HAS-MORE-P")))
+    `(with-iterator (,iterator ,sequence)
+       (loop
+         (multiple-value-bind (,var ,has-more-p) (iterator-next ,iterator)
+           (unless ,has-more-p
+             (return ,result))
+           ,@body)))))
 
 ;; NTH-VALUE macro - extract nth return value from multiple-values form
 ;; FR-402: capture values list directly for stable semantics across all N.
