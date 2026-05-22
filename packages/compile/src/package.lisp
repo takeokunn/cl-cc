@@ -115,6 +115,7 @@
      #:ctx-tail-position
      #:ctx-target
      #:ctx-diagnostics
+     #:no-allocation
    #:*builtin-special-variables* #:*repl-global-variables*
    #:*repl-label-counter* #:*repl-capture-label-counter*
   #:*labels-boxed-fns* #:*local-tail-jump-fns* #:*compiling-typed-fn*
@@ -149,13 +150,16 @@
    #:compilation-result-globals
    #:compilation-result-type
    #:compilation-result-type-env
-   #:compilation-result-cps
-   #:compilation-result-ast
+    #:compilation-result-cps
+    #:compilation-result-ast
+    #:compilation-result-coverage
     #:compilation-result-vm-instructions
     #:compilation-result-optimized-instructions
-     #:compilation-result-pgo-counter-plan
-     #:compilation-result-errors
-     #:compilation-result-warnings
+    #:compilation-result-pgo-counter-plan
+    #:compilation-result-errors
+    #:compilation-result-warnings
+    #:mcdc-coverage-enabled-p
+    #:collect-mcdc-coverage
 
    ;; ── CPS transformation re-exports ──
    #:cps-transform

@@ -29,8 +29,87 @@
   (vm-instructions nil)
   (optimized-instructions nil)
   (pgo-counter-plan nil)
+  (coverage nil)
   (warnings nil :type list)
   (errors nil :type list))
+
+;;; ── FR-351 MC/DC coverage metadata ────────────────────────────────────────
+
+(defun %normalize-coverage-mode (coverage)
+  "Normalize COVERAGE option into NIL, T, or :MCDC."
+  (cond
+    ((null coverage) nil)
+    ((eq coverage :mcdc) :mcdc)
+    ((and (stringp coverage) (string-equal coverage "mcdc")) :mcdc)
+    (coverage t)))
+
+(defun mcdc-coverage-enabled-p (coverage)
+  "Return true when COVERAGE requests MC/DC condition-decision metadata."
+  (eq (%normalize-coverage-mode coverage) :mcdc))
+
+(defun %mcdc-boolean-op (form)
+  "Return :AND or :OR when FORM is an AND/OR decision with 2+ conditions."
+  (when (and (consp form) (symbolp (car form)) (>= (length (cdr form)) 2))
+    (let ((name (string-upcase (symbol-name (car form)))))
+      (cond ((string= name "AND") :and)
+            ((string= name "OR") :or)
+            (t nil)))))
+
+(defun %mcdc-decision-outcome (operator values)
+  "Evaluate boolean decision OPERATOR over VALUES without evaluating source forms."
+  (case operator
+    (:and (every #'identity values))
+    (:or  (some #'identity values))))
+
+(defun %mcdc-independent-effect-pair (operator conditions index)
+  "Build one non-masking MC/DC pair proving condition INDEX can affect decision."
+  (let* ((neutral (case operator (:and t) (:or nil)))
+         (false-row (loop for _ in conditions for i from 0
+                          collect (if (= i index) nil neutral)))
+         (true-row  (loop for _ in conditions for i from 0
+                          collect (if (= i index) t neutral)))
+         (false-outcome (%mcdc-decision-outcome operator false-row))
+         (true-outcome  (%mcdc-decision-outcome operator true-row)))
+    (list :condition (nth index conditions)
+          :condition-index index
+          :false-row false-row
+          :false-outcome false-outcome
+          :true-row true-row
+          :true-outcome true-outcome
+          :independent-effect (not (eql false-outcome true-outcome)))))
+
+(defun %make-mcdc-decision-entry (form path)
+  "Return MC/DC metadata for one AND/OR decision FORM."
+  (let* ((operator (%mcdc-boolean-op form))
+         (conditions (copy-list (cdr form))))
+    (when operator
+      (list :operator operator
+            :form form
+            :path path
+            :conditions conditions
+            :pairs (loop for i below (length conditions)
+                         collect (%mcdc-independent-effect-pair operator conditions i))))))
+
+(defun %collect-mcdc-decision-entries (form &optional (path nil))
+  "Collect MC/DC decision entries from FORM and nested subforms."
+  (let ((entries nil))
+    (labels ((walk (node current-path)
+               (when (consp node)
+                 (let ((entry (%make-mcdc-decision-entry node current-path)))
+                   (when entry (push entry entries)))
+                 (loop for child in node
+                       for index from 0
+                       do (walk child (append current-path (list index)))))))
+      (walk form path))
+    (nreverse entries)))
+
+(defun collect-mcdc-coverage (forms)
+  "Return MC/DC coverage metadata for AND/OR decisions in FORMS."
+  (let ((decisions (loop for form in forms
+                         for index from 0
+                         append (%collect-mcdc-decision-entries form (list index)))))
+    (when decisions
+      (list :mode :mcdc :decisions decisions))))
 
 ;;; ── FR-138 zero-cost exception table bookkeeping ───────────────────────────
 
@@ -311,7 +390,7 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
 
 (defun %make-compile-opts (&key pass-pipeline speed (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                  print-pass-stats stats-stream trace-json-stream)
+                                  print-pass-stats stats-stream trace-json-stream strict-no-alloc)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
   (let ((resolved-speed (or speed (%global-optimize-quality 'speed))))
   (list :pass-pipeline       pass-pipeline
@@ -325,7 +404,8 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
         :opt-remarks-mode    opt-remarks-mode
         :print-pass-stats    print-pass-stats
         :stats-stream        stats-stream
-        :trace-json-stream   trace-json-stream)))
+        :trace-json-stream   trace-json-stream
+        :strict-no-alloc     strict-no-alloc)))
 
 (defun %ast-declarations-for-optimize-policy (ast)
   "Return declaration list associated with AST when available."
@@ -502,8 +582,18 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
        (%compile-toplevel-ast-into-context ast ctx target type-check opts))
      (values last-reg last-type last-cps type-env compiled-asts)))
 
+(defun %strict-no-alloc-error-p (entry)
+  (typep (getf entry :condition) 'no-allocation-violation))
+
+(defun %maybe-signal-strict-no-alloc-error (errors opts)
+  (when (getf opts :strict-no-alloc)
+    (let ((entry (find-if #'%strict-no-alloc-error-p errors)))
+      (when entry
+        (error (getf entry :condition))))))
+
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier)
   "Finalize CTX after all top-level forms have been compiled."
+  (%maybe-signal-strict-no-alloc-error errors opts)
   (when last-reg
     (emit ctx (make-vm-halt :reg last-reg)))
   (when *repl-capture-label-counter*
@@ -555,10 +645,11 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                              :type-env               (ctx-type-env ctx)
                               :cps                    last-cps
                               :ast                    (nreverse compiled-asts)
-                               :vm-instructions        instructions
-                               :optimized-instructions optimized
-                               :warnings               (nreverse (ctx-diagnostics ctx))
-                               :errors                 (nreverse errors))))
+                                :vm-instructions        instructions
+                                :optimized-instructions optimized
+                                :coverage               nil
+                                :warnings               (nreverse (ctx-diagnostics ctx))
+                                :errors                 (nreverse errors))))
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
@@ -568,11 +659,11 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                         print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                         print-pass-stats stats-stream trace-json-stream
                                          retpoline spectre-mitigations stack-protector shadow-stack
-                                         asan msan tsan ubsan hwasan (compilation-tier 1))
+                                         asan msan tsan ubsan hwasan strict-no-alloc (compilation-tier 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
-  (declare (ignore coverage retpoline spectre-mitigations stack-protector shadow-stack
+  (declare (ignore retpoline spectre-mitigations stack-protector shadow-stack
                    asan msan tsan ubsan hwasan))
   (let ((ctx           (make-instance 'compiler-context :safety safety :target target))
         (last-reg      nil)
@@ -593,7 +684,8 @@ Returns a compilation-result struct with program, assembly, and globals."
                                            :opt-remarks-mode opt-remarks-mode
                                             :print-pass-stats print-pass-stats
                                             :stats-stream stats-stream
-                                            :trace-json-stream trace-json-stream)))
+                                            :trace-json-stream trace-json-stream
+                                            :strict-no-alloc strict-no-alloc)))
     (let ((*compile-time-value-env*    nil)
           (*compile-time-function-env* nil)
           (*pending-exception-table-entries* nil)
@@ -612,7 +704,11 @@ Returns a compilation-result struct with program, assembly, and globals."
                           (setf *string-literal-pool* string-literal-pool-snapshot)
                          (push (%make-toplevel-recovery-error form-index form e) errors))))))
        (setf (ctx-type-env ctx) type-env)
-         (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier))))
+          (let ((result (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier)))
+            (when (mcdc-coverage-enabled-p coverage)
+              (setf (compilation-result-coverage result)
+                    (collect-mcdc-coverage forms)))
+            result))))
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).

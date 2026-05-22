@@ -1,6 +1,64 @@
 ;;;; macros-control-flow.lisp — Control-flow bootstrap macros
 (in-package :cl-cc/expand)
 
+;; ── FR-351: MC/DC Coverage — Dynamic Variables & Runtime Helpers ────────────
+
+(defvar *mcdc-coverage-enabled* nil
+  "When non-NIL, the AND/OR macros emit MC/DC-instrumented code.
+Set to :MCDC by compile-toplevel-forms when --coverage=mcdc is active.")
+
+(defvar *mcdc-coverage-data* (make-hash-table :test #'equal)
+  "MC/DC coverage data: maps (decision-id cond-idx op) → hit-count.")
+
+(defvar *mcdc-decision-counter* 0
+  "Monotonic counter for unique MC/DC decision IDs.")
+
+(defun %mcdc-next-id ()
+  "Return a fresh integer decision ID for MC/DC tracking."
+  (incf *mcdc-decision-counter*))
+
+(defun %mcdc-record-condition (id idx op)
+  "Record that condition IDX of decision ID (operator OP) was the toggling condition.
+Returns NIL for :AND (short-circuit false) and T for :OR (short-circuit true)."
+  (incf (gethash (list id idx op) *mcdc-coverage-data* 0))
+  (case op
+    (:and nil)
+    (:or t)))
+
+(defun %mcdc-eval-and (id thunks)
+  "Evaluate AND conditions with MC/DC tracking.
+THUNKS is a list of (lambda () val) — one per condition.
+Records which condition toggled the decision."
+  (let* ((len (length thunks)))
+    (loop for thunk in thunks
+          for idx from 1
+          for val = (funcall thunk)
+          do (unless val
+               (%mcdc-record-condition id idx :and)
+               (return-from %mcdc-eval-and nil))
+          finally
+             (when (plusp len)
+               (%mcdc-record-condition id idx :and)))
+    t))
+
+(defun %mcdc-eval-or (id thunks)
+  "Evaluate OR conditions with MC/DC tracking.
+THUNKS is a list of (lambda () val) — one per condition.
+Records which condition toggled the decision."
+  (let* ((len (length thunks)))
+    (loop for thunk in thunks
+          for idx from 1
+          for val = (funcall thunk)
+          do (when val
+               (%mcdc-record-condition id idx :or)
+               (return-from %mcdc-eval-or val))
+          finally
+             (when (plusp len)
+               (%mcdc-record-condition id idx :or)))
+    nil))
+
+;; ── Control-flow bootstrap macros ───────────────────────────────────────────
+
 ;; WHEN macro
 (register-macro 'when
   (lambda (form env)
@@ -27,22 +85,30 @@
                       (cons 'progn (cdr clause))
                       (cons 'cond (cdr clauses)))))))))
 
-;; AND macro
+;; AND macro (FR-351: MC/DC support)
 (register-macro 'and
   (lambda (form env)
     (declare (ignore env))
     (let ((args (cdr form)))
       (cond ((null args) t)
             ((null (cdr args)) (car args))
+            (*mcdc-coverage-enabled*
+             (let ((id (%mcdc-next-id)))
+               `(%mcdc-eval-and ,id
+                                (list ,@(mapcar (lambda (a) `(lambda () ,a)) args)))))
             (t (list 'if (car args) (cons 'and (cdr args)) nil))))))
 
-;; OR macro
+;; OR macro (FR-351: MC/DC support)
 (register-macro 'or
   (lambda (form env)
     (declare (ignore env))
     (let ((args (cdr form)))
       (cond ((null args) nil)
             ((null (cdr args)) (car args))
+            (*mcdc-coverage-enabled*
+             (let ((id (%mcdc-next-id)))
+               `(%mcdc-eval-or ,id
+                               (list ,@(mapcar (lambda (a) `(lambda () ,a)) args)))))
             (t (let ((tmp (gensym "OR")))
                  (list 'let (list (list tmp (car args)))
                        (list 'if tmp tmp (cons 'or (cdr args))))))))))

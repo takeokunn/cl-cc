@@ -30,9 +30,6 @@ Synchronized: parallel test workers populate this concurrently.")
   "Runtime callable registry keyed by exported runtime helper name string.
 Synchronized: parallel test workers populate this concurrently.")
 
-(defvar *vm-current-state* nil
-  "Dynamically bound to the VM state while invoking host bridge callables.")
-
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((package (or (find-package :cffi)
                      (make-package :cffi :use '(:cl)))))

@@ -167,8 +167,8 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                  print-pass-stats stats-stream trace-json-stream
                                    retpoline spectre-mitigations stack-protector shadow-stack
-                                    compress asan msan tsan ubsan hwasan
-                                    target-os mir-isel compilation-tier)
+                                     compress asan msan tsan ubsan hwasan strict-no-alloc
+                                     target-os mir-isel compilation-tier)
   "Build a native-compile options plist suitable for APPLYing to compile-* functions."
   (append (list :pass-pipeline pass-pipeline)
           (if speed (list :speed speed) nil)
@@ -195,6 +195,7 @@ code and relocation data from the backend. OUTPUT-PATH is the target file path."
                 :tsan               tsan
                 :ubsan              ubsan
                 :hwasan             hwasan
+                :strict-no-alloc    strict-no-alloc
                 :target-os          (or target-os (%native-host-os)))))
 
 (defun %maybe-compile-native-via-cps (form target opts &key type-check (safety 1))
@@ -514,8 +515,8 @@ don't accept as keyword arguments."
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
                                     retpoline spectre-mitigations stack-protector shadow-stack
-                                     compress asan msan tsan ubsan hwasan
-                                      target-os mir-isel)
+                                      compress asan msan tsan ubsan hwasan strict-no-alloc
+                                       target-os mir-isel)
   "Compile SOURCE to a native executable.
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
@@ -552,6 +553,7 @@ Returns the output file path on success."
                                        :tsan tsan
                                        :ubsan ubsan
                                        :hwasan hwasan
+                                       :strict-no-alloc strict-no-alloc
                                        :target-os effective-target-os))
          (compile-opts (%strip-internal-opts opts))
          (result (%compile-native-source source native-target language compile-opts))
@@ -647,7 +649,7 @@ Returns the output file path on success."
                                              print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                              print-pass-stats stats-stream trace-json-stream
                                                retpoline spectre-mitigations stack-protector shadow-stack
-                                               compress asan msan tsan ubsan hwasan
+                                               compress asan msan tsan ubsan hwasan strict-no-alloc
                                                target-os mir-isel (compilation-tier *compilation-tier*))
   "Compile a CL-CC source file to a native executable.
 INPUT-FILE is the path to the source file.
@@ -683,7 +685,8 @@ TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-det
                                       :tsan tsan
                                       :ubsan ubsan
                                        :hwasan hwasan
-                                      :compilation-tier compilation-tier
+                                       :strict-no-alloc strict-no-alloc
+                                       :compilation-tier compilation-tier
                                        :target-os effective-target-os))
            (cache-key (%compile-cache-key source arch effective-language opts))
           (cache-path (%compile-cache-path cache-key output)))

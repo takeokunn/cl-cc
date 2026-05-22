@@ -240,8 +240,44 @@ around the execution. Returns the value produced by RUN-COMPILED."
     (t
      (handler-case
          (apply #'compile-string source :target :vm kwargs)
-       (error ()
-         (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
+        (error ()
+          (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
+
+(defun %file-write-date-or-nil (path)
+  "Return PATH's write date, or NIL if it cannot be probed."
+  (ignore-errors (file-write-date path)))
+
+(defun %record-hot-reload-source (path source result)
+  "Record SOURCE definitions for later `(hot-reload 'fn)' calls."
+  (cl-cc/vm::%hot-reload-record
+   (namestring (truename path))
+   (cl-cc/vm::%hot-reload-function-names source)
+   result))
+
+(defun %watch-file-poll (path vm-state &key (interval 1))
+  "Poll PATH and hot-reload changed definitions into VM-STATE."
+  (let ((last-write-date (%file-write-date-or-nil path)))
+    (format *error-output* "; cl-cc watch: polling ~A every ~A second~:P~%" path interval)
+    (force-output *error-output*)
+    (loop
+      (sleep interval)
+      (let ((write-date (%file-write-date-or-nil path)))
+        (when (and write-date
+                   (or (null last-write-date) (> write-date last-write-date)))
+          (setf last-write-date write-date)
+          (handler-case
+              (let ((result (cl-cc/vm:hot-reload-file path vm-state)))
+                (format *error-output* "; cl-cc watch: hot-reloaded ~A => ~S~%" path result)
+                (force-output *error-output*))
+            (error (e)
+              (format *error-output* "; cl-cc watch: reload failed: ~A~%" e)
+              (force-output *error-output*))))))))
+
+(defun %start-watch-file-poll-thread (path vm-state)
+  "Start a background polling watcher for PATH."
+  (sb-thread:make-thread
+   (lambda () (%watch-file-poll path vm-state))
+   :name (format nil "cl-cc hot reload watcher: ~A" path)))
 
 (defun %do-run (parsed)
   "Handle the `cl-cc run' subcommand using PARSED command-line arguments.
@@ -257,7 +293,8 @@ exits with status 0 on success."
           (timeout (%get-timeout parsed))
          (opts (%parse-compile-opts parsed))
           (source (%read-command-source file))
-          (no-stdlib (flag parsed "--no-stdlib")))
+           (no-stdlib (flag parsed "--no-stdlib"))
+           (watch (flag parsed "--watch")))
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
@@ -273,18 +310,25 @@ exits with status 0 on success."
                 ((eq language :lisp)
                   (let ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib)))
                     (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%record-hot-reload-source file source ret)
                       (%maybe-write-pgo-profile opts result vm-state)
-                      ret)))
+                      (if watch
+                          (%watch-file-poll file vm-state)
+                          ret))))
                 ((eq language :php)
                  (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
-                   (let ((ret (%run-compiled-result result vm-state opts)))
-                     (%maybe-write-pgo-profile opts result vm-state)
-                     ret)))
+                    (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%maybe-write-pgo-profile opts result vm-state)
+                      (if watch
+                          (%watch-file-poll file vm-state)
+                          ret))))
                  (t
                   (let ((result (apply #'compile-string source :target :vm kwargs)))
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)
-                      ret))))
+                      (if watch
+                          (%watch-file-poll file vm-state)
+                          ret)))))
               (uiop:quit 0)))))
        "run"))))
 
@@ -555,6 +599,40 @@ inside strings for REPL input balancing."
     (%repl-set-global "//" previous-/)
     (%repl-set-global "/" values-list)))
 
+(defun %hot-reload-command-name-p (symbol name)
+  "Return T when SYMBOL names the REPL hot reload command NAME."
+  (and (symbolp symbol)
+       (string= (symbol-name symbol) name)))
+
+(defun %quote-form-value (form)
+  "Return the quoted value of FORM, or FORM itself when it is not QUOTE."
+  (if (and (consp form)
+           (%hot-reload-command-name-p (first form) "QUOTE"))
+      (second form)
+      form))
+
+(defun %try-repl-hot-reload-command (trimmed)
+  "Handle `(hot-reload 'fn)' and `(hot-reload-file "path")' REPL commands.
+Returns T when TRIMMED was a hot reload command."
+  (let ((form (ignore-errors (read-from-string trimmed))))
+    (when (and (consp form) (symbolp (first form)))
+      (cond
+        ((%hot-reload-command-name-p (first form) "HOT-RELOAD")
+         (let* ((name-form (second form))
+                (function-name (%quote-form-value name-form))
+                (result (cl-cc/vm:hot-reload function-name cl-cc/repl::*repl-vm-state*)))
+           (format t "=> ~S~%" result)
+           (force-output)
+           t))
+        ((%hot-reload-command-name-p (first form) "HOT-RELOAD-FILE")
+         (let ((path (second form)))
+           (unless (stringp path)
+             (error "HOT-RELOAD-FILE requires a string path"))
+           (let ((result (cl-cc/vm:hot-reload-file path cl-cc/repl::*repl-vm-state*)))
+             (format t "=> ~S~%" result)
+             (force-output)
+             t)))))))
+
 (defun %do-repl (parsed)
   "Handle the `cl-cc repl' subcommand using PARSED arguments.
 
@@ -563,13 +641,19 @@ balanced forms from *STANDARD-INPUT*, evaluates them through RUN-STRING-REPL,
 prints non-NIL results, and exits cleanly on EOF or quit commands."
   (let ((stdlib (flag parsed "--stdlib"))
         (no-stdlib (flag parsed "--no-stdlib"))
-        (timeout (%get-timeout parsed)))
+        (timeout (%get-timeout parsed))
+        (watch (flag parsed "--watch"))
+        (watch-file (car (parsed-args-positional parsed))))
     (cl-cc:reset-repl-state)
     (cl-cc:%ensure-repl-state)
     (%initialize-repl-completeness-globals)
     (when stdlib
       (handler-case (cl-cc:run-string-repl cl-cc:*standard-library-source*)
         (error () nil)))
+    (when (and watch watch-file)
+      (let ((source (%read-command-source watch-file)))
+        (%record-hot-reload-source watch-file source nil)
+        (%start-watch-file-poll-thread watch-file cl-cc/repl::*repl-vm-state*)))
     (format t "CL-CC ~A  —  ANSI Common Lisp~%" *version*)
     (format t "Type a CL form and press Return. (exit) or Ctrl+D to quit.~%~%")
     (force-output)
@@ -624,17 +708,19 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
                (format t "Goodbye.~%")
                (uiop:quit 0))
               (t
-               (cl-cc:%repl-record-history trimmed)
-               (handler-case
-                   (if timeout
+                (cl-cc:%repl-record-history trimmed)
+                (handler-case
+                    (if timeout
                        (handler-case
                            (sb-ext:with-timeout timeout
-                             (eval-and-print trimmed))
+                              (or (%try-repl-hot-reload-command trimmed)
+                                  (eval-and-print trimmed)))
                          (sb-ext:timeout (c)
                            (declare (ignore c))
                            (format t "; Timeout after ~A second~:P~%" timeout)
                            (force-output)))
-                       (eval-and-print trimmed))
+                        (or (%try-repl-hot-reload-command trimmed)
+                            (eval-and-print trimmed)))
                  (error (e)
                    (format t "; Error: ~A~%" e)
                     (force-output))))))))))))

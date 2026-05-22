@@ -1,16 +1,16 @@
 ;;;; cli/src/main-dump.lisp — ANSI color codes, dump functions, compile-opts struct
-;;;
-;;; Extracted from main-utils.lisp.
-;;; Contains:
-;;;   - +ansi-*+ color code parameters
-;;;   - %dump-{ast,cps,vm,opt,ssa,asm}-phase — IR phase dump functions
-;;;   - %string-suffix-p, %dump-ir-phase, %trace-emit-stages
-;;;   - %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode
-;;;   - compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
-;;;
-;;; Depends on main-utils.lisp (%ensure-list, %source-location-comment,
-;;;   %print-source-comment, %ssa-block-name).
-;;; Load order: immediately after main-utils.lisp.
+;;;;
+;;;; Extracted from main-utils.lisp.
+;;;; Contains:
+;;;;   - +ansi-*+ color code parameters
+;;;;   - %dump-{ast,cps,vm,opt,ssa,asm}-phase — IR phase dump functions
+;;;;   - %string-suffix-p, %dump-ir-phase, %trace-emit-stages
+;;;;   - %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode
+;;;;   - compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
+;;;;
+;;;; Depends on main-utils.lisp (%ensure-list, %source-location-comment,
+;;;;   %print-source-comment, %ssa-block-name).
+;;;; Load order: immediately after main-utils.lisp.
 
 (in-package :cl-cc/cli)
 
@@ -186,6 +186,14 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
 ;;; shared data so each command can call %parse-compile-opts once and then use
 ;;; %compile-opts-kwargs to spread the args onto compile-string.
 
+(defun %parse-coverage-flag (value)
+  "Parse the --coverage flag value.
+Returns T for plain coverage, :MCDC for MC/DC, NIL when unset."
+  (cond
+    ((null value) nil)
+    ((string-equal value "mcdc") :mcdc)
+    (t t)))
+
 (defstruct (compile-opts (:constructor make-compile-opts))
   "Pipeline control and diagnostic flags shared by run / compile / eval."
   (pass-pipeline      nil)
@@ -210,7 +218,8 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
   (msan               nil)
   (tsan               nil)
   (ubsan              nil)
-  (hwasan             nil))
+  (hwasan             nil)
+  (strict-no-alloc    nil))
 
 (defun %parse-compile-opts (parsed)
   "Extract all pipeline/tracing flags from PARSED into a compile-opts struct."
@@ -219,9 +228,9 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
     :tier               (flag parsed "--tier")
     :block-compile      (flag parsed "--block-compile")
     :print-pass-timings (or (flag parsed "--print-pass-timings")
-                           (flag parsed "--time-passes"))
+                            (flag parsed "--time-passes"))
    :trace-json-path    (flag parsed "--trace-json")
-   :coverage           (flag parsed "--coverage")
+   :coverage           (%parse-coverage-flag (flag parsed "--coverage"))
     :pgo-generate-path  (flag parsed "--pgo-generate")
      :pgo-use-path       (flag parsed "--pgo-use")
      :spectre-mitigations (flag parsed "--spectre-mitigations")
@@ -238,7 +247,8 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
    :msan               (flag parsed "--msan")
    :tsan               (flag parsed "--tsan")
    :ubsan              (flag parsed "--ubsan")
-   :hwasan             (flag parsed "--hwasan")))
+   :hwasan             (flag parsed "--hwasan")
+   :strict-no-alloc    (flag parsed "--strict-no-alloc")))
 
 (defun %compile-opts-kwargs (opts stream)
   "Return a flat keyword plist for compile-string.
@@ -306,7 +316,7 @@ STREAM is the resolved trace-json output stream (may be nil)."
                            (compile-opts-tier opts)))
                     nil)
                 (if (compile-opts-coverage opts)
-                    (list :coverage t)
+                    (list :coverage (compile-opts-coverage opts))
                     nil)
                 (if (compile-opts-block-compile opts)
                     (list :block-compile t)
@@ -343,6 +353,9 @@ STREAM is the resolved trace-json output stream (may be nil)."
                    (if (compile-opts-hwasan opts)
                        (list :hwasan t)
                        nil)
-                    (list :print-pass-timings (compile-opts-print-pass-timings opts)
+                   (if (compile-opts-strict-no-alloc opts)
+                       (list :strict-no-alloc t)
+                       nil)
+                     (list :print-pass-timings (compile-opts-print-pass-timings opts)
                          :print-opt-remarks  (not (null remarks))
                        :opt-remarks-mode   (or remarks :all)))))))

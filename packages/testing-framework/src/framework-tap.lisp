@@ -135,11 +135,47 @@ pairs, and optional :BRANCHES as (LINE BLOCK BRANCH HITS) lists or plists."
         (format stream "BRF:~D~%BRH:~D~%end_of_record~%" branch-count branch-hit-count))))
   output-path)
 
+(defun %mcdc-report-path-from-lcov (lcov-path)
+  "Return the default MC/DC report path next to LCOV-PATH."
+  (merge-pathnames #P"coverage-mcdc.txt"
+                   (make-pathname :defaults (pathname lcov-path)
+                                  :name nil :type nil)))
+
+(defun write-mcdc-report (coverage output-path)
+  "Write human-readable MC/DC COVERAGE metadata to OUTPUT-PATH."
+  (ensure-directories-exist output-path)
+  (with-open-file (stream output-path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (format stream "CL-CC MC/DC Coverage Report~%")
+    (format stream "Mode: ~A~%~%" (getf coverage :mode))
+    (dolist (decision (getf coverage :decisions))
+      (format stream "Decision: ~S~%" (getf decision :form))
+      (format stream "Operator: ~A~%" (getf decision :operator))
+      (format stream "Path: ~S~%" (getf decision :path))
+      (format stream "Conditions: ~S~%" (getf decision :conditions))
+      (dolist (pair (getf decision :pairs))
+        (format stream "  Condition ~D (~S): ~:[NO~;YES~]~%"
+                (getf pair :condition-index)
+                (getf pair :condition)
+                (getf pair :independent-effect))
+        (format stream "    false row ~S => ~S~%"
+                (getf pair :false-row)
+                (getf pair :false-outcome))
+        (format stream "    true  row ~S => ~S~%"
+                (getf pair :true-row)
+                (getf pair :true-outcome)))
+      (format stream "~%")))
+  output-path)
+
 (defun generate-coverage-report (&key
-                                   (directory (%coverage-report-directory))
-                                   entries
-                                   lcov-path
-                                   (html t))
+                                    (directory (%coverage-report-directory))
+                                    entries
+                                    lcov-path
+                                    mcdc-coverage
+                                    mcdc-path
+                                    (html t))
   "Generate stable CL-CC coverage artifacts from ENTRIES.
 When HTML is true, writes a small cover-index.html.  When LCOV-PATH is supplied,
 writes an LCOV tracefile.  Returns DIRECTORY."
@@ -147,6 +183,11 @@ writes an LCOV tracefile.  Returns DIRECTORY."
     (%write-simple-coverage-html-index directory entries))
   (when lcov-path
     (write-lcov-report entries lcov-path))
+  (when mcdc-coverage
+    (write-mcdc-report mcdc-coverage
+                       (or mcdc-path
+                           (and lcov-path (%mcdc-report-path-from-lcov lcov-path))
+                           (merge-pathnames #P"coverage-mcdc.txt" directory))))
   directory)
 
 (defmacro with-coverage (options &body body)
@@ -155,16 +196,20 @@ OPTIONS is a plist accepting :REPORT-DIRECTORY, :LCOV-PATH and :ENTRIES for
 stable CL-CC report artifact generation around the covered body."
   (let ((report-directory (getf options :report-directory))
         (lcov-path (getf options :lcov-path))
-        (entries (getf options :entries)))
+        (entries (getf options :entries))
+        (mcdc-coverage (getf options :mcdc-coverage))
+        (mcdc-path (getf options :mcdc-path)))
     `(unwind-protect
           (progn
             (enable-coverage)
             (multiple-value-prog1
                 (progn ,@body)
               (when (or ,report-directory ,lcov-path ,entries)
-                (generate-coverage-report :directory (or ,report-directory (%coverage-report-directory))
-                                          :entries ,entries
-                                          :lcov-path ,lcov-path))))
+                 (generate-coverage-report :directory (or ,report-directory (%coverage-report-directory))
+                                           :entries ,entries
+                                           :lcov-path ,lcov-path
+                                           :mcdc-coverage ,mcdc-coverage
+                                           :mcdc-path ,mcdc-path))))
        (disable-coverage))))
 
 (defun %print-coverage-report (covered-modules)

@@ -243,7 +243,7 @@
       (unless (vm-closure-label-table closure)
         (setf (vm-closure-label-table closure) labels))
       (setf (vm-closure-dispatch-tag closure) (cons :known-function name)))
-    (setf (gethash name (vm-function-registry state)) closure)
+    (vm-register-function-atomic state name closure)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-set-global) state pc labels)

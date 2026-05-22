@@ -173,10 +173,14 @@
     vm-apply
     vm-add-package-local-nickname
     vm-remove-package-local-nickname
-    vm-register-function
-   vm-function-registry
-   vm-resolve-function
-   vm-register-host-bridge
+     vm-register-function
+    vm-function-registry
+    vm-register-function-atomic
+    vm-resolve-function
+    *hot-reload-history*
+    hot-reload
+    hot-reload-file
+    vm-register-host-bridge
    *vm-host-bridge-functions*
    vm-generic-function-p
    vm-resolve-gf-method

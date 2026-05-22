@@ -46,6 +46,7 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (stats-stream       nil)
   (trace-json-stream  nil)
   (coverage           nil)
+  (strict-no-alloc    nil)
   (print-opt-remarks  nil)
   (opt-remarks-stream nil)
   (opt-remarks-mode   :all    :type keyword)

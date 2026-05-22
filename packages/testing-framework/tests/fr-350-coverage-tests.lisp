@@ -39,8 +39,39 @@
 (deftest fr-350-cli-coverage-flag-is-accepted
   "FR-350: CLI argument parsing accepts the --coverage compile flag."
   :tags '(:fr-350)
+  (let ((parsed (cl-cc/cli:parse-args '("compile" "file.lisp" "--coverage" "true"))))
+    (assert-true (cl-cc/cli:flag parsed "--coverage"))))
+
+(deftest fr-351-cli-mcdc-flag-is-accepted
+  "FR-351: CLI argument parsing accepts --coverage=mcdc."
+  :tags '(:fr-351)
+  (let ((parsed (cl-cc/cli:parse-args '("compile" "file.lisp" "--coverage=mcdc"))))
+    (assert-string= "mcdc" (cl-cc/cli:flag parsed "--coverage"))))
+
+(deftest fr-351-cli-bare-coverage-flag-is-still-accepted
+  "FR-351: bare --coverage remains a boolean coverage request."
+  :tags '(:fr-351)
   (let ((parsed (cl-cc/cli:parse-args '("compile" "file.lisp" "--coverage"))))
     (assert-true (cl-cc/cli:flag parsed "--coverage"))))
+
+(deftest fr-351-collects-and-or-mcdc-decisions
+  "FR-351: MC/DC collection records independent effects for AND/OR conditions."
+  :tags '(:fr-351)
+  (let* ((coverage (cl-cc/compile:collect-mcdc-coverage '((and a b c) (or a b c))))
+         (decisions (getf coverage :decisions)))
+    (assert-eq :mcdc (getf coverage :mode))
+    (assert-= 2 (length decisions))
+    (dolist (decision decisions)
+      (assert-= 3 (length (getf decision :conditions)))
+      (dolist (pair (getf decision :pairs))
+        (assert-true (getf pair :independent-effect))))))
+
+(deftest fr-351-pipeline-accepts-mcdc-coverage
+  "FR-351: pipeline compilation accepts :coverage :mcdc for MC/DC."
+  :tags '(:fr-351)
+  (let ((result (cl-cc:compile-string "(and t t nil)" :target :vm :coverage :mcdc)))
+    (assert-true (typep result 'cl-cc:compilation-result))
+    (assert-eq :mcdc (getf (cl-cc/compile:compilation-result-coverage result) :mode))))
 
 (deftest fr-350-pipeline-accepts-coverage-keyword
   "FR-350: pipeline compilation accepts the :coverage keyword propagated from CLI flags."
@@ -95,6 +126,27 @@
              (assert-true (search "BRF:2" text))
              (assert-true (search "BRH:1" text))
              (assert-true (search "end_of_record" text))))
+      (%fr-350-clean-dir dir))))
+
+(deftest fr-351-mcdc-report-is-written-next-to-lcov
+  "FR-351: coverage report generation writes MC/DC artifacts alongside LCOV."
+  :tags '(:fr-351)
+  (let* ((dir (%fr-350-temp-dir 'mcdc-report))
+         (lcov (merge-pathnames #P"coverage.lcov" dir))
+         (mcdc (merge-pathnames #P"coverage-mcdc.txt" dir))
+         (coverage (cl-cc/compile:collect-mcdc-coverage '((and a b c) (or a b c)))))
+    (unwind-protect
+         (progn
+           (generate-coverage-report :directory dir
+                                     :entries *fr-350-sample-entries*
+                                     :lcov-path lcov
+                                     :mcdc-coverage coverage)
+           (assert-true (probe-file lcov))
+           (assert-true (probe-file mcdc))
+           (let ((text (%fr-350-read-file mcdc)))
+             (assert-true (search "CL-CC MC/DC Coverage Report" text))
+             (assert-true (search "Decision:" text))
+             (assert-true (search "Condition 0" text))))
       (%fr-350-clean-dir dir))))
 
 (deftest fr-350-with-coverage-cleans-up-and-writes-reports

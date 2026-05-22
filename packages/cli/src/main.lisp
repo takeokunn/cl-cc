@@ -54,6 +54,7 @@ Options:
    --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --coverage[=mcdc]      Enable code coverage, or MC/DC coverage with =mcdc
   --pgo-generate <file>   Write lightweight optimizer profile data
   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
   --profile               Enable VM profile collection/reporting
@@ -61,7 +62,9 @@ Options:
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
+  --strict-no-alloc       Signal no-allocation violations as CLI errors
   --timeout <seconds>     Maximum execution time (run/compile/eval/repl)
+  --watch                 Poll input file for changes and hot-reload (run/repl)
   --dump-image <file>     Dump an initialized SBCL image/executable
 
 Version: ~A~%" *version*))
@@ -92,6 +95,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --strict-no-alloc       Signal no-allocation violations as CLI errors
+  --watch                 Poll the file and hot-reload changed definitions
  ")
     ("compile" . "Usage: cl-cc compile [options] <file>
 
@@ -126,6 +131,7 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --strict-no-alloc       Signal no-allocation violations as CLI errors
  ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
 
@@ -149,6 +155,7 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --strict-no-alloc       Signal no-allocation violations as CLI errors
  ")
     ("repl" . "Usage: cl-cc repl [options]
 
@@ -159,6 +166,7 @@ Options:
 Options:
   --stdlib   Prepend standard library on startup
   --no-stdlib Disable lazy stdlib auto-require
+  --watch <file> is accepted as `cl-cc repl --watch file.lisp` by passing the file as positional input.
 
 Examples:
   * (defun square (x) (* x x))

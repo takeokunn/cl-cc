@@ -37,10 +37,19 @@ optimize-instructions."
   "Spread all OPTS fields into a keyword plist for compile-expression /
 compile-toplevel-forms."
   (append (list :target     (pipeline-opts-target opts)
-                :type-check (pipeline-opts-type-check opts)
-                :safety     (pipeline-opts-safety opts))
-          (%opts->optimize-kwargs opts)
-          (%opts->codegen-kwargs opts)))
+                  :type-check (pipeline-opts-type-check opts)
+                  :safety     (pipeline-opts-safety opts)
+                  :strict-no-alloc (pipeline-opts-strict-no-alloc opts)
+                  :coverage   (pipeline-opts-coverage opts))
+            (%opts->optimize-kwargs opts)
+            (%opts->codegen-kwargs opts)))
+
+(defun %maybe-attach-mcdc-coverage (result forms opts)
+  "Attach MC/DC metadata to RESULT when OPTS requests it."
+  (when (cl-cc/compile:mcdc-coverage-enabled-p (pipeline-opts-coverage opts))
+    (setf (cl-cc/compile:compilation-result-coverage result)
+          (cl-cc/compile:collect-mcdc-coverage forms)))
+  result)
 
 (defun %tier-0-p (opts)
   "Return T when OPTS requests the fast Tier-0 compilation path."
@@ -482,8 +491,9 @@ value carries top-level source locations for later AST annotation.
                                       (opt-remarks-mode :all)
                                       print-pass-stats stats-stream trace-json-stream
                                          retpoline spectre-mitigations stack-protector shadow-stack
-                                          asan msan tsan ubsan hwasan pgo-profile-data
-                                          (compilation-tier *compilation-tier*))
+                                           asan msan tsan ubsan hwasan pgo-profile-data
+                                           strict-no-alloc
+                                           (compilation-tier *compilation-tier*))
   "Compile EXPR and return a compilation-result object.
 
 EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
@@ -500,6 +510,7 @@ streams, and PGO counter plan."
                   :block-compile block-compile
                   :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
                   :coverage coverage
+                  :strict-no-alloc strict-no-alloc
                   :timing-stream timing-stream :print-pass-stats print-pass-stats
                   :stats-stream stats-stream :trace-json-stream trace-json-stream
                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
@@ -522,25 +533,28 @@ streams, and PGO counter plan."
     (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
     (multiple-value-bind (cps cps-result)
         (%maybe-compile-expression-via-cps ast opts)
-      (%pgo-apply-type-feedback-to-result
-       (if cps-result
-           (make-compilation-result
-            :program                (compilation-result-program cps-result)
-            :assembly               (compilation-result-assembly cps-result)
-            :type                   (or (and type-check inferred-type)
-                                         (compilation-result-type cps-result))
-            :type-env               (compilation-result-type-env cps-result)
-            :cps                    cps
-             :ast                    ast
-             :vm-instructions        (compilation-result-vm-instructions cps-result)
-             :optimized-instructions (compilation-result-optimized-instructions cps-result)
-             :warnings               (append (nreverse (ctx-diagnostics ctx))
-                                             (compilation-result-warnings cps-result))
-             :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
-                                      (compilation-result-vm-instructions cps-result)))
-           (let ((result-reg (compile-ast ast ctx)))
-             (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts)))
-       opts))))
+      (let ((result
+              (%pgo-apply-type-feedback-to-result
+               (if cps-result
+                   (make-compilation-result
+                    :program                (compilation-result-program cps-result)
+                    :assembly               (compilation-result-assembly cps-result)
+                    :type                   (or (and type-check inferred-type)
+                                                (compilation-result-type cps-result))
+                    :type-env               (compilation-result-type-env cps-result)
+                    :cps                    cps
+                    :ast                    ast
+                    :coverage               (compilation-result-coverage cps-result)
+                    :vm-instructions        (compilation-result-vm-instructions cps-result)
+                    :optimized-instructions (compilation-result-optimized-instructions cps-result)
+                    :warnings               (append (nreverse (ctx-diagnostics ctx))
+                                                    (compilation-result-warnings cps-result))
+                    :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
+                                             (compilation-result-vm-instructions cps-result)))
+                   (let ((result-reg (compile-ast ast ctx)))
+                     (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts)))
+               opts)))
+        (%maybe-attach-mcdc-coverage result (list expr) opts)))))
 
 (defun %pipeline-ast-declarations-for-optimize-policy (ast)
   "Return declaration list associated with AST when available."
@@ -572,7 +586,8 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                     print-pass-stats stats-stream trace-json-stream
                                       retpoline spectre-mitigations stack-protector shadow-stack
                                       asan msan tsan ubsan hwasan pgo-profile-data
-                                      (compilation-tier *compilation-tier*))
+                                      strict-no-alloc
+                                       (compilation-tier *compilation-tier*))
   "Compile SOURCE text and return a compilation-result object.
 
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -588,6 +603,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                      :block-compile block-compile
                     :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
                     :coverage coverage
+                    :strict-no-alloc strict-no-alloc
                     :timing-stream timing-stream :print-pass-stats print-pass-stats
                     :stats-stream stats-stream :trace-json-stream trace-json-stream
                     :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
@@ -629,8 +645,9 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                                  (opt-remarks-mode :all)
                                                 print-pass-stats stats-stream trace-json-stream
                                                    retpoline spectre-mitigations stack-protector shadow-stack
-                                                    asan msan tsan ubsan hwasan pgo-profile-data
-                                                    (compilation-tier *compilation-tier*))
+                                                     asan msan tsan ubsan hwasan pgo-profile-data
+                                                     strict-no-alloc
+                                                     (compilation-tier *compilation-tier*))
   "Compile Lisp SOURCE with the standard library forms prepended.
 
 The standard library is obtained from GET-STDLIB-FORMS, combined with parsed
@@ -648,6 +665,7 @@ compilation-result object shape as COMPILE-STRING."
                     :block-compile block-compile
                    :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
                    :coverage coverage
+                   :strict-no-alloc strict-no-alloc
                    :timing-stream timing-stream :print-pass-stats print-pass-stats
                    :stats-stream stats-stream :trace-json-stream trace-json-stream
                    :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
