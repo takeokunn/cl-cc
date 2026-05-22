@@ -73,6 +73,18 @@
     (assert-true (>= bin-32 bin-8))
     (assert-true (>= bin-64 bin-32))))
 
+(deftest fr-156-size-class-segregated-allocator-evidence
+  "FR-156: Segregated free-list allocation reuses the best fitting bin and splits remainders."
+  (let ((heap (%make-small-heap-fr)))
+    (cl-cc/runtime::rt-free-list-insert heap 16 100)
+    (cl-cc/runtime::rt-free-list-insert heap 64 200)
+    (multiple-value-bind (bin addr) (cl-cc/runtime::rt-free-list-find heap 12)
+      (assert-= (cl-cc/runtime::rt-free-list-bin-index 16) bin)
+      (assert-= 100 addr)
+      (assert-true (member (cons 4 112)
+                           (cl-cc/runtime::rt-heap-free-list-blocks heap)
+                           :test #'equal)))))
+
 ;;; ------------------------------------------------------------
 ;;; FR-333: Nursery Sizing Heuristics
 ;;; ------------------------------------------------------------
@@ -158,6 +170,79 @@
         (obj-ptr (cl-cc/runtime:encode-pointer #x600 cl-cc/runtime:+tag-object+)))
     (assert-true (cl-cc/runtime:val-cons-p cons-ptr))
     (assert-false (cl-cc/runtime:val-cons-p obj-ptr))))
+
+(deftest fr-140-symbol-immediates-roundtrip-common-symbols
+  "FR-140: NIL, T, and common keywords/symbols are immediate values, not heap pointers."
+  (assert-= cl-cc/runtime:+val-nil+ (cl-cc/runtime:cl-value->val nil))
+  (assert-= cl-cc/runtime:+val-t+ (cl-cc/runtime:cl-value->val t))
+  (let ((encoded (cl-cc/runtime:cl-value->val :key)))
+    (assert-true (cl-cc/runtime::val-immediate-symbol-p encoded))
+    (assert-false (cl-cc/runtime:val-pointer-p encoded))
+    (assert-eq :key (cl-cc/runtime:val->cl-value encoded))))
+
+(deftest fr-264-compressed-pointer-roundtrip
+  "FR-264: Pointer compression stores heap-relative offsets and decodes to the original address."
+  (let ((cl-cc/runtime:*compressed-pointers-enabled* t)
+        (cl-cc/runtime:*heap-base-address* #x10000000))
+    (let ((encoded (cl-cc/runtime:encode-pointer #x10001000 cl-cc/runtime:+tag-object+)))
+      (assert-true (cl-cc/runtime:val-compressed-pointer-p encoded))
+      (assert-= #x10001000 (cl-cc/runtime:decode-pointer encoded)))))
+
+(deftest fr-265-small-string-optimization-roundtrip
+  "FR-265: Small byte strings are encoded as SSO immediates and round-trip without heap allocation."
+  (let ((encoded (cl-cc/runtime:cl-value->val "abc")))
+    (assert-true (cl-cc/runtime:val-sso-string-p encoded))
+    (assert-string= "abc" (cl-cc/runtime:val->cl-value encoded))))
+
+(deftest fr-266-compressed-object-header-is-one-word
+  "FR-266: Object headers pack size/tag/age metadata into one unsigned 64-bit word."
+  (let ((header (cl-cc/runtime:make-header 42 cl-cc/runtime:+rt-tag-cons+ 2)))
+    (assert-true (typep header '(unsigned-byte 64)))
+    (assert-= 42 (cl-cc/runtime:header-size header))
+    (assert-= cl-cc/runtime:+rt-tag-cons+ (cl-cc/runtime:header-tag header))
+    (assert-= 2 (cl-cc/runtime:header-age header))))
+
+(deftest fr-184-weak-reference-and-finalizer-evidence
+  "FR-184: Weak references clear unreachable referents and finalizers run for unmarked objects."
+  (let* ((heap (%make-small-heap-fr))
+         (marked (make-hash-table :test #'eql))
+         (referent (cl-cc/runtime:encode-pointer (cl-cc/runtime:rt-heap-old-base heap)
+                                                  cl-cc/runtime:+tag-object+))
+         (weak (cl-cc/runtime:rt-make-weak-ref referent))
+         (object-addr (cl-cc/runtime:rt-heap-old-base heap))
+         (finalized nil)
+         (cl-cc/runtime::*rt-reference-registry* (list weak))
+         (cl-cc/runtime::*rt-finalizer-registry* nil)
+         (cl-cc/runtime::*rt-finalization-queue* nil))
+    (cl-cc/runtime:rt-heap-set-header
+     heap (cl-cc/runtime:rt-heap-old-base heap)
+     (cl-cc/runtime:make-header 1 cl-cc/runtime:+rt-tag-cons+ 0))
+    (cl-cc/runtime::%rt-gc-process-weak-references heap marked)
+    (assert-null (cl-cc/runtime:rt-ref-get weak))
+    (cl-cc/runtime:rt-register-finalizer object-addr (lambda (obj) (setf finalized obj)))
+    (cl-cc/runtime::%rt-gc-process-finalizers heap marked)
+    (assert-= object-addr finalized)
+    (assert-equal (list object-addr) cl-cc/runtime::*rt-finalization-queue*)))
+
+(deftest fr-300-runtime-condition-restart-stacks
+  "FR-300: Runtime handler and restart stacks establish dynamic recovery frames."
+  (let ((handled nil))
+    (multiple-value-bind (value foundp)
+        (cl-cc/runtime:rt-establish-handler
+         'error
+         (lambda (condition) (setf handled condition) :handled)
+         (lambda () (cl-cc/runtime:rt-dispatch-signal
+                     (make-condition 'simple-error :format-control "x"))))
+      (assert-true foundp)
+      (assert-eq :handled value)
+      (assert-true (typep handled 'simple-error))))
+  (multiple-value-bind (value foundp)
+      (cl-cc/runtime:rt-establish-restart
+       'use-value
+       (lambda (x) x)
+       (lambda () (cl-cc/runtime:rt-dispatch-restart 'use-value '(42))))
+    (assert-true foundp)
+    (assert-= 42 value)))
 
 ;;; ------------------------------------------------------------
 ;;; FR-341: GC Pause Time Goals / SLO

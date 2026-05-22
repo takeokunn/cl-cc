@@ -168,11 +168,14 @@ from *HEAP-BASE-ADDRESS* and sets +COMPRESSED-POINTER-FLAG+.
          (encode-fixnum x)
          (error "cl-value->val: integer ~A out of 51-bit fixnum range" x)))
      (double-float (encode-double x))
-     (single-float (encode-double (float x 1.0d0)))
-     (character    (encode-char x))
-     (string
-      (if (and (<= (length x) +sso-string-max-length+)
-               (loop for char across x always (<= (char-code char) #xFF)))
+      (single-float (encode-double (float x 1.0d0)))
+      (character    (encode-char x))
+      (symbol
+       (or (immediate-symbol-value x)
+           (error "cl-value->val: symbol ~S requires heap symbol allocation" x)))
+      (string
+       (if (and (<= (length x) +sso-string-max-length+)
+                (loop for char across x always (<= (char-code char) #xFF)))
           (encode-sso-string x)
           (error "cl-value->val: string ~S requires heap string allocation" x)))
      (t
@@ -189,6 +192,7 @@ from *HEAP-BASE-ADDRESS* and sets +COMPRESSED-POINTER-FLAG+.
     ((= v +val-unbound+) (error "val->cl-value: unbound slot"))
      ((val-fixnum-p v)    (decode-fixnum v))
      ((val-sso-string-p v) (decode-sso-string v))
+     ((val-immediate-symbol-p v) (decode-immediate-symbol v))
      ((val-char-p v)      (decode-char v))
     ((val-double-p v)    (decode-double v))
     ((val-pointer-p v)   (decode-pointer v))
