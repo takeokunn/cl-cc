@@ -72,15 +72,23 @@
    #:lambda-list-info-environment
 
    ;; --- macros used via run-string (need umbrella re-export) ---------
-    #:defun/c
-    #:copy-hash-table
-    #:copy-structure
-    #:make-iterator
-    #:iterator-next
-    #:doiterator
-    #:with-iterator
-    ;; --- hygienic macros (FR-804/805) ---------------------------------
-    #:define-syntax
-    #:syntax-rules
-    #:with-gensyms
-    #:once-only))
+   #:defun/c
+   #:copy-hash-table
+   #:copy-structure
+   #:make-iterator
+   #:iterator-next
+   #:doiterator
+   #:with-iterator
+   ;; --- hygienic macros (FR-804/805) ---------------------------------
+   #:define-syntax
+   #:syntax-rules
+   #:with-gensyms
+   #:once-only
+
+   ;; --- FR-539/540 deprecation and branch hints ---------------------
+   #:*deprecation-registry*
+   #:deprecate
+   #:deprecated-p
+   #:%warn-deprecated-use
+   #:likely
+   #:unlikely))

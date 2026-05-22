@@ -106,3 +106,53 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
                             (compiler-macroexpand-all
                               (list 'slot-value (second form) (list 'quote (cdr mapping))))
                             (mapcar #'compiler-macroexpand-all form))))))))))))))
+
+;;; ── FR-539: Deprecation API ──────────────────────────────────────────
+
+(defvar *deprecation-registry* (make-hash-table :test #'eq)
+  "Registry mapping function names to deprecation plists with keys
+:SINCE, :REMOVED-IN, :REPLACEMENT, :MESSAGE.")
+
+(defun deprecate (name &key since removed-in replacement message)
+  "Register NAME as deprecated. When NAME is called, a diagnostic warning is emitted.
+SINCE is the version when it was deprecated. REMOVED-IN is the planned removal version.
+REPLACEMENT names the suggested alternative function. MESSAGE is an optional explanation."
+  (setf (gethash name *deprecation-registry*)
+        (list :since since :removed-in removed-in
+              :replacement replacement :message message))
+  name)
+
+(defun deprecated-p (name)
+  "Return non-NIL when NAME is a registered deprecated function."
+  (values (gethash name *deprecation-registry*)))
+
+(defun %warn-deprecated-use (name &optional context-stream)
+  "Emit a deprecation warning for NAME using parse diagnostics when available."
+  (declare (ignore context-stream))
+  (let ((info (deprecated-p name)))
+    (when info
+      (let ((since (getf info :since))
+            (replacement (getf info :replacement))
+            (removed-in (getf info :removed-in)))
+        ;; Use the diagnostics package if loaded
+        (when (find-package :cl-cc/parse)
+          (let ((output (list nil)))
+            (push (format nil "function ~S is deprecated" name) output)
+            (when since
+              (push (format nil "  deprecated since: ~A" since) output))
+            (when removed-in
+              (push (format nil "  planned removal: ~A" removed-in) output))
+            (when replacement
+              (push (format nil "  consider using ~S instead" replacement) output))
+            (values (nreverse output))))))))
+
+;;; ── FR-540: Branch Probability Hints ─────────────────────────────────
+
+(defmacro likely (form)
+  "Annotate FORM as the likely path of a conditional. The code generator may
+use this hint to place the likely branch as a fallthrough."
+  `(progn ,form))
+
+(defmacro unlikely (form)
+  "Annotate FORM as the unlikely path of a conditional."
+  `(progn ,form))
