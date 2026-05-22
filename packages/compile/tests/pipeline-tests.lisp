@@ -103,6 +103,17 @@
     (assert-true (integerp (getf plan :total-bb)))
     (assert-true (consp (getf plan :bb-runtime-keys)))))
 
+(deftest pipeline-tier-0-and-tier-1-are-distinguishable
+  "FR-154: Tier-0 skips optimizer policy while Tier-1 records optimized compilation tier metadata."
+  (let ((tier0 (compile-string "(+ 1 2)" :target :vm :compilation-tier 0))
+        (tier1 (compile-string "(+ 1 2)" :target :vm :compilation-tier 1)))
+    (assert-= 0 (cl-cc/vm:vm-program-compilation-tier
+                 (cl-cc/compile:compilation-result-program tier0)))
+    (assert-= 1 (cl-cc/vm:vm-program-compilation-tier
+                 (cl-cc/compile:compilation-result-program tier1)))
+    (assert-true (listp (cl-cc/compile:compilation-result-optimized-instructions tier0)))
+    (assert-true (listp (cl-cc/compile:compilation-result-optimized-instructions tier1)))))
+
 (deftest pipeline-maybe-bump-opts-speed-from-ast-defun-declaration
   "%pipeline-maybe-bump-opts-speed-from-ast picks up local defun optimize speed declaration."
   (let* ((opts (cl-cc::%make-pipeline-opts :target :vm :speed nil))

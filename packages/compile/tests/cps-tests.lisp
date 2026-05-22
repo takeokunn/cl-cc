@@ -154,4 +154,16 @@ Returns a function that takes a continuation."
 (deftest cps-sexp-transform-emits-trampoline-thunk
   "cps-transform emits trampoline thunk construction around generated tail continuations."
   (assert-true (%cps-form-contains-p (cl-cc:cps-transform '(+ 1 2))
-                                     :cps-trampoline-thunk)))
+                                      :cps-trampoline-thunk)))
+
+(deftest cps-trmc-rewrites-obvious-self-recursive-cons
+  "FR-045: TRMC rewrites only the obvious (cons x (self y)) tail-recursive pattern."
+  (let* ((source '(defun trmc-fixture (n)
+                   (if (<= n 0)
+                       nil
+                       (cons n (trmc-fixture (- n 1))))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-false (equal source rewritten))
+    (assert-true (%cps-form-contains-p rewritten 'labels))
+    (eval rewritten)
+    (assert-equal '(3 2 1) (funcall (symbol-function 'trmc-fixture) 3))))

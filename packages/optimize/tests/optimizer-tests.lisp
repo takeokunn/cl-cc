@@ -96,7 +96,37 @@
                               (eq (cl-cc/vm::vm-dst i) :r2)
                               (eql (cl-cc/vm::vm-value i) expected-value)))
                        out))
-    (assert-false (some (lambda (i) (typep i (type-of predicate))) out))))
+     (assert-false (some (lambda (i) (typep i (type-of predicate))) out))))
+
+(deftest optimizer-sequence-fusion-recognizes-map-filter-chain
+  "FR-179: the late optimizer pass recognizes MAPCAR + REMOVE-IF direct-call chains for reporting."
+  (let* ((instrs (list (make-vm-func-ref :dst :f-map :label 'mapcar)
+                       (make-vm-func-ref :dst :f-filter :label 'remove-if)
+                       (make-vm-call :dst :mapped :func :f-map :args '(:fn :xs))
+                       (make-vm-call :dst :filtered :func :f-filter :args '(:pred :mapped))))
+         (out (cl-cc/optimize::opt-pass-sequence-fusion instrs)))
+    (assert-true (cl-cc/optimize::%opt-sequence-fusion-candidate-p instrs))
+    (assert-eq instrs out)))
+
+(deftest optimizer-demand-analysis-records-absent-params
+  "FR-182: demand analysis records absent parameters for known VM functions."
+  (let* ((instrs (list (make-vm-func-ref :dst :f :label 'demand-fixture :params '(:x :y))
+                       (make-vm-label :name 'demand-fixture)
+                       (make-vm-ret :reg :x)))
+         (summaries (cl-cc/optimize::opt-analyze-program-demand instrs))
+         (summary (gethash 'demand-fixture summaries)))
+    (assert-true summary)
+    (assert-true (member :x (cl-cc/optimize::opt-demand-summary-strict-params summary)))
+    (assert-true (member :y (cl-cc/optimize::opt-demand-summary-absent-params summary)))))
+
+(deftest optimizer-dead-store-elim-collections-removes-overwritten-aset
+  "FR-342: collection DSE removes an overwritten array store with no intervening read."
+  (let* ((store1 (make-vm-aset :array-reg :arr :index-reg :idx :val-reg :v1))
+         (store2 (make-vm-aset :array-reg :arr :index-reg :idx :val-reg :v2))
+         (ret (make-vm-ret :reg :arr))
+         (out (cl-cc/optimize::opt-pass-dead-store-elim (list store1 store2 ret))))
+    (assert-false (member store1 out :test #'eq))
+    (assert-true (member store2 out :test #'eq))))
 
 ;;; ── Dead Code Elimination: Semantics ─────────────────────────────────────
 

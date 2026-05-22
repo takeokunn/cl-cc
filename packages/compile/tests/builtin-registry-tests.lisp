@@ -69,6 +69,14 @@
   (let ((entry (gethash "MOD" cl-cc/compile::*builtin-registry*)))
     (assert-true (eq :binary (cl-cc/compile::be-convention entry)))))
 
+(deftest builtin-registry-known-function-properties
+  "FR-183: builtin registry entries expose known function properties for optimizer consumers."
+  (let ((char-entry (gethash "CHAR=" cl-cc/compile::*builtin-registry*))
+        (princ-entry (gethash "PRINC" cl-cc/compile::*builtin-registry*)))
+    (assert-true (member :pure (cl-cc/compile::be-properties char-entry)))
+    (assert-true (member :foldable (cl-cc/compile::be-properties char-entry)))
+    (assert-true (member :io (cl-cc/compile::be-properties princ-entry)))))
+
 ;;; ─── Prolog Fact Tests ─────────────────────────────────────────────────────
 
 (deftest builtin-prolog-facts-registered
