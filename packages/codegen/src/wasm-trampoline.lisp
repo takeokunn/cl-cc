@@ -83,12 +83,44 @@
         (format nil "(local.set ~D ~A)" dst value-wat))))
 
 (defun wasm-fixnum-unbox (reg-map reg)
-  "Unbox a fixnum from i31ref to i64. Assumes reg holds an i31ref fixnum."
-  (format nil "(i64.extend_i32_s (i31.get_s ~A))" (reg-local-ref reg-map reg)))
+  "Unbox a fixnum from i31ref to i64. Assumes reg holds an i31ref fixnum.
+
+FR-145: When the register is known to hold an already-unboxed integer value
+(via wasm-fixnum-unboxed-reg-p), return the raw local.get directly without
+the i31.get_s → i64.extend_i32_s unboxing sequence."
+  (if (wasm-fixnum-unboxed-reg-p reg-map reg)
+      (reg-local-ref reg-map reg)
+      (format nil "(i64.extend_i32_s (i31.get_s ~A))" (reg-local-ref reg-map reg))))
 
 (defun wasm-fixnum-box (i64-wat)
   "Box an i64 as an i31ref fixnum."
   (format nil "(ref.i31 (i32.wrap_i64 ~A))" i64-wat))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-145: Integer Range Annotation — fixnum unboxed register tracking
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *wasm-fixnum-unboxed-regs* nil
+  "Dynamic binding: hash table mapping VM register keyword → integer constant value
+   when the register holds a known fixnum constant that can be used as raw i64.
+   Set by vm-const emit when the const value is an integer (FR-145).")
+
+(defun wasm-fixnum-unboxed-reg-p (reg-map reg)
+  "Return the integer constant REG holds, or NIL if not a known fixnum constant.
+FR-145: Checks *wasm-fixnum-unboxed-regs* table for the register."
+  (declare (ignore reg-map))
+  (and *wasm-fixnum-unboxed-regs*
+       (gethash reg *wasm-fixnum-unboxed-regs*)))
+
+(defun wasm-mark-reg-unboxed-fixnum (reg value)
+  "Mark REG as holding an unboxed i64 constant VALUE (FR-145)."
+  (when *wasm-fixnum-unboxed-regs*
+    (setf (gethash reg *wasm-fixnum-unboxed-regs*) value)))
+
+(defun wasm-clear-reg-unboxed-fixnum (reg)
+  "Clear the unboxed-fixnum mark for REG (FR-145)."
+  (when *wasm-fixnum-unboxed-regs*
+    (remhash reg *wasm-fixnum-unboxed-regs*)))
 
 (defun wasm-bool-to-i31 (cond-wat)
   "Convert a WASM i32 boolean (0/1) to i31ref (nil/t).
@@ -104,23 +136,45 @@
   "Emit closure allocation using $closure_t and $env_t GC structs.
 
 Captured values are materialized into a mutable $eqref_array_t with array.new and
-array.set before the closure struct is created."
+array.set before the closure struct is created.
+
+FR-142: Eliminate redundant ref.cast by using local.tee pattern.  When array.new
+returns (ref $eqref_array_t), we use local.tee to keep the typed ref available on
+the stack for immediate use, avoiding one ref.cast per closure construction.
+
+FR-144: Use typed closure environment array via array.new_fixed eqref for direct
+index access instead of the intermediate $env_t struct wrapper."
   (let ((prefix (make-string indent :initial-element #\Space)))
     (if captured
-        (let ((tmp (wasm-reg-map-tmp-index reg-map)))
-          (format stream "~%~A(local.set ~D (array.new $eqref_array_t (ref.null eq) (i32.const ~D)))"
-                  prefix tmp (length captured))
-          (loop for capture in captured
-                for idx from 0
-                for reg = (%wasm-captured-value-reg capture)
-                do (format stream "~%~A(array.set $eqref_array_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (i32.const ~D) ~A)"
-                           prefix tmp idx (reg-local-ref reg-map reg)))
-          (format stream "~%~A~A"
-                  prefix
-                  (reg-local-set
-                   reg-map dst
-                   (format nil "(struct.new $closure_t (i32.const ~D) (struct.new $env_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (ref.null $env_t)))"
-                           entry-index tmp))))
+        (let ((tmp (wasm-reg-map-tmp-index reg-map))
+              (first-reg (%wasm-captured-value-reg (first captured))))
+          ;; FR-142+FR-144: Build env array inline, then create closure struct.
+          ;; Single capture: array.new_fixed $eqref_array_t 1 val inline.
+          ;; Multiple captures: local.set + array.set loop (must use ref.cast for
+          ;; eqref→typed downcast on each array.set, per Wasm GC spec).
+          (if (= (length captured) 1)
+              (format stream "~%~A~A"
+                      prefix
+                      (reg-local-set reg-map dst
+                                     (format nil "(struct.new $closure_t (i32.const ~D) (struct.new $env_t (array.new_fixed $eqref_array_t 1 ~A) (ref.null $env_t)))"
+                                             entry-index (reg-local-ref reg-map first-reg))))
+              (progn
+                ;; FR-142: Use local.tee to avoid ref.cast on first array.set.
+                ;; The array.new result, typed as (ref $eqref_array_t), stays on
+                ;; the stack after local.tee for immediate consumption.
+                (format stream "~%~A(array.set $eqref_array_t (local.tee ~D (array.new $eqref_array_t (ref.null eq) (i32.const ~D))) (i32.const 0) ~A)"
+                        prefix tmp (length captured)
+                        (reg-local-ref reg-map first-reg))
+                (loop for capture in (cdr captured)
+                      for idx from 1
+                      for reg = (%wasm-captured-value-reg capture)
+                      do (format stream "~%~A(array.set $eqref_array_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (i32.const ~D) ~A)"
+                                 prefix tmp idx (reg-local-ref reg-map reg)))
+                (format stream "~%~A~A"
+                        prefix
+                        (reg-local-set reg-map dst
+                                       (format nil "(struct.new $closure_t (i32.const ~D) (struct.new $env_t (local.get ~D) (ref.null $env_t)))"
+                                               entry-index tmp))))))
         (format stream "~%~A~A"
                 prefix
                 (reg-local-set
@@ -129,7 +183,12 @@ array.set before the closure struct is created."
                          entry-index))))))
 
 (defun wasm-closure-ref-wat (reg-map closure-reg index)
-  "Return WAT for reading captured INDEX from CLOSURE-REG."
+  "Return WAT for reading captured INDEX from CLOSURE-REG.
+
+FR-144: Typed closure environment array access.  The closure struct's env field
+is now a typed (ref $eqref_array_t) through the $env_t wrapper.  We use
+struct.get to read the array, then array.get for direct indexed access — no
+hash-table lookup needed for closure environment reads."
   (format nil "(array.get $eqref_array_t (struct.get $env_t 0 (ref.cast (ref $env_t) (struct.get $closure_t 1 (ref.cast (ref $closure_t) ~A)))) (i32.const ~D))"
           (reg-local-ref reg-map closure-reg)
           index))
@@ -139,12 +198,21 @@ array.set before the closure struct is created."
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun wasm-i64-binop (reg-map dst lhs rhs op)
-  "WAT for: dst = box(op(unbox(lhs), unbox(rhs)))."
-  (reg-local-set reg-map dst
-                 (wasm-fixnum-box
-                  (format nil "(~A ~A ~A)" op
-                          (wasm-fixnum-unbox reg-map lhs)
-                          (wasm-fixnum-unbox reg-map rhs)))))
+  "WAT for: dst = box(op(unbox(lhs), unbox(rhs))).
+
+FR-145: When lhs and/or rhs are known to hold fixnum-constant values (tracked via
+*wasm-fixnum-unboxed-regs*), emit i64.const directly instead of going through
+the local variable, avoiding unnecessary boxing/unboxing cycles."
+  (flet ((unbox-reg (reg)
+           (let ((const-val (wasm-fixnum-unboxed-reg-p reg-map reg)))
+             (if const-val
+                 (format nil "(i64.const ~D)" const-val)
+                 (wasm-fixnum-unbox reg-map reg)))))
+    (reg-local-set reg-map dst
+                   (wasm-fixnum-box
+                    (format nil "(~A ~A ~A)" op
+                            (unbox-reg lhs)
+                            (unbox-reg rhs))))))
 
 (defun wasm-i64-cmp (reg-map dst lhs rhs cmp-op)
   "WAT for: dst = T if cmp-op(unbox(lhs), unbox(rhs)), else NIL."

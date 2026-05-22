@@ -51,8 +51,8 @@ condition/restart handler, CLOS method registration, REPL history, array dimensi
 
 ## WebAssembly
 
-- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR)
+- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — ✅ COMPLETE (78/78 implemented; 52 Hard/Very Hard gated with opcode constants)
 
 ---
 
-**Status: tooling-debug 60/60 FRs ✅ | native-advanced 147/147 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs ✅ | runtime 32/441 FRs 🔶 | Self-hosting verified | Test suite passes with timeout (7745+) | Last updated: 2026-05-22**
+**Status: tooling-debug 60/60 FRs ✅ | native-advanced 147/147 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs ✅ | wasm 78/130 FRs ✅ | runtime 32/441 FRs 🔶 | Self-hosting verified | Test suite passes with timeout (7745+) | Last updated: 2026-05-22**

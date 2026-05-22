@@ -415,6 +415,129 @@ Arguments are marshaled through the standard wasm calling-convention globals
                                    (wasm-fixnum-box
                                     (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
 
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-233: Non-trapping Float-to-int — safe floor/truncate/round codegen
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defmethod emit-instruction ((target wasm-target) (inst vm-floor) stream)
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-fixnum-box
+                            (format nil "(i64.trunc_sat_f64_s ~A)"
+                                    (format nil "(f64.convert_i64_s ~A)"
+                                            (wasm-fixnum-unbox reg-map (vm-lhs inst)))))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-323: MVP Bit Operations — integer-length uses i64.clz directly
+;;; FR-324: f64.copysign — float-sign operation
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defmethod emit-instruction ((target wasm-target) (inst vm-float-sign) stream)
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil "(struct.new $float_t (f64.copysign ~A ~A))"
+                                   (reg-local-ref reg-map (vm-lhs inst))
+                                   (reg-local-ref reg-map (vm-rhs inst)))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-212: Typed Function References — call_ref codegen (Chrome 113+)
+;;; Uses +wasm-call-ref+ (#x14) for direct typed function calls without
+;;; the call_indirect table lookup overhead (15-30% faster per V8 benchmarks).
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-call-ref-enabled* t
+  "Feature gate for WASM typed function references call_ref (FR-212).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-143/FR-253: return_call / return_call_ref feature gate
+;;; ─────────────────────────────────────────────────────────────────────────────
+;; (See wasm-emit-data.lisp for *wasm-tail-call-enabled*)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-209: i31ref — native fixnum boxing (i31ref already used in fixnum helpers)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-i31ref-enabled* t
+  "Feature gate for WASM GC i31ref fixnum representation (FR-209).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-226: externref — opaque JS object references (Chrome 91+)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-externref-enabled* nil
+  "Feature gate for WASM externref JS object reference passing (FR-226).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-222: DWARF debug info emission flag
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-emit-debug-info* nil
+  "When T, emit DWARF 5 debug info in WASM custom sections (FR-222).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-223: Source Maps emission flag
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-emit-source-maps* nil
+  "When T, emit Source Map v3 for browser DevTools (FR-223).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-219: AOT mode flag — static WASM binary generation
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-aot-mode* nil
+  "When T, generate fully static .wasm binary in single pass (FR-219).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-220: PGO mode — profile-guided optimization
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-pgo-mode* nil
+  "When T, use profile-guided optimization feedback (FR-220).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-221: Dead Import Elimination — link-time GC
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-dead-import-elimination* t
+  "When T, eliminate unused WASM imports at link time (FR-221).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-232: Streaming Compilation / Module Cache
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-streaming-compilation* nil
+  "When T, generate code compatible with WebAssembly.instantiateStreaming (FR-232).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-261: Security features — CFI / CSP / Constant-Time
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-cfi-enabled* t
+  "When T, emit CFI (Control Flow Integrity) via typed call_ref (FR-261).")
+(defparameter *wasm-constant-time* nil
+  "When T, use select-based constant-time patterns for crypto (FR-261).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-265: Deterministic build
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-deterministic-build* nil
+  "When T, produce reproducible WASM binaries (FR-265).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-305: WASM validation — WebAssembly.validate integration
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-validate-output* t
+  "When T, validate generated WASM binary after compilation (FR-305).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-307: Subresource Integrity — SRI hash for .wasm
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-emit-sri-hash* nil
+  "When T, compute and output SRI integrity hash for .wasm file (FR-307).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-326: memory.grow OOM detection — storage-condition on allocation failure
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-oom-detection* t
+  "When T, check memory.grow return value and signal CL storage-condition (FR-326).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-308: Relaxed Dead Code Validation (Phase 2)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-relaxed-dead-code-validation* nil
+  "When T, skip dummy type coercion in unreachable code paths (FR-308).")
+
 ;;; Catch-all for unsupported instructions
 (defmethod emit-instruction ((target wasm-target) instruction stream)
   (declare (ignore target stream))

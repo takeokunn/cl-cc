@@ -152,14 +152,22 @@ tree emission on NIL."
   ;; Remaining instructions handled by typecase (unique logic per instruction)
   (typecase inst
     (vm-const
+     ;; FR-145: Track fixnum constants for unbox optimization
+     (when (integerp (vm-value inst))
+       (wasm-mark-reg-unboxed-fixnum (vm-dst inst) (vm-value inst)))
      (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (%wasm-const-value-to-wat (vm-value inst))))
+              (reg-local-set reg-map (vm-dst inst)
+                             (%wasm-const-value-to-wat (vm-value inst))))
      t)
     (vm-move
+     ;; FR-145: Propagate fixnum-constant tracking through moves
+     (let ((src-val (wasm-fixnum-unboxed-reg-p reg-map (vm-src inst))))
+       (if src-val
+           (wasm-mark-reg-unboxed-fixnum (vm-dst inst) src-val)
+           (wasm-clear-reg-unboxed-fixnum (vm-dst inst))))
      (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (reg-local-ref reg-map (vm-src inst))))
+              (reg-local-set reg-map (vm-dst inst)
+                             (reg-local-ref reg-map (vm-src inst))))
      t)
     (vm-jump
      (emit-trampoline-jump-to-label (vm-label-name inst) label-pc-map reg-map stream)

@@ -199,6 +199,73 @@
 (defconstant +wasm-gc-i31-get-u+         30)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-202: WASM SIMD128 opcodes (Wasm SIMD Proposal, all major browsers shipped)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+;; SIMD prefix byte (0xfd)
+(defconstant +wasm-simd-prefix+ #xfd)
+
+;; v128 value type
+(defconstant +wasm-v128+ #x7b)
+
+;; SIMD memory operations
+(defconstant +wasm-simd-v128-load+         0)   ; v128.load
+(defconstant +wasm-simd-v128-load8-splat+  1)   ; v128.load8_splat
+(defconstant +wasm-simd-v128-load16-splat+ 2)   ; v128.load16_splat
+(defconstant +wasm-simd-v128-load32-splat+ 3)   ; v128.load32_splat
+(defconstant +wasm-simd-v128-load64-splat+ 4)   ; v128.load64_splat
+(defconstant +wasm-simd-v128-store+        11)  ; v128.store
+(defconstant +wasm-simd-v128-load32-zero+  5)   ; v128.load32_zero FR-313
+(defconstant +wasm-simd-v128-load64-zero+  6)   ; v128.load64_zero FR-313
+
+;; SIMD i8x16 operations
+(defconstant +wasm-simd-i8x16-shuffle+    13)  ; i8x16.shuffle (FR-278)
+(defconstant +wasm-simd-i8x16-swizzle+    14)  ; i8x16.swizzle (FR-298)
+
+;; SIMD i32x4 arithmetic
+(defconstant +wasm-simd-i32x4-add+        26)  ; i32x4.add
+
+;; SIMD f64x2 arithmetic
+(defconstant +wasm-simd-f64x2-add+        157) ; f64x2.add
+(defconstant +wasm-simd-f64x2-mul+        162) ; f64x2.mul
+(defconstant +wasm-simd-f64x2-div+        163) ; f64x2.div
+
+;; SIMD bitwise operations
+(defconstant +wasm-simd-v128-and+         69)  ; v128.and
+(defconstant +wasm-simd-v128-or+          70)  ; v128.or
+(defconstant +wasm-simd-v128-xor+         71)  ; v128.xor
+(defconstant +wasm-simd-v128-not+         77)  ; v128.not
+
+;; SIMD boolean reduction (FR-304)
+(defconstant +wasm-simd-v128-any-true+    121) ; v128.any_true
+(defconstant +wasm-simd-i32x4-all-true+   117) ; i32x4.all_true
+
+;; SIMD lane operations (FR-303)
+(defconstant +wasm-simd-v128-load8-lane+  84)  ; v128.load8_lane
+(defconstant +wasm-simd-v128-store8-lane+ 85)  ; v128.store8_lane
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; FR-203: WASM Threads / Atomics opcodes
+;; ─────────────────────────────────────────────────────────────────────────────
+
+;; Atomic prefix byte (0xfe)
+(defconstant +wasm-atomic-prefix+ #xfe)
+
+;; Atomic RMW operations
+(defconstant +wasm-atomic-i32-rmw-add+    1)   ; i32.atomic.rmw.add
+(defconstant +wasm-atomic-i32-rmw-cmpxchg+ 8)  ; i32.atomic.rmw.cmpxchg
+(defconstant +wasm-atomic-i64-rmw-add+    17)  ; i64.atomic.rmw.add
+(defconstant +wasm-atomic-i64-rmw-cmpxchg+ 24) ; i64.atomic.rmw.cmpxchg
+
+;; Atomic wait/notify
+(defconstant +wasm-atomic-memory-wait32+  2)   ; memory.atomic.wait32
+(defconstant +wasm-atomic-memory-wait64+  3)   ; memory.atomic.wait64
+(defconstant +wasm-atomic-memory-notify+  0)   ; memory.atomic.notify
+
+;; Atomic fence (FR-256)
+(defconstant +wasm-atomic-fence+          3)   ; atomic.fence (standalone prefix opcode)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Section 2: Named GC Type Indices
 ;;; These indices match the ORDER of type definitions emitted in the WASM type section.
 ;;; Every module emitted by cl-cc starts with these predefined types.
@@ -305,6 +372,156 @@
 
 ;;; Sentinel value for "no type" / void
 (defconstant +wasm-void+ #x40)  ; used as block type for empty results
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-213: Memory64 — 64bit address space (Chrome 119+/Firefox 120+)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-memory64-flag+ #x04)  ; memory64 feature flag in module
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-228: Bulk Memory Operations (MVP v1.1, all major browsers)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-memory-copy+   #xfc 0)  ; memory.copy (prefix 0xfc op 10)
+(defconstant +wasm-memory-fill+   #xfc 11) ; memory.fill (prefix 0xfc op 11)
+(defconstant +wasm-memory-init+   #xfc 8)  ; memory.init (prefix 0xfc op 8)
+(defconstant +wasm-data-drop+     #xfc 9)  ; data.drop (prefix 0xfc op 9)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-233: Non-trapping Float-to-int Conversions (MVP v1.1)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-i32-trunc-sat-f32-s+  #xfc 0)  ; i32.trunc_sat_f32_s
+(defconstant +wasm-i32-trunc-sat-f32-u+  #xfc 1)  ; i32.trunc_sat_f32_u
+(defconstant +wasm-i32-trunc-sat-f64-s+  #xfc 2)  ; i32.trunc_sat_f64_s
+(defconstant +wasm-i32-trunc-sat-f64-u+  #xfc 3)  ; i32.trunc_sat_f64_u
+(defconstant +wasm-i64-trunc-sat-f32-s+  #xfc 4)  ; i64.trunc_sat_f32_s
+(defconstant +wasm-i64-trunc-sat-f32-u+  #xfc 5)  ; i64.trunc_sat_f32_u
+(defconstant +wasm-i64-trunc-sat-f64-s+  #xfc 6)  ; i64.trunc_sat_f64_s
+(defconstant +wasm-i64-trunc-sat-f64-u+  #xfc 7)  ; i64.trunc_sat_f64_u
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-234: Sign-extension Operators (MVP v1.1)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-i32-extend8-s+   #xc0)  ; i32.extend8_s
+(defconstant +wasm-i32-extend16-s+  #xc1)  ; i32.extend16_s
+(defconstant +wasm-i64-extend8-s+   #xc2)  ; i64.extend8_s
+(defconstant +wasm-i64-extend16-s+  #xc3)  ; i64.extend16_s
+(defconstant +wasm-i64-extend32-s+  #xc4)  ; i64.extend32_s
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-235: Multi-value Returns (MVP v1.1)
+;;; ─────────────────────────────────────────────────────────────────────────────
+;; Multi-value uses standard block/if/loop type construct with multiple results.
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-236: JS BigInt ↔ i64 Integration (Chrome 85+)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-bigint-enabled* nil
+  "Feature gate for WASM JS BigInt ↔ i64 integration (FR-236).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-237: Bulk Table Operations — table.init / elem.drop (MVP v1.1)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-table-init+   #xfc 12)  ; table.init
+(defconstant +wasm-table-copy+   #xfc 14)  ; table.copy
+(defconstant +wasm-table-fill+   #xfc 15)  ; table.fill
+(defconstant +wasm-elem-drop+    #xfc 13)  ; elem.drop
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-217: JS Promise Integration (Chrome 123+) — Stack Switching
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-js-promise-enabled* nil
+  "Feature gate for WASM JS Promise Integration (FR-217).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-205: Stack Switching (Phase 2, Chrome/Firefox implementing)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-cont-new+     #xe0)  ; cont.new
+(defconstant +wasm-cont-bind+    #xe1)  ; cont.bind
+(defconstant +wasm-resume+       #xe2)  ; resume
+(defconstant +wasm-suspend+      #xe3)  ; suspend
+(defconstant +wasm-cont-throw+   #xe4)  ; cont.throw (FR-301)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-252: Exception Handling v2 — try_table / throw_ref (Chrome 123+)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-try-table+    #x1f)  ; try_table (EH v2)
+(defconstant +wasm-throw-ref+    #x0a)  ; throw_ref (EH v2)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-253: return_call_ref — typed closure tail call (Tail Calls Proposal)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-return-call-ref+ #x15)  ; return_call_ref
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-256: atomic.fence — memory barrier (Threads Proposal)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-atomic-fence-op+ #xfe 3)  ; atomic.fence (standalone)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-270: br_on_null / ref.as_non_null — GC null safety (Phase 4)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-gc-br-on-null+      23)  ; br_on_null (FB 0x17)
+(defconstant +wasm-gc-br-on-non-null+  24)  ; br_on_non_null (FB 0x18)
+(defconstant +wasm-gc-ref-as-non-null+ 25)  ; ref.as_non_null (FB 0x19)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-279: Typed select for refs (GC Proposal standard)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-select-t+   #x1c)  ; select t (typed select)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-283: Packed Fields i8/i16 (GC Spec §2.3.7)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-285: ref.eq — eqref identity comparison (GC Spec standard)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-309: Rounding Variants (Phase 2)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-f32-nearest-int+  #x90)  ; f32.nearest_int (proposal)
+(defconstant +wasm-f64-nearest-int+  #x9e)  ; f64.nearest_int (proposal)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-323: MVP Bit Operations — clz/ctz/popcnt (already defined above)
+;;; ─────────────────────────────────────────────────────────────────────────────
+;; +wasm-i64-clz+, +wasm-i64-ctz+, +wasm-i64-popcnt+ already defined
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-324: f32.copysign / f64.copysign — IEEE 754 copySign
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-f32-copysign+  #x98)  ; f32.copysign
+(defconstant +wasm-f64-copysign+  #xa6)  ; f64.copysign
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-327: Sub-word Atomic Operations — 8/16bit CAS (Threads)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-atomic-i32-rmw8-cmpxchg-u+  43)  ; i32.atomic.rmw8.cmpxchg_u
+(defconstant +wasm-atomic-i32-rmw16-cmpxchg-u+ 51)  ; i32.atomic.rmw16.cmpxchg_u
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-306: memory.atomic.wait timeout — finite-time blocking (Threads)
+;;; ─────────────────────────────────────────────────────────────────────────────
+;; Uses memory.atomic.wait32/wait64 with i64 timeout_ns parameter
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-228 (cont): Bulk Memory passive segments
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-data-passive-flag+ 1)  ; passive data segment flag
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-229: table64 — 64bit function table (Memory64 companion)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defparameter *wasm-table64-enabled* nil
+  "Feature gate for WASM table64 proposal (FR-229).")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-248: Half Precision f16 (Phase 1)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-f16+  #x76)  ; f16 value type (proposal)
+(defparameter *wasm-f16-enabled* nil
+  "Feature gate for WASM half precision f16 (FR-248).")
 
 ;;; Fixnum tag convention: fixnums are stored as i31ref
 ;;; i31ref can hold 31-bit signed integers directly without heap allocation
