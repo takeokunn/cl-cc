@@ -42,6 +42,16 @@
   (declare (ignore target inst stream))
   nil)
 
+(defmethod emit-instruction (target (inst vm-deopt) stream)
+  "No-op: deopt checkpoints are VM metadata until native deopt stubs are linked."
+  (declare (ignore target inst stream))
+  nil)
+
+(defmethod emit-instruction (target (inst vm-osr-entry) stream)
+  "No-op: OSR markers are VM metadata until native OSR stubs are linked."
+  (declare (ignore target inst stream))
+  nil)
+
 (defmethod emit-instruction (target (inst vm-instruction) stream)
   (declare (ignore target stream))
   (error "Unsupported x86-64 instruction: ~A" (type-of inst)))

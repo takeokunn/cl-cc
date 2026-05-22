@@ -227,6 +227,70 @@ branch is encoded as rel8.")
   "Return byte size of the x86-64 SafeStack unsafe-stack pointer store."
   (if *x86-64-safe-stack-enabled* 9 0))
 
+(defun x86-64-align-up (offset alignment)
+  "Return OFFSET rounded up to ALIGNMENT bytes."
+  (let ((alignment (max 1 alignment)))
+    (* alignment (ceiling offset alignment))))
+
+(defun x86-64-stack-slot-name (slot)
+  "Return the deterministic identity key for stack SLOT."
+  (cond
+    ((and (consp slot) (keywordp (first slot))) (getf slot :name))
+    ((consp slot) (first slot))
+    (t slot)))
+
+(defun x86-64-stack-slot-size (slot)
+  "Return the byte size for stack SLOT."
+  (cond
+    ((and (consp slot) (keywordp (first slot))) (getf slot :size 8))
+    ((consp slot) (or (second slot) 8))
+    (t 8)))
+
+(defun x86-64-stack-slot-alignment (slot)
+  "Return the byte alignment for stack SLOT."
+  (cond
+    ((and (consp slot) (keywordp (first slot)))
+     (or (getf slot :alignment) (min 8 (x86-64-stack-slot-size slot))))
+    ((consp slot) (or (third slot) (min 8 (x86-64-stack-slot-size slot))))
+    (t 8)))
+
+(defun x86-64-pack-stack-slots (slots &key (base-offset 0) (final-alignment 8))
+  "Pack local stack SLOTS by descending size and return layout metadata.
+
+SLOTS accepts either (NAME SIZE &optional ALIGNMENT) entries or plists with
+:NAME, :SIZE, and optional :ALIGNMENT.  Values are deterministic: equal-size
+slots keep their original relative order.  Returns three values:
+
+  1. layout plists in packed order with :NAME :SIZE :ALIGNMENT :OFFSET
+  2. an EQUAL hash-table mapping original slot names to packed offsets
+  3. final frame size rounded to FINAL-ALIGNMENT"
+  (let* ((indexed (loop for slot in slots
+                        for index from 0
+                        collect (list :slot slot :index index
+                                      :name (x86-64-stack-slot-name slot)
+                                      :size (x86-64-stack-slot-size slot)
+                                      :alignment (x86-64-stack-slot-alignment slot))))
+         (ordered (stable-sort indexed #'> :key (lambda (entry) (getf entry :size))))
+         (remap (make-hash-table :test #'equal))
+         (offset base-offset)
+         (layout nil))
+    (dolist (entry ordered)
+      (let* ((alignment (getf entry :alignment))
+             (slot-offset (x86-64-align-up offset alignment))
+             (name (getf entry :name))
+             (size (getf entry :size)))
+        (setf (gethash name remap) slot-offset)
+        (push (list :name name
+                    :size size
+                    :alignment alignment
+                    :offset slot-offset)
+              layout)
+        (setf offset (+ slot-offset size))))
+    (values (nreverse layout)
+            remap
+            (x86-64-align-up offset final-alignment))))
+
+
 (defun x86-64-tls-base-register ()
   "Return the selected x86-64 TLS base register from optimizer planning."
   (let ((plan (opt-build-tls-plan :target :x86-64 :hot-access-p t)))

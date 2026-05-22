@@ -366,6 +366,8 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     ;; FR-298: vm-print with real I/O (indirect call through R11)
     (vm-print        . emit-vm-print)
     (vm-type-check   . emit-vm-native-noop-inst)
+    (vm-deopt        . emit-vm-native-noop-inst)
+    (vm-osr-entry    . emit-vm-native-noop-inst)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)
