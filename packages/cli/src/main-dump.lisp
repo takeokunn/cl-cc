@@ -221,7 +221,8 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
   (msan               nil)
   (tsan               nil)
   (ubsan              nil)
-  (hwasan             nil))
+  (hwasan             nil)
+  (werror             nil))
 
 (defun %parse-compile-opts (parsed)
   "Extract all pipeline/tracing flags from PARSED into a compile-opts struct."
@@ -260,7 +261,8 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
    :msan               (flag parsed "--msan")
    :tsan               (flag parsed "--tsan")
    :ubsan              (flag parsed "--ubsan")
-   :hwasan             (flag parsed "--hwasan")))
+   :hwasan             (flag parsed "--hwasan")
+   :werror             (flag parsed "--Werror")))
 
 (defun %compile-opts-kwargs (opts stream)
   "Return a flat keyword plist for compile-string.

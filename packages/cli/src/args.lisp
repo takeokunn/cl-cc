@@ -73,6 +73,7 @@
       ("--timeout" . :string)
       ("--no-timeout" . :bool)
      ("--dump-image" . :string)
+     ("--Werror" . :bool)
      ("--help"    . :bool)
     ("-h"        . :bool))
   "Alist of (flag-string . type) where type is :bool or :string.")

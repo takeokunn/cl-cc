@@ -37,7 +37,8 @@
                      compile-opts-msan
                      compile-opts-tsan
                      compile-opts-ubsan
-                     compile-opts-hwasan))
+                      compile-opts-hwasan
+                      compile-opts-werror))
 
 (defun %call-with-runtime-sanitizer-flags (opts thunk)
   "Execute THUNK with runtime sanitizer toggles derived from OPTS."
@@ -45,7 +46,8 @@
         (cl-cc/runtime::*rt-msan-enabled* (not (null (compile-opts-msan opts))))
         (cl-cc/runtime::*rt-tsan-enabled* (not (null (compile-opts-tsan opts))))
         (cl-cc/runtime::*rt-hwasan-enabled* (not (null (compile-opts-hwasan opts))))
-        (cl-cc/runtime::*rt-ubsan-enabled* (not (null (compile-opts-ubsan opts)))))
+        (cl-cc/runtime::*rt-ubsan-enabled* (not (null (compile-opts-ubsan opts))))
+        (cl-cc/parse::*werror-p* (not (null (compile-opts-werror opts)))))
     (funcall thunk)))
 
 (defun %pgo-profile-instructions (result)

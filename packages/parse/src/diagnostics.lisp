@@ -83,13 +83,64 @@
                 (fix-it-text fix-it))))))
 
 (defun format-diagnostic-list (diags source &optional (stream *standard-output*))
-  "Format a list of diagnostics with summary."
-  (dolist (d diags)
-    (format-diagnostic d source stream)
-    (terpri stream))
-  (let ((nerr (count :error diags :key #'diagnostic-severity))
-        (nwarn (count :warning diags :key #'diagnostic-severity)))
-    (format stream "~&~D error~:P, ~D warning~:P~%" nerr nwarn)))
+  "Format a list of diagnostics with summary.
+When *WERROR-P* is non-NIL, warnings are promoted to errors before output."
+  (let ((diags (if *werror-p*
+                   (mapcar (lambda (d)
+                             (if (eq (diagnostic-severity d) :warning)
+                                 (make-diagnostic :severity :error
+                                                  :span (diagnostic-span d)
+                                                  :source-file (diagnostic-source-file d)
+                                                  :message (format nil "[upgraded from warning] ~A"
+                                                                   (diagnostic-message d))
+                                                  :hints (diagnostic-hints d)
+                                                  :notes (diagnostic-notes d)
+                                                  :error-code (diagnostic-error-code d)
+                                                  :fix-it (diagnostic-fix-it d))
+                                 d))
+                           diags)
+                   diags)))
+    (dolist (d diags)
+      (format-diagnostic d source stream)
+      (terpri stream))
+    (let ((nerr (count :error diags :key #'diagnostic-severity))
+          (nwarn (count :warning diags :key #'diagnostic-severity)))
+      (when *werror-p*
+        (format stream "~&note: warnings treated as errors (-Werror)~%"))
+      (format stream "~&~D error~:P, ~D warning~:P~%" nerr nwarn))))
+
+;;; Warnings-as-errors (FR-485)
+
+(defvar *werror-p* nil
+  "When non-NIL, all diagnostics with :warning severity are promoted to :error.")
+
+;;; Did You Mean? suggestion engine (FR-484)
+
+(defun levenshtein-distance (s1 s2)
+  "Compute the Levenshtein (edit) distance between strings S1 and S2."
+  (let* ((n (length s1))
+         (m (length s2))
+         (d (make-array (list (1+ n) (1+ m)) :initial-element 0)))
+    (dotimes (i (1+ n)) (setf (aref d i 0) i))
+    (dotimes (j (1+ m)) (setf (aref d 0 j) j))
+    (dotimes (i n)
+      (dotimes (j m)
+        (setf (aref d (1+ i) (1+ j))
+              (min (1+ (aref d i (1+ j)))
+                   (1+ (aref d (1+ i) j))
+                   (+ (aref d i j)
+                      (if (char= (char s1 i) (char s2 j)) 0 1))))))
+    (aref d n m)))
+
+(defun did-you-mean (target candidates &key (max-distance 3) (max-results 3))
+  "Return the top MAX-RESULTS candidates closest to TARGET by Levenshtein distance.
+Candidates with distance > MAX-DISTANCE are filtered out."
+  (let ((scored (loop for c in candidates
+                      for d = (levenshtein-distance (string-downcase target)
+                                                     (string-downcase (string c)))
+                      when (<= d max-distance)
+                      collect (cons c d))))
+    (mapcar #'car (stable-sort scored #'< :key #'cdr))))
 
 ;;; Convenience constructors
 
