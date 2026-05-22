@@ -20,7 +20,7 @@
 
 (deftest fr-evidence-binary-emission-operational
   "Verify binary emission for x86-64, aarch64, wasm targets is available."
-  (assert-true (fboundp 'cl-cc/emit::compile-to-x86-64)))
+  (assert-true (fboundp 'cl-cc/emit::compile-to-x86-64))
   (assert-true (fboundp 'cl-cc/emit::compile-to-aarch64)))
 
 (deftest fr-evidence-vm-interpreter-operational
