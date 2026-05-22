@@ -56,7 +56,7 @@ Returns (values bindings matched-p)."
              (cond
                ;; Pattern variable: bind to form
                ((and (symbolp pat) (not (member pat env :test #'eq))
-                      (not (string= (symbol-name pat) "..."))))
+                      (not (string= (symbol-name pat) "...")))
                  (values `((,pat . ,frm)) t))
                ;; Literal symbol from env or keyword
                ((and (symbolp pat) (or (member pat env :test #'eq)

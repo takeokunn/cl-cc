@@ -497,7 +497,13 @@
     (:module "coverage-tests"
      :pathname "tests"
      :components
-     ((:file "runtime-stdlib-2-coverage-tests"))))
+     ((:file "runtime-stdlib-2-coverage-tests")))
+    (:module "native-advanced-evidence"
+     :pathname "tests"
+     :serial t
+     :components
+     ((:file "native-advanced-evidence-tests")
+      (:file "tooling-advanced-1-evidence-tests"))))
   :perform (asdf:test-op (op c)
               (declare (ignore op c))
               (uiop:symbol-call :cl-cc/test 'run-tests)))
