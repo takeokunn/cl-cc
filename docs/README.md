@@ -25,7 +25,7 @@
 
 - [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — ✅ COMPLETE (52 / 52 FR)
 - [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
-- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR)
+- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — ✅ COMPLETE (75 / 75 FR)
 - [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto (71 FR)
 - [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures (73 FR)
 
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: ~1944/1997 tracked FRs complete (~97.3%) | native-advanced ~91+ complete, 100% addressed | Test: target coverage matrix generated | CLI timeout default: 30s | Last updated: 2026-05-22**
+**Status: ~1944/1997 tracked FRs complete (~97.3%) | native-advanced ~91+ complete, 100% addressed | runtime-stdlib-1 75/75 FRs ✅ | Test: target coverage matrix generated | CLI timeout default: 30s | Last updated: 2026-05-23**
