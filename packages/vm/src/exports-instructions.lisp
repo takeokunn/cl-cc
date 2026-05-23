@@ -185,7 +185,8 @@
        vm-simd-vector-op-lanes
        vm-simd-vector-op-element-type
        vm-fill
-     vm-copy-vector
+      vm-copy-vector
+      vm-vector
     vm-eq
    vm-num-eq
    vm-lt

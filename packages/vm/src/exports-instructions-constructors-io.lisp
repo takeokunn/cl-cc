@@ -167,7 +167,8 @@
      make-vm-load-time-value
      make-vm-spread-values
    make-vm-values-to-list
-   make-vm-vector-pop
+    make-vm-vector-pop
+    make-vm-vector
    make-vm-vector-push
    make-vm-vector-push-extend
    make-vm-vectorp

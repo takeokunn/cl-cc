@@ -38,10 +38,14 @@
     :initform (make-hash-table)
     :accessor wasm-target-known-class-by-reg
     :documentation "Map VM register => class-name symbol/string.")
-   (known-object-class-by-reg :initarg :known-object-class-by-reg
-    :initform (make-hash-table)
-    :accessor wasm-target-known-object-class-by-reg
-    :documentation "Map VM object register => class-name symbol/string."))
+    (known-object-class-by-reg :initarg :known-object-class-by-reg
+     :initform (make-hash-table)
+     :accessor wasm-target-known-object-class-by-reg
+     :documentation "Map VM object register => class-name symbol/string.")
+    (try-stack :initarg :try-stack :initform nil :accessor wasm-target-try-stack
+     :documentation "Structured Wasm EH frames active in direct instruction emission.")
+    (try-depth :initarg :try-depth :initform 0 :accessor wasm-target-try-depth
+     :documentation "Current native Wasm try/catch nesting depth."))
   (:documentation "WASM backend target. Emits WebAssembly Text Format (WAT)."))
 
 ;;; target-register: maps VM register to WAT local index (integer)
@@ -83,6 +87,10 @@
 
 (defun emit-wat-type-section (stream)
   "Emit the predefined WASM GC type definitions to STREAM as WAT."
+  ;; FR-209: $fixnum_t is an i31ref alias, not a heap struct type.  Fixnums are
+  ;; stored inline with ref.i31 and read with i31.get_s/i31.get_u; no
+  ;; (struct.new $fixnum_t) allocation is emitted.
+  (format stream "~%  ;; $fixnum_t := i31ref (native Wasm GC immediate; no heap allocation)")
   ;; Type 0: main function type
   (format stream "~%  (type $main_func_t (func (result eqref)))")
   ;; Type 1: bytes array (i8, mutable)
@@ -113,7 +121,13 @@
   ;; Type 11: boxed float
   (format stream "~%  (type $float_t (struct (field $val f64)))")
   ;; Type 12: character
-  (format stream "~%  (type $char_t (struct (field $code i32)))"))
+  (format stream "~%  (type $char_t (struct (field $code i32)))")
+  ;; FR-211: specialized GC array types for unboxed CL vectors.  These are
+  ;; appended after the historical predefined types so existing type indices for
+  ;; strings/closures/classes remain stable.
+  (format stream "~%  (type $fixnum_array_t (array (mut i64)))")
+  (format stream "~%  (type $float_array_t (array (mut f64)))")
+  (format stream "~%  (type $char_array_t (array (mut i32)))"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module: global variable table
@@ -226,10 +240,10 @@ the generated module."
   (format stream "~%    (local eqref) ;; $tmp at index ~D"
           (wasm-reg-map-tmp-index reg-map))
   ;; One eqref local per VM register that was allocated into this reg-map.
-  ;; The count is (next-index - pc-slot - tmp-slot) = next-index - (pc + 1) - 1
+  ;; The count is everything after $pc and $tmp.
   (let ((reg-count (- (wasm-reg-map-next-index reg-map)
-                      (wasm-reg-map-pc-index reg-map)
-                      2)))
+                       (wasm-reg-map-pc-index reg-map)
+                       2)))
     (dotimes (i (max 0 reg-count))
       (format stream "~%    (local eqref) ;; VM register local ~D"
               (+ (wasm-reg-map-tmp-index reg-map) 1 i)))))
@@ -253,6 +267,12 @@ the generated module."
          (reg-map (make-wasm-reg-map-for-function 0)))
     ;; Pre-collect all registers to populate reg-map local count.
     (collect-registers-from-instructions instructions reg-map)
+    (when (or (wasm-func-exception-table func-def)
+              (some (lambda (inst)
+                      (or (typep inst 'vm-establish-catch)
+                          (typep inst 'vm-establish-handler)))
+                    instructions))
+      (wasm-reg-map-eh-tag-index reg-map))
     ;; Function header: no parameters, returns eqref
     (format stream "~%  (func ~A (result eqref)" wat-name)
     ;; Local declarations

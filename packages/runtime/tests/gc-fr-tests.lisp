@@ -484,7 +484,8 @@
 (deftest fr-343-tlab-alloc-bumps-private-buffer
   "FR-343: rt-gc-tlab-alloc allocates from a thread-local buffer and advances FREE."
   (let ((heap (%make-small-heap-fr))
-        (cl-cc/runtime::*gc-tlab-size-words* 8))
+        (cl-cc/runtime::*gc-tlab-size-words* 8)
+        (cl-cc/runtime::*rt-thread-local-heaps* nil))
     (let* ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-a 3))
            (tlab (cl-cc/runtime::%rt-gc-tlab-for heap :worker-a)))
       (assert-= addr (cl-cc/runtime:rt-tlab-base tlab))
@@ -494,7 +495,8 @@
   "FR-344: retiring TLABs records unused words and writes a dummy fill header."
   (let ((heap (%make-small-heap-fr))
         (cl-cc/runtime::*gc-tlab-size-words* 8)
-        (cl-cc/runtime::*gc-tlab-retire-fill* t))
+        (cl-cc/runtime::*gc-tlab-retire-fill* t)
+        (cl-cc/runtime::*rt-thread-local-heaps* nil))
     (let* ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-b 3))
            (tlab (cl-cc/runtime::%rt-gc-tlab-for heap :worker-b))
            (free-before (cl-cc/runtime:rt-tlab-free tlab)))
@@ -508,7 +510,8 @@
 (deftest fr-345-tlab-allocation-returns-zero-filled-words
   "FR-345: Pure CL fallback exposes zero-initialized allocation words for SIMD zeroing sites."
   (let ((heap (%make-small-heap-fr))
-        (cl-cc/runtime::*gc-tlab-size-words* 8))
+        (cl-cc/runtime::*gc-tlab-size-words* 8)
+        (cl-cc/runtime::*rt-thread-local-heaps* nil))
     (let ((addr (cl-cc/runtime:rt-gc-tlab-alloc heap :worker-c 3)))
       (assert-= 0 (cl-cc/runtime:rt-heap-ref heap addr))
       (assert-= 0 (cl-cc/runtime:rt-heap-ref heap (+ addr 1)))

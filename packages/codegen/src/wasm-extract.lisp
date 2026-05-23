@@ -178,8 +178,47 @@ through extracted standalone functions."
    :source-instructions body-instructions
    :params nil    ; filled by trampoline builder
    :locals nil    ; filled by trampoline builder
-   :body nil      ; filled by trampoline builder
-   :exported-p nil))
+    :body nil      ; filled by trampoline builder
+    :exported-p nil))
+
+(defun %wasm-instruction-pc-index (instructions)
+  "Return an EQ hash table mapping each instruction object to its flat PC."
+  (let ((index (make-hash-table :test #'eq)))
+    (loop for inst in instructions
+          for pc from 0
+          do (setf (gethash inst index) pc))
+    index))
+
+(defun %wasm-label-at-pc (instructions pc)
+  "Return the VM label name at PC when PC denotes a vm-label instruction."
+  (let ((inst (and (integerp pc) (nth pc instructions))))
+    (when (typep inst 'vm-label)
+      (vm-name inst))))
+
+(defun %wasm-function-local-exception-table (full-instructions body-instructions exception-table)
+  "Project PROGRAM's exception table onto BODY-INSTRUCTIONS using local PCs."
+  (let ((local-index (%wasm-instruction-pc-index body-instructions))
+        (entries nil))
+    (when exception-table
+      (loop for entry across exception-table
+            for start-inst = (nth (cl-cc/vm::vm-exception-entry-start-pc entry)
+                                  full-instructions)
+            for end-inst = (nth (1- (cl-cc/vm::vm-exception-entry-end-pc entry))
+                                full-instructions)
+            for start-local = (and start-inst (gethash start-inst local-index))
+            for end-local = (and end-inst (gethash end-inst local-index))
+            for handler-label = (%wasm-label-at-pc
+                                 full-instructions
+                                 (cl-cc/vm::vm-exception-entry-handler-pc entry))
+            when (and start-local end-local handler-label)
+              do (push (list :kind :handler
+                             :start-pc start-local
+                             :end-pc (1+ end-local)
+                             :handler-label handler-label
+                             :result-reg (cl-cc/vm::vm-exception-entry-result-reg entry)
+                             :condition-type (cl-cc/vm::vm-exception-entry-condition-type entry))
+                       entries)))
+    (nreverse entries)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Main entry point: extract-wasm-functions
@@ -192,9 +231,11 @@ through extracted standalone functions."
   (let* ((instructions (vm-program-instructions program))
          (entry-labels (collect-entry-labels instructions))
          (segments (segment-instructions instructions entry-labels))
-         (module (make-empty-wasm-module))
-         (func-index 0)
-         (toplevel-instructions nil))
+          (module (make-empty-wasm-module))
+          (exception-table (gethash program cl-cc/vm::*vm-program-exception-tables*))
+          (func-index 0)
+          (toplevel-instructions nil))
+    (setf (wasm-module-exception-table module) exception-table)
     ;; Collect all global variable names and register them in the module.
     ;; Must happen before function body building so WAT references resolve.
     (let ((seen-globals (make-hash-table :test #'equal)))
@@ -217,18 +258,22 @@ through extracted standalone functions."
          (setf toplevel-instructions
                (append toplevel-instructions (cdr segment))))
         (:function
-         (let* ((label (second segment))
-                (body (third segment))
-                (func (make-wasm-func-from-segment label body func-index)))
-           (incf func-index)
-           (wasm-module-add-function module func)))))
+          (let* ((label (second segment))
+                 (body (third segment))
+                 (func (make-wasm-func-from-segment label body func-index)))
+            (setf (wasm-func-exception-table func)
+                  (%wasm-function-local-exception-table instructions body exception-table))
+            (incf func-index)
+            (wasm-module-add-function module func)))))
     ;; Create the "$main" function for top-level code
     (let ((main-func (make-wasm-function-def
                       :index func-index
                        :wat-name "$main"
                        :type-index +type-idx-main-func+
-                       :source-instructions toplevel-instructions
-                      :exported-p t
+                        :source-instructions toplevel-instructions
+                       :exception-table (%wasm-function-local-exception-table
+                                         instructions toplevel-instructions exception-table)
+                       :exported-p t
                       :export-name "main")))
       (wasm-module-add-function module main-func))
     ;; Reverse the functions list so it is in definition order

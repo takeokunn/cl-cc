@@ -326,6 +326,13 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
   (:sexp-tag :copy-vector)
   (:sexp-slots dst-array-reg src-array-reg len-reg))
 
+(define-vm-instruction vm-vector (vm-instruction)
+  "Create a simple vector from already-evaluated element registers."
+  (dst nil :reader vm-dst)
+  (element-regs nil :reader vm-element-regs)
+  (:sexp-tag :vector)
+  (:sexp-slots dst element-regs))
+
 (define-vm-instruction vm-vector-push-extend (vm-instruction)
   "Push VAL onto adjustable ARRAY, extending if needed. Store new index in DST."
   (dst nil :reader vm-dst)
@@ -494,6 +501,14 @@ storage word.  :ANY/T arrays retain pointer-scannable element semantics."
       (t
        (replace dst src :end1 len :end2 len)))
     (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-vector) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (coerce (mapcar (lambda (reg) (vm-reg-get state reg))
+                              (vm-element-regs inst))
+                      'vector))
+  (values (1+ pc) nil nil))
 
 (defun %vm-bridge-replace (sequence-1 sequence-2 &key end1 end2)
   "VM-safe bridge for CL:REPLACE over ordinary, COW, and specialized arrays."

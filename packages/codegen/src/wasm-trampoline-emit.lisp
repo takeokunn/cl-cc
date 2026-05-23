@@ -97,7 +97,7 @@ tree emission on NIL."
       (dotimes (i span)
         (format stream " $case_~D" i))
       (format stream " $case_default")
-      (format stream "~%            (i32.wrap_i64 (i64.sub ~A (i64.const ~D))))"
+      (format stream "~%            (i64.sub ~A (i64.const ~D)))"
               (wasm-fixnum-unbox reg-map selector-reg)
               min-key)
       (format stream "~%        ) ;; end block $case_default")
@@ -129,7 +129,12 @@ tree emission on NIL."
         (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
           (format stream "~%      ~A"
                   (reg-local-set reg-map (vm-dst inst)
-                                 (wasm-fixnum-box (format nil unary-fmt src)))))
+                                 (wasm-fixnum-box (format nil unary-fmt src))))
+          (reg-record-fixnum-range
+           reg-map
+           (vm-dst inst)
+           (wasm-range-i31-or-unknown
+            (wasm-range-unary (reg-known-fixnum-range reg-map (vm-src inst)) unary-fmt))))
         (return-from emit-trampoline-instruction t)))
     ;; Struct field access (vm-car, vm-cdr) — FR-142: use smart ref.cast
     (let ((struct-fmt (gethash tp *wasm-struct-get-table*)))
@@ -176,11 +181,13 @@ tree emission on NIL."
        (format stream "~%      ~A"
                (reg-local-set reg-map (vm-dst inst)
                               (%wasm-const-value-to-wat val)))
-       ;; FR-145: Record type info for integer constants (known fixnum range)
-       (typecase val
-         (integer (reg-record-type reg-map (vm-dst inst) :i31ref))
-         (null    (reg-record-type reg-map (vm-dst inst) :null))))
-     t)
+         ;; FR-209: Record type/range info for integer constants (known i31ref)
+         (typecase val
+           (integer (reg-record-fixnum-range reg-map (vm-dst inst) (cons val val)))
+           (vector  (wasm-array-reg-record-kind reg-map (vm-dst inst)
+                                                (wasm-vector-literal-kind val)))
+           (null    (reg-record-type reg-map (vm-dst inst) :null))))
+      t)
     (vm-move
       (format stream "~%      ~A"
               (reg-local-set reg-map (vm-dst inst)
@@ -189,7 +196,11 @@ tree emission on NIL."
       (let ((known (reg-known-type reg-map (vm-src inst))))
         (when known
           (reg-record-type reg-map (vm-dst inst) known)))
-      t)
+       (let ((range (reg-known-fixnum-range reg-map (vm-src inst))))
+         (when range
+           (reg-record-fixnum-range reg-map (vm-dst inst) range)))
+       (wasm-array-reg-copy-kind reg-map (vm-dst inst) (vm-src inst))
+       t)
     (vm-jump
      (emit-trampoline-jump-to-label (vm-label-name inst) label-pc-map reg-map stream)
      t)
@@ -283,12 +294,69 @@ tree emission on NIL."
              (vm-func-name inst)
              (wasm-reg-to-local reg-map (vm-src inst)))
      t)
-    (vm-closure-ref-idx
+     (vm-closure-ref-idx
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)
                             (wasm-closure-ref-wat reg-map
                                                   (vm-closure-reg inst)
                                                   (vm-closure-index inst))))
+      t)
+    (vm-make-array
+     (let* ((kind (if (and *wasm-gc-array-types-enabled*
+                           (not (vm-element-type-reg inst)))
+                      (wasm-normalize-array-element-kind (vm-element-type inst))
+                      :eqref))
+            (init (if (vm-initial-element inst)
+                      (wasm-reg-to-array-element-wat reg-map (vm-initial-element inst) kind)
+                      (wasm-array-default-wat kind)))
+            (size (wasm-fixnum-unbox reg-map (vm-size-reg inst) :result-type :i32)))
+       (format stream "~%      ~A"
+               (reg-local-set reg-map (vm-dst inst)
+                              (wasm-array-new-wat kind init size
+                                                  :default-p (null (vm-initial-element inst)))))
+       (wasm-array-reg-record-kind reg-map (vm-dst inst) kind)
+       t))
+    (vm-aref
+     (when (opt-bounds-check-eliminable-marked-p inst)
+       (format stream "~%      ;; BCE: explicit bounds check eliminated; array.get remains spec-checked"))
+     (format stream "~%      ~A"
+             (reg-local-set reg-map (vm-dst inst)
+                            (wasm-array-get-eqref-wat reg-map
+                                                      (vm-array-reg inst)
+                                                      (vm-index-reg inst))))
+     t)
+    (vm-aset
+     (when (opt-bounds-check-eliminable-marked-p inst)
+       (format stream "~%      ;; BCE: explicit bounds check eliminated; array.set remains spec-checked"))
+     (format stream "~%      ~A"
+             (wasm-array-set-wat reg-map
+                                 (vm-array-reg inst)
+                                 (vm-index-reg inst)
+                                 (vm-val-reg inst)))
+     t)
+    (vm-array-length
+     (format stream "~%      ~A"
+             (reg-local-set reg-map (vm-dst inst)
+                            (wasm-fixnum-box
+                             (format nil "(i64.extend_i32_u ~A)"
+                                     (wasm-array-len-wat reg-map (vm-src inst))))))
+     t)
+    (vm-vector
+     (let ((elems (loop for reg in (vm-element-regs inst)
+                        collect (reg-local-ref reg-map reg))))
+       (format stream "~%      ~A"
+               (reg-local-set reg-map (vm-dst inst)
+                              (format nil "(array.new_fixed $eqref_array_t ~D~@[ ~A~])"
+                                      (length elems)
+                                      (and elems (format nil "~{~A~^ ~}" elems)))))
+       (wasm-array-reg-record-kind reg-map (vm-dst inst) :eqref)
+       t))
+    (vm-copy-vector
+     (format stream "~%      ~A"
+             (wasm-array-copy-wat reg-map
+                                  (vm-dst-array-reg inst)
+                                  (vm-src-array-reg inst)
+                                  (vm-len-reg inst)))
      t)
     (vm-call
       (let* ((args (vm-args inst))
@@ -306,27 +374,37 @@ tree emission on NIL."
                  dst-idx entry-idx-wat)
          t))
     (vm-establish-catch
-      ;; FR-204: Emit native Wasm try block for exception handling
-      (format stream "~%      ;; try block for handler ~S" (vm-catch-handler-label inst))
-      (format stream "~%      (try (result eqref)")
-      (push :try (wasm-reg-map-try-stack reg-map))
-      t)
-    (vm-establish-handler
-      ;; FR-204: Handler wraps try body; catch clause follows
-      (format stream "~%      ;; handler clause for ~S — catch after try body" (vm-handler-label inst))
-      t)
-    (vm-remove-handler
-      ;; FR-204: Close try/catch with actual catch clause
-      (when *wasm-exception-handling-enabled*
-        (if (eq (car (wasm-reg-map-try-stack reg-map)) :try)
-            (progn
-              (format stream "~%      (catch $cl_condition_tag")
-              (format stream "~%        ;; handler stores condition in local, then jumps to handler label")
-              (format stream "~%        (unreachable)")
-              (format stream "~%      ) ;; end try/catch")
-              (pop (wasm-reg-map-try-stack reg-map)))
-            (format stream "~%      ;; remove handler frame (no active try)")))
-      t)
+      ;; FR-204: The trampoline builder wraps the PC-dispatch loop in one native
+      ;; try/catch and projects this dynamic extent into its catch dispatch table.
+      ;; Keep the stub visible, but do not emit an unmatched local try here.
+      (push (list :kind :catch
+                  :handler-label (vm-catch-handler-label inst)
+                  :result-reg (vm-catch-result-reg inst)
+                  :tag-reg (vm-catch-tag-reg inst))
+            (wasm-reg-map-try-stack reg-map))
+      (incf (wasm-reg-map-try-depth reg-map))
+      (format stream "~%      ;; native try/catch catch-frame => ~S (depth ~D)"
+              (vm-catch-handler-label inst)
+              (wasm-reg-map-try-depth reg-map))
+       t)
+     (vm-establish-handler
+      (push (list :kind :handler
+                  :handler-label (vm-handler-label inst)
+                  :result-reg (vm-handler-result-reg inst)
+                  :condition-type (vm-error-type inst))
+            (wasm-reg-map-try-stack reg-map))
+      (incf (wasm-reg-map-try-depth reg-map))
+      (format stream "~%      ;; native try/catch handler-frame => ~S (depth ~D)"
+              (vm-handler-label inst)
+              (wasm-reg-map-try-depth reg-map))
+       t)
+     (vm-remove-handler
+      (when (wasm-reg-map-try-stack reg-map)
+        (pop (wasm-reg-map-try-stack reg-map))
+        (decf (wasm-reg-map-try-depth reg-map)))
+      (format stream "~%      ;; native try/catch frame closed by trampoline wrapper (depth ~D)"
+              (wasm-reg-map-try-depth reg-map))
+       t)
     (vm-sync-handler-regs
       (format stream "~%      ;; FR-204: handler regs synced — locals update automatically in WASM")
       t)

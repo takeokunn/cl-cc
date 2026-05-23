@@ -115,6 +115,7 @@
     ;; can still emit valid WAT instead of aborting during extraction.
     (symbol  "(ref.null eq)")
     (string  (error "Unsupported WASM trampoline string constant: ~S" val))
+    (vector  (wasm-vector-literal-wat val))
     (t       (error "Unsupported WASM trampoline constant: ~S" val))))
 
 (defun %wasm-if-eqref (cond-wat then-wat else-wat)

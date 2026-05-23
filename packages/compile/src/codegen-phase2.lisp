@@ -229,6 +229,12 @@ unknown so callers can fall through instead of silently changing semantics."
       (setf result-reg new-reg)))
   result-reg)
 
+;; vector: variadic constructor → simple vector from evaluated operands.
+(define-phase2-handler "VECTOR" (args result-reg ctx)
+  (let ((element-regs (mapcar (lambda (arg) (compile-ast arg ctx)) args)))
+    (emit ctx (make-vm-vector :dst result-reg :element-regs element-regs))
+    result-reg))
+
 ;; encode-universal-time: 6 or 7 args → cons-list → single instruction
 (define-phase2-handler "ENCODE-UNIVERSAL-TIME" (args result-reg ctx)
   (when (and (>= (length args) 6) (<= (length args) 7))

@@ -111,12 +111,123 @@ match or the br_table helper declines the dispatch."
               3))))))
     0)
 
-(defun build-trampoline-body (basic-blocks label-pc-map reg-map param-regs stream)
+(defun %wasm-local-pc-block-map (basic-blocks)
+  "Return an EQL hash table mapping local instruction PC to trampoline block PC."
+  (let ((map (make-hash-table :test #'eql))
+        (pc 0))
+    (loop for bb in basic-blocks
+          for block-pc from 0
+          do (dolist (_ (wasm-bb-instructions bb))
+               (declare (ignore _))
+               (setf (gethash pc map) block-pc)
+               (incf pc)))
+    map))
+
+(defun %wasm-dynamic-eh-entries (instructions)
+  "Recover catch/handler dynamic extents still represented by VM instructions."
+  (let ((stack nil)
+        (entries nil))
+    (loop for inst in instructions
+          for pc from 0
+          do (cond
+               ((typep inst 'vm-establish-catch)
+                (push (list :kind :catch
+                            :start-pc (1+ pc)
+                            :handler-label (vm-catch-handler-label inst)
+                            :result-reg (vm-catch-result-reg inst)
+                            :tag-reg (vm-catch-tag-reg inst))
+                      stack))
+               ((typep inst 'vm-establish-handler)
+                (push (list :kind :handler
+                            :start-pc (1+ pc)
+                            :handler-label (vm-handler-label inst)
+                            :result-reg (vm-handler-result-reg inst)
+                            :condition-type (vm-error-type inst))
+                      stack))
+               ((typep inst 'vm-remove-handler)
+                (let ((entry (pop stack)))
+                  (when entry
+                    (setf (getf entry :end-pc) pc)
+                    (push entry entries))))))
+    (nreverse entries)))
+
+(defun %wasm-eh-entry->block-entry (entry pc->block label-pc-map)
+  "Convert a local instruction-PC EH ENTRY to trampoline block-PC coordinates."
+  (let* ((start-pc (getf entry :start-pc))
+         (end-pc (getf entry :end-pc))
+         (start-block (gethash start-pc pc->block))
+         (end-block (gethash (max start-pc (1- end-pc)) pc->block))
+         (handler-block (gethash (getf entry :handler-label) label-pc-map)))
+    (when (and start-block end-block handler-block)
+      (append entry
+              (list :start-block start-block
+                    :end-block (1+ end-block)
+                    :handler-block handler-block)))))
+
+(defun %wasm-effective-eh-entries (basic-blocks label-pc-map reg-map static-entries)
+  "Return native Wasm EH dispatch entries for this trampoline body."
+  (let* ((all-instructions nil))
+    (dolist (bb basic-blocks)
+      (dolist (inst (wasm-bb-instructions bb))
+        (push inst all-instructions)))
+    (let* ((instructions (nreverse all-instructions))
+           (pc->block (%wasm-local-pc-block-map basic-blocks))
+           (entries (append static-entries (%wasm-dynamic-eh-entries instructions))))
+      (loop for entry in entries
+            for block-entry = (%wasm-eh-entry->block-entry entry pc->block label-pc-map)
+            when block-entry
+              collect (progn
+                        (when (getf block-entry :result-reg)
+                          (wasm-reg-to-local reg-map (getf block-entry :result-reg)))
+                        (when (getf block-entry :tag-reg)
+                          (wasm-reg-to-local reg-map (getf block-entry :tag-reg)))
+                        block-entry)))))
+
+(defun %wasm-eh-pc-range-test (reg-map entry)
+  (format nil "(i32.and (i32.ge_u (local.get ~D) (i32.const ~D)) (i32.lt_u (local.get ~D) (i32.const ~D)))"
+          (wasm-reg-map-pc-index reg-map)
+          (getf entry :start-block)
+          (wasm-reg-map-pc-index reg-map)
+          (getf entry :end-block)))
+
+(defun %emit-wasm-dispatch-catch (entries reg-map stream)
+  "Emit the native Wasm catch side of the PC-dispatch trampoline."
+  (format stream "~%            (catch $cl_condition_tag")
+  (format stream "~%              (local.set ~D) ;; condition/value payload"
+          (wasm-reg-map-tmp-index reg-map))
+  (format stream "~%              (local.set ~D) ;; condition/catch tag payload"
+          (wasm-reg-map-eh-tag-index reg-map))
+  (dolist (entry entries)
+    (let ((range-test (%wasm-eh-pc-range-test reg-map entry)))
+      (when (eq (getf entry :kind) :catch)
+        (setf range-test
+              (format nil "(i32.and ~A (ref.eq (local.get ~D) ~A))"
+                      range-test
+                      (wasm-reg-map-eh-tag-index reg-map)
+                      (reg-local-ref reg-map (getf entry :tag-reg)))))
+      (format stream "~%              (if ~A" range-test)
+      (format stream "~%                (then")
+      (format stream "~%                  (local.set ~D (local.get ~D))"
+              (wasm-reg-to-local reg-map (getf entry :result-reg))
+              (wasm-reg-map-tmp-index reg-map))
+      (format stream "~%                  (local.set ~D (i32.const ~D))"
+              (wasm-reg-map-pc-index reg-map)
+              (getf entry :handler-block))
+      (format stream "~%                  (br $dispatch)))"))
+  (format stream "~%              (throw $cl_condition_tag (local.get ~D) (local.get ~D))"
+          (wasm-reg-map-eh-tag-index reg-map)
+          (wasm-reg-map-tmp-index reg-map))
+  (format stream "~%            ) ;; end catch $cl_condition_tag")))
+
+(defun build-trampoline-body (basic-blocks label-pc-map reg-map param-regs stream
+                              &optional static-exception-entries)
   "Emit the WAT trampoline body (nested blocks + loop) to STREAM.
    BASIC-BLOCKS is the list of wasm-basic-block. REG-MAP is the register map.
    PARAM-REGS is a list of VM register keywords that are this function's parameters;
    they are loaded from the global $cl_argN calling-convention registers as a prologue."
-  (let ((num-blocks (length basic-blocks)))
+  (let* ((num-blocks (length basic-blocks))
+         (eh-entries (%wasm-effective-eh-entries
+                      basic-blocks label-pc-map reg-map static-exception-entries)))
     (when (zerop num-blocks)
       (format stream "~%      ;; empty function body")
       (return-from build-trampoline-body))
@@ -136,6 +247,10 @@ match or the br_table helper declines the dispatch."
 
     ;; Loop for re-dispatching after a jump
     (format stream "~%        (loop $dispatch (result eqref)")
+
+    (when eh-entries
+      (format stream "~%          (try (result eqref)")
+      (format stream "~%            (do"))
 
     ;; Nested blocks in REVERSE order so block 0 is innermost.
     ;; WAT nesting: (block $blk_N-1 (block $blk_N-2 ... (block $blk_0 br_table)))
@@ -194,6 +309,11 @@ match or the br_table helper declines the dispatch."
                     (wasm-reg-map-pc-index reg-map))
             (format stream "~%          (br $dispatch)"))))
 
+    (when eh-entries
+      (format stream "~%            ) ;; end do")
+      (%emit-wasm-dispatch-catch eh-entries reg-map stream)
+      (format stream "~%          ) ;; end try/catch $dispatch"))
+
     ;; Close loop and outer block
     (format stream "~%        ) ;; end loop $dispatch")
     (format stream "~%      ) ;; end block $exit")
@@ -238,7 +358,8 @@ match or the br_table helper declines the dispatch."
     (collect-registers-from-instructions instructions reg-map)
     ;; Emit the trampoline body (pass param-regs for the arg-load prologue)
     (build-trampoline-body basic-blocks label-pc-map reg-map
-                           (wasm-func-params func-def) body-stream)
+                           (wasm-func-params func-def) body-stream
+                           (wasm-func-exception-table func-def))
     (let ((body-str (get-output-stream-string body-stream)))
       (setf (wasm-func-body func-def) (list body-str))
       body-str)))

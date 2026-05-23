@@ -1052,10 +1052,12 @@ When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
                    asan msan tsan ubsan hwasan))
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
-  (when speed
-    (opt-configure-optimization-policy :speed speed))
   (let* ((*opt-inline-threshold-scale* inline-threshold-scale)
          (*block-compile* (or block-compile *block-compile*))
+         (*opt-enable-pure-call-optimization*
+          (if speed (>= speed 3) *opt-enable-pure-call-optimization*))
+         (*opt-enable-sealed-gf-devirtualization*
+          (if speed (>= speed 2) *opt-enable-sealed-gf-devirtualization*))
          (reporting (make-opt-reporting-options
                      :print-pass-timings print-pass-timings
                      :timing-stream      (or timing-stream *standard-output*)

@@ -342,11 +342,11 @@ Returns a plist describing the compaction result."
         (rt-gc-run-unload-pass heap)
         (when (fboundp '%rt-gc-clean-adjustable-array-registry)
           (%rt-gc-clean-adjustable-array-registry heap)))
-    ;; Always reset gc-state, even on error
+    ;; Always reset gc-state and increment count, even on error
     (with-gc-mark-queue-locked ()
       (remhash heap *rt-gc-incremental-mark-queues*))
-    (setf (rt-heap-gc-state heap) :normal))
-  (incf (rt-heap-major-gc-count heap))
+    (setf (rt-heap-gc-state heap) :normal)
+    (incf (rt-heap-major-gc-count heap)))
   (%rt-gc-check-pressure heap)
   (%rt-gc-note-pause heap pause-start)
   ;; FR-391: Heap Growth Policy / FR-392: Heap Shrink Policy — resize only

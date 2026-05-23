@@ -114,6 +114,10 @@
   (body nil :type list)
   ;; The vm-program-instructions subset assigned to this function
   (source-instructions nil :type list)
+  ;; Function-local exception table entries.  Each entry is a plist using local
+  ;; VM instruction PCs and VM labels/registers, consumed by the trampoline
+  ;; builder to materialize native Wasm try/catch dispatch.
+  (exception-table nil :type list)
   ;; Whether this is exported
   (exported-p nil)
   ;; Export name (if exported-p)
@@ -154,7 +158,9 @@
   ;; counter for assigning tag indices
   (next-tag-index 0 :type integer)
   ;; map from WAT tag name to wasm-tag-def
-  (tag-name-table nil))
+  (tag-name-table nil)
+  ;; Original VM exception table registered on the vm-program, when present.
+  (exception-table nil))
 
 (defun make-empty-wasm-module ()
   "Create an empty wasm-module-ir with an initialized global-name-table."
@@ -254,8 +260,18 @@
   (tmp-index nil)
   ;; FR-142: Known type tracking — maps register -> type keyword
   (known-types nil)
-  ;; FR-204: Try/catch nesting stack — list of :try markers
-  (try-stack nil))
+  ;; FR-209: Fixnum range tracking — maps register -> (MIN . MAX).
+  ;; VM locals remain eqref; this metadata records when an eqref is an i31ref
+  ;; fixnum so the Wasm emitter can avoid redundant unbox/rebox sequences.
+  (fixnum-ranges nil)
+  ;; FR-211: maps register -> specialized GC array element kind
+  ;; (:eqref, :fixnum, :float, :char).  This lets later aref/aset/len
+  ;; instructions choose the right array.get/array.set type while preserving VM
+  ;; register values as eqref-compatible references.
+  (array-element-types nil)
+  ;; FR-204: Try/catch nesting stack — list of frame plists
+  (try-stack nil)
+  (try-depth 0 :type integer))
 
 (defun make-wasm-reg-map-for-function (param-count)
   "Create a register map. Params occupy locals 0..param-count-1.
@@ -264,9 +280,12 @@
    :table (make-hash-table)
    :next-index (+ param-count 2)  ; skip $pc and $tmp
    :pc-index param-count
-   :tmp-index (1+ param-count)
-   :known-types (make-hash-table)
-   :try-stack nil))
+    :tmp-index (1+ param-count)
+     :known-types (make-hash-table)
+     :fixnum-ranges (make-hash-table)
+     :array-element-types (make-hash-table)
+     :try-stack nil
+   :try-depth 0))
 
 (defun wasm-reg-to-local (reg-map reg)
   "Return the WASM local index for VM register REG.
@@ -276,3 +295,7 @@
         (setf (gethash reg (wasm-reg-map-table reg-map)) idx)
         (incf (wasm-reg-map-next-index reg-map))
         idx)))
+
+(defun wasm-reg-map-eh-tag-index (reg-map)
+  "Return the lazily allocated eqref local used for native Wasm EH tag payloads."
+  (wasm-reg-to-local reg-map :%wasm-eh-tag))

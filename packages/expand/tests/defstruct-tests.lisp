@@ -23,11 +23,12 @@
 
 (defun ds-assert-deriving-registers (typeclass-name)
   "Assert that a :deriving defstruct registers TYPECLASS-NAME when evaluated."
-  (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
-        (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal))
-        (name (gensym "DERIVING-POINT-")))
-    (eval (ds-expand `(defstruct (,name (:deriving eq show ord)) x y)))
-    (assert-true (has-typeclass-instance-p typeclass-name name))))
+  (cl-cc/expand:with-fresh-defstruct-registries
+    (let ((cl-cc/type::*typeclass-registry* (make-hash-table :test #'eq))
+          (cl-cc/type::*typeclass-instance-registry* (make-hash-table :test #'equal))
+          (name (gensym "DERIVING-POINT-")))
+      (eval (ds-expand `(defstruct (,name (:deriving eq show ord)) x y)))
+      (assert-true (has-typeclass-instance-p typeclass-name name)))))
 
 ;;; ─── Basic struct ─────────────────────────────────────────────────────────
 

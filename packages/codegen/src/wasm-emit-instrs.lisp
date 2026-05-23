@@ -19,14 +19,18 @@
                     (character
                      (format nil "(ref.i31 (i32.const ~D))" (char-code val)))
                     ;; FR-297: Float literals — emit as f64.const + struct
-                    (float
-                     (%wasm-float-literal-eqref val))
+                     (float
+                      (%wasm-float-literal-eqref val))
+                     (vector
+                      (wasm-vector-literal-wat val))
                     (t
                      ;; Fallback for unsupported literal types
                      "(ref.null eq)"))))
     (format stream "~%    (local.set ~D ~A)"
             (wasm-reg-to-local reg-map dst)
-            wat-val)))
+            wat-val)
+    (when (vectorp val)
+      (wasm-array-reg-record-kind reg-map dst (wasm-vector-literal-kind val)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-move) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -34,6 +38,7 @@
       (if known-label
           (setf (gethash (vm-dst inst) (wasm-target-known-func-labels target)) known-label)
           (remhash (vm-dst inst) (wasm-target-known-func-labels target))))
+    (wasm-array-reg-copy-kind reg-map (vm-dst inst) (vm-src inst))
     (format stream "~%    (local.tee ~D (local.get ~D))"
             (wasm-reg-to-local reg-map (vm-dst inst))
             (wasm-reg-to-local reg-map (vm-src inst)))))
@@ -254,40 +259,72 @@ tail-position indirect call sites."
 
 Uses $eqref_array_t as the canonical mutable eqref array representation."
   (let* ((reg-map (wasm-target-reg-map target))
+         (kind (if (and *wasm-gc-array-types-enabled*
+                        (not (vm-element-type-reg inst)))
+                   (wasm-normalize-array-element-kind (vm-element-type inst))
+                   :eqref))
          (init (if (vm-initial-element inst)
-                   (reg-local-ref reg-map (vm-initial-element inst))
-                   "(ref.null eq)"))
-         (size (wasm-fixnum-unbox reg-map (vm-size-reg inst))))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst)
-                           (format nil "(array.new $eqref_array_t ~A ~A)" init size)))))
+                   (wasm-reg-to-array-element-wat reg-map (vm-initial-element inst) kind)
+                   (wasm-array-default-wat kind)))
+         (size (wasm-fixnum-unbox reg-map (vm-size-reg inst) :result-type :i32)))
+     (format stream "~%    ~A"
+             (reg-local-set reg-map (vm-dst inst)
+                            (wasm-array-new-wat kind init size
+                                                :default-p (null (vm-initial-element inst)))))
+     (wasm-array-reg-record-kind reg-map (vm-dst inst) kind)))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-aref) stream)
   "Emit wasm-gc array element read via array.get."
   (let* ((reg-map (wasm-target-reg-map target))
-         (arr (reg-local-ref reg-map (vm-array-reg inst)))
-         (idx (wasm-fixnum-unbox reg-map (vm-index-reg inst))))
+         (dst (vm-dst inst)))
     ;; BCE metadata suppresses any extra explicit bounds guard here.  Wasm GC has
     ;; no standard unchecked array.get; the opcode retains mandatory trap
     ;; semantics, so we emit a marker documenting that compiler-side BCE fired.
     (when (opt-bounds-check-eliminable-marked-p inst)
       (format stream "~%    ;; BCE: explicit bounds check eliminated; array.get remains spec-checked"))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst)
-                           (format nil "(array.get $eqref_array_t ~A ~A)" arr idx)))))
+     (format stream "~%    ~A"
+             (reg-local-set reg-map dst
+                            (wasm-array-get-eqref-wat reg-map (vm-array-reg inst) (vm-index-reg inst))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-aset) stream)
   "Emit wasm-gc array element write via array.set."
-  (let* ((reg-map (wasm-target-reg-map target))
-         (arr (reg-local-ref reg-map (vm-array-reg inst)))
-         (idx (wasm-fixnum-unbox reg-map (vm-index-reg inst)))
-         (val (reg-local-ref reg-map (vm-val-reg inst))))
+  (let ((reg-map (wasm-target-reg-map target)))
     ;; BCE metadata suppresses any extra explicit bounds guard here.  Wasm GC has
     ;; no standard unchecked array.set; the opcode retains mandatory trap
     ;; semantics, so we emit a marker documenting that compiler-side BCE fired.
     (when (opt-bounds-check-eliminable-marked-p inst)
       (format stream "~%    ;; BCE: explicit bounds check eliminated; array.set remains spec-checked"))
-    (format stream "~%    (array.set $eqref_array_t ~A ~A ~A)" arr idx val)))
+    (format stream "~%    ~A"
+            (wasm-array-set-wat reg-map (vm-array-reg inst) (vm-index-reg inst) (vm-val-reg inst)))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-array-length) stream)
+  "Emit wasm-gc vector length via array.len."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-fixnum-box (format nil "(i64.extend_i32_u ~A)"
+                                                     (wasm-array-len-wat reg-map (vm-src inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-vector) stream)
+  "Emit variadic CL VECTOR as a generic eqref array.new_fixed."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (elems (loop for reg in (vm-element-regs inst)
+                      collect (reg-local-ref reg-map reg))))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil "(array.new_fixed $eqref_array_t ~D~@[ ~A~])"
+                                   (length elems)
+                                   (and elems (format nil "~{~A~^ ~}" elems)))))
+    (wasm-array-reg-record-kind reg-map (vm-dst inst) :eqref)))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-copy-vector) stream)
+  "Emit FR-228 vector bulk copy via Wasm GC array.copy."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (wasm-array-copy-wat reg-map
+                                 (vm-dst-array-reg inst)
+                                 (vm-src-array-reg inst)
+                                 (vm-len-reg inst)))))
 
 (defun %wasm-string-literal-eqref (str)
   "Return wasm-gc eqref construction for a string literal STR.
@@ -413,7 +450,80 @@ Arguments are marshaled through the standard wasm calling-convention globals
                                    src
                                    (wasm-fixnum-box "(i64.const 0)")
                                    (wasm-fixnum-box
-                                    (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
+                                     (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-establish-catch) stream)
+  "Record a native Wasm catch extent for direct instruction emission.
+
+The PC-dispatch trampoline consumes the same VM instruction by projecting the
+extent into its enclosing try/catch table; this method keeps non-trampoline
+emission structurally aware without changing the VM instruction definition."
+  (let ((frame (list :kind :catch
+                     :handler-label (vm-catch-handler-label inst)
+                     :result-reg (vm-catch-result-reg inst)
+                     :tag-reg (vm-catch-tag-reg inst))))
+    (push frame (wasm-target-try-stack target))
+    (incf (wasm-target-try-depth target))
+    (format stream "~%    ;; FR-204 begin catch try depth ~D handler ~S"
+            (wasm-target-try-depth target)
+            (vm-catch-handler-label inst))
+    (format stream "~%    (try (result eqref)")
+    (format stream "~%      (do")))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-establish-handler) stream)
+  "Record a native Wasm condition handler extent for direct instruction emission."
+  (let ((frame (list :kind :handler
+                     :handler-label (vm-handler-label inst)
+                     :result-reg (vm-handler-result-reg inst)
+                     :condition-type (vm-error-type inst))))
+    (push frame (wasm-target-try-stack target))
+    (incf (wasm-target-try-depth target))
+    (format stream "~%    ;; FR-204 begin handler try depth ~D handler ~S type ~S"
+            (wasm-target-try-depth target)
+            (vm-handler-label inst)
+            (vm-error-type inst))
+    (format stream "~%    (try (result eqref)")
+    (format stream "~%      (do")))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-remove-handler) stream)
+  "Close the innermost native Wasm EH extent for direct instruction emission."
+  (declare (ignore inst))
+  (let ((frame (pop (wasm-target-try-stack target))))
+    (when (plusp (wasm-target-try-depth target))
+      (decf (wasm-target-try-depth target)))
+    (format stream "~%      ) ;; end do")
+    (format stream "~%      (catch $cl_condition_tag")
+    (when (wasm-target-reg-map target)
+      (format stream "~%        (local.set ~D)" (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
+      (format stream "~%        (local.set ~D)" (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))))
+    (format stream "~%        ;; direct emitter catch frame ~S; trampoline emits concrete PC dispatch"
+            (getf frame :handler-label))
+    (if (wasm-target-reg-map target)
+        (format stream "~%        (throw $cl_condition_tag (local.get ~D) (local.get ~D)))"
+                (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))
+                (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
+        (format stream "~%        (rethrow 0))"))
+    (format stream "~%    ) ;; end try/catch depth ~D"
+            (wasm-target-try-depth target))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-sync-handler-regs) stream)
+  "No-op for Wasm: locals already contain the current implicit handler state."
+  (declare (ignore target inst))
+  (format stream "~%    ;; FR-204 vm-sync-handler-regs: no-op for Wasm locals"))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-signal-error) stream)
+  "Lower VM error signaling to the CL condition exception tag."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    (throw $cl_condition_tag (ref.null eq) ~A)"
+            (reg-local-ref reg-map (vm-error-reg inst)))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-throw) stream)
+  "Lower CL throw to the shared two-eqref Wasm exception tag."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ;; throw tagidx ~D" +tag-idx-cl-condition+)
+    (format stream "~%    (throw $cl_condition_tag ~A ~A)"
+            (reg-local-ref reg-map (vm-throw-tag-reg inst))
+            (reg-local-ref reg-map (vm-throw-value-reg inst)))))
 
 ;;; Catch-all for unsupported instructions
 (defmethod emit-instruction ((target wasm-target) instruction stream)

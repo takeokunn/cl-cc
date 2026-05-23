@@ -297,6 +297,9 @@
 ;;; Section 2: Named GC Type Indices
 ;;; These indices match the ORDER of type definitions emitted in the WASM type section.
 ;;; Every module emitted by cl-cc starts with these predefined types.
+;;; FR-209: fixnums use the built-in Wasm GC i31ref immediate type.  The logical
+;;; name $fixnum_t is documented in the WAT type section as an alias to i31ref;
+;;; it has no numeric type-index because it is not heap allocated.
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 ;;; Type 0: main function type () -> (eqref)
@@ -326,7 +329,15 @@
 (defconstant +type-idx-float+       11)
 ;;; Type 12: $char struct { code: i32 } — character
 (defconstant +type-idx-char+        12)
-;;; Number of predefined types
+;;; Type 13: $fixnum_array_t array (mut i64) — specialized unboxed fixnum vector
+(defconstant +type-idx-fixnum-array+ 13)
+;;; Type 14: $float_array_t array (mut f64) — specialized unboxed float vector
+(defconstant +type-idx-float-array+ 14)
+;;; Type 15: $char_array_t array (mut i32) — specialized character-code vector
+(defconstant +type-idx-char-array+ 15)
+;;; Number of historical predefined core types.  FR-211 specialized array type
+;;; indices are fixed above but kept outside this legacy count for compatibility
+;;; with tests and binary metadata that treat 0..12 as the stable core prefix.
 (defconstant +num-predefined-types+ 13)
 
 ;;; Exception tag indices emitted by the WAT backend.
