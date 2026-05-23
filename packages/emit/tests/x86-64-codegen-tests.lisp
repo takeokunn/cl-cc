@@ -10,6 +10,11 @@
 (defsuite x86-64-codegen-suite :description "x86-64 machine code generation tests"
   :parent cl-cc-unit-suite)
 
+;;; Tests that call with-replaced-function on global emit functions must run serially.
+(defsuite x86-64-codegen-serial-suite
+  :description "Serial x86-64 codegen tests (use with-replaced-function)."
+  :parent cl-cc-unit-suite
+  :parallel nil)
 
 (in-suite x86-64-codegen-suite)
 ;;; ─── *vm-reg-map* ───────────────────────────────────────────────────────────
@@ -171,6 +176,8 @@
     (assert-= 1 (length bytes))
     (assert-= #xC3 (aref bytes 0))))
 
+(in-suite x86-64-codegen-serial-suite)
+
 (deftest x86-64-sanitizer-flags-enable-stack-protector-policy
   "Passing sanitizer flags to compile-to-x86-64-bytes enables stack-protector policy during emission."
   (let* ((prog (cl-cc/vm::make-vm-program :instructions nil :result-register :R0))
@@ -182,6 +189,8 @@
                                nil))
       (cl-cc/codegen::compile-to-x86-64-bytes prog :asan t)
       (assert-true saw-stack-protector))))
+
+(in-suite x86-64-codegen-suite)
 
 (deftest x86-64-leaf-and-nonleaf-without-spills-share-fpe-layout
   "Default FPE does not add an RBP frame for leaf or non-leaf programs when no spill frame is needed."
