@@ -83,12 +83,4 @@
    #:define-syntax
    #:syntax-rules
    #:with-gensyms
-   #:once-only
-
-   ;; --- FR-539/540 deprecation and branch hints ---------------------
-   #:*deprecation-registry*
-   #:deprecate
-   #:deprecated-p
-   #:%warn-deprecated-use
-   #:likely
-   #:unlikely))
+   #:once-only))
