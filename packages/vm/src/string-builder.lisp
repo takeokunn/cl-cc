@@ -14,21 +14,21 @@ Avoids O(n^2) repeated copying that happens with CONCATENATE."
           :type (vector character))
   (capacity 64 :type fixnum))
 
-(defun make-string-builder (&optional (initial-capacity 64))
-  "Create a fresh string builder with INITIAL-CAPACITY (default 64)."
-  (let ((buf (make-array initial-capacity :element-type 'character
+(defun make-string-builder (&key (capacity 64))
+  "Create a fresh string builder with CAPACITY (default 64)."
+  (let ((buf (make-array capacity :element-type 'character
                          :adjustable t :fill-pointer 0)))
-    (%make-string-builder :buffer buf :capacity initial-capacity)))
+    (%make-string-builder :buffer buf :capacity capacity)))
 
 (defun string-builder-append! (sb value)
-  "Append VALUE (string, character, or number) to the string builder SB.
+  "Append VALUE (string, character, number, or symbol) to the string builder SB.
 Value is converted via PRINC-TO-STRING. Returns SB for chaining."
   (etypecase value
     (string (loop for c across value do
               (vector-push-extend c (sb-buffer sb) (sb-capacity sb))))
     (character (vector-push-extend value (sb-buffer sb) (sb-capacity sb)))
-    (number (let ((s (princ-to-string value)))
-              (string-builder-append! sb s))))
+    (number (string-builder-append! sb (princ-to-string value)))
+    (symbol (string-builder-append! sb (string-downcase (symbol-name value)))))
   sb)
 
 (defun string-builder-finish (sb)
@@ -39,7 +39,7 @@ Value is converted via PRINC-TO-STRING. Returns SB for chaining."
   "Execute BODY with VAR bound to a fresh string builder.
 Returns the finished string."
   (let ((sb-var (gensym "SB")))
-    `(let* ((,sb-var (make-string-builder ,initial-capacity))
+    `(let* ((,sb-var (make-string-builder :capacity ,initial-capacity))
             (,var ,sb-var))
        ,@body
        (string-builder-finish ,sb-var))))
@@ -62,10 +62,16 @@ O(k) substring extraction. Short strings (< 1024 chars) stored inline."
   "Create a new rope from STRING."
   (make-rope :root string :length (length string)))
 
+(defun %rope-coerce (x)
+  "Coerce X to a rope if it is a plain string."
+  (if (stringp x) (rope x) x))
+
 (defun rope-concat (r1 r2)
-  "Concatenate two ropes. O(1): creates a new concat node only.
+  "Concatenate two ropes (or plain strings). O(1): creates a new concat node only.
 R1 and R2 are left unchanged (persistent)."
-  (let* ((len1 (rope-length r1))
+  (let* ((r1 (%rope-coerce r1))
+         (r2 (%rope-coerce r2))
+         (len1 (rope-length r1))
          (len2 (rope-length r2))
          (node (%make-rope-node :weight len1
                                 :left (rope-root r1)
@@ -76,36 +82,33 @@ R1 and R2 are left unchanged (persistent)."
   "Split rope R at POSITION. O(log n).
 Returns (values left-rope right-rope)."
   (labels ((%split (node pos)
+             ;; Returns (values left-node right-node); nodes are null/string/rope-node only
              (etypecase node
+               (null (values nil nil))
                (string
                 (let ((len (length node)))
-                  (if (<= pos 0)
-                      (values nil node)
-                      (if (>= pos len)
-                          (values node nil)
-                          (values (subseq node 0 pos)
-                                  (subseq node pos))))))
+                  (cond ((<= pos 0) (values nil node))
+                        ((>= pos len) (values node nil))
+                        (t (values (subseq node 0 pos) (subseq node pos))))))
                (rope-node
                 (let ((left-weight (rope-node-weight node)))
                   (if (<= pos left-weight)
                       (multiple-value-bind (ll lr)
                           (%split (rope-node-left node) pos)
                         (values ll (if lr
-                                       (make-rope :root
-                                                  (%make-rope-node
-                                                   :weight (if (typep lr 'string)
-                                                               (length lr)
-                                                               (rope-length* lr))
-                                                   :left lr
-                                                   :right (rope-node-right node)))
-                                       (make-rope :root (rope-node-right node)))))
+                                       (%make-rope-node
+                                        :weight (rope-length* lr)
+                                        :left lr
+                                        :right (rope-node-right node))
+                                       (rope-node-right node))))
                       (multiple-value-bind (rl rr)
                           (%split (rope-node-right node) (- pos left-weight))
-                        (values (make-rope :root
-                                           (%make-rope-node
-                                            :weight left-weight
-                                            :left (rope-node-left node)
-                                            :right rl))
+                        (values (if rl
+                                    (%make-rope-node
+                                     :weight left-weight
+                                     :left (rope-node-left node)
+                                     :right rl)
+                                    (rope-node-left node))
                                 rr))))))))
     (multiple-value-bind (left right)
         (%split (rope-root r) position)

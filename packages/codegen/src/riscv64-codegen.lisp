@@ -14,11 +14,14 @@
 (defconstant +rv-sp+ 2 "Stack pointer register X2.")
 (defconstant +rv-gp+ 3 "Global pointer register X3.")
 (defconstant +rv-tp+ 4 "Thread pointer register X4.")
+(defconstant +rv-t0+ 5 "Scratch register X5 used for spill and long-immediate lowering.")
 (defconstant +rv-s0+ 8 "Callee-saved frame-pointer register X8.")
 (defconstant +rv-fp+ 8 "ABI frame-pointer alias for X8/S0.")
 (defconstant +rv-a0+ 10 "First integer argument and return register X10.")
 (defconstant +rv-a1+ 11 "Second integer argument and second return register X11.")
-(defconstant +rv-t0+ 5 "Scratch register X5 used for spill and long-immediate lowering.")
+(defconstant +rv-a2+ 12 "Third integer argument register X12.")
+(defconstant +rv-a3+ 13 "Fourth integer argument register X13.")
+(defconstant +rv-zicond-funct7+ #b0000111 "Zicond extension funct7 for CZERO.EQZ and CZERO.NEZ.")
 
 (defparameter *riscv64-reg-number*
   '((:zero . 0) (:ra . 1) (:sp . 2) (:gp . 3) (:tp . 4)
@@ -58,7 +61,7 @@
 (defparameter *current-riscv64-float-vregs* nil
   "When non-nil, hash table of virtual registers known to hold unboxed floats.")
 
-(defparameter *riscv64-zicond-enabled* nil
+(defparameter *riscv64-zicond-enabled* t
   "When true, lower integer select through Zicond CZERO.EQZ/CZERO.NEZ.")
 
 (defun riscv64-codegen-target ()
@@ -220,6 +223,7 @@
 
 (defun encode-rv-add (rd rs1 rs2) (encode-rv-r +rv-op+ rd 0 rs1 rs2 0))
 (defun encode-rv-sub (rd rs1 rs2) (encode-rv-r +rv-op+ rd 0 rs1 rs2 #x20))
+(defun encode-rv-or  (rd rs1 rs2) (encode-rv-r +rv-op+ rd 6 rs1 rs2 0))
 (defun encode-rv-mul (rd rs1 rs2) (encode-rv-r +rv-op+ rd 0 rs1 rs2 1))
 (defun encode-rv-div (rd rs1 rs2) (encode-rv-r +rv-op+ rd 4 rs1 rs2 1))
 (defun encode-rv-rem (rd rs1 rs2) (encode-rv-r +rv-op+ rd 6 rs1 rs2 1))
@@ -457,7 +461,7 @@
           ;; rd = (cond != 0) ? then : else
           (emit-riscv32 (encode-rv-czero-eqz +rv-t0+ then cond-reg) stream)
           (emit-riscv32 (encode-rv-czero-nez rd else cond-reg) stream)
-          (emit-riscv32 (encode-rv-add rd rd +rv-t0+) stream))
+          (emit-riscv32 (encode-rv-or rd rd +rv-t0+) stream))
         (progn
           (emit-riscv32 (encode-rv-addi rd then 0) stream)))))
 
@@ -490,6 +494,7 @@
   "Return encoded byte size of INST for conservative fixed-width layout."
   (case (type-of inst)
     ((vm-label vm-print vm-closure vm-register-function vm-set-global) 0)
+    (vm-select (if *riscv64-zicond-enabled* 12 4))
     (otherwise 4)))
 
 (defun build-riscv64-label-offsets (instructions prologue-size)

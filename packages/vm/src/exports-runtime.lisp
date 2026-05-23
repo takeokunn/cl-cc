@@ -364,4 +364,14 @@
      unicode-normalize-nfkd
      string-to-utf8-bytes
      utf8-bytes-to-string
-     unicode-syntax-class))
+     unicode-syntax-class
+     ;; String builder (FR-787)
+     string-builder
+     string-builder-p
+     make-string-builder
+     string-builder-append!
+     string-builder-finish
+     with-string-builder
+     ;; Rope (FR-788)
+     rope rope-p make-rope
+     rope-concat rope-split rope-to-string rope-length))

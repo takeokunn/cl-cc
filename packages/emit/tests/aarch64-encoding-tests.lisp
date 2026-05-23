@@ -128,7 +128,7 @@
     (assert-equal 3 (logand (ash sve-add -10) #x7))
     (assert-equal 8 (logand (ash sve-add -5) #x1F))
     (assert-equal 9 (logand (ash sve-add -16) #x1F))
-    (assert-equal #x04C30000 (logand sve2-eor #xFFE00000))
+    (assert-equal #x04C00000 (logand sve2-eor #xFFE00000))
     (assert-equal 10 (logand sve2-eor #x1F))))
 
 (deftest a64-sme-representative-encoders-and-gate

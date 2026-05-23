@@ -1,5 +1,7 @@
 (defpackage :cl-cc
   (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/sb-mop :cl-cc/sb-pcl :closer-mop :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl)
+  (:shadowing-import-from :cl-cc/expand
+    #:define-syntax)
   (:shadowing-import-from :cl-cc/vm
     #:get-universal-time #:get-internal-real-time #:get-internal-run-time
     #:internal-time-units-per-second #:sleep #:time
@@ -54,6 +56,11 @@
   ;; Re-export compile symbols from :cl-cc.
   (do-external-symbols (s :cl-cc/compile)
     (export s :cl-cc))
+  ;; DEFINE-SYNTAX exists as a stub in :cl-cc/vm and as the real implementation in
+  ;; :cl-cc/expand. Unintern the vm stub so (use-package :cl-cc :cl-cc/vm) succeeds;
+  ;; the expand version (already re-exported above) remains in :cl-cc.
+  (let ((vm-ds (find-symbol "DEFINE-SYNTAX" :cl-cc/vm)))
+    (when vm-ds (unintern vm-ds :cl-cc/vm)))
   ;; Wire VM source files into the umbrella package
   (use-package :cl-cc :cl-cc/vm)
   ;; Re-export VM symbols from :cl-cc.
@@ -80,7 +87,8 @@
   (let ((conflict-names '("GENERIC-FUNCTION-METHOD-COMBINATION" "GENERIC-FUNCTION-METHODS"
                           "%PACKAGE-EXTERNAL-SYMBOLS" "*DOCUMENTATION-TABLE*"
                           "HASH-TABLE-VALUES" "BSWAP" "%CLASS-SLOT-DEFINITIONS"
-                          "%PACKAGE-SYMBOLS" "%ALL-SYMBOLS")))
+                          "%PACKAGE-SYMBOLS" "%ALL-SYMBOLS"
+                          "STRING-BUILDER")))
     (dolist (name conflict-names)
       (let* ((vm-sym (find-symbol name :cl-cc/vm))
              (exp-sym (find-symbol name :cl-cc/expand)))

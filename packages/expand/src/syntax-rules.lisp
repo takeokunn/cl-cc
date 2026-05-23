@@ -70,22 +70,32 @@ Returns (values bindings matched-p)."
                 (let ((bindings nil)
                       (p-rest pat)
                       (f-rest frm))
-                  (loop while (and p-rest f-rest)
-                        do (let ((p (car p-rest))
-                                 (f (car f-rest)))
+                  (loop while p-rest
+                        do (let ((p (car p-rest)))
                              (cond
-                               ((and (symbolp p) (string= (symbol-name p) "...")
-                                     (cdr p-rest))
-                                ;; ... at end: match rest as list
+                               ;; (var ...) ellipsis: var followed by ...
+                               ((and (symbolp p)
+                                     (not (string= (symbol-name p) "..."))
+                                     (not (member p env :test #'eq))
+                                     (consp (cdr p-rest))
+                                     (symbolp (cadr p-rest))
+                                     (string= (symbol-name (cadr p-rest)) "..."))
+                                (setf bindings (append bindings (list (cons p f-rest))))
+                                (setf p-rest (cddr p-rest)
+                                      f-rest nil))
+                               ;; bare ... token (legacy): match rest as list
+                               ((and (symbolp p) (string= (symbol-name p) "..."))
                                 (multiple-value-bind (b ok)
                                     (match-ellipsis (cdr p-rest) f-rest)
                                   (unless ok (return-from match-one (values nil nil)))
                                   (setf bindings (append bindings b))
-                                  (return-from match-one
-                                    (values bindings t))))
+                                  (return-from match-one (values bindings t))))
+                               ;; normal element
+                               ((null f-rest)
+                                (return-from match-one (values nil nil)))
                                (t
                                 (multiple-value-bind (b ok)
-                                    (match-one p f)
+                                    (match-one p (car f-rest))
                                   (unless ok (return-from match-one (values nil nil)))
                                   (setf bindings (append bindings b))
                                   (pop p-rest)
@@ -99,37 +109,57 @@ Returns (values bindings matched-p)."
 
 (defun build-template (template bindings)
   "Substitute pattern variables in TEMPLATE with their bindings.
-Pattern variables are replaced with the bound form;
-newly introduced symbols are gensym'd for hygiene."
-  (labels ((resolve (sym)
-             (let ((binding (assoc sym bindings)))
-               (if binding
-                   (cdr binding)
-                   ;; Unbound introduced symbol: gensym for hygiene
-                   (gensym (string sym))))))
-    (cond
-      ((consp template)
-       ;; Handle (var ...) ellipsis in template
-      (if (and (consp (cdr template))
-               (string= (symbol-name (cadr template)) "..."  )
-                (symbolp (car template)))
-           (let* ((var (car template))
-                  (vals (cdr (assoc var bindings)))
-                  (rest (cddr template)))
-             (if (listp vals)
-                 (cons 'list
-                       (mapcar (lambda (v)
-                                 (let ((bindings (cons (cons var v) bindings)))
-                                   (build-template (car rest) bindings)))
-                               (if (null (cdr rest))
-                                   vals
-                                   (loop for v in vals collect v))))
-                 template))
-           (cons (build-template (car template) bindings)
-                 (build-template (cdr template) bindings))))
-      ((symbolp template)
-       (resolve template))
-      (t template))))
+Pattern variables are replaced with their bound values.  Newly introduced
+symbols (not in bindings, not operators) are consistently gensym'd for hygiene.
+List templates with (var ...) are spliced in-place."
+  (let ((gensym-map (make-hash-table :test #'eq)))
+    (labels ((resolve (sym)
+               (let ((binding (assoc sym bindings)))
+                 (cond
+                   ;; Pattern variable: substitute bound value
+                   (binding (cdr binding))
+                   ;; Known operator/function: keep as-is to preserve semantics
+                   ((or (special-operator-p sym)
+                        (fboundp sym)
+                        (cl:macro-function sym))
+                    sym)
+                   ;; Fresh introduced identifier: stable gensym within this expansion
+                   (t
+                    (or (gethash sym gensym-map)
+                        (setf (gethash sym gensym-map)
+                              (gensym (string sym))))))))
+             (do-build (tmpl)
+               (cond
+                 ((consp tmpl)
+                  ;; Build list, handling (var ...) splicing
+                  (let ((result nil))
+                    (loop for cell = tmpl then (cdr cell)
+                          while (consp cell)
+                          for elem = (car cell)
+                          for next-cell = (cdr cell)
+                          do (cond
+                               ;; (var ...) splicing pattern
+                               ((and (symbolp elem)
+                                     (consp next-cell)
+                                     (symbolp (car next-cell))
+                                     (string= (symbol-name (car next-cell)) "..."))
+                                (let* ((binding (assoc elem bindings))
+                                       (vals (if binding (cdr binding) nil)))
+                                  (dolist (v vals)
+                                    (push v result)))
+                                ;; Advance past the ... token
+                                (setf cell next-cell))
+                               ;; Normal element: recurse
+                               (t
+                                (push (do-build elem) result)))
+                          finally (when cell
+                                    ;; Improper list tail
+                                    (push (do-build cell) result)))
+                    (nreverse result)))
+                 ((symbolp tmpl)
+                  (resolve tmpl))
+                 (t tmpl))))
+      (do-build template))))
 
 ;; ── Public API ─────────────────────────────────────────────────────────
 
@@ -141,12 +171,17 @@ Pattern variables are automatically hygienic (auto-gensym'd)."
   (flet ((expand-clause (clause)
            (let ((keywords (cadr clause))
                  (rules (cddr clause)))
-             `(register-syntax-rules
-               ',name
-               (cons ',keywords
-                     (list ,@(mapcar (lambda (rule)
-                                       `(cons ',(car rule) ',(cadr rule)))
-                                     rules)))))))
+             `(progn
+                (register-syntax-rules
+                 ',name
+                 (cons ',keywords
+                       (list ,@(mapcar (lambda (rule)
+                                         `(cons ',(car rule) ',(cadr rule)))
+                                       rules))))
+                (register-macro ',name
+                  (lambda (form env)
+                    (declare (ignore env))
+                    (or (expand-syntax-rules ',name form) form)))))))
     `(progn
        ,@(mapcar #'expand-clause clauses))))
 
@@ -164,19 +199,16 @@ Not called directly; used inside define-syntax clauses."
 Returns the expanded form or NIL if no rules match."
   (let ((rules (find-syntax-rules name)))
     (unless rules (return-from expand-syntax-rules nil))
-    (let ((form-args (cdr form)))
-      (dolist (clause (cdr rules))
-        (let* ((keywords (car rules))
-               (pattern (car clause))
-               (template (cdr clause)))
-          (multiple-value-bind (bindings matched)
-              (match-pattern pattern (if (= (length form-args) 1)
-                                        (car form-args)
-                                        (cons 'list form-args))
-                             keywords)
-            (when matched
-              (return-from expand-syntax-rules
-                (build-template template bindings)))))))
+    (dolist (clause (cdr rules))
+      (let* ((keywords (car rules))
+             (pattern (car clause))
+             (template (cdr clause)))
+        ;; Skip the keyword (macro name) in both pattern and form
+        (multiple-value-bind (bindings matched)
+            (match-pattern (cdr pattern) (cdr form) keywords)
+          (when matched
+            (return-from expand-syntax-rules
+              (build-template template bindings))))))
     nil))
 
 (defun syntax-rules-expander (form env)
@@ -189,9 +221,55 @@ Return expanded form or FORM unchanged. To be called from our-macroexpand-1."
         (return-from syntax-rules-expander expanded))))
   form)
 
+;; ── syntax-case (partial, FR-804) ─────────────────────────────────────
+
+(defun %collect-pattern-vars (pattern literals)
+  "Return all pattern variable symbols in PATTERN (not literals, not ...)."
+  (cond
+    ((null pattern) nil)
+    ((symbolp pattern)
+     (when (and (not (string= (symbol-name pattern) "..."))
+                (not (member pattern literals :test #'eq)))
+       (list pattern)))
+    ((consp pattern)
+     (append (%collect-pattern-vars (car pattern) literals)
+             (%collect-pattern-vars (cdr pattern) literals)))
+    (t nil)))
+
+(defmacro syntax-case (form-expr literals &rest clauses)
+  "Partial syntax-case: match FORM-EXPR against each CLAUSE pattern.
+Each clause is (pattern template) or (pattern guard template).
+Pattern variables are bound during guard and template evaluation."
+  (let ((form-var (gensym "FORM"))
+        (bindings-var (gensym "BINDINGS"))
+        (ok-var (gensym "OK"))
+        (block-name (gensym "SYNTAX-CASE")))
+    `(let ((,form-var ,form-expr))
+       (block ,block-name
+         ,@(mapcar
+            (lambda (clause)
+              (destructuring-bind (pattern &rest rest) clause
+                (let* ((has-guard (= (length rest) 2))
+                       (guard-expr (if has-guard (first rest) nil))
+                       (tmpl-expr  (if has-guard (second rest) (first rest)))
+                       (pvars (%collect-pattern-vars pattern literals)))
+                  `(multiple-value-bind (,bindings-var ,ok-var)
+                       (match-pattern ',pattern ,form-var ',literals)
+                     (when ,ok-var
+                       (let ,(mapcar (lambda (v)
+                                       `(,v (cdr (assoc ',v ,bindings-var))))
+                                     pvars)
+                         ,(if has-guard
+                              `(when ,guard-expr
+                                 (return-from ,block-name ,tmpl-expr))
+                              `(return-from ,block-name ,tmpl-expr))))))))
+            clauses)
+         nil))))
+
 ;; ── Exports ─────────────────────────────────────────────────────────────
 
 (export '(define-syntax syntax-rules with-gensyms once-only
           syntax-rules-expander expand-syntax-rules
-          *syntax-rules-registry*)
+          *syntax-rules-registry*
+          syntax-case match-pattern build-template)
         :cl-cc/expand)

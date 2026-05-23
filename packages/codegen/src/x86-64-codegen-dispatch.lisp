@@ -368,6 +368,8 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (vm-type-check   . emit-vm-native-noop-inst)
     (vm-deopt        . emit-vm-native-noop-inst)
     (vm-osr-entry    . emit-vm-native-noop-inst)
+    ;; Ball-Larus path profiling: profiling counter update, no native emission
+    (cl-cc/optimize::opt-vm-path-profile-record . emit-vm-native-noop-inst)
     (vm-halt         . emit-vm-halt-inst)
      (vm-call         . emit-vm-call-like-inst)
      (vm-tail-call    . emit-vm-tail-call-inst)

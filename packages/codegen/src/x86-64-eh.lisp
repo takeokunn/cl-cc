@@ -72,6 +72,9 @@ is treated as an additional opt-in switch.")
 (defconstant +x86-64-landing-pad-size+ 16
   "Reserved byte size for each x86-64 landing pad.")
 
+(defconstant +x86-64-landing-pad-stub-size+ +x86-64-landing-pad-size+
+  "Alias for +x86-64-landing-pad-size+ used by EH stub emission tests.")
+
 (defstruct x86-64-landing-pad
   "Metadata for one protected native handler/restart landing pad."
   (start-address 0 :type integer)
@@ -95,7 +98,7 @@ is treated as an additional opt-in switch.")
   (set-ip "_Unwind_SetIP" :type string))
 
 (defparameter *x86-64-personality-descriptor*
-  (make-x86-64-personality-stub)
+  (make-x86-64-personality-descriptor)
   "Personality routine descriptor used by x86-64 table-based EH.")
 
 (defstruct x86-64-eh-dispatch
@@ -182,7 +185,7 @@ relocations, so the bytes encode the ABI-level control-flow skeleton: inspect
 the ACTIONS argument (RSI), return HANDLER_FOUND for SEARCH, INSTALL_CONTEXT
 for CLEANUP|HANDLER_FRAME, and CONTINUE_UNWIND otherwise.  The Lisp model above
 performs LSDA/type dispatch; binary metadata carries the same LSDA for real
-libunwind consumers.")
+libunwind consumers."
   ;; test rsi, _UA_SEARCH_PHASE
   (emit-byte #x48 stream) (emit-byte #xF7 stream) (emit-byte #xC6 stream)
   (emit-dword +_ua-search-phase+ stream)
@@ -272,7 +275,7 @@ semantics."
              :initial-location (x86-64-landing-pad-start-address lp)
               :address-range (max 0 (- (x86-64-landing-pad-end-address lp)
                                         (x86-64-landing-pad-start-address lp)))
-              :personality (x86-64-personality-stub-name *x86-64-personality-descriptor*)
+              :personality (x86-64-personality-descriptor-name *x86-64-personality-descriptor*)
               :lsda (x86-64-lsda-bytes landing-pads)
               :instructions '((:def-cfa-offset 8))))
           landing-pads))

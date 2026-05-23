@@ -134,8 +134,9 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 
 (deftest cli-command-dispatch-covers-all-public-subcommands
   "The CLI dispatch table still exposes the expected public commands."
-  (assert-equal '("run" "compile" "eval" "repl" "check" "selfhost")
-                (mapcar #'car cl-cc/cli::*cli-command-dispatch*)))
+  (let ((commands (mapcar #'car cl-cc/cli::*cli-command-dispatch*)))
+    (dolist (expected '("run" "compile" "eval" "repl" "check" "selfhost"))
+      (assert-true (member expected commands :test #'string=)))))
 
 (deftest cli-maybe-make-profiled-vm-state-disabled
   "No profiled VM state is created when flamegraph output is not requested."

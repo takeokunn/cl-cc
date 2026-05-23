@@ -292,15 +292,23 @@
   (%check-signed offset 9 "C.B")
   (let ((imm (%mask offset 9)))
     (logior #b01 (ash funct3 13)
-            (ash (ldb (byte 1 8) imm) 12)
-            (ash (ldb (byte 2 3) imm) 10)
-            (ash (%rvc-reg3 rs1) 7)
-            (ash (ldb (byte 2 6) imm) 5)
-            (ash (ldb (byte 1 2) imm) 4)
-            (ash (ldb (byte 2 1) imm) 2))))
+            (ash (ldb (byte 1 8) imm) 12)   ; offset[8]  → bit 12
+            (ash (ldb (byte 2 3) imm) 10)   ; offset[4:3] → bits 11:10
+            (ash (%rvc-reg3 rs1) 7)          ; rs1'        → bits 9:7
+            (ash (ldb (byte 2 6) imm) 5)    ; offset[7:6] → bits 6:5
+            (ash (ldb (byte 2 1) imm) 3)    ; offset[2:1] → bits 4:3
+            (ash (ldb (byte 1 5) imm) 2))))
 
 (defun encode-rvc-beqz (rs1 offset) (%encode-rvc-b #b110 rs1 offset))
 (defun encode-rvc-bnez (rs1 offset) (%encode-rvc-b #b111 rs1 offset))
+
+(defun encode-rvc-ldsp (rd offset)
+  "Encode C.LDSP rd, offset(sp). RD must be non-zero; offset unsigned multiple of 8."
+  (unless (and (plusp rd) (not (minusp offset)) (zerop (mod offset 8)) (< offset 512))
+    (error "C.LDSP requires rd!=x0 and unsigned 8-byte offset <512, got rd=~D offset=~D" rd offset))
+  (let ((imm (ash offset -3)))
+    (logior #b10 (ash #b011 13) (ash (ldb (byte 1 5) imm) 12)
+            (ash rd 7) (ash (ldb (byte 2 3) imm) 5) (ash (ldb (byte 3 0) imm) 2))))
 
 (defparameter *riscv64-r-encoders*
   `((:add . ,#'encode-rv-add) (:sub . ,#'encode-rv-sub) (:and . ,#'encode-rv-and)
@@ -355,13 +363,16 @@
     frame-size))
 
 (defun riscv64-emit-epilogue (asm &key (save-regs nil) (stack-size 0) (save-ra t))
-  "Emit psABI epilogue: restore saved registers, deallocate frame, return."
+  "Emit psABI epilogue: restore saved registers, deallocate frame, return.
+RA is restored with a full LD; callee-saved regs use compressed C.LDSP where possible."
   (let* ((regs (append (when save-ra (list :ra)) save-regs))
          (save-bytes (* 8 (length regs)))
          (frame-size (* 16 (ceiling (+ stack-size save-bytes) 16))))
     (loop for reg in regs
           for offset from 0 by 8
-          do (riscv64-emit-u32 asm (encode-rv-ld (%reg reg) +rv-sp+ offset)))
+          do (if (eq reg :ra)
+                 (riscv64-emit-u32 asm (encode-rv-ld (%reg reg) +rv-sp+ offset))
+                 (riscv64-emit-u16 asm (encode-rvc-ldsp (%reg reg) offset))))
     (when (plusp frame-size)
       (riscv64-emit-u32 asm (encode-rv-addi +rv-sp+ +rv-sp+ frame-size)))
     (riscv64-emit-u32 asm (encode-rv-ret))

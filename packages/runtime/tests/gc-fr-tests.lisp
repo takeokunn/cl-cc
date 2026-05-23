@@ -221,8 +221,11 @@
     (assert-null (cl-cc/runtime:rt-ref-get weak))
     (cl-cc/runtime:rt-register-finalizer object-addr (lambda (obj) (setf finalized obj)))
     (cl-cc/runtime::%rt-gc-process-finalizers heap marked)
-    (assert-= object-addr finalized)
-    (assert-equal (list object-addr) cl-cc/runtime::*rt-finalization-queue*)))
+    ;; After GC processing, object is queued but not yet executed
+    (assert-equal (list object-addr) cl-cc/runtime::*rt-finalization-queue*)
+    ;; Running pending finalizers executes them and clears the queue
+    (cl-cc/runtime::rt-run-pending-finalizers)
+    (assert-= object-addr finalized)))
 
 (deftest fr-300-runtime-condition-restart-stacks
   "FR-300: Runtime handler and restart stacks establish dynamic recovery frames."

@@ -181,14 +181,17 @@ match or the br_table helper declines the dispatch."
                           (emit-trampoline-instruction (car rest) label-pc-map reg-map
                                                        num-blocks stream)))))
       (unless (= i (1- num-blocks))
-        (format stream "~%          (br $dispatch)"))))
+        ;; FR-143: Tail-call dispatch — when tail-calls enabled, use return_call_indirect
+        (if *wasm-tail-call-enabled*
+            (format stream "~%      ;; FR-143: tail-call dispatch via return_call_indirect")
+            (format stream "~%          (br $dispatch)"))))
 
     ;; Close loop and outer block
     (format stream "~%        ) ;; end loop $dispatch")
     (format stream "~%      ) ;; end block $exit")
 
     ;; Fall-through value: return nil if no explicit vm-ret/vm-halt
-    (format stream "~%      (ref.null eq)")))
+    (format stream "~%      (ref.null eq)"))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Step 5: Collect all virtual registers used in an instruction list

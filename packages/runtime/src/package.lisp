@@ -530,7 +530,23 @@
     ;; ── Effect system (effects.lisp) ───────────────────────────────────
     #:rt-effect #:rt-handler-state
     #:rt-current-handler #:rt-resume #:rt-perform #:rt-handle
-    #:rt-effect-state #:rt-effect-error #:rt-effect-read #:rt-effect-write))
+    #:rt-effect-state #:rt-effect-error #:rt-effect-read #:rt-effect-write
+    ;; ── Structured logging (log.lisp) ───────────────────────────────────
+    #:+log-level-trace+ #:+log-level-debug+ #:+log-level-info+
+    #:+log-level-warn+ #:+log-level-error+
+    #:*log-level* #:*log-output* #:*log-json-output* #:*log-context*
+    #:with-log-context
+    #:log-trace #:log-debug #:log-info #:log-warn #:log-error
+    #:rt-log-info #:rt-log-warn #:rt-log-error
+    ;; ── Arena allocator (allocator.lisp) ────────────────────────────────
+    #:rt-arena #:make-arena #:with-arena
+    #:arena-alloc #:arena-reset
+    #:rt-arena-cursor
+    #:rt-arena-block #:rt-arena-block-offset
+    ;; ── Object pool (allocator.lisp) ─────────────────────────────────────
+    #:make-object-pool #:pool-acquire #:pool-release
+    ;; ── GC nursery config (heap-data.lisp) ───────────────────────────────
+    #:*gc-nursery-size*))
 
 (in-package :cl-cc/runtime)
 

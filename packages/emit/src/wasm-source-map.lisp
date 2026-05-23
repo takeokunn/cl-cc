@@ -51,20 +51,21 @@
         (unless (plusp vlq)
           (return (coerce (nreverse chars) 'string)))))))
 
-(defun %source-map-source-index (source sources table)
-  "Return SOURCE's stable index in SOURCES/TABLE, adding it when needed."
+(defun %source-map-source-index (source sources-ref table)
+  "Return SOURCE's stable index in SOURCES-REF/TABLE, adding it when needed.
+SOURCES-REF is a cons box (list of sources stored in car)."
   (or (gethash source table)
-      (let ((index (length (symbol-value sources))))
+      (let ((index (length (car sources-ref))))
         (setf (gethash source table) index)
-        (set sources (append (symbol-value sources) (list source)))
+        (setf (car sources-ref) (append (car sources-ref) (list source)))
         index)))
 
-(defun %source-map-normalize-entry (entry sources table previous)
+(defun %source-map-normalize-entry (entry sources-ref table previous)
   "Return one VLQ segment and updated PREVIOUS state for ENTRY."
   (destructuring-bind (prev-generated-column prev-source prev-line prev-column) previous
     (let* ((generated-column (max 0 (or (getf entry :offset) 0)))
            (source-name (or (getf entry :source) "<unknown>"))
-           (source-index (%source-map-source-index source-name sources table))
+           (source-index (%source-map-source-index source-name sources-ref table))
            (source-line (max 0 (1- (or (getf entry :line) 1))))
            (source-column (max 0 (or (getf entry :column) 0)))
            (fields (list (- generated-column prev-generated-column)
@@ -77,16 +78,16 @@
 (defun source-map-encode-mappings (entries)
   "Encode ENTRIES into Source Map v3 mappings and return mappings/sources."
   (let ((sorted (sort (copy-list entries) #'< :key (lambda (entry) (getf entry :offset 0))))
-        (sources nil)
+        (sources-ref (list nil))   ; mutable cons box for accumulating source names
         (source-table (make-hash-table :test #'equal))
         (previous '(0 0 0 0))
         (segments nil))
     (dolist (entry sorted)
       (multiple-value-bind (segment next-previous)
-          (%source-map-normalize-entry entry 'sources source-table previous)
+          (%source-map-normalize-entry entry sources-ref source-table previous)
         (push segment segments)
         (setf previous next-previous)))
-    (values (format nil "~{~A~^,~}" (nreverse segments)) sources)))
+    (values (format nil "~{~A~^,~}" (nreverse segments)) (car sources-ref))))
 
 (defun build-wasm-source-map-v3 (entries &key file (source-root ""))
   "Build a Source Map v3 JSON string for Wasm ENTRIES."

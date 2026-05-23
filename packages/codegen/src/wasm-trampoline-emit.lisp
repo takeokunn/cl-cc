@@ -131,14 +131,17 @@ tree emission on NIL."
                   (reg-local-set reg-map (vm-dst inst)
                                  (wasm-fixnum-box (format nil unary-fmt src)))))
         (return-from emit-trampoline-instruction t)))
-    ;; Struct field access (vm-car, vm-cdr)
+    ;; Struct field access (vm-car, vm-cdr) — FR-142: use smart ref.cast
     (let ((struct-fmt (gethash tp *wasm-struct-get-table*)))
       (when struct-fmt
-        (format stream "~%      ~A"
-                (reg-local-set reg-map (vm-dst inst)
-                               (format nil struct-fmt
-                                       (reg-local-ref reg-map (vm-src inst)))))
-        (return-from emit-trampoline-instruction t)))
+        (let ((type-keyword (if (eq tp 'vm-car) :cons (if (eq tp 'vm-cdr) :cons nil))))
+          (format stream "~%      ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (let ((src-wat (if (eq type-keyword :cons)
+                                                    (wasm-ref-cast-maybe "(ref $cons_t)" reg-map (vm-src inst))
+                                                    (reg-local-ref reg-map (vm-src inst)))))
+                                   (format nil struct-fmt src-wat))))
+          (return-from emit-trampoline-instruction t))))
     ;; Min/max — conditional-select pattern, differs only in comparison opcode
     (let ((cmp-op (gethash tp *wasm-minmax-table*)))
       (when cmp-op
@@ -148,19 +151,45 @@ tree emission on NIL."
                   (reg-local-set reg-map (vm-dst inst)
                                  (format nil "(if (result eqref) (~A ~A ~A) (then ~A) (else ~A))"
                                          cmp-op l r (wasm-fixnum-box l) (wasm-fixnum-box r))))
-          (return-from emit-trampoline-instruction t)))))
+          (return-from emit-trampoline-instruction t))))
+    ;; FR-234: Sign-extension operations
+    (let ((sext-fmt (gethash tp *wasm-sign-extend-table*)))
+      (when sext-fmt
+        (let ((src (wasm-fixnum-unbox reg-map (vm-src inst))))
+          (format stream "~%      (local.set ~D ~A)"
+                  (wasm-reg-to-local reg-map (vm-dst inst))
+                  (wasm-fixnum-box (format nil sext-fmt src))))
+        (return-from emit-trampoline-instruction t)))
+    ;; FR-233: Non-trapping float-to-int conversion
+    (let ((fti-op (gethash tp *wasm-float-to-int-table*)))
+      (when fti-op
+        (let ((src-wat (reg-local-ref reg-map (vm-src inst))))
+          (format stream "~%      ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (wasm-fixnum-box
+                                  (format nil "(~A ~A)" fti-op src-wat)))))
+        (return-from emit-trampoline-instruction t))))
   ;; Remaining instructions handled by typecase (unique logic per instruction)
   (typecase inst
     (vm-const
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (%wasm-const-value-to-wat (vm-value inst))))
+     (let ((val (vm-value inst)))
+       (format stream "~%      ~A"
+               (reg-local-set reg-map (vm-dst inst)
+                              (%wasm-const-value-to-wat val)))
+       ;; FR-145: Record type info for integer constants (known fixnum range)
+       (typecase val
+         (integer (reg-record-type reg-map (vm-dst inst) :i31ref))
+         (null    (reg-record-type reg-map (vm-dst inst) :null))))
      t)
     (vm-move
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (reg-local-ref reg-map (vm-src inst))))
-     t)
+      (format stream "~%      ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (reg-local-ref reg-map (vm-src inst))))
+      ;; FR-142: Copy known type from source to destination register
+      (let ((known (reg-known-type reg-map (vm-src inst))))
+        (when known
+          (reg-record-type reg-map (vm-dst inst) known)))
+      t)
     (vm-jump
      (emit-trampoline-jump-to-label (vm-label-name inst) label-pc-map reg-map stream)
      t)
@@ -222,12 +251,14 @@ tree emission on NIL."
              (reg-local-ref reg-map (vm-reg inst)))
      t)
     (vm-cons
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (format nil "(struct.new $cons_t ~A ~A)"
-                                    (reg-local-ref reg-map (vm-car-reg inst))
-                                    (reg-local-ref reg-map (vm-cdr-reg inst)))))
-     t)
+      (format stream "~%      ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (format nil "(struct.new $cons_t ~A ~A)"
+                                     (reg-local-ref reg-map (vm-car-reg inst))
+                                     (reg-local-ref reg-map (vm-cdr-reg inst)))))
+      ;; FR-142: Record that dst now holds a $cons_t reference
+      (reg-record-type reg-map (vm-dst inst) :cons)
+      t)
      (vm-closure
       (let* ((label (vm-label-name inst))
               (table-idx (if (and *wasm-label-to-table-idx* label)
@@ -260,19 +291,20 @@ tree emission on NIL."
                                                   (vm-closure-index inst))))
      t)
     (vm-call
-     (let* ((args (vm-args inst))
-            (func-local (reg-local-ref reg-map (vm-func-reg inst)))
-            (dst-idx (wasm-reg-to-local reg-map (vm-dst inst)))
-            (entry-idx-wat (format nil
-                                   "(struct.get $closure_t 0 (ref.cast (ref $closure_t) ~A))"
-                                   func-local)))
-        (loop for arg in args for i from 0 do
-          (format stream "~%      (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
-        (format stream "~%      ;; call_indirect typeidx ~D tableidx 0"
-                +type-idx-main-func+)
-        (format stream "~%      (local.set ~D (call_indirect (type $main_func_t) (table $funcref_table) ~A))"
-                dst-idx entry-idx-wat)
-        t))
+      (let* ((args (vm-args inst))
+             (func-local (reg-local-ref reg-map (vm-func-reg inst)))
+             (dst-idx (wasm-reg-to-local reg-map (vm-dst inst)))
+             ;; FR-142: Use wasm-ref-cast-maybe to skip ref.cast when type is known
+             (entry-idx-wat (format nil
+                                    "(struct.get $closure_t 0 ~A)"
+                                    (wasm-ref-cast-maybe "(ref $closure_t)" reg-map (vm-func-reg inst)))))
+         (loop for arg in args for i from 0 do
+           (format stream "~%      (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
+         (format stream "~%      ;; call_indirect typeidx ~D tableidx 0"
+                 +type-idx-main-func+)
+         (format stream "~%      (local.set ~D (call_indirect (type $main_func_t) (table $funcref_table) ~A))"
+                 dst-idx entry-idx-wat)
+         t))
     (vm-establish-catch
      (format stream "~%      ;; establish catch: native EH tag $cl_condition_tag, handler ~S, result local ~D"
              (vm-catch-handler-label inst)

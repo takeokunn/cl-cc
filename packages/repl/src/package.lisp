@@ -17,6 +17,8 @@
         :cl-cc/stdlib
         :cl-cc/pipeline
         :cl-cc/selfhost)
+  (:shadowing-import-from :cl-cc/expand
+    #:define-syntax)
   (:shadowing-import-from :cl-cc/vm
     #:get-universal-time #:get-internal-real-time #:get-internal-run-time
     #:internal-time-units-per-second #:sleep #:time

@@ -15,4 +15,5 @@
    (:file "ebpf")
    (:file "wasm-threads")
    (:file "regalloc-advanced-132")
-   (:file "simd-sched-138")))
+   (:file "simd-sched-138")
+   (:file "riscv64")))

@@ -177,6 +177,18 @@ Environment override: CLCC_WASM_TAILCALL=1|0"
   "FR-259: Return T when Tiered Compilation hints are enabled."
   (wasm-feature-enabled-p "CLCC_WASM_TIERED_COMPILATION" *wasm-tiered-compilation-enabled*))
 
+(defun emit-wat-memories (module stream)
+  "Emit linear memory declarations for MODULE."
+  (declare (ignore module stream)))
+
+(defun emit-wat-eh-v2-helper (stream)
+  "FR-252: Emit Wasm EH v2 (try_table/throw_ref) helper declarations."
+  (format stream "~%  ;; FR-252: EH v2 try_table/throw_ref helpers"))
+
+(defun emit-wat-js-conversion-helpers (stream)
+  "FR-262: Emit JS ↔ Wasm exception bridge helper functions."
+  (format stream "~%  ;; FR-262: JS exception bridge helpers"))
+
 (defun wasm-record-class-slot-layout! (target slot-names)
   "Record slot-name -> index mapping from a vm-class-def SLOT-NAMES list." 
   (loop for s in slot-names

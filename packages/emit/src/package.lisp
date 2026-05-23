@@ -139,4 +139,13 @@
       #:mlir-module-metadata
       #:mlir-bridge-capabilities
       #:vm-program->mlir-module
-      #:emit-mlir))
+      #:emit-mlir
+      ;; RISC-V 64 backend (FR-860)
+      #:make-riscv64-assembler
+      #:riscv64-emit-instruction
+      #:riscv64-emit-bytes
+      #:riscv64-emit-function
+      #:riscv64-emit-prologue
+      #:riscv64-emit-epilogue
+      #:riscv64-emit-load-immediate
+      #:riscv64-emit-pic-call))

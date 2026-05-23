@@ -251,7 +251,11 @@
   (next-index 0 :type integer)
   ;; special locals: $pc (i32), $tmp (eqref)
   (pc-index nil)
-  (tmp-index nil))
+  (tmp-index nil)
+  ;; FR-142: Known type tracking — maps register -> type keyword
+  ;; (:closure, :cons, :i31ref, :string, :symbol, :instance-N, etc.)
+  ;; Used by ref.cast elimination and fixnum unbox optimization
+  (known-types nil))
 
 (defun make-wasm-reg-map-for-function (param-count)
   "Create a register map. Params occupy locals 0..param-count-1.
@@ -260,7 +264,8 @@
    :table (make-hash-table)
    :next-index (+ param-count 2)  ; skip $pc and $tmp
    :pc-index param-count
-   :tmp-index (1+ param-count)))
+   :tmp-index (1+ param-count)
+   :known-types (make-hash-table)))
 
 (defun wasm-reg-to-local (reg-map reg)
   "Return the WASM local index for VM register REG.

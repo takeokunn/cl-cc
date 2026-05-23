@@ -70,5 +70,6 @@
    (:file "expander-tail")
    (:file "expander-numeric")
       (:file "expander-sequence")
+     (:file "macros-lazy")          ; FR-856 delay/force, FR-857 memoize
      ;; ── Phase 131: Pattern Matching Optimization ──
      (:file "pattern-opt-131")))

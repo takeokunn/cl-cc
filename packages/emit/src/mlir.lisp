@@ -338,7 +338,7 @@ The emitted text is valid MLIR module syntax suitable for mlir-opt parsing."
                    (format out "  func.func @clcc_entry() -> i64 {~%")
                    (format out "  ^entry:~%")
                    (format out "    %reg0 = arith.constant 0 : i64~%")
-                   (format out "    return %reg0 : i64~%")
+                   (format out "    func.return %reg0 : i64~%")
                    (format out "  }~%"))
                  (format out "}~%"))))
     (make-mlir-module

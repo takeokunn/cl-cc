@@ -245,3 +245,20 @@ Returns :lisp or :php."
           (format *error-output* "~&Error: ~A timed out after ~A second~:P~%" command-name seconds)
           (uiop:quit 124)))
       (funcall thunk)))
+
+;;; FR-808: Script mode / shebang support stub
+(defun parse-cli-args (argv)
+  "FR-808: Parse CLI arguments, stripping shebang lines if present.
+Returns a parsed-args structure."
+  (parse-args argv))
+
+;;; FR-809: Command-line arguments API stub
+(defun cl-cc-argv ()
+  "FR-809: Return the command-line arguments as a list of strings."
+  (uiop:command-line-arguments))
+
+;;; FR-917: Reproducible build support stub
+(defun cl-cc-deterministic-build-p ()
+  "FR-917: Return T when building in reproducible/deterministic mode."
+  (let ((env (ignore-errors (sb-ext:posix-getenv "CLCC_DETERMINISTIC"))))
+    (and env (member (string-downcase env) '("1" "true" "yes") :test #'string=))))

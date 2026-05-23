@@ -297,13 +297,42 @@ Supports both host functions and descriptor-backed expanders."
 (defun %expand-quasiquote (template)
   "Transform a quasiquote template into list/cons/append calls.
 Handles (unquote x) and (unquote-splicing x) within template.
-These symbols live in :cl-cc/bootstrap so both parse and expand share them."
+Folds static (list ...) parts together and eliminates nil splices."
   (cond
     ((%qq-head-p template "UNQUOTE")
      (second template))
     ((consp template)
-     (let ((parts (mapcar #'%expand-qq-element template)))
-       (if (= (length parts) 1) (first parts) (cons 'append parts))))
+     (let* ((parts (mapcar #'%expand-qq-element template))
+            ;; nil arises from (unquote-splicing nil) — remove it
+            (non-nil-parts (remove nil parts)))
+       (cond
+         ((null non-nil-parts) nil)
+         (t
+          ;; Merge adjacent (list ...) chunks into a single (list ...)
+          (let ((merged
+                 (loop with result = nil
+                       with acc = nil
+                       for part in non-nil-parts
+                       do (if (and (consp part) (eq (car part) 'list))
+                              (setf acc (append acc (cdr part)))
+                              (progn
+                                (when acc
+                                  (push (cons 'list acc) result)
+                                  (setf acc nil))
+                                (push part result)))
+                       finally
+                       (when acc (push (cons 'list acc) result))
+                       (return (nreverse result)))))
+            (cond
+              ((null merged) nil)
+              ((= (length merged) 1)
+               (let ((part (first merged)))
+                 (if (and (consp part) (eq (car part) 'list))
+                     ;; Pure list splice — return as-is
+                     part
+                     ;; Single non-list splice like ,@xs — wrap in copy-list
+                     (list 'copy-list part))))
+              (t (cons 'append merged))))))))
     (t
      (list 'quote template))))
 

@@ -19,8 +19,7 @@ optimize-instructions."
         :trace-json-stream  (pipeline-opts-trace-json-stream opts)
         :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
          :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
-        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
-        :verify-transforms  (pipeline-opts-verify-transforms opts)))
+        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)))
 
 (defun %opts->codegen-kwargs (opts)
   "Extract backend hardening/sanitizer options from OPTS."
@@ -39,7 +38,8 @@ optimize-instructions."
 compile-toplevel-forms."
   (append (list :target     (pipeline-opts-target opts)
                 :type-check (pipeline-opts-type-check opts)
-                :safety     (pipeline-opts-safety opts))
+                :safety     (pipeline-opts-safety opts)
+                :verify-transforms (pipeline-opts-verify-transforms opts))
           (%opts->optimize-kwargs opts)
           (%opts->codegen-kwargs opts)))
 

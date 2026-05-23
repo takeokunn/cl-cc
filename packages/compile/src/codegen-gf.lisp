@@ -104,9 +104,6 @@ existing generic function in the same compilation unit."
         (closure-reg (make-register ctx))
         (param-regs nil))
     (%register-defmethod-structural-methods name specializers)
-    (or (gethash name (ctx-global-generics ctx))
-        (cdr (%assoc-eq name (ctx-env ctx)))
-        (%ensure-generic-function ctx name))
     (let ((keys (loop for spec in specializers
                       collect (if (and spec (consp spec))
                                   (let ((raw (cdr spec)))
@@ -132,7 +129,7 @@ existing generic function in the same compilation unit."
                       (format nil "METHOD_~A~A_~A_END" name qual-str
                               label-suffix)))
     (setq param-regs (loop for _ in params collect (make-register ctx)))
-    (emit ctx (make-vm-get-global :dst gf-reg :name name))
+    (setq gf-reg (%ensure-generic-function ctx name))
     (emit ctx (make-vm-closure
                :dst closure-reg :label func-label
                :params param-regs :captured nil))

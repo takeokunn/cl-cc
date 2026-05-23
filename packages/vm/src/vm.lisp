@@ -908,12 +908,15 @@ Use LOCK-PACKAGE / UNLOCK-PACKAGE to manage.")
 
 (defun lock-package (package &optional (lock t))
   "Lock PACKAGE (when LOCK is non-NIL) or unlock it.
-Locked packages prevent new symbol internment, export, import, and shadowing."
+Locked packages prevent new symbol internment, export, import, and shadowing.
+Also engages SBCL's native package lock so that CL:INTERN signals an error."
   (if lock
       (progn (pushnew package *locked-packages* :test #'eq)
-             (vm-lock-package package))
+             (vm-lock-package package)
+             #+sbcl (handler-case (sb-ext:lock-package package) (error () nil)))
       (progn (setf *locked-packages* (remove package *locked-packages* :test #'eq))
-             (vm-unlock-package package)))
+             (vm-unlock-package package)
+             #+sbcl (handler-case (sb-ext:unlock-package package) (error () nil))))
   package)
 
 (defun unlock-package (package)
@@ -924,23 +927,24 @@ Locked packages prevent new symbol internment, export, import, and shadowing."
   "Return T when PACKAGE is locked."
   (vm-package-locked-p package))
 
-(define-condition package-locked-error (vm-package-locked-error)
-  ()
-  (:report (lambda (c s)
-             (format s "Package ~S is locked: no modifications permitted"
-                     (vm-package-locked-error-package c)))))
+;;; Alias package-locked-error to SBCL's native type so that standard
+;;; `intern` on a locked package signals a condition that matches our type.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf (find-class 'package-locked-error)
+        (find-class 'sb-ext:package-locked-error)))
 
 (defun check-package-lock (package &optional (operation :intern))
   "Signal PACKAGE-LOCKED-ERROR when PACKAGE is locked.
 OPERATION is :INTERN, :EXPORT, :IMPORT, or :SHADOW (for error messages)."
+  (declare (ignore operation))
   (when (vm-package-locked-p package)
-    (cerror (format nil "Ignore the lock and ~(~A~) anyway" operation)
-            'package-locked-error :package package)))
+    (error 'package-locked-error :package package)))
 
 (defmacro with-unlocked-packages ((&rest packages) &body body)
   "Execute BODY with PACKAGES temporarily unlocked.
 Each element of PACKAGES is a package designator (symbol or string).
-Packages are re-locked when BODY exits (via UNWIND-PROTECT)."
+Packages are re-locked when BODY exits (via UNWIND-PROTECT).
+Also temporarily disengages SBCL's native lock so CL:INTERN works inside."
   (let ((pkg-vars (mapcar (lambda (p) (gensym (format nil "~A-UNLOCK" p))) packages))
         (thunk (gensym "WITH-UNLOCKED-THUNK")))
     `(flet ((,thunk () ,@body))
@@ -949,9 +953,12 @@ Packages are re-locked when BODY exits (via UNWIND-PROTECT)."
               (progn
                 ,@(mapcar (lambda (pv)
                             `(when (and ,pv (vm-package-locked-p ,pv))
-                               (vm-unlock-package ,pv)))
+                               (vm-unlock-package ,pv)
+                               #+sbcl (handler-case (sb-ext:unlock-package ,pv) (error () nil))))
                           pkg-vars)
                 (,thunk))
            ,@(mapcar (lambda (pv)
-                        `(when ,pv (vm-lock-package ,pv)))
+                        `(when ,pv
+                           (vm-lock-package ,pv)
+                           #+sbcl (handler-case (sb-ext:lock-package ,pv) (error () nil))))
                       pkg-vars))))))

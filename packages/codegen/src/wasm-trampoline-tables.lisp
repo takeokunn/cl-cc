@@ -45,14 +45,17 @@
      (vm-ge     . "i64.ge_s")))
   "Maps comparison VM instruction types to WASM i64 opcode strings.")
 
-;;; Unary fixnum — 5 instruction types; ~A expands to the unboxed source operand
+;;; Unary fixnum — 7 instruction types; ~A expands to the unboxed source operand
+;;; FR-323: i64.clz/i64.ctz/i64.popcnt mapped to integer-length/logcount
 (defparameter *wasm-unary-fixnum-table*
   (%make-eq-hash-table
    '((vm-inc      . "(i64.add ~A (i64.const 1))")
      (vm-dec      . "(i64.sub ~A (i64.const 1))")
      (vm-neg      . "(i64.sub (i64.const 0) ~A)")
      (vm-lognot   . "(i64.xor ~A (i64.const -1))")
-     (vm-logcount . "(i64.popcnt ~A)")))
+     (vm-logcount . "(i64.popcnt ~A)")
+     (vm-clz      . "(i64.clz ~A)")
+     (vm-ctz      . "(i64.ctz ~A)")))
   "Maps unary VM instruction types to WASM i64 format strings (~A = unboxed src).")
 
 ;;; Min/max — binary instructions using a conditional select pattern
@@ -70,10 +73,35 @@
   "Maps cons accessor VM instruction types to WASM struct.get format strings (~A = src).")
 
 ;;; Ordered dispatch list: (table . emit-fn) for binary instruction dispatch.
+;;; FR-324: f64.copysign for float-sign, FR-233: non-trapping float-to-int
 (defparameter *wasm-binop-dispatch*
   (list (cons *wasm-i64-binop-table* #'wasm-i64-binop)
         (cons *wasm-i64-cmp-table*   #'wasm-i64-cmp))
   "Ordered list of (table . emit-fn) for binary instruction dispatch.")
+
+;;; FR-234: Sign-extension ops table — unary fixnum ops for extending i32/i64 values
+(defparameter *wasm-sign-extend-table*
+  (%make-eq-hash-table
+   '((vm-i32-extend-8  . "(i32.extend8_s (i32.wrap_i64 ~A))")
+     (vm-i32-extend-16 . "(i32.extend16_s (i32.wrap_i64 ~A))")
+     (vm-i64-extend-8  . "(i64.extend8_s ~A)")
+     (vm-i64-extend-16 . "(i64.extend16_s ~A)")
+     (vm-i64-extend-32 . "(i64.extend32_s ~A)")))
+  "Maps sign-extension VM instruction types to WASM i32/i64 format strings (FR-234).")
+
+;;; FR-233: Non-trapping float-to-int saturating conversion helpers
+;;; Used by CL floor/truncate/round/ceiling for safe float→int conversion
+(defparameter *wasm-float-to-int-table*
+  (%make-eq-hash-table
+   '((vm-floor-f64   . "i64.trunc_sat_f64_s")
+     (vm-ceiling-f64 . "i64.trunc_sat_f64_u")
+     (vm-floor-f32   . "i64.trunc_sat_f32_s")
+     (vm-ceiling-f32 . "i64.trunc_sat_f32_u")))
+  "Maps float-to-int VM instruction types to non-trapping WASM opcode strings (FR-233).")
+
+;;; FR-229: table64 — 64-bit table operations (paired with Memory64, FR-213)
+(defparameter *wasm-table64-enabled* nil
+  "Feature flag for Wasm table64 proposal (64-bit function table indices).")
 
 (defun %wasm-const-value-to-wat (val)
   "Return the WASM WAT string for a literal constant value VAL."

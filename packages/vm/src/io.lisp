@@ -56,9 +56,16 @@
       (setf (gethash object seen) t)
       (cond
         ((consp object)
+         ;; Traverse the CDR chain iteratively, stopping when we revisit a cons
+         ;; (circular back-reference) so the DFS terminates.
          (loop for tail = object then (cdr tail)
                while (consp tail)
-               do (%vm-circle-labeling-visit (car tail) ctx seen)
+               do (let ((next (cdr tail)))
+                    (%vm-circle-labeling-visit (car tail) ctx seen)
+                    ;; If next cell is already seen, count the back-reference and stop
+                    (when (and (consp next) (gethash next seen))
+                      (%vm-circle-labeling-visit next ctx seen)
+                      (return)))
                finally (when tail (%vm-circle-labeling-visit tail ctx seen))))
         ((vectorp object)
          (loop for element across object do (%vm-circle-labeling-visit element ctx seen)))

@@ -83,4 +83,14 @@
    #:define-syntax
    #:syntax-rules
    #:with-gensyms
-   #:once-only))
+   #:once-only
+   ;; --- lazy evaluation (FR-856/857) ---------------------------------
+   #:promise
+   #:promisep
+   #:%make-promise
+   #:force
+   #:delay
+   #:memoize
+   #:memoize-stats
+   #:memoize-clear
+   #:*memoize-registry*))

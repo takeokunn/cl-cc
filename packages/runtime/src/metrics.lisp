@@ -112,28 +112,43 @@
 (defun increment! (counter &optional (n 1)) (rt-counter-increment! counter n))
 (defun set-gauge! (gauge val) (rt-gauge-set! gauge val))
 (defun observe! (histogram value) (rt-histogram-observe! histogram value))
+(defun %metric-name-string (name)
+  "Return NAME as a lowercase string suitable for Prometheus metric names."
+  (string-downcase (format nil "~A" name)))
+
+(defun %metric-label-key-string (key)
+  "Return label KEY as a lowercase string."
+  (string-downcase (format nil "~A" key)))
+
 (defun prometheus-text-format (metrics)
   "Return Prometheus text for METRICS list."
   (with-output-to-string (s)
     (dolist (m metrics)
       (typecase m
         (rt-counter
-         (format s "# TYPE ~a counter~%" (rt-counter-name m))
-         (let ((lbls (rt-counter-labels m)))
-           (if lbls
-               (format s "~a{~{~a=\"~a\"~^,~}} ~d~%"
-                       (rt-counter-name m) lbls (rt-counter-value m))
-               (format s "~a ~d~%" (rt-counter-name m) (rt-counter-value m)))))
+         (let ((name (%metric-name-string (rt-counter-name m))))
+           (format s "# TYPE ~a counter~%" name)
+           (let ((lbls (rt-counter-labels m)))
+             (if lbls
+                 ;; Normalize label keys to lowercase
+                 (let ((normalized-lbls
+                        (loop for (k v) on lbls by #'cddr
+                              collect (%metric-label-key-string k)
+                              collect v)))
+                   (format s "~a{~{~a=\"~a\"~^,~}} ~d~%"
+                           name normalized-lbls (rt-counter-value m)))
+                 (format s "~a ~d~%" name (rt-counter-value m))))))
         (rt-histogram
-         (format s "# TYPE ~a histogram~%" (rt-histogram-name m))
-         (loop for b in (rt-histogram-buckets m)
-               for c in (rt-histogram-counts m)
-               do (format s "~a_bucket{le=\"~a\"} ~d~%"
-                          (rt-histogram-name m) b c))
-         (format s "~a_bucket{le=\"+Inf\"} ~d~%"
-                 (rt-histogram-name m) (rt-histogram-count m))
-         (format s "~a_sum ~f~%" (rt-histogram-name m) (rt-histogram-sum m))
-         (format s "~a_count ~d~%" (rt-histogram-name m) (rt-histogram-count m)))
+         (let ((name (%metric-name-string (rt-histogram-name m))))
+           (format s "# TYPE ~a histogram~%" name)
+           (loop for b in (rt-histogram-buckets m)
+                 for c in (rt-histogram-counts m)
+                 do (format s "~a_bucket{le=\"~a\"} ~d~%" name b c))
+           (format s "~a_bucket{le=\"+Inf\"} ~d~%"
+                   name (rt-histogram-count m))
+           (format s "~a_sum ~f~%" name (rt-histogram-sum m))
+           (format s "~a_count ~d~%" name (rt-histogram-count m))))
         (rt-gauge
-         (format s "# TYPE ~a gauge~%" (rt-gauge-name m))
-         (format s "~a ~f~%" (rt-gauge-name m) (rt-gauge-value m)))))))
+         (let ((name (%metric-name-string (rt-gauge-name m))))
+           (format s "# TYPE ~a gauge~%" name)
+           (format s "~a ~f~%" name (rt-gauge-value m))))))))

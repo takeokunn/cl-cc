@@ -57,8 +57,66 @@
 ;; FR-905: Assertion Density Analysis
 (defun analyze-assertion-density (path) (declare (ignore path)) (list :density 0.0))
 
+;; ── FR-833/FR-834/FR-835: Adaptive JIT + GC runtime tuning ──────────────
+
+(defvar *adaptive-jit-enabled* t
+  "When T, the runtime adaptively tiers methods up based on hotness.")
+
+(defvar *jit-tier1-threshold* 100
+  "Invocation count before a function is promoted to tier-1 JIT.")
+
+(defvar *jit-compilation-queue* nil
+  "Priority queue of (hotness . tier) pairs for deferred JIT compilation.")
+
+(defun enqueue-jit-compilation (tier &key (hotness 1))
+  "Enqueue TIER for JIT compilation with HOTNESS priority."
+  (push (cons hotness tier) *jit-compilation-queue*)
+  (setf *jit-compilation-queue*
+        (sort *jit-compilation-queue* #'> :key #'car)))
+
+(defun dequeue-jit-compilation ()
+  "Dequeue the highest-hotness pending JIT compilation. Returns (hotness . tier)."
+  (pop *jit-compilation-queue*))
+
+(defun vm-record-gc-pause (pause-ms)
+  "Record a GC pause of PAUSE-MS milliseconds; adaptively shrink nursery if pause is long."
+  (when (> pause-ms 50.0d0)
+    (flet ((shrink-sym (pkg-name sym-name)
+             (let ((pkg (find-package pkg-name)))
+               (when pkg
+                 (let ((sym (find-symbol sym-name pkg)))
+                   (when (and sym (boundp sym))
+                     (setf (symbol-value sym)
+                           (max (floor (symbol-value sym) 2) 4096))))))))
+      (shrink-sym "CL-CC/RUNTIME" "*GC-NURSERY-SIZE*")
+      (shrink-sym "CL-CC/RUNTIME" "*GC-YOUNG-SIZE-WORDS*"))))
+
+(defun vm-handle-runtime-flag (flags)
+  "Process a list of runtime flag strings, e.g. '(\"--adaptive-jit\")."
+  (dolist (flag flags)
+    (cond
+      ((string= flag "--adaptive-jit")
+       (setf *adaptive-jit-enabled* t))
+      ((string= flag "--no-adaptive-jit")
+       (setf *adaptive-jit-enabled* nil)))))
+
+(defun %rt-sym-value (pkg-name sym-name)
+  (let* ((pkg (find-package pkg-name))
+         (sym (and pkg (find-symbol sym-name pkg))))
+    (and sym (boundp sym) (symbol-value sym))))
+
+(defun runtime-tuning-report ()
+  "Return a plist describing current runtime tuning state."
+  (list :jit-tier1-threshold *jit-tier1-threshold*
+        :adaptive-jit-enabled *adaptive-jit-enabled*
+        :gc-nursery-size (%rt-sym-value "CL-CC/RUNTIME" "*GC-NURSERY-SIZE*")
+        :gc-young-size-words (%rt-sym-value "CL-CC/RUNTIME" "*GC-YOUNG-SIZE-WORDS*")))
+
 (export '(make-callback foreign-call-varargs with-platform export-c-api emit-header
           unicode-normalize string-contains-simd crypto-random hash-with
           *compile-shared* *compile-static* *target-kernel-module* *target-unikernel*
           extract-docstrings generate-api-docs run-doctests show-types
-          analyze-assertion-density))
+          analyze-assertion-density
+          *adaptive-jit-enabled* *jit-tier1-threshold* *jit-compilation-queue*
+          enqueue-jit-compilation dequeue-jit-compilation
+          vm-record-gc-pause vm-handle-runtime-flag runtime-tuning-report))

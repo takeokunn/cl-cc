@@ -27,6 +27,9 @@
 ;;; Configuration Parameters
 ;;; ------------------------------------------------------------
 
+(defparameter *gc-nursery-size* (* 64 1024)
+  "Nursery (eden) size in words. Adaptive GC may shrink/grow this.")
+
 (defparameter *gc-young-size-words* (* 128 1024)
   "Young space in 64-bit words (1MB total, 512KB per semi-space).")
 

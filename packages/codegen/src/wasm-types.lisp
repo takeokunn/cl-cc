@@ -161,16 +161,69 @@
 (defconstant +wasm-f64-div+   #xa3)
 (defconstant +wasm-f64-min+   #xa4)
 (defconstant +wasm-f64-max+   #xa5)
+(defconstant +wasm-f64-copysign+ #xa6)  ; FR-324 copysign
+;;; f32 opcodes (FR-324)
+(defconstant +wasm-f32-abs+   #x8b)
+(defconstant +wasm-f32-neg+   #x8c)
+(defconstant +wasm-f32-ceil+  #x8d)
+(defconstant +wasm-f32-floor+ #x8e)
+(defconstant +wasm-f32-trunc+ #x8f)
+(defconstant +wasm-f32-nearest+ #x90)
+(defconstant +wasm-f32-sqrt+  #x91)
+(defconstant +wasm-f32-add+   #x92)
+(defconstant +wasm-f32-sub+   #x93)
+(defconstant +wasm-f32-mul+   #x94)
+(defconstant +wasm-f32-div+   #x95)
+(defconstant +wasm-f32-min+   #x96)
+(defconstant +wasm-f32-max+   #x97)
+(defconstant +wasm-f32-copysign+ #x98)  ; FR-324
+;;; i32 bit count ops (FR-323)
+(defconstant +wasm-i32-clz+   #x67)
+(defconstant +wasm-i32-ctz+   #x68)
+(defconstant +wasm-i32-popcnt+ #x69)
 ;;; Conversion opcodes
 (defconstant +wasm-i32-wrap-i64+       #xa7)
 (defconstant +wasm-i64-extend-i32-s+   #xac)
 (defconstant +wasm-f64-convert-i64-s+  #xb9)
 (defconstant +wasm-i64-trunc-f64-s+    #xb0)
+;;; Misc opcode prefix (0xfc — saturating trunc, bulk-memory, strings, wide-arith, f16)
+(defconstant +wasm-misc-prefix+ #xfc)
+;;; Non-trapping float-to-int conversions (MVP v1.1, FR-233) — secondary bytes after +wasm-misc-prefix+
+(defconstant +wasm-i32-trunc-sat-f32-s+ 0)
+(defconstant +wasm-i32-trunc-sat-f32-u+ 1)
+(defconstant +wasm-i32-trunc-sat-f64-s+ 2)
+(defconstant +wasm-i32-trunc-sat-f64-u+ 3)
+(defconstant +wasm-i64-trunc-sat-f32-s+ 4)
+(defconstant +wasm-i64-trunc-sat-f32-u+ 5)
+(defconstant +wasm-i64-trunc-sat-f64-s+ 6)
+(defconstant +wasm-i64-trunc-sat-f64-u+ 7)
+;;; Sign-extension operators (MVP v1.1, FR-234)
+(defconstant +wasm-i32-extend8-s+  #xc0)
+(defconstant +wasm-i32-extend16-s+ #xc1)
+(defconstant +wasm-i64-extend8-s+  #xc2)
+(defconstant +wasm-i64-extend16-s+ #xc3)
+(defconstant +wasm-i64-extend32-s+ #xc4)
 ;;; Reference opcodes
 (defconstant +wasm-ref-null+    #xd0)
 (defconstant +wasm-ref-is-null+ #xd1)
 (defconstant +wasm-ref-func+    #xd2)
 (defconstant +wasm-ref-eq+      #xd3)  ; GC proposal
+(defconstant +wasm-ref-as-non-null+ #xd4)  ; GC proposal null safety
+(defconstant +wasm-br-on-null+  #xd5)  ; GC proposal null safety
+(defconstant +wasm-br-on-non-null+ #xd6) ; GC proposal null safety
+;;; Tail-call proposal (FR-143)
+(defconstant +wasm-return-call+          #x12)
+(defconstant +wasm-return-call-indirect+ #x13)
+;;; Bulk memory operations (MVP v1.1, FR-228) — secondary bytes after +wasm-misc-prefix+
+(defconstant +wasm-memory-copy+  10)
+(defconstant +wasm-memory-fill+  11)
+(defconstant +wasm-memory-init+  8)
+(defconstant +wasm-data-drop+    9)
+;;; Bulk table operations (MVP v1.1, FR-237) — secondary bytes after +wasm-misc-prefix+
+(defconstant +wasm-table-init+  12)
+(defconstant +wasm-table-copy+  15)
+(defconstant +wasm-table-fill+  17)
+(defconstant +wasm-elem-drop+   13)
 
 ;;; GC opcode prefix
 (defconstant +wasm-gc-prefix+ #xfb)
@@ -347,6 +400,84 @@
 
 ;;; Sentinel value for "no type" / void
 (defconstant +wasm-void+ #x40)  ; used as block type for empty results
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-213: Memory64 opcodes
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-memory-size64+  30)
+(defconstant +wasm-memory-grow64+  31)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-247: Frozen values (immutable GC types)
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-gc-struct-new-immutable+  16)  ; 0xfb 0x10
+(defconstant +wasm-gc-array-new-immutable+    9)  ; 0xfb 0x09
+;;; FR-249: More Array Constructors
+(defconstant +wasm-gc-array-new-data+       10)  ; 0xfb 0x0a
+(defconstant +wasm-gc-array-new-elem+       17)  ; 0xfb 0x11
+(defconstant +wasm-gc-array-fill+           18)  ; 0xfb 0x12
+;;; FR-250: Multibyte Array Access
+(defconstant +wasm-gc-array-load2-u+        19)  ; 0xfb 0x13
+(defconstant +wasm-gc-array-load4-u+        20)  ; 0xfb 0x14
+(defconstant +wasm-gc-array-store2+         21)  ; 0xfb 0x15
+(defconstant +wasm-gc-array-store4+         22)  ; 0xfb 0x16
+;;; FR-283: GC packed fields
+(defconstant +wasm-gc-struct-get-s-packed+  23)  ; 0xfb 0x17
+(defconstant +wasm-gc-struct-get-u-packed+  24)  ; 0xfb 0x18
+(defconstant +wasm-gc-struct-set-packed+    25)  ; 0xfb 0x19
+;;; FR-279: Typed select for refs
+(defconstant +wasm-select-typed+            #x1c)
+;;; FR-275/FR-290: func.bind
+(defconstant +wasm-func-bind+           33)
+;;; FR-310: Exception tag import/export (EH v2)
+(defconstant +wasm-try-table+           #x1f)
+(defconstant +wasm-throw-ref+           #x0a)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-205: Stack Switching opcodes
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-cont-new+            #xe0)
+(defconstant +wasm-cont-bind+           #xe1)
+(defconstant +wasm-suspend+             #xe2)
+(defconstant +wasm-resume+              #xe3)
+(defconstant +wasm-resume-throw+        #xe4)
+(defconstant +wasm-cont-throw+          #xe5)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-218, FR-295: String Builtins opcodes
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-string-new-utf8+     80)
+(defconstant +wasm-string-new-wtf8+     81)
+(defconstant +wasm-string-new-lossy-utf8+ 82)
+(defconstant +wasm-string-encode-wtf16+ 83)
+(defconstant +wasm-string-encode-utf8+  84)
+(defconstant +wasm-string-encode-wtf8+  85)
+(defconstant +wasm-string-measure-wtf16+ 86)
+(defconstant +wasm-string-measure-utf8+  87)
+(defconstant +wasm-string-measure-wtf8+  88)
+(defconstant +wasm-string-concat+        89)
+(defconstant +wasm-string-compare+       90)
+(defconstant +wasm-string-from-code-point+ 91)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-238: Wide Arithmetic (128-bit) opcodes
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-i64-add128+          19)
+(defconstant +wasm-i64-sub128+          20)
+(defconstant +wasm-i64-mul-wide-s+      21)
+(defconstant +wasm-i64-mul-wide-u+      22)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-248: Half Precision (f16) opcodes
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-f16-load+            50)
+(defconstant +wasm-f16-store+           51)
+(defconstant +wasm-f16-add+             52)
+(defconstant +wasm-f16-sub+             53)
+(defconstant +wasm-f16-mul+             54)
+(defconstant +wasm-f16-div+             55)
+(defconstant +wasm-f16-min+             56)
+(defconstant +wasm-f16-max+             57)
 
 ;;; Fixnum tag convention: fixnums are stored as i31ref
 ;;; i31ref can hold 31-bit signed integers directly without heap allocation
