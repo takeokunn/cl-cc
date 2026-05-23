@@ -76,7 +76,11 @@
     (:file "symbols")
     (:file "hash")
     (:file "hash-execute")
-    (:file "atomics")))
+     (:file "atomics")
+     ;; ── Phase 114-129: Standard Library Extensions ──
+     (:file "json")
+     (:file "regex")
+     (:file "persistent")))
 
 ;;;; ---------------------------------------------------------------------
 ;;;; Tests — run with (asdf:test-system :cl-cc-vm) or :cl-cc-vm/tests.
@@ -120,7 +124,19 @@
    (:file "array-tests")
    (:file "strings-tests")
    (:file "symbols-tests")
-   (:file "hash-tests"))
+    (:file "hash-tests")
+    ;; ── Phase 129-160: Advanced Compilation III ──
+    (:file "strings-optimize-130")
+    (:file "v8-objects-133")
+    (:file "security-134")
+    (:file "stack-thread-137")
+    (:file "numeric-fp-141")
+    (:file "phases-142-144")
+    (:file "phases-145-147")
+    (:file "phases-148-150")
+    (:file "phases-151-153")
+    (:file "phases-154-156")
+    (:file "phases-157-160"))
   ;; NOTE: run-tests invokes the canonical cl-cc-suite (unit + integration + e2e),
   ;; not a VM-subset. There is intentionally one test entry point; suite filtering
   ;; is done via keyword args to run-tests, not via per-package ASDF systems.

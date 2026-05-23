@@ -101,5 +101,9 @@
        (:file "optimizer-speculative-atomics")
        (:file "optimizer-speculative-peval-data")
        (:file "optimizer-speculative-peval")
-       (:file "optimizer-speculative-passes-data")
-       (:file "optimizer-speculative-passes")))
+        (:file "optimizer-speculative-passes-data")
+        (:file "optimizer-speculative-passes")
+        ;; ── Phase 135-140: Advanced Optimization ──
+        (:file "static-analysis-135")
+        (:file "ghc-transforms-136")
+        (:file "lisp-opt-140")))

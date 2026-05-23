@@ -69,4 +69,8 @@
    (:file "expander-control")
    (:file "expander-tail")
    (:file "expander-numeric")
-   (:file "expander-sequence")))
+    (:file "expander-sequence")
+    ;; ── Phase 136: Pattern Matching ──
+     (:file "match")
+     ;; ── Phase 131: Pattern Matching Optimization ──
+     (:file "pattern-opt-131")))

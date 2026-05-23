@@ -29,6 +29,22 @@ Commands:
   selfhost [file]         Run the self-hosting profile workload
   install  <system.asd>   Register/compile a local ASDF system
   uninstall <system>      Remove a registered local system
+  fuzz     [--seed N]     Compiler fuzzing (FR-794)
+  reduce   <file>         Test case reduction (FR-796)
+  audit                   Dependency vulnerability scan (FR-814)
+  doc      <path>         API documentation generation (FR-902)
+  doctest  <path>         Run docstring code examples (FR-903)
+  show-types <file>       Show inferred type signatures (FR-904)
+  assert-density <path>   Assertion density analysis (FR-905)
+  abi-dump  <file>        Dump ABI manifest (FR-777)
+  abi-check <old> <new>   Check ABI compatibility (FR-777)
+  demangle  <name>        Demangle C++ ABI symbol (FR-776)
+  objdump   <file>        Inspect binary internals (FR-808)
+  macrostep <file>        Step through macro expansion (FR-836)
+  bisect    [range]       Find regression commit (FR-809)
+  features                List feature flags (FR-812)
+  generate  <schema>      Build-time code generation (FR-815)
+  update    [pkg]         Update dependencies (FR-813)
   help     [command]      Show this help or command-specific help
 
 Options:
@@ -245,10 +261,27 @@ Options:
 (defparameter *cli-command-dispatch*
   '(("run"      . %do-run)
     ("compile"  . %do-compile)
-     ("eval"     . %do-eval)
-     ("repl"     . %do-repl)
-     ("check"    . %do-check)
-     ("selfhost" . %do-selfhost))
+    ("eval"     . %do-eval)
+    ("repl"     . %do-repl)
+    ("check"    . %do-check)
+    ("selfhost" . %do-selfhost)
+    ;; ── Phase 129-160: Advanced Compilation III commands ──
+    ("fuzz"         . %do-fuzz)
+    ("reduce"       . %do-reduce)
+    ("audit"        . %do-audit)
+    ("doc"          . %do-doc)
+    ("doctest"      . %do-doctest)
+    ("show-types"   . %do-show-types)
+    ("assert-density" . %do-assert-density)
+    ("abi-dump"     . %do-abi-dump)
+    ("abi-check"    . %do-abi-check)
+    ("demangle"     . %do-demangle)
+    ("objdump"      . %do-objdump)
+    ("macrostep"    . %do-macrostep)
+    ("bisect"       . %do-bisect)
+    ("features"     . %do-features)
+    ("generate"     . %do-generate)
+    ("update"       . %do-update))
   "Alist mapping command name strings to their handler functions.")
 
 (defun main ()

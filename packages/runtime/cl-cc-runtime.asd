@@ -91,9 +91,14 @@
      ;; ── Memory / Topology / Algorithms ──
      (:file "allocator")
      (:file "topology")
-       (:file "mvcc")
-        (:file "hash-weak")
-        (:file "parallel-algo")
-       ;; ── GPU / WASM / Reactive / Async ──
-       (:file "gpu")
-       (:file "reactive")))
+     (:file "mvcc")
+     (:file "hash-weak")
+     (:file "parallel-algo")
+     ;; ── GPU / WASM / Reactive / Async ──
+     (:file "gpu")
+     (:file "reactive")
+     ;; ── Phase 116-127: Serialization / Crypto / Compression ──
+     (:file "serialize")
+     (:file "crypto")
+     (:file "compress")
+     (:file "gc-advanced-129")))

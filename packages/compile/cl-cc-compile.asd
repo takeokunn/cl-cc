@@ -54,4 +54,6 @@
    (:file "codegen")
    (:file "codegen-calls")
    ;; Local function bindings and assembly dispatch (uses machine code layer)
-   (:file "codegen-locals")))
+    (:file "codegen-locals")
+    ;; ── Phase 139: ABI/Symbol Management ──
+    (:file "abi-symbol-139")))
