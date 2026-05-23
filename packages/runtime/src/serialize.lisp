@@ -4,7 +4,7 @@
 (defun %ser-tnil () 0) (defun %ser-tfix () 1) (defun %ser-tflt () 2) (defun %ser-tstr () 3) (defun %ser-tsym () 4)
 (defun %ser-tcons () 5) (defun %ser-tvec () 6) (defun %ser-thash () 7) (defun %ser-tref () 8) (defun %ser-tt () 9)
 (defun %ser-wb (b s) (write-byte (logand b #xFF) s))
-(defun %ser-wtag (t s) (%ser-wb t s))
+(defun %ser-wtag (tag s) (%ser-wb tag s))
 (defun %ser-wfix (n s) (%ser-wtag (%ser-tfix) s) (let ((v (abs n))) (loop (let ((b (logand v #x7F))) (setf v (ash v -7)) (when (plusp v) (setf b (logior b #x80))) (%ser-wb b s) (when (zerop v) (return)))) (%ser-wb (if (minusp n) 1 0) s)))
 (defun %ser-wstr (str s) (%ser-wtag (%ser-tstr) s) (let* ((o (map '(vector (unsigned-byte 8)) #'char-code str)) (len (length o))) (%ser-wfix len s) (write-sequence o s)))
 (defun %ser-obj (o c s)
