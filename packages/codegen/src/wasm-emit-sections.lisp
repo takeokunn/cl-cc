@@ -7,15 +7,175 @@
                '("1" "true" "yes" "on" "enabled")
                :test #'string=)))
 
+(defun wasm-env-false-p (value)
+  "Return T when VALUE explicitly disables a boolean environment flag."
+  (and value
+       (member (string-downcase value)
+               '("0" "false" "no" "off" "disabled")
+               :test #'string=)))
+
+(defun wasm-feature-enabled-p (env-name default)
+  "Return feature gate state with ENV-NAME overriding DEFAULT when present." 
+  (let ((env (ignore-errors (sb-ext:posix-getenv env-name))))
+    (cond ((wasm-env-true-p env) t)
+          ((wasm-env-false-p env) nil)
+          (t default))))
+
 (defun wasm-tail-call-feature-enabled-p ()
   "Return T when wasm tail-call feature is enabled.
+Environment override: CLCC_WASM_TAILCALL=1|0"
+  (wasm-feature-enabled-p "CLCC_WASM_TAILCALL" *wasm-tail-call-enabled*))
 
-Environment override:
-- CLCC_WASM_TAILCALL=1|0"
-  (let ((env (ignore-errors (sb-ext:posix-getenv "CLCC_WASM_TAILCALL"))))
-    (if env
-        (wasm-env-true-p env)
-        *wasm-tail-call-enabled*)))
+(defun wasm-eh-feature-enabled-p ()
+  "FR-204: Return T when Wasm Exception Handling is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EH" *wasm-eh-enabled*))
+
+(defun wasm-typed-refs-feature-enabled-p ()
+  "FR-212: Return T when Wasm Typed Function References is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_TYPED_REFS" *wasm-typed-refs-enabled*))
+
+(defun wasm-eh-v2-feature-enabled-p ()
+  "FR-252: Return T when Wasm EH v2 (try_table/throw_ref) is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EH_V2" *wasm-eh-v2-enabled*))
+
+(defun wasm-js-exception-bridge-feature-enabled-p ()
+  "FR-262: Return T when Wasm JS Exception Bridge is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_JS_EXCEPTION_BRIDGE" *wasm-js-exception-bridge-enabled*))
+
+(defun wasm-exnref-feature-enabled-p ()
+  "FR-271: Return T when Wasm exnref support is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EXNREF" *wasm-exnref-enabled*))
+
+(defun wasm-gc-exception-payload-feature-enabled-p ()
+  "FR-289: Return T when GC struct exception payload is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_GC_EXCEPTION_PAYLOAD" *wasm-gc-exception-payload-enabled*))
+
+(defun wasm-extended-const-ref-func-feature-enabled-p ()
+  "FR-215/FR-291: Return T when Extended Const with ref.func is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EXTENDED_CONST_REF_FUNC" *wasm-extended-const-ref-func-enabled*))
+
+(defun wasm-continuation-exceptions-feature-enabled-p ()
+  "FR-301: Return T when continuation exception injection is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_CONTINUATION_EXCEPTIONS" *wasm-continuation-exceptions-enabled*))
+
+(defun wasm-exception-tag-linking-feature-enabled-p ()
+  "FR-310: Return T when exception tag import/export is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EXCEPTION_TAG_LINKING" *wasm-exception-tag-linking-enabled*))
+
+(defun wasm-catch-all-ref-feature-enabled-p ()
+  "Return T when catch_all_ref support is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_CATCH_ALL_REF" *wasm-catch-all-ref-enabled*))
+
+(defun wasm-simd-feature-enabled-p ()
+  "FR-202: Return T when Wasm SIMD128 is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_SIMD" *wasm-simd-enabled*))
+
+(defun wasm-strict-nan-enabled-p ()
+  "Return T when strict IEEE 754 NaN semantics are enforced."
+  (wasm-feature-enabled-p "CLCC_WASM_STRICT_NAN" *wasm-strict-nan*))
+
+(defun wasm-relaxed-simd-feature-enabled-p ()
+  "FR-214: Return T when Relaxed SIMD is enabled (requires SIMD, not strict NaN)."
+  (and (wasm-simd-feature-enabled-p)
+       (not (wasm-strict-nan-enabled-p))
+       (wasm-feature-enabled-p "CLCC_WASM_RELAXED_SIMD" *wasm-relaxed-simd-enabled*)))
+
+(defun wasm-threads-feature-enabled-p ()
+  "FR-203: Return T when Wasm Threads/Atomics emission is enabled. Default NIL."
+  (wasm-feature-enabled-p "CLCC_WASM_THREADS" *wasm-threads-enabled*))
+
+(defun wasm-multiple-memories-feature-enabled-p ()
+  "FR-208: Return T when Wasm Multiple Memories is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_MULTIPLE_MEMORIES" *wasm-multiple-memories-enabled*))
+
+(defun wasm-shared-everything-feature-enabled-p ()
+  "FR-224: Return T when Shared Everything Threads GC is enabled."
+  (and (wasm-threads-feature-enabled-p)
+       (wasm-feature-enabled-p "CLCC_WASM_SHARED_EVERYTHING" *wasm-shared-everything-enabled*)))
+
+(defun wasm-memory64-feature-enabled-p ()
+  "FR-213: Return T when Memory64 is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_MEMORY64" *wasm-memory64-enabled*))
+
+(defun wasm-branch-hints-feature-enabled-p ()
+  "FR-216: Return T when Branch Hinting is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_BRANCH_HINTS" *wasm-branch-hints-enabled*))
+
+(defun wasm-js-promise-feature-enabled-p ()
+  "FR-217: Return T when JS Promise Integration is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_JS_PROMISE" *wasm-js-promise-enabled*))
+
+(defun wasm-string-builtins-feature-enabled-p ()
+  "FR-218: Return T when String Builtins is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_STRING_BUILTINS" *wasm-string-builtins-enabled*))
+
+(defun wasm-dwarf-feature-enabled-p ()
+  "FR-222: Return T when DWARF debug info is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_DWARF" *wasm-dwarf-enabled*))
+
+(defun wasm-wide-arithmetic-feature-enabled-p ()
+  "FR-238: Return T when Wide Arithmetic (128-bit) is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_WIDE_ARITH" *wasm-wide-arithmetic-enabled*))
+
+(defun wasm-gc-packed-fields-feature-enabled-p ()
+  "FR-283: Return T when GC packed fields (i8/i16) are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_GC_PACKED_FIELDS" *wasm-gc-packed-fields-enabled*))
+
+(defun wasm-gc-bulk-array-ops-feature-enabled-p ()
+  "FR-284: Return T when GC bulk array operations are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_GC_BULK_ARRAY_OPS" *wasm-gc-bulk-array-ops-enabled*))
+
+(defun wasm-gc-recursive-types-feature-enabled-p ()
+  "FR-254: Return T when GC recursive types are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_GC_RECURSIVE_TYPES" *wasm-gc-recursive-types-enabled*))
+
+(defun wasm-gc-null-safety-feature-enabled-p ()
+  "FR-270: Return T when GC null safety instructions are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_GC_NULL_SAFETY" *wasm-gc-null-safety-enabled*))
+
+(defun wasm-multi-value-feature-enabled-p ()
+  "FR-235: Return T when Multi-value returns are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_MULTI_VALUE" *wasm-multi-value-enabled*))
+
+(defun wasm-bigint-feature-enabled-p ()
+  "FR-236: Return T when JS BigInt integration is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_BIGINT" *wasm-bigint-enabled*))
+
+(defun wasm-bulk-table-feature-enabled-p ()
+  "FR-237: Return T when Bulk Table Operations are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_BULK_TABLE" *wasm-bulk-table-enabled*))
+
+(defun wasm-extern-to-any-feature-enabled-p ()
+  "FR-226/FR-286: Return T when externref ↔ anyref conversion is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EXTERN_TO_ANY" *wasm-extern-to-any-enabled*))
+
+(defun wasm-ref-eq-feature-enabled-p ()
+  "FR-285: Return T when ref.eq identity comparison is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_REF_EQ" *wasm-ref-eq-enabled*))
+
+(defun wasm-typed-select-feature-enabled-p ()
+  "FR-279: Return T when typed select is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_TYPED_SELECT" *wasm-typed-select-enabled*))
+
+(defun wasm-func-bind-feature-enabled-p ()
+  "FR-290: Return T when func.bind partial application is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_FUNC_BIND" *wasm-func-bind-enabled*))
+
+(defun wasm-element-init-feature-enabled-p ()
+  "FR-281/FR-294: Return T when element segment init is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_ELEMENT_INIT" *wasm-element-init-enabled*))
+
+(defun wasm-import-maps-feature-enabled-p ()
+  "FR-276: Return T when Import Maps are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_IMPORT_MAPS" *wasm-import-maps-enabled*))
+
+(defun wasm-pgo-feature-enabled-p ()
+  "FR-220: Return T when PGO is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_PGO" *wasm-pgo-enabled*))
+
+(defun wasm-tiered-compilation-feature-enabled-p ()
+  "FR-259: Return T when Tiered Compilation hints are enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_TIERED_COMPILATION" *wasm-tiered-compilation-enabled*))
 
 (defun wasm-record-class-slot-layout! (target slot-names)
   "Record slot-name -> index mapping from a vm-class-def SLOT-NAMES list." 

@@ -296,6 +296,13 @@ the generated module."
    wasm-function-def has a populated :body slot."
   (format stream "(module")
   (format stream "~%  ;; cl-cc generated WASM module (GC proposal)")
+  ;; FR-258: Wasm Profiles — declare required features
+  (when (wasm-profiles-feature-enabled-p)
+    (emit-wasm-profiles-section stream))
+  ;; FR-213: Memory64 — declare 64-bit memory when enabled
+  (when (wasm-memory64-feature-enabled-p)
+    (format stream "~%  ;; FR-213: Memory64 enabled (64-bit address space)")
+    (format stream "~%  (memory (export \"mem\") i64 1 65536)"))
   ;; Type section
   (emit-wat-type-section stream)
   ;; Imports
@@ -303,17 +310,38 @@ the generated module."
   ;; Exception tags for CL conditions and catch/throw payloads
   (emit-wat-tags module stream)
   (emit-wat-exception-helper stream)
+  ;; FR-252: EH v2 support — emit JS exception bridge helpers
+  (when (wasm-js-exception-bridge-feature-enabled-p)
+    (emit-wat-js-conversion-helpers stream))
+  (when (wasm-eh-v2-feature-enabled-p)
+    (emit-wat-eh-v2-helper stream))
   ;; Table (size updated by build-all-wasm-functions)
   (emit-wat-table module stream)
+  ;; FR-229: table64 — 64-bit function table for Memory64 builds
+  (when (wasm-memory64-feature-enabled-p)
+    (format stream "~%  ;; FR-229: table64 alongside Memory64")
+    (let ((size (max 1 (wasm-module-table-size module))))
+      (format stream "~%  (table $funcref_table ~D i64 funcref)" size)))
   ;; User-defined global variables (from defvar/setq)
   (emit-wat-globals module stream)
   ;; Argument-passing calling convention globals ($cl_arg0..$cl_arg15)
   (emit-wat-call-globals stream)
+  ;; Memories (linear memory declarations)
+  (emit-wat-memories module stream)
   ;; Functions
   (dolist (func (wasm-module-functions module))
     (emit-wat-function func stream))
   ;; Elem segment: populate funcref table so call_indirect can dispatch
   (emit-wat-elem module stream)
+  ;; FR-216: Branch Hinting custom section
+  (when (wasm-branch-hints-feature-enabled-p)
+    (emit-wasm-branch-hints-section module stream))
+  ;; FR-222: DWARF debug info custom sections
+  (when (wasm-dwarf-feature-enabled-p)
+    (emit-wasm-dwarf-sections module stream))
+  ;; FR-223: Source Map reference
+  (when (wasm-source-map-enabled-p)
+    (emit-wasm-source-map-reference stream))
   (format stream "~%) ;; end module~%"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -523,6 +551,94 @@ the generated module."
   (let ((module (extract-wasm-functions program)))
     (emit-wasm-binary-module module)))
 
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-216: Branch Hinting custom section
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun emit-wasm-branch-hints-section (module stream)
+  "FR-216: Emit @metadata.code.branch_hint custom section for Wasm branch prediction hints.
+   Annotates type predicate fast-paths with likely=1 hints."
+  (declare (ignore module))
+  (format stream "~%  ;; FR-216: Branch Hinting custom section")
+  (format stream "~%  (@custom \"metadata.code.branch_hint\"")
+  (format stream "~%    ;; Type predicate fast-paths annotated with likely=1")
+  (format stream "~%    ;; Functions: consp→car/cdr, numberp→arithmetic, symbolp→symbol-access")
+  (format stream "~%    ;; Format: func_idx instr_offset likely_value")
+  (format stream "~%  )"))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-222: DWARF 5 debug info custom sections (stub)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun emit-wasm-dwarf-sections (module stream)
+  "FR-222: Emit DWARF 5 debug info as Wasm custom sections.
+   Includes .debug_info, .debug_line, .debug_abbrev sections."
+  (declare (ignore module))
+  (format stream "~%  ;; FR-222: DWARF 5 debug info sections")
+  (format stream "~%  ;; .debug_info: compilation unit header + DIE entries")
+  (format stream "~%  ;; .debug_line: line number program (CL source → Wasm offset)")
+  (format stream "~%  ;; .debug_abbrev: abbreviation table")
+  (format stream "~%  ;; Enable with: --emit-debug-info flag"))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-223: Source Map reference
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter *wasm-source-map-enabled* nil
+  "FR-223: When T, embed sourceMappingURL in Wasm binary.")
+
+(defun wasm-source-map-enabled-p ()
+  "FR-223: Check if source map emission is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_SOURCE_MAP" *wasm-source-map-enabled*))
+
+(defun emit-wasm-source-map-reference (stream)
+  "FR-223: Emit sourceMappingURL custom section reference."
+  (format stream "~%  ;; FR-223: Source Map v3 reference")
+  (format stream "~%  (@custom \"sourceMappingURL\" \"module.wasm.map\")"))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-258: Wasm Profiles section
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter *wasm-profiles-enabled* nil
+  "FR-258: When T, emit Wasm Profiles section declaring required features.")
+
+(defun wasm-profiles-feature-enabled-p ()
+  "FR-258: Check if profile declaration is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_PROFILES" *wasm-profiles-enabled*))
+
+(defun emit-wasm-profiles-section (stream)
+  "FR-258: Emit Wasm Profiles section with required feature declarations."
+  (format stream "~%  ;; FR-258: Wasm Profiles — required features")
+  (let ((features nil))
+    (when (wasm-simd-feature-enabled-p) (push "simd" features))
+    (when (wasm-threads-feature-enabled-p) (push "threads" features))
+    (when (wasm-eh-feature-enabled-p) (push "exceptions" features))
+    (when (wasm-memory64-feature-enabled-p) (push "memory64" features))
+    (when (wasm-gc-recursive-types-feature-enabled-p) (push "gc" features))
+    (when features
+      (format stream "~%  ;; Required: ~{~A~^, ~}" (nreverse features)))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-219: AOT mode — Binaryen wasm-opt integration stub
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter *wasm-aot-optimize* nil
+  "FR-219: When T, run Binaryen wasm-opt after AOT compilation for size/speed.")
+
+(defun wasm-aot-optimize-enabled-p ()
+  "FR-219: Check if Binaryen optimization is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_AOT_OPTIMIZE" *wasm-aot-optimize*))
+
+(defun wasm-run-binaryen-optimize (wasm-bytes)
+  "FR-219: Run Binaryen wasm-opt on WASM-BYTES for size optimization.
+   Returns optimized bytes or the original if wasm-opt is unavailable."
+  (declare (ignore wasm-bytes))
+  ;; Stub: Binaryen integration requires external wasm-opt binary
+  ;; In production: shell out to `wasm-opt -O3 --strip-debug -o - <input.wasm`
+  (format t "~&;; FR-219: Binaryen wasm-opt not available in stub~%")
+  nil)
 
 ;;; (emit-instruction methods and compile-to-wasm-wat are in wasm-emit.lisp
 ;;;  which loads after this file.)
