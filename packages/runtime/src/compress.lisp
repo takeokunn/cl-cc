@@ -1,6 +1,6 @@
 (in-package :cl-cc/runtime)
 (defun adler32 (o) (let ((a 1)(b 0)) (loop for x across o do (setf a (mod (+ a x) 65521) b (mod (+ b a) 65521))) (logior (ash b 16) a)))
-(defparameter +crc32-tbl+ (let ((t (make-array 256 :element-type '(unsigned-byte 32)))) (dotimes (i 256) (let ((c i)) (dotimes (j 8) (setf c (if (logbitp 0 c) (logxor (ash c -1) #xEDB88320) (ash c -1)))) (setf (aref t i) c))) t))
+(defparameter +crc32-tbl+ (let ((tbl (make-array 256 :element-type '(unsigned-byte 32)))) (dotimes (i 256) (let ((c i)) (dotimes (j 8) (setf c (if (logbitp 0 c) (logxor (ash c -1) #xEDB88320) (ash c -1)))) (setf (aref tbl i) c))) tbl))
 (defun crc32 (o) (let ((c #xFFFFFFFF)) (loop for x across o do (setf c (logxor (ash c -8) (aref +crc32-tbl+ (logand (logxor c x) #xFF))))) (logxor c #xFFFFFFFF)))
 (defun %deflate-store (o) (let* ((len (length o)) (hdr (vector #x01 (ldb (byte 8 0) len) (ldb (byte 8 8) len) (logxor (ldb (byte 8 0) len) #xFF) (logxor (ldb (byte 8 8) len) #xFF)))) (concatenate '(vector (unsigned-byte 8)) hdr o)))
 (defun zlib-compress (o &key (level 6)) (declare (ignore level)) (let* ((ad (adler32 o)) (hdr (vector #x78 #x01)) (def (%deflate-store o)) (trl (vector (ldb (byte 8 24) ad) (ldb (byte 8 16) ad) (ldb (byte 8 8) ad) (ldb (byte 8 0) ad)))) (concatenate '(vector (unsigned-byte 8)) hdr def trl)))
