@@ -8,6 +8,13 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+;;; Tests that call with-replaced-function mutate the global symbol-function
+;;; binding and are therefore not safe to run concurrently with other workers.
+(defsuite prim-bignum-serial-suite
+  :description "Serial tests for bignum fallback paths (use with-replaced-function)."
+  :parent cl-cc-unit-suite
+  :parallel nil)
+
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Helpers: construct and execute unary/binary VM instructions
 ;;; ═══════════════════════════════════════════════════════════════════════════
@@ -146,6 +153,8 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
   (ctor lhs rhs expected)
   (assert-= expected (%run-binary-inst ctor lhs rhs)))
 
+(in-suite prim-bignum-serial-suite)
+
 (deftest prim-add-fixnum51-overflow-uses-bignum-fallback
   "vm-add branches to host-backed bignum fallback when the 51-bit fixnum range overflows."
   (let ((called nil))
@@ -190,6 +199,8 @@ INSTRUCTION-THUNK receives the source register index and must build the VM instr
       (assert-= (* cl-cc/vm::+vm-max-fixnum51+ 2)
                 (%run-binary-inst #'cl-cc:make-vm-mul cl-cc/vm::+vm-max-fixnum51+ 2))
       (assert-true called))))
+
+(in-suite cl-cc-unit-suite)
 
 (deftest prim-trampoline-instruction-produces-forceable-thunk
   "vm-trampoline stores a zero-argument thunk that the VM trampoline loop can force."
@@ -279,6 +290,8 @@ Round (banker's rounding) returns q=4 r=-1 for 7/2 (halfway, nearest even)."
      (assert-= expected-q (cl-cc:vm-reg-get state 0))
      (assert-equal expected-vals (cl-cc:vm-values-list state)))))
 
+(in-suite prim-bignum-serial-suite)
+
 (deftest prim-truncate-bignum-uses-vm-bignum-division-path
   "vm-truncate on bignum operands routes through vm-bignum-burnikel-ziegler-divide."
   (let ((called nil))
@@ -337,6 +350,8 @@ Round (banker's rounding) returns q=4 r=-1 for 7/2 (halfway, nearest even)."
          (exec1 (cl-cc:make-vm-mul :dst 0 :lhs 1 :rhs 2) state)
          (assert-true called)
          (assert-= 77 (cl-cc:vm-reg-get state 0)))))))
+
+(in-suite cl-cc-unit-suite)
 
 ;;; ═══════════════════════════════════════════════════════════════════════════
 ;;; Section 7: Boolean Operations
