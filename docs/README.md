@@ -26,25 +26,25 @@
 - [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — ✅ COMPLETE (52 / 52 FR)
 - [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
 - [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — ✅ COMPLETE (75 / 75 FR)
-- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto (71 FR)
-- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures (73 FR)
+- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: string builder, structured logging, LSP/DAP, continuations, hygienic macros, C embedding (71 FR) — 🔶 in progress
+- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures, numeric stability (73 FR) — 🔶 in progress
 
 ## Memory & GC
 
-- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (166 FR: 50✅/15⚠️/101⏸️)
+- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (167 FR: 67✅/16⚠️/84⏸️)
 
 ## Tooling
 
-- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR)
-- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR)
-- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR)
-- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR)
-- [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR)
+- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — 🔶 in progress
+- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — 🔶 in progress
+- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — 🔶 in progress (mlgo, polyhedral, ICF implemented)
+- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — 🔶 in progress (superopt, phases 104-128 partially addressed)
+- [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR) — ✅ COMPLETE (128 / 128 FR; Phases 129-160)
 
 ## WebAssembly
 
-- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR)
+- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — 🔶 in progress (33 feature gates + threads/WASI/source-map added; Phases 23-54 partially addressed)
 
 ---
 
-**Status: ~1944/1997 tracked FRs complete (~97.3%) | native-advanced ~91+ complete, 100% addressed | runtime-stdlib-1 75/75 FRs ✅ | Test: target coverage matrix generated | CLI timeout default: 30s | Last updated: 2026-05-23**
+**Status: ~1944/1997 tracked FRs complete (~97.3%) | tooling-advanced-3 128/128 ✅ | native-advanced ~91+ complete, 100% addressed | runtime-stdlib-1 75/75 FRs ✅ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-23**
