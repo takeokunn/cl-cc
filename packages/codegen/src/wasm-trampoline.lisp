@@ -156,22 +156,22 @@ array.set before the closure struct is created."
     (if captured
         (if *wasm-typed-closure-env-enabled*
             (progn
-              ;; FR-144: Typed env path — use array.new_fixed directly
-              (format stream "~%~A;; FR-144: typed closure env using array.new_fixed" prefix)
-              (format stream "~%~A(local.set ~D (call $host_alloc_env ~A ~{~A~^ ~}))"
-                      prefix (wasm-reg-map-tmp-index reg-map)
-                      (length captured)
-                      (loop for capture in captured
-                            for reg = (%wasm-captured-value-reg capture)
-                            collect (reg-local-ref reg-map reg)))
-              (format stream "~%~A~A"
-                      prefix
-                      (reg-local-set
-                       reg-map dst
-                       (format nil "(struct.new $closure_t (i32.const ~D) ~A)"
-                               entry-index
-                               (reg-local-ref reg-map (wasm-reg-map-tmp-index reg-map)))))
-              (reg-record-type reg-map dst :closure))
+               ;; FR-144: Typed env path — use array.new_fixed directly
+               (format stream "~%~A;; FR-144: typed closure env using array.new_fixed" prefix)
+               (format stream "~%~A(local.set ~D (array.new_fixed $eqref_array_t ~D~{ ~A~}))"
+                       prefix (wasm-reg-map-tmp-index reg-map)
+                       (length captured)
+                       (loop for capture in captured
+                             for reg = (%wasm-captured-value-reg capture)
+                             collect (reg-local-ref reg-map reg)))
+               (format stream "~%~A~A"
+                       prefix
+                       (reg-local-set
+                        reg-map dst
+                        (format nil "(struct.new $closure_t (i32.const ~D) (local.get ~D))"
+                                entry-index
+                                (wasm-reg-map-tmp-index reg-map))))
+               (reg-record-type reg-map dst :closure))
             (progn
               ;; Original env struct path
               (let ((tmp (wasm-reg-map-tmp-index reg-map)))
@@ -198,20 +198,13 @@ array.set before the closure struct is created."
                            entry-index)))
           (reg-record-type reg-map dst :closure)))))
 
-;;; FR-237: host_alloc_env — host function stub for typed closure env allocation
-;;; In production, this would generate array.new_fixed directly.
-;;; For now it's a bridge function called from the wasm module.
-
 (defun wasm-closure-ref-wat (reg-map closure-reg index)
   "Return WAT for reading captured INDEX from CLOSURE-REG.
-   FR-144: When typed env is enabled and the closure-reg is known to be :closure,
-   uses array.get directly on the env field (skipping $env_t wrapping)."
+   FR-144: When typed env enabled, uses array.get directly on env field."
   (if *wasm-typed-closure-env-enabled*
-      ;; FR-144 typed env path: closure.env is directly the array
       (format nil "(array.get $eqref_array_t (struct.get $closure_t 1 ~A) (i32.const ~D))"
               (wasm-ref-cast-maybe "(ref $closure_t)" reg-map closure-reg)
               index)
-      ;; Original path: closure → env → vars array → indexed element
       (format nil "(array.get $eqref_array_t (struct.get $env_t 0 (ref.cast (ref $env_t) (struct.get $closure_t 1 ~A))) (i32.const ~D))"
               (wasm-ref-cast-maybe "(ref $closure_t)" reg-map closure-reg)
               index)))
@@ -237,13 +230,18 @@ array.set before the closure struct is created."
                           (wasm-fixnum-unbox reg-map rhs)))))
 
 (defun emit-trampoline-jump-to-label (label-name label-pc-map reg-map stream)
-  "Emit WAT to set $pc to the index for LABEL-NAME and branch back to $dispatch."
+  "Emit WAT to set $pc to the index for LABEL-NAME and branch back to $dispatch.
+   FR-143: When tail-calls enabled and label has a known table entry, 
+   emit return_call_indirect directly without the br $dispatch."
   (let ((pc-idx (gethash label-name label-pc-map)))
     (if pc-idx
         (format stream "~%      (local.set ~D (i32.const ~D))"
                 (wasm-reg-map-pc-index reg-map) pc-idx)
         (format stream "~%      ;; WARNING: unknown label ~S" label-name))
-    (format stream "~%      (br $dispatch)")))
+    (if *wasm-tail-call-enabled*
+        (format stream "~%      (return_call_indirect (type $main_func_t) (table $funcref_table) (local.get ~D))"
+                (wasm-reg-map-pc-index reg-map))
+        (format stream "~%      (br $dispatch)"))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-228: Bulk Memory Operations helpers

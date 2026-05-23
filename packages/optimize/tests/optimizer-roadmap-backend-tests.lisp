@@ -32,7 +32,8 @@
     (assert-true (cl-cc/optimize::translation-validation-equivalent-p before before))
     (assert-false (cl-cc/optimize::translation-validation-equivalent-p before after))
     (let ((cl-cc/optimize:*translation-validation-enabled* t))
-      (assert-eq after (cl-cc/optimize:validate-optimizer-translation :unit before after)))))
+      (assert-eq after (handler-bind ((warning #'muffle-warning))
+                         (cl-cc/optimize:validate-optimizer-translation :unit before after))))))
 
 (deftest optimize-differential-fuzzing-deterministic-smoke
   "FR-753: differential fuzzing generator/interpreter is deterministic and catches mismatches without signaling."

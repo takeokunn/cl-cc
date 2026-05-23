@@ -102,7 +102,10 @@ expansion during self-host loading)."
 ;;; Wire compile functions into VM hooks for runtime EVAL/compile support
 (defun %vm-install-eval-hooks-if-available ()
   (when cl-cc/bootstrap:*vm-eval-hook-installer*
-    (funcall cl-cc/bootstrap:*vm-eval-hook-installer* #'our-eval #'compile-string)))
+    (funcall cl-cc/bootstrap:*vm-eval-hook-installer*
+             #'our-eval
+             (lambda (source)
+               (cl-cc/compile:compilation-result-program (compile-string source))))))
 
 (eval-when (:load-toplevel :execute)
   (%vm-install-eval-hooks-if-available))

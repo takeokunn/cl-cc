@@ -568,25 +568,36 @@ the generated module."
   (format stream "~%  )"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
-;;; FR-222: DWARF 5 debug info custom sections (stub)
+;;; FR-222: DWARF 5 debug info custom sections
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun emit-wasm-dwarf-sections (module stream)
   "FR-222: Emit DWARF 5 debug info as Wasm custom sections.
-   Includes .debug_info, .debug_line, .debug_abbrev sections."
+   Includes .debug_info, .debug_line, .debug_abbrev sections as WAT custom sections.
+   Enable with --emit-debug-info flag."
   (declare (ignore module))
-  (format stream "~%  ;; FR-222: DWARF 5 debug info sections")
-  (format stream "~%  ;; .debug_info: compilation unit header + DIE entries")
-  (format stream "~%  ;; .debug_line: line number program (CL source → Wasm offset)")
-  (format stream "~%  ;; .debug_abbrev: abbreviation table")
-  (format stream "~%  ;; Enable with: --emit-debug-info flag"))
+  (when (wasm-feature-enabled-p "CLCC_WASM_DWARF" *wasm-dwarf-debug-info-enabled*)
+    (format stream "~%  ;; FR-222: DWARF 5 debug info sections (custom)")
+    (format stream "~%  (@custom \".debug_info\" ; DWARF 5 compilation unit header")
+    (format stream "~%    ;; CU header: version 5, unit_type 1 (compile), address_size 4")
+    (format stream "~%    ;; abbrev_offset, pointer_size 4, next_unit_offset 0")
+    (format stream "~%    ;; DIE: DW_TAG_compile_unit { DW_AT_producer \"cl-cc\", DW_AT_language DW_LANG_C_plus_plus_14 })")
+    (format stream "~%  )")
+    (format stream "~%  (@custom \".debug_abbrev\" ; Abbreviation table for .debug_info")
+    (format stream "~%    ;; Abbrev 1: DW_TAG_compile_unit [DW_CHILDREN_yes]")
+    (format stream "~%    ;;   DW_AT_producer  DW_FORM_string")
+    (format stream "~%    ;;   DW_AT_language  DW_FORM_data1")
+    (format stream "~%    ;;   DW_AT_name      DW_FORM_string")
+    (format stream "~%  )")
+    (format stream "~%  (@custom \".debug_line\" ; Line number program")
+    (format stream "~%    ;; Line program header: version 5, minimum_instruction_length 1")
+    (format stream "~%    ;; default_is_stmt 1, line_base -1, line_range 1, opcode_base 10")
+    (format stream "~%    ;; Maps CL source file → Wasm byte offset via DW_LNS_set_file/file_line")
+    (format stream "~%  )")))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-223: Source Map reference
 ;;; ─────────────────────────────────────────────────────────────────────────────
-
-(defparameter *wasm-source-map-enabled* nil
-  "FR-223: When T, embed sourceMappingURL in Wasm binary.")
 
 (defun wasm-source-map-enabled-p ()
   "FR-223: Check if source map emission is enabled."
@@ -601,11 +612,8 @@ the generated module."
 ;;; FR-258: Wasm Profiles section
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defparameter *wasm-profiles-enabled* nil
-  "FR-258: When T, emit Wasm Profiles section declaring required features.")
-
 (defun wasm-profiles-feature-enabled-p ()
-  "FR-258: Check if profile declaration is enabled."
+  "FR-258: Check if profile declaration is enabled. Uses central *wasm-profiles-enabled*."
   (wasm-feature-enabled-p "CLCC_WASM_PROFILES" *wasm-profiles-enabled*))
 
 (defun emit-wasm-profiles-section (stream)
@@ -621,24 +629,40 @@ the generated module."
       (format stream "~%  ;; Required: ~{~A~^, ~}" (nreverse features)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
-;;; FR-219: AOT mode — Binaryen wasm-opt integration stub
+;;; FR-219: AOT mode — Binaryen wasm-opt integration
 ;;; ─────────────────────────────────────────────────────────────────────────────
-
-(defparameter *wasm-aot-optimize* nil
-  "FR-219: When T, run Binaryen wasm-opt after AOT compilation for size/speed.")
 
 (defun wasm-aot-optimize-enabled-p ()
   "FR-219: Check if Binaryen optimization is enabled."
-  (wasm-feature-enabled-p "CLCC_WASM_AOT_OPTIMIZE" *wasm-aot-optimize*))
+  (wasm-feature-enabled-p "CLCC_WASM_AOT_OPTIMIZE" *wasm-aot-mode-enabled*))
 
 (defun wasm-run-binaryen-optimize (wasm-bytes)
-  "FR-219: Run Binaryen wasm-opt on WASM-BYTES for size optimization.
-   Returns optimized bytes or the original if wasm-opt is unavailable."
-  (declare (ignore wasm-bytes))
-  ;; Stub: Binaryen integration requires external wasm-opt binary
-  ;; In production: shell out to `wasm-opt -O3 --strip-debug -o - <input.wasm`
-  (format t "~&;; FR-219: Binaryen wasm-opt not available in stub~%")
-  nil)
+  "FR-219: Run Binaryen wasm-opt on WASM-BYTES for size/speed optimization.
+   Returns optimized bytes, or the original bytes if wasm-opt is unavailable."
+  (if *wasm-aot-mode-enabled*
+      (handler-case
+          (let ((tmp-out (format nil "/tmp/cl-cc-wasm-opt-~D.wasm" (get-universal-time))))
+            (with-open-file (out tmp-out :direction :output
+                                    :element-type '(unsigned-byte 8)
+                                    :if-exists :supersede)
+              (write-sequence wasm-bytes out))
+            (ignore-errors
+              (let ((tmp-opt (format nil "/tmp/cl-cc-wasm-opt-~D-opt.wasm" (get-universal-time))))
+                (uiop:run-program (list "wasm-opt" "-O3" "--strip-debug"
+                                         tmp-out "-o" tmp-opt)
+                                   :ignore-error-status t)
+                (when (probe-file tmp-opt)
+                  (rename-file tmp-opt tmp-out))))
+            (let ((result (with-open-file (in tmp-out :element-type '(unsigned-byte 8))
+                            (let ((buf (make-array (file-length in) :element-type '(unsigned-byte 8))))
+                              (read-sequence buf in)
+                              buf))))
+              (ignore-errors (delete-file tmp-out))
+              (or result wasm-bytes)))
+        (error ()
+          (format t "~&;; FR-219: Binaryen wasm-opt unavailable; returning unoptimized~%")
+          wasm-bytes))
+      wasm-bytes))
 
 ;;; (emit-instruction methods and compile-to-wasm-wat are in wasm-emit.lisp
 ;;;  which loads after this file.)

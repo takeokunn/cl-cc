@@ -239,3 +239,11 @@
     ;; ── WASM backend ──
    #:compile-to-wasm-wat
    #:compile-to-wasm-binary))
+
+;; Declare sanitizer variables as special before x86-64-codegen-emitters.lisp
+;; is compiled. Without this, SBCL compiles the let bindings in
+;; compile-to-x86-64-bytes as lexical (not dynamic), so sanitizer-enabled-p
+;; never sees the enabled values.
+(in-package :cl-cc/codegen)
+(declaim (special *asan-instrumentation-enabled*
+                  *ubsan-instrumentation-enabled*))

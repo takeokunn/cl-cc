@@ -17,10 +17,6 @@
 ;; FR-818: Zero-Copy I/O / sendfile
 (defun sendfile (dst src count) (declare (ignore dst src count)) 0)
 
-;; FR-819: Memory-Mapped Files / mmap
-(defstruct mapped-region (addr 0) (size 0))
-(defun mmap-file (path) (declare (ignore path)) (make-mapped-region))
-
 ;; FR-820: UNIX Signal Handling
 (defun handle-signal (sig handler) (declare (ignore sig handler)) t)
 
@@ -40,6 +36,6 @@
 (defvar *optimize-for-instruction-count* nil)
 
 (export '(*feature-flags* when-feature generate-lockfile audit-dependencies
-          generate-from-schema sendfile mapped-region mmap-file
+          generate-from-schema sendfile
           handle-signal shm-open detect-fusion-pairs swar-and
           emit-cmov *optimize-for-instruction-count*))

@@ -181,9 +181,17 @@ match or the br_table helper declines the dispatch."
                           (emit-trampoline-instruction (car rest) label-pc-map reg-map
                                                        num-blocks stream)))))
       (unless (= i (1- num-blocks))
-        ;; FR-143: Tail-call dispatch — when tail-calls enabled, use return_call_indirect
-        (if *wasm-tail-call-enabled*
-            (format stream "~%      ;; FR-143: tail-call dispatch via return_call_indirect")
+        ;; FR-143: Tail-call dispatch — when tail-calls enabled
+        ;; each basic block ends with return_call_indirect instead of br $dispatch
+        (if (and *wasm-tail-call-enabled*
+                 ;; Tail-call requires the function table to be populated
+                 ;; with entry indices for each label. The PC value holds
+                 ;; the table index for the next block.
+                 *wasm-label-to-table-idx*)
+            (format stream 
+                    "~%      ;; FR-143: tail-call to next block via return_call_indirect"
+                    "~%      (return_call_indirect (type $main_func_t) (table $funcref_table) (local.get ~D))"
+                    (wasm-reg-map-pc-index reg-map))
             (format stream "~%          (br $dispatch)"))))
 
     ;; Close loop and outer block

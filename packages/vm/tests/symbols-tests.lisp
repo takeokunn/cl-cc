@@ -227,9 +227,11 @@
 ;;; ─── FR-896: Package Lock / Sealed ──────────────────────────────────────────
 
 (defun %str-delete-package-if-exists (designator)
-  "Delete DESIGNATOR's package when it exists."
+  "Delete DESIGNATOR's package when it exists, unlocking first if necessary."
   (let ((pkg (find-package designator)))
-    (when pkg (delete-package pkg))))
+    (when pkg
+      (cl-cc/vm::unlock-package pkg)
+      (delete-package pkg))))
 
 (deftest sym-lock-package
   "lock-package prevents intern/lock-package-locked-p reflects state."

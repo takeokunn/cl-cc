@@ -6,11 +6,14 @@
 ;; ── FR-856 Promises ─────────────────────────────────────────────────────
 
 (defstruct (promise (:constructor %make-promise (thunk forced-p value))
-                    (:conc-name promise-))
+                    (:conc-name promise-)
+                    (:predicate promise-p))
   "Lazy value: stores a thunk and caches its result after the first FORCE."
   thunk
   forced-p
   value)
+
+(defun promisep (x) (promise-p x))
 
 (defun force (promise)
   "Force PROMISE, calling its thunk exactly once and caching the result."

@@ -253,9 +253,9 @@
   (pc-index nil)
   (tmp-index nil)
   ;; FR-142: Known type tracking — maps register -> type keyword
-  ;; (:closure, :cons, :i31ref, :string, :symbol, :instance-N, etc.)
-  ;; Used by ref.cast elimination and fixnum unbox optimization
-  (known-types nil))
+  (known-types nil)
+  ;; FR-204: Try/catch nesting stack — list of :try markers
+  (try-stack nil))
 
 (defun make-wasm-reg-map-for-function (param-count)
   "Create a register map. Params occupy locals 0..param-count-1.
@@ -265,7 +265,8 @@
    :next-index (+ param-count 2)  ; skip $pc and $tmp
    :pc-index param-count
    :tmp-index (1+ param-count)
-   :known-types (make-hash-table)))
+   :known-types (make-hash-table)
+   :try-stack nil))
 
 (defun wasm-reg-to-local (reg-map reg)
   "Return the WASM local index for VM register REG.

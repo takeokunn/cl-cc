@@ -238,7 +238,7 @@
 (defun %host-address (host family)
   #+sbcl
   (cond
-    ((vectorp host) host)
+    ((and (vectorp host) (not (stringp host))) host)
     ((member family '(:ipv6 :inet6 6))
      (sb-bsd-sockets:make-inet6-address (string host)))
     (t

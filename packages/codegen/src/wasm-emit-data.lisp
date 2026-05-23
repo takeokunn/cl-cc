@@ -146,9 +146,7 @@ FR-226, FR-286.")
   "Feature gate for Wasm GC ref.eq identity comparison.
 FR-285.")
 
-(defparameter *wasm-typed-select-enabled* t
-  "Feature gate for Wasm typed select (reference types).
-FR-279.")
+;; FR-279: *wasm-typed-select-enabled* now defined centrally in wasm-features.lisp
 
 (defparameter *wasm-func-bind-enabled* nil
   "Feature gate for Wasm func.bind (partial application).

@@ -24,10 +24,10 @@
   (assert-equal 'x (cl-cc/expand::%expand-quasiquote '(cl-cc:unquote x))))
 
 (deftest expand-quasiquote-list-wraps-in-list
-  "Plain list elements are wrapped in (list ...) and appended."
+  "Plain list elements are wrapped in (list ...) -- adjacent list chunks merge."
   (let ((result (cl-cc/expand::%expand-quasiquote '(a b))))
-    ;; Result should be (append (list ...) (list ...))
-    (assert-eq 'append (car result))))
+    ;; Adjacent (list ...) parts are merged into a single (list ...) form
+    (assert-eq 'list (car result))))
 
 (deftest expand-quasiquote-unquote-in-list
   "Unquote inside list is spliced as a (list val) part."

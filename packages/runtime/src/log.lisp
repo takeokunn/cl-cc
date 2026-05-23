@@ -72,11 +72,11 @@
       (format *rt-log-out* "[~D] ~A~%" level msg)
       (force-output *rt-log-out*))))
 
-(defun log-trace (message &rest attrs) (when (<= +log-level-trace+ *log-level*) (rt-log +log-level-trace+ message :attrs attrs)))
-(defun log-debug (message &rest attrs) (when (<= +log-level-debug+ *log-level*) (rt-log +log-level-debug+ message :attrs attrs)))
-(defun log-info  (message &rest attrs) (when (<= +log-level-info+  *log-level*) (rt-log +log-level-info+  message :attrs attrs)))
-(defun log-warn  (message &rest attrs) (when (<= +log-level-warn+  *log-level*) (rt-log +log-level-warn+  message :attrs attrs)))
-(defun log-error (message &rest attrs) (when (<= +log-level-error+ *log-level*) (rt-log +log-level-error+ message :attrs attrs)))
+(defun log-trace (message &rest attrs) (when (<= *log-level* +log-level-trace+) (rt-log +log-level-trace+ message :attrs attrs)))
+(defun log-debug (message &rest attrs) (when (<= *log-level* +log-level-debug+) (rt-log +log-level-debug+ message :attrs attrs)))
+(defun log-info  (message &rest attrs) (when (<= *log-level* +log-level-info+)  (rt-log +log-level-info+  message :attrs attrs)))
+(defun log-warn  (message &rest attrs) (when (<= *log-level* +log-level-warn+)  (rt-log +log-level-warn+  message :attrs attrs)))
+(defun log-error (message &rest attrs) (when (<= *log-level* +log-level-error+) (rt-log +log-level-error+ message :attrs attrs)))
 
 ;;; Legacy wrappers
 (defun rt-log-info  (m &key a) (rt-log +log-level-info+  m :attrs a))

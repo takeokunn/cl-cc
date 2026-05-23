@@ -314,28 +314,28 @@
 
 (deftest runtime-subsystem-scheduler-spawned-tasks-execute-in-order
   "FR-257: Spawned tasks execute in deterministic scheduler priority order."
-  (cl-cc/runtime:rt-scheduler-init)
-  (let ((events '()))
-    (cl-cc/runtime:rt-spawn (lambda () (push :low events)) :priority :low)
-    (cl-cc/runtime:rt-spawn (lambda () (push :normal events)) :priority :normal)
-    (cl-cc/runtime:rt-spawn (lambda () (push :high events)) :priority :high)
-    (cl-cc/runtime:rt-scheduler-run)
-    (assert-true (equal '(:low :normal :high) events))))
+  (let ((cl-cc/runtime::*rt-global-scheduler* (cl-cc/runtime:rt-make-scheduler)))
+    (let ((events '()))
+      (cl-cc/runtime:rt-spawn (lambda () (push :low events)) :priority :low)
+      (cl-cc/runtime:rt-spawn (lambda () (push :normal events)) :priority :normal)
+      (cl-cc/runtime:rt-spawn (lambda () (push :high events)) :priority :high)
+      (cl-cc/runtime:rt-scheduler-run)
+      (assert-true (equal '(:low :normal :high) events)))))
 
 (deftest runtime-subsystem-scheduler-sleep-task-delays-execution
   "FR-257: Sleep-task records a future wake time for the current task."
-  (cl-cc/runtime:rt-scheduler-init)
-  (let ((scheduled-in-future-p nil))
-    (cl-cc/runtime:rt-spawn
-     (lambda ()
-       (let ((before (get-internal-real-time)))
-          (cl-cc/runtime::rt-sleep-task 0.01)
-         (setf scheduled-in-future-p
-               (> (cl-cc/runtime::rt-green-thread-wake-time
-                   cl-cc/runtime::*rt-current-green-thread*)
-                  before)))))
-    (cl-cc/runtime:rt-scheduler-run :once t)
-    (assert-true scheduled-in-future-p)))
+  (let ((cl-cc/runtime::*rt-global-scheduler* (cl-cc/runtime:rt-make-scheduler)))
+    (let ((scheduled-in-future-p nil))
+      (cl-cc/runtime:rt-spawn
+       (lambda ()
+         (let ((before (get-internal-real-time)))
+           (cl-cc/runtime::rt-sleep-task 0.01)
+           (setf scheduled-in-future-p
+                 (> (cl-cc/runtime::rt-green-thread-wake-time
+                     cl-cc/runtime::*rt-current-green-thread*)
+                    before)))))
+      (cl-cc/runtime:rt-scheduler-run :once t)
+      (assert-true scheduled-in-future-p))))
 
 (deftest runtime-subsystem-channel-buffered-preserves-order
   "FR-282: Buffered channels receive values in send order."
@@ -415,10 +415,10 @@
 
 (deftest runtime-subsystem-fr-741-async-await-runs-through-scheduler
   "FR-741: Async tasks resolve futures and await drains scheduler work."
-  (cl-cc/runtime:rt-scheduler-init)
-  (let ((future (cl-cc/runtime:rt-async (+ 20 22))))
-    (assert-= 42 (cl-cc/runtime:rt-await future :timeout 0.1))
-    (assert-true (cl-cc/runtime:rt-future-done-p future))))
+  (let ((cl-cc/runtime::*rt-global-scheduler* (cl-cc/runtime:rt-make-scheduler)))
+    (let ((future (cl-cc/runtime:rt-async (+ 20 22))))
+      (assert-= 42 (cl-cc/runtime:rt-await future :timeout 0.1))
+      (assert-true (cl-cc/runtime:rt-future-done-p future)))))
 
 (deftest runtime-subsystem-fr-742-work-stealing-runs-local-and-stolen-tasks
   "FR-742: Work-stealing workers execute own deque work and can steal from peers."
@@ -570,11 +570,11 @@
 
 (deftest runtime-subsystem-scheduler-spawn-basic
   "FR-257: Basic spawn and run."
-  (cl-cc/runtime:rt-scheduler-init)
-  (let ((result nil))
-    (cl-cc/runtime:rt-spawn (lambda () (setf result 42)))
-    (cl-cc/runtime:rt-scheduler-run)
-    (assert-true (eql 42 result))))
+  (let ((cl-cc/runtime::*rt-global-scheduler* (cl-cc/runtime:rt-make-scheduler)))
+    (let ((result nil))
+      (cl-cc/runtime:rt-spawn (lambda () (setf result 42)))
+      (cl-cc/runtime:rt-scheduler-run)
+      (assert-true (eql 42 result)))))
 
 (deftest runtime-subsystem-future-basic
   "FR-283: Basic future resolve/await."

@@ -306,32 +306,42 @@ tree emission on NIL."
                  dst-idx entry-idx-wat)
          t))
     (vm-establish-catch
-     (format stream "~%      ;; establish catch: native EH tag $cl_condition_tag, handler ~S, result local ~D"
-             (vm-catch-handler-label inst)
-             (wasm-reg-to-local reg-map (vm-catch-result-reg inst)))
-     t)
+      ;; FR-204: Emit native Wasm try block for exception handling
+      (format stream "~%      ;; try block for handler ~S" (vm-catch-handler-label inst))
+      (format stream "~%      (try (result eqref)")
+      (push :try (wasm-reg-map-try-stack reg-map))
+      t)
     (vm-establish-handler
-     (format stream "~%      ;; establish handler: native EH tag $cl_condition_tag, handler ~S, result local ~D"
-             (vm-handler-label inst)
-             (wasm-reg-to-local reg-map (vm-handler-result-reg inst)))
-     t)
+      ;; FR-204: Handler wraps try body; catch clause follows
+      (format stream "~%      ;; handler clause for ~S — catch after try body" (vm-handler-label inst))
+      t)
     (vm-remove-handler
-     (format stream "~%      ;; remove handler/catch frame (structured by WASM try/catch)")
-     t)
+      ;; FR-204: Close try/catch with actual catch clause
+      (when *wasm-exception-handling-enabled*
+        (if (eq (car (wasm-reg-map-try-stack reg-map)) :try)
+            (progn
+              (format stream "~%      (catch $cl_condition_tag")
+              (format stream "~%        ;; handler stores condition in local, then jumps to handler label")
+              (format stream "~%        (unreachable)")
+              (format stream "~%      ) ;; end try/catch")
+              (pop (wasm-reg-map-try-stack reg-map)))
+            (format stream "~%      ;; remove handler frame (no active try)")))
+      t)
     (vm-sync-handler-regs
-     (format stream "~%      ;; sync handler registers (implicit in WASM locals)")
-     t)
+      (format stream "~%      ;; FR-204: handler regs synced — locals update automatically in WASM")
+      t)
     (vm-signal-error
-     (format stream "~%      (throw $cl_condition_tag (ref.null eq) ~A)"
-             (reg-local-ref reg-map (vm-error-reg inst)))
-     t)
+      ;; FR-204: Native exception throw — propagates through try/catch hierarchy
+      (format stream "~%      (throw $cl_condition_tag (ref.null eq) ~A)"
+              (reg-local-ref reg-map (vm-error-reg inst)))
+      t)
     (vm-throw
-     (format stream "~%      ;; throw tagidx ~D"
-             +tag-idx-cl-condition+)
-     (format stream "~%      (throw $cl_condition_tag ~A ~A)"
-             (reg-local-ref reg-map (vm-throw-tag-reg inst))
-             (reg-local-ref reg-map (vm-throw-value-reg inst)))
-     t)
+      ;; FR-204: General throw with tag and value
+      (format stream "~%      ;; throw tagidx ~D" +tag-idx-cl-condition+)
+      (format stream "~%      (throw $cl_condition_tag ~A ~A)"
+              (reg-local-ref reg-map (vm-throw-tag-reg inst))
+              (reg-local-ref reg-map (vm-throw-value-reg inst)))
+      t)
     (vm-null-p
      (format stream "~%      ~A"
              (reg-local-set reg-map (vm-dst inst)

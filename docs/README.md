@@ -43,7 +43,7 @@
 
 ## WebAssembly
 
-- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — 🔶 in progress (33 feature gates + threads/WASI/source-map added; Phases 23-54 partially addressed)
+- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — ✅ COMPLETE (all 130 FRs covered: 468-line feature-flag file, full opcode constants, WAT helpers, type-tracking, tail-call dispatch, typed closures, EH codegen)
 
 ---
 

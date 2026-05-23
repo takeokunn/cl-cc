@@ -168,11 +168,12 @@ the implementation portable while preserving the CAS-style try/fail API shape."
          (scheduler (make-rt-work-stealing-scheduler
                      :min-workers min-count
                      :max-workers max-count)))
-    (dotimes (i (or workers min-count) scheduler)
+    (dotimes (i (or workers min-count))
       (push (%rt-make-worker scheduler i)
             (rt-work-stealing-scheduler-workers scheduler)))
     (setf (rt-work-stealing-scheduler-workers scheduler)
-          (nreverse (rt-work-stealing-scheduler-workers scheduler)))))
+          (nreverse (rt-work-stealing-scheduler-workers scheduler)))
+    scheduler))
 
 (defun rt-work-stealing-init (&key workers min-workers max-workers)
   (setf *rt-work-stealing-scheduler*

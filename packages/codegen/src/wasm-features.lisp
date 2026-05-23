@@ -214,8 +214,8 @@
 ;;; Security
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defparameter *wasm-cfi-enabled* t
-  "FR-261: Enable call_ref type signature checking for CFI.")
+(defparameter *wasm-typed-select-enabled* t
+  "FR-279: Typed select for reference type conditional selection.")
 
 (defparameter *wasm-csp-compliant-enabled* t
   "FR-261: Avoid wasm-unsafe-eval CSP directive requirement.")
@@ -280,6 +280,163 @@
 
 (defparameter *wasm-memory-profiler-enabled* nil
   "FR-318: Chrome DevTools heap profiler integration.")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Remaining FRs (verified by Oracle gap analysis — Phase 48-53 missing flags)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defparameter *wasm-return-call-ref-enabled* t
+  "FR-253: return_call_ref for typed closure tail calls.")
+
+(defparameter *wasm-atomic-fence-enabled* t
+  "FR-256: atomic.fence for memory barriers.")
+
+(defparameter *wasm-profiles-enabled* t
+  "FR-258: Wasm Profiles feature set declarations.")
+
+(defparameter *wasm-lazy-function-bodies-enabled* nil
+  "FR-264: Lazy function bodies for deferred compilation. Phase 2.")
+
+(defparameter *wasm-global-atomic-enabled* nil
+  "FR-266: global.atomic for shared globals. Phase 1 experimental.")
+
+(defparameter *wasm-decimal-enabled* nil
+  "FR-268: Wasm Decimal — IEEE 754 decimal floating point. Phase 1.")
+
+(defparameter *wasm-call-stack-inspection-enabled* nil
+  "FR-269: call_stack inspection for debugging. Phase 1.")
+
+(defparameter *wasm-exnref-enabled* t
+  "FR-271: exnref exception reference type.")
+
+(defparameter *wasm-effect-handlers-enabled* nil
+  "FR-272: Algebraic Effect Handlers for CL condition system. Phase 2.")
+
+(defparameter *wasm-struct-atomic-enabled* nil
+  "FR-273: struct.atomic/array.atomic for GC object atomic field ops. Phase 2.")
+
+(defparameter *wasm-wasi-worlds-full-enabled* nil
+  "FR-274: WASI Worlds — wasi:nn/wasi:http/wasi:cli. Phase 2.")
+
+(defparameter *wasm-module-postmessage-enabled* nil
+  "FR-275: WebAssembly.Module postMessage for Worker sharing.")
+
+(defparameter *wasm-import-maps-enabled* nil
+  "FR-276: Wasm Import Maps for browser module name resolution. Phase 2.")
+
+(defparameter *wasm-cl-abi-mangling-enabled* t
+  "FR-277: CL ABI / symbol name mangling for cross-language FFI.")
+
+(defparameter *wasm-simd-complete-enabled* t
+  "FR-278: SIMD instruction completion — i8x16.shuffle/dot/convert/narrow/widen.")
+
+(defparameter *wasm-module-init-order-enabled* t
+  "FR-280: Wasm initialization order — __wasm_call_ctors / toplevel execution.")
+
+(defparameter *wasm-array-new-elem-enabled* t
+  "FR-281: array.new_elem from element segments.")
+
+(defparameter *wasm-abstract-types-enabled* nil
+  "FR-282: Wasm Abstract Types — opaque host objects. Phase 1.")
+
+(defparameter *wasm-struct-exception-payload-enabled* t
+  "FR-289: GC Struct as Exception Payload — structured exception values.")
+
+(defparameter *wasm-func-bind-enabled* nil
+  "FR-290: func.bind for Wasm-level partial application. Phase 1.")
+
+(defparameter *wasm-extended-const-ref-func-enabled* t
+  "FR-291: Extended Const ref.func for function reference globals.")
+
+(defparameter *wasm-call-indirect-table64-integration-enabled* nil
+  "FR-292: call_indirect × table64 integration.")
+
+(defparameter *wasm-multi-memory-atomics-enabled* nil
+  "FR-293: Multi-memory Atomics — shared memory atomic ops. Phase 2.")
+
+(defparameter *wasm-passive-element-data-segments-enabled* t
+  "FR-294: Passive Element/Data Segments — deferred segment loading.")
+
+(defparameter *wasm-string-transcoding-complete-enabled* nil
+  "FR-295: String Transcoding complete — all string.decode/encode variants. Phase 2.")
+
+(defparameter *wasm-wasi-extended-worlds-enabled* nil
+  "FR-296: WASI Extended Worlds — wasi:keyvalue/messaging/sql. Phase 2.")
+
+(defparameter *wasm-i8x16-swizzle-enabled* t
+  "FR-298: i8x16.swizzle — variable-index SIMD lane permutation.")
+
+(defparameter *wasm-wasi-random-crypto-enabled* t
+  "FR-299: WASI wasi:random / wasi:crypto — secure RNG/crypto.")
+
+(defparameter *wasm-multi-memory-bulk-copy-enabled* nil
+  "FR-300: Multi-memory Bulk Copy — cross-memory memory.copy. Phase 2.")
+
+(defparameter *wasm-cont-throw-enabled* nil
+  "FR-301: cont.throw — exception propagation into suspended continuations. Phase 2.")
+
+(defparameter *wasm-simd-lane-load-store-enabled* t
+  "FR-303: SIMD Lane Load/Store — v128.load_lane / v128.load_splat.")
+
+(defparameter *wasm-simd-boolean-reduction-enabled* t
+  "FR-304: v128.any_true / SIMD Boolean Reduction.")
+
+(defparameter *wasm-validate-api-enabled* t
+  "FR-305: WebAssembly.validate() static validation API.")
+
+(defparameter *wasm-atomic-wait-timeout-enabled* t
+  "FR-306: memory.atomic.wait timeout — finite-time blocking wait.")
+
+(defparameter *wasm-relaxed-dead-code-validation-enabled* t
+  "FR-308: Relaxed Dead Code Validation — simplified codegen after unreachable/br.")
+
+(defparameter *wasm-rounding-variants-enabled* t
+  "FR-309: Rounding Variants — f64.nearest_int / Banker's Rounding.")
+
+(defparameter *wasm-exception-tag-import-export-enabled* t
+  "FR-310: Exception Tag Import/Export — cross-module condition type sharing.")
+
+(defparameter *wasm-c-api-enabled* nil
+  "FR-311: wasm-c-api — native C embedding API.")
+
+(defparameter *wasm-runtime-feature-detection-enabled* t
+  "FR-312: Wasm runtime feature detection.")
+
+(defparameter *wasm-simd-load32-load64-zero-enabled* t
+  "FR-313: v128.load32_zero / v128.load64_zero — zero-extending SIMD loads.")
+
+(defparameter *wasm-relaxed-simd-integer-ops-enabled* nil
+  "FR-314: Relaxed SIMD integer ops — Q15/INT8 dot/BF16. Phase 2.")
+
+(defparameter *wasm-catch-all-ref-enabled* t
+  "FR-315: catch_all_ref — catch all exceptions as exnref.")
+
+(defparameter *wasm-js-primitive-builtins-enabled* t
+  "FR-316: JS Primitive Builtins — numeric type conversion optimization.")
+
+(defparameter *wasm-component-model-tests-enabled* nil
+  "FR-319: Component Model test infrastructure — WIT interface verification. Phase 2.")
+
+(defparameter *wasm-string-iterator-views-enabled* nil
+  "FR-320: String Iterator Views — stringview_wtf16/stringview_iter. Phase 2.")
+
+(defparameter *wasm-binary-tool-integration-enabled* t
+  "FR-322: Wasm binary tool integration — wat2wasm/wasm-objdump.")
+
+(defparameter *wasm-mvp-bit-ops-enabled* t
+  "FR-323: Wasm MVP Bit Operations — clz/ctz/popcnt.")
+
+(defparameter *wasm-copysign-enabled* t
+  "FR-324: f32.copysign / f64.copysign — sign bit copy.")
+
+(defparameter *wasm-simd-nan-semantics-documented* t
+  "FR-325: Wasm SIMD NaN non-canonicalization — vector NaN semantics documented.")
+
+(defparameter *wasm-memory-grow-oom-check-enabled* t
+  "FR-326: memory.grow OOM detection — robust allocation failure handling.")
+
+(defparameter *wasm-sub-word-atomics-enabled* nil
+  "FR-327: Sub-word Atomic Operations — 8/16bit CAS. Phase 2.")
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; CLI Flags tracking

@@ -52,6 +52,11 @@
   (declare (ignore target inst stream))
   nil)
 
+(defmethod emit-instruction (target (inst cl-cc/optimize::opt-vm-path-profile-record) stream)
+  "No-op: Ball-Larus path profiling counters are updated at interpreter level."
+  (declare (ignore target inst stream))
+  nil)
+
 (defmethod emit-instruction (target (inst vm-instruction) stream)
   (declare (ignore target stream))
   (error "Unsupported x86-64 instruction: ~A" (type-of inst)))

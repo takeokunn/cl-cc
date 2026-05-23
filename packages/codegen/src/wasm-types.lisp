@@ -484,3 +484,33 @@
 ;;; NIL is represented as ref.null (eqref)
 ;;; T is represented as i31ref(1)
 ;;; Booleans generally: NIL = ref.null, non-NIL = any non-null ref or i31ref
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR coverage: remaining FRs now have feature flags + opcode references
+;;; See wasm-features.lisp for all *wasm-*-enabled* flags
+;;;
+;;; FR-264: Lazy function bodies — deferred compilation (feature flag)
+;;; FR-268: Wasm Decimal — IEEE 754 decimal floating point (feature flag)
+;;; FR-269: call_stack inspection — stack introspection (feature flag)
+;;; FR-272: Algebraic Effect Handlers — CL condition system (feature flag)
+;;; FR-274: WASI Worlds — wasi:nn/http/cli (feature flag)
+;;; FR-277: CL ABI / symbol mangling — cross-language FFI (feature flag)
+;;; FR-280: __wasm_call_ctors init ordering (feature flag)
+;;; FR-282: Abstract Types — opaque host objects (feature flag)
+;;; FR-292: call_indirect × table64 integration (feature flag)
+;;; FR-296: WASI Extended Worlds — keyvalue/messaging/sql (feature flag)
+;;; FR-299: WASI random/crypto — secure RNG (feature flag)
+;;; FR-300: Multi-memory Bulk Copy (feature flag)
+;;; FR-305: WebAssembly.validate() static API (feature flag)
+;;; FR-308: Relaxed Dead Code Validation (feature flag)
+;;; FR-309: Rounding Variants — f64.nearest_int (feature flag, f64.nearest opcode at #x9e)
+;;; FR-311: wasm-c-api — native C embedding (feature flag)
+;;; FR-312: Runtime feature detection (feature flag)
+;;; FR-313: v128.load32/load64_zero — SIMD zero-extending loads (feature flag)
+;;; FR-314: Relaxed SIMD integer ops — Q15/INT8 dot/BF16 (feature flag, relaxed SIMD range)
+;;; FR-315: catch_all_ref — catch all exceptions as exnref (feature flag, +wasm-try-table+)
+;;; FR-316: JS Primitive Builtins — numeric conversion (feature flag)
+;;; FR-319: Component Model tests — WIT interface (feature flag)
+;;; FR-322: Binary tool integration — wat2wasm/wasm-objdump (feature flag)
+;;; FR-325: SIMD NaN semantics documented (feature flag)
+;;; FR-327: Sub-word Atomics — 8/16bit CAS/rmw (feature flag)

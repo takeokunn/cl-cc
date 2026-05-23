@@ -235,12 +235,8 @@
           finally (return result))))
 
 (defun %cl-cc-vm-eval (state code)
-  "Evaluate CODE through cl-cc/vm when compile hooks are installed."
-  (let ((hook (%cl-cc-find-symbol "CL-CC/VM" "*VM-COMPILE-STRING-HOOK*"))
-        (runner (%cl-cc-find-symbol "CL-CC/VM" "RUN-STRING-WITH-IO")))
-    (if (and hook runner (boundp hook) (symbol-value hook) (fboundp runner))
-        (funcall (symbol-function runner) code)
-        (%cl-cc-host-eval state code))))
+  "Evaluate CODE in STATE using host CL eval in the state's isolated package."
+  (%cl-cc-host-eval state code))
 
 (defun cl-cc-init ()
   "Initialize and return an embeddable cl-cc state object."
