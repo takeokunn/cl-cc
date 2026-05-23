@@ -60,10 +60,13 @@ V8 Hidden Classes / SpiderMonkey Shapes equivalent."
   (let* ((hash (mod (sxhash selector) +imt-size+))
          (entry (aref (inline-method-table-entries imt) hash)))
     (cond ((null entry) nil)
-          ((eq (imt-entry-selector entry) selector) (imt-entry-implementation entry))
-          (t (let ((found (assoc selector (imt-entry-conflict-chain entry)
-                                 :test #'eq :key #'imt-entry-selector)))
-               (when found (imt-entry-implementation found)))))))
+          ((eq (imt-entry-selector entry) selector)
+           (imt-entry-implementation entry))
+          ((imt-entry-conflict-chain entry)
+           (let ((found (find selector (imt-entry-conflict-chain entry)
+                             :test #'eq :key #'imt-entry-selector)))
+             (when found
+               (imt-entry-implementation found)))))))
 
 ;;; ──── FR-742: Object Header Layout Optimization ────
 (defconstant +mark-word-gc-color-bits+ 2
