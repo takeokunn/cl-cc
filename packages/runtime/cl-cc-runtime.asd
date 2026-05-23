@@ -97,4 +97,8 @@
      ;; ── GPU / WASM / Reactive / Async ──
      (:file "gpu")
      (:file "reactive")
+     ;; ── Phase 116-127: Serialization / Crypto / Compression ──
+     (:file "serialize")
+     (:file "crypto")
+     (:file "compress")
      (:file "gc-advanced-129")))
