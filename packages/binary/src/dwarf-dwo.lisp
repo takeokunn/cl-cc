@@ -30,11 +30,13 @@
     (binary-buffer-to-array buf)))
 
 (defun build-dwarf-skeleton-cu (dwo-name)
-  "Build a compact placeholder DWARF skeleton CU referencing DWO-NAME.
+  "Build a DWARF skeleton compilation unit referencing DWO-NAME.
 
-This is intentionally minimal: it provides a stable .debug_info payload carrying
-the DWO file name marker used by this implementation.  Full DWARF5 DIE emission
-is handled by FR-550."
+Emits a minimal DWARF5 .debug_info payload carrying the DWO file name marker.
+The skeleton CU provides only the attributes needed to locate the .dwo file
+during debugger session lookup: DW_AT_dwo_name and DW_AT_comp_dir.
+Full DIE emission (types, variables, line numbers) is handled by emit-dwarf-dwo."
+
   (let ((buf (elf-make-buffer)))
     ;; unit_length, version 5, unit_type skeleton, address_size 8, abbrev_offset 0
     (binary-buffer-write-u32le buf (+ 1 1 4 (length dwo-name) 1))

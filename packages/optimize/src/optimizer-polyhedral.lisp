@@ -2,7 +2,7 @@
 
 (in-package :cl-cc/optimize)
 
-(defvar *polyhedral-enabled* nil
+(defvar *polyhedral-enabled* t
   "When non-NIL, enable explicit polyhedral loop transforms.")
 
 (defparameter *polyhedral-default-tile-size* 32
