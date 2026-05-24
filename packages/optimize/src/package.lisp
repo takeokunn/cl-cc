@@ -248,10 +248,12 @@
        #:ai-gamma
        #:ai-compute-fixed-point
        #:opt-pass-abstract-interpretation
-       #:*translation-validation-enabled*
-       #:tv-symbolic-execute-block
-       #:validate-optimizer-translation
-       #:opt-pass-translation-validation
+        #:*translation-validation-enabled*
+        #:tv-symbolic-execute-block
+        #:translation-validation-error
+        #:validate-translation
+        #:validate-optimizer-translation
+        #:opt-pass-translation-validation
        #:*polyhedral-enabled*
       #:polyhedral-domain #:make-polyhedral-domain #:polyhedral-domain-p
       #:poly-domain-dimensions #:poly-domain-constraints

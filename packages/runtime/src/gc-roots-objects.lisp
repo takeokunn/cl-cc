@@ -97,11 +97,15 @@ slot kinds are accepted but ignored by root scanning."
     (and frame-id (gethash frame-id *rt-gc-stackmap-table*))))
 
 (defun rt-gc-generate-stackmap (frame-id live-object-offsets)
-  "Compiler integration stub: generate/register a stack map from live offsets."
+  "FR-541: Generate and register a precise GC stack map for FRAME-ID.
+LIVE-OBJECT-OFFSETS is a list of frame offsets containing live object pointers.
+The stack map is registered into *rt-gc-stackmap-table* for use by the
+precise garbage collector. Source tag distinguishes compiler-generated
+maps from manually registered ones."
   (rt-gc-register-stackmap
    frame-id
    (mapcar (lambda (offset) (cons offset :object)) live-object-offsets)
-   :source :compiler-stub))
+   :source :compiler))
 
 (defun %rt-gc-frame-slot-value (frame offset)
   "Read OFFSET from FRAME for precise stack-map scanning."

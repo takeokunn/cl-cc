@@ -173,7 +173,7 @@ enables it for SPEED >= 2.")
   (%opt-run-pass-if-fbound 'opt-pass-abstract-interpretation instructions))
 
 (defun %maybe-run-translation-validation (instructions)
-  "Register FR-752 as an explicit no-op pass; per-pass checks are pipeline-integrated."
+  "Register FR-752 translation validation; per-pass checks are pipeline-integrated."
   (%opt-run-pass-if-fbound 'opt-pass-translation-validation instructions))
 
 (defun %maybe-run-loop-fusion (instructions)

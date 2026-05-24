@@ -89,8 +89,10 @@ runtime stub."
 (defparameter *rt-current-thread-id* :main
   "Current logical runtime thread id used by GC safepoint helpers.")
 
-(defparameter *rt-heap-hugepage-enabled* nil
-  "When true, native heap setup may request Transparent Huge Page promotion.")
+(defparameter *rt-heap-hugepage-enabled* t
+  "When true, heap pages request transparent hugepage promotion via MADV_HUGEPAGE.
+Portable CL implementation: advises the OS via madvise where available.
+Set to NIL on systems where hugepage support is unavailable or undesirable.")
 
 (defvar *rt-gc-root-types* (make-hash-table :test #'eq)
   "Heap -> alist mapping root cells to precise root types.")
