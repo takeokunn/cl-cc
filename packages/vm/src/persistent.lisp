@@ -35,8 +35,8 @@
             do (setf (gethash k table) v))
       (%make-persistent-map table (hash-table-count table) test))))
 
-(defun assoc (&rest args)
-  "Persistent-map assoc when called as (ASSOC MAP KEY VALUE); otherwise CL:ASSOC."
+(defun pmap-assoc (&rest args)
+  "Persistent-map assoc: (PMAP-ASSOC MAP KEY VALUE) returns new map with association."
   (if (and (first args) (persistent-map-p (first args)) (>= (length args) 3))
       (destructuring-bind (m k v &rest ignored) args
         (declare (ignore ignored))
