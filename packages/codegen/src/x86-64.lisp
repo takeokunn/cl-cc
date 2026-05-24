@@ -43,14 +43,54 @@
   nil)
 
 (defmethod emit-instruction (target (inst vm-deopt) stream)
-  "No-op: deopt checkpoints are VM metadata until native deopt stubs are linked."
-  (declare (ignore target inst stream))
-  nil)
+  "FR-522: Emit deoptimization checkpoint code.
+Saves register state to memory for interpreter fallback. The runtime deopt
+trampoline reads the saved state from the deopt frame and reconstructs the
+interpreter context at the corresponding bytecode PC."
+  (let* ((deopt-id (vm-deopt-id inst))
+         (reason (vm-deopt-reason inst))
+         (label (format nil ".Ldeopt~D" deopt-id)))
+    ;; Emit a unique label for the deopt point
+    (format stream "~A:~%" label)
+    ;; Save volatile registers to deopt frame slots
+    (format stream "  push rax~%")
+    (format stream "  push rcx~%")
+    (format stream "  push rdx~%")
+    (format stream "  push rsi~%")
+    (format stream "  push rdi~%")
+    (format stream "  push r8~%")
+    (format stream "  push r9~%")
+    (format stream "  push r10~%")
+    (format stream "  push r11~%")
+    ;; Store deopt ID for the runtime trampoline
+    (format stream "  mov edi, ~D~%" deopt-id)
+    ;; Call the runtime deoptimization trampoline
+    (format stream "  call _cl_cc_deopt_trampoline~%")
+    ;; Emit reason as comment for debugging
+    (format stream "  # deopt reason: ~A~%" reason)
+    ;; The trampoline never returns; emit ud2 as safety
+    (format stream "  ud2~%")))
 
 (defmethod emit-instruction (target (inst vm-osr-entry) stream)
-  "No-op: OSR markers are VM metadata until native OSR stubs are linked."
-  (declare (ignore target inst stream))
-  nil)
+  "FR-521: Emit On-Stack Replacement entry point.
+Marks a code location where the interpreter can jump into compiled code.
+The runtime OSR trampoline reads the interpreter frame, reconstructs
+register state, and jumps to this label."
+  (let* ((osr-id (vm-osr-id inst))
+         (osr-label (vm-osr-label inst))
+         (label (or (and (stringp osr-label) osr-label)
+                    (format nil ".Losr~D" osr-id))))
+    ;; Emit OSR entry label — aligned for jump target
+    (format stream "  .align 16~%")
+    (format stream "~A:~%" label)
+    ;; Prologue: set up frame pointer and allocate spill slots
+    (format stream "  push rbp~%")
+    (format stream "  mov rbp, rsp~%")
+    (format stream "  sub rsp, 64~%")  ; reserve 64 bytes for OSR spill area
+    ;; OSR marker for debugging
+    (format stream "  # OSR entry id=~D label=~A~%" osr-id label)
+    ;; Fall through to compiled code body
+    (values)))
 
 (defmethod emit-instruction (target (inst cl-cc/optimize::opt-vm-path-profile-record) stream)
   "No-op: Ball-Larus path profiling counters are updated at interpreter level."
