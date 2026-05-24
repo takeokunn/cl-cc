@@ -57,10 +57,12 @@ Returns the function object for the best matching feature set."
   (let ((versions (gethash func-name *cpu-dispatched-functions*)))
     (when versions
       ;; Sort by feature set size (more features = better)
-      (let ((sorted (sort versions #'> :key (lambda (v) (length (car v))))))
-        (dolist ((features . fn) sorted)
-          (when (every (lambda (f) (member f *cpu-features*)) features)
-            (return-from resolve-cpu-version fn))))
+      (let ((sorted (sort (copy-list versions) #'> :key (lambda (v) (length (car v))))))
+        (dolist (entry sorted)
+          (let ((features (car entry))
+                (fn (cdr entry)))
+            (when (every (lambda (f) (member f *cpu-features*)) features)
+              (return-from resolve-cpu-version fn)))))
       ;; No version matches: fall back to last (baseline)
       (cdr (first (last versions))))))
 
@@ -70,7 +72,7 @@ Returns the function object for the best matching feature set."
 Usage: (define-dispatched matmul
   ((:avx2 :fma) (defun matmul-avx2 ...) ...)
   (:baseline (defun matmul-base ...)))"
-  (declare (ignore name versions))
+  (declare (ignore name))
   ;; Expanded at macro time: creates versions + resolver function
   `(progn ,@(loop for (features def) in versions collect def)))
 
