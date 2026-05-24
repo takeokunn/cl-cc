@@ -62,7 +62,18 @@ compile-toplevel-forms."
     (funcall thunk)))
 
 (defun %tier1-recompile-closure (closure target-tier)
-  "Upgrade CLOSURE's owning instruction stream to Tier-1 optimized bytecode."
+  "Upgrade CLOSURE's owning instruction stream to Tier-1 optimized bytecode.
+Also handles OSR entry compilation: when CLOSURE is a plist (:osr ...),
+return normalized OSR entry metadata without recompiling."
+  ;; ── OSR path: plist dispatch ──
+  (when (and (consp closure) (eq (car closure) :osr))
+    (return-from %tier1-recompile-closure
+      (let* ((plist closure)
+             (id (getf plist :id))
+             (label (getf plist :label))
+             (pc (getf plist :pc)))
+        (list :pc pc :label label :id id :kind :bytecode-osr))))
+  ;; ── Tier upgrade path: closure recompilation ──
   (when (and (>= target-tier 1)
              (cl-cc/vm:vm-closure-program-flat closure))
     (let* ((instructions (coerce (cl-cc/vm:vm-closure-program-flat closure) 'list))
