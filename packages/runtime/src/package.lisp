@@ -508,10 +508,16 @@
    ;; ── CRDTs (crdt.lisp) ────────────────────────────────────────────
    #:rt-make-gcounter #:rt-gcounter-increment #:rt-gcounter-value
    #:rt-make-pncounter #:rt-make-lwwregister
-    ;; ── Parallel algorithms (parallel-algo.lisp) ─────────────────────
-    #:rt-parallel-algo-init
-    ;; ── GPU compute (gpu.lisp) ────────────────────────────────────────
-    #:rt-gpu-buffer #:rt-gpu-kernel
+     ;; ── Parallel algorithms (parallel-algo.lisp) ─────────────────────
+     #:rt-parallel-algo-init
+     ;; ── CPU / NUMA topology (topology.lisp) ───────────────────────────
+     #:detect-cpu-cores #:detect-numa-topology
+     #:get-cpu-affinity-mask #:set-cpu-affinity-mask
+     #:memory-tier-info
+     #:rt-cpu-count #:rt-cpu-topology
+     #:rt-thread-set-affinity #:rt-thread-get-affinity
+     ;; ── GPU compute (gpu.lisp) ────────────────────────────────────────
+     #:rt-gpu-buffer #:rt-gpu-kernel
     #:rt-gpu-buffer-alloc #:rt-gpu-buffer-copy #:rt-gpu-buffer-free
     #:rt-gpu-kernel-compile #:rt-gpu-launch-kernel #:rt-gpu-launch-async
     ;; ── Reactive Streams (reactive.lisp) ──────────────────────────────
