@@ -262,7 +262,6 @@ CPU bitmask compatible with this runtime API."
           nil)))
   #-(and sbcl linux)
   (progn
-    (declare (ignore cpus))
     (warn "CPU affinity changes are not supported on this host; returning NIL.")
     nil))
 
