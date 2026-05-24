@@ -19,7 +19,7 @@
 ## Native Backend
 
 - [native-codegen.md](native-codegen.md) — Code Generation: regalloc, instruction scheduling, SIMD, MIR, WASM binary, lazy compilation, FFI marshaling (83 FR) — ✅ COMPLETE (82 / 83 FR; ⬜ FR-227 SLP Vectorizer only)
-- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 133+ / 🔶 14 (~91% addressed, ~81% implemented)
+- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 133 complete / 🔶 14 deferred (JIT infrastructure, OSR bridge, Quicklisp integration — see spec for details)
 
 ## Runtime
 
