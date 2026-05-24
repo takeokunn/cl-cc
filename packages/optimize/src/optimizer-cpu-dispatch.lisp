@@ -11,24 +11,30 @@
 (defun detect-cpu-features ()
   "Detect CPU features via CPUID instruction.
 Returns a list of feature strings."
+  ;; CPUID-based feature detection requires SBCL internals.
+  ;; On non-SBCL (or if sb-vm::%cpuid unavailable), fall back to a conservative set.
   #+sbcl
-  (let ((features nil))
-    ;; CPUID leaf 1: ECX bit 28 = AVX, EDX bit 26 = SSE2, etc.
-    (multiple-value-bind (eax ebx ecx edx)
-        (sb-c:%cpuid 1 0)
-      (declare (ignore eax ebx))
-      (when (logtest ecx (ash 1 28)) (push :avx features))
-      (when (logtest ecx (ash 1 19)) (push :sse4.1 features))
-      (when (logtest ecx (ash 1 20)) (push :sse4.2 features))
-      (when (logtest edx (ash 1 26)) (push :sse2 features))
-      (when (logtest edx (ash 1 25)) (push :sse features)))
-    ;; CPUID leaf 7: EBX bit 5 = AVX2, bit 16 = AVX512F
-    (multiple-value-bind (eax ebx ecx edx)
-        (sb-c:%cpuid 7 0)
-      (declare (ignore eax ecx edx))
-      (when (logtest ebx (ash 1 5)) (push :avx2 features))
-      (when (logtest ebx (ash 1 16)) (push :avx512f features)))
-    (nreverse features))
+  (let ((features nil)
+        (cpuid-fn (find-symbol "%CPUID" "SB-VM")))
+    (if cpuid-fn
+        (progn
+          ;; CPUID leaf 1: ECX bit 28 = AVX, EDX bit 26 = SSE2, etc.
+          (multiple-value-bind (eax ebx ecx edx)
+              (funcall cpuid-fn 1 0)
+            (declare (ignore eax ebx))
+            (when (logtest ecx (ash 1 28)) (push :avx features))
+            (when (logtest ecx (ash 1 19)) (push :sse4.1 features))
+            (when (logtest ecx (ash 1 20)) (push :sse4.2 features))
+            (when (logtest edx (ash 1 26)) (push :sse2 features))
+            (when (logtest edx (ash 1 25)) (push :sse features)))
+          ;; CPUID leaf 7: EBX bit 5 = AVX2, bit 16 = AVX512F
+          (multiple-value-bind (eax ebx ecx edx)
+              (funcall cpuid-fn 7 0)
+            (declare (ignore eax ecx edx))
+            (when (logtest ebx (ash 1 5)) (push :avx2 features))
+            (when (logtest ebx (ash 1 16)) (push :avx512f features)))
+          (nreverse features))
+        '(:sse2)))
   #-sbcl
   '(:sse2))
 

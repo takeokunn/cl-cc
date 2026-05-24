@@ -9,7 +9,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php :cl-cc-tools)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -454,12 +454,26 @@
       (:file "macho-tests")
       (:file "macho-builder-tests")))
      (:module "binary-tests"
-      :pathname "packages/binary/tests"
+       :pathname "packages/binary/tests"
+       :serial t
+       :components
+        ((:file "binary-buffer-tests")
+         (:file "macho-fat-tests")
+         (:file "binary-fr-tests")
+         (:file "binary-wxorx-tests")
+         (:file "binary-constpool-tests")))
+     (:module "pipeline-tests"
+      :pathname "packages/pipeline/tests"
       :serial t
       :components
-       ((:file "binary-buffer-tests")
-        (:file "macho-fat-tests")
-        (:file "binary-fr-tests")))
+      ((:file "perfmap-tests")
+       (:file "pipeline-incremental-hot-parallel-tests")))
+     (:module "tools-tests"
+      :pathname "packages/tools/tests"
+      :serial t
+      :components
+      ((:file "lsp-server-tests")
+       (:file "dap-server-tests")))
     (:module "runtime-tests"
      :pathname "packages/runtime/tests"
      :serial t
