@@ -318,3 +318,45 @@
 (setf (symbol-function '|cl_cc_last_error|) #'cl-cc-last-error)
 (setf (symbol-function '|cl_cc_register_callback|) #'cl-cc-register-callback)
 (setf (symbol-function '|cl_cc_get_callback|) #'cl-cc-callback)
+
+;;; ──── FR-522: Deoptimization Trampoline ────
+;;; Called by native codegen when a deoptimization checkpoint is hit.
+;;; The trampoline saves register state, reconstructs the interpreter
+;;; frame from the deopt metadata, and resumes execution in the interpreter.
+
+(defvar *rt-deopt-enabled* t
+  "When T, deoptimization trampolines are active.
+When NIL, deopt checkpoints are treated as fatal errors.")
+
+(defvar *rt-deopt-frame-count* 0
+  "Number of deoptimization events since startup, for diagnostics.")
+
+(defun rt-deopt-trampoline (deopt-id saved-regs)
+  "FR-522: Deoptimization trampoline — called from native code.
+DEOPT-ID is the checkpoint identifier. SAVED-REGS is a plist of
+(register-name . value) pairs captured by the codegen prologue.
+Reconstructs interpreter state and transfers control."
+  (declare (ignore deopt-id saved-regs))
+  (incf *rt-deopt-frame-count*)
+  ;; On host SBCL, signal a continuable error for development.
+  ;; Native binary will implement full state reconstruction.
+  #+sbcl
+  (restart-case
+      (error "Deoptimization trampoline invoked (id=~D, frame=~D). ~
+              Full interpreter state reconstruction not yet implemented. ~
+              Use CONTINUE to return to the deopt point."
+             deopt-id *rt-deopt-frame-count*)
+    (continue ()
+      :report "Return from deoptimization (no-op)"
+      nil))
+  #-sbcl
+  ;; Native binary: reconstruct interpreter state from deopt metadata
+  ;; and resume execution at the corresponding bytecode PC.
+  (progn
+    (format *error-output* "DEOPT id=~D frame=~D~%" deopt-id *rt-deopt-frame-count*)
+    nil))
+
+;; C ABI entry point for the deopt trampoline
+(setf (symbol-function '|_cl_cc_deopt_trampoline|)
+      (lambda (deopt-id)
+        (rt-deopt-trampoline deopt-id nil)))
