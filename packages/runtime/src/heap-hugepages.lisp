@@ -11,7 +11,7 @@
 (defconstant +rt-vm-flags-superpage-size-2mb+ #x200000
   "Darwin VM_FLAGS_SUPERPAGE_SIZE_2MB marker used as metadata in the portable backend.")
 
-(defparameter *use-huge-pages* nil
+(defparameter *use-huge-pages* t
   "When true, runtime code/heap mmap helpers try huge pages before falling back.
 
 Huge pages are opt-in and best-effort: allocation must keep working when the
