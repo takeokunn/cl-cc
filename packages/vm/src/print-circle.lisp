@@ -117,6 +117,6 @@
   object)
 
 ;; NOTE: vm-write-object-to-string is already defined in io.lisp (line 149)
-;; with circle support. Do NOT redefine it here.
-
-(defun %print-with-circle (object &key stream (escape t))
+;; with circle support. print-circle.lisp provides the low-level helpers
+;; (%collect-shared-objects, %write-circle-object, etc.) used by io.lisp.
+;; Do NOT redefine vm-write-object-to-string here.
