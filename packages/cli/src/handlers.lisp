@@ -334,6 +334,31 @@ around the execution. Returns the value produced by RUN-COMPILED."
         (pushnew (uiop:pathname-directory-pathname (pathname path))
                  asdf:*central-registry* :test #'equal)))))
 
+;; ──── FR-763: Quicklisp integration ────
+(defun %quickload-system-if-available (name)
+  "Try to load NAME through Quicklisp when Quicklisp is present.
+Returns true when Quicklisp successfully loaded the system."
+  (let* ((ql-package (find-package :ql))
+         (quickload (and ql-package (find-symbol "QUICKLOAD" ql-package))))
+    (when quickload
+      (handler-case
+          (progn
+            (funcall quickload name :silent t)
+            t)
+        (error () nil)))))
+
+(defun %find-system-or-quickload (name)
+  "Find ASDF system NAME, trying registered paths first and Quicklisp second."
+  (%ensure-registered-systems-visible)
+  (or (asdf:find-system name nil)
+      (and (%quickload-system-if-available name)
+           (asdf:find-system name nil))))
+
+(defun %ensure-asdf-system (name)
+  "Return ASDF system NAME or signal a CLI-friendly missing-system error."
+  (or (%find-system-or-quickload name)
+      (error "ASDF system not found: ~A. Install it with Quicklisp or register a local .asd file with `cl-cc install <system.asd>`." name)))
+
 (defun %toposort-systems (names)
   (let ((seen (make-hash-table :test #'equal))
         (visiting (make-hash-table :test #'equal))
@@ -580,16 +605,28 @@ export async function instantiate(imports = {}) {~%
           out))))
 
 (defun %do-install (parsed)
-  "Handle `cl-cc install' for local ASDF system files."
-  (let ((file (%required-file-arg parsed "install")))
+  "Handle `cl-cc install' for local ASDF system files and Quicklisp packages.
+Accepts either a path to a .asd file or a system name for Quicklisp installation."
+  (let ((spec (%positional-arg parsed "install")))
     (%with-cli-error-handler
-      (let* ((entry (%register-asd file))
-             (order (%toposort-systems (list (getf entry :name)))))
-        (dolist (system order) (ignore-errors (asdf:load-system system)))
-        (format t "Installed ~A from ~A~%" (getf entry :name) (getf entry :path))
-        (when (getf entry :depends-on)
-          (format t "Dependencies: ~{~A~^, ~}~%" (getf entry :depends-on)))
-        (uiop:quit 0)))))
+      (cond
+        ;; Path to .asd file: register locally
+        ((uiop:file-exists-p spec)
+         (let* ((entry (%register-asd spec))
+                (order (%toposort-systems (list (getf entry :name)))))
+           (dolist (system order) (ignore-errors (asdf:load-system system)))
+           (format t "Installed ~A from ~A~%" (getf entry :name) (getf entry :path))
+           (when (getf entry :depends-on)
+             (format t "Dependencies: ~{~A~^, ~}~%" (getf entry :depends-on)))))
+        ;; System name: try Quicklisp
+        (t
+         (if (%quickload-system-if-available spec)
+             (format t "Installed ~A via Quicklisp~%" spec)
+             (error "Cannot install ~A: not a file path and Quicklisp not available.~
+                     ~%  Use `cl-cc install path/to/system.asd` for local systems.~
+                     ~%  Ensure Quicklisp is loaded with (ql:quickload ...) for remote packages."
+                    spec))))
+      (uiop:quit 0))))
 
 (defun %do-uninstall (parsed)
   "Handle `cl-cc uninstall' for local ASDF system registry entries."
@@ -690,27 +727,43 @@ exits with status 0 on success."
 (defun %do-compile (parsed)
   "Handle the `cl-cc compile' subcommand using PARSED arguments.
 
-Reads the source file, applies target architecture and compile options, either
-dumps the requested IR phase or writes a native binary, prints the output path,
-and exits with status 0 on success."
+For --system: compiles an ASDF system by name without requiring a source file.
+For files: compiles a single source file to native binary or IR dump."
   (let* ((system-name (flag parsed "--system"))
-         (file (or system-name (%required-file-arg parsed "compile")))
          (arch-str (or (flag parsed "--target")
                        (flag parsed "--arch")
                        (if (flag parsed "--aot") "wasm32" "x86-64")))
          (arch (%arch-keyword arch-str))
          (output (flag-or parsed "--output" "-o"))
-         (lang-flag (or (flag parsed "--lang") ""))
-         (language (let ((l (%detect-language file lang-flag)))
-                     (if (string= lang-flag "") nil l)))
          (dump-ir (flag parsed "--dump-ir"))
          (debug (flag parsed "--debug"))
          (annotate (flag parsed "--annotate-source"))
          (verbose (flag parsed "--verbose"))
-          (compress (and (flag parsed "--compress")
-                         (not (flag parsed "--no-compress"))))
-          (timeout (%get-timeout parsed))
+         (compress (and (flag parsed "--compress")
+                        (not (flag parsed "--no-compress"))))
+         (timeout (%get-timeout parsed))
          (opts (%parse-compile-opts parsed)))
+    (when verbose
+      (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
+              (or system-name "file") arch-str (or output "(auto)")))
+    ;; ── System compilation path ──
+    (when system-name
+      (%with-cli-error-handler
+        (%call-with-cli-timeout timeout
+          (lambda ()
+            (let ((result (%compile-system-to-native system-name output arch compress
+                                                     (list :bolt-profile (flag parsed "--bolt-profile"))
+                                                     :bolt (flag parsed "--bolt")
+                                                     :bolt-profile (flag parsed "--bolt-profile"))))
+              (format t "~A~%" result)
+              (uiop:quit 0))))
+        "system-compile"))
+      (return-from %do-compile))
+    ;; ── File compilation path ──
+    (let* ((file (%required-file-arg parsed "compile"))
+           (lang-flag (or (flag parsed "--lang") ""))
+           (language (let ((l (%detect-language file lang-flag)))
+                       (if (string= lang-flag "") nil l))))
     (when verbose
       (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
               file arch-str (or output "(auto)")))

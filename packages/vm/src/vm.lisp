@@ -601,14 +601,14 @@ Options:
   (resolved-p nil)
   (value nil))
 
-(defparameter *deopt-enabled* t
+(defparameter *deopt-enabled* nil
   "When true, optimistic guards capture FR-522 deoptimization maps and frames.
 When NIL, guards still take their safe interpreter fallback edge without storing
-deoptimization history. Tests should dynamically bind this for deterministic behavior.")
+deoptimization history. Tests should dynamically bind this to T for deopt coverage.")
 
-(defparameter *osr-enabled* t
+(defparameter *osr-enabled* nil
   "When true, loop-header OSR entries may transfer hot interpreter loops to Tier-1 code.
-Tests should dynamically bind this for deterministic behavior.")
+Tests should dynamically bind this to T for OSR coverage.")
 
 (defvar *vm-current-program-deopt-info* nil
   "Dynamically bound PC -> deoptimization metadata for the currently running program.")
