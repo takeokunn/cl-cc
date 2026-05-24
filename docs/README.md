@@ -26,7 +26,7 @@
 - [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — ✅ COMPLETE (52 / 52 FR)
 - [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
 - [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — ✅ COMPLETE (75 / 75 FR)
-- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: string builder, structured logging, LSP/DAP, continuations, hygienic macros, C embedding (71 FR) — ✅ COMPLETE (71 / 71 FR; Phases 138-175)
+- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: string builder, structured logging, LSP/DAP, continuations, hygienic macros, C embedding (71 FR) — ✅ COMPLETE (71 / 71 FR; Phases 138-175; 6 deferred stubs: FR-800/801 call/cc, FR-808/809 CLI/script, FR-828 stack canary, FR-873 CoW arrays, FR-905 TCO, FR-914 prompts)
 - [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures, numeric stability (73 FR) — 🔶 in progress
 
 ## Memory & GC
