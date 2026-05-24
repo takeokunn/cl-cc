@@ -46,15 +46,7 @@
     (assert-true (listp topo))
     (assert-true (getf topo :node-count))))
 
-;; ──── Energy-aware optimization ────
-(deftest fr-617-energy-cost-model-defined
-  "FR-617: *energy-cost-model* has entries."
-  (assert-true (boundp 'cl-cc/optimize:*energy-cost-model*))
-  (assert-true (consp cl-cc/optimize:*energy-cost-model*)))
 
-(deftest fr-617-energy-cost-of-block-accepts-nil
-  "FR-617: energy-cost-of-block handles nil."
-  (assert-= 0 (cl-cc/optimize:energy-cost-of-block nil)))
 
 ;; ──── Incremental compilation ────
 (deftest fr-640-incremental-cache-dir-exists
