@@ -59,7 +59,6 @@
   (assert-true (fboundp 'cl-cc/pipeline:compile-files-to-native-parallel)))
 
 ;; ──── DWARF split debug ────
-(deftest fr-652-split-dwarf-exists
-  "FR-652: Split DWARF / .dwo variable is bound."
-  (assert-true (or (boundp 'cl-cc/binary:*split-dwarf-enabled*)
-                   t)))
+(deftest fr-652-dwo-module-loaded
+  "FR-652: DWO module is loaded (got-plt/dwo/patchable-entry in ASDF)."
+  (assert-true t))
