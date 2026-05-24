@@ -54,6 +54,11 @@
     #:pipeline-record-incremental-state
     #:write-perf-map-entry
     #:write-perf-map-for-native-code
+    #:perf-map-line-valid-p
+    #:perf-map-path
+    #:*perf-map-stream*
+    #:*perf-map-output-dir*
+    #:*perf-map-base-address*
     #:*lto-enabled*
     #:lto-serialize-module
     #:lto-deserialize-module
