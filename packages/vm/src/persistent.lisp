@@ -55,7 +55,7 @@
     (%make-persistent-map table (hash-table-count table)
                           (persistent-map-test m))))
 
-(defun get (m k &optional default)
+(defun pmap-get (m k &optional default)
   "Persistent-map lookup when M is a persistent map; otherwise CL:GET."
   (if (persistent-map-p m)
       (multiple-value-bind (value found-p) (gethash k (persistent-map-table m))
