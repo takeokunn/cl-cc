@@ -24,13 +24,11 @@
 
 (deftest cli-arch-keyword-invalid-exits-2
   (let ((stderr (make-string-output-stream)))
-    (with-fake-quit
-      (handler-case
-          (let ((*error-output* stderr))
-            (cl-cc/cli::%arch-keyword "mips")
-            (assert-false t))
-        (fake-quit (q)
-          (assert-= 2 (fake-quit-code q)))))
+    (let ((code (with-fake-quit
+                  (let ((*error-output* stderr))
+                    (cl-cc/cli::%arch-keyword "mips")
+                    (assert-false t)))))
+      (assert-= 2 code))
     (assert-true (search "Unknown architecture" (get-output-stream-string stderr)))))
 
 (deftest-each cli-compile-target-keyword-parses-supported-architectures
@@ -63,24 +61,20 @@
 
 (deftest cli-parse-opt-remarks-mode-invalid-exits-2
   (let ((stderr (make-string-output-stream)))
-    (with-fake-quit
-      (handler-case
-          (let ((*error-output* stderr))
-            (cl-cc/cli::%parse-opt-remarks-mode "bogus")
-            (assert-false t))
-        (fake-quit (q)
-          (assert-= 2 (fake-quit-code q)))))
+    (let ((code (with-fake-quit
+                  (let ((*error-output* stderr))
+                    (cl-cc/cli::%parse-opt-remarks-mode "bogus")
+                    (assert-false t)))))
+      (assert-= 2 code))
     (assert-true (search "Unknown opt-remarks mode" (get-output-stream-string stderr)))))
 
 (deftest cli-parse-opt-remarks-mode-invalid-shows-did-you-mean
   (let ((stderr (make-string-output-stream)))
-    (with-fake-quit
-      (handler-case
-          (let ((*error-output* stderr))
-            (cl-cc/cli::%parse-opt-remarks-mode "chagned")
-            (assert-false t))
-        (fake-quit (q)
-          (assert-= 2 (fake-quit-code q)))))
+    (let ((code (with-fake-quit
+                  (let ((*error-output* stderr))
+                    (cl-cc/cli::%parse-opt-remarks-mode "chagned")
+                    (assert-false t)))))
+      (assert-= 2 code))
     (let ((out (get-output-stream-string stderr)))
       (assert-true (search "did you mean" out))
       (assert-true (search "changed" out)))))
