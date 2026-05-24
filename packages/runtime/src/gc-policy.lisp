@@ -122,7 +122,7 @@ active policy."
                :shrink-threshold (rt-heap-shrink-threshold heap)))
         (:balanced
          (setf *gc-throughput-target* 0.05d0
-               (rt-heap-pressure-threshold-high heap) 80.0d0
+                (rt-heap-pressure-threshold-high heap) (* 100.0d0 *gc-major-threshold*)
                (rt-heap-pressure-threshold-low heap) 20.0d0
                (rt-heap-shrink-threshold heap) 0.25d0
                (rt-heap-compaction-trigger-fraction heap) 0.50d0)

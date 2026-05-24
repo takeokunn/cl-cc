@@ -58,7 +58,7 @@
   (name nil :read-only t)
   (value nil))
 
-(defvar *unresolved-forward-refs* nil
+(defvar *vm-unresolved-forward-refs* nil
   "Alist of (NAME . VM-FORWARD-REFERENCE-CELL) entries still unresolved.")
 
 (defvar *vm-forward-reference-auto-resolve-enabled* t
@@ -85,7 +85,7 @@
       (t
        (let ((cell (make-vm-forward-reference-cell :name name)))
          (setf (gethash name registry) cell)
-         (pushnew (cons name cell) *unresolved-forward-refs* :key #'car :test #'eq)
+         (pushnew (cons name cell) *vm-unresolved-forward-refs* :key #'car :test #'eq)
          cell)))))
 
 (defun vm-resolve-forward-references (&optional (state *vm-current-state*))
@@ -94,7 +94,7 @@
   (let ((resolved nil)
         (unresolved nil)
         (remaining nil))
-    (dolist (entry *unresolved-forward-refs*)
+    (dolist (entry *vm-unresolved-forward-refs*)
       (let ((name (car entry))
             (cell (cdr entry)))
         (if (and (vm-forward-reference-cell-p cell)
@@ -104,7 +104,7 @@
               (push name unresolved)
               (push entry remaining)
               (warn "Unresolved forward reference: ~S" name)))))
-    (setf *unresolved-forward-refs* (nreverse remaining))
+    (setf *vm-unresolved-forward-refs* (nreverse remaining))
     (values (nreverse resolved) (nreverse unresolved))))
 
 (defun declare-forward-reference (name)

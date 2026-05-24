@@ -297,8 +297,8 @@
       (if (vm-forward-reference-cell-p existing)
           (progn
             (setf (vm-forward-reference-cell-ref existing) closure)
-            (setf *unresolved-forward-refs*
-                  (remove name *unresolved-forward-refs* :key #'car :test #'eq)))
+            (setf *vm-unresolved-forward-refs*
+                  (remove name *vm-unresolved-forward-refs* :key #'car :test #'eq)))
           (setf (gethash name (vm-function-registry state)) closure)))
     (values (1+ pc) nil nil)))
 
