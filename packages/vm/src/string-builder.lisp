@@ -62,8 +62,8 @@ Returns SB.  Existing contents are preserved."
          (new-length (+ old-length (length string))))
     (string-builder-ensure-capacity! sb new-length)
     (let ((buffer (sb-buffer sb)))
-      (replace buffer string :start1 old-length :end1 new-length)
-      (setf (fill-pointer buffer) new-length)))
+      (setf (fill-pointer buffer) new-length)
+      (replace buffer string :start1 old-length :end1 new-length))
   sb)
 
 (defun string-builder-clear! (sb)

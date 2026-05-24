@@ -32,8 +32,9 @@
    (:file "macros-setops")       ; list/set operations split from stdlib
    (:file "macros-list-utils")   ; ordering and list utility helpers
    (:file "macros-restarts")     ; restart/condition protocol split from stdlib
-   (:file "macros-introspection") ; equalp and introspection helpers
-   (:file "macros-stdlib")       ; stdlib: numeric/control macros (1+, ecase, rotatef...)
+    (:file "macros-introspection") ; equalp and introspection helpers
+    (:file "macros-iterator")      ; FR-839 iterator protocol
+    (:file "macros-stdlib")       ; stdlib: numeric/control macros (1+, ecase, rotatef...)
    (:file "macros-stdlib-ansi")  ; ANSI CL Phase 1 (psetf, assert, define-condition...)
    (:file "macros-stdlib-utils") ; list/tree/string/array utility macros
    (:file "macros-cxr")          ; algorithmic CXR accessor registration

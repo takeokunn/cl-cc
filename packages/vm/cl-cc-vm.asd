@@ -90,6 +90,7 @@
      (:file "phases-151-153")
      (:file "phases-154-156")
      (:file "phases-157-160")
+     (:file "persistent")
      (:file "runtime-stdlib-2-completion")))
 
 ;;;; ---------------------------------------------------------------------

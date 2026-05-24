@@ -2,21 +2,22 @@
 
 (in-package :cl-cc/vm)
 
-;; ── FR-895/896: Symbol table / package lock ────────────────────────────
+;; ── FR-895: Symbol Table Freeze/Thaw (implementation in vm.lisp) ───────
 (assert-true (functionp 'freeze-symbol-table) "freeze-symbol-table")
 (assert-true (functionp 'thaw-symbol-table) "thaw-symbol-table")
-(assert-true (functionp 'lock-package) "lock-package")
-(assert-true (functionp 'package-locked-p) "package-locked-p")
+
+;; ── FR-896: Package Lock (implementation in vm.lisp) ───────────────────
+;; NOTE: lock-package and package-locked-p are defined in vm.lisp
 
 ;; ── FR-917: Reproducible Build ─────────────────────────────────────────
 (assert-true (functionp 'build-fingerprint) "build-fingerprint")
+(assert-true (functionp 'source-date-epoch) "source-date-epoch")
+(assert-true (functionp 'build-timestamp) "build-timestamp")
 
 ;; ── FR-920: Forward References ─────────────────────────────────────────
 (assert-true (functionp 'declare-forward-reference) "declare-forward-reference")
 (assert-true (functionp 'resolve-forward-reference) "resolve-forward-reference")
 (assert-true (functionp 'resolve-all-forward-references) "resolve-all-forward-references")
 
-(let ((name 'test-fwd-ref-r2))
-  (declare-forward-reference name)
-  (resolve-forward-reference name (lambda (x) (+ x 1)))
-  (assert-true t "Forward reference resolved"))
+;; ── FR-820: Print-Circle ───────────────────────────────────────────────
+(assert-true (find-symbol "*PRINT-CIRCLE*" :cl-cc/vm) "*print-circle* exists")

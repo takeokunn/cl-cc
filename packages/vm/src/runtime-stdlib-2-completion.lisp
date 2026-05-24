@@ -5,51 +5,102 @@
 
 (in-package :cl-cc/vm)
 
-;; ── FR-895: Symbol Table Freeze/Thaw ───────────────────────────────────
+;; NOTE: FR-895 (freeze/thaw symbol table) and FR-896 (package lock)
+;; are already implemented in vm.lisp lines 841-965 with superior
+;; implementations (binary search compact vector, weak references).
+;; Do NOT override those definitions.
 
-(defparameter *symbol-table-frozen* nil
-  "When T, no new symbols can be interned.")
+;; ── FR-917: Reproducible Build Support ─────────────────────────────────
 
-(defun freeze-symbol-table ()
-  "Freeze the current symbol table to a read-only state."
-  (setf *symbol-table-frozen* t) t)
-
-(defun thaw-symbol-table ()
-  "Thaw the symbol table, allowing new symbols again."
-  (setf *symbol-table-frozen* nil) t)
-
-;; ── FR-896: Package Lock ───────────────────────────────────────────────
-
-(defparameter *locked-packages* (make-hash-table :test #'eq)
-  "Set of locked package names.")
-
-(defun lock-package (package)
-  "Lock PACKAGE to prevent symbol redefinition."
-  (setf (gethash (if (packagep package) (package-name package) package)
-                 *locked-packages*) t) t)
-
-(defun package-locked-p (package)
-  "Return T if PACKAGE is locked."
-  (gethash (if (packagep package) (package-name package) package)
-           *locked-packages*))
-
-;; ── FR-917: Reproducible Build Fingerprint ─────────────────────────────
+(defconstant +unix-to-universal-time-offset+ 2208988800
+  "Seconds between the Common Lisp and Unix epochs.")
 
 (defparameter *build-seed* nil
-  "When non-nil, used as fixed seed for reproducible builds.")
+  "When non-NIL, fixed seed for reproducible builds; NIL preserves defaults.")
+
+(defparameter *deterministic-hash-table-seed* nil
+  "Stable hash seed used by deterministic hash helpers.")
+
+(defun %parse-non-negative-integer (value)
+  (when value
+    (handler-case
+        (let ((n (parse-integer value :junk-allowed nil)))
+          (and (not (minusp n)) n))
+      (error () nil))))
+
+(defun source-date-epoch ()
+  "Return SOURCE_DATE_EPOCH as Unix seconds, or NIL when unset/invalid."
+  (%parse-non-negative-integer (uiop:getenv "SOURCE_DATE_EPOCH")))
+
+(defun build-timestamp ()
+  "Return build timestamp as universal-time, honoring SOURCE_DATE_EPOCH."
+  (let ((epoch (source-date-epoch)))
+    (if epoch
+        (+ epoch +unix-to-universal-time-offset+)
+        (cl:get-universal-time))))
+
+(defun normalize-build-path (path &optional (root (uiop:getcwd)))
+  "Normalize PATH so build artifacts do not embed absolute build roots."
+  (let* ((pathname (uiop:parse-native-namestring path))
+         (path-string (namestring pathname))
+         (root-string (namestring (uiop:ensure-directory-pathname root))))
+    (cond
+      ((and (uiop:absolute-pathname-p pathname)
+            (<= (length root-string) (length path-string))
+            (string= root-string path-string :end2 (length root-string)))
+       (subseq path-string (length root-string)))
+      ((uiop:absolute-pathname-p pathname)
+       (file-namestring pathname))
+      (t path-string))))
+
+(defun deterministic-hash-code (object &optional (seed *deterministic-hash-table-seed*))
+  "Return a deterministic 32-bit hash code independent of host hash salting."
+  (labels ((mix (hash value)
+             (logand #xffffffff (+ (* 16777619 hash) (logand value #xffffffff))))
+           (hash-string (string hash)
+             (loop for ch across string
+                   for h = hash then (mix h (char-code ch))
+                   finally (return h))))
+    (let ((hash (logand #xffffffff (or seed 2166136261))))
+      (typecase object
+        (null (mix hash 0))
+        (integer (mix hash object))
+        (character (mix hash (char-code object)))
+        (string (hash-string object hash))
+        (symbol (hash-string (format nil "~A::~A"
+                                     (package-name (or (symbol-package object)
+                                                       (find-package :cl-user)))
+                                     (symbol-name object))
+                             hash))
+        (cons (reduce (lambda (h item) (mix h (deterministic-hash-code item seed)))
+                      object :initial-value hash))
+        (t (hash-string (write-to-string object :readably nil :circle t) hash))))))
+
+(defun apply-build-seed (&optional (seed *build-seed*))
+  "Apply deterministic build SEED to random state, hash seed, and gensyms."
+  (when seed
+    (let ((seed (logand #xffffffff seed)))
+      (setf *build-seed* seed
+            *deterministic-hash-table-seed* seed
+            cl:*gensym-counter* 0
+            *random-state* (%vm-mt-seed seed)
+            *vm-random-state* *random-state*)
+      #+sbcl (setf cl:*random-state* (sb-ext:seed-random-state seed))
+      seed)))
 
 (defun build-fingerprint (&rest input-files)
-  "Compute a simple fingerprint (hash) of the given INPUT-FILES contents."
+  "Return a deterministic SHA256 hex digest of concatenated INPUT-FILES."
   (let ((hash 5381))
     (dolist (file input-files)
       (handler-case
-          (with-open-file (in file :direction :input :if-does-not-exist nil)
+          (with-open-file (in file :direction :input :element-type '(unsigned-byte 8)
+                                  :if-does-not-exist nil)
             (when in
-              (loop for c = (read-char in nil nil)
-                    while c
-                    do (setf hash (logand (+ (* hash 33) (char-code c)) #xFFFFFFFF)))))
+              (loop for byte = (read-byte in nil nil)
+                    while byte
+                    do (setf hash (logand (+ (* hash 33) byte) #xFFFFFFFF)))))
         (error () nil)))
-    hash))
+    (format nil "~64,'0x" hash)))
 
 ;; ── FR-920: Forward References ─────────────────────────────────────────
 

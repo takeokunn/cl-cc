@@ -763,17 +763,21 @@ For files: compiles a single source file to native binary or IR dump."
     (let* ((file (%required-file-arg parsed "compile"))
            (lang-flag (or (flag parsed "--lang") ""))
            (language (let ((l (%detect-language file lang-flag)))
-                       (if (string= lang-flag "") nil l))))
+                        (if (string= lang-flag "") nil l))))
     (when verbose
       (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
               file arch-str (or output "(auto)")))
      (%with-cli-error-handler
        (%call-with-cli-timeout timeout
         (lambda ()
-          (flet ((compile-source (source &rest kwargs)
-                   (if (eq (or language :lisp) :lisp)
-                       (apply #'compile-string source :source-file file :language :lisp kwargs)
-                       (apply #'compile-string source :language (or language :lisp) kwargs))))
+           (flet ((compile-source (source &rest kwargs)
+                    (if (eq (or language :lisp) :lisp)
+                        (apply #'compile-string source
+                               :source-file (if (compile-opts-deterministic opts)
+                                                (normalize-build-path file)
+                                                file)
+                               :language :lisp kwargs)
+                        (apply #'compile-string source :language (or language :lisp) kwargs))))
              (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
                      (if (or debug (compile-opts-stack-protector opts))
                          nil

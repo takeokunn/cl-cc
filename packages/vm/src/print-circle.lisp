@@ -116,11 +116,7 @@
     (%write-circle-object object stream state escape))
   object)
 
-(defun vm-write-object-to-string (object &key (escape t) (circle *print-circle*))
-  "Return OBJECT's printed representation, using circle detection only on demand."
-  (if (not circle)
-      (let ((cl:*print-circle* nil)
-            (cl:*print-escape* escape))
-        (write-to-string object))
-      (with-output-to-string (stream)
-        (%print-with-circle object stream :escape escape))))
+;; NOTE: vm-write-object-to-string is already defined in io.lisp (line 149)
+;; with circle support. Do NOT redefine it here.
+
+(defun %print-with-circle (object &key stream (escape t))

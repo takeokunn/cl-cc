@@ -321,11 +321,11 @@ subcommands, then dispatches to the appropriate handler."
                        (car (parsed-args-positional parsed))))
       (uiop:quit 0))
 
-    (when (flag parsed "--dump-image")
-      (%dump-image-and-exit parsed))
-
     (when (flag parsed "--deterministic")
       (configure-reproducible-build))
+
+    (when (flag parsed "--dump-image")
+      (%dump-image-and-exit parsed))
 
     (let ((command (parsed-args-command parsed)))
       (cond
