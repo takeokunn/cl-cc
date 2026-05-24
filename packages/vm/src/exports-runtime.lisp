@@ -39,12 +39,20 @@
     vm-parent-environment-globals
     vm-parent-environment-functions
     vm-parent-environment-symbols
-    vm-instance-parent-env
-    vm-instance-lock
-    with-vm-instance-lock
-    vm-instance-global-value
-    vm-instance-function-value
-    vm-state-registers
+     vm-instance-parent-env
+     vm-instance-lock
+     with-vm-instance-lock
+     vm-instance-global-value
+     vm-instance-function-value
+     vm-forward-reference-cell
+     vm-forward-reference-cell-p
+     make-vm-forward-reference-cell
+     vm-forward-reference-cell-name
+     vm-forward-reference-cell-ref
+     *vm-forward-reference-auto-resolve-enabled*
+     vm-declare-forward-reference
+     vm-resolve-forward-references
+     vm-state-registers
    vm-state-heap
    vm-heap-counter
     vm-call-stack
@@ -373,5 +381,11 @@
      string-builder-finish
      with-string-builder
      ;; Rope (FR-788)
-     rope rope-p make-rope
-     rope-concat rope-split rope-to-string rope-length))
+      rope rope-p make-rope
+      rope-concat rope-split rope-to-string rope-length
+      ;; Persistent/transient collections (FR-748/FR-749/FR-824)
+      persistent-map persistent-map-p persistent-map-count persistent-map-test
+      dissoc pget
+      pvec pvec-count pvec-get pvec->list pvec-assoc pvec-conj
+      transient transient-p transient! conj! persistent!
+      transient-hash transient-hash-p assoc! dissoc!))

@@ -348,6 +348,12 @@ lane/type/op combinations must signal a clear error."
   (src nil :reader vm-src)
   (:sexp-tag :register-function))
 
+(define-vm-instruction vm-declare-forward-reference (vm-instruction)
+  "Declare NAME as a forward-referenced function and allocate its cell."
+  (name nil :reader vm-forward-reference-name)
+  (:sexp-tag :declare-forward-reference)
+  (:sexp-slots name))
+
 (define-vm-instruction vm-set-global (vm-instruction)
   "Store a value in the global variable store."
   (name nil :reader vm-global-name)

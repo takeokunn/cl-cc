@@ -475,11 +475,6 @@
   "FR-848: Reader-writer lock."
   (name "rwlock"))
 
-;;; FR-824: Transient collections
-(defun transient (collection)
-  "FR-824: Return a mutable transient view of COLLECTION."
-  collection)
-
 ;;; FR-914: Delimited continuations
 (defun call-with-continuation-prompt (thunk &optional tag handler)
   "FR-914: Call THUNK with a continuation prompt boundary."

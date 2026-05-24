@@ -137,6 +137,7 @@
                                   (make-ast-quote :value (ast-defun-documentation node))))
         ctx))
     (setf (gethash name (ctx-global-functions ctx)) func-label)
+    (%record-defun-resolves-forward-reference name)
     (note-function-calling-convention
      ctx func-label (function-calling-convention-for-defun name :stored-global-p t))
     (let ((mv-arity (%static-values-arity-from-body body)))

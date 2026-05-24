@@ -55,6 +55,12 @@
   "FR-217 async API stub for CL:AWAIT; preserve FORM until Wasm JS promise lowering is selected."
   form)
 
+(our-defmacro defun-forward (name lambda-list &body body)
+  "Declare NAME as forward-referenced and define it with DEFUN."
+  `(defun ,name ,lambda-list
+     (declare (forward-reference ,name))
+     ,@body))
+
 (our-defmacro async-handler (form &body clauses)
   "FR-217 async API stub for CL:ASYNC-HANDLER; model promise rejection with HANDLER-CASE."
   `(handler-case (await ,form) ,@clauses))

@@ -365,4 +365,6 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
                              (setf pc next-pc)))
                       finally (return nil))))))
       (vm-maybe-dump-type-profile state)
+      (when *vm-forward-reference-auto-resolve-enabled*
+        (vm-resolve-forward-references state))
       (%vm-managed-tree-materialize state result))))

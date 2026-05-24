@@ -41,12 +41,12 @@
     (assert-true (plusp cores))))
 
 (deftest fr-624-topology-numa-info-returns-plist
-  "FR-624: detect-numa-topology returns a plist or NIL on unsupported hosts."
+  "FR-624: detect-numa-topology returns a list of node property lists."
   (let ((topo (cl-cc/runtime:detect-numa-topology)))
-    (when topo
-      (assert-true (listp topo))
-      (assert-true (getf topo :node-count)))
-    (assert-true t)))
+    (assert-true (listp topo))
+    (dolist (node topo)
+      (assert-true (listp node))
+      (assert-true (getf node :node-id)))))
 
 
 

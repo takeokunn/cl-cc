@@ -51,8 +51,8 @@
            #:get-macro-character
             #:set-dispatch-macro-character
             #:get-dispatch-macro-character
-            #:readtable-case
-            #:sequence
+             #:readtable-case
+             #:sequence
             #:elt
             #:length
             #:subseq

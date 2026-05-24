@@ -52,6 +52,7 @@ int cl_cc_register_callback(cl_cc_state_t *state,
                             cl_cc_callback_t callback,
                             void *userdata);
 void *cl_cc_get_callback(cl_cc_state_t *state, const char *name);
+const char *cl_cc_value_to_string(cl_cc_value_t value);
 
 #ifdef __cplusplus
 }

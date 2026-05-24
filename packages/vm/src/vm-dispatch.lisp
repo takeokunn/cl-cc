@@ -76,15 +76,22 @@ Saves and restores call stack around the sub-invocation."
 
 (defun %resolve-direct-function-designator (value)
   "Resolve VALUE through the direct-function-designator table, or return NIL." 
-  (dolist (entry *vm-direct-function-designator-resolvers* nil)
-    (when (funcall (symbol-function (car entry)) value)
-      (return (funcall (symbol-function (cdr entry)) value)))))
+  (if (vm-forward-reference-cell-p value)
+      (or (vm-forward-reference-cell-ref value)
+          (error "Unresolved forward reference: ~S"
+                 (vm-forward-reference-cell-name value)))
+      (dolist (entry *vm-direct-function-designator-resolvers* nil)
+        (when (funcall (symbol-function (car entry)) value)
+          (return (funcall (symbol-function (cdr entry)) value))))))
 
 (defun %resolve-symbol-function-designator (state value)
   "Resolve symbol VALUE through the VM function registry or host bridge." 
   (let* ((registry (ignore-errors (vm-function-registry state)))
          (entry (and registry (gethash value registry))))
     (cond
+      ((vm-forward-reference-cell-p entry)
+       (or (vm-forward-reference-cell-ref entry)
+           (error "Unresolved forward reference: ~S" value)))
       (entry entry)
       ((vm-bridge-callable value)
        (vm-bridge-callable value))

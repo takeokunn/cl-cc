@@ -14,7 +14,9 @@
 
 (defun get-universal-time ()
   "Return the current VM universal time in seconds since 1900-01-01 UTC."
-  (cl:get-universal-time))
+  (if *build-seed*
+      (build-timestamp)
+      (cl:get-universal-time)))
 
 (defun get-internal-real-time ()
   "Return monotonically increasing VM real time in internal-time units."

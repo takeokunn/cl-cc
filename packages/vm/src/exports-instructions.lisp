@@ -208,10 +208,12 @@
    vm-integer-p
    vm-function-p
     vm-apply
-    vm-add-package-local-nickname
-    vm-remove-package-local-nickname
-    vm-register-function
-   vm-function-registry
+     vm-add-package-local-nickname
+     vm-remove-package-local-nickname
+     vm-register-function
+     vm-declare-forward-reference
+     vm-forward-reference-name
+    vm-function-registry
    vm-resolve-function
    vm-register-host-bridge
    *vm-host-bridge-functions*

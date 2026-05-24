@@ -95,6 +95,7 @@ Options:
   --source-map            Emit external .wasm.map and sourceMappingURL
   --debug-info            Emit DWARF custom sections for wasm targets
   --emit-names            Emit extended wasm name metadata
+  --deterministic         Enable reproducible build mode (FR-917)
 
 Version: ~A~%" *version*))
 
@@ -322,6 +323,9 @@ subcommands, then dispatches to the appropriate handler."
 
     (when (flag parsed "--dump-image")
       (%dump-image-and-exit parsed))
+
+    (when (flag parsed "--deterministic")
+      (configure-reproducible-build))
 
     (let ((command (parsed-args-command parsed)))
       (cond

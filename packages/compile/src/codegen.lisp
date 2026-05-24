@@ -49,6 +49,39 @@
 (defvar *forward-reference-patch-table* (make-hash-table :test #'equal)
   "FR-920 table mapping unresolved reference names to pending fixup plists.")
 
+(defvar *forward-declared-functions* nil
+  "Function names declared by `(declare (forward-reference ...))' in this compilation.")
+
+(defvar *unresolved-forward-refs* nil
+  "Compile-time mirror of forward-declared function names awaiting DEFUN.")
+
+(defun %forward-reference-declaration-form-p (form)
+  (and (consp form)
+       (eq (car form) 'declare)
+       (some (lambda (clause)
+               (and (consp clause)
+                    (eq (car clause) 'forward-reference)))
+             (cdr form))))
+
+(defun %forward-reference-names-from-form (form)
+  (loop for clause in (cdr form)
+        when (and (consp clause) (eq (car clause) 'forward-reference))
+          append (remove-if-not #'symbolp (cdr clause))))
+
+(defun %declare-forward-references-in-context (names ctx)
+  "Record NAMES as forward references in CTX and emit runtime cell allocation."
+  (dolist (name names)
+    (pushnew name *forward-declared-functions* :test #'eq)
+    (pushnew (cons name nil) *unresolved-forward-refs* :key #'car :test #'eq)
+    (setf (gethash name (ctx-global-functions ctx)) :forward-reference)
+    (emit ctx (make-vm-declare-forward-reference :name name)))
+  names)
+
+(defun %record-defun-resolves-forward-reference (name)
+  (when (member name *forward-declared-functions* :test #'eq)
+    (setf *unresolved-forward-refs*
+          (remove name *unresolved-forward-refs* :key #'car :test #'eq))))
+
 (defgeneric wasm-fixnum-range-annotation (object &optional context)
   (:documentation
    "FR-145 hook for Wasm fixnum range metadata.
@@ -91,6 +124,12 @@ RESOLVE-FORWARD-REFERENCES once NAME is defined."
   "Resolve all pending forward references using RESOLVER.
 RESOLVER may be a hash table, alist, function, or a single replacement value.
 Signals UNRESOLVED-FORWARD-REFERENCE-ERROR when ERRORP and refs remain."
+  (when (and (null resolver)
+             (zerop (hash-table-count *forward-reference-patch-table*))
+             (boundp 'cl-cc/vm::*vm-current-state*)
+             cl-cc/vm::*vm-current-state*)
+    (return-from resolve-forward-references
+      (cl-cc/vm:vm-resolve-forward-references cl-cc/vm::*vm-current-state*)))
   (let ((unresolved nil)
         (resolved nil))
     (maphash
@@ -447,6 +486,12 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
     ((typep ast 'ast-let) (ast-let-declarations ast))
     (t nil)))
 
+(defun %ast-forward-reference-names (ast)
+  "Return forward-reference declaration names carried by AST."
+  (loop for decl in (%ast-declarations-for-optimize-policy ast)
+        when (and (consp decl) (eq (car decl) 'forward-reference))
+          append (remove-if-not #'symbolp (cdr decl))))
+
 (defun %maybe-bump-opts-speed-from-ast (opts ast)
   "Merge local `(declare (optimize (speed ...)))` into OPTS conservatively.
 
@@ -598,12 +643,20 @@ Returns two values: result register and CPS form used for the AST."
 (defun %process-toplevel-form (form ctx target type-env type-check safety opts compiled-asts)
   "Compile one top-level FORM and return updated compilation state.
 Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
+  (when (%forward-reference-declaration-form-p form)
+    (%declare-forward-references-in-context
+     (%forward-reference-names-from-form form) ctx)
+    (return-from %process-toplevel-form
+      (values nil nil nil type-env compiled-asts)))
   (let* ((ast (%lower-toplevel-form-to-ast form))
           (last-reg nil) (last-type nil) (last-cps nil))
      (setf (ctx-safety ctx) (or (%global-optimize-quality 'safety) safety))
      (%maybe-bump-opts-speed-from-ast opts ast)
     (when (typep ast 'ast-defvar)
       (setf (gethash (ast-defvar-name ast) (ctx-global-variables ctx)) t))
+    (let ((forward-names (%ast-forward-reference-names ast)))
+      (when forward-names
+        (%declare-forward-references-in-context forward-names ctx)))
     (%record-toplevel-defun-for-ct-env ast)
     (push ast compiled-asts)
     (multiple-value-setq (last-type type-env)
@@ -710,9 +763,11 @@ Returns a compilation-result struct with program, assembly, and globals."
     (let ((*compile-time-value-env*    nil)
            (*compile-time-function-env* nil)
             (*pending-exception-table-entries* nil)
-            (*next-exception-table-entry-order* 0)
-            (*forward-reference-patch-table* (make-hash-table :test #'equal))
-            (*load-time-value-cells* nil)
+             (*next-exception-table-entry-order* 0)
+             (*forward-reference-patch-table* (make-hash-table :test #'equal))
+             (*forward-declared-functions* nil)
+             (*unresolved-forward-refs* nil)
+             (*load-time-value-cells* nil)
             (*next-load-time-value-cell-id* 0))
        (loop for form in forms
              for form-index from 0
@@ -821,6 +876,7 @@ unless a caller opts into FR-861 dispatch lowering."
            emit-inline-arith-dispatch
            *forward-reference-patch-table*
            record-forward-reference
-           resolve-forward-references
-           unresolved-forward-reference-error
-           *codegen-inline-arith-dispatch-enabled*))
+            resolve-forward-references
+            unresolved-forward-reference-error
+            *unresolved-forward-refs*
+            *codegen-inline-arith-dispatch-enabled*))

@@ -76,9 +76,10 @@
    make-vm-read-sexp
    make-vm-read-sexp-inst
    make-vm-reader-advance-rp
-   make-vm-reader-peek-rp
-   make-vm-reader-read
-   make-vm-register-function
+    make-vm-reader-peek-rp
+    make-vm-reader-read
+    make-vm-declare-forward-reference
+    make-vm-register-function
    make-vm-register-method
    make-vm-rational
    make-vm-rationalize

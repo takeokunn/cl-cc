@@ -102,8 +102,8 @@
                  ((or whitespace-symbol-p unsupported-p)
                   nil)
                  (t
-                  (setf last-result (run-form-repl form))
-                  (when print
+                   (setf last-result (run-form-repl form))
+                   (when print
                     (format *standard-output* "~S~%" last-result)))))))))))
 
 (eval-when (:load-toplevel :execute)

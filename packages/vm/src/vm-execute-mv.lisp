@@ -293,8 +293,19 @@
       (unless (vm-closure-label-table closure)
         (setf (vm-closure-label-table closure) labels))
       (setf (vm-closure-dispatch-tag closure) (cons :known-function name)))
-    (setf (gethash name (vm-function-registry state)) closure)
+    (let ((existing (gethash name (vm-function-registry state))))
+      (if (vm-forward-reference-cell-p existing)
+          (progn
+            (setf (vm-forward-reference-cell-ref existing) closure)
+            (setf *unresolved-forward-refs*
+                  (remove name *unresolved-forward-refs* :key #'car :test #'eq)))
+          (setf (gethash name (vm-function-registry state)) closure)))
     (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-declare-forward-reference) state pc labels)
+  (declare (ignore labels))
+  (vm-declare-forward-reference state (vm-forward-reference-name inst))
+  (values (1+ pc) nil nil))
 
 (defmethod execute-instruction ((inst vm-set-global) state pc labels)
   (declare (ignore labels))
