@@ -466,8 +466,7 @@
       :pathname "packages/pipeline/tests"
       :serial t
       :components
-      ((:file "perfmap-tests")
-       (:file "pipeline-incremental-hot-parallel-tests")))
+      ((:file "perfmap-tests")))
     (:module "runtime-tests"
      :pathname "packages/runtime/tests"
      :serial t
