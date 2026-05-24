@@ -8,7 +8,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-500: LTO (Link-Time Optimization) — モジュール間最適化基盤
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
   - コンパイル済みモジュールを独立したIR（VMまたはMIR）形式でバイナリに埋め込み
   - リンク段階で全モジュールのIRを統合し、クロスモジュールインライン化・定数伝播・デッドコード除去を実行
@@ -18,7 +18,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-501: ThinLTO — スケーラブルな並列LTO
 
-- **対象**: `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - モジュールごとに軽量サマリ（関数シグネチャ・インライン候補・型情報）を生成
   - リンク時はサマリのみ読み込み、必要な関数のIRのみ選択的にインポート
@@ -28,7 +28,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-502: Interprocedural Constant Propagation (IPCP)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 呼び出しサイトで定数引数が渡される関数を検出し、その引数を定数として特化版を生成
   - 特化版にはIPCPサフィックスを付与し、元関数は汎用版として残す
@@ -139,7 +139,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-520: Tiered Compilation (段階的コンパイル)
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - **Tier 0**: VM インタープリタで即実行（起動時間ゼロ）
   - **Tier 1**: 呼び出し回数カウンタが閾値（例: 100回）を超えたらベースラインJIT（最適化なし、高速コンパイル）
@@ -150,7 +150,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-521: On-Stack Replacement (OSR) — スタック上置換
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - ループ実行中にそのループがホットと判定された場合、現在実行中のインタープリタフレームをJITコンパイル済みフレームに動的置換
   - OSR エントリポイントを各ループヘッダに生成し、インタープリタの仮想レジスタを物理レジスタにマッピング
@@ -160,7 +160,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-522: Deoptimization (脱最適化)
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 型推測に基づく最適化（例: 整数加算を `FIXNUM` と仮定してオーバーフローチェックを省略）が失敗した場合、インタープリタフレームへ安全に復帰
   - 各 deopt ポイントでの仮想レジスタマッピング（deopt マップ）をコンパイル時に生成
@@ -180,7 +180,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-524: Value Profiling (値プロファイリング)
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 実行時に特定命令のオペランド値（整数定数、型タグ）の分布を記録
   - `vm-generic-call` の receiver 型頻度（ICと兼用）、整数値の頻度（IPCP特化のヒント）
@@ -190,7 +190,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-525: AutoFDO / Sample-Based PGO (サンプリングベースPGO)
 
-- **対象**: `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - `perf record` / `dtrace` 等のハードウェアサンプラーで収集したプロファイルを CL ソース行にマッピング
   - 特定のコンパイル時フラグなしに実運用バイナリからPGOデータを収集可能
@@ -204,7 +204,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-530: Control Flow Integrity (CFI) — 制御フロー完全性
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - **Forward-edge CFI**: 間接呼び出し（`call [reg]`）の前に呼び出し先が合法なエントリポイントかを検証
     - x86-64: `ENDBR64` 命令を全関数エントリに挿入 (CET: Control-flow Enforcement Technology)
@@ -217,7 +217,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-531: Pointer Authentication (PAC) — AArch64ポインタ認証
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - ARMv8.3-A PAC命令でリターンアドレスと関数ポインタに署名
   - プロローグ: `PACIASP`（IA鍵でSP混合署名）、エピローグ: `AUTIASP`（検証）
@@ -228,7 +228,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-532: Stack Canary / Stack Protection (スタックカナリア)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - 関数プロローグでカナリア値（`FS:[0x28]` / TLS経由）をスタックフレームに書き込み
   - エピローグでカナリア値を検証し、改ざんがあれば `__stack_chk_fail` を呼び出す
@@ -238,7 +238,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-533: Stack Clash Protection (スタッククラッシュ保護)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - 大きなスタックフレーム確保時（4KB超）に1ページごとにプローブを実行
   - `SUB RSP, large_value` の代わりに複数の `SUB RSP, 4096` + `MOV [RSP], 0` のシーケンスに展開
@@ -248,7 +248,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-534: Speculative Execution Mitigation (投機実行緩和)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - Spectre Variant 1 (bounds check bypass) 緩和: 配列アクセス前に `LFENCE` を挿入
   - SLH (Speculative Load Hardening): 分岐条件を投機状態マスクとして伝播し、投機パスでのロード値をマスク
@@ -262,7 +262,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-540: Safepoint Polling (セーフポイントポーリング)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`, `packages/runtime/src/gc.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`, `packages/runtime/src/gc.lisp`
 - **内容**:
   - GC起動・スレッド停止のためのセーフポイントポーリング命令をJIT出力に挿入
   - ループバックエッジと関数エントリで専用ポーリングページの読み取り（ポーリングページを `mprotect` で書き込み不可にするとSIGSEGVでGCトリガー）
@@ -272,7 +272,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-541: Stack Maps for Precise GC (精密GCのためのスタックマップ)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/runtime/src/gc.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/runtime/src/gc.lisp`
 - **内容**:
   - 各セーフポイントで「どの物理レジスタとスタックスロットがGCルートか」を記述するスタックマップを生成
   - スタックマップをコード末尾または専用セクション（LLVM `__llvm_stackmaps`相当）に埋め込み
@@ -319,7 +319,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-551: Source Map Generation for Wasm (Wasm用ソースマップ生成)
 
-- **対象**: `packages/emit/src/wasm.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`
 - **内容**:
   - Wasm バイナリの各命令オフセット → CL ソースファイル行・列のマッピングを生成
   - `.wasm` + `.map` ファイルペアまたは `name` セクションに埋め込み
@@ -329,7 +329,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-552: Variable Location Tracking (変数位置追跡)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/regalloc/src/regalloc.lisp`
 - **内容**:
   - レジスタ割り当て後の各変数の物理位置（レジスタ番号またはスタックオフセット）の変化を追跡
   - `DW_OP_reg0`〜`DW_OP_reg31` / `DW_OP_breg` / `DW_OP_fbreg` を使った DWARF ロケーション式生成
@@ -339,7 +339,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-553: PerfMap / JIT Map File Output (perf 用マップファイル出力)
 
-- **対象**: `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - `/tmp/perf-<pid>.map` 形式でJITコンパイルされた関数のアドレス範囲とシンボル名を出力
   - `perf report` / `perf annotate` がCL関数名でホットスポットを表示可能に
@@ -349,7 +349,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-554: Sanitizer Instrumentation Integration (サニタイザ計装統合)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - **ASan (AddressSanitizer)**: ヒープ・スタックの境界外アクセス検出のためにメモリアクセスにシャドウチェックを挿入
   - **UBSan (UndefinedBehaviorSanitizer)**: 整数オーバーフロー・型ミスマッチ検出のためにガードを挿入
@@ -364,7 +364,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-560: Table-Based Zero-Cost Exception Handling (テーブルベースゼロコスト例外処理)
 
-- **対象**: `packages/vm/src/conditions.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/binary/src/elf.lisp`
+- **対象**: `packages/vm/src/conditions.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
   - 現状: VM レベルでの `handler-case`/`restart-case` は `CL:HANDLER-CASE` マクロ展開に依存（ホスト CL のスタックアンワインド）
   - ネイティブバックエンド向けに DWARF `.eh_frame` / Mach-O `__unwind_info` セクションを生成
@@ -376,7 +376,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-561: SJLJ vs Table-Based Exception Selection (SJLJ vs テーブルEH選択)
 
-- **対象**: `packages/vm/src/conditions.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/conditions.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 現状: `handler-case` の低コスト実装として `setjmp`/`longjmp` を選択可能
   - `--eh-model=sjlj` (デバッグ・低頻度例外向け) と `--eh-model=table` (ホットパス向け) の選択機構
@@ -387,7 +387,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-562: Landing Pad Generation (ランディングパッド生成)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - 各 `handler-case` / `restart-case` に対してランディングパッドコードを生成
   - `_Unwind_GetException()` でコンディションオブジェクトを取得し、型チェック後に対応ハンドラへ分岐
@@ -401,7 +401,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-570: AVX-512 / AVX-10 Support (x86-64 512-bitベクトル)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/regalloc/src/regalloc.lisp`
 - **内容**:
   - ZMM0-ZMM31 (512-bit) レジスタとマスクレジスタ K0-K7 の管理
   - `EVEX` プレフィックスエンコーディング（4バイト）の実装
@@ -413,7 +413,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-571: Intel AMX (Advanced Matrix Extensions) — 行列演算アクセラレータ
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - AMX タイルレジスタ (TMM0-TMM7, 最大8KB) の管理
   - `TILELOADD` / `TILESTORED` でタイルロード/ストア
@@ -425,7 +425,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-572: ARM SVE / SVE2 (Scalable Vector Extension)
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`, `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`, `packages/regalloc/src/regalloc.lisp`
 - **内容**:
   - Z0-Z31 スケーラブルベクトルレジスタ (128〜2048-bit、実行時に `RDVL` で長さ取得)
   - P0-P15 プレディケートレジスタによるマスク付き命令
@@ -437,7 +437,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-573: RISC-V Vector Extension (RVV 1.0)
 
-- **対象**: `packages/emit/src/riscv64-codegen.lisp` (FR-296と連携)
+- **対象**: `packages/codegen/src/riscv64-codegen.lisp` (FR-296と連携)
 - **内容**:
   - V0-V31 ベクトルレジスタ (最小128-bit, `vlenb` CSR で実行時取得)
   - `VSETVLI` / `VSETIVLI` でベクトル長と要素幅の動的設定
@@ -449,7 +449,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-574: ARM SME (Scalable Matrix Extension) — 行列演算
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - ZA 行列ストレージ (2D タイル、SVE ベクトル幅の2乗) の管理
   - `SMSTART` / `SMSTOP` でストリーミングSVEモード切り替え
@@ -461,7 +461,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-575: x86-64 APX (Advanced Performance Extensions, Intel 2024)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - 汎用レジスタを16本から32本に拡張 (R16-R31): EVEX プレフィックスで符号化
   - NDD (New Data Destination): 2オペランドを3オペランドに拡張し `dst = src1 op src2` を1命令で
@@ -473,7 +473,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-576: RISC-V Zicond (Integer Conditional Operations)
 
-- **対象**: `packages/emit/src/riscv64-codegen.lisp`
+- **対象**: `packages/codegen/src/riscv64-codegen.lisp`
 - **内容**:
   - `CZERO.EQZ rd, rs1, rs2`: rs2==0 なら rd=0, 否なら rd=rs1
   - `CZERO.NEZ rd, rs1, rs2`: rs2!=0 なら rd=0, 否なら rd=rs1
@@ -499,7 +499,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-581: ML-Based Register Allocation (ML駆動レジスタ割り当て)
 
-- **対象**: `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/regalloc/src/regalloc.lisp`
 - **内容**:
   - スピルコスト予測モデル: 変数の使用頻度・ループ深度・ライブ区間長から最悪スピルコストを予測
   - スピル選択を強化学習（RL）で最適化（DeepMind/Google の RegAlloc RL 手法）
@@ -523,7 +523,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-590: WASI Preview 2 / Component Model (WASI p2対応)
 
-- **対象**: `packages/emit/src/wasm.lisp`, `packages/cli/src/main.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - WASI Preview 1 (`fd_read`, `fd_write` 等の syscall) から WASI Preview 2 (Component Model ベースのインターフェース型) へ移行
   - WIT (Wasm Interface Types) 定義から CL 型とのバインディングを自動生成
@@ -534,7 +534,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-591: Wasm Threads & Shared Memory (Wasmスレッド・共有メモリ)
 
-- **対象**: `packages/emit/src/wasm.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`
 - **内容**:
   - `shared` メモリ型 (`(memory 1 1 shared)`) と `atomic` 命令 (`i32.atomic.rmw.add` 等) のエミッション
   - `wait` / `notify` (futex 相当) 命令で CL の `bt:make-thread` 相当を Wasm スレッドにマッピング
@@ -544,7 +544,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-592: Wasm SIMD128 (Wasm固定幅SIMD)
 
-- **対象**: `packages/emit/src/wasm.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`
 - **内容**:
   - `v128` 型と128-bit SIMD 命令 (`i32x4.add`, `f64x2.mul`, `v128.load` 等) のエミッション
   - FR-226（自動ベクトル化）の結果を Wasm SIMD128 に lowering
@@ -554,7 +554,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-593: Wasm Relaxed SIMD (リラックスSIMD)
 
-- **対象**: `packages/emit/src/wasm.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`
 - **内容**:
   - Relaxed SIMD proposal (ratified 2023): `f32x4.relaxed_fma`, `i8x16.relaxed_swizzle` 等
   - ネイティブ `VFMADD` / `VTBL` に直接マッピングされる「ベストエフォート」セマンティクス命令
@@ -564,7 +564,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-594: Wasm Garbage Collection Proposal 完全実装
 
-- **対象**: `packages/emit/src/wasm.lisp`
+- **対象**: `packages/codegen/src/wasm.lisp`
 - **内容**:
   - WasmGC (ratified 2023): `struct.new <typeidx>`, `array.new <typeidx>`, `ref.cast`, `br_on_cast` のフル実装
   - CL CLOS インスタンスを WasmGC `struct` にマッピング（`__class__` フィールドは `externref`）
@@ -625,7 +625,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### ✅ FR-604: If Conversion / CMOV Selection (if変換・条件移動命令選択)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - 分岐予測ミスコストが高い短い条件分岐を条件移動命令に変換
   - `(if cond a b)` → `vm-select(cond, a, b)` MIR命令 → `CMOVNE` (x86-64) / `CSEL` (AArch64)
@@ -658,7 +658,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-607: Identical Code Folding / Function Merging (同一コード折り畳み)
 
-- **対象**: `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - コンパイル済み関数のバイト列を比較し、完全一致する関数を単一エントリにマージ
   - テンプレート展開やコード生成で重複が生まれやすい数値特化関数が主な対象
@@ -725,7 +725,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-614: Bitwidth Reduction / Integer Narrowing (ビット幅削減)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - VRP で値が `[0, 255]` 範囲に収まると証明された変数を `i64` から `i32` または `i8` に縮退
   - x86-64 では 32-bit 演算が 64-bit より若干高速（REX プレフィックス不要）かつ即値エンコーディングが短縮
@@ -795,7 +795,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-625: Arena Allocation for Compiler Phases (コンパイラ内アリーナ割り当て)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
   - コンパイル1関数ごとに専用アリーナを確保し、最適化パス内の一時オブジェクトをアリーナから割り当て
   - 関数コンパイル完了時にアリーナを一括解放（個別 GC 不要）
@@ -810,7 +810,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-630: Thread-Local Storage Code Generation (TLSコード生成)
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/compile/src/codegen.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - CL の `defvar` に `:thread-local t` 相当の宣言を追加し、スレッドローカル変数をサポート
   - **x86-64 Linux**: `FS`セグメントレジスタ経由のTLSアクセス (`MOV RAX, FS:[offset]`)、`R_X86_64_TPOFF32` リロケーション
@@ -822,7 +822,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-631: Atomic Operations / Memory Model (アトミック操作・メモリモデル)
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - CL の `bt:with-lock-held` 等の下層に必要なアトミック命令の生成
   - **x86-64**: `LOCK CMPXCHG`（CAS）、`LOCK XADD`（fetch-add）、`MFENCE`/`SFENCE`/`LFENCE`（メモリバリア）
@@ -833,7 +833,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-632: Parallel Compilation (並列コンパイル)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - ファイル間依存グラフ（`our-load` が構築するロード順）を解析し、依存関係のないファイルを並列コンパイル
   - `lparallel` / `bt:make-thread` を用いた worker スレッドプール（スレッド数 = CPU コア数）
@@ -859,7 +859,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-640: Incremental Compilation (インクリメンタルコンパイル)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - ファイルの内容ハッシュ（SHA-256）と依存ファイルのハッシュを記録し、変更がないファイルのコンパイルをスキップ
   - `.deps` ファイルに各ソースファイルが使うマクロ・型・グローバル変数の依存関係を記録
@@ -870,7 +870,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-641: Hot Reload / Live Patching (ホットリロード)
 
-- **対象**: `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 実行中の CL プロセスに対して `(our-load "file.lisp")` で関数定義を上書き可能（現状は再起動が必要な場合あり）
   - JIT コンパイル済みコードの場合: 新バージョンをコンパイルし、古い `vm-func-ref` エントリをアトミックに差し替え
@@ -903,7 +903,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-644: Compiler Diagnostics / Optimization Remarks (最適化レマーク)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - 最適化の成功・失敗をソース位置付きで出力する仕組み
   - 例: `note: foo.lisp:42: inlined call to bar (3 instructions)` / `note: foo.lisp:55: loop not vectorized: data dependency`
@@ -952,7 +952,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-653: C ABI Compatibility / `export-cl-function` (C ABI互換エクスポート)
 
-- **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/calling-convention.lisp`
+- **対象**: `packages/compile/src/codegen.lisp`, `packages/codegen/src/calling-convention.lisp`
 - **内容**:
   - `(defun foo (x y) ... :export :c)` 相当の宣言で C から呼び出し可能な関数を生成
   - System V AMD64 ABI / Windows x64 ABI に完全準拠したプロローグ・エピローグ
@@ -963,7 +963,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-654: eBPF Backend (eBPFバックエンド)
 
-- **対象**: 新規 `packages/emit/src/ebpf-codegen.lisp`, `packages/mir/src/target.lisp`
+- **対象**: 新規 `packages/codegen/src/ebpf.lisp`, `packages/mir/src/target.lisp`
 - **内容**:
   - Linux カーネル内で実行される eBPF プログラム（64-bit RISC 命令セット、11レジスタ）の生成
   - eBPF 命令セット: `BPF_ADD`, `BPF_LD`, `BPF_CALL`、Map アクセスヘルパー呼び出し
@@ -991,7 +991,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 #### FR-661: Propeller / Profile-Guided Layout (プロファイルガイドレイアウト)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/binary/src/elf.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
   - BOLT はポストリンクのバイナリ書き換えだが、Propeller はコンパイル・リンク段階でレイアウトを最適化
   - `--propeller-profile=perf.data` でコンパイル時に関数・基本ブロックの配置を決定
@@ -1075,7 +1075,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-675: Purity Analysis / Effect Tracking (純粋性解析・作用追跡)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
   - 副作用のない関数（純粋関数）を静的に検出し、呼び出し間のCSEとモーションを許可
   - **効果アノテーション**: `no-side-effects`, `reads-only`, `writes-global` の3レベルを関数に付与
@@ -1157,7 +1157,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-684: Idiom Recognition (イディオム認識)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - よく使われる操作パターンを単一の効率的な命令またはランタイム関数呼び出しに変換
   - **memset認識**: `(dotimes (i n) (setf (aref arr i) 0))` → `(fill arr 0)` → `memset(arr, 0, n*8)`
@@ -1169,7 +1169,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-685: Integer Division by Constant → Multiply+Shift (定数除算の乗算化)
 
-- **対象**: `packages/vm/src/primitives.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/vm/src/primitives.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - `(/ x c)` で `c` がコンパイル時定数の場合、除算命令（20-80サイクル）を乗算+シフト（3-5サイクル）に変換
   - **符号なし**: `floor(x/c)` = `floor(x * m / 2^p)` で魔法定数 `m`, `p` を事前計算（GCC ハッセ・モンゴメリ法）
@@ -1231,7 +1231,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-692: BTF (BPF Type Format) — eBPF型情報
 
-- **対象**: `packages/emit/src/ebpf-codegen.lisp` (FR-654と連携)
+- **対象**: `packages/codegen/src/ebpf.lisp` (FR-654と連携)
 - **内容**:
   - eBPF プログラム（FR-654）の型情報を `.BTF` セクションに埋め込み
   - BTF 型エントリ: `BTF_KIND_INT`, `BTF_KIND_STRUCT`, `BTF_KIND_FUNC`, `BTF_KIND_DATASEC`
@@ -1242,7 +1242,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-693: ARM MTE (Memory Tagging Extension) — メモリタグ
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`, `packages/runtime/src/heap.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**:
   - ARMv8.5-A MTE: ポインタの上位4ビットにタグを埋め込み、アロケーション時にメモリにもタグを付与
   - `IRG` (Insert Random Tag) でアロケーションごとにランダムタグ生成
@@ -1266,7 +1266,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-695: PowerPC / POWER10 Backend
 
-- **対象**: 新規 `packages/emit/src/ppc64-codegen.lisp`, `packages/mir/src/target.lisp`
+- **対象**: 新規 `packages/codegen/src/ppc64-codegen.lisp`, `packages/mir/src/target.lisp`
 - **内容**:
   - IBM POWER10 (2021) 向け PPC64LE 命令セット
   - `MMA` (Matrix Math Assist) アクセラレータ命令: `xvf64gerpp`, `pmxvf64ger` 等
@@ -1282,7 +1282,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-700: Heap Profiler / Allocation Site Tracking (ヒーププロファイラ)
 
-- **対象**: `packages/runtime/src/heap.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/runtime/src/heap.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - すべてのヒープ割り当てにコールサイト情報（ソースファイル:行番号）を記録するプロファイリングモード
   - `--heap-profile` フラグで有効化。割り当てのサンプリングレート（1/N）を設定可能
@@ -1293,7 +1293,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-701: Continuous Profiling Integration (継続的プロファイリング統合)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
   - **eBPF ベース**: `perf_event_open` + eBPF でランタイムオーバーヘッドなしに本番環境でサンプリング
   - **Pyroscope / parca 互換**: OpenTelemetry Profiling Signal（OTEP-0239, 2024 draft）形式で継続的プロファイルを送信
@@ -1315,7 +1315,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-703: Compiler Self-Profiling / Build Analytics (コンパイラ自己プロファイリング)
 
-- **対象**: `packages/pipeline/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
+- **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
   - `--time-passes` フラグ: 各最適化パスの CPU 時間・GC 回数・IR 命令数変化を計測
   - `--stats` フラグ: 各パスの統計（インライン化回数、定数畳み込み回数、除去した命令数等）を集計出力
@@ -1353,7 +1353,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-711: Sea of Nodes IR (ノードの海IR)
 
-- **対象**: 新規 `packages/emit/src/son-ir.lisp`, `packages/mir/src/mir.lisp`
+- **対象**: 新規 `packages/emit/src/mlir.lisp`, `packages/mir/src/mir.lisp`
 - **内容**:
   - V8 Turbofan / HotSpot C2 で採用される IR。基本ブロックを持たず全命令がデータ・制御依存グラフのノード
   - **利点**: 命令スケジューリング・CSE・LICM が「グラフの位置」として統一的に表現。フェーズ分離が不要
@@ -1365,7 +1365,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-712: MLIR Integration (MLIRマルチレベルIR統合)
 
-- **対象**: `packages/mir/src/mir.lisp`, `packages/pipeline/pipeline.lisp`
+- **対象**: `packages/mir/src/mir.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
   - LLVM MLIR の dialect システム: 複数の抽象度レベルのIRを同一フレームワークで扱う
   - **cl-cc 用 dialect**: `cl-cc` dialect（高レベル CL 演算）→ `linalg` dialect（配列演算）→ `llvm` dialect（低レベル）の段階的 lowering
@@ -1414,7 +1414,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-721: Macro-Fusion Awareness (マクロフュージョン認識)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, FR-068（命令スケジューリング）と連携
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, FR-068（命令スケジューリング）と連携
 - **内容**:
   - 現代 x86-64 CPU（Haswell 以降）は `CMP`/`TEST` + `Jcc` の連続ペアを単一 μop にフュージョン
   - 命令スケジューリング時に `CMP`+`Jcc` ペアを隣接配置し、フュージョン機会を最大化
@@ -1425,7 +1425,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-722: Rotate Instruction Recognition (ローテート命令認識)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - `(logior (ash x n) (ash x (- n width)))` パターンを `ROL`/`ROR` 命令に変換
   - x86-64: `ROL r64, cl` / `ROL r64, imm8`
@@ -1436,7 +1436,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-723: Load Widening / Store Coalescing (ロード幅拡大・ストア統合)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - **ロード幅拡大**: 隣接アドレスへの複数の狭いロードを単一幅広ロードに統合
   - **ストア統合**: 隣接アドレスへの複数ストアを `MOVDQU`/`STP`（AArch64）等で一括書き込み
@@ -1457,7 +1457,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-725: Parallel Copy Sequentialization (並列コピー逐次化)
 
-- **対象**: `packages/emit/src/regalloc.lisp`
+- **対象**: `packages/regalloc/src/regalloc.lisp`
 - **内容**:
   - SSA 分解（φ関数除去）時に生成される並列コピー `{r1←r2, r2←r3, r3←r1}` を依存関係を壊さずに逐次コピー列に変換
   - **サイクルなし**: トポロジカルソートで逐次化
@@ -1584,7 +1584,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-750: Superoptimization (スーパー最適化)
 
-- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
+- **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
   - 短い命令列（3-5命令）に対して網羅的探索または確率的探索で最適な等価命令列を発見
   - **Stochastic Superoptimization** (Schkufza et al. 2013): MCMC でランダム変異し、SMT ソルバ（Z3）で等価性を検証
@@ -1676,7 +1676,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### ✅ FR-770: Shadow Call Stack (SCS) — AArch64
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - リターンアドレスを通常スタックとは別の「シャドウスタック」（X18 レジスタが指す専用ページ）にも保存
   - ✅ 実装済み: プロローグで `STR LR, [X18], #8`、エピローグで `LDR X17, [X18, #-8]!` → `CMP X17, LR` → `B.EQ` → `BRK` → `RET` を生成
@@ -1686,7 +1686,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-771: SafeStack (セーフスタック)
 
-- **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
+- **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
   - スタックフレームを「安全スタック」（リターンアドレス・フレームポインタ）と「危険スタック」（可変長バッファ）に分割
   - 危険スタックは TLS（FR-630）経由で別ページに配置し、バッファオーバーフロー時のリターンアドレス上書きを防止
@@ -1696,7 +1696,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 
 #### FR-772: Execute-Only Memory / XOM (実行専用メモリ)
 
-- **対象**: `packages/emit/src/aarch64-codegen.lisp`, `packages/binary/src/elf.lisp`
+- **対象**: `packages/codegen/src/aarch64-codegen.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
   - コードページを実行専用に設定し、データとして読み取れなくする
   - AArch64: `mprotect(PROT_EXEC)` のみでユーザー空間のコードページ読み取りを禁止
