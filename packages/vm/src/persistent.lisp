@@ -65,7 +65,7 @@
       (cl:get m k default)))
 
 (defun pget (m k &optional default)
-  (get m k default))
+  (pmap-get m k default))
 
 (defun pvec (&rest elts)
   "Create a persistent vector from ELTS."

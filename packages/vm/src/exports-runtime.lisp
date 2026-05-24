@@ -383,9 +383,9 @@
      ;; Rope (FR-788)
       rope rope-p make-rope
       rope-concat rope-split rope-to-string rope-length
-      ;; Persistent/transient collections (FR-748/FR-749/FR-824)
-      persistent-map persistent-map-p persistent-map-count persistent-map-test
-      dissoc pget
-      pvec pvec-count pvec-get pvec->list pvec-assoc pvec-conj
-      transient transient-p transient! conj! persistent!
-      transient-hash transient-hash-p assoc! dissoc!))
+;; Persistent/transient collections (FR-748/FR-749/FR-824)
+   persistent-map persistent-map-p persistent-map-count persistent-map-test
+   pmap-get pmap-assoc pget conj dissoc
+   transient transient-p transient! conj! persistent!
+   transient-hash transient-hash-p assoc! dissoc!
+   lazy-force lazy-take-seq lazy-map lazy-filter))
