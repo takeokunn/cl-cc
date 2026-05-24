@@ -141,15 +141,23 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
   '(("x86-64"  :x86-64 :x86_64)
     ("x86_64"  :x86-64 :x86_64)
     ("arm64"   :arm64  :aarch64)
-    ("aarch64" :arm64  :aarch64))
+    ("aarch64" :arm64  :aarch64)
+    ("wasm"    :wasm32 :wasm)
+    ("wasm32"  :wasm32 :wasm)
+    ("wasm64"  :wasm64 :wasm)
+    ("wasm32-wasi" :wasm32-wasi :wasm))
   "Architecture string aliases: (input-string arch-keyword compile-target-keyword).")
+
+(defun %wasm-arch-keyword-p (arch)
+  "Return true when ARCH denotes a WebAssembly target."
+  (member arch '(:wasm32 :wasm64 :wasm32-wasi) :test #'eq))
 
 (defun %arch-keyword (arch-str)
   "Convert ARCH-STR to its canonical arch keyword. Calls (uiop:quit 2) on unknown values."
   (let ((entry (assoc arch-str *arch-aliases* :test #'string=)))
     (or (and entry (second entry))
         (progn
-          (format *error-output* "Unknown architecture: ~A (use x86-64 or arm64)~%" arch-str)
+          (format *error-output* "Unknown architecture: ~A (use x86-64, arm64, wasm32, wasm64, or wasm32-wasi)~%" arch-str)
           (uiop:quit 2)))))
 
 (defun %compile-target-keyword (arch-str)

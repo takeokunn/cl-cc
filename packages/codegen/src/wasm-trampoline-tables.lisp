@@ -38,8 +38,8 @@
 (defparameter *wasm-i64-cmp-table*
   (%make-eq-hash-table
    '((vm-num-eq . "i64.eq")
-     (vm-eq     . "i64.eq")
-     (vm-lt     . "i64.lt_s")
+      (vm-eq     . "i64.eq")
+      (vm-lt     . "i64.lt_s")
      (vm-gt     . "i64.gt_s")
      (vm-le     . "i64.le_s")
      (vm-ge     . "i64.ge_s")))
@@ -114,7 +114,7 @@
     ;; programs containing defvar/defparameter and similar symbol-designator flows
     ;; can still emit valid WAT instead of aborting during extraction.
     (symbol  "(ref.null eq)")
-    (string  (error "Unsupported WASM trampoline string constant: ~S" val))
+    (string  (wasm-string-literal-wat val))
     (vector  (wasm-vector-literal-wat val))
     (t       (error "Unsupported WASM trampoline constant: ~S" val))))
 

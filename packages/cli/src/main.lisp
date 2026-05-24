@@ -39,6 +39,8 @@ Commands:
   abi-dump  <file>        Dump ABI manifest (FR-777)
   abi-check <old> <new>   Check ABI compatibility (FR-777)
   demangle  <name>        Demangle C++ ABI symbol (FR-776)
+  disasm    [--wat] <wasm> Disassemble Wasm via wabt tools (FR-322)
+  inspect   <wasm>         Inspect Wasm sections/disassembly (FR-322)
   objdump   <file>        Inspect binary internals (FR-808)
   macrostep <file>        Step through macro expansion (FR-836)
   bisect    [range]       Find regression commit (FR-809)
@@ -49,7 +51,7 @@ Commands:
 
 Options:
   -o, --output <file>     Output file (compile only)
-  --arch x86-64|arm64     Target architecture (default: x86-64)
+  --arch x86-64|arm64|wasm32 Target architecture (default: x86-64)
   --lang lisp|php         Source language (auto-detect from file extension)
   --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source       Add source-location comments when available
@@ -62,6 +64,11 @@ Options:
   --eh-model sjlj|table   Select legacy SJLJ or DWARF table zero-cost EH
   --compress              Add compressed code payload sections when supported
   --no-compress           Disable code payload compression (default)
+  --memory64              Enable opt-in Wasm Memory64/Table64 codegen
+  --aot                   Generate AOT static .wasm when targeting wasm
+  --streaming             Generate instantiateStreaming JS glue for wasm
+  --validate              Validate generated wasm before deployment
+  --sri                   Generate SRI hashes and metadata
   --stdlib                Eagerly prepend standard library (run/eval/repl)
   --no-stdlib             Disable lazy stdlib auto-require
   --opt-remarks <mode>    Print optimizer remarks: all, changed, missed
@@ -85,6 +92,9 @@ Options:
   --no-timeout            Disable CLI timeout for debugging
   --dump-image <file>     Dump an initialized SBCL image/executable
   --system <name>         Compile an ASDF system and dependencies
+  --source-map            Emit external .wasm.map and sourceMappingURL
+  --debug-info            Emit DWARF custom sections for wasm targets
+  --emit-names            Emit extended wasm name metadata
 
 Version: ~A~%" *version*))
 
@@ -117,15 +127,18 @@ Options:
   --trace-emit            Print VM/OPT/ASM compilation stages
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
+  --source-map            Emit external .wasm.map for wasm targets
+  --debug-info            Emit DWARF custom sections for wasm targets
+  --emit-names            Emit extended wasm name metadata
  ")
     ("compile" . "Usage: cl-cc compile [options] <file>
 
-  Compile source to a native Mach-O binary.
+  Compile source to a native Mach-O binary or AOT .wasm.
 
 Options:
   -o, --output <file>   Output file (default: input without extension)
   --system <name>       Compile ASDF system NAME instead of a single file
-  --arch x86-64|arm64   Target architecture (default: x86-64)
+  --arch x86-64|arm64|wasm32 Target architecture (default: x86-64)
   --lang lisp|php       Source language (auto-detect from .php extension)
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source     Add source-location comments when available
@@ -137,8 +150,13 @@ Options:
   --shadow-stack        Enable CET shadow-stack planning/integration path
   --eh-model sjlj|table Select legacy SJLJ or DWARF table zero-cost EH
   --compress            Add compressed code payload sections when supported
+  --memory64            Enable opt-in Wasm Memory64/Table64 codegen
   --no-compress         Disable code payload compression (default)
   --deterministic       Strip volatile build timestamps where possible
+  --aot                 Generate AOT static .wasm when targeting wasm
+  --streaming           Generate instantiateStreaming JS glue for wasm
+  --validate            Run WebAssembly.validate/wasmtime validation if available
+  --sri                 Generate SHA-256/SHA-384 SRI metadata
   --build-id <id|auto>  Embed a build id/hash marker in native output
   --opt-remarks <mode>  Print optimizer remarks: all, changed, missed
   --optimization-report Print per-optimization debugging report lines
@@ -274,9 +292,11 @@ Options:
     ("show-types"   . %do-show-types)
     ("assert-density" . %do-assert-density)
     ("abi-dump"     . %do-abi-dump)
-    ("abi-check"    . %do-abi-check)
-    ("demangle"     . %do-demangle)
-    ("objdump"      . %do-objdump)
+     ("abi-check"    . %do-abi-check)
+     ("demangle"     . %do-demangle)
+     ("disasm"       . %do-disasm)
+     ("inspect"      . %do-inspect)
+     ("objdump"      . %do-objdump)
     ("macrostep"    . %do-macrostep)
     ("bisect"       . %do-bisect)
     ("features"     . %do-features)

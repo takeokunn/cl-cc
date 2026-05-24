@@ -219,6 +219,62 @@ match or the br_table helper declines the dispatch."
           (wasm-reg-map-tmp-index reg-map))
   (format stream "~%            ) ;; end catch $cl_condition_tag")))
 
+(defun emit-wasm-try-table-wat (entries reg-map stream)
+  "Emit EH v2 try_table catch clauses for ENTRIES.
+
+The PC-dispatch trampoline keeps the existing EH v1 try/catch wrapper for
+portable control flow; this function is the EH v2 codegen hook used by both the
+trampoline comments/metadata and direct structured emission.  It materializes
+the exact catch table shape expected by EH v2 backends: CL tag catches plus an
+optional catch_all_ref clause that captures an exnref for inspection."
+  (format stream "~%            ;; FR-252: try_table catch table")
+  (format stream "~%            ;; (try_table")
+  (dolist (entry entries)
+    (format stream "~%            ;;   (catch_ref $cl_condition_tag $blk_~D) ;; handler-case ~S"
+            (getf entry :handler-block)
+            (or (getf entry :condition-type) (getf entry :tag-reg))))
+  (when (wasm-catch-all-ref-feature-enabled-p)
+    (format stream "~%            ;;   (catch_all_ref $dispatch) ;; handler-case (t (e) ...), captured in local ~D"
+            (wasm-reg-map-exnref-index reg-map)))
+  (format stream "~%            ;; )"))
+
+(defun %emit-wasm-dispatch-catch-v2 (entries reg-map stream)
+  "Emit EH v2-aware catch side for the PC-dispatch trampoline.
+
+Native try_table branch targets are recorded through emit-wasm-try-table-wat;
+the catch body captures exnref through imported helpers so CL handler-case can
+compare tags/payloads without changing the trampoline architecture."
+  (emit-wasm-try-table-wat entries reg-map stream)
+  (format stream "~%            (catch $cl_condition_tag")
+  (format stream "~%              (local.set ~D) ;; condition/value payload" (wasm-reg-map-tmp-index reg-map))
+  (format stream "~%              (local.set ~D) ;; condition/catch tag payload" (wasm-reg-map-eh-tag-index reg-map))
+  (format stream "~%              ;; FR-271/FR-289: exnref-compatible handler dispatch; payload may be a GC struct")
+  (dolist (entry entries)
+    (let ((range-test (%wasm-eh-pc-range-test reg-map entry)))
+      (when (eq (getf entry :kind) :catch)
+        (setf range-test
+              (format nil "(i32.and ~A (ref.eq (local.get ~D) ~A))"
+                      range-test
+                      (wasm-reg-map-eh-tag-index reg-map)
+                      (reg-local-ref reg-map (getf entry :tag-reg)))))
+      (when (and (eq (getf entry :kind) :handler)
+                 (not (member (getf entry :condition-type) '(t condition) :test #'eq)))
+        (format stream "~%              ;; FR-289: handler ~S may ref.cast/br_on_cast payload local ~D to $condition_t"
+                (getf entry :condition-type)
+                (wasm-reg-map-tmp-index reg-map)))
+      (format stream "~%              (if ~A" range-test)
+      (format stream "~%                (then")
+      (format stream "~%                  (local.set ~D (local.get ~D))"
+              (wasm-reg-to-local reg-map (getf entry :result-reg))
+              (wasm-reg-map-tmp-index reg-map))
+      (format stream "~%                  (local.set ~D (i32.const ~D))"
+              (wasm-reg-map-pc-index reg-map)
+              (getf entry :handler-block))
+      (format stream "~%                  (br $dispatch)))")))
+  (format stream "~%              (throw_ref (call $cl_condition_to_exnref (local.get ~D)))"
+          (wasm-reg-map-tmp-index reg-map))
+  (format stream "~%            ) ;; end EH v2 catch $cl_condition_tag"))
+
 (defun build-trampoline-body (basic-blocks label-pc-map reg-map param-regs stream
                               &optional static-exception-entries)
   "Emit the WAT trampoline body (nested blocks + loop) to STREAM.
@@ -247,6 +303,9 @@ match or the br_table helper declines the dispatch."
 
     ;; Loop for re-dispatching after a jump
     (format stream "~%        (loop $dispatch (result eqref)")
+
+    (when (and eh-entries (wasm-eh-v2-feature-enabled-p) (wasm-exnref-feature-enabled-p))
+      (wasm-reg-map-exnref-index reg-map))
 
     (when eh-entries
       (format stream "~%          (try (result eqref)")
@@ -296,22 +355,16 @@ match or the br_table helper declines the dispatch."
                           (emit-trampoline-instruction (car rest) label-pc-map reg-map
                                                        num-blocks stream)))))
       (unless (= i (1- num-blocks))
-        ;; FR-143: Tail-call dispatch — when tail-calls enabled
-        ;; each basic block ends with return_call_indirect instead of br $dispatch
-        (if (and *wasm-tail-call-enabled*
-                 ;; Tail-call requires the function table to be populated
-                 ;; with entry indices for each label. The PC value holds
-                 ;; the table index for the next block.
-                 *wasm-label-to-table-idx*)
-            (format stream 
-                    "~%      ;; FR-143: tail-call to next block via return_call_indirect"
-                    "~%      (return_call_indirect (type $main_func_t) (table $funcref_table) (local.get ~D))"
-                    (wasm-reg-map-pc-index reg-map))
-            (format stream "~%          (br $dispatch)"))))
+        ;; Fall-through remains an intra-function trampoline dispatch.  FR-143
+        ;; return_call_indirect is only valid for jumps to labels that are known
+        ;; function-table entries; a basic-block PC is not a funcref table index.
+        (format stream "~%          (br $dispatch)")))
 
     (when eh-entries
       (format stream "~%            ) ;; end do")
-      (%emit-wasm-dispatch-catch eh-entries reg-map stream)
+      (if (wasm-eh-v2-feature-enabled-p)
+          (%emit-wasm-dispatch-catch-v2 eh-entries reg-map stream)
+          (%emit-wasm-dispatch-catch eh-entries reg-map stream))
       (format stream "~%          ) ;; end try/catch $dispatch"))
 
     ;; Close loop and outer block

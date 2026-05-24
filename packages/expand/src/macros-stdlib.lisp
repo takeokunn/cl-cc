@@ -51,6 +51,14 @@
   `(call/cc (lambda (,k)
               (abort-to-prompt 'reset (progn ,@body)))))
 
+(our-defmacro await (form)
+  "FR-217 async API stub for CL:AWAIT; preserve FORM until Wasm JS promise lowering is selected."
+  form)
+
+(our-defmacro async-handler (form &body clauses)
+  "FR-217 async API stub for CL:ASYNC-HANDLER; model promise rejection with HANDLER-CASE."
+  `(handler-case (await ,form) ,@clauses))
+
 ;; ROTATEF macro
 (our-defmacro rotatef (&rest places)
   (labels ((shift-forms (remaining acc)

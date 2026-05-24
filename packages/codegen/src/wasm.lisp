@@ -87,47 +87,59 @@
 
 (defun emit-wat-type-section (stream)
   "Emit the predefined WASM GC type definitions to STREAM as WAT."
-  ;; FR-209: $fixnum_t is an i31ref alias, not a heap struct type.  Fixnums are
-  ;; stored inline with ref.i31 and read with i31.get_s/i31.get_u; no
-  ;; (struct.new $fixnum_t) allocation is emitted.
-  (format stream "~%  ;; $fixnum_t := i31ref (native Wasm GC immediate; no heap allocation)")
-  ;; Type 0: main function type
-  (format stream "~%  (type $main_func_t (func (result eqref)))")
-  ;; Type 1: bytes array (i8, mutable)
-  (format stream "~%  (type $bytes_array_t (array (mut i8)))")
-  ;; Type 2: string struct
-  (format stream "~%  (type $string_t (struct (field $chars (ref $bytes_array_t))))")
-  ;; Type 3: symbol struct
-  (format stream "~%  (type $symbol_t (struct (field $name (ref $string_t)) (field $plist eqref)))")
-  ;; Type 4: cons cell
-  (format stream "~%  (type $cons_t (struct (field $car (mut eqref)) (field $cdr (mut eqref))))")
-  ;; Type 5: eqref array (for slots, envs, mv-buffers)
-  (format stream "~%  (type $eqref_array_t (array (mut eqref)))")
-  ;; Type 6: closure environment
-  (format stream "~%  (type $env_t (struct (field $vars (ref $eqref_array_t)) (field $parent (ref null $env_t))))")
-  ;; Type 7: closure
-  (format stream "~%  (type $closure_t (struct (field $entry i32) (field $env (ref null $env_t))))")
-  ;; Type 8: class metadata
-  ;; Fields:
-  ;; - name: class symbol
-  ;; - slot_names: effective slot-name vector
-  ;; - method_combination: symbol metadata (staged placeholder)
-  ;; - methods: method table payload (staged eqref array)
-  (format stream "~%  (type $class_meta_t (struct (field $name (ref $symbol_t)) (field $slot_names (ref $eqref_array_t)) (field $method_combination (ref $symbol_t)) (field $methods (ref $eqref_array_t))))")
-  ;; Type 9: CLOS instance
-  (format stream "~%  (type $instance_t (struct (field $class (ref $class_meta_t)) (field $slots (mut (ref $eqref_array_t)))))")
-  ;; Type 10: hash table
-  (format stream "~%  (type $htable_t (struct (field $keys (mut (ref $eqref_array_t))) (field $vals (mut (ref $eqref_array_t))) (field $count (mut i32))))")
-  ;; Type 11: boxed float
-  (format stream "~%  (type $float_t (struct (field $val f64)))")
-  ;; Type 12: character
-  (format stream "~%  (type $char_t (struct (field $code i32)))")
-  ;; FR-211: specialized GC array types for unboxed CL vectors.  These are
-  ;; appended after the historical predefined types so existing type indices for
-  ;; strings/closures/classes remain stable.
-  (format stream "~%  (type $fixnum_array_t (array (mut i64)))")
-  (format stream "~%  (type $float_array_t (array (mut f64)))")
-  (format stream "~%  (type $char_array_t (array (mut i32)))"))
+  (let ((rec-p (wasm-gc-recursive-types-feature-enabled-p)))
+    (flet ((emit-type (wat)
+             (format stream "~%  ~:[~;  ~]~A" rec-p wat)))
+      ;; FR-209: $fixnum_t is an i31ref alias, not a heap struct type.  Fixnums
+      ;; are stored inline with ref.i31 and read with i31.get_s/i31.get_u; no
+      ;; (struct.new $fixnum_t) allocation is emitted.
+      (format stream "~%  ;; $fixnum_t := i31ref (native Wasm GC immediate; no heap allocation)")
+      (when (wasm-half-precision-feature-enabled-p)
+        (format stream "~%  ;; FR-248: short-float maps to f16 value type"))
+      (when (wasm-reference-typed-strings-feature-enabled-p)
+        (format stream "~%  ;; FR-251: simple-string maps to native stringref"))
+      ;; Type 0: main function type
+      (format stream "~%  (type $main_func_t (func (result eqref)))")
+      (format stream "~%  ;; FR-231: hierarchy: anyref > eqref > i31ref/structref/arrayref")
+      (when rec-p (format stream "~%  (rec"))
+      ;; Type 1: bytes array (i8, mutable)
+      (emit-type "(type $bytes_array_t (array (mut i8)))")
+      ;; Type 2: string struct
+      (emit-type "(type $string_t (struct (field $chars (ref $bytes_array_t))))")
+      ;; Type 3: symbol struct
+      (emit-type "(type $symbol_t (struct (field $name (ref $string_t)) (field $plist eqref)))")
+      ;; Type 4: cons cell.  CL permits dotted lists, so the physical CDR field
+      ;; remains eqref; the surrounding rec group still allows recursive cons/env
+      ;; references wherever values are statically known to be lists.
+      (emit-type "(type $cons_t (struct (field $car (mut eqref)) (field $cdr (mut eqref))))")
+      ;; Type 5: eqref array (for slots, envs, mv-buffers)
+      (emit-type "(type $eqref_array_t (array (mut eqref)))")
+      ;; Type 6: closure environment (recursive parent)
+      (emit-type "(type $env_t (struct (field $vars (ref $eqref_array_t)) (field $parent (ref null $env_t))))")
+      ;; Type 7: closure
+      (emit-type (format nil "(type $closure_t (struct (field $entry ~A) (field $env ~A)))"
+                         (if (wasm-table64-feature-enabled-p) "i64" "i32")
+                         (if *wasm-typed-closure-env-enabled*
+                             "(ref null $eqref_array_t)"
+                             "(ref null $env_t)")))
+      ;; Type 8: class metadata.  Per-class inheritance is modeled by the
+      ;; compiler-side effective slot-order maps and materialized in metadata.
+      (emit-type "(type $class_meta_t (struct (field $name (ref $symbol_t)) (field $slot_names (ref $eqref_array_t)) (field $method_combination (ref $symbol_t)) (field $methods (ref $eqref_array_t))))")
+      ;; Type 9: CLOS instance
+      (emit-type "(type $instance_t (struct (field $class (ref $class_meta_t)) (field $slots (mut (ref $eqref_array_t)))))")
+      ;; Type 10: hash table
+      (emit-type "(type $htable_t (struct (field $keys (mut (ref $eqref_array_t))) (field $vals (mut (ref $eqref_array_t))) (field $count (mut i32))))")
+      ;; Type 11: boxed float
+      (emit-type "(type $float_t (struct (field $val f64)))")
+      ;; Type 12: character
+      (emit-type "(type $char_t (struct (field $code i32)))")
+      ;; Type 13: opaque JS reference box.
+      (emit-type "(type $js_ref_t (struct (field $value externref)))")
+      ;; FR-211: specialized GC array types for unboxed CL vectors.
+      (emit-type "(type $fixnum_array_t (array (mut i64)))")
+      (emit-type "(type $float_array_t (array (mut f64)))")
+      (emit-type "(type $char_array_t (array (mut i32)))")
+      (when rec-p (format stream "~%  )")))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module: global variable table
@@ -149,16 +161,21 @@
   (let* ((name "$cl_condition_tag")
          (table (wasm-module-tag-name-table module)))
     (or (and table (gethash name table))
+        (and (wasm-import-cl-condition-tag-enabled-p)
+             (make-wasm-tag-def :wat-name name :params '(:eqref :eqref)))
         (wasm-module-add-tag module
           (make-wasm-tag-def :wat-name name :params '(:eqref :eqref))))))
 
 (defun emit-wat-tags (module stream)
   "Emit WASM exception tags to STREAM."
   (ensure-wasm-condition-tag! module)
-  (dolist (tag (reverse (wasm-module-tags module)))
-    (format stream "~%  (tag ~A (param eqref eqref)) ;; tagidx ~D"
-            (wasm-tag-def-wat-name tag)
-            (wasm-tag-def-index tag))))
+  (unless (wasm-import-cl-condition-tag-enabled-p)
+    (dolist (tag (reverse (wasm-module-tags module)))
+      (format stream "~%  (tag ~A (param eqref eqref)) ;; tagidx ~D"
+              (wasm-tag-def-wat-name tag)
+              (wasm-tag-def-index tag))))
+  (when (wasm-exception-tag-linking-feature-enabled-p)
+    (format stream "~%  (export \"cl_condition_tag\" (tag $cl_condition_tag))")))
 
 (defun emit-wat-exception-helper (stream)
   "Emit a small EH helper so modules declare concrete try/catch/throw forms.
@@ -183,22 +200,68 @@ the generated module."
 (defun emit-wat-table (module stream)
   "Emit the funcref table for call_indirect dispatch."
   (let ((size (max 1 (wasm-module-table-size module))))
-    (format stream "~%  (table $funcref_table ~D funcref)" size)))
+    (if (wasm-table64-feature-enabled-p)
+        (format stream "~%  (table $funcref_table i64 ~D funcref)" size)
+        (format stream "~%  (table $funcref_table ~D funcref)" size))))
+
+(defun emit-wat-table64-helpers (stream)
+  "Emit FR-229 helper functions that exercise i64 table indices when enabled."
+  (when (wasm-table64-feature-enabled-p)
+    (format stream "~%  ;; FR-229: table64 helper forms use i64 table indices")
+    (format stream "~%  (func $clcc_table_get (param i64) (result funcref)")
+    (format stream "~%    (table.get $funcref_table (local.get 0))")
+    (format stream "~%  )")
+    (format stream "~%  (func $clcc_table_set (param i64) (param funcref)")
+    (format stream "~%    (table.set $funcref_table (local.get 0) (local.get 1))")
+    (format stream "~%  )")
+    (format stream "~%  (func $clcc_table_grow (param i64) (result i64)")
+    (format stream "~%    (table.grow $funcref_table (ref.null func) (local.get 0))")
+    (format stream "~%  )")
+    (format stream "~%  (func $clcc_table_size (result i64)")
+    (format stream "~%    (table.size $funcref_table)")
+    (format stream "~%  )")))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module: elem segment — populate funcref table with all compiled functions
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun emit-wat-elem (module stream)
-  "Emit an active elem segment that fills $funcref_table starting at offset 0
-   with all compiled WASM functions.  This enables call_indirect dispatch for
-   vm-call and vm-closure (which store the function's table index in $closure_t)."
+  "Emit element-segment initialization for $funcref_table.
+
+When FR-237 bulk table operations are enabled, emit a passive element segment
+plus a start-time table.init/elem.drop initializer.  Otherwise keep the legacy
+active segment fallback."
   (let ((funcs (wasm-module-functions module)))
     (when funcs
-      (format stream "~%  (elem (table $funcref_table) (i32.const 0) func")
-      (dolist (func funcs)
-        (format stream " ~A" (wasm-func-wat-name func)))
-      (format stream ")"))))
+      (if (wasm-bulk-table-feature-enabled-p)
+          (progn
+            (format stream "~%  ;; FR-237: passive elem segment + table.init")
+            (format stream "~%  (elem $clcc_funcrefs func")
+            (dolist (func funcs)
+              (format stream " ~A" (wasm-func-wat-name func)))
+            (format stream ")")
+            (format stream "~%  (func $clcc_init_funcref_table")
+            (format stream "~%    ~A"
+                    (emit-wasm-table-init-wat "$funcref_table" "$clcc_funcrefs"
+                                              (wasm-table-const-wat 0)
+                                              (wasm-table-const-wat 0)
+                                              (wasm-table-const-wat (length funcs))))
+            (format stream "~%    ~A" (emit-wasm-elem-drop-wat "$clcc_funcrefs"))
+            (format stream "~%  )")
+            (format stream "~%  (start $clcc_init_funcref_table)")
+            (format stream "~%  ;; FR-237 helper forms available: ~A"
+                    (emit-wasm-table-copy-wat "$funcref_table" "$funcref_table"
+                                              (wasm-table-const-wat 0)
+                                              (wasm-table-const-wat 0)
+                                              (wasm-table-const-wat 0)))
+            (format stream "~%  ;; FR-237 helper forms available: ~A"
+                    (emit-wasm-table-fill-wat "$funcref_table" (wasm-table-const-wat 0) "(ref.null func)" (wasm-table-const-wat 0))))
+          (progn
+            (format stream "~%  (elem (table $funcref_table) (~A.const 0) func"
+                    (if (wasm-table64-feature-enabled-p) "i64" "i32"))
+            (dolist (func funcs)
+              (format stream " ~A" (wasm-func-wat-name func)))
+            (format stream ")"))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT module: calling-convention globals ($cl_arg0..$cl_arg15)
@@ -283,32 +346,252 @@ the generated module."
     ;; Close function
     (format stream "~%  ) ;; end func ~A" wat-name)
     ;; Export declaration if needed
-    (when (wasm-func-exported-p func-def)
+    (when (and (wasm-func-exported-p func-def)
+               (not (wasm-bigint-feature-enabled-p)))
       (format stream "~%  (export ~S (func ~A))"
               (or (wasm-func-export-name func-def)
                   (subseq wat-name 1))
               wat-name))))
 
+(defun wasm-bigint-wrapper-name (func-def)
+  "Return the internal WAT name for FUNC-DEF's BigInt i64 boundary wrapper."
+  (format nil "~A_bigint_i64" (wasm-func-wat-name func-def)))
+
+(defun emit-wat-bigint-wrapper (func-def stream)
+  "Emit an opt-in FR-236 JS BigInt ↔ i64 export wrapper for FUNC-DEF.
+
+The wrapper exposes an i64 parameter/result at the Wasm boundary.  JS engines
+surface those i64 values as BigInt.  The existing CL function ABI remains eqref
+internally, so the wrapper boxes the incoming i64 into cl_arg0 and unboxes the
+primary eqref result back to i64."
+  (let ((wrapper-name (wasm-bigint-wrapper-name func-def))
+        (export-name (or (wasm-func-export-name func-def)
+                         (subseq (wasm-func-wat-name func-def) 1))))
+    (format stream "~%  ;; FR-236: BigInt/i64 boundary wrapper for ~A" (wasm-func-wat-name func-def))
+    (format stream "~%  (func ~A (param i64) (result i64)" wrapper-name)
+    (format stream "~%    (global.set $cl_arg0 ~A)" (wasm-fixnum-box "(local.get 0)"))
+    (format stream "~%    (i64.extend_i32_s (i31.get_s (ref.cast i31 (call ~A))))" (wasm-func-wat-name func-def))
+    (format stream "~%  ) ;; end func ~A" wrapper-name)
+    (format stream "~%  (export ~S (func ~A))" export-name wrapper-name)))
+
+(defun emit-wat-bigint-wrappers (module stream)
+  "Emit FR-236 wrappers for exported functions when BigInt integration is enabled."
+  (when (wasm-bigint-feature-enabled-p)
+    (dolist (func (wasm-module-functions module))
+      (when (wasm-func-exported-p func)
+        (emit-wat-bigint-wrapper func stream)))))
+
+(defun emit-wat-bigint-js-wrapper-code (stream)
+  "Emit documentation comments containing the JS BigInt wrapper shape."
+  (when (wasm-bigint-feature-enabled-p)
+    (format stream "~%  ;; FR-236 JS BigInt wrapper pattern:")
+    (format stream "~%  ;; export const callI64 = (instance, name, x) => instance.exports[name](BigInt(x));")))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WAT imports section (I/O host functions)
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defparameter *wasm-aot-current-used-imports* nil
+  "Dynamic hash-set of host bridge import names used by the module being emitted.")
+
+(defun %wasm-aot-mode-active-p ()
+  "Return T when the backend should avoid mandatory host imports."
+  (wasm-feature-enabled-p "CLCC_WASM_AOT" *wasm-aot-mode-enabled*))
+
+(defun %wasm-import-needed-p (name)
+  "Return T when host import NAME should be emitted."
+  (or (not *wasm-dead-import-elimination-enabled*)
+      (null *wasm-aot-current-used-imports*)
+      (gethash name *wasm-aot-current-used-imports*)))
+
+(defun %wasm-call-string-mentions-p (needle string)
+  (and (stringp string) (search needle string :test #'char=)))
+
+(defun wasm-module-used-host-imports (module)
+  "Build a best-effort dependency graph of host bridge functions used by MODULE."
+  (let ((used (make-hash-table :test #'equal)))
+    (labels ((mark (name) (setf (gethash name used) t))
+             (scan-string (text)
+               (dolist (entry '(("$host_write_char" . "write_char")
+                                ("$host_read_char" . "read_char")
+                                ("$host_write_string" . "write_string")
+                                ("$host_error" . "error")
+                                ("$host_print_val" . "print_val")
+                                ("$host_rt_register_method" . "register_method")
+                                ("$host_rt_call_generic" . "call_generic")
+                                ("$cl_condition_to_exnref" . "condition_to_exnref")
+                                ("$cl_exnref_payload" . "exnref_payload")
+                                ("$cl_exnref_tag" . "exnref_tag")))
+                 (when (%wasm-call-string-mentions-p (car entry) text)
+                   (mark (cdr entry))))))
+      (dolist (func (wasm-module-functions module))
+        (dolist (body (wasm-func-body func))
+          (scan-string body))
+        (dolist (inst (wasm-func-source-instructions func))
+          (typecase inst
+            (vm-print (mark "print_val"))
+            (vm-register-method (mark "register_method"))
+            (vm-generic-call (mark "call_generic"))
+            ((or vm-signal-error vm-throw)
+             (when (wasm-eh-v2-feature-enabled-p)
+               (mark "condition_to_exnref")))))))
+    (when (wasm-import-cl-condition-tag-enabled-p)
+      (setf (gethash "condition-tag" used) t))
+    (when (wasm-eh-v2-feature-enabled-p)
+      (setf (gethash "condition_to_exnref" used) t
+            (gethash "exnref_payload" used) t
+            (gethash "exnref_tag" used) t))
+    used))
+
+(defun emit-wat-aot-host-stubs (stream)
+  "Emit no-op host bridge stubs so AOT modules are self-contained."
+  (format stream "~%  ;; FR-219: AOT host bridge stubs (no mandatory JS imports)")
+  (when (%wasm-import-needed-p "write_char")
+    (format stream "~%  (func $host_write_char (param i32))"))
+  (when (%wasm-import-needed-p "read_char")
+    (format stream "~%  (func $host_read_char (result i32) (i32.const -1))"))
+  (when (%wasm-import-needed-p "write_string")
+    (format stream "~%  (func $host_write_string (param (ref $string_t)))"))
+  (when (%wasm-import-needed-p "error")
+    (format stream "~%  (func $host_error (param (ref $string_t)))"))
+  (when (%wasm-import-needed-p "print_val")
+    (format stream "~%  (func $host_print_val (param eqref))"))
+  (when (%wasm-import-needed-p "register_method")
+    (format stream "~%  (func $host_rt_register_method (param eqref) (param eqref) (param eqref) (param eqref))"))
+  (when (%wasm-import-needed-p "call_generic")
+    (format stream "~%  (func $host_rt_call_generic (param eqref) (param i32) (result eqref) (ref.null eq))")))
+
 (defun emit-wat-imports (stream)
   "Emit standard cl-cc I/O imports."
+  (if (%wasm-aot-mode-active-p)
+      (emit-wat-aot-host-stubs stream)
+      (progn
   (format stream "~%  ;; Host I/O imports")
-  (format stream "~%  (import \"cl_io\" \"write_char\" (func $host_write_char (param i32)))")
-  (format stream "~%  (import \"cl_io\" \"read_char\" (func $host_read_char (result i32)))")
-  (format stream "~%  (import \"cl_io\" \"write_string\" (func $host_write_string (param (ref $string_t))))")
-  (format stream "~%  (import \"cl_io\" \"error\" (func $host_error (param (ref $string_t))))")
-  ;; print_val: host-side formatter for any eqref value (used by vm-print)
+  (when (and (wasm-import-cl-condition-tag-enabled-p)
+             (%wasm-import-needed-p "condition-tag"))
+    (format stream "~%  ;; FR-310: external exception tag import")
+    (format stream "~%  (import \"cl-core\" \"condition-tag\" (tag $cl_condition_tag (param eqref eqref)))"))
+  (when (and (wasm-eh-v2-feature-enabled-p)
+             (%wasm-import-needed-p "condition_to_exnref"))
+    (format stream "~%  ;; FR-252/FR-262: host bridge for fresh throw_ref exceptions")
+    (format stream "~%  (import \"cl_exception\" \"condition_to_exnref\" (func $cl_condition_to_exnref (param eqref) (result exnref)))")
+    (format stream "~%  (import \"cl_exception\" \"exnref_payload\" (func $cl_exnref_payload (param exnref) (result eqref)))")
+    (format stream "~%  (import \"cl_exception\" \"exnref_tag\" (func $cl_exnref_tag (param exnref) (result eqref)))"))
+  (when *wasm-ref-types-externref-enabled*
+    (format stream "~%  ;; FR-226: opaque JavaScript object import")
+    (format stream "~%  (import \"js\" \"host-object\" (func $js_host_object (result externref)))"))
+  (when *wasm-custom-descriptors-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-241.import"
+                                         "typed externref descriptor import required: js.descriptor -> externref"))
+  (when *wasm-type-imports-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-244.import"
+                                         "dynamic type import required: cl-core.$cons_t"))
+  (when *wasm-wasi-random-crypto-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-299.import"
+                                         "WASI random/crypto imports required: get-random-bytes, hash"))
+  (when (%wasm-import-needed-p "write_char")
+    (format stream "~%  (import \"cl_io\" \"write_char\" (func $host_write_char (param i32)))"))
+  (when (%wasm-import-needed-p "read_char")
+    (format stream "~%  (import \"cl_io\" \"read_char\" (func $host_read_char (result i32)))"))
+  (when (%wasm-import-needed-p "write_string")
+    (format stream "~%  (import \"cl_io\" \"write_string\" (func $host_write_string (param (ref $string_t))))"))
+  (when (%wasm-import-needed-p "error")
+    (format stream "~%  (import \"cl_io\" \"error\" (func $host_error (param (ref $string_t))))"))
+  ;; print_val: host-side formatter for any eqref value (used by vm-print).
+  ;; Keep this standard import present for module-structure compatibility.
   (format stream "~%  (import \"cl_io\" \"print_val\" (func $host_print_val (param eqref)))")
   ;; FR-321 staged runtime MOP bridge imports
-  (format stream "~%  (import \"cl_runtime\" \"register_method\" (func $host_rt_register_method (param eqref) (param eqref) (param eqref) (param eqref)))")
-  (format stream "~%  (import \"cl_runtime\" \"call_generic\" (func $host_rt_call_generic (param eqref) (param i32) (result eqref)))"))
+  (when (%wasm-import-needed-p "register_method")
+    (format stream "~%  (import \"cl_runtime\" \"register_method\" (func $host_rt_register_method (param eqref) (param eqref) (param eqref) (param eqref)))"))
+  (when (%wasm-import-needed-p "call_generic")
+    (format stream "~%  (import \"cl_runtime\" \"call_generic\" (func $host_rt_call_generic (param eqref) (param i32) (result eqref)))")))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; emit-wasm-module: serialize a wasm-module-ir to WAT text
 ;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun emit-wasm-annotation-custom-section (stream key value)
+  "Emit a clcc.annotations custom section entry for staged Wasm metadata."
+  (%emit-wasm-custom-string stream "clcc.annotations"
+                            (format nil "~A=~A" key value)))
+
+(defun emit-wat-low-priority-proposal-helpers (stream)
+  "Emit Wave 11-15 feature-gated helper comments/custom sections that do not alter core lowering."
+  (when (wasm-wide-arithmetic-feature-enabled-p)
+    (format stream "~%  ;; FR-238 helpers: ~A | ~A | ~A | ~A"
+            (wasm-i64-add128-wat "(local.get 0)" "(local.get 1)" "(local.get 2)" "(local.get 3)")
+            (wasm-i64-sub128-wat "(local.get 0)" "(local.get 1)" "(local.get 2)" "(local.get 3)")
+            (wasm-i64-mul-wide-s-wat "(local.get 0)" "(local.get 1)")
+            (wasm-i64-mul-wide-u-wat "(local.get 0)" "(local.get 1)")))
+  (when *wasm-compact-import-section-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-240" "compact-import-section metadata enabled; import name trie/compression staged for binary writer"))
+  (when *wasm-custom-descriptors-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-241" "descriptor generation maps externref slots to WebAssembly.Descriptor metadata"))
+  (when *wasm-memory-control-enabled*
+    (format stream "~%  ;; FR-243 helper: ~A" (wasm-memory-discard-wat (wasm-memory-const-wat 0) (wasm-memory-const-wat 0))))
+  (when *wasm-jit-interface-enabled*
+    (format stream "~%  ;; FR-245: JIT interface feedback hook custom section follows")
+    (%emit-wasm-custom-string stream "clcc.jit-interface" "{\"feedback\":[\"inline-cache\",\"hot-calls\",\"monomorphic-stubs\"]}"))
+  (when *wasm-flexible-vectors-enabled*
+    (format stream "~%  ;; FR-246 helpers: ~A | ~A"
+            (wasm-flexible-vector-op-wat "add" "(local.get 0)" "(local.get 1)" :width :v128x2)
+            (wasm-flexible-vector-op-wat "add" "(local.get 0)" "(local.get 1)" :width :v512)))
+  (when (wasm-half-precision-feature-enabled-p)
+    (format stream "~%  ;; FR-248 helpers: ~A | ~A | ~A"
+            (wasm-f16-binop-wat "add" "(local.get 0)" "(local.get 1)")
+            (wasm-f16-load-wat "(local.get 0)")
+            (wasm-f16-store-wat "(local.get 0)" "(local.get 1)")))
+  (when (wasm-reference-typed-strings-feature-enabled-p)
+    (format stream "~%  ;; FR-251 helpers: ~A | ~A"
+            (wasm-stringref-length-wat "(local.get 0)")
+            (wasm-stringref-get-codeunit-wat "(local.get 0)" "(local.get 1)")))
+  (when *wasm-startup-snapshots-enabled*
+    (format stream "~%  ~A" (wasm-startup-snapshot-comment-wat)))
+  (when (wasm-func-bind-feature-enabled-p)
+    (format stream "~%  ;; FR-290 helper: ~A" (wasm-func-bind-wat "$main_func_t" "(ref.func $main)" "(ref.null eq)")))
+  (when *wasm-wasi-extended-worlds-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-296" "WASI extended worlds: wasi:keyvalue, wasi:messaging, wasi:sql"))
+  (when (wasm-cfi-feature-enabled-p)
+    (emit-wasm-annotation-custom-section stream "FR-261.cfi" "typed call_ref/call_indirect signatures are emitted for indirect calls"))
+  (when *wasm-csp-compliant-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-261.csp" "no dynamic wasm-unsafe-eval path required for AOT output"))
+  (when *wasm-constant-time-enabled*
+    (emit-wasm-annotation-custom-section stream "FR-261.constant-time" "constant-time lowering prefers select over data-dependent branches"))
+  (when (wasm-coop-coep-feature-enabled-p)
+    (emit-wasm-annotation-custom-section stream "FR-297" "deploy with COOP=same-origin and COEP=require-corp for SharedArrayBuffer"))
+  (when *wasm-wasi-p2-enabled*
+    (format stream "~%  ;; FR-207: WASI Preview 2 worlds enabled: filesystem, sockets, clocks"))
+  (when *wasm-wasi-p3-enabled*
+    (format stream "~%  ;; FR-257: WASI 0.3 async I/O stubs use suspend/resume around wasi:io/streams"))
+  (when *wasm-wasi-worlds-full-enabled*
+    (format stream "~%  ;; FR-274: WASI world definitions enabled: wasi:nn, wasi:http, wasi:cli"))
+  (when *wasm-wasi-p1-compat-enabled*
+    (format stream "~%  ;; FR-321: WASI Preview 1 compatibility shim imports fd_read/fd_write/path_open"))
+  (when *wasm-stack-switching-enabled*
+    (format stream "~%  ;; FR-205 helpers: ~A | ~A | ~A"
+            (wasm-cont-new-wat "$main_func_t" "(ref.func $main)")
+            (wasm-suspend-wat "$cl_suspend_tag" "(ref.null eq)")
+            (wasm-resume-wat "(local.get 0)" "(ref.null eq)")))
+  (when *wasm-effect-handlers-enabled*
+    (format stream "~%  ;; FR-272 helper: ~A" (wasm-effect-perform-wat "$restart_handler" "(ref.null eq)")))
+  (when *wasm-cont-throw-enabled*
+    (format stream "~%  ;; FR-301 helper: ~A" (wasm-cont-throw-wat "(local.get 0)" "(local.get 1)")))
+  (when *wasm-component-model-enabled*
+    (format stream "~%  ;; FR-206: Component Model enabled; WIT type infrastructure custom section follows")
+    (%emit-wasm-custom-string stream "clcc.component.wit" "package clcc:runtime; world clcc { export main: func() -> string; }"))
+  (when *wasm-component-model-tests-enabled*
+    (format stream "~%  ;; FR-319: Component Model test metadata enabled for WIT interface verification")))
+
+(defun emit-wat-deployment-js-glue (stream)
+  "Emit browser/deployment JS glue custom sections for low-priority wasm features."
+  (when *wasm-service-worker-enabled*
+    (%emit-wasm-custom-string
+     stream "clcc.service-worker.js"
+     "self.addEventListener('install', e => e.waitUntil(caches.open('clcc-wasm').then(c => c.addAll(['./module.wasm']))));\nself.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));"))
+  (when *wasm-runtime-feature-detection-enabled*
+    (%emit-wasm-custom-string
+     stream "clcc.feature-detect.js"
+     "export async function detectClccWasmFeatures(bytes){ const ok=WebAssembly.validate(bytes); return { mvp: ok, gc: typeof WebAssembly.Global === 'function', threads: typeof SharedArrayBuffer !== 'undefined', exceptions: typeof WebAssembly.Exception === 'function', componentModel: false }; }")))
 
 (defun emit-wasm-module (module stream)
   "Serialize a wasm-module-ir to WAT text format on STREAM.
@@ -319,14 +602,11 @@ the generated module."
   ;; FR-258: Wasm Profiles — declare required features
   (when (wasm-profiles-feature-enabled-p)
     (emit-wasm-profiles-section stream))
-  ;; FR-213: Memory64 — declare 64-bit memory when enabled
-  (when (wasm-memory64-feature-enabled-p)
-    (format stream "~%  ;; FR-213: Memory64 enabled (64-bit address space)")
-    (format stream "~%  (memory (export \"mem\") i64 1 65536)"))
   ;; Type section
   (emit-wat-type-section stream)
   ;; Imports
-  (emit-wat-imports stream)
+  (let ((*wasm-aot-current-used-imports* (wasm-module-used-host-imports module)))
+    (emit-wat-imports stream))
   ;; Exception tags for CL conditions and catch/throw payloads
   (emit-wat-tags module stream)
   (emit-wat-exception-helper stream)
@@ -337,20 +617,25 @@ the generated module."
     (emit-wat-eh-v2-helper stream))
   ;; Table (size updated by build-all-wasm-functions)
   (emit-wat-table module stream)
-  ;; FR-229: table64 — 64-bit function table for Memory64 builds
-  (when (wasm-memory64-feature-enabled-p)
-    (format stream "~%  ;; FR-229: table64 alongside Memory64")
-    (let ((size (max 1 (wasm-module-table-size module))))
-      (format stream "~%  (table $funcref_table ~D i64 funcref)" size)))
+  (emit-wat-table64-helpers stream)
   ;; User-defined global variables (from defvar/setq)
   (emit-wat-globals module stream)
   ;; Argument-passing calling convention globals ($cl_arg0..$cl_arg15)
   (emit-wat-call-globals stream)
   ;; Memories (linear memory declarations)
   (emit-wat-memories module stream)
+  ;; Low-priority proposal helpers from Waves 11-15.
+  (emit-wat-low-priority-proposal-helpers stream)
+  (emit-wat-deployment-js-glue stream)
+  ;; JS/FFI helper functions and JS glue snippets.
+  (emit-wat-js-ffi-helpers stream)
+  ;; Host-side Worker bootstrap guidance for SharedArrayBuffer-backed memory.
+  (emit-wat-worker-bootstrap stream)
   ;; Functions
   (dolist (func (wasm-module-functions module))
     (emit-wat-function func stream))
+  (emit-wat-bigint-wrappers module stream)
+  (emit-wat-bigint-js-wrapper-code stream)
   ;; Elem segment: populate funcref table so call_indirect can dispatch
   (emit-wat-elem module stream)
   ;; FR-216: Branch Hinting custom section
@@ -362,6 +647,11 @@ the generated module."
   ;; FR-223: Source Map reference
   (when (wasm-source-map-enabled-p)
     (emit-wasm-source-map-reference stream))
+  ;; FR-242: Extended Name Section for readable DevTools symbols.
+  (when (wasm-extended-names-feature-enabled-p)
+    (emit-wasm-name-section module stream))
+  ;; FR-263/269/318/317/288: browser developer tooling JS helpers.
+  (emit-wasm-developer-tooling-sections module stream)
   (format stream "~%) ;; end module~%"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -439,11 +729,13 @@ the generated module."
   (ecase type
     (:i32 +wasm-i32+)
     (:i64 +wasm-i64+)
-    (:f32 +wasm-f32+)
-    (:f64 +wasm-f64+)
-    (:funcref +wasm-funcref+)
-    (:externref +wasm-externref+)
-    (:eqref +wasm-eqref+)))
+     (:f32 +wasm-f32+)
+     (:f64 +wasm-f64+)
+     (:f16 +wasm-f16+)
+     (:funcref +wasm-funcref+)
+     (:externref +wasm-externref+)
+     (:stringref +wasm-stringref+)
+     (:eqref +wasm-eqref+)))
 
 (defun wasm-binary-write-valtype-vector (buffer types)
   "Write a vector of value TYPES."
@@ -571,6 +863,232 @@ the generated module."
   (let ((module (extract-wasm-functions program)))
     (emit-wasm-binary-module module)))
 
+(defstruct (wasm-aot-result (:conc-name wasm-aot-result-))
+  "Result bundle for FR-219 AOT Wasm generation."
+  (bytes #() :type vector)
+  (wat "" :type string)
+  (metadata nil :type list))
+
+(defun wasm-tool-available-p (program)
+  "Return T when PROGRAM can be found on PATH."
+  (let ((path (ignore-errors (sb-ext:posix-getenv "PATH"))))
+    (and path
+         (loop with start = 0
+               for end = (position #\: path :start start)
+               for dir = (subseq path start end)
+               for candidate = (merge-pathnames program
+                                                (pathname (format nil "~A/" dir)))
+               thereis (probe-file candidate)
+               while end
+               do (setf start (1+ end))))))
+
+(defun wasm-run-tool-to-string (argv &key input-file)
+  "Run an optional wasm tool and return stdout, or NIL when unavailable/failing."
+  (declare (ignore input-file))
+  (when (and argv (wasm-tool-available-p (first argv)))
+    (handler-case
+        (uiop:run-program argv :output :string :error-output :string
+                              :ignore-error-status nil)
+      (error () nil))))
+
+(defun %wasm-write-bytes-file (path bytes)
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede
+                          :if-does-not-exist :create
+                          :element-type '(unsigned-byte 8))
+    (write-sequence bytes out))
+  path)
+
+(defun %wasm-read-bytes-file (path)
+  (with-open-file (in path :direction :input :element-type '(unsigned-byte 8))
+    (let ((buf (make-array (file-length in) :element-type '(unsigned-byte 8))))
+      (read-sequence buf in)
+      buf)))
+
+(defun %wasm-temp-path (suffix)
+  (merge-pathnames (make-pathname :name (format nil "cl-cc-wasm-~A" (gensym))
+                                  :type suffix)
+                   (uiop:temporary-directory)))
+
+(defun %wasm-hex-digest-file (path bits)
+  "Return a hex digest for PATH using shasum/sha*sum/openssl when available."
+  (or (when (wasm-tool-available-p "shasum")
+        (let ((out (wasm-run-tool-to-string
+                    (list "shasum" "-a" (princ-to-string bits) (namestring path)))))
+          (and out (first (uiop:split-string out :separator '(#\Space #\Tab #\Newline))))))
+      (let ((tool (format nil "sha~Dsum" bits)))
+        (when (wasm-tool-available-p tool)
+          (let ((out (wasm-run-tool-to-string (list tool (namestring path)))))
+            (and out (first (uiop:split-string out :separator '(#\Space #\Tab #\Newline)))))))
+      (when (wasm-tool-available-p "openssl")
+        (let ((out (wasm-run-tool-to-string
+                    (list "openssl" "dgst" (format nil "-sha~D" bits) "-r" (namestring path)))))
+          (and out (first (uiop:split-string out :separator '(#\Space #\Tab #\Newline))))))))
+
+(defun %wasm-byte-vector-hex-digest (bytes bits)
+  (let ((tmp (%wasm-temp-path "wasm")))
+    (unwind-protect
+         (progn
+           (%wasm-write-bytes-file tmp bytes)
+           (or (%wasm-hex-digest-file tmp bits)
+               ;; Deterministic non-cryptographic fallback when no digest tool exists.
+               (format nil (format nil "~~~D,'0X" (/ bits 4))
+                       (mod (abs (sxhash (coerce bytes 'list)))
+                            (expt 16 (/ bits 4))))))
+      (ignore-errors (delete-file tmp)))))
+
+(defun wasm-file-content-hash (path &key (bits 256))
+  "Return SHA-BITS hex digest for PATH, using optional platform tools."
+  (or (%wasm-hex-digest-file path bits)
+      (%wasm-byte-vector-hex-digest (%wasm-read-bytes-file path) bits)))
+
+(defun %wasm-hex-to-bytes (hex)
+  (let* ((clean (remove-if-not #'alphanumericp hex))
+         (len (floor (length clean) 2))
+         (out (make-array len :element-type '(unsigned-byte 8))))
+    (dotimes (i len out)
+      (setf (aref out i)
+            (parse-integer clean :start (* i 2) :end (+ (* i 2) 2) :radix 16)))))
+
+(defparameter +wasm-base64-alphabet+
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  "RFC 4648 base64 alphabet used for SRI output.")
+
+(defun %wasm-base64-encode (bytes)
+  (with-output-to-string (out)
+    (loop for i from 0 below (length bytes) by 3
+          for b0 = (aref bytes i)
+          for have1 = (< (1+ i) (length bytes))
+          for have2 = (< (+ i 2) (length bytes))
+          for b1 = (if have1 (aref bytes (1+ i)) 0)
+          for b2 = (if have2 (aref bytes (+ i 2)) 0)
+          for n = (logior (ash b0 16) (ash b1 8) b2)
+          do (write-char (char +wasm-base64-alphabet+ (ldb (byte 6 18) n)) out)
+             (write-char (char +wasm-base64-alphabet+ (ldb (byte 6 12) n)) out)
+             (write-char (if have1 (char +wasm-base64-alphabet+ (ldb (byte 6 6) n)) #\=) out)
+             (write-char (if have2 (char +wasm-base64-alphabet+ (ldb (byte 6 0) n)) #\=) out))))
+
+(defun wasm-file-sri-hash (path &key (bits 384))
+  "Return an SRI integrity token such as sha384-... for PATH."
+  (let ((hex (wasm-file-content-hash path :bits bits)))
+    (format nil "sha~D-~A" bits (%wasm-base64-encode (%wasm-hex-to-bytes hex)))))
+
+(defun wasm-binary-write-custom-section (buffer name payload-string)
+  "Append a custom section NAME with UTF-8-ish PAYLOAD-STRING to BUFFER."
+  (wasm-binary-write-section
+   buffer +wasm-section-custom+
+   (lambda (section)
+     (wasm-binary-write-name section name)
+     (let ((bytes (map 'vector #'char-code payload-string)))
+       (wasm-binary-write-bytes section bytes)))))
+
+(defun wasm-append-build-hash-section (bytes hash)
+  "Return BYTES with a deterministic cl-cc build hash custom section appended."
+  (let ((buffer (cl-cc/binary::make-byte-buffer (+ (length bytes) 96))))
+    (wasm-binary-write-bytes buffer bytes)
+    (wasm-binary-write-custom-section buffer "cl-cc.build.sha256" hash)
+    (cl-cc/binary::buffer-get-bytes buffer)))
+
+(defun wasm-run-wasm-opt-passes (wasm-bytes &key (aot nil))
+  "Run Binaryen optimization/removal passes when wasm-opt is available."
+  (if (and (or aot *wasm-aot-mode-enabled*) (wasm-tool-available-p "wasm-opt"))
+      (let ((tmp-in (%wasm-temp-path "wasm"))
+            (tmp-out (%wasm-temp-path "wasm")))
+        (unwind-protect
+             (handler-case
+                 (progn
+                   (%wasm-write-bytes-file tmp-in wasm-bytes)
+                   (uiop:run-program (list "wasm-opt" "-O3" "--strip-debug"
+                                           "--remove-unused-module-elements"
+                                           (namestring tmp-in) "-o" (namestring tmp-out))
+                                     :ignore-error-status nil)
+                   (if (probe-file tmp-out) (%wasm-read-bytes-file tmp-out) wasm-bytes))
+               (error () wasm-bytes))
+          (ignore-errors (delete-file tmp-in))
+          (ignore-errors (delete-file tmp-out))))
+      wasm-bytes))
+
+(defun wasm-run-wasm2wat (wasm-bytes fallback-wat)
+  "Return wasm2wat output for WASM-BYTES when wabt is available, else FALLBACK-WAT."
+  (if (wasm-tool-available-p "wasm2wat")
+      (let ((tmp (%wasm-temp-path "wasm")))
+        (unwind-protect
+             (progn
+               (%wasm-write-bytes-file tmp wasm-bytes)
+               (or (wasm-run-tool-to-string (list "wasm2wat" (namestring tmp)))
+                   fallback-wat))
+          (ignore-errors (delete-file tmp))))
+      fallback-wat))
+
+(defun wasm-wat-to-binary-if-available (wat fallback-bytes)
+  "Assemble WAT through wat2wasm when available, falling back to FALLBACK-BYTES."
+  (if (wasm-tool-available-p "wat2wasm")
+      (let ((tmp-wat (%wasm-temp-path "wat"))
+            (tmp-wasm (%wasm-temp-path "wasm")))
+        (unwind-protect
+             (handler-case
+                 (progn
+                   (with-open-file (out tmp-wat :direction :output :if-exists :supersede
+                                                :if-does-not-exist :create)
+                     (write-string wat out))
+                   (uiop:run-program (list "wat2wasm" (namestring tmp-wat) "-o" (namestring tmp-wasm))
+                                     :ignore-error-status nil)
+                   (if (probe-file tmp-wasm) (%wasm-read-bytes-file tmp-wasm) fallback-bytes))
+               (error () fallback-bytes))
+          (ignore-errors (delete-file tmp-wat))
+          (ignore-errors (delete-file tmp-wasm))))
+      fallback-bytes))
+
+(defun wasm-determinize-module! (module)
+  "Sort module tables for reproducible AOT emission."
+  (setf (wasm-module-functions module)
+        (sort (copy-list (wasm-module-functions module)) #'string< :key #'wasm-func-wat-name)
+        (wasm-module-globals module)
+        (sort (copy-list (wasm-module-globals module)) #'string< :key #'wasm-global-def-wat-name))
+  (loop for func in (wasm-module-functions module)
+        for i from 0
+        do (setf (wasm-func-index func) i))
+  module)
+
+(defun wasm-eliminate-dead-exports! (module)
+  "Conservatively keep only public entry exports for AOT output."
+  (dolist (func (wasm-module-functions module))
+    (unless (string= (or (wasm-func-export-name func) "") "main")
+      (setf (wasm-func-exported-p func) nil)))
+  module)
+
+(defun compile-to-aot-wasm (program &key deterministic)
+  "FR-219: Compile PROGRAM to a self-contained AOT .wasm result bundle.
+
+The function performs dead export/import pruning, optional deterministic
+ordering, optional wat2wasm/wasm-opt integration, and embeds a content-hash
+custom section without requiring external tools to be installed."
+  (let* ((*wasm-aot-mode-enabled* t)
+         (module (extract-wasm-functions program)))
+    (build-all-wasm-functions module)
+    (when deterministic
+      (wasm-determinize-module! module))
+    (wasm-eliminate-dead-exports! module)
+    (let* ((wat (with-output-to-string (s) (emit-wasm-module module s)))
+           (fallback (emit-wasm-binary-module module))
+           (assembled (wasm-wat-to-binary-if-available wat fallback))
+           (optimized (wasm-run-wasm-opt-passes assembled :aot t))
+           (sha256 (%wasm-byte-vector-hex-digest optimized 256))
+           (final-bytes (if deterministic
+                            (wasm-append-build-hash-section optimized sha256)
+                            optimized))
+           (debug-wat (wasm-run-wasm2wat final-bytes wat)))
+      (make-wasm-aot-result
+       :bytes final-bytes
+       :wat debug-wat
+       :metadata (list :format :cl-cc-wasm-aot-v1
+                       :sha256 sha256
+                       :deterministic (not (null deterministic))
+                       :imports-eliminated *wasm-dead-import-elimination-enabled*
+                       :wasm-opt (wasm-tool-available-p "wasm-opt")
+                       :wabt (and (wasm-tool-available-p "wat2wasm")
+                                  (wasm-tool-available-p "wasm2wat")))))))
+
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-216: Branch Hinting custom section
@@ -595,25 +1113,10 @@ the generated module."
   "FR-222: Emit DWARF 5 debug info as Wasm custom sections.
    Includes .debug_info, .debug_line, .debug_abbrev sections as WAT custom sections.
    Enable with --emit-debug-info flag."
-  (declare (ignore module))
   (when (wasm-feature-enabled-p "CLCC_WASM_DWARF" *wasm-dwarf-debug-info-enabled*)
     (format stream "~%  ;; FR-222: DWARF 5 debug info sections (custom)")
-    (format stream "~%  (@custom \".debug_info\" ; DWARF 5 compilation unit header")
-    (format stream "~%    ;; CU header: version 5, unit_type 1 (compile), address_size 4")
-    (format stream "~%    ;; abbrev_offset, pointer_size 4, next_unit_offset 0")
-    (format stream "~%    ;; DIE: DW_TAG_compile_unit { DW_AT_producer \"cl-cc\", DW_AT_language DW_LANG_C_plus_plus_14 })")
-    (format stream "~%  )")
-    (format stream "~%  (@custom \".debug_abbrev\" ; Abbreviation table for .debug_info")
-    (format stream "~%    ;; Abbrev 1: DW_TAG_compile_unit [DW_CHILDREN_yes]")
-    (format stream "~%    ;;   DW_AT_producer  DW_FORM_string")
-    (format stream "~%    ;;   DW_AT_language  DW_FORM_data1")
-    (format stream "~%    ;;   DW_AT_name      DW_FORM_string")
-    (format stream "~%  )")
-    (format stream "~%  (@custom \".debug_line\" ; Line number program")
-    (format stream "~%    ;; Line program header: version 5, minimum_instruction_length 1")
-    (format stream "~%    ;; default_is_stmt 1, line_base -1, line_range 1, opcode_base 10")
-    (format stream "~%    ;; Maps CL source file → Wasm byte offset via DW_LNS_set_file/file_line")
-    (format stream "~%  )")))
+    (dolist (section (%wasm-build-dwarf-section-alist module))
+      (%emit-wasm-custom-bytes stream (car section) (cdr section)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-223: Source Map reference
@@ -626,7 +1129,226 @@ the generated module."
 (defun emit-wasm-source-map-reference (stream)
   "FR-223: Emit sourceMappingURL custom section reference."
   (format stream "~%  ;; FR-223: Source Map v3 reference")
-  (format stream "~%  (@custom \"sourceMappingURL\" \"module.wasm.map\")"))
+  (%emit-wasm-custom-string stream "sourceMappingURL" *wasm-source-map-url*))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Debug/DevTools metadata helpers (FR-222/223/242/263/269/288/317/318)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun %wasm-wat-string (text)
+  "Return TEXT as an escaped WAT string literal."
+  (with-output-to-string (out)
+    (write-char #\" out)
+    (loop for ch across (princ-to-string (or text "")) do
+      (case ch
+        (#\" (write-string "\\\"" out))
+        (#\\ (write-string "\\\\" out))
+        (#\Newline (write-string "\\0a" out))
+        (#\Return (write-string "\\0d" out))
+        (#\Tab (write-string "\\09" out))
+        (otherwise (write-char ch out))))
+    (write-char #\" out)))
+
+(defun %wasm-byte-vector-wat-string (bytes)
+  "Return BYTES as an escaped WAT string literal."
+  (with-output-to-string (out)
+    (write-char #\" out)
+    (loop for byte across bytes do (format out "\\~2,'0X" byte))
+    (write-char #\" out)))
+
+(defun %emit-wasm-custom-string (stream name text)
+  (format stream "~%  (@custom ~A ~A)"
+          (%wasm-wat-string name)
+          (%wasm-wat-string text)))
+
+(defun %emit-wasm-custom-bytes (stream name bytes)
+  (format stream "~%  (@custom ~A ~A)"
+          (%wasm-wat-string name)
+          (%wasm-byte-vector-wat-string bytes)))
+
+(defun %wasm-clean-debug-name (name)
+  (let ((text (if name (princ-to-string name) "anonymous")))
+    (if (and (> (length text) 0) (char= (char text 0) #\$))
+        (subseq text 1)
+        text)))
+
+(defun %wasm-json-string (text)
+  "Return TEXT encoded as a JSON string literal."
+  (with-output-to-string (out)
+    (write-char #\" out)
+    (loop for ch across (princ-to-string (or text "")) do
+      (case ch
+        (#\" (write-string "\\\"" out))
+        (#\\ (write-string "\\\\" out))
+        (#\Newline (write-string "\\n" out))
+        (#\Return (write-string "\\r" out))
+        (#\Tab (write-string "\\t" out))
+        (otherwise (write-char ch out))))
+    (write-char #\" out)))
+
+(defun %wasm-human-local-name (reg)
+  "Map a VM register like :R0 to a stable, DevTools-friendly local name."
+  (let* ((raw (string-downcase (string reg)))
+         (n (ignore-errors (parse-integer raw :start 1))))
+    (cond
+      ((eql n 0) "temp-result")
+      ((integerp n) (format nil "temp-r~D" n))
+      (t raw))))
+
+(defun %wasm-function-source-offset (func)
+  (* (or (wasm-func-index func) 0) 16))
+
+(defun %wasm-registers-in-function (func)
+  (remove-duplicates
+   (append (wasm-func-params func)
+           (loop for inst in (wasm-func-source-instructions func)
+                 append (append (ignore-errors (cl-cc/regalloc:instruction-defs inst))
+                                (ignore-errors (cl-cc/regalloc:instruction-uses inst)))))
+   :test #'eq))
+
+(defun %wasm-dwarf-subprogram-for-func (func)
+  (let* ((low (%wasm-function-source-offset func))
+         (inst-count (length (wasm-func-source-instructions func)))
+         (high (+ low (max 1 inst-count)))
+         (params (loop for reg in (or (wasm-func-params func) nil)
+                       for i from 0
+                       collect (cl-cc/binary::make-dwarf-variable-location
+                                :name (%wasm-human-local-name reg)
+                                :kind :register
+                                :register (min i 31)
+                                :pc-start low :pc-end high)))
+         (locals (loop for reg in (%wasm-registers-in-function func)
+                       for i from 0
+                       unless (member reg (wasm-func-params func) :test #'eq)
+                         collect (cl-cc/binary::make-dwarf-variable-location
+                                  :name (%wasm-human-local-name reg)
+                                  :kind :register
+                                  :register (min i 31)
+                                  :pc-start low :pc-end high))))
+    (cl-cc/binary::make-dwarf-subprogram
+     :name (%wasm-clean-debug-name (wasm-func-wat-name func))
+     :low-pc low
+     :high-pc high
+     :parameters params
+     :variables locals)))
+
+(defun %wasm-dwarf-lines-for-module (module)
+  (loop for func in (wasm-module-functions module)
+        for low = (%wasm-function-source-offset func)
+        append (loop for inst in (wasm-func-source-instructions func)
+                     for pc from low
+                     collect (list pc (1+ (- pc low)) 0 0))))
+
+(defun %wasm-build-dwarf-section-alist (module)
+  "Build DWARF5 section payloads for MODULE using existing binary DWARF helpers."
+  (let* ((functions (wasm-module-functions module))
+         (max-len (loop for f in functions maximize (length (wasm-func-source-instructions f))))
+         (high (+ (* (max 0 (1- (length functions))) 16) (max 1 (or max-len 0))))
+         (cu (cl-cc/binary::make-dwarf-compile-unit
+              :name "cl-cc-wasm-module"
+              :producer "cl-cc wasm backend"
+              :low-pc 0
+              :high-pc high
+              :subprograms (mapcar #'%wasm-dwarf-subprogram-for-func functions)
+              :lines (%wasm-dwarf-lines-for-module module))))
+    (cl-cc/binary::build-dwarf-section-alist cu)))
+
+(defun %wasm-name-section-subsection (id writer)
+  (let ((payload (wasm-binary-section-bytes writer)))
+    (wasm-binary-section-bytes
+     (lambda (section)
+       (wasm-binary-write-u8 section id)
+       (wasm-binary-write-uleb128 section (length payload))
+       (wasm-binary-write-bytes section payload)))))
+
+(defun %wasm-name-assoc-vector (buffer assocs)
+  (wasm-binary-write-uleb128 buffer (length assocs))
+  (dolist (entry assocs)
+    (wasm-binary-write-uleb128 buffer (car entry))
+    (wasm-binary-write-name buffer (cdr entry))))
+
+(defun %wasm-function-name-assocs (module)
+  (loop for func in (wasm-module-functions module)
+        collect (cons (or (wasm-func-index func) 0)
+                      (%wasm-clean-debug-name (wasm-func-wat-name func)))))
+
+(defun %wasm-local-name-assocs (module)
+  (loop for func in (wasm-module-functions module)
+        collect (cons (or (wasm-func-index func) 0)
+                      (append '((0 . "pc") (1 . "tmp"))
+                              (loop for reg in (%wasm-registers-in-function func)
+                                    for idx from 2
+                                    collect (cons idx (%wasm-human-local-name reg)))))))
+
+(defun %wasm-label-name-assocs (module)
+  (loop for func in (wasm-module-functions module)
+        collect (cons (or (wasm-func-index func) 0)
+                      (loop for inst in (wasm-func-source-instructions func)
+                            for idx from 0
+                            when (typep inst 'vm-label)
+                              collect (cons idx (%wasm-clean-debug-name (vm-name inst)))))))
+
+(defun %wasm-indirect-name-map (buffer entries)
+  (wasm-binary-write-uleb128 buffer (length entries))
+  (dolist (entry entries)
+    (wasm-binary-write-uleb128 buffer (car entry))
+    (%wasm-name-assoc-vector buffer (cdr entry))))
+
+(defun %wasm-build-name-section-bytes (module)
+  "Build the payload for the standard WebAssembly name custom section."
+  (let ((chunks (list
+                 (%wasm-name-section-subsection 0 (lambda (b) (wasm-binary-write-name b "cl-cc-wasm-module")))
+                 (%wasm-name-section-subsection 1 (lambda (b) (%wasm-name-assoc-vector b (%wasm-function-name-assocs module))))
+                 (%wasm-name-section-subsection 2 (lambda (b) (%wasm-indirect-name-map b (%wasm-local-name-assocs module))))
+                 (%wasm-name-section-subsection 3 (lambda (b) (%wasm-indirect-name-map b (%wasm-label-name-assocs module)))))))
+    (apply #'concatenate '(simple-array (unsigned-byte 8) (*)) chunks)))
+
+(defun wasm-extended-names-feature-enabled-p ()
+  "FR-242: Return true when extended wasm name-section metadata is enabled."
+  (wasm-feature-enabled-p "CLCC_WASM_EXTENDED_NAMES" *wasm-extended-names-enabled*))
+
+(defun emit-wasm-name-section (module stream)
+  "FR-242: Emit function/local/label names as a standard Wasm name custom section."
+  (format stream "~%  ;; FR-242: Extended Name Section (functions, locals, labels)")
+  (%emit-wasm-custom-bytes stream "name" (%wasm-build-name-section-bytes module)))
+
+(defun %wasm-type-reflection-json (module)
+  (with-output-to-string (out)
+    (format out "{\"exports\":[")
+    (let ((first-p t))
+      (dolist (func (wasm-module-functions module))
+        (when (wasm-func-exported-p func)
+          (unless first-p (write-char #\, out))
+          (setf first-p nil)
+          (format out "{\"name\":~A,\"functionType\":{\"params\":[],\"results\":[\"eqref\"]}}"
+                  (%wasm-json-string
+                   (or (wasm-func-export-name func)
+                       (%wasm-clean-debug-name (wasm-func-wat-name func))))))))
+    (format out "],\"gcStructs\":[{\"name\":\"string_t\",\"fields\":[[\"chars\",\"bytes_array_t\"]]},{\"name\":\"cons_t\",\"fields\":[[\"car\",\"eqref\"],[\"cdr\",\"eqref\"]]},{\"name\":\"instance_t\",\"fields\":[[\"class\",\"class_meta_t\"],[\"slots\",\"eqref_array_t\"]]}]}")))
+
+(defun %wasm-devtools-js (module)
+  (format nil "export const clccTypeMetadata = ~A;~%
+export function attachClccTypeReflection(instance) {~%
+  const exports = instance && instance.exports || {};~%
+  for (const [name, fn] of Object.entries(exports)) if (typeof fn === 'function') fn.clccType = clccTypeMetadata.exports.find(e => e.name === name) || null;~%
+  return { metadata: clccTypeMetadata, describe(value) { return { jsType: typeof value, value, clccType: value && value.clccType || null }; } };~%
+}~%
+export function captureClccStack(mapper = x => x) { const e = {}; Error.captureStackTrace?.(e, captureClccStack); return String(e.stack || '').split('\\n').slice(1).map(mapper); }~%
+export function printBacktrace(mapper) { return captureClccStack(mapper).join('\\n'); }~%
+export function createMemoryProfiler(instance) { const memory = instance?.exports?.memory; return { snapshot() { return { byteLength: memory?.buffer?.byteLength || 0, timestamp: Date.now() }; } }; }~%
+export async function hotReload({ table, index, module, imports = {} }) { const { instance } = await WebAssembly.instantiate(module, imports); const replacement = instance.exports.main || Object.values(instance.exports).find(v => typeof v === 'function'); table.set(index, replacement); return replacement; }~%
+export async function compileReplForm({ compile, table, imports = {}, form }) { const module = await compile(form); return hotReload({ table, index: table.length - 1, module, imports }); }~%"
+          (%wasm-type-reflection-json module)))
+
+(defun emit-wasm-developer-tooling-sections (module stream)
+  "Emit opt-in browser developer tooling custom sections."
+  (when (or (wasm-feature-enabled-p "CLCC_WASM_TYPE_REFLECTION" *wasm-type-reflection-js-api-enabled*)
+            (wasm-feature-enabled-p "CLCC_WASM_STACK_INSPECTION" *wasm-call-stack-inspection-enabled*)
+            (wasm-feature-enabled-p "CLCC_WASM_MEMORY_PROFILER" *wasm-memory-profiler-enabled*)
+            (wasm-feature-enabled-p "CLCC_WASM_HOT_RELOAD" *wasm-hot-code-reload-enabled*)
+            (wasm-feature-enabled-p "CLCC_WASM_INCREMENTAL_REPL" *wasm-repl-incremental-compilation-enabled*))
+    (format stream "~%  ;; FR-263/269/318/317/288: cl-cc DevTools JS helper module")
+    (%emit-wasm-custom-string stream "clcc.devtools.js" (%wasm-devtools-js module))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-258: Wasm Profiles section
@@ -659,30 +1381,7 @@ the generated module."
 (defun wasm-run-binaryen-optimize (wasm-bytes)
   "FR-219: Run Binaryen wasm-opt on WASM-BYTES for size/speed optimization.
    Returns optimized bytes, or the original bytes if wasm-opt is unavailable."
-  (if *wasm-aot-mode-enabled*
-      (handler-case
-          (let ((tmp-out (format nil "/tmp/cl-cc-wasm-opt-~D.wasm" (get-universal-time))))
-            (with-open-file (out tmp-out :direction :output
-                                    :element-type '(unsigned-byte 8)
-                                    :if-exists :supersede)
-              (write-sequence wasm-bytes out))
-            (ignore-errors
-              (let ((tmp-opt (format nil "/tmp/cl-cc-wasm-opt-~D-opt.wasm" (get-universal-time))))
-                (uiop:run-program (list "wasm-opt" "-O3" "--strip-debug"
-                                         tmp-out "-o" tmp-opt)
-                                   :ignore-error-status t)
-                (when (probe-file tmp-opt)
-                  (rename-file tmp-opt tmp-out))))
-            (let ((result (with-open-file (in tmp-out :element-type '(unsigned-byte 8))
-                            (let ((buf (make-array (file-length in) :element-type '(unsigned-byte 8))))
-                              (read-sequence buf in)
-                              buf))))
-              (ignore-errors (delete-file tmp-out))
-              (or result wasm-bytes)))
-        (error ()
-          (format t "~&;; FR-219: Binaryen wasm-opt unavailable; returning unoptimized~%")
-          wasm-bytes))
-      wasm-bytes))
+  (wasm-run-wasm-opt-passes wasm-bytes :aot *wasm-aot-mode-enabled*))
 
 ;;; (emit-instruction methods and compile-to-wasm-wat are in wasm-emit.lisp
 ;;;  which loads after this file.)

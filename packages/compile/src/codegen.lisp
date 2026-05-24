@@ -49,6 +49,15 @@
 (defvar *forward-reference-patch-table* (make-hash-table :test #'equal)
   "FR-920 table mapping unresolved reference names to pending fixup plists.")
 
+(defgeneric wasm-fixnum-range-annotation (object &optional context)
+  (:documentation
+   "FR-145 hook for Wasm fixnum range metadata.
+
+Backends may specialize this generic function to return either NIL or a
+(min . max) cons usable by the Wasm backend to skip redundant fixnum
+box/unbox operations without changing the core compilation pipeline."))
+
+
 (define-condition unresolved-forward-reference-error (error)
   ((references :initarg :references :reader unresolved-forward-reference-error-references))
   (:report (lambda (c s)

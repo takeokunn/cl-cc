@@ -126,9 +126,9 @@ FR-254.")
   "Feature gate for Wasm GC null safety (br_on_null/ref.as_non_null).
 FR-270.")
 
-(defparameter *wasm-multi-value-enabled* t
+(defparameter *wasm-multi-value-enabled* nil
   "Feature gate for Wasm Multi-value returns.
-FR-235.")
+  FR-235. Default NIL because this changes the public Wasm ABI.")
 
 (defparameter *wasm-bigint-enabled* nil
   "Feature gate for JS BigInt ↔ i64 integration.

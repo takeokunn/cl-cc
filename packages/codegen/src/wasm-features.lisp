@@ -3,6 +3,11 @@
 ;;;; Centralized feature gates for all Wasm proposals implemented in
 ;;;; the cl-cc wasm backend. Each flag defaults to the most appropriate
 ;;;; value given current browser/engine support as of 2026.
+;;;;
+;;;; Default-NIL policy: flags that change the ABI, require security headers,
+;;;; depend on unstable proposals, or need host/runtime coordination stay opt-in.
+;;;; These defaults are intentionally conservative and must not be flipped by
+;;;; documentation-only or metadata-only Wasm work.
 
 (in-package :cl-cc/codegen)
 
@@ -21,6 +26,8 @@
 
 (defparameter *wasm-bulk-table-enabled* t
   "FR-237: Use table.init/table.copy/table.fill/elem.drop.") ;; MVP v1.1
+
+;;; ABI-sensitive proposal defaults remain NIL until all call boundaries agree.
 
 (defparameter *wasm-multi-value-enabled* nil
   "FR-235: Use wasm multi-value returns for CL values. WARNING: changes ABI.") ;; MVP v1.1
@@ -46,8 +53,20 @@
 (defparameter *wasm-exception-handling-v2-enabled* t
   "FR-252: Use try_table/throw_ref/exnref for EH v2.") ;; Chrome 123+
 
+;;; Threading/memory expansion defaults remain NIL unless the host can provide
+;;; SharedArrayBuffer isolation, memory64/table64 support, and matching runtime ABI.
+
 (defparameter *wasm-multiple-memories-enabled* nil
   "FR-208: Use multiple linear memories (stack/heap/strings).") ;; Chrome 92+
+
+(defconstant +wasm-memory-stack+ 0
+  "FR-208: Memory index 0, used for stack-oriented linear-memory helpers.")
+
+(defconstant +wasm-memory-gc-heap+ 1
+  "FR-208: Memory index 1, used for GC heap linear-memory helpers.")
+
+(defconstant +wasm-memory-strings+ 2
+  "FR-208: Memory index 2, used for string interning/transcoding helpers.")
 
 (defparameter *wasm-typed-func-refs-enabled* t
   "FR-212: Use typed function references (call_ref, ref.func).") ;; Chrome 113+
@@ -157,6 +176,9 @@
 (defparameter *wasm-source-map-enabled* t
   "FR-223: Generate Source Map v3 for browser debugging.")
 
+(defparameter *wasm-source-map-url* "module.wasm.map"
+  "FR-223: sourceMappingURL payload embedded in the Wasm custom section.")
+
 (defparameter *wasm-extended-names-enabled* t
   "FR-242: Embed local variable names in Name Section.")
 
@@ -185,7 +207,7 @@
 (defparameter *wasm-exception-js-api-enabled* t
   "FR-262: Use WebAssembly.Exception JS API for CL<->JS exception bridge.")
 
-(defparameter *wasm-type-reflection-js-api-enabled* t
+(defparameter *wasm-type-reflection-js-api-enabled* nil
   "FR-263: Use WebAssembly.Descriptor API for runtime type inspection.")
 
 (defparameter *wasm-coop-coep-headers-enabled* nil
@@ -194,12 +216,21 @@
 (defparameter *wasm-service-worker-enabled* nil
   "FR-302: Generate Service Worker + manifest.json for PWA.")
 
+(defparameter *wasm-coop-enabled* nil
+  "FR-297: Emit Cross-Origin-Opener-Policy guidance for wasm deployment.")
+
+(defparameter *wasm-coep-enabled* nil
+  "FR-297: Emit Cross-Origin-Embedder-Policy guidance for wasm deployment.")
+
 (defparameter *wasm-sri-hashes-enabled* nil
   "FR-307: Generate SHA-256 SRI integrity hashes.")
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Dynamic Linking / Runtime
 ;;; ─────────────────────────────────────────────────────────────────────────────
+
+;;; Runtime integration defaults remain NIL because they require loader/linker or
+;;; REPL coordination outside the core single-module compilation path.
 
 (defparameter *wasm-dynamic-linking-enabled* nil
   "FR-227: Support side-module dynamic linking.")
@@ -214,6 +245,9 @@
 ;;; Security
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+;;; Security opt-ins default to NIL when they can alter semantics or deployment
+;;; requirements; metadata-only hardening flags may stay enabled.
+
 (defparameter *wasm-typed-select-enabled* t
   "FR-279: Typed select for reference type conditional selection.")
 
@@ -223,15 +257,24 @@
 (defparameter *wasm-constant-time-enabled* nil
   "FR-261: Convert crypto branches to select for timing safety.")
 
+(defparameter *wasm-cfi-enabled* t
+  "FR-261: Emit CFI-oriented typed call_ref/call_indirect metadata.")
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Experimental / Phase 1-3 Proposals (default OFF)
 ;;; ─────────────────────────────────────────────────────────────────────────────
+
+;;; Experimental flags in this section default to NIL until proposal syntax,
+;;; browser/toolchain support, and cl-cc runtime semantics are all stable.
 
 (defparameter *wasm-wide-arithmetic-enabled* nil
   "FR-238: Use i64.add128/sub128/mul_wide for 128-bit bignum ops. Phase 3.")
 
 (defparameter *wasm-custom-page-sizes-enabled* nil
   "FR-239: Use 4KB memory pages for finer GC heap. Phase 3.")
+
+(defparameter *wasm-custom-page-size* 4096
+  "FR-239: Requested custom wasm memory page size in bytes when enabled.")
 
 (defparameter *wasm-compact-import-section-enabled* nil
   "FR-240: Compress import names in binary. Phase 3.")
@@ -459,8 +502,14 @@
     ("--no-simd" . *wasm-simd128-enabled*)  ; negated
     ("--exception-handling" . *wasm-exception-handling-enabled*)
     ("--source-map" . *wasm-source-map-enabled*)
+    ("--debug-info" . *wasm-dwarf-debug-info-enabled*)
     ("--emit-debug-info" . *wasm-dwarf-debug-info-enabled*)
     ("--emit-names" . *wasm-extended-names-enabled*)
+    ("--type-reflection" . *wasm-type-reflection-js-api-enabled*)
+    ("--stack-inspection" . *wasm-call-stack-inspection-enabled*)
+    ("--memory-profiler" . *wasm-memory-profiler-enabled*)
+    ("--hot-reload" . *wasm-hot-code-reload-enabled*)
+    ("--incremental-repl" . *wasm-repl-incremental-compilation-enabled*)
     ("--streaming" . *wasm-streaming-compilation-enabled*)
     ("--pgo" . *wasm-pgo-enabled*)
     ("--memory64" . *wasm-memory64-enabled*)

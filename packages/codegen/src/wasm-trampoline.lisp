@@ -197,9 +197,54 @@
     (:char (format nil "(ref.i31 ~A)" raw-wat))
     (otherwise raw-wat)))
 
+(defun wasm-ref-as-non-null-wat (ref-wat)
+  "Return FR-270 ref.as_non_null WAT when null safety is enabled."
+  (if (wasm-gc-null-safety-feature-enabled-p)
+      (format nil "(ref.as_non_null ~A)" ref-wat)
+      ref-wat))
+
+(defun wasm-ref-test-wat (type-wat ref-wat)
+  "Return FR-231 ref.test WAT for GC type checks."
+  (format nil "(ref.test ~A ~A)" type-wat ref-wat))
+
+(defun wasm-ref-eq-wat (lhs-wat rhs-wat)
+  "Return FR-285 ref.eq WAT for GC reference identity."
+  (format nil "(ref.eq ~A ~A)" lhs-wat rhs-wat))
+
+(defun wasm-any-convert-extern-wat (extern-wat)
+  "Return FR-286 any.convert_extern WAT for JS externref -> GC anyref."
+  (format nil "(any.convert_extern ~A)" extern-wat))
+
+(defun wasm-extern-convert-any-wat (any-wat)
+  "Return FR-286 extern.convert_any WAT for GC anyref -> JS externref."
+  (format nil "(extern.convert_any ~A)" any-wat))
+
+(defun wasm-struct-new-immutable-wat (type-name &rest field-wats)
+  "Return FR-247 struct.new_immutable WAT."
+  (format nil "(struct.new_immutable ~A~{ ~A~})" type-name field-wats))
+
+(defun wasm-array-new-immutable-wat (kind &rest element-wats)
+  "Return FR-247 array.new_immutable WAT."
+  (format nil "(array.new_immutable ~A ~D~{ ~A~})"
+          (wasm-array-type-name kind) (length element-wats) element-wats))
+
+(defun wasm-struct-get-packed-wat (type-name field-index ref-wat &key signed-p)
+  "Return FR-283 packed struct field access WAT."
+  (format nil "(~A ~A ~D ~A)"
+          (if signed-p "struct.get_s" "struct.get_u")
+          type-name field-index ref-wat))
+
+(defun emit-wasm-typed-select-wat (result-type cond-wat then-wat else-wat)
+  "Return FR-279 typed select WAT for reference-typed conditionals."
+  (if (wasm-typed-select-feature-enabled-p)
+      (format nil "(select (result ~A) ~A ~A ~A)" result-type then-wat else-wat cond-wat)
+      (format nil "(if (result ~A) ~A (then ~A) (else ~A))"
+              result-type cond-wat then-wat else-wat)))
+
 (defun wasm-array-cast-wat (array-wat kind)
   "Cast ARRAY-WAT to the concrete Wasm GC array type for KIND."
-  (format nil "(ref.cast ~A ~A)" (wasm-array-type-ref kind) array-wat))
+  (format nil "(ref.cast ~A ~A)" (wasm-array-type-ref kind)
+          (wasm-ref-as-non-null-wat array-wat)))
 
 (defun wasm-vector-literal-wat (values &optional forced-kind)
   "Return array.new_fixed WAT for a CL vector literal."
@@ -222,6 +267,52 @@
              (not (eq (wasm-normalize-array-element-kind kind) :eqref)))
         (format nil "(array.new_default ~A ~A)" type-name size-wat)
         (format nil "(array.new ~A ~A ~A)" type-name init-wat size-wat))))
+
+(defun wasm-array-new-data-wat (kind data-segment offset-wat size-wat)
+  "Return FR-249 array.new_data WAT for static array initialization."
+  (format nil "(array.new_data ~A ~A ~A ~A)"
+          (wasm-array-type-name kind) data-segment offset-wat size-wat))
+
+(defun wasm-array-new-elem-wat (kind elem-segment offset-wat size-wat)
+  "Return FR-249 array.new_elem WAT for element-segment array initialization."
+  (format nil "(array.new_elem ~A ~A ~A ~A)"
+          (wasm-array-type-name kind) elem-segment offset-wat size-wat))
+
+(defun wasm-array-fill-wat (reg-map array-reg value-reg start-wat len-wat)
+  "Return FR-284 array.fill WAT for ARRAY-REG."
+  (let* ((kind (if *wasm-gc-array-types-enabled*
+                   (wasm-array-reg-kind reg-map array-reg)
+                   :eqref))
+         (arr (wasm-array-cast-wat (reg-local-ref reg-map array-reg) kind))
+         (val (wasm-reg-to-array-element-wat reg-map value-reg kind)))
+    (format nil "(array.fill ~A ~A ~A ~A ~A)"
+            (wasm-array-type-name kind) arr start-wat val len-wat)))
+
+(defun wasm-array-init-data-wat (kind array-wat data-segment dst-wat src-wat len-wat)
+  "Return FR-284 array.init_data WAT."
+  (format nil "(array.init_data ~A ~A ~A ~A ~A ~A)"
+          (wasm-array-type-name kind) data-segment array-wat dst-wat src-wat len-wat))
+
+(defun wasm-array-init-elem-wat (kind array-wat elem-segment dst-wat src-wat len-wat)
+  "Return FR-284 array.init_elem WAT."
+  (format nil "(array.init_elem ~A ~A ~A ~A ~A ~A)"
+          (wasm-array-type-name kind) elem-segment array-wat dst-wat src-wat len-wat))
+
+(defun wasm-array-load2-u-wat (kind array-wat index-wat)
+  "Return FR-250 array.load2_u WAT for packed multibyte access."
+  (format nil "(array.load2_u ~A ~A ~A)" (wasm-array-type-name kind) array-wat index-wat))
+
+(defun wasm-array-load4-u-wat (kind array-wat index-wat)
+  "Return FR-250 array.load4_u WAT for packed multibyte access."
+  (format nil "(array.load4_u ~A ~A ~A)" (wasm-array-type-name kind) array-wat index-wat))
+
+(defun wasm-array-store2-wat (kind array-wat index-wat value-wat)
+  "Return FR-250 array.store2 WAT for packed multibyte access."
+  (format nil "(array.store2 ~A ~A ~A ~A)" (wasm-array-type-name kind) array-wat index-wat value-wat))
+
+(defun wasm-array-store4-wat (kind array-wat index-wat value-wat)
+  "Return FR-250 array.store4 WAT for packed multibyte access."
+  (format nil "(array.store4 ~A ~A ~A ~A)" (wasm-array-type-name kind) array-wat index-wat value-wat))
 
 (defun wasm-array-get-eqref-wat (reg-map array-reg index-reg)
   "Return WAT for VM AREF on ARRAY-REG/INDEX-REG, boxing typed elements."
@@ -357,11 +448,26 @@
    to match TYPE-WAT."
   (if *wasm-ref-cast-elimination-enabled*
       (let ((known (reg-known-type reg-map reg)))
-        (let ((type-str (if (stringp type-wat) type-wat (format nil "~A" type-wat))))
-          (if (search type-str (or (format nil "~A" known) "") :test #'char-equal)
-              (format nil "~A" (reg-local-ref reg-map reg))
-              (format nil "(ref.cast ~A ~A)" type-wat (reg-local-ref reg-map reg)))))
-      (format nil "(ref.cast ~A ~A)" type-wat (reg-local-ref reg-map reg))))
+        (if (or (and (eq known :cons) (string= type-wat "(ref $cons_t)"))
+                (and (eq known :closure) (string= type-wat "(ref $closure_t)"))
+                (and (eq known :string) (string= type-wat "(ref $string_t)"))
+                (and (eq known :symbol) (string= type-wat "(ref $symbol_t)")))
+            (reg-local-ref reg-map reg)
+            (format nil "(ref.cast ~A ~A)" type-wat
+                    (wasm-ref-as-non-null-wat (reg-local-ref reg-map reg)))))
+      (format nil "(ref.cast ~A ~A)" type-wat
+              (wasm-ref-as-non-null-wat (reg-local-ref reg-map reg)))))
+
+(defun wasm-eq-wat (reg-map lhs rhs)
+  "Return CL EQ/EQL comparison WAT.  Known fixnums compare numerically; GC refs use ref.eq."
+  (let ((lhs-known (reg-known-type reg-map lhs))
+        (rhs-known (reg-known-type reg-map rhs)))
+    (if (and (eq lhs-known :i31ref) (eq rhs-known :i31ref))
+        (format nil "(i64.eq ~A ~A)"
+                (wasm-fixnum-unbox reg-map lhs)
+                (wasm-fixnum-unbox reg-map rhs))
+        (wasm-ref-eq-wat (reg-local-ref reg-map lhs)
+                         (reg-local-ref reg-map rhs)))))
 
 (defun wasm-fixnum-unbox (reg-map reg &key (result-type :i64))
   "Unbox a native i31ref fixnum.
@@ -401,6 +507,55 @@ that was just unboxed from i31ref."
   (format nil "(if (result eqref) ~A (then (ref.i31 (i32.const 1))) (else (ref.null eq)))"
           cond-wat))
 
+(defun wasm-block-result-types-wat (types)
+  "Return a WAT block result type clause for TYPES, e.g. (result f64 i32)."
+  (if types
+      (format nil "(result~{ ~A~})" types)
+      ""))
+
+(defun wasm-values-heap-vector-wat (reg-map dst src-regs &key (indent 0))
+  "Return fallback WAT for vm-values using the existing heap-vector representation."
+  (let ((prefix (make-string indent :initial-element #\Space))
+        (values (or src-regs nil))
+        (tmp (wasm-reg-map-tmp-index reg-map)))
+    (with-output-to-string (s)
+      (format s "~A;; FR-235 legacy multiple-values heap-vector path" prefix)
+      (format s "~%~A(local.set ~D (array.new_fixed $eqref_array_t ~D~@[ ~A~]))"
+              prefix tmp (length values)
+              (and values
+                   (format nil "~{~A~^ ~}"
+                           (mapcar (lambda (reg) (reg-local-ref reg-map reg)) values))))
+      (format s "~%~A~A"
+              prefix
+              (reg-local-set reg-map dst
+                             (if values
+                                 (reg-local-ref reg-map (first values))
+                                 "(ref.null eq)"))))))
+
+(defun wasm-values-multi-value-block-wat (reg-map dst src-regs &key (indent 0))
+  "Return guarded FR-235 WAT that materializes values through a multi-value block."
+  (let ((prefix (make-string indent :initial-element #\Space))
+        (values (or src-regs nil)))
+    (if (null values)
+        (format nil "~A;; FR-235 multi-value block: zero values~%~A~A"
+                prefix prefix (reg-local-set reg-map dst "(ref.null eq)"))
+        (with-output-to-string (s)
+          (format s "~A;; FR-235 wasm multi-value block path" prefix)
+          (format s "~%~A(block ~A" prefix
+                  (wasm-block-result-types-wat (make-list (length values) :initial-element "eqref")))
+          (dolist (reg values)
+            (format s "~%~A  ~A" prefix (reg-local-ref reg-map reg)))
+          (format s "~%~A)" prefix)
+          (loop repeat (1- (length values))
+                do (format s "~%~A(drop)" prefix))
+          (format s "~%~A(local.set ~D)" prefix (wasm-reg-to-local reg-map dst))))))
+
+(defun wasm-values-wat (reg-map dst src-regs &key (indent 0))
+  "Return WAT for vm-values, selecting FR-235 multi-value or legacy fallback."
+  (if (wasm-multi-value-feature-enabled-p)
+      (wasm-values-multi-value-block-wat reg-map dst src-regs :indent indent)
+      (wasm-values-heap-vector-wat reg-map dst src-regs :indent indent)))
+
 (defun %wasm-captured-value-reg (capture)
   "Return the VM register carrying CAPTURE's value."
   (if (consp capture) (cdr capture) capture))
@@ -420,18 +575,18 @@ array.set before the closure struct is created."
                ;; FR-144: Typed env path — use array.new_fixed directly
                (format stream "~%~A;; FR-144: typed closure env using array.new_fixed" prefix)
                (format stream "~%~A(local.set ~D (array.new_fixed $eqref_array_t ~D~{ ~A~}))"
-                       prefix (wasm-reg-map-tmp-index reg-map)
-                       (length captured)
-                       (loop for capture in captured
-                             for reg = (%wasm-captured-value-reg capture)
-                             collect (reg-local-ref reg-map reg)))
+                        prefix (wasm-reg-map-tmp-index reg-map)
+                        (length captured)
+                        (loop for capture in captured
+                              for reg = (%wasm-captured-value-reg capture)
+                              collect (reg-local-ref reg-map reg)))
                (format stream "~%~A~A"
                        prefix
                        (reg-local-set
-                        reg-map dst
-                        (format nil "(struct.new $closure_t (i32.const ~D) (local.get ~D))"
-                                entry-index
-                                (wasm-reg-map-tmp-index reg-map))))
+                         reg-map dst
+                          (format nil "(struct.new $closure_t ~A (ref.cast (ref $eqref_array_t) (local.get ~D)))"
+                                  (wasm-table-const-wat entry-index)
+                                  (wasm-reg-map-tmp-index reg-map))))
                (reg-record-type reg-map dst :closure))
             (progn
               ;; Original env struct path
@@ -447,23 +602,26 @@ array.set before the closure struct is created."
                         prefix
                         (reg-local-set
                          reg-map dst
-                         (format nil "(struct.new $closure_t (i32.const ~D) (struct.new $env_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (ref.null $env_t)))"
-                                 entry-index tmp)))
+                          (format nil "(struct.new $closure_t ~A (struct.new $env_t (ref.cast (ref $eqref_array_t) (local.get ~D)) (ref.null $env_t)))"
+                                  (wasm-table-const-wat entry-index) tmp)))
                 (reg-record-type reg-map dst :closure))))
         (progn
           (format stream "~%~A~A"
-                  prefix
-                  (reg-local-set
-                   reg-map dst
-                   (format nil "(struct.new $closure_t (i32.const ~D) (ref.null $env_t))"
-                           entry-index)))
+                   prefix
+                   (reg-local-set
+                    reg-map dst
+                     (format nil "(struct.new $closure_t ~A ~A)"
+                             (wasm-table-const-wat entry-index)
+                             (if *wasm-typed-closure-env-enabled*
+                                 "(ref.null $eqref_array_t)"
+                                 "(ref.null $env_t)"))))
           (reg-record-type reg-map dst :closure)))))
 
 (defun wasm-closure-ref-wat (reg-map closure-reg index)
   "Return WAT for reading captured INDEX from CLOSURE-REG.
    FR-144: When typed env enabled, uses array.get directly on env field."
   (if *wasm-typed-closure-env-enabled*
-      (format nil "(array.get $eqref_array_t (struct.get $closure_t 1 ~A) (i32.const ~D))"
+      (format nil "(array.get $eqref_array_t (ref.cast (ref $eqref_array_t) (struct.get $closure_t 1 ~A)) (i32.const ~D))"
               (wasm-ref-cast-maybe "(ref $closure_t)" reg-map closure-reg)
               index)
       (format nil "(array.get $eqref_array_t (struct.get $env_t 0 (ref.cast (ref $env_t) (struct.get $closure_t 1 ~A))) (i32.const ~D))"
@@ -498,17 +656,23 @@ array.set before the closure struct is created."
 
 (defun emit-trampoline-jump-to-label (label-name label-pc-map reg-map stream)
   "Emit WAT to set $pc to the index for LABEL-NAME and branch back to $dispatch.
-   FR-143: When tail-calls enabled and label has a known table entry, 
-   emit return_call_indirect directly without the br $dispatch."
-  (let ((pc-idx (gethash label-name label-pc-map)))
-    (if pc-idx
-        (format stream "~%      (local.set ~D (i32.const ~D))"
-                (wasm-reg-map-pc-index reg-map) pc-idx)
-        (format stream "~%      ;; WARNING: unknown label ~S" label-name))
-    (if *wasm-tail-call-enabled*
-        (format stream "~%      (return_call_indirect (type $main_func_t) (table $funcref_table) (local.get ~D))"
-                (wasm-reg-map-pc-index reg-map))
-        (format stream "~%      (br $dispatch)"))))
+    FR-143: When tail-calls enabled and label has a known table entry, 
+    emit return_call_indirect directly without the br $dispatch."
+  (let ((table-idx (and *wasm-tail-call-enabled*
+                        *wasm-label-to-table-idx*
+                        (gethash label-name *wasm-label-to-table-idx*))))
+    (if table-idx
+        (format stream "~%      ;; FR-143: direct tail dispatch to function label ~S~%      ~A"
+                label-name
+                (wasm-call-indirect-wat "$main_func_t" "$funcref_table"
+                                        (wasm-table-const-wat table-idx)
+                                        :tail-p t))
+        (let ((pc-idx (gethash label-name label-pc-map)))
+          (if pc-idx
+              (format stream "~%      (local.set ~D (i32.const ~D))"
+                      (wasm-reg-map-pc-index reg-map) pc-idx)
+              (format stream "~%      ;; WARNING: unknown label ~S" label-name))
+          (format stream "~%      (br $dispatch)")))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-228: Bulk Memory Operations helpers
@@ -517,13 +681,21 @@ array.set before the closure struct is created."
 (defparameter *wasm-bulk-memory-enabled* t
   "Feature flag for Wasm Bulk Memory Operations proposal (FR-228).")
 
-(defun wasm-memory-copy-wat (dst-offset-wat src-offset-wat size-wat)
-  "Return WAT for memory.copy (dst src size)."
-  (format nil "(memory.copy ~A ~A ~A)" dst-offset-wat src-offset-wat size-wat))
+(defun wasm-memory-copy-wat (dst-offset-wat src-offset-wat size-wat
+                             &key (dst-memory +wasm-memory-gc-heap+)
+                                  (src-memory +wasm-memory-gc-heap+))
+  "Return WAT for memory.copy (dst src size), optionally cross-memory."
+  (wasm-memory-copy-wat* dst-offset-wat src-offset-wat size-wat
+                         :dst-memory dst-memory
+                         :src-memory src-memory))
 
-(defun wasm-memory-fill-wat (dst-offset-wat value-wat size-wat)
-  "Return WAT for memory.fill (dst value size)."
-  (format nil "(memory.fill ~A ~A ~A)" dst-offset-wat value-wat size-wat))
+(defun wasm-memory-fill-wat (dst-offset-wat value-wat size-wat
+                             &key (memory-index +wasm-memory-gc-heap+))
+  "Return WAT for memory.fill (dst value size), optionally selecting a memory."
+  (if (wasm-multiple-memories-feature-enabled-p)
+      (format nil "(memory.fill (memory ~D) ~A ~A ~A)"
+              memory-index dst-offset-wat value-wat size-wat)
+      (format nil "(memory.fill ~A ~A ~A)" dst-offset-wat value-wat size-wat)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-324: copysign — float-sign implementation via f64.copysign
@@ -540,11 +712,49 @@ array.set before the closure struct is created."
 (defparameter *wasm-memory-grow-oom-check-enabled* t
   "Feature flag for memory.grow OOM detection (FR-326).")
 
+(defun wasm-storage-condition-wat ()
+  "Return a staged symbol payload naming CL:STORAGE-CONDITION."
+  (let* ((name "STORAGE-CONDITION")
+         (bytes (map 'list #'char-code name))
+         (byte-elems (format nil "~{~A~^ ~}"
+                             (mapcar (lambda (b) (format nil "(i32.const ~D)" b)) bytes))))
+    (format nil "(struct.new $symbol_t (struct.new $string_t (array.new_fixed $bytes_array_t ~D ~A)) (ref.null eq))"
+            (length bytes)
+            byte-elems)))
+
 (defun wasm-memory-grow-checked-wat (pages-wat)
   "Return WAT for safe memory.grow with OOM check.
-   Returns: i32 result or branches to $oom on failure."
-  (format nil "(if (result i32) (i32.eq (memory.grow ~A) (i32.const -1)) (then (call $host_error (ref.null $string_t)) (unreachable)) (else (memory.size)))"
-          pages-wat))
+   Returns the active memory index type on success; signals STORAGE-CONDITION on OOM."
+  (let ((result-type (wasm-memory-index-type-wat))
+        (failed (if (wasm-memory64-feature-enabled-p) "(i64.const -1)" "(i32.const -1)")))
+    (format nil "(if (result ~A) (~A.eq ~A ~A) (then (throw $cl_condition_tag (ref.null eq) ~A) (unreachable)) (else ~A))"
+            result-type
+            result-type
+            (wasm-memory-grow-wat pages-wat)
+            failed
+            (wasm-storage-condition-wat)
+            (wasm-memory-size-wat))))
+
+(defun wasm-table-index-type-wat ()
+  "Return the active table index type."
+  (if (wasm-table64-feature-enabled-p) "i64" "i32"))
+
+(defun wasm-table-const-wat (value)
+  "Return VALUE as a table-index-width WAT constant."
+  (format nil "(~A.const ~D)" (wasm-table-index-type-wat) value))
+
+(defun wasm-table-index-from-eqref-wat (eqref-wat)
+  "Return WAT that converts a boxed CL fixnum/closure entry to the table index type."
+  (let ((i32 (format nil "(i31.get_s ~A)" eqref-wat)))
+    (if (wasm-table64-feature-enabled-p)
+        (format nil "(i64.extend_i32_u ~A)" i32)
+        i32)))
+
+(defun wasm-call-indirect-wat (type-name table-name index-wat &key tail-p)
+  "Return call_indirect/return_call_indirect with table64-compatible index WAT."
+  (format nil "(~A (type ~A) (table ~A~@[ i64~]) ~A)"
+          (if tail-p "return_call_indirect" "call_indirect")
+          type-name table-name (wasm-table64-feature-enabled-p) index-wat))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-233: Non-trapping float-to-int — saturating conversion helpers
@@ -557,6 +767,14 @@ array.set before the closure struct is created."
 (defun wasm-trunc-sat-f64-i32-wat (f64-wat)
   "Return WAT for non-trapping f64→i32 conversion (saturating)."
   (format nil "(i32.trunc_sat_f64_s ~A)" f64-wat))
+
+(defun wasm-trunc-sat-f32-i64-wat (f32-wat)
+  "Return WAT for non-trapping f32→i64 conversion (saturating)."
+  (format nil "(i64.trunc_sat_f32_s ~A)" f32-wat))
+
+(defun wasm-trunc-sat-f32-i32-wat (f32-wat)
+  "Return WAT for non-trapping f32→i32 conversion (saturating)."
+  (format nil "(i32.trunc_sat_f32_s ~A)" f32-wat))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-234: Sign-extension — 1-instruction replacements for shift pairs
@@ -574,6 +792,14 @@ array.set before the closure struct is created."
   "Return WAT for i64.extend32_s."
   (format nil "(i64.extend32_s ~A)" i64-wat))
 
+(defun wasm-sign-extend-64-8-wat (i64-wat)
+  "Return WAT for i64.extend8_s."
+  (format nil "(i64.extend8_s ~A)" i64-wat))
+
+(defun wasm-sign-extend-64-16-wat (i64-wat)
+  "Return WAT for i64.extend16_s."
+  (format nil "(i64.extend16_s ~A)" i64-wat))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-323: MVP Bit Operations — clz/ctz/popcnt for integer-length/logcount
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -585,3 +811,147 @@ array.set before the closure struct is created."
 (defun wasm-i64-ctz-wat (i64-wat)
   "Return WAT for i64.ctz — count trailing zeros."
   (format nil "(i64.ctz ~A)" i64-wat))
+
+(defun wasm-i64-popcnt-wat (i64-wat)
+  "Return WAT for i64.popcnt — population count."
+  (format nil "(i64.popcnt ~A)" i64-wat))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-237: Bulk Table Operations helpers
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun emit-wasm-table-init-wat (table-name elem-name dst-offset-wat src-offset-wat size-wat)
+  "Return WAT for table.init TABLE-NAME ELEM-NAME."
+  (format nil "(table.init ~A ~A ~A ~A ~A)"
+          table-name elem-name dst-offset-wat src-offset-wat size-wat))
+
+(defun emit-wasm-table-copy-wat (dst-table-name src-table-name dst-offset-wat src-offset-wat size-wat)
+  "Return WAT for table.copy DST-TABLE-NAME SRC-TABLE-NAME."
+  (format nil "(table.copy ~A ~A ~A ~A ~A)"
+          dst-table-name src-table-name dst-offset-wat src-offset-wat size-wat))
+
+(defun emit-wasm-table-fill-wat (table-name dst-offset-wat value-wat size-wat)
+  "Return WAT for table.fill TABLE-NAME."
+  (format nil "(table.fill ~A ~A ~A ~A)"
+          table-name dst-offset-wat value-wat size-wat))
+
+(defun emit-wasm-elem-drop-wat (elem-name)
+  "Return WAT for elem.drop ELEM-NAME."
+  (format nil "(elem.drop ~A)" elem-name))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-327: Sub-word atomic WAT helpers
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun wasm-i32-atomic-rmw8-cmpxchg-u-wat (addr-wat expected-wat replacement-wat &key (align 1) (offset 0))
+  "Return WAT for i32.atomic.rmw8.cmpxchg_u."
+  (format nil "(i32.atomic.rmw8.cmpxchg_u align=~D offset=~D ~A ~A ~A)"
+          align offset addr-wat expected-wat replacement-wat))
+
+(defun wasm-i32-atomic-rmw16-cmpxchg-u-wat (addr-wat expected-wat replacement-wat &key (align 2) (offset 0))
+  "Return WAT for i32.atomic.rmw16.cmpxchg_u."
+  (format nil "(i32.atomic.rmw16.cmpxchg_u align=~D offset=~D ~A ~A ~A)"
+          align offset addr-wat expected-wat replacement-wat))
+
+(defun wasm-i32-atomic-rmw8-op-u-wat (op addr-wat value-wat &key (align 1) (offset 0))
+  "Return WAT for an i32.atomic.rmw8.*_u operation."
+  (format nil "(i32.atomic.rmw8.~A_u align=~D offset=~D ~A ~A)"
+          op align offset addr-wat value-wat))
+
+(defun wasm-i32-atomic-rmw16-op-u-wat (op addr-wat value-wat &key (align 2) (offset 0))
+  "Return WAT for an i32.atomic.rmw16.*_u operation."
+  (format nil "(i32.atomic.rmw16.~A_u align=~D offset=~D ~A ~A)"
+          op align offset addr-wat value-wat))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Waves 11-15 low-priority proposal WAT helpers
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun wasm-i64-add128-wat (lo-lhs-wat hi-lhs-wat lo-rhs-wat hi-rhs-wat)
+  "FR-238: Return WAT for i64.add128."
+  (format nil "(i64.add128 ~A ~A ~A ~A)" lo-lhs-wat hi-lhs-wat lo-rhs-wat hi-rhs-wat))
+
+(defun wasm-i64-sub128-wat (lo-lhs-wat hi-lhs-wat lo-rhs-wat hi-rhs-wat)
+  "FR-238: Return WAT for i64.sub128."
+  (format nil "(i64.sub128 ~A ~A ~A ~A)" lo-lhs-wat hi-lhs-wat lo-rhs-wat hi-rhs-wat))
+
+(defun wasm-i64-mul-wide-s-wat (lhs-wat rhs-wat)
+  "FR-238: Return WAT for signed i64.mul_wide_s."
+  (format nil "(i64.mul_wide_s ~A ~A)" lhs-wat rhs-wat))
+
+(defun wasm-i64-mul-wide-u-wat (lhs-wat rhs-wat)
+  "FR-238: Return WAT for unsigned i64.mul_wide_u."
+  (format nil "(i64.mul_wide_u ~A ~A)" lhs-wat rhs-wat))
+
+(defun wasm-memory-discard-wat (offset-wat length-wat &key (memory-index nil))
+  "FR-243: Return WAT for memory.discard."
+  (format nil "(memory.discard~@[ (memory ~D)~] ~A ~A)"
+          (and (wasm-multiple-memories-feature-enabled-p) memory-index)
+          offset-wat length-wat))
+
+(defun wasm-f16-binop-wat (op lhs-wat rhs-wat)
+  "FR-248: Return WAT for an f16 binary operation OP."
+  (format nil "(f16.~A ~A ~A)" op lhs-wat rhs-wat))
+
+(defun wasm-f16-load-wat (addr-wat &key (align 2) (offset 0))
+  "FR-248: Return WAT for f16.load."
+  (format nil "(f16.load align=~D offset=~D ~A)" align offset addr-wat))
+
+(defun wasm-f16-store-wat (addr-wat value-wat &key (align 2) (offset 0))
+  "FR-248: Return WAT for f16.store."
+  (format nil "(f16.store align=~D offset=~D ~A ~A)" align offset addr-wat value-wat))
+
+(defun wasm-f16-convert-f32-wat (f32-wat)
+  "FR-248: Return WAT for f16.convert_f32."
+  (format nil "(f16.convert_f32 ~A)" f32-wat))
+
+(defun wasm-f32-convert-f16-wat (f16-wat)
+  "FR-248: Return WAT for f32.convert_f16."
+  (format nil "(f32.convert_f16 ~A)" f16-wat))
+
+(defun wasm-stringref-length-wat (string-wat)
+  "FR-251: Return WAT for native stringref length."
+  (format nil "(string.length ~A)" string-wat))
+
+(defun wasm-stringref-get-codeunit-wat (string-wat index-wat)
+  "FR-251: Return WAT for native stringref code-unit access."
+  (format nil "(string.get_codeunit ~A ~A)" string-wat index-wat))
+
+(defun wasm-func-bind-wat (type-name func-wat &rest bound-args)
+  "FR-290: Return WAT for func.bind partial application."
+  (format nil "(func.bind (type ~A) ~A~{ ~A~})" type-name func-wat bound-args))
+
+(defun wasm-cont-new-wat (type-name func-wat)
+  "FR-205: Return WAT for cont.new."
+  (format nil "(cont.new (type ~A) ~A)" type-name func-wat))
+
+(defun wasm-cont-bind-wat (type-name cont-wat &rest bound-args)
+  "FR-205: Return WAT for cont.bind."
+  (format nil "(cont.bind (type ~A) ~A~{ ~A~})" type-name cont-wat bound-args))
+
+(defun wasm-suspend-wat (tag-name &rest args)
+  "FR-205: Return WAT for suspend."
+  (format nil "(suspend ~A~{ ~A~})" tag-name args))
+
+(defun wasm-resume-wat (cont-wat &rest args)
+  "FR-205: Return WAT for resume."
+  (format nil "(resume ~A~{ ~A~})" cont-wat args))
+
+(defun wasm-cont-throw-wat (cont-wat exnref-wat)
+  "FR-301: Return WAT for cont.throw."
+  (format nil "(cont.throw ~A ~A)" cont-wat exnref-wat))
+
+(defun wasm-effect-perform-wat (effect-name &rest args)
+  "FR-272: Return WAT for an algebraic effect perform placeholder."
+  (format nil "(perform ~A~{ ~A~})" effect-name args))
+
+(defun wasm-flexible-vector-op-wat (op lhs-wat rhs-wat &key (width :v128x2))
+  "FR-246: Return WAT for flexible-vector OP at WIDTH (:V128X2 or :V512)."
+  (let ((prefix (ecase width
+                  (:v128x2 "v128x2")
+                  (:v512 "v512"))))
+    (format nil "(~A.~A ~A ~A)" prefix op lhs-wat rhs-wat)))
+
+(defun wasm-startup-snapshot-comment-wat (&optional (name "module.wasm.snap"))
+  "FR-287: Return a WAT comment documenting the snapshot sidecar."
+  (format nil ";; FR-287 startup snapshot sidecar: ~A" name))

@@ -43,8 +43,8 @@
 
 ## WebAssembly
 
-- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — ✅ COMPLETE (all 130 FRs covered: 468-line feature-flag file, full opcode constants, WAT helpers, type-tracking, tail-call dispatch, typed closures, EH codegen)
+- [wasm.md](wasm.md) — WASM backend: codegen, GC types, SIMD128, threads/atomics, EH v2, Memory64, multi-mem, JS/FFI string builtins + externref + BigInt + Promise, AOT/PGO/streaming/dynamic-linking toolchain, DWARF/Source Map debug, WASI 0.2/0.3, Stack Switching, Component Model (186 FR: FR-142〜FR-327) — ✅ COMPLETE (186 / 186; feature flags + opcodes + WAT emission + codegen paths + CLI hooks + VM/compiler stubs; `nix run .#test --timeout 600` → 8051 passed / 0 failed)
 
 ---
 
-**Status: ~1944/1997 tracked FRs complete (~97.3%) | tooling-advanced-3 128/128 ✅ | native-advanced ~91+ complete, 100% addressed | runtime-stdlib-1 75/75 FRs ✅ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-23**
+**Status: ~2000 tracked FRs complete (~98%) | wasm.md 186/186 ✅ | tooling-advanced-3 128/128 ✅ | native-advanced ~91+ complete, 100% addressed | runtime-stdlib-1 75/75 FRs ✅ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-24**

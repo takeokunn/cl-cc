@@ -222,6 +222,10 @@
   (sealed nil :reader vm-sealed-p)
   (:sexp-tag :class-def))
 
+;;; FR-210 Wasm GC mapping: vm-make-obj/vm-slot-read/vm-slot-write are
+;;; the VM-level CLOS object operations the Wasm backend maps to struct.new,
+;;; struct.get, and struct.set when dedicated GC struct types are enabled.
+
 (define-vm-instruction vm-make-obj (vm-instruction)
   "Create an instance of a class."
   (dst nil :reader vm-dst)

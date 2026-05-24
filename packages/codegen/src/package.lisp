@@ -238,7 +238,16 @@
 
     ;; ── WASM backend ──
    #:compile-to-wasm-wat
-   #:compile-to-wasm-binary))
+   #:compile-to-wasm-binary
+   #:compile-to-aot-wasm
+   #:wasm-aot-result
+   #:wasm-aot-result-bytes
+   #:wasm-aot-result-wat
+   #:wasm-aot-result-metadata
+   #:wasm-tool-available-p
+   #:wasm-run-tool-to-string
+   #:wasm-file-sri-hash
+   #:wasm-file-content-hash))
 
 ;; Declare sanitizer variables as special before x86-64-codegen-emitters.lisp
 ;; is compiled. Without this, SBCL compiles the let bindings in

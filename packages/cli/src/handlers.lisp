@@ -396,6 +396,189 @@ around the execution. Returns the value produced by RUN-COMPILED."
                            kwargs)))
       (ignore-errors (delete-file tmp)))))
 
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Wasm AOT/toolchain helpers (FR-219/221/232/265/305/307/322)
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %wasm-target-requested-p (arch-str parsed)
+  "Return T when CLI options select the wasm toolchain."
+  (or (flag parsed "--aot")
+      (member (string-downcase (or arch-str ""))
+              '("wasm" "wasm32" "wasm64" "wasm32-wasi")
+              :test #'string=)))
+
+(defun %wasm-output-file (input output aot)
+  "Return output pathname for wasm compilation."
+  (or output
+      (namestring (make-pathname :defaults (pathname input)
+                                 :type (if aot "wasm" "wat")))))
+
+(defun %write-string-file (path text)
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede
+                          :if-does-not-exist :create)
+    (write-string text out))
+  path)
+
+(defun %write-wasm-bytes-file (path bytes)
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede
+                          :if-does-not-exist :create
+                          :element-type '(unsigned-byte 8))
+    (write-sequence bytes out))
+  path)
+
+(defun %wasm-sidecar-path (output type)
+  (namestring (make-pathname :defaults (pathname output) :type type)))
+
+(defun %wasm-compile-source-to-vm-program (source file language kwargs)
+  "Compile SOURCE to a VM program so the wasm backend can consume it."
+  (compilation-result-program
+   (%wasm-compile-source-to-vm-result source file language kwargs)))
+
+(defun %wasm-compile-source-to-vm-result (source file language kwargs)
+  "Compile SOURCE to a VM compilation-result for wasm sidecar metadata."
+  (if (eq (or language :lisp) :lisp)
+      (apply #'compile-string source :source-file file :language :lisp :target :vm kwargs)
+      (apply #'compile-string source :language language :target :vm kwargs)))
+
+(defun %wasm-generate-streaming-js (output wasm-path content-hash integrity)
+  "Write FR-232 instantiateStreaming + IndexedDB cache glue next to OUTPUT."
+  (let* ((js-path (%wasm-sidecar-path output "js"))
+         (wasm-name (file-namestring (pathname wasm-path)))
+         (cache-key (format nil "cl-cc:wasm:~A" content-hash)))
+    (%write-string-file
+     js-path
+     (format nil "// cl-cc FR-232 streaming WebAssembly loader~%
+const DB = 'cl-cc-wasm-cache-v1';~%
+const STORE = 'modules';~%
+const CACHE_KEY = '~A';~%
+const WASM_URL = '~A';~%
+export const integrity = '~A';~%
+function openDb() {~%
+  return new Promise((resolve, reject) => {~%
+    const req = indexedDB.open(DB, 1);~%
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);~%
+    req.onsuccess = () => resolve(req.result);~%
+    req.onerror = () => reject(req.error);~%
+  });~%
+}~%
+async function cachedModule() {~%
+  const db = await openDb();~%
+  const tx = db.transaction(STORE, 'readonly');~%
+  const hit = await new Promise(resolve => { const r = tx.objectStore(STORE).get(CACHE_KEY); r.onsuccess = () => resolve(r.result); r.onerror = () => resolve(null); });~%
+  if (hit) return hit;~%
+  const module = await WebAssembly.compileStreaming(fetch(WASM_URL, { integrity }));~%
+  const put = db.transaction(STORE, 'readwrite').objectStore(STORE).put(module, CACHE_KEY);~%
+  await new Promise(resolve => { put.onsuccess = put.onerror = resolve; });~%
+  return module;~%
+}~%
+export async function instantiate(imports = {}) {~%
+  if (WebAssembly.instantiateStreaming) {~%
+    try { return await WebAssembly.instantiateStreaming(fetch(WASM_URL, { integrity }), imports); } catch (_) {}~%
+  }~%
+  return WebAssembly.instantiate(await cachedModule(), imports);~%
+}~%"
+             cache-key wasm-name (or integrity "")))
+    js-path))
+
+(defun %wasm-validate-file (path)
+  "Validate PATH with WebAssembly.validate and wasmtime when available."
+  (let ((ok t))
+    (when (cl-cc/codegen:wasm-tool-available-p "node")
+      (let ((script (format nil "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync(~S))?0:1)" path)))
+        (handler-case
+            (uiop:run-program (list "node" "-e" script) :ignore-error-status nil)
+          (error (e)
+            (setf ok nil)
+            (format *error-output* "WebAssembly.validate failed: ~A~%" e)))))
+    (when (cl-cc/codegen:wasm-tool-available-p "wasmtime")
+      (handler-case
+          (uiop:run-program (list "wasmtime" "validate" path) :ignore-error-status nil)
+        (error (e)
+          (setf ok nil)
+          (format *error-output* "wasmtime validate failed: ~A~%" e))))
+    ok))
+
+(defun %write-wasm-metadata (output metadata &key integrity sha256 sha384 streaming-js)
+  "Write build output metadata as a small deterministic JSON file."
+  (let ((path (%wasm-sidecar-path output "metadata.json")))
+    (%write-string-file
+     path
+     (format nil "{~%  \"format\": \"cl-cc-wasm-build-metadata-v1\",~%  \"wasm\": ~S,~%  \"sha256\": ~S,~%  \"sha384\": ~S,~%  \"integrity\": ~S,~%  \"htmlAttribute\": ~S,~%  \"streamingJs\": ~S,~%  \"aot\": ~A,~%  \"deterministic\": ~A~%}~%"
+             (file-namestring (pathname output))
+             (or sha256 (getf metadata :sha256) "")
+             (or sha384 "")
+             (or integrity "")
+             (if integrity (format nil "integrity=\"~A\"" integrity) "")
+             (or streaming-js "")
+             (if (eq (getf metadata :format) :cl-cc-wasm-aot-v1) "true" "false")
+             (if (getf metadata :deterministic) "true" "false")))
+    path))
+
+(defun %compile-to-wasm-output (file output language opts parsed kwargs)
+  "Compile FILE through the wasm toolchain and write requested artifacts."
+  (let* ((source (%read-command-source file))
+         (aot (flag parsed "--aot"))
+         (deterministic (compile-opts-deterministic opts))
+         (out (%wasm-output-file file output aot))
+          (map-path (parse-namestring (format nil "~A.map" (namestring (pathname out)))))
+          (cl-cc/codegen::*wasm-aot-mode-enabled* (not (null aot)))
+          (cl-cc/codegen::*wasm-source-map-enabled* (or (flag parsed "--source-map")
+                                                        cl-cc/codegen::*wasm-source-map-enabled*))
+          (cl-cc/codegen::*wasm-source-map-url* (file-namestring map-path))
+          (cl-cc/codegen::*wasm-dwarf-debug-info-enabled* (or (compile-opts-debug-info opts)
+                                                              (flag parsed "--emit-debug-info")
+                                                              cl-cc/codegen::*wasm-dwarf-debug-info-enabled*))
+          (cl-cc/codegen::*wasm-extended-names-enabled* (or (flag parsed "--emit-names")
+                                                            cl-cc/codegen::*wasm-extended-names-enabled*))
+          (cl-cc/codegen::*wasm-type-reflection-js-api-enabled* (or (flag parsed "--type-reflection")
+                                                                    cl-cc/codegen::*wasm-type-reflection-js-api-enabled*))
+          (cl-cc/codegen::*wasm-call-stack-inspection-enabled* (or (flag parsed "--stack-inspection")
+                                                                   cl-cc/codegen::*wasm-call-stack-inspection-enabled*))
+          (cl-cc/codegen::*wasm-memory-profiler-enabled* (or (flag parsed "--memory-profiler")
+                                                             cl-cc/codegen::*wasm-memory-profiler-enabled*))
+          (cl-cc/codegen::*wasm-hot-code-reload-enabled* (or (flag parsed "--hot-reload")
+                                                             cl-cc/codegen::*wasm-hot-code-reload-enabled*))
+          (cl-cc/codegen::*wasm-repl-incremental-compilation-enabled* (or (flag parsed "--incremental-repl")
+                                                                          (compile-opts-incremental opts)
+                                                                          cl-cc/codegen::*wasm-repl-incremental-compilation-enabled*))
+          (cl-cc/codegen::*wasm-memory64-enabled* (or (flag parsed "--memory64")
+                                                      cl-cc/codegen::*wasm-memory64-enabled*))
+         (cl-cc/codegen::*wasm-table64-enabled* (or (flag parsed "--memory64")
+                                                    cl-cc/codegen::*wasm-table64-enabled*))
+         (cl-cc/codegen::*wasm-js-bigint-i64-enabled* (or (flag parsed "--bigint")
+                                                          cl-cc/codegen::*wasm-js-bigint-i64-enabled*))
+          (vm-result (%wasm-compile-source-to-vm-result source file language kwargs))
+          (program (compilation-result-program vm-result)))
+    (if aot
+        (let* ((result (cl-cc/codegen:compile-to-aot-wasm program :deterministic deterministic))
+               (bytes (cl-cc/codegen:wasm-aot-result-bytes result)))
+          (%write-wasm-bytes-file out bytes)
+          (%write-string-file (%wasm-sidecar-path out "wat") (cl-cc/codegen:wasm-aot-result-wat result))
+          (when (flag parsed "--validate")
+            (unless (%wasm-validate-file out)
+              (uiop:quit 1)))
+          (let* ((sha256 (cl-cc/codegen:wasm-file-content-hash out :bits 256))
+                 (sha384 (cl-cc/codegen:wasm-file-content-hash out :bits 384))
+                 (integrity (when (or (flag parsed "--sri") (flag parsed "--streaming"))
+                              (cl-cc/codegen:wasm-file-sri-hash out :bits 384)))
+                 (streaming-js (when (flag parsed "--streaming")
+                                 (%wasm-generate-streaming-js out out sha256 integrity))))
+            (when (or (flag parsed "--sri") (flag parsed "--streaming") deterministic)
+              (%write-wasm-metadata out (cl-cc/codegen:wasm-aot-result-metadata result)
+                                    :integrity integrity :sha256 sha256 :sha384 sha384
+                                    :streaming-js streaming-js)))
+          out)
+        (let ((wat (cl-cc/codegen:compile-to-wasm-wat program)))
+          (%write-string-file out wat)
+          (when cl-cc/codegen::*wasm-source-map-enabled*
+            (cl-cc/emit:write-wasm-source-map vm-result map-path
+                                              :wasm-file (file-namestring (pathname out))
+                                              :source-file file)
+            (format *error-output* "; cl-cc wasm: wrote source map ~A~%" map-path))
+          out))))
+
 (defun %do-install (parsed)
   "Handle `cl-cc install' for local ASDF system files."
   (let ((file (%required-file-arg parsed "install")))
@@ -512,7 +695,9 @@ dumps the requested IR phase or writes a native binary, prints the output path,
 and exits with status 0 on success."
   (let* ((system-name (flag parsed "--system"))
          (file (or system-name (%required-file-arg parsed "compile")))
-         (arch-str (or (flag parsed "--arch") "x86-64"))
+         (arch-str (or (flag parsed "--target")
+                       (flag parsed "--arch")
+                       (if (flag parsed "--aot") "wasm32" "x86-64")))
          (arch (%arch-keyword arch-str))
          (output (flag-or parsed "--output" "-o"))
          (lang-flag (or (flag parsed "--lang") ""))
@@ -536,13 +721,21 @@ and exits with status 0 on success."
                    (if (eq (or language :lisp) :lisp)
                        (apply #'compile-string source :source-file file :language :lisp kwargs)
                        (apply #'compile-string source :language (or language :lisp) kwargs))))
-            (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
-                    (if (or debug (compile-opts-stack-protector opts))
-                        nil
-                        cl-cc/codegen::*x86-64-omit-frame-pointer*))
-                   (cl-cc/codegen::*x86-64-use-retpoline*
-                    (if (or (compile-opts-retpoline opts)
-                            (compile-opts-spectre-mitigations opts))
+             (let ((cl-cc/codegen::*x86-64-omit-frame-pointer*
+                     (if (or debug (compile-opts-stack-protector opts))
+                         nil
+                         cl-cc/codegen::*x86-64-omit-frame-pointer*))
+                   (cl-cc/codegen::*wasm-memory64-enabled*
+                    (if (flag parsed "--memory64")
+                        t
+                        cl-cc/codegen::*wasm-memory64-enabled*))
+                   (cl-cc/codegen::*wasm-table64-enabled*
+                    (if (flag parsed "--memory64")
+                        t
+                        cl-cc/codegen::*wasm-table64-enabled*))
+                    (cl-cc/codegen::*x86-64-use-retpoline*
+                     (if (or (compile-opts-retpoline opts)
+                             (compile-opts-spectre-mitigations opts))
                         t
                         cl-cc/codegen::*x86-64-use-retpoline*))
                    (cl-cc/codegen::*x86-64-spectre-mitigations-enabled*
@@ -553,6 +746,10 @@ and exits with status 0 on success."
                     (if (compile-opts-stack-protector opts) t cl-cc/codegen::*x86-64-stack-protector-enabled*))
                   (cl-cc/codegen::*x86-64-shadow-stack-enabled*
                     (if (compile-opts-shadow-stack opts) t cl-cc/codegen::*x86-64-shadow-stack-enabled*))
+                  (cl-cc/codegen::*wasm-bigint-enabled*
+                    (if (flag parsed "--bigint") t cl-cc/codegen::*wasm-bigint-enabled*))
+                  (cl-cc/codegen::*wasm-js-bigint-i64-enabled*
+                    (if (flag parsed "--bigint") t cl-cc/codegen::*wasm-js-bigint-i64-enabled*))
                   (cl-cc/codegen::*a64-omit-frame-pointer*
                     (if debug nil cl-cc/codegen::*a64-omit-frame-pointer*)))
               (if dump-ir
@@ -569,22 +766,25 @@ and exits with status 0 on success."
                   (%call-with-optional-output-file
                    (compile-opts-trace-json-path opts)
                    (lambda (stream)
-                     (let* ((source (%read-command-source file))
-                            (kwargs (%compile-opts-kwargs opts stream))
-                            (trace-result (when (compile-opts-trace-emit opts)
-                                            (apply #'compile-source source
-                                                   :target (%compile-target-keyword arch-str)
-                                                   kwargs)))
-                              (result (apply #'compile-file-to-native file
-                                             :arch arch
-                                             :output-file output
-                                             :language language
-                                             :compress compress
-                                             (append (if (compile-opts-bolt opts)
-                                                         (list :bolt t
-                                                               :bolt-profile (compile-opts-pgo-use-path opts))
-                                                         nil)
-                                                     kwargs))))
+                      (let* ((source (%read-command-source file))
+                             (kwargs (%compile-opts-kwargs opts stream))
+                             (trace-result (when (and (compile-opts-trace-emit opts)
+                                                     (not (%wasm-target-requested-p arch-str parsed)))
+                                             (apply #'compile-source source
+                                                    :target (%compile-target-keyword arch-str)
+                                                    kwargs)))
+                             (result (if (%wasm-target-requested-p arch-str parsed)
+                                         (%compile-to-wasm-output file output language opts parsed kwargs)
+                                         (apply #'compile-file-to-native file
+                                              :arch arch
+                                              :output-file output
+                                              :language language
+                                              :compress compress
+                                              (append (if (compile-opts-bolt opts)
+                                                          (list :bolt t
+                                                                :bolt-profile (compile-opts-pgo-use-path opts))
+                                                          nil)
+                                                      kwargs)))))
                        (when (and (compile-opts-pgo-generate-path opts)
                                   (null trace-result))
                          (setf trace-result
@@ -948,119 +1148,156 @@ with a source caret and type trace on failure."
 (defun %do-fuzz (parsed)
   "Compiler fuzzing: FR-794. Generate and test random CL expressions."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 60)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Fuzzing with seed ~A...~%"
                 (or (flag parsed "--seed") 42))
-        (format t "Fuzz completed.~%")))
-    "fuzz"))
+        (format t "Fuzz completed.~%"))
+      "fuzz")))
 
 (defun %do-reduce (parsed)
   "Test case reduction: FR-796. Delta-debug failing test cases."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (let ((file (car (parsed-args-positional parsed))))
           (format t "Reducing ~A...~%" (or file "bug.lisp"))
-          (format t "Reduction complete.~%"))))
-    "reduce"))
+          (format t "Reduction complete.~%")))
+      "reduce")))
 
 (defun %do-audit (parsed)
   "Dependency auditing: FR-814. Scan dependencies for known CVEs."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Auditing dependencies...~%")
-        (format t "Audit complete. No known vulnerabilities found.~%")))
-    "audit"))
+        (format t "Audit complete. No known vulnerabilities found.~%"))
+      "audit")))
 
 (defun %do-doc (parsed)
   "API documentation generation: FR-902. Extract docstrings."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 60)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Generating API documentation...~%")
-        (format t "Documentation generated.~%")))
-    "doc"))
+        (format t "Documentation generated.~%"))
+      "doc")))
 
 (defun %do-doctest (parsed)
   "Doctest runner: FR-903. Execute docstring code examples."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 60)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Running doctests...~%")
-        (format t "Doctests: 0 failures.~%")))
-    "doctest"))
+        (format t "Doctests: 0 failures.~%"))
+      "doctest")))
 
 (defun %do-show-types (parsed)
   "Type signature display: FR-904. Show inferred types."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Inferred type signatures:~%")
-        (format t "(no file specified)~%")))
-    "show-types"))
+        (format t "(no file specified)~%"))
+      "show-types")))
 
 (defun %do-assert-density (parsed)
   "Assertion density analysis: FR-905. Measure code defense level."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "Assertion density: 0.0 assertions/LOC~%")))
-    "assert-density"))
+        (format t "Assertion density: 0.0 assertions/LOC~%"))
+      "assert-density")))
 
 (defun %do-abi-dump (parsed)
   "ABI dump: FR-777. Dump public API surface."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "ABI dump complete.~%")))
-    "abi-dump"))
+        (format t "ABI dump complete.~%"))
+      "abi-dump")))
 
 (defun %do-abi-check (parsed)
   "ABI compatibility check: FR-777. Compare ABI manifests."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "ABI check: compatible.~%")))
-    "abi-check"))
+        (format t "ABI check: compatible.~%"))
+      "abi-check")))
 
 (defun %do-demangle (parsed)
   "Name demangling: FR-776. Demangle C++ ABI symbols."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 10)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (let ((name (car (parsed-args-positional parsed))))
-          (format t "Demangled: ~A~%" (or name "")))))
-    "demangle"))
+          (format t "Demangled: ~A~%" (or name ""))))
+      "demangle")))
+
+(defun %run-wasm-tool-command (tool args unavailable-message)
+  "Run TOOL with ARGS, printing stdout; report graceful unavailability."
+  (if (cl-cc/codegen:wasm-tool-available-p tool)
+      (let ((out (cl-cc/codegen:wasm-run-tool-to-string (cons tool args))))
+        (if out
+            (write-string out)
+            (format *error-output* "~A failed.~%" tool)))
+      (format *error-output* "~A~%" unavailable-message)))
+
+(defun %do-disasm (parsed)
+  "FR-322: Disassemble a Wasm module using wabt tools when available."
+  (let ((timeout (%get-timeout parsed)))
+    (%call-with-cli-timeout timeout
+      (lambda ()
+        (let ((file (%required-file-arg parsed "disasm")))
+          (cond
+            ((flag parsed "--decompile")
+             (%run-wasm-tool-command "wasm-decompile" (list file)
+                                     "wasm-decompile is not available in this environment."))
+            ((or (flag parsed "--wat") t)
+             (%run-wasm-tool-command "wasm2wat" (list file)
+                                     "wasm2wat is not available in this environment.")))))
+      "disasm")))
+
+(defun %do-inspect (parsed)
+  "FR-322: Inspect a Wasm module with wasm-objdump and optional decompile output."
+  (let ((timeout (%get-timeout parsed)))
+    (%call-with-cli-timeout timeout
+      (lambda ()
+        (let ((file (%required-file-arg parsed "inspect")))
+          (%run-wasm-tool-command "wasm-objdump" (list "-x" "-d" file)
+                                  "wasm-objdump is not available in this environment.")
+          (when (flag parsed "--decompile")
+            (%run-wasm-tool-command "wasm-decompile" (list file)
+                                    "wasm-decompile is not available in this environment."))))
+      "inspect")))
 
 (defun %do-objdump (parsed)
   "Binary analysis: FR-808. Inspect binary internals."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (let ((file (car (parsed-args-positional parsed))))
           (format t "Objdump of ~A:~%" (or file "(none)"))
-          (format t "  Sections: .text .data .bss~%"))))
-    "objdump"))
+          (format t "  Sections: .text .data .bss~%")))
+      "objdump")))
 
 (defun %do-macrostep (parsed)
   "Macro debugger: FR-836. Step through macro expansion."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Macro stepping...~%")
-        (format t "Expansion complete.~%")))
-    "macrostep"))
+        (format t "Expansion complete.~%"))
+      "macrostep")))
 
 (defun %do-bisect (parsed)
   "Regression bisection: FR-809. Find regression-introducing commit."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 120)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Bisecting...~%")
-        (format t "Bisection complete. Regression found at HEAD.~%")))
-    "bisect"))
+        (format t "Bisection complete. Regression found at HEAD.~%"))
+      "bisect")))
 
 (defun %do-features (parsed)
   "Feature flags: FR-812. List available feature flags."
@@ -1074,16 +1311,16 @@ with a source caret and type trace on failure."
 (defun %do-generate (parsed)
   "Build-time codegen: FR-815. Generate code from schema."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 30)
+    (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "Code generation complete.~%")))
-    "generate"))
+        (format t "Code generation complete.~%"))
+      "generate")))
 
 (defun %do-update (parsed)
   "Package update: FR-813. Update dependencies and lockfile."
   (let ((timeout (%get-timeout parsed)))
-    (%call-with-cli-timeout (or timeout 60)
+    (%call-with-cli-timeout timeout
       (lambda ()
         (format t "Updating dependencies...~%")
-        (format t "Lockfile updated: cl-cc.lock~%")))
-    "update"))
+        (format t "Lockfile updated: cl-cc.lock~%"))
+      "update")))

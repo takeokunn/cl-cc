@@ -8,6 +8,11 @@
 
 ;;; ─── Standard/VM Condition Classes ───────────────────────────────────────────
 
+;;; FR-204/252/255 Wasm EH mapping: VM condition classes remain the semantic
+;;; source of truth; the Wasm backend lowers handler ranges to tag/try_table/
+;;; exnref metadata and uses finalization hooks only when the corresponding
+;;; experimental feature flag is explicitly enabled.
+
 (defvar *active-restarts* nil
   "VM-visible list of active restart records.
 

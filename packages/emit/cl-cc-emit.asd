@@ -8,6 +8,9 @@
   :serial t
   :components
   ((:file "package")
+   (:file "wasm-types")
+   (:file "wasm")
+   (:file "wasm-trampoline")
    (:file "llvm-ir")
    (:file "mlir")
    (:file "wasm-source-map")

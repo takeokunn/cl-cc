@@ -9,9 +9,9 @@
                      (wasm-fixnum-box (format nil "(i64.const ~D)" val)))
                     (null "(ref.null eq)")
                     ((eql t) "(ref.i31 (i32.const 1))")
-                    ;; FR-297: String literals — emit as staged string objects
-                    (string
-                     (%wasm-string-literal-eqref val))
+                     ;; FR-297: String literals — emit as staged string objects
+                     (string
+                      (wasm-string-literal-wat val))
                     ;; FR-297: Symbol literals — emit staged symbol objects
                     (symbol
                      (%wasm-symbol-literal-eqref val))
@@ -83,14 +83,213 @@
 (defmethod emit-instruction ((target wasm-target) (inst vm-integer-mul) stream)
   (emit-instruction target (make-vm-mul :dst (vm-dst inst) :lhs (vm-lhs inst) :rhs (vm-rhs inst)) stream))
 
+(defmethod emit-instruction ((target wasm-target) (inst vm-eq) stream)
+  "Emit CL EQ/EQL using ref.eq for GC references and numeric equality for known i31 refs."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-bool-to-i31
+                            (wasm-eq-wat reg-map (vm-lhs inst) (vm-rhs inst)))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-select) stream)
+  "Emit FR-279 typed select for reference-valued conditionals."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (emit-wasm-typed-select-wat
+                            "eqref"
+                            (format nil "(i32.eqz (ref.is_null ~A))"
+                                    (reg-local-ref reg-map (vm-select-cond-reg inst)))
+                            (reg-local-ref reg-map (vm-select-then-reg inst))
+                            (reg-local-ref reg-map (vm-select-else-reg inst)))))))
+
 (defmethod emit-instruction ((target wasm-target) (inst vm-rotate) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (wasm-fixnum-box
                             (format nil "(i64.rotr ~A ~A)"
-                                    (wasm-fixnum-unbox reg-map (vm-lhs inst))
-                                    (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
+                                     (wasm-fixnum-unbox reg-map (vm-lhs inst))
+                                     (wasm-fixnum-unbox reg-map (vm-rhs inst))))))))
+
+(defun %wasm-atomic-disabled-comment (stream inst)
+  "Emit a conservative comment when threads are disabled for INST."
+  (format stream "~%    ;; Wasm threads disabled; non-atomic fallback for ~A"
+          (type-of inst)))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-atomic-cas) stream)
+  "Lower VM CAS to Wasm atomic.rmw.cmpxchg when FR-203 is enabled."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (width (wasm-atomic-width-for-inst inst 64)))
+    (if (wasm-threads-feature-enabled-p)
+        (progn
+          (format stream "~%    ;; FR-203/FR-327 atomic CAS width=~D" width)
+          (format stream "~%    ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (wasm-atomic-result-box-wat
+                                  (wasm-atomic-rmw-cmpxchg-wat
+                                   reg-map
+                                   (cl-cc/vm::vm-acas-addr inst)
+                                   (cl-cc/vm::vm-acas-expected inst)
+                                   (cl-cc/vm::vm-acas-newval inst)
+                                   :width width)
+                                  :width width))))
+        (progn
+          (%wasm-atomic-disabled-comment stream inst)
+          (format stream "~%    ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (reg-local-ref reg-map (cl-cc/vm::vm-acas-addr inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-atomic-load) stream)
+  "Lower VM atomic load to i32/i64.atomic.load when FR-203 is enabled."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (width (wasm-atomic-width-for-inst inst 64)))
+    (if (wasm-threads-feature-enabled-p)
+        (progn
+          (format stream "~%    ;; FR-203 atomic load width=~D" width)
+          (format stream "~%    ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (wasm-atomic-result-box-wat
+                                  (wasm-atomic-load-wat reg-map (cl-cc/vm::vm-aload-addr inst)
+                                                        :width width)
+                                  :width width))))
+        (progn
+          (%wasm-atomic-disabled-comment stream inst)
+          (format stream "~%    ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (reg-local-ref reg-map (cl-cc/vm::vm-aload-addr inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-atomic-store) stream)
+  "Lower VM atomic store to i32/i64.atomic.store when FR-203 is enabled."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (width (wasm-atomic-width-for-inst inst 64)))
+    (if (wasm-threads-feature-enabled-p)
+        (progn
+          (format stream "~%    ;; FR-203 atomic store width=~D" width)
+          (format stream "~%    ~A"
+                  (wasm-atomic-store-wat reg-map
+                                         (cl-cc/vm::vm-astore-addr inst)
+                                         (cl-cc/vm::vm-astore-val inst)
+                                         :width width)))
+        (progn
+          (%wasm-atomic-disabled-comment stream inst)
+          (format stream "~%    (local.set ~D ~A)"
+                  (wasm-reg-to-local reg-map (cl-cc/vm::vm-astore-addr inst))
+                  (reg-local-ref reg-map (cl-cc/vm::vm-astore-val inst)))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-atomic-incf) stream)
+  "Lower VM atomic increment/fetch-add to Wasm atomic.rmw.add."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (width (wasm-atomic-width-for-inst inst 64)))
+    (if (wasm-threads-feature-enabled-p)
+        (progn
+          (format stream "~%    ;; FR-203/FR-327 atomic fetch-add width=~D" width)
+          (format stream "~%    ~A"
+                  (reg-local-set reg-map (vm-dst inst)
+                                 (wasm-atomic-result-box-wat
+                                  (wasm-atomic-rmw-add-wat
+                                   reg-map (cl-cc/vm::vm-aincf-addr inst) (cl-cc/vm::vm-aincf-delta inst)
+                                   :width width)
+                                  :width width))))
+        (let ((old (reg-local-ref reg-map (cl-cc/vm::vm-aincf-addr inst)))
+              (new (wasm-fixnum-box
+                    (format nil "(i64.add ~A ~A)"
+                            (wasm-fixnum-unbox reg-map (cl-cc/vm::vm-aincf-addr inst))
+                            (wasm-fixnum-unbox reg-map (cl-cc/vm::vm-aincf-delta inst))))))
+          (%wasm-atomic-disabled-comment stream inst)
+          (format stream "~%    ~A" (reg-local-set reg-map (vm-dst inst) old))
+          (format stream "~%    ~A" (reg-local-set reg-map (cl-cc/vm::vm-aincf-addr inst) new))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-atomic-swap) stream)
+  "Lower VM atomic swap.  Wasm uses cmpxchg fallback shape until xchg is wired."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (%wasm-atomic-disabled-comment stream inst)
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (reg-local-ref reg-map (cl-cc/vm::vm-aswap-addr inst))))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (cl-cc/vm::vm-aswap-addr inst)
+                           (reg-local-ref reg-map (cl-cc/vm::vm-aswap-newval inst))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-memory-barrier) stream)
+  "Lower VM memory barrier to atomic.fence (FR-256)."
+  (declare (ignore target))
+  (if (wasm-threads-feature-enabled-p)
+      (format stream "~%    atomic.fence")
+      (%wasm-atomic-disabled-comment stream inst)))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-load-fence) stream)
+  "Lower VM load fence to atomic.fence when Wasm threads are enabled."
+  (declare (ignore target))
+  (if (wasm-threads-feature-enabled-p)
+      (format stream "~%    atomic.fence")
+      (%wasm-atomic-disabled-comment stream inst)))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-store-fence) stream)
+  "Lower VM store fence to atomic.fence when Wasm threads are enabled."
+  (declare (ignore target))
+  (if (wasm-threads-feature-enabled-p)
+      (format stream "~%    atomic.fence")
+      (%wasm-atomic-disabled-comment stream inst)))
+
+(eval-when (:load-toplevel :execute)
+  ;; Optional future VM classes requested by the Wasm threads feature plan.  The
+  ;; current VM names fetch-add as VM-ATOMIC-INCF and fences as VM-MEMORY-BARRIER;
+  ;; these methods attach automatically if/when aliases/classes are present.
+  (when (find-class 'vm-atomic-add nil)
+    (eval
+     '(defmethod emit-instruction ((target wasm-target) (inst vm-atomic-add) stream)
+        (let* ((reg-map (wasm-target-reg-map target))
+               (width (wasm-atomic-width-for-inst inst 64))
+               (dst (wasm-vm-slot-value inst 'dst))
+               (addr (wasm-vm-slot-value inst 'addr-reg))
+               (delta (or (wasm-vm-slot-value inst 'delta-reg)
+                          (wasm-vm-slot-value inst 'val-reg))))
+          (if (wasm-threads-feature-enabled-p)
+              (format stream "~%    ~A"
+                      (reg-local-set reg-map dst
+                                     (wasm-atomic-result-box-wat
+                                      (wasm-atomic-rmw-add-wat reg-map addr delta
+                                                               :width width)
+                                      :width width)))
+              (%wasm-atomic-disabled-comment stream inst))))))
+  (when (find-class 'vm-memory-fence nil)
+    (eval
+     '(defmethod emit-instruction ((target wasm-target) (inst vm-memory-fence) stream)
+        (declare (ignore target))
+        (if (wasm-threads-feature-enabled-p)
+            (format stream "~%    atomic.fence")
+            (%wasm-atomic-disabled-comment stream inst)))))
+  (when (find-class 'vm-atomic-wait nil)
+    (eval
+     '(defmethod emit-instruction ((target wasm-target) (inst vm-atomic-wait) stream)
+        (let* ((reg-map (wasm-target-reg-map target))
+               (dst (wasm-vm-slot-value inst 'dst))
+               (addr (wasm-vm-slot-value inst 'addr-reg))
+               (expected (wasm-vm-slot-value inst 'expected-reg))
+               (timeout (wasm-vm-slot-value inst 'timeout-reg)))
+          (if (wasm-threads-feature-enabled-p)
+              (format stream "~%    ~A"
+                      (reg-local-set reg-map dst
+                                     (wasm-atomic-result-box-wat
+                                      (wasm-atomic-wait-wat reg-map addr expected timeout)
+                                      :width 32)))
+              (%wasm-atomic-disabled-comment stream inst))))))
+  (when (find-class 'vm-atomic-notify nil)
+    (eval
+     '(defmethod emit-instruction ((target wasm-target) (inst vm-atomic-notify) stream)
+        (let* ((reg-map (wasm-target-reg-map target))
+               (dst (wasm-vm-slot-value inst 'dst))
+               (addr (wasm-vm-slot-value inst 'addr-reg))
+               (count (wasm-vm-slot-value inst 'count-reg)))
+          (if (wasm-threads-feature-enabled-p)
+              (let ((wat (wasm-atomic-notify-wat reg-map addr count)))
+                (if dst
+                    (format stream "~%    ~A"
+                            (reg-local-set reg-map dst
+                                           (wasm-atomic-result-box-wat wat :width 32)))
+                    (format stream "~%    (drop ~A)" wat)))
+              (%wasm-atomic-disabled-comment stream inst)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-label) stream)
   (format stream "~%    ;; label: ~A" (vm-name inst)))
@@ -158,9 +357,11 @@ The host import $host_print_val takes a single eqref parameter."
       (format stream "~%    ~A"
               (reg-local-set reg-map (vm-dst inst)
                               (if known-label
-                                  (%wasm-direct-call known-label)
-                                  (format nil "(call_indirect (type $main_func_t) (table $funcref_table) ~A)"
-                                          func-ref)))))))
+                                  (if (wasm-typed-refs-feature-enabled-p)
+                                      (format nil "(call_ref (type $main_func_t) (ref.func $~A))" known-label)
+                                      (%wasm-direct-call known-label))
+                                  (wasm-call-indirect-wat "$main_func_t" "$funcref_table"
+                                                          (wasm-table-index-from-eqref-wat func-ref))))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-func-ref) stream)
   "Materialize a closure for LABEL in DST and track a direct-call label hint."
@@ -204,9 +405,9 @@ tail-position indirect call sites."
                 (direct-opcode-str (if (eq direct-opcode :return-call)
                                        "return_call"
                                        "call")))
-           (format stream "~%    ~A"
-                   (reg-local-set reg-map (vm-dst inst)
-                                  (format nil "(~A $~A)" direct-opcode-str known-label)))))
+            (format stream "~%    ~A"
+                    (reg-local-set reg-map (vm-dst inst)
+                                   (format nil "(~A $~A)" direct-opcode-str known-label)))))
         ;; Direct non-tail fallback when feature disabled.
         (known-label
          (let* ((direct-opcode (cl-cc/optimize:opt-wasm-select-direct-tailcall-opcode
@@ -215,16 +416,17 @@ tail-position indirect call sites."
                 (direct-opcode-str (if (eq direct-opcode :return-call)
                                        "return_call"
                                        "call")))
-           (format stream "~%    ~A"
-                   (reg-local-set reg-map (vm-dst inst)
-                                  (format nil "(~A $~A)" direct-opcode-str known-label)))))
+            (format stream "~%    ~A"
+                    (reg-local-set reg-map (vm-dst inst)
+                                   (format nil "(~A $~A)" direct-opcode-str known-label)))))
         ;; Indirect fallback.
         (t
          (format stream "~%    ~A"
                  (reg-local-set reg-map (vm-dst inst)
-                                (format nil "(~A (type $main_func_t) (table $funcref_table) ~A)"
-                                        opcode-str
-                                        func-ref))))))))
+                                 (format nil "(~A (type $main_func_t) (table $funcref_table~@[ i64~]) ~A)"
+                                         opcode-str
+                                         (wasm-table64-feature-enabled-p)
+                                         (wasm-table-index-from-eqref-wat func-ref)))))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-closure) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -252,7 +454,8 @@ tail-position indirect call sites."
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(struct.new $cons_t ~A ~A)"
                                    (reg-local-ref reg-map (vm-car-reg inst))
-                                    (reg-local-ref reg-map (vm-cdr-reg inst)))))))
+                                     (reg-local-ref reg-map (vm-cdr-reg inst)))))
+    (reg-record-type reg-map (vm-dst inst) :cons)))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-make-array) stream)
   "Emit wasm-gc array allocation via array.new.
@@ -303,7 +506,38 @@ Uses $eqref_array_t as the canonical mutable eqref array representation."
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (wasm-fixnum-box (format nil "(i64.extend_i32_u ~A)"
-                                                     (wasm-array-len-wat reg-map (vm-src inst))))))))
+                                                      (wasm-array-len-wat reg-map (vm-src inst))))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-fill) stream)
+  "Emit CL FILL/REPLACE-recognized full-array fill through FR-284 array.fill."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (arr (vm-array-reg inst))
+         (len (wasm-array-len-wat reg-map arr)))
+    (format stream "~%    ~A"
+            (wasm-array-fill-wat reg-map arr (vm-val-reg inst) "(i32.const 0)" len))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-string-length) stream)
+  "Emit string length through the packed $bytes_array_t payload."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (str (wasm-ref-cast-maybe "(ref $string_t)" reg-map (vm-src inst)))
+         (chars (format nil "(struct.get $string_t 0 ~A)" str)))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (wasm-fixnum-box
+                            (format nil "(i64.extend_i32_u (array.len ~A))" chars))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-char) stream)
+  "Emit character access from packed simple-base-string bytes."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (str (wasm-ref-cast-maybe "(ref $string_t)" reg-map (vm-string-reg inst)))
+         (chars (format nil "(struct.get $string_t 0 ~A)" str))
+         (idx (wasm-fixnum-unbox reg-map (vm-index inst) :result-type :i32))
+         (load (if (wasm-gc-packed-fields-feature-enabled-p)
+                   (format nil "(array.get_u $bytes_array_t ~A ~A)" chars idx)
+                   (format nil "(array.get $bytes_array_t ~A ~A)" chars idx))))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil "(ref.i31 ~A)" load)))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-vector) stream)
   "Emit variadic CL VECTOR as a generic eqref array.new_fixed."
@@ -314,17 +548,39 @@ Uses $eqref_array_t as the canonical mutable eqref array representation."
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(array.new_fixed $eqref_array_t ~D~@[ ~A~])"
                                    (length elems)
-                                   (and elems (format nil "~{~A~^ ~}" elems)))))
+                                    (and elems (format nil "~{~A~^ ~}" elems)))))
     (wasm-array-reg-record-kind reg-map (vm-dst inst) :eqref)))
+
+(defmethod emit-instruction ((target wasm-target) (inst vm-values) stream)
+  "Emit CL multiple values.  FR-235 uses the legacy heap-vector path unless the
+multi-value feature gate is explicitly enabled."
+  (let ((reg-map (wasm-target-reg-map target)))
+    (format stream "~%    ~A"
+            (wasm-values-wat reg-map (vm-dst inst) (vm-src-regs inst) :indent 4))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-copy-vector) stream)
   "Emit FR-228 vector bulk copy via Wasm GC array.copy."
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
-            (wasm-array-copy-wat reg-map
-                                 (vm-dst-array-reg inst)
-                                 (vm-src-array-reg inst)
-                                 (vm-len-reg inst)))))
+              (wasm-array-copy-wat reg-map
+                                   (vm-dst-array-reg inst)
+                                   (vm-src-array-reg inst)
+                                   (vm-len-reg inst)))))
+
+(defmacro define-wasm-string-emit-method (class)
+  `(defmethod emit-instruction ((target wasm-target) (inst ,class) stream)
+     (let ((reg-map (wasm-target-reg-map target)))
+       (unless (maybe-emit-wasm-string-instruction inst reg-map stream :indent 4)
+         (format stream "~%    ;; UNSUPPORTED without Wasm String Builtins: ~A" (type-of inst))))))
+
+(define-wasm-string-emit-method vm-concatenate)
+(define-wasm-string-emit-method vm-string=)
+(define-wasm-string-emit-method vm-string<)
+(define-wasm-string-emit-method vm-string>)
+(define-wasm-string-emit-method vm-string<=)
+(define-wasm-string-emit-method vm-string>=)
+(define-wasm-string-emit-method vm-string-not-equal)
+(define-wasm-string-emit-method vm-code-char)
 
 (defun %wasm-string-literal-eqref (str)
   "Return wasm-gc eqref construction for a string literal STR.
@@ -332,22 +588,44 @@ Builds a $string_t struct with a $bytes_array_t containing the UTF-8 bytes."
   (let* ((bytes (map 'list #'char-code str))
          (byte-elems (format nil "~{~A~^ ~}" 
                               (mapcar (lambda (b) (format nil "(i32.const ~D)" b)) bytes))))
-    (format nil "(struct.new $string_t (array.new_fixed $bytes_array_t ~D ~A))"
-            (length bytes)
-            byte-elems)))
+    (if *wasm-gc-frozen-values-enabled*
+        (wasm-struct-new-immutable-wat
+         "$string_t"
+         (format nil "(array.new_fixed $bytes_array_t ~D ~A)" (length bytes) byte-elems))
+        (format nil "(struct.new $string_t (array.new_fixed $bytes_array_t ~D ~A))"
+                (length bytes)
+                byte-elems))))
+
+(eval-when (:load-toplevel :execute)
+  (when (find-class 'vm-js-ref nil)
+    (eval
+     '(defmethod emit-instruction ((target wasm-target) (inst vm-js-ref) stream)
+        "Emit FR-226 opaque JavaScript reference creation."
+        (let* ((reg-map (wasm-target-reg-map target))
+               (dst (or (wasm-vm-slot-value inst 'dst)
+                        (wasm-vm-slot-value inst 'reg))))
+          (if (and dst *wasm-ref-types-externref-enabled*)
+              (format stream "~%    ~A"
+                      (reg-local-set reg-map dst
+                                     (wasm-js-ref-box-wat "(call $js_host_object)")))
+              (format stream "~%    ;; FR-226 disabled or missing DST for vm-js-ref")))))))
 
 (defun %wasm-symbol-literal-eqref (sym)
   "Return wasm-gc eqref for a symbol literal SYM.
 Builds a staged symbol object: $symbol_t with the symbol's name string
 and null value cell."
   (let ((name-str (string sym)))
-    (format nil "(struct.new $symbol_t ~A (ref.null eq))"
-            (%wasm-string-literal-eqref name-str))))
+    (if *wasm-gc-frozen-values-enabled*
+        (wasm-struct-new-immutable-wat "$symbol_t" (%wasm-string-literal-eqref name-str) "(ref.null eq)")
+        (format nil "(struct.new $symbol_t ~A (ref.null eq))"
+                (%wasm-string-literal-eqref name-str)))))
 
 (defun %wasm-float-literal-eqref (val)
   "Return wasm-gc eqref for a float literal VAL.
 Wraps the f64.const in a boxed heap float struct."
-  (format nil "(struct.new $float_t (f64.const ~F))" val))
+  (if *wasm-gc-frozen-values-enabled*
+      (wasm-struct-new-immutable-wat "$float_t" (format nil "(f64.const ~F)" val))
+      (format nil "(struct.new $float_t (f64.const ~F))" val)))
 
 (defun %wasm-empty-symbol-eqref ()
   "Return a staged symbol eqref literal.
@@ -407,14 +685,14 @@ Arguments are marshaled through the standard wasm calling-convention globals
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(struct.get $cons_t 0 ~A)"
-                                   (reg-local-ref reg-map (vm-src inst)))))))
+                                    (wasm-ref-cast-maybe "(ref $cons_t)" reg-map (vm-src inst)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-cdr) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
                            (format nil "(struct.get $cons_t 1 ~A)"
-                                   (reg-local-ref reg-map (vm-src inst)))))))
+                                    (wasm-ref-cast-maybe "(ref $cons_t)" reg-map (vm-src inst)))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-null-p) stream)
   (let ((reg-map (wasm-target-reg-map target)))
@@ -448,9 +726,19 @@ Arguments are marshaled through the standard wasm calling-convention globals
                            (format nil
                                    "(if (result eqref) (i64.eqz ~A) (then ~A) (else ~A))"
                                    src
-                                   (wasm-fixnum-box "(i64.const 0)")
-                                   (wasm-fixnum-box
-                                     (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
+                                    (wasm-fixnum-box "(i64.const 0)")
+                                    (wasm-fixnum-box
+                                      (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))))
+
+(defmethod emit-instruction ((target wasm-target) (inst cl-cc/vm::vm-float-sign) stream)
+  "Emit FLOAT-SIGN using f64.copysign rather than abs/conditional branching."
+  (let* ((reg-map (wasm-target-reg-map target))
+         (src (format nil "(struct.get $float_t 0 (ref.cast (ref $float_t) ~A))"
+                      (reg-local-ref reg-map (vm-src inst)))))
+    (format stream "~%    ~A"
+            (reg-local-set reg-map (vm-dst inst)
+                           (format nil "(struct.new $float_t ~A)"
+                                   (wasm-copysign-wat "(f64.const 1.0)" src))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-establish-catch) stream)
   "Record a native Wasm catch extent for direct instruction emission.
@@ -467,8 +755,19 @@ emission structurally aware without changing the VM instruction definition."
     (format stream "~%    ;; FR-204 begin catch try depth ~D handler ~S"
             (wasm-target-try-depth target)
             (vm-catch-handler-label inst))
-    (format stream "~%    (try (result eqref)")
-    (format stream "~%      (do")))
+    (if (wasm-eh-v2-feature-enabled-p)
+        (progn
+          (format stream "~%    ;; FR-252 try_table (catch $cl_condition_tag $~A)"
+                  (vm-catch-handler-label inst))
+          (format stream "~%    (try_table (result eqref)")
+          (format stream "~%      (catch_ref $cl_condition_tag $~A)"
+                  (vm-catch-handler-label inst))
+          (when (wasm-catch-all-ref-feature-enabled-p)
+            (format stream "~%      (catch_all_ref $~A)"
+                    (vm-catch-handler-label inst))))
+        (progn
+          (format stream "~%    (try (result eqref)")
+          (format stream "~%      (do")))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-establish-handler) stream)
   "Record a native Wasm condition handler extent for direct instruction emission."
@@ -491,20 +790,26 @@ emission structurally aware without changing the VM instruction definition."
   (let ((frame (pop (wasm-target-try-stack target))))
     (when (plusp (wasm-target-try-depth target))
       (decf (wasm-target-try-depth target)))
-    (format stream "~%      ) ;; end do")
-    (format stream "~%      (catch $cl_condition_tag")
-    (when (wasm-target-reg-map target)
-      (format stream "~%        (local.set ~D)" (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
-      (format stream "~%        (local.set ~D)" (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))))
-    (format stream "~%        ;; direct emitter catch frame ~S; trampoline emits concrete PC dispatch"
-            (getf frame :handler-label))
-    (if (wasm-target-reg-map target)
-        (format stream "~%        (throw $cl_condition_tag (local.get ~D) (local.get ~D)))"
-                (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))
-                (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
-        (format stream "~%        (rethrow 0))"))
-    (format stream "~%    ) ;; end try/catch depth ~D"
-            (wasm-target-try-depth target))))
+    (if (wasm-eh-v2-feature-enabled-p)
+        (progn
+          (format stream "~%    ) ;; end try_table depth ~D; handler ~S captures exnref via catch_ref/catch_all_ref"
+                  (wasm-target-try-depth target)
+                  (getf frame :handler-label)))
+        (progn
+          (format stream "~%      ) ;; end do")
+          (format stream "~%      (catch $cl_condition_tag")
+          (when (wasm-target-reg-map target)
+            (format stream "~%        (local.set ~D)" (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
+            (format stream "~%        (local.set ~D)" (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))))
+          (format stream "~%        ;; direct emitter catch frame ~S; trampoline emits concrete PC dispatch"
+                  (getf frame :handler-label))
+          (if (wasm-target-reg-map target)
+              (format stream "~%        (throw $cl_condition_tag (local.get ~D) (local.get ~D)))"
+                      (wasm-reg-map-eh-tag-index (wasm-target-reg-map target))
+                      (wasm-reg-map-tmp-index (wasm-target-reg-map target)))
+              (format stream "~%        (rethrow 0))"))
+          (format stream "~%    ) ;; end try/catch depth ~D"
+                  (wasm-target-try-depth target))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-sync-handler-regs) stream)
   "No-op for Wasm: locals already contain the current implicit handler state."
@@ -514,8 +819,11 @@ emission structurally aware without changing the VM instruction definition."
 (defmethod emit-instruction ((target wasm-target) (inst vm-signal-error) stream)
   "Lower VM error signaling to the CL condition exception tag."
   (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    (throw $cl_condition_tag (ref.null eq) ~A)"
-            (reg-local-ref reg-map (vm-error-reg inst)))))
+    (if (wasm-eh-v2-feature-enabled-p)
+        (format stream "~%    (throw_ref (call $cl_condition_to_exnref ~A))"
+                (reg-local-ref reg-map (vm-error-reg inst)))
+        (format stream "~%    (throw $cl_condition_tag (ref.null eq) ~A)"
+                (reg-local-ref reg-map (vm-error-reg inst))))))
 
 (defmethod emit-instruction ((target wasm-target) (inst vm-throw) stream)
   "Lower CL throw to the shared two-eqref Wasm exception tag."

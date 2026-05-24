@@ -299,3 +299,7 @@
 (defun wasm-reg-map-eh-tag-index (reg-map)
   "Return the lazily allocated eqref local used for native Wasm EH tag payloads."
   (wasm-reg-to-local reg-map :%wasm-eh-tag))
+
+(defun wasm-reg-map-exnref-index (reg-map)
+  "Return the lazily allocated local used for EH v2 exnref capture."
+  (wasm-reg-to-local reg-map :%wasm-exnref))

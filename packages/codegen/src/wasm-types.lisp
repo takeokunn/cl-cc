@@ -31,8 +31,12 @@
 (defconstant +wasm-i64+     #x7e)
 (defconstant +wasm-f32+     #x7d)
 (defconstant +wasm-f64+     #x7c)
+(defconstant +wasm-f16+     #x79)
 (defconstant +wasm-funcref+ #x70)
 (defconstant +wasm-externref+ #x6f)
+(defconstant +wasm-stringref+ #x67)
+;;; EH v2 exception reference type.
+(defconstant +wasm-exnref+ #x69)
 ;;; GC proposal reference types
 (defconstant +wasm-anyref+    #x6e)
 (defconstant +wasm-eqref+     #x6d)
@@ -80,6 +84,10 @@
 (defconstant +wasm-import-table+  1)
 (defconstant +wasm-import-memory+ 2)
 (defconstant +wasm-import-global+ 3)
+;;; Exception Handling tag import/export descriptor.
+(defconstant +wasm-import-tag+    4)
+(defconstant +wasm-export-tag+    4)
+(defconstant +wasm-import-type+   5)
 
 ;;; Core opcodes
 (defconstant +wasm-unreachable+   #x00)
@@ -224,6 +232,23 @@
 (defconstant +wasm-table-copy+  15)
 (defconstant +wasm-table-fill+  17)
 (defconstant +wasm-elem-drop+   13)
+
+;;; Threads/atomics prefixed opcodes (0xfe).  FR-327 adds sub-word RMW forms.
+(defconstant +wasm-atomic-prefix+ #xfe)
+(defconstant +wasm-i32-atomic-rmw8-add-u+      #x26)
+(defconstant +wasm-i32-atomic-rmw16-add-u+     #x27)
+(defconstant +wasm-i32-atomic-rmw8-sub-u+      #x2e)
+(defconstant +wasm-i32-atomic-rmw16-sub-u+     #x2f)
+(defconstant +wasm-i32-atomic-rmw8-and-u+      #x36)
+(defconstant +wasm-i32-atomic-rmw16-and-u+     #x37)
+(defconstant +wasm-i32-atomic-rmw8-or-u+       #x3e)
+(defconstant +wasm-i32-atomic-rmw16-or-u+      #x3f)
+(defconstant +wasm-i32-atomic-rmw8-xor-u+      #x46)
+(defconstant +wasm-i32-atomic-rmw16-xor-u+     #x47)
+(defconstant +wasm-i32-atomic-rmw8-xchg-u+     #x4e)
+(defconstant +wasm-i32-atomic-rmw16-xchg-u+    #x4f)
+(defconstant +wasm-i32-atomic-rmw8-cmpxchg-u+  #x56)
+(defconstant +wasm-i32-atomic-rmw16-cmpxchg-u+ #x57)
 
 ;;; GC opcode prefix
 (defconstant +wasm-gc-prefix+ #xfb)
@@ -427,6 +452,9 @@
 (defconstant +wasm-gc-array-new-data+       10)  ; 0xfb 0x0a
 (defconstant +wasm-gc-array-new-elem+       17)  ; 0xfb 0x11
 (defconstant +wasm-gc-array-fill+           18)  ; 0xfb 0x12
+;;; FR-284: Bulk Array Operations
+(defconstant +wasm-gc-array-init-data+      26)  ; 0xfb 0x1a
+(defconstant +wasm-gc-array-init-elem+      27)  ; 0xfb 0x1b
 ;;; FR-250: Multibyte Array Access
 (defconstant +wasm-gc-array-load2-u+        19)  ; 0xfb 0x13
 (defconstant +wasm-gc-array-load4-u+        20)  ; 0xfb 0x14
@@ -443,6 +471,9 @@
 ;;; FR-310: Exception tag import/export (EH v2)
 (defconstant +wasm-try-table+           #x1f)
 (defconstant +wasm-throw-ref+           #x0a)
+;;; EH v2 reference-capturing catch variants in try_table immediates.
+(defconstant +wasm-catch-ref+           #x01)
+(defconstant +wasm-catch-all-ref+       #x03)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-205: Stack Switching opcodes
@@ -477,6 +508,8 @@
 (defconstant +wasm-i64-sub128+          20)
 (defconstant +wasm-i64-mul-wide-s+      21)
 (defconstant +wasm-i64-mul-wide-u+      22)
+(defconstant +wasm-i64-add-carry+       23)
+(defconstant +wasm-i64-sub-borrow+      24)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-248: Half Precision (f16) opcodes
@@ -489,6 +522,18 @@
 (defconstant +wasm-f16-div+             55)
 (defconstant +wasm-f16-min+             56)
 (defconstant +wasm-f16-max+             57)
+(defconstant +wasm-f16-convert-f32+     58)
+(defconstant +wasm-f32-convert-f16+     59)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-243/251/272 proposal opcode placeholders in prefixed spaces
+;;; ─────────────────────────────────────────────────────────────────────────────
+(defconstant +wasm-memory-discard+       32)
+(defconstant +wasm-string-length+        92)
+(defconstant +wasm-string-get-codeunit+  93)
+(defconstant +wasm-effect-declare+       #xe6)
+(defconstant +wasm-effect-perform+       #xe7)
+(defconstant +wasm-effect-resume+        #xe8)
 
 ;;; Fixnum tag convention: fixnums are stored as i31ref
 ;;; i31ref can hold 31-bit signed integers directly without heap allocation

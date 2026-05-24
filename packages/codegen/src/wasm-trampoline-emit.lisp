@@ -116,6 +116,14 @@ tree emission on NIL."
    Returns T if instruction was handled, NIL otherwise (emits warn comment)."
   (declare (ignore num-blocks))
   (let ((tp (type-of inst)))
+    ;; FR-285: CL EQ/EQL over GC references uses ref.eq; known i31 fixnums keep
+    ;; numeric equality so immediate integers preserve CL semantics.
+    (when (eq tp 'vm-eq)
+      (format stream "~%      ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (wasm-bool-to-i31
+                              (wasm-eq-wat reg-map (vm-lhs inst) (vm-rhs inst)))))
+      (return-from emit-trampoline-instruction t))
     ;; Binary i64 and comparison operations via shared dispatch
     (loop for (table . emit-fn) in *wasm-binop-dispatch*
           for op = (gethash tp table)
@@ -172,8 +180,11 @@ tree emission on NIL."
           (format stream "~%      ~A"
                   (reg-local-set reg-map (vm-dst inst)
                                  (wasm-fixnum-box
-                                  (format nil "(~A ~A)" fti-op src-wat)))))
+                                   (format nil "(~A ~A)" fti-op src-wat)))))
         (return-from emit-trampoline-instruction t))))
+  ;; FR-218/FR-295/FR-320: native Wasm string builtins.
+  (when (maybe-emit-wasm-string-instruction inst reg-map stream :indent 6)
+    (return-from emit-trampoline-instruction t))
   ;; Remaining instructions handled by typecase (unique logic per instruction)
   (typecase inst
     (vm-const
@@ -188,7 +199,7 @@ tree emission on NIL."
                                                 (wasm-vector-literal-kind val)))
            (null    (reg-record-type reg-map (vm-dst inst) :null))))
       t)
-    (vm-move
+     (vm-move
       (format stream "~%      ~A"
               (reg-local-set reg-map (vm-dst inst)
                              (reg-local-ref reg-map (vm-src inst))))
@@ -199,8 +210,11 @@ tree emission on NIL."
        (let ((range (reg-known-fixnum-range reg-map (vm-src inst))))
          (when range
            (reg-record-fixnum-range reg-map (vm-dst inst) range)))
-       (wasm-array-reg-copy-kind reg-map (vm-dst inst) (vm-src inst))
-       t)
+        (wasm-array-reg-copy-kind reg-map (vm-dst inst) (vm-src inst))
+        t)
+    (vm-simd-vector-op
+     (emit-wasm-vm-simd-vector-op reg-map inst stream)
+     t)
     (vm-jump
      (emit-trampoline-jump-to-label (vm-label-name inst) label-pc-map reg-map stream)
      t)
@@ -245,8 +259,16 @@ tree emission on NIL."
        (format stream "~%      ~A"
                (reg-local-set reg-map (vm-dst inst)
                               (%wasm-if-eqref (format nil "(i64.eqz ~A)" src)
-                                              (wasm-fixnum-box "(i64.const 0)")
-                                              (wasm-fixnum-box (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))
+                                               (wasm-fixnum-box "(i64.const 0)")
+                                               (wasm-fixnum-box (format nil "(i64.sub (i64.const 64) (i64.clz ~A))" src)))))
+        t))
+    (cl-cc/vm::vm-float-sign
+     (let ((src (format nil "(struct.get $float_t 0 (ref.cast (ref $float_t) ~A))"
+                        (reg-local-ref reg-map (vm-src inst)))))
+       (format stream "~%      ~A"
+               (reg-local-set reg-map (vm-dst inst)
+                              (format nil "(struct.new $float_t ~A)"
+                                      (wasm-copysign-wat "(f64.const 1.0)" src))))
        t))
     (vm-ash
      (let ((lhs (wasm-fixnum-unbox reg-map (vm-lhs inst)))
@@ -334,45 +356,173 @@ tree emission on NIL."
                                  (vm-index-reg inst)
                                  (vm-val-reg inst)))
      t)
-    (vm-array-length
-     (format stream "~%      ~A"
-             (reg-local-set reg-map (vm-dst inst)
-                            (wasm-fixnum-box
+     (vm-array-length
+      (format stream "~%      ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (wasm-fixnum-box
                              (format nil "(i64.extend_i32_u ~A)"
-                                     (wasm-array-len-wat reg-map (vm-src inst))))))
-     t)
-    (vm-vector
-     (let ((elems (loop for reg in (vm-element-regs inst)
-                        collect (reg-local-ref reg-map reg))))
+                                      (wasm-array-len-wat reg-map (vm-src inst))))))
+      t)
+     (vm-fill
+      (let* ((arr (vm-array-reg inst))
+             (len (wasm-array-len-wat reg-map arr)))
+        (format stream "~%      ~A"
+                (wasm-array-fill-wat reg-map arr (vm-val-reg inst) "(i32.const 0)" len))
+        t))
+     (vm-select
+      (format stream "~%      ~A"
+              (reg-local-set reg-map (vm-dst inst)
+                             (emit-wasm-typed-select-wat
+                              "eqref"
+                              (format nil "(i32.eqz (ref.is_null ~A))"
+                                      (reg-local-ref reg-map (vm-select-cond-reg inst)))
+                              (reg-local-ref reg-map (vm-select-then-reg inst))
+                              (reg-local-ref reg-map (vm-select-else-reg inst)))))
+      t)
+     (vm-string-length
+      (let* ((str (wasm-ref-cast-maybe "(ref $string_t)" reg-map (vm-src inst)))
+             (chars (format nil "(struct.get $string_t 0 ~A)" str)))
+        (format stream "~%      ~A"
+                (reg-local-set reg-map (vm-dst inst)
+                               (wasm-fixnum-box
+                                (format nil "(i64.extend_i32_u (array.len ~A))" chars))))
+        t))
+     (vm-char
+      (let* ((str (wasm-ref-cast-maybe "(ref $string_t)" reg-map (vm-string-reg inst)))
+             (chars (format nil "(struct.get $string_t 0 ~A)" str))
+             (idx (wasm-fixnum-unbox reg-map (vm-index inst) :result-type :i32)))
+        (format stream "~%      ~A"
+                (reg-local-set reg-map (vm-dst inst)
+                               (format nil "(ref.i31 ~A)"
+                                       (if (wasm-gc-packed-fields-feature-enabled-p)
+                                           (format nil "(array.get_u $bytes_array_t ~A ~A)" chars idx)
+                                           (format nil "(array.get $bytes_array_t ~A ~A)" chars idx)))))
+        t))
+     (vm-vector
+      (let ((elems (loop for reg in (vm-element-regs inst)
+                         collect (reg-local-ref reg-map reg))))
        (format stream "~%      ~A"
                (reg-local-set reg-map (vm-dst inst)
                               (format nil "(array.new_fixed $eqref_array_t ~D~@[ ~A~])"
                                       (length elems)
                                       (and elems (format nil "~{~A~^ ~}" elems)))))
-       (wasm-array-reg-record-kind reg-map (vm-dst inst) :eqref)
-       t))
+        (wasm-array-reg-record-kind reg-map (vm-dst inst) :eqref)
+        t))
+    (vm-values
+     (format stream "~%      ~A"
+             (wasm-values-wat reg-map (vm-dst inst) (vm-src-regs inst) :indent 6))
+     t)
     (vm-copy-vector
      (format stream "~%      ~A"
              (wasm-array-copy-wat reg-map
                                   (vm-dst-array-reg inst)
                                   (vm-src-array-reg inst)
                                   (vm-len-reg inst)))
+      t)
+    (cl-cc/vm::vm-atomic-cas
+     (let ((width (wasm-atomic-width-for-inst inst 64)))
+       (if (wasm-threads-feature-enabled-p)
+           (progn
+             (format stream "~%      ;; FR-203/FR-327 atomic CAS width=~D" width)
+             (format stream "~%      ~A"
+                     (reg-local-set reg-map (vm-dst inst)
+                                    (wasm-atomic-result-box-wat
+                                     (wasm-atomic-rmw-cmpxchg-wat
+                                       reg-map (cl-cc/vm::vm-acas-addr inst)
+                                       (cl-cc/vm::vm-acas-expected inst)
+                                       (cl-cc/vm::vm-acas-newval inst)
+                                      :width width)
+                                     :width width))))
+           (progn
+             (format stream "~%      ;; Wasm threads disabled; non-atomic fallback for vm-atomic-cas")
+             (format stream "~%      ~A"
+                     (reg-local-set reg-map (vm-dst inst)
+                                      (reg-local-ref reg-map (cl-cc/vm::vm-acas-addr inst))))))
+       t))
+    (cl-cc/vm::vm-atomic-load
+     (let ((width (wasm-atomic-width-for-inst inst 64)))
+       (if (wasm-threads-feature-enabled-p)
+           (progn
+             (format stream "~%      ;; FR-203 atomic load width=~D" width)
+             (format stream "~%      ~A"
+                     (reg-local-set reg-map (vm-dst inst)
+                                    (wasm-atomic-result-box-wat
+                                      (wasm-atomic-load-wat reg-map (cl-cc/vm::vm-aload-addr inst)
+                                                           :width width)
+                                     :width width))))
+           (progn
+             (format stream "~%      ;; Wasm threads disabled; non-atomic fallback for vm-atomic-load")
+             (format stream "~%      ~A"
+                     (reg-local-set reg-map (vm-dst inst)
+                                      (reg-local-ref reg-map (cl-cc/vm::vm-aload-addr inst))))))
+       t))
+    (cl-cc/vm::vm-atomic-store
+     (let ((width (wasm-atomic-width-for-inst inst 64)))
+       (if (wasm-threads-feature-enabled-p)
+           (progn
+             (format stream "~%      ;; FR-203 atomic store width=~D" width)
+             (format stream "~%      ~A"
+                      (wasm-atomic-store-wat reg-map (cl-cc/vm::vm-astore-addr inst)
+                                             (cl-cc/vm::vm-astore-val inst)
+                                            :width width)))
+           (progn
+             (format stream "~%      ;; Wasm threads disabled; non-atomic fallback for vm-atomic-store")
+             (format stream "~%      (local.set ~D ~A)"
+                      (wasm-reg-to-local reg-map (cl-cc/vm::vm-astore-addr inst))
+                       (reg-local-ref reg-map (cl-cc/vm::vm-astore-val inst)))))
+       t))
+    (cl-cc/vm::vm-atomic-incf
+     (let ((width (wasm-atomic-width-for-inst inst 64)))
+       (if (wasm-threads-feature-enabled-p)
+           (progn
+             (format stream "~%      ;; FR-203/FR-327 atomic fetch-add width=~D" width)
+             (format stream "~%      ~A"
+                     (reg-local-set reg-map (vm-dst inst)
+                                    (wasm-atomic-result-box-wat
+                                     (wasm-atomic-rmw-add-wat
+                                       reg-map (cl-cc/vm::vm-aincf-addr inst)
+                                       (cl-cc/vm::vm-aincf-delta inst)
+                                      :width width)
+                                     :width width))))
+            (let ((old (reg-local-ref reg-map (cl-cc/vm::vm-aincf-addr inst)))
+                 (new (wasm-fixnum-box
+                       (format nil "(i64.add ~A ~A)"
+                                (wasm-fixnum-unbox reg-map (cl-cc/vm::vm-aincf-addr inst))
+                                (wasm-fixnum-unbox reg-map (cl-cc/vm::vm-aincf-delta inst))))))
+             (format stream "~%      ;; Wasm threads disabled; non-atomic fallback for vm-atomic-incf")
+             (format stream "~%      ~A" (reg-local-set reg-map (vm-dst inst) old))
+              (format stream "~%      ~A" (reg-local-set reg-map (cl-cc/vm::vm-aincf-addr inst) new))))
+       t))
+    (cl-cc/vm::vm-atomic-swap
+     (format stream "~%      ;; vm-atomic-swap fallback; Wasm xchg lowering pending")
+     (format stream "~%      ~A"
+             (reg-local-set reg-map (vm-dst inst)
+                             (reg-local-ref reg-map (cl-cc/vm::vm-aswap-addr inst))))
+     (format stream "~%      ~A"
+             (reg-local-set reg-map (cl-cc/vm::vm-aswap-addr inst)
+                            (reg-local-ref reg-map (cl-cc/vm::vm-aswap-newval inst))))
      t)
-    (vm-call
-      (let* ((args (vm-args inst))
-             (func-local (reg-local-ref reg-map (vm-func-reg inst)))
+    ((or cl-cc/vm::vm-memory-barrier cl-cc/vm::vm-load-fence cl-cc/vm::vm-store-fence)
+     (if (wasm-threads-feature-enabled-p)
+         (format stream "~%      atomic.fence")
+         (format stream "~%      ;; Wasm threads disabled; fence elided"))
+     t)
+     (vm-call
+       (let* ((args (vm-args inst))
+              (func-local (reg-local-ref reg-map (vm-func-reg inst)))
              (dst-idx (wasm-reg-to-local reg-map (vm-dst inst)))
              ;; FR-142: Use wasm-ref-cast-maybe to skip ref.cast when type is known
-             (entry-idx-wat (format nil
-                                    "(struct.get $closure_t 0 ~A)"
-                                    (wasm-ref-cast-maybe "(ref $closure_t)" reg-map (vm-func-reg inst)))))
+              (entry-idx-wat (format nil
+                                     "(struct.get $closure_t 0 ~A)"
+                                     (wasm-ref-cast-maybe "(ref $closure_t)" reg-map (vm-func-reg inst)))))
          (loop for arg in args for i from 0 do
            (format stream "~%      (global.set $cl_arg~D ~A)" i (reg-local-ref reg-map arg)))
          (format stream "~%      ;; call_indirect typeidx ~D tableidx 0"
                  +type-idx-main-func+)
-         (format stream "~%      (local.set ~D (call_indirect (type $main_func_t) (table $funcref_table) ~A))"
-                 dst-idx entry-idx-wat)
-         t))
+          (format stream "~%      (local.set ~D ~A)"
+                  dst-idx
+                  (wasm-call-indirect-wat "$main_func_t" "$funcref_table" entry-idx-wat))
+          t))
     (vm-establish-catch
       ;; FR-204: The trampoline builder wraps the PC-dispatch loop in one native
       ;; try/catch and projects this dynamic extent into its catch dispatch table.
@@ -409,9 +559,13 @@ tree emission on NIL."
       (format stream "~%      ;; FR-204: handler regs synced — locals update automatically in WASM")
       t)
     (vm-signal-error
-      ;; FR-204: Native exception throw — propagates through try/catch hierarchy
-      (format stream "~%      (throw $cl_condition_tag (ref.null eq) ~A)"
-              (reg-local-ref reg-map (vm-error-reg inst)))
+      ;; FR-204/FR-252: Native exception throw.  EH v2 uses throw_ref through
+      ;; the JS/host bridge so a fresh CL condition can be represented as exnref.
+      (if (wasm-eh-v2-feature-enabled-p)
+          (format stream "~%      (throw_ref (call $cl_condition_to_exnref ~A))"
+                  (reg-local-ref reg-map (vm-error-reg inst)))
+          (format stream "~%      (throw $cl_condition_tag (ref.null eq) ~A)"
+                  (reg-local-ref reg-map (vm-error-reg inst))))
       t)
     (vm-throw
       ;; FR-204: General throw with tag and value

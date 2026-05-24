@@ -23,11 +23,28 @@
   '(("--output"  . :string)
     ("-o"        . :string)
     ("--arch"    . :string)
+    ("--target"  . :string)    ; FR-219: --target wasm32 | wasm64 | wasm32-wasi
     ("--lang"    . :string)
-     ("--dump-ir" . :string)
-      ("--stdlib"  . :bool)
-      ("--no-stdlib" . :bool)
-      ("--system" . :string)
+    ("--dump-ir" . :string)
+    ("--stdlib"  . :bool)
+    ("--no-stdlib" . :bool)
+     ("--aot"     . :bool)      ; FR-219: enable AOT static .wasm compilation
+     ("--streaming" . :bool)   ; FR-232: generate instantiateStreaming JS glue
+     ("--validate" . :bool)    ; FR-305: validate output Wasm
+     ("--sri" . :bool)         ; FR-307: generate SRI metadata
+     ("--wat" . :bool)         ; FR-322: disassemble wasm to WAT
+     ("--decompile" . :bool)   ; FR-322: use wasm-decompile pseudo-code
+    ("--memory64" . :bool)     ; FR-213: enable 64-bit linear memory
+    ("--bigint"  . :bool)      ; FR-236: enable JS BigInt i64 conversion
+    ("--source-map" . :bool)   ; FR-223: generate .wasm.map
+    ("--emit-names" . :bool)   ; FR-242: emit Wasm name section metadata
+    ("--emit-debug-info" . :bool) ; FR-222 alias for --debug-info
+    ("--type-reflection" . :bool) ; FR-263 devtools JS type metadata
+    ("--stack-inspection" . :bool) ; FR-269 stack inspection helpers
+    ("--memory-profiler" . :bool) ; FR-318 heap profiler helpers
+    ("--hot-reload" . :bool) ; FR-317 table.set reload helpers
+    ("--incremental-repl" . :bool) ; FR-288 browser Wasm REPL helpers
+    ("--system" . :string)
     ("--annotate-source" . :bool)
     ("--debug"  . :bool)
      ("--opt-remarks" . :string)
