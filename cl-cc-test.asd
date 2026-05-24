@@ -9,7 +9,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php :cl-cc-tools)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -468,12 +468,6 @@
       :components
       ((:file "perfmap-tests")
        (:file "pipeline-incremental-hot-parallel-tests")))
-     (:module "tools-tests"
-      :pathname "packages/tools/tests"
-      :serial t
-      :components
-      ((:file "lsp-server-tests")
-       (:file "dap-server-tests")))
     (:module "runtime-tests"
      :pathname "packages/runtime/tests"
      :serial t
