@@ -24,7 +24,6 @@
    (:file "runtime-io")
     (:file "value")
     (:file "value-codec")
-    (:file "runtime-bignum")
     (:file "frame")
      (:file "heap-data")
      (:file "heap-core")
