@@ -36,6 +36,18 @@ Returns a function that takes a continuation."
                           (%cps-form-contains-p (cdr form) sym)))
         (t nil)))
 
+(defun %cps-trmc-rewritten-p (source rewritten)
+  "Return T when REWRITTEN has the expected accumulator-worker TRMC shape."
+  (and (not (equal source rewritten))
+       (%cps-form-contains-p rewritten 'labels)
+       (or (%cps-form-contains-p rewritten 'nreverse)
+           (%cps-form-contains-p rewritten 'nreconc))))
+
+(defun %eval-trmc-defun (form symbol)
+  "Evaluate FORM and return SYMBOL's function object."
+  (eval form)
+  (symbol-function symbol))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Structure predicate tests (extracted for readability)
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -167,3 +179,109 @@ Returns a function that takes a continuation."
     (assert-true (%cps-form-contains-p rewritten 'labels))
     (eval rewritten)
     (assert-equal '(3 2 1) (funcall (symbol-function 'trmc-fixture) 3))))
+
+(deftest cps-trmc-does-not-rewrite-nonrecursive-dotted-base
+  "FR-045: a literal dotted-list base without a recursive tail is not a TRMC candidate."
+  (let* ((source '(defun trmc-dotted-base ()
+                   (cons 'a '(b . c))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-equal source rewritten)
+    (assert-equal '(a b . c) (funcall (%eval-trmc-defun rewritten 'trmc-dotted-base)))))
+
+(deftest cps-trmc-rewrites-nested-if-tail-cons-branches
+  "FR-045: nested IF branches in tail position are rewritten to the accumulator worker."
+  (let* ((source '(defun trmc-nested-if (n p)
+                   (if (<= n 0)
+                       nil
+                       (if p
+                           (cons :a (trmc-nested-if (- n 1) nil))
+                           (cons :b (trmc-nested-if (- n 1) t))))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-true (%cps-trmc-rewritten-p source rewritten))
+    (assert-equal '(:a :b :a :b)
+                  (funcall (%eval-trmc-defun rewritten 'trmc-nested-if) 4 t))))
+
+(deftest cps-trmc-rewrites-block-wrapper-tail-cons
+  "FR-045: BLOCK wrappers preserve tail position for TRMC cons chains."
+  (let* ((source '(defun trmc-block-wrapper (n)
+                   (if (<= n 0)
+                       nil
+                       (block nil
+                         (cons n (trmc-block-wrapper (- n 1)))))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-true (%cps-trmc-rewritten-p source rewritten))
+    (assert-equal '(4 3 2 1)
+                  (funcall (%eval-trmc-defun rewritten 'trmc-block-wrapper) 4))))
+
+(deftest cps-trmc-rewrites-let-and-let-star-wrapper-tail-cons
+  "FR-045: LET/LET* wrappers preserve tail position for TRMC cons chains."
+  (let* ((let-source '(defun trmc-let-wrapper (n)
+                       (if (<= n 0)
+                           nil
+                           (let ((x n))
+                             (cons x (trmc-let-wrapper (- n 1)))))))
+         (let*-source '(defun trmc-let-star-wrapper (n)
+                         (if (<= n 0)
+                             nil
+                             (let* ((x n)
+                                    (y (+ x 10)))
+                               (cons y (trmc-let-star-wrapper (- n 1)))))))
+         (let-rewritten (cl-cc/cps::trmc-transform-defun-form let-source))
+         (let*-rewritten (cl-cc/cps::trmc-transform-defun-form let*-source)))
+    (assert-true (%cps-trmc-rewritten-p let-source let-rewritten))
+    (assert-true (%cps-trmc-rewritten-p let*-source let*-rewritten))
+    (assert-equal '(3 2 1)
+                  (funcall (%eval-trmc-defun let-rewritten 'trmc-let-wrapper) 3))
+    (assert-equal '(13 12 11)
+                  (funcall (%eval-trmc-defun let*-rewritten 'trmc-let-star-wrapper) 3))))
+
+(deftest cps-trmc-mutual-recursion-remains-untransformed
+  "FR-045: mutual recursion is intentionally not rewritten by the direct self-call TRMC pass."
+  (let* ((source '(defun trmc-mutual-entry (n)
+                   (if (<= n 0)
+                       nil
+                       (cons n (trmc-mutual-other (- n 1))))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-equal source rewritten)
+    (eval '(defun trmc-mutual-other (n)
+            (if (<= n 0)
+                nil
+                (cons (- n) (trmc-mutual-entry (- n 1))))))
+    (assert-equal '(3 -2 1)
+                  (funcall (%eval-trmc-defun rewritten 'trmc-mutual-entry) 3))))
+
+(deftest optimizer-trmc-rewrites-list-star-termination-pattern
+  "FR-045: the optimizer TRMC layer rewrites LIST* heads ending in a self call."
+  (let* ((source '(defun trmc-list-star (n)
+                   (declare (optimize (tail-recursion-modulo-cons t)))
+                   (if (<= n 0)
+                       '(done . tail)
+                       (list* n (+ n 10) (trmc-list-star (- n 1))))))
+         (rewritten (cl-cc/optimize::opt-trmc-transform-defun-form source)))
+    (assert-true (%cps-trmc-rewritten-p source rewritten))
+    (assert-equal '(2 12 1 11 done . tail)
+                  (funcall (%eval-trmc-defun rewritten 'trmc-list-star) 2))))
+
+(deftest cps-trmc-host-native-compiled-worker-produces-correct-result
+  "FR-045: the rewritten accumulator worker remains valid after native host compilation."
+  (let* ((source '(defun trmc-native-fixture (n)
+                   (if (<= n 0)
+                       nil
+                       (cons n (trmc-native-fixture (- n 1))))))
+         (rewritten (cl-cc/cps::trmc-transform-defun-form source)))
+    (assert-true (%cps-trmc-rewritten-p source rewritten))
+    (eval rewritten)
+    (compile 'trmc-native-fixture)
+    (assert-equal '(5 4 3 2 1)
+                  (funcall (symbol-function 'trmc-native-fixture) 5))))
+
+(deftest cps-trmc-run-string-pipeline-preserves-semantics
+  "FR-045: parse → CPS → optimize → codegen → VM execution preserves TRMC list results."
+  (assert-equal '(4 3 2 1)
+                (run-string "(progn
+                               (defun trmc-pipeline-fixture (n)
+                                 (if (<= n 0)
+                                     nil
+                                     (cons n (trmc-pipeline-fixture (- n 1)))))
+                               (trmc-pipeline-fixture 4))"
+                            :pass-pipeline '(:trmc :fold :jump)))))
