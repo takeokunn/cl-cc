@@ -575,7 +575,13 @@
     ;; ── Object pool (allocator.lisp) ─────────────────────────────────────
     #:make-object-pool #:pool-acquire #:pool-release
     ;; ── GC nursery config (heap-data.lisp) ───────────────────────────────
-    #:*gc-nursery-size*))
+    #:*gc-nursery-size*
+    ;; ── Pinned arrays for FFI (FR-417) ──────────────────────────────────
+    #:rt-pin-unboxed-array #:rt-pinned-unboxed-array-buffer-p
+    #:rt-pinned-unboxed-array-buffer-array
+    #:rt-pinned-unboxed-array-buffer-length
+    #:rt-pinned-array-data-pointer #:rt-release-pinned-array
+    #:rt-pinned-unboxed-array-buffer-released-p))
 
 (in-package :cl-cc/runtime)
 
