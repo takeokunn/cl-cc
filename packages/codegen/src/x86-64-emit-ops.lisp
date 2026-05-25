@@ -337,65 +337,43 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
 
 ;;; Checked arithmetic emitters (FR-303 overflow detection, FR-149 bignum fallback)
 ;;;;
-;;;; Pattern: save original operands, MOV dst,lhs + ALU dst,rhs + JO overflow-stub.
-;;;; The overflow stub calls a runtime native-bignum helper with the original
-;;;; boxed fixnum operands in RDI/RSI and returns the promoted value in RAX.
-
-(defun %runtime-integer-function-address (name)
-  "Resolve a two-argument native integer runtime helper address."
-  (sb-sys:sap-int
-   (sb-alien:alien-sap
-    (sb-alien:extern-alien name (function sb-alien:unsigned-long
-                                          sb-alien:unsigned-long
-                                          sb-alien:unsigned-long)))))
-
-(defun %push-pop-r64-size (reg)
-  (if (>= reg 8) 2 1))
-
-(defun %checked-overflow-stub-size (dst)
-  (+ (%push-pop-r64-size +rsi+)
-     (%push-pop-r64-size +rdi+)
-     10                         ; mov r11, helper-address
-     3                          ; call r11
-     (if (= dst +rax+) 0 3)))   ; optional mov dst, rax
-
-(defun %emit-checked-bignum-overflow-stub (dst helper-name stream)
-  ;; Stack top contains saved RHS, then saved LHS.
-  (emit-pop-r64 +rsi+ stream)
-  (emit-pop-r64 +rdi+ stream)
-  (emit-mov-ri64 +r11+ (load-time-value (%runtime-integer-function-address helper-name)) stream)
-  (emit-call-r64 +r11+ stream)
-  (unless (= dst +rax+)
-    (emit-mov-rr64 dst +rax+ stream)))
-
-(defun %emit-vm-checked-bignum-binop (inst stream alu-emitter helper-name)
-  "Emit checked fixnum arithmetic with native-bignum overflow promotion."
-  (let* ((dst (vm-reg-to-x86 (vm-dst inst)))
-         (lhs (vm-reg-to-x86 (vm-lhs inst)))
-         (rhs (vm-reg-to-x86 (vm-rhs inst)))
-         (fast-cleanup-size 12) ; ADD RSP,16 + JMP rel32
-         (overflow-size (%checked-overflow-stub-size dst)))
-    (emit-push-r64 lhs stream)
-    (emit-push-r64 rhs stream)
-    (emit-mov-rr64 dst lhs stream)
-    (funcall alu-emitter dst rhs stream)
-    (emit-jo-rel32 fast-cleanup-size stream)
-    (emit-add-ri32 +rsp+ 16 stream)
-    (emit-jmp-rel32 overflow-size stream)
-    (%emit-checked-bignum-overflow-stub dst helper-name stream)))
+;;;; Pattern: MOV dst,lhs + ALU dst,rhs + JNO +2 (skip UD2) + UD2 (trap on overflow)
+;;;; On overflow, execution falls into UD2 which signals an error.
+;;;; JNO rel32 is 6 bytes; UD2 is 2 bytes; JNO offset = +2 (skip past UD2).
 
 (defun emit-vm-add-checked (inst stream)
-  "vm-add-checked: dst = lhs + rhs with overflow bignum promotion (FR-149/303)."
-  (%emit-vm-checked-bignum-binop inst stream #'emit-add-rr64 "rt_native_bignum_add"))
+  "vm-add-checked: dst = lhs + rhs with overflow bignum fallback (FR-149/303)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-add-rr64 dst rhs stream)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-sub-checked (inst stream)
-  "vm-sub-checked: dst = lhs - rhs with overflow bignum promotion (FR-149/303)."
-  (%emit-vm-checked-bignum-binop inst stream #'emit-sub-rr64 "rt_native_bignum_sub"))
+  "vm-sub-checked: dst = lhs - rhs with hardware overflow trap (FR-149/303)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-sub-rr64 dst rhs stream)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-mul-checked (inst stream)
-  "vm-mul-checked: dst = lhs * rhs with overflow bignum promotion (FR-149/303).
+  "vm-mul-checked: dst = lhs * rhs with hardware overflow trap (FR-149/303).
    IMUL sets OF on overflow when the full result does not fit in the destination."
-  (%emit-vm-checked-bignum-binop inst stream #'emit-imul-rr64 "rt_native_bignum_mul"))
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-imul-rr64 dst rhs stream)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
 
 (defun emit-vm-integer-mul-high-u (inst stream)
   "vm-integer-mul-high-u: dst = unsigned high 64 bits of lhs*rhs."
