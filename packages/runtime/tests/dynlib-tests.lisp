@@ -2,8 +2,19 @@
 
 (in-package :cl-cc/test)
 
-;;; cl-cc/ffi package is provided by the cl-cc umbrella system
-;;; (dynlib.lisp is compiled as component ffi-dynlib/dynlib).
+;;; cl-cc/ffi is provided at load-time by the cl-cc umbrella system.
+;;; At compile-time in the test build, the package may not exist yet.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package :cl-cc/ffi)
+    (defpackage :cl-cc/ffi
+      (:use :cl)
+      (:export #:dl-lib #:dl-lib-p #:dl-lib-name #:dl-lib-handle #:dl-lib-loaded
+               #:load-shared-library #:load-framework #:unload-shared-library
+               #:list-loaded-libraries #:find-foreign-symbol))))
+(import '(cl-cc/ffi:dl-lib cl-cc/ffi:dl-lib-p cl-cc/ffi:dl-lib-name
+          cl-cc/ffi:dl-lib-loaded cl-cc/ffi:load-shared-library
+          cl-cc/ffi:load-framework cl-cc/ffi:unload-shared-library
+          cl-cc/ffi:find-foreign-symbol))
 
 (in-suite cl-cc-unit-suite)
 
