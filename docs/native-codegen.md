@@ -140,7 +140,7 @@
 | FR | Description | Status | Notes |
 |----|-------------|--------|-------|
 | FR-226 | Auto-Vectorization | ✅ | `opt-pass-auto-vectorization` in optimizer.lisp; SIMD backend lowering via `vm-simd-vector-op` wired to x86-64 SSE/AVX + AArch64 NEON |
-| FR-227 | SLP Vectorizer | ⬜ | |
+| FR-227 | SLP Vectorizer | ⚠️ | `opt-pass-slp-vectorize` in optimizer.lisp (lines 815-1057): pack discovery, isomorphism, lane matching, SIMD op generation. 3 tests pass. Needs: float ops, broader coverage, end-to-end backend verification. |
 | FR-228 | x86-64 SSE/AVX Emission | ✅ | SSE/AVX packed integer encoders, `vm-simd-vector-op` lowering, MOVDQU/VPSUBD/VPAND/VPOR/VPXOR |
 | FR-229 | AArch64 NEON Emission | ✅ | NEON packed integer encoders (ADD/SUB/MUL/AND/ORR/EOR), LD1/ST1, `a64-vm-simd-vector-op` |
 | FR-230 | SIMD Register Allocation | 🔶 | FP register class separated; SIMD-specific partial |
@@ -223,6 +223,6 @@
 
 | Priority | FR | Description | Difficulty |
 |----------|-----|-------------|------------|
-| Low | FR-227 | SLP Vectorizer | Very Hard |
+| Low | FR-227 | SLP Vectorizer (code exists, needs coverage expansion) | Hard |
 
-> **Summary**: All previously ⬜ items have been implemented or verified as already-existing. The only remaining ⬜ is FR-227 (SLP Vectorizer), which requires straight-line pack discovery and isomorphism analysis — a very hard optimization that can be deferred. Test suite: 7553 passed, 114 failed (failures are pre-existing/unrelated to this work).
+> **Summary**: All previously ⬜ items have been implemented or verified as already-existing (verified 2026-05-25: SLP code exists in optimizer.lisp lines 815-1057 with 3 tests). FR-227 SLP coverage expansion and native backend bignum (T2-A) remain as future work.

@@ -67,9 +67,9 @@ virtual registers."
     ((vm-add vm-integer-add)            6)  ; mov + add (3+3)
     ((vm-sub vm-integer-sub)            6)  ; mov + sub
     ((vm-mul vm-integer-mul)            7)  ; mov + imul (3+4, 0F AF)
-    ;; Checked arithmetic (FR-303): MOV + ALU + JO(rel32) + UD2
-    ((vm-add-checked vm-sub-checked)   14)  ; mov + add/sub + jo + ud2 (3+3+6+2)
-    (vm-mul-checked                    15)  ; mov + imul + jo + ud2 (3+4+6+2)
+    ;; Checked arithmetic (FR-303/149): save operands + ALU + overflow helper call.
+    ((vm-add-checked vm-sub-checked)   50)
+    (vm-mul-checked                    51)
     ((vm-integer-mul-high-u vm-integer-mul-high-s) 19) ; mul-high sequence + mov
     ;; Control flow
     (vm-halt                            3)  ; mov result to RAX
