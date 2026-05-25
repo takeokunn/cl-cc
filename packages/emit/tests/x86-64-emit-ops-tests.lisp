@@ -58,59 +58,59 @@
 
 ;;; ─── Checked arithmetic emitters (FR-303) ─────────────────────────────────
 
-(deftest x86-emit-add-checked-emits-jno-and-ud2
-  "emit-vm-add-checked emits MOV+ADD+JNO+UD2 sequence (FR-149/303 overflow trap)."
+(deftest x86-emit-add-checked-emits-jo-and-bignum-helper
+  "emit-vm-add-checked emits MOV+ADD+JO to native bignum helper, not UD2."
   (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-checked inst)))
-    (assert-= 14 (length bytes))
-    (assert-equal '(#x0F #x81) (subseq bytes 6 8))
-    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 8 12))  ;; JNO rel32 offset = 2 (little-endian)
-    (assert-equal '(#x0F #x0B) (subseq bytes 12 14)))) ;; UD2 at bytes 12-13
+    (assert-= 50 (length bytes))
+    (assert-equal '(#x0F #x80) (subseq bytes 8 10))
+    (assert-equal '(#x0C #x00 #x00 #x00) (subseq bytes 10 14))
+    (assert-false (search '(#x0F #x0B) bytes :test #'=))))
 
-(deftest x86-emit-sub-checked-emits-jno-and-ud2
-  "emit-vm-sub-checked emits MOV+SUB+JNO+UD2 sequence (FR-149/303 overflow trap)."
+(deftest x86-emit-sub-checked-emits-jo-and-bignum-helper
+  "emit-vm-sub-checked emits MOV+SUB+JO to native bignum helper, not UD2."
   (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-checked inst)))
-    (assert-= 14 (length bytes))
-    (assert-equal '(#x0F #x81) (subseq bytes 6 8))
-    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 8 12))
-    (assert-equal '(#x0F #x0B) (subseq bytes 12 14))))
+    (assert-= 50 (length bytes))
+    (assert-equal '(#x0F #x80) (subseq bytes 8 10))
+    (assert-equal '(#x0C #x00 #x00 #x00) (subseq bytes 10 14))
+    (assert-false (search '(#x0F #x0B) bytes :test #'=))))
 
-(deftest x86-emit-mul-checked-emits-jno-and-ud2
-  "emit-vm-mul-checked emits MOV+IMUL+JNO+UD2 sequence (FR-149/303 overflow trap)."
+(deftest x86-emit-mul-checked-emits-jo-and-bignum-helper
+  "emit-vm-mul-checked emits MOV+IMUL+JO to native bignum helper, not UD2."
   (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-checked inst)))
-    (assert-= 15 (length bytes))
-    (assert-equal '(#x0F #x81) (subseq bytes 7 9))
-    (assert-equal '(#x02 #x00 #x00 #x00) (subseq bytes 9 13))  ;; JNO rel32 offset = 2 (little-endian)
-    (assert-equal '(#x0F #x0B) (subseq bytes 13 15))))
+    (assert-= 51 (length bytes))
+    (assert-equal '(#x0F #x80) (subseq bytes 9 11))
+    (assert-equal '(#x0C #x00 #x00 #x00) (subseq bytes 11 15))
+    (assert-false (search '(#x0F #x0B) bytes :test #'=))))
 
-(deftest x86-emit-add-checked-emits-14-bytes
-  "FR-303 roadmap evidence anchor for checked add size and ADD/JNO trap semantics."
+(deftest x86-emit-add-checked-emits-50-bytes
+  "FR-303 roadmap evidence anchor for checked add size and ADD/JO helper semantics."
   (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-checked inst)))
-    (assert-= 14 (length bytes))
-    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
-    (assert-equal '(#x48 #x01 #xD0) (subseq bytes 3 6))  ;; ADD RAX,RDX
-    (assert-equal '(#x0F #x81) (subseq bytes 6 8))))       ;; JNO rel32
+    (assert-= 50 (length bytes))
+    (assert-equal '(#x51 #x52 #x48 #x89 #xC8) (subseq bytes 0 5))
+    (assert-equal '(#x48 #x01 #xD0) (subseq bytes 5 8))
+    (assert-equal '(#x0F #x80) (subseq bytes 8 10))))
 
-(deftest x86-emit-sub-checked-emits-14-bytes
-  "FR-303 roadmap evidence anchor for checked sub size and SUB/JNO trap semantics."
+(deftest x86-emit-sub-checked-emits-50-bytes
+  "FR-303 roadmap evidence anchor for checked sub size and SUB/JO helper semantics."
   (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-checked inst)))
-    (assert-= 14 (length bytes))
-    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
-    (assert-equal '(#x48 #x29 #xD0) (subseq bytes 3 6))  ;; SUB RAX,RDX
-    (assert-equal '(#x0F #x81) (subseq bytes 6 8))))       ;; JNO rel32
+    (assert-= 50 (length bytes))
+    (assert-equal '(#x51 #x52 #x48 #x89 #xC8) (subseq bytes 0 5))
+    (assert-equal '(#x48 #x29 #xD0) (subseq bytes 5 8))
+    (assert-equal '(#x0F #x80) (subseq bytes 8 10))))
 
-(deftest x86-emit-mul-checked-emits-15-bytes
-  "FR-303 roadmap evidence anchor for checked mul size and IMUL/JNO trap semantics."
+(deftest x86-emit-mul-checked-emits-51-bytes
+  "FR-303 roadmap evidence anchor for checked mul size and IMUL/JO helper semantics."
   (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-checked inst)))
-    (assert-= 15 (length bytes))
-    (assert-equal '(#x48 #x89 #xC8) (subseq bytes 0 3))  ;; MOV RAX,RCX
-    (assert-equal '(#x48 #x0F #xAF #xC2) (subseq bytes 3 7))  ;; IMUL RAX,RDX
-    (assert-equal '(#x0F #x81) (subseq bytes 7 9))))       ;; JNO rel32
+    (assert-= 51 (length bytes))
+    (assert-equal '(#x51 #x52 #x48 #x89 #xC8) (subseq bytes 0 5))
+    (assert-equal '(#x48 #x0F #xAF #xC2) (subseq bytes 5 9))
+    (assert-equal '(#x0F #x80) (subseq bytes 9 11))))
 
 (deftest x86-emit-mul-high-emits-19-bytes
   "vm-integer-mul-high-{u,s} emit the documented 19-byte save/MUL-high/restore sequence."

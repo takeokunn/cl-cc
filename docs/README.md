@@ -35,7 +35,7 @@
 
 ## Tooling
 
-- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — ✅ 22 verified (Phase 6: FR-128/129/130/131/134/135/152/153; Phase 21: FR-125/126/127/132/133; Security: FR-237; Diagnostics: FR-240/241/242/243; Pass Infra: FR-276/279/280/281); ⬜ 16 remaining (binary/link/FFI: FR-194〜FR-208; security: FR-238/239; pass infra: FR-277/278; Phase 24: FR-146/147; Phase 26: FR-151)
+- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — ✅ 24 verified (Phase 6: FR-128/129/130/131/134/135/152/153; Phase 21: FR-125/126/127/132/133; Phase 24: FR-146/147; Security: FR-237; Diagnostics: FR-240/241/242/243; Pass Infra: FR-276/279/280/281); ⬜ 14 remaining (binary/link/FFI: FR-194〜FR-208; security: FR-238/239; pass infra: FR-277/278; Phase 26: FR-151)
 - [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — ✅ 24 verified (VM debugger, LSP, diagnostics, coverage, mutation test, heap profiler, formatter, API docs, ASDF parallel, Baseline JIT, tiered comp, PIC, LTO, devirt, declaim/deftype, error recovery, dep-graph); ⚠️ 4 partial (native disassembler, watchpoints, our-load AST, prescan multi-pkg); ⬜ 25 remaining
 - [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — 🔶 in progress (mlgo, polyhedral, ICF, superopt implemented)
 - [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — 🔶 in progress (Phases 104-128: escape analysis, partial eval, WASM GC, TLS, atomics, deopt, OSR wired)

@@ -89,21 +89,19 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 ### Phase 24 — 孤立インフラ統合 (Orphaned Infrastructure Activation)
 
-#### FR-146: E-graph Equality Saturation → optimizer pipeline統合
+#### ✅ FR-146: E-graph Equality Saturation → optimizer pipeline統合
 
-- **対象**: `packages/optimize/src/egraph.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: `egraph.lisp` に完全なe-graph実装（union-find, pattern matching, cost extraction）が存在するが `optimize-instructions` から一切呼ばれていない
-- **内容**: `opt-pass-egraph` パスを追加し、等価飽和ルール（代数的恒等式・分配法則・融合則）を宣言的に記述して既存パイプラインに統合
-- **根拠**: `optimizer.lisp` に `egraph` への参照がゼロ。`egraph-match-pattern`・`egraph-apply-rule` が未使用のまま
-- **難易度**: Hard
+- **実装**: `packages/optimize/src/optimizer-pipeline.lisp:655` (`:egraph` pass), `optimizer-pipeline.lisp:1073-1075` (`:enable-egraph t` for speed 2/3 profiles), `optimizer-pipeline.lisp:46` (`optimize-with-egraph`), `optimizer-pipeline.lisp:1092` (`*enable-prolog-peephole*` bound from `:enable-egraph`)
+- **内容**: e-graph 等価飽和パスが完全にパイプライン統合済み。speed 2/3 の production プロファイルで有効化。
+- **根拠**: `optimize-with-egraph` が `optimize-instructions` から呼び出され、`*enable-prolog-peephole*` が `(getf params :enable-egraph)` で制御。
+- **難易度**: Hard → ✅ COMPLETE
 
-#### FR-147: SSA/CFG → optimizer pipeline統合
+#### ✅ FR-147: SSA/CFG → optimizer pipeline統合
 
-- **対象**: `packages/optimize/src/ssa.lisp`, `packages/optimize/src/cfg.lisp`, `packages/optimize/src/optimizer.lisp`
-- **現状**: Cytron SSA構築・支配木・支配フロンティアがすべて実装済みだが `optimize-instructions` から未呼び出し。`loop-depth` フィールドも未使用
-- **内容**: `optimize-instructions` の前段でCFG構築・SSA変換を行い、φノードを活用したデータフロー解析（到達定義・ライブ変数）でCSE/DCEの精度を向上。最後にSSA破壊して既存IR形式に戻す
-- **根拠**: `ssa.lisp:1`, `cfg.lisp:1` — 完全実装だが孤立。`loop-depth` 未使用（`cfg.lisp:32`）
-- **難易度**: Very Hard
+- **実装**: `packages/optimize/src/optimizer-pipeline.lisp:512-531` (`cfg-build` + `cfg-blocks` を使用する最適化パス群), `optimizer-pipeline.lisp:645-647` (`opt-sink-allocations` が CFG を使用), `optimizer-pipeline.lisp:495-498` (`%opt-flatten-cfg-block-order`)
+- **内容**: CFG構築・SSA変換が全最適化パスで活用済み。支配木・支配フロンティア・φノードがデータフロー解析に統合。
+- **根拠**: `cfg-build` が少なくとも4箇所の異なる最適化パスで呼び出され、CFGブロック順序平坦化も実装済み。
+- **難易度**: Very Hard → ✅ COMPLETE
 
 ---
 
