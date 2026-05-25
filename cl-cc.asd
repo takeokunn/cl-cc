@@ -60,7 +60,10 @@
     :serial t
     :components
     ((:file "package")))
-   (:file "ffi/dynlib")))
+   (:module "ffi-dynlib"
+    :pathname "src/ffi/"
+    :components
+    ((:file "dynlib")))))
 
 (eval-when (:load-toplevel :execute)
   (require :asdf)
