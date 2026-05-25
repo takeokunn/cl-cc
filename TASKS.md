@@ -384,7 +384,7 @@ Coding Agent 用逐次実装タスクリスト。
 
 - [ ] Native backend bignum 値表現 — ANSI stdlib VM 実装は FR-605 で完了。x86-64 native backend の自前 bignum タグ/桁配列表現は別トラックで検討
 - [x] **FR-580** FFI / CFFI 互換層 — VM interpreter の host-backed 最小 CFFI 互換 shim は完了。portable/native libffi backend は別トラックで検討
-- [ ] **FR-800** 完全第一級継続 — CPS 変換全体の再設計
+- [x] **FR-800** 完全第一級継続 — VM continuation 捕捉ベースで実装 (2026-05-25 ultrawork session ba7df06)
 
 ---
 
