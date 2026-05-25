@@ -397,21 +397,39 @@ compare tags/payloads without changing the trampoline architecture."
 ;;; Step 6: Build complete WAT body for a single wasm-function-def
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defun wasm-function-param-regs (func-def)
+  "Return the VM registers used as FUNC-DEF's closure parameters."
+  (or (wasm-func-params func-def)
+      (when (fboundp 'wasm-func-captures)
+        (let ((captures (funcall (symbol-function 'wasm-func-captures) func-def)))
+          (when (listp captures)
+            captures)))
+      nil))
+
+(defun initialize-wasm-param-locals (reg-map param-regs)
+  "Reserve local indices 0..N-1 for PARAM-REGS in REG-MAP."
+  (loop for reg in param-regs
+        for index from 0
+        do (setf (gethash reg (wasm-reg-map-table reg-map)) index))
+  reg-map)
+
 (defun build-wasm-function-wat (func-def)
   "Build the WAT trampoline body for FUNC-DEF.
    Populates the :body slot with a list containing a single WAT string.
    Returns the WAT string."
   (let* ((instructions (wasm-func-source-instructions func-def))
-         (basic-blocks (group-into-basic-blocks instructions))
-         (label-pc-map (build-label-pc-map basic-blocks))
-         (num-params 0)  ; TODO: infer from closure captures
-         (reg-map (make-wasm-reg-map-for-function num-params))
-         (body-stream (make-string-output-stream)))
+          (basic-blocks (group-into-basic-blocks instructions))
+          (label-pc-map (build-label-pc-map basic-blocks))
+          (param-regs (wasm-function-param-regs func-def))
+          (num-params (length param-regs))
+          (reg-map (make-wasm-reg-map-for-function num-params))
+          (body-stream (make-string-output-stream)))
+    (initialize-wasm-param-locals reg-map param-regs)
     ;; Pre-allocate locals for all registers that appear in this function
     (collect-registers-from-instructions instructions reg-map)
     ;; Emit the trampoline body (pass param-regs for the arg-load prologue)
     (build-trampoline-body basic-blocks label-pc-map reg-map
-                           (wasm-func-params func-def) body-stream
+                           param-regs body-stream
                            (wasm-func-exception-table func-def))
     (let ((body-str (get-output-stream-string body-stream)))
       (setf (wasm-func-body func-def) (list body-str))

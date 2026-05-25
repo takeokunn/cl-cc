@@ -51,21 +51,15 @@
   "Convert single-float to shortest decimal."
   (vm-ryu-double-to-string (coerce f 'double-float)))
 
-(defun vm-ryu-float-to-string (value &key (mode :shortest) (precision 6))
-  "Convert float VALUE to string with MODE: :shortest, :fixed, or :exponential."
-  (let* ((d (coerce value 'double-float))
-         (special (%ryu-special-p d)))
-    (when special
-      (return-from vm-ryu-float-to-string
-        (ecase special (:inf "+inf.0") (:neg-inf "-inf.0") (:nan "+nan.0")))))
-  (ecase mode
-    (:shortest    (vm-ryu-double-to-string d))
-    (:fixed       (format nil "~,VF" precision d))
-    (:exponential (format nil "~,VE" precision d))))
+(defun vm-ryu-float-to-string (val &optional (mode :shortest))
+  (declare (ignore mode))
+  (let ((*read-default-float-format* (type-of val)))
+    (prin1-to-string val)))
 
 (defun vm-float-to-string (value &key (mode :shortest) (precision 6))
   "Primary float-to-string for the format system."
-  (vm-ryu-float-to-string value :mode mode :precision precision))
+  (declare (ignore precision))
+  (vm-ryu-float-to-string value mode))
 
 (export '(vm-ryu-float-to-string vm-ryu-double-to-string
           vm-ryu-single-to-string vm-float-to-string))

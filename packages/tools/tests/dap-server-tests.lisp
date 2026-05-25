@@ -14,7 +14,10 @@
   :timeout 5
   (assert-true (asdf:find-system :cl-cc-tools nil))
   (assert-true (fboundp 'cl-cc/tools/dap:make-dap-server))
-  (assert-true (fboundp 'cl-cc/tools/dap:read-jsonrpc-message)))
+  (assert-true (fboundp 'cl-cc/tools/dap:dap-server-p))
+  (assert-true (fboundp 'cl-cc/tools/dap:dap-server-running-p))
+  (assert-true (fboundp 'cl-cc/tools/dap:read-jsonrpc-message))
+  (assert-true (cl-cc/tools/dap:dap-server-p (cl-cc/tools/dap:make-dap-server))))
 
 (deftest dap-jsonrpc-framing-round-trips
   "FR-797: DAP uses the same Content-Length protocol framing."

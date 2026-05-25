@@ -6,6 +6,11 @@
   (defpackage :cl-cc/tools/lsp
     (:use :cl)
     (:export #:make-lsp-server
+             #:lsp-server-p
+             #:lsp-server-documents
+             #:lsp-server-symbols
+             #:lsp-server-shutdown-requested-p
+             #:lsp-server-running-p
              #:read-jsonrpc-message
              #:write-jsonrpc-message
              #:lsp-handle-request
@@ -16,6 +21,13 @@
   (defpackage :cl-cc/tools/dap
     (:use :cl)
     (:export #:make-dap-server
+             #:dap-server-p
+             #:dap-server-seq
+             #:dap-server-breakpoints
+             #:dap-server-variables
+             #:dap-server-next-variable-reference
+             #:dap-server-vm-state
+             #:dap-server-running-p
              #:read-jsonrpc-message
              #:write-jsonrpc-message
              #:dap-handle-request

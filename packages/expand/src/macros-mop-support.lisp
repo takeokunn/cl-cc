@@ -97,14 +97,9 @@
 
 ;;; FR-302: parse-float — not in ANSI CL but requested; implemented via read-from-string
 
-(register-macro 'parse-float
-  (lambda (form env)
-    (declare (ignore env))
-    (let ((string (second form))
-          (start (third form))
-          (sv (gensym "SV")))
-      (list 'let (list (list sv (list 'if start (list 'subseq string start) string)))
-            (list 'float (list 'read-from-string sv))))))
+(defun parse-float (string)
+  (let ((*read-default-float-format* 'single-float))
+    (read-from-string string)))
 
 ;;; FR-1005: reinitialize-instance and shared-initialize
 

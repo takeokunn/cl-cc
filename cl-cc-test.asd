@@ -9,7 +9,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php :cl-cc-tools)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -471,9 +471,15 @@
       :serial t
       :components
       ((:file "perfmap-tests")))
-    (:module "runtime-tests"
-     :pathname "packages/runtime/tests"
-     :serial t
+     (:module "tools-tests"
+      :pathname "packages/tools/tests"
+      :serial t
+      :components
+      ((:file "lsp-server-tests")
+       (:file "dap-server-tests")))
+     (:module "runtime-tests"
+      :pathname "packages/runtime/tests"
+      :serial t
     :components
     ((:file "runtime-tests")
      (:file "runtime-tests-2")
@@ -496,7 +502,8 @@
          (:file "runtime-stdlib-3-image-tests")
         (:file "continuous-profile-tests")
        (:file "value-tests")
-      (:file "frame-tests")))
+       (:file "dynlib-tests")
+       (:file "frame-tests")))
    (:module "bytecode-tests"
     :pathname "packages/bytecode/tests"
     :serial t

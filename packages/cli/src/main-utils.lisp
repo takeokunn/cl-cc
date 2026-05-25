@@ -37,6 +37,22 @@ Signals an error when the file does not exist."
            (n   (read-sequence buf in)))
       (subseq buf 0 n))))
 
+(defun %shebang-line-p (line)
+  "Return T when LINE is a POSIX shebang line."
+  (and (stringp line)
+       (>= (length line) 2)
+       (char= (char line 0) #\#)
+       (char= (char line 1) #\!)))
+
+(defun %strip-shebang-line (source)
+  "Return SOURCE with a leading #! interpreter line removed."
+  (let* ((text (or source ""))
+         (newline (position #\Newline text))
+         (first-line (if newline (subseq text 0 newline) text)))
+    (if (%shebang-line-p first-line)
+        (if newline (subseq text (1+ newline)) "")
+        text)))
+
 (defparameter *lang-flag-map*
   '(("php" . :php) ("lisp" . :lisp))
   "Alist mapping --lang flag strings to language keywords.")
@@ -101,7 +117,7 @@ Returns :lisp or :php."
 
 (defun %read-command-source (file)
   "Read FILE or print a consistent CLI read error and exit with status 1."
-  (handler-case (%read-file file)
+  (handler-case (%strip-shebang-line (%read-file file))
     (error (e)
       (format *error-output* "Error reading ~A: ~A~%" file e)
       (uiop:quit 1))))
@@ -248,17 +264,110 @@ Returns :lisp or :php."
 
 ;;; FR-808: Script mode / shebang support stub
 (defun parse-cli-args (argv)
-  "FR-808: Parse CLI arguments, stripping shebang lines if present.
+  "FR-808: Parse CLI arguments and script-mode argv conventions.
 Returns a parsed-args structure."
   (parse-args argv))
 
 ;;; FR-809: Command-line arguments API stub
+(defvar *command-line-arguments* nil
+  "Stable CLI-level view of script arguments after the script/expression.")
+
 (defun cl-cc-argv ()
   "FR-809: Return the command-line arguments as a list of strings."
-  (uiop:command-line-arguments))
+  (copy-list *command-line-arguments*))
+
+(defun %script-argv-from-parsed (parsed)
+  "Return script-visible argv: positional arguments after file/expression."
+  (copy-list (cdr (parsed-args-positional parsed))))
+
+(defun %set-vm-global-if-package (package-name symbol-name value &optional (state nil state-p))
+  (let ((package (find-package package-name)))
+    (when package
+      (multiple-value-bind (symbol status) (find-symbol symbol-name package)
+        (declare (ignore status))
+        (when symbol
+          (set symbol value)
+          (when state-p
+            (setf (gethash symbol (cl-cc/vm:vm-global-vars state)) value)))))))
+
+(defun %bind-command-line-arguments (argv &optional vm-state)
+  "Bind FR-809 command-line arguments in CLI, runtime, and VM state."
+  (let ((args (copy-list argv)))
+    (setf *command-line-arguments* args)
+    (dolist (name '("*COMMAND-LINE-ARGUMENTS*" "*COMMAND-LINE-ARGS*" "*SCRIPT-ARGV*"))
+      (%set-vm-global-if-package :cl-cc/vm name args vm-state)
+      (%set-vm-global-if-package :cl-cc name args vm-state))
+    args))
+
+(defun getopt (_program option-spec argv)
+  "FR-809: Minimal script getopt helper. Returns option plist and positionals."
+  (declare (ignore _program))
+  (let ((opts nil)
+        (positionals nil)
+        (rest (copy-list argv)))
+    (labels ((spec-for-short (ch)
+               (find ch option-spec :key #'second :test #'char=))
+             (spec-for-long (name)
+               (find name option-spec :key #'third :test #'string=)))
+      (loop while rest do
+        (let ((arg (pop rest)))
+          (cond
+            ((string= arg "--")
+             (setf positionals (append positionals rest)
+                   rest nil))
+            ((and (> (length arg) 2) (string= arg "--" :end1 2))
+             (let ((spec (spec-for-long (subseq arg 2))))
+               (if spec
+                   (setf (getf opts (first spec)) t)
+                   (push arg positionals))))
+            ((and (= (length arg) 2) (char= (char arg 0) #\-))
+             (let ((spec (spec-for-short (char arg 1))))
+               (if spec
+                   (setf (getf opts (first spec)) t)
+                   (push arg positionals))))
+            (t (push arg positionals))))))
+    (values opts (nreverse positionals))))
+
+(defun %source-with-script-bindings (source argv)
+  "Wrap SOURCE with script argv initialization and optional CL-CC:MAIN call."
+  (format nil "(progn~%  (defparameter cl-cc:*script-argv* '~S)~%  (defparameter cl-cc:*command-line-arguments* cl-cc:*script-argv*)~%  ~A~%  (when (fboundp 'cl-cc:main) (funcall #'cl-cc:main cl-cc:*script-argv*)))~%"
+          argv source))
 
 ;;; FR-917: Reproducible build support stub
 (defun cl-cc-deterministic-build-p ()
   "FR-917: Return T when building in reproducible/deterministic mode."
-  (let ((env (ignore-errors (sb-ext:posix-getenv "CLCC_DETERMINISTIC"))))
-    (and env (member (string-downcase env) '("1" "true" "yes") :test #'string=))))
+  (let ((env (or (ignore-errors (uiop:getenv "CLCC_DETERMINISTIC"))
+                 (ignore-errors (uiop:getenv "SOURCE_DATE_EPOCH")))))
+    (and env (not (member (string-downcase env) '("" "0" "false" "no") :test #'string=)))))
+
+(defun configure-reproducible-build (&key (epoch "0") (seed 0))
+  "Enable deterministic build defaults for this process and return metadata."
+  (setf (uiop:getenv "CLCC_DETERMINISTIC") "1")
+  (unless (uiop:getenv "SOURCE_DATE_EPOCH")
+    (setf (uiop:getenv "SOURCE_DATE_EPOCH") epoch))
+  (let ((apply-seed (find-symbol "APPLY-BUILD-SEED" :cl-cc/vm)))
+    (when (and apply-seed (fboundp apply-seed))
+      (funcall apply-seed seed)))
+  (list :format :cl-cc-reproducible-build-v1
+        :source-date-epoch (uiop:getenv "SOURCE_DATE_EPOCH")
+        :seed seed
+        :deterministic t))
+
+(defun %reproducible-metadata-path (path)
+  (namestring (make-pathname :defaults (pathname path) :type "build-metadata.sexp")))
+
+(defun %apply-reproducible-build-options (output parsed)
+  "Write deterministic sidecar metadata for OUTPUT when reproducible mode is on."
+  (when (and output (or (flag parsed "--deterministic")
+                       (flag parsed "--reproducible")
+                       (flag parsed "--build-id")))
+    (let* ((path (%reproducible-metadata-path output))
+           (metadata (append (configure-reproducible-build)
+                             (list :output (file-namestring (pathname output))
+                                   :build-id (or (flag parsed "--build-id") "")
+                                   :timestamp-stripped t))))
+      (ensure-directories-exist path)
+      (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+        (write metadata :stream out :pretty t)
+        (terpri out))
+      path)))

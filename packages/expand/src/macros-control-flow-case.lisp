@@ -212,7 +212,7 @@ Uses VM-TYPE-OF which returns stable integer type tags suitable for CASE dispatc
          (default-clause (if default-form
                              `(t ,default-form)
                              `(t nil))))
-    `(case (vm-type-of ,key-var)
+    `(case (cl-cc/vm:vm-type-of ,key-var)
        ,@(mapcar (lambda (pair)
                    `(,(car pair) ,(second pair)))
                  pairs)

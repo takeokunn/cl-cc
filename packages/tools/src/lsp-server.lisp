@@ -315,7 +315,6 @@
          (lsp-open-document server uri text)
          (lsp-publish-diagnostics server uri)))
       ((string= method "textDocument/completion")
-       (declare (ignore params))
        (%response id `(("isIncomplete" . :false)
                        ("items" . ,(mapcar (lambda (label) `(("label" . ,label) ("kind" . 3)))
                                             (append '("defun" "defvar" "defparameter" "lambda" "let" "if")

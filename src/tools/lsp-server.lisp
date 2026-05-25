@@ -9,8 +9,11 @@
 
 (in-package :cl-cc/tools/lsp)
 
-(defstruct (lsp-server (:constructor make-lsp-server))
+(defstruct (lsp-server (:constructor make-lsp-server (&key)))
   (documents (make-hash-table :test #'equal))
+  (symbols (make-hash-table :test #'equal))
+  (shutdown-requested-p nil)
+  (running-p nil)
   (capabilities
    '(("definitionProvider" . t)
      ("hoverProvider" . t)

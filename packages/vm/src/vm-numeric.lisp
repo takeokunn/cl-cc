@@ -940,6 +940,12 @@ representation and applies signs after quotient/remainder construction."
 (defmethod print-object ((value vm-complex) stream)
   (format stream "#C(~S ~S)" (vm-complex-real value) (vm-complex-imag value)))
 
+(defmethod print-object ((value vm-ratio) stream)
+  (format stream "~D/~D" (vm-ratio-numerator value) (vm-ratio-denominator value)))
+
+(defmethod print-object ((value vm-bignum) stream)
+  (format stream "~D" (vm-bignum-to-integer value)))
+
 (defun %vm-externalize-complex (value)
   (if (vm-complex-p value)
       (complex (vm-complex-real value) (vm-complex-imag value))

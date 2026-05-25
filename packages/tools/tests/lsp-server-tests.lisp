@@ -14,7 +14,10 @@
   :timeout 5
   (assert-true (asdf:find-system :cl-cc-tools nil))
   (assert-true (fboundp 'cl-cc/tools/lsp:make-lsp-server))
-  (assert-true (fboundp 'cl-cc/tools/lsp:read-jsonrpc-message)))
+  (assert-true (fboundp 'cl-cc/tools/lsp:lsp-server-p))
+  (assert-true (fboundp 'cl-cc/tools/lsp:lsp-server-running-p))
+  (assert-true (fboundp 'cl-cc/tools/lsp:read-jsonrpc-message))
+  (assert-true (cl-cc/tools/lsp:lsp-server-p (cl-cc/tools/lsp:make-lsp-server))))
 
 (deftest lsp-jsonrpc-framing-round-trips
   "FR-796: Content-Length framing and JSON parsing work without network I/O."

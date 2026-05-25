@@ -196,6 +196,25 @@ The returned bytes start with Elf64_Chdr:
     (binary-buffer-write-bytes buf compressed-bytes)
     (binary-buffer-to-array buf)))
 
+(defun %emit-dwarf-line-info (text-size &key (source "<unknown>"))
+  "Emit a minimal DWARF3 .debug_line mapping line 1 to address 0."
+  (declare (ignore source))
+  (let ((buf (elf-make-buffer)))
+    (binary-buffer-write-u32le buf 29) ; unit_length
+    (binary-buffer-write-u16le buf 3)  ; version
+    (binary-buffer-write-u32le buf 16) ; header_length
+    (binary-buffer-write-bytes buf #(1 1 1 #xfb 14 13))
+    (dotimes (_ 12) (declare (ignore _)) (elf-buf-u8 buf 0))
+    (elf-buf-u8 buf 0) ; include dirs
+    (elf-buf-u8 buf 0) ; file names
+    (elf-buf-u8 buf +dwarf-dw-lns-copy+)
+    (elf-buf-u8 buf +dwarf-dw-lns-advance-pc+)
+    (elf64-write-uleb128 buf text-size)
+    (elf-buf-u8 buf 0)
+    (elf64-write-uleb128 buf 1)
+    (elf-buf-u8 buf +dwarf-dw-lne-end-sequence+)
+    (binary-buffer-to-array buf)))
+
 (defun elf64-finalize-relocatable (builder)
   "Assemble the complete ELF64 object file. Returns a (simple-array (unsigned-byte 8) (*))."
   (let* (;; String tables
@@ -210,8 +229,9 @@ The returned bytes start with Elf64_Chdr:
          (sh-eh-frame-hdr-off (strtab-add shstrtab ".eh_frame_hdr"))
          (sh-rela-off     (strtab-add shstrtab ".rela.text"))
          (sh-symtab-off   (strtab-add shstrtab ".symtab"))
-         (sh-strtab-off   (strtab-add shstrtab ".strtab"))
-         (sh-shstrtab-off (strtab-add shstrtab ".shstrtab"))
+          (sh-strtab-off   (strtab-add shstrtab ".strtab"))
+          (sh-debug-line-off (strtab-add shstrtab ".debug_line"))
+          (sh-shstrtab-off (strtab-add shstrtab ".shstrtab"))
          ;; Build symbol table (populates strtab); capture both bytes and local-count
          (sym-build (multiple-value-list (elf64-build-symtab builder strtab)))
          (sym-buf (first sym-build))
@@ -244,17 +264,18 @@ The returned bytes start with Elf64_Chdr:
            (rodata-bytes (binary-buffer-to-array (elf64-rodata-buf builder)))
            (rodata-str-bytes (binary-buffer-to-array (elf64-rodata-str-buf builder)))
            (bss-size        (elf64-bss-size builder))
-           (eh-frame-bytes (elf64-build-eh-frame (length text-bytes)))
+            (eh-frame-bytes (elf64-build-eh-frame (length text-bytes)))
+            (debug-line-bytes (%emit-dwarf-line-info (length text-bytes)))
            (rodata-str-size (length rodata-str-bytes))
            (rodata-str-present-p (plusp rodata-str-size))
            ;; Layout: ELF header + sections + section headers.
            ;; Section ordering: NULL, .text, .rodata, optional .rodata.str,
            ;; .bss, .eh_frame, .eh_frame_hdr, .rela.text, .symtab, .strtab,
            ;; .shstrtab
-           (n-sections (if rodata-str-present-p 11 10))
-           (symtab-idx (if rodata-str-present-p 8 7))
-           (strtab-idx (if rodata-str-present-p 9 8))
-           (shstrtab-idx (if rodata-str-present-p 10 9))  ; index of .shstrtab
+            (n-sections (if rodata-str-present-p 12 11))
+            (symtab-idx (if rodata-str-present-p 8 7))
+            (strtab-idx (if rodata-str-present-p 9 8))
+            (shstrtab-idx (if rodata-str-present-p 11 10))  ; index of .shstrtab
           ;; Data starts after ELF header, honoring section alignment requirements.
             (text-offset     (align-up +elf64-ehdr-size+ 16))
             (text-size       (length text-section-bytes))
@@ -272,7 +293,9 @@ The returned bytes start with Elf64_Chdr:
          (symtab-size     (length sym-buf))
          (strtab-offset   (+ symtab-offset symtab-size))
          (strtab-size     (length strtab-bytes))
-         (shstrtab-offset (+ strtab-offset strtab-size))
+          (debug-line-offset (+ strtab-offset strtab-size))
+          (debug-line-size (length debug-line-bytes))
+          (shstrtab-offset (+ debug-line-offset debug-line-size))
          (shstrtab-size   (length shstrtab-bytes))
          ;; Section headers start after all section data
          (shoff           (align-up (+ shstrtab-offset shstrtab-size) 8))
@@ -333,9 +356,11 @@ The returned bytes start with Elf64_Chdr:
      (binary-buffer-write-bytes out rela-buf)
      (binary-buffer-write-pad out (- symtab-offset (length out)))
      (binary-buffer-write-bytes out sym-buf)
-     (binary-buffer-write-pad out (- strtab-offset (length out)))
-     (binary-buffer-write-bytes out strtab-bytes)
-     (binary-buffer-write-pad out (- shstrtab-offset (length out)))
+      (binary-buffer-write-pad out (- strtab-offset (length out)))
+      (binary-buffer-write-bytes out strtab-bytes)
+      (binary-buffer-write-pad out (- debug-line-offset (length out)))
+      (binary-buffer-write-bytes out debug-line-bytes)
+      (binary-buffer-write-pad out (- shstrtab-offset (length out)))
      (binary-buffer-write-bytes out shstrtab-bytes)
      (binary-buffer-write-pad out (- shoff (length out)))
 
@@ -390,9 +415,11 @@ The returned bytes start with Elf64_Chdr:
                         8 +elf64-sym-size+)
       ;; SHN 9: .strtab
       (elf64-write-shdr out sh-strtab-off +sht-strtab+
-                        0
-                        strtab-offset strtab-size
-                        0 0 1 0)
+                         0
+                         strtab-offset strtab-size
+                         0 0 1 0)
+      (elf64-write-shdr out sh-debug-line-off +sht-progbits+ 0
+                        debug-line-offset debug-line-size 0 0 1 0)
       ;; SHN 10: .shstrtab
       (elf64-write-shdr out sh-shstrtab-off +sht-strtab+
                        0
@@ -442,6 +469,7 @@ The returned bytes start with Elf64_Chdr:
 (defun elf64-finalize-executable (builder)
   "Assemble an ELF64 ET_EXEC or ET_DYN image with program headers."
   (let* ((dynamic-p (= (elf64-elf-type builder) +elf-type-dyn+))
+         (interp-p (and dynamic-p (not (elf64-shared-object builder))))
          (base (if dynamic-p 0 +elf64-exec-base+))
          (shstrtab (make-strtab))
          (strtab (make-strtab))
@@ -453,21 +481,22 @@ The returned bytes start with Elf64_Chdr:
          (sh-bss-off (strtab-add shstrtab ".bss"))
          (sh-eh-frame-off (strtab-add shstrtab ".eh_frame"))
          (sh-eh-frame-hdr-off (strtab-add shstrtab ".eh_frame_hdr"))
-         (sh-symtab-off (strtab-add shstrtab ".symtab"))
-         (sh-strtab-off (strtab-add shstrtab ".strtab"))
-         (sh-shstrtab-off (strtab-add shstrtab ".shstrtab"))
-         (sh-interp-off (and dynamic-p (strtab-add shstrtab ".interp")))
+          (sh-symtab-off (strtab-add shstrtab ".symtab"))
+          (sh-strtab-off (strtab-add shstrtab ".strtab"))
+          (sh-debug-line-off (strtab-add shstrtab ".debug_line"))
+          (sh-shstrtab-off (strtab-add shstrtab ".shstrtab"))
+          (sh-interp-off (and interp-p (strtab-add shstrtab ".interp")))
          (sh-dynamic-off (and dynamic-p (strtab-add shstrtab ".dynamic")))
          (sh-dynsym-off (and dynamic-p (strtab-add shstrtab ".dynsym")))
          (sh-dynstr-off (and dynamic-p (strtab-add shstrtab ".dynstr")))
          (sh-rela-dyn-off (and dynamic-p (strtab-add shstrtab ".rela.dyn")))
          (sh-rela-plt-off (and dynamic-p (strtab-add shstrtab ".rela.plt")))
-         (phnum (if dynamic-p 8 6))
+          (phnum (if dynamic-p (if interp-p 8 7) 6))
          (phoff +elf64-ehdr-size+)
          (headers-size (+ +elf64-ehdr-size+ (* phnum +elf64-phdr-size+)))
-         (interp-bytes (and dynamic-p (elf64-string-bytes (elf64-interpreter builder))))
-         (interp-offset (and dynamic-p (align-up headers-size 8)))
-         (after-interp (if dynamic-p (+ interp-offset (length interp-bytes)) headers-size))
+          (interp-bytes (and interp-p (elf64-string-bytes (elf64-interpreter builder))))
+          (interp-offset (and interp-p (align-up headers-size 8)))
+          (after-interp (if interp-p (+ interp-offset (length interp-bytes)) headers-size))
          (text-offset (align-up after-interp +elf-page-size+))
          (text-bytes (binary-buffer-to-array (elf64-text-buf builder)))
          (text-size (length text-bytes))
@@ -524,20 +553,25 @@ The returned bytes start with Elf64_Chdr:
          (sym-buf (first sym-build))
          (sym-local-count (second sym-build))
          (strtab-bytes (strtab-bytes strtab))
-         (shstrtab-bytes (strtab-bytes shstrtab))
+          (shstrtab-bytes (strtab-bytes shstrtab))
+          (debug-line-bytes (%emit-dwarf-line-info text-size))
          (symtab-offset (align-up bss-offset 8))
          (symtab-size (length sym-buf))
          (strtab-offset (+ symtab-offset symtab-size))
          (strtab-size (length strtab-bytes))
-         (shstrtab-offset (+ strtab-offset strtab-size))
+          (debug-line-offset (+ strtab-offset strtab-size))
+          (debug-line-size (length debug-line-bytes))
+          (shstrtab-offset (+ debug-line-offset debug-line-size))
          (shstrtab-size (length shstrtab-bytes))
          (shoff (align-up (+ shstrtab-offset shstrtab-size) 8))
-           (n-sections (+ (if dynamic-p 16 10) rodata-str-section-delta))
-           (dynsym-idx (and dynamic-p (+ 8 rodata-str-section-delta)))
-           (dynstr-idx (and dynamic-p (+ 9 rodata-str-section-delta)))
-           (symtab-idx (+ (if dynamic-p 13 7) rodata-str-section-delta))
-           (strtab-idx (+ (if dynamic-p 14 8) rodata-str-section-delta))
-           (shstrtab-idx (+ (if dynamic-p 15 9) rodata-str-section-delta))
+            (n-sections (+ (if dynamic-p (+ 16 (if interp-p 1 0)) 11)
+                           rodata-str-section-delta))
+            (dynsym-idx (and dynamic-p (+ 7 (if interp-p 1 0) rodata-str-section-delta)))
+            (dynstr-idx (and dynamic-p (1+ dynsym-idx)))
+            (symtab-idx (+ (if dynamic-p (+ dynsym-idx 5) 7) rodata-str-section-delta))
+            (strtab-idx (1+ symtab-idx))
+            (debug-line-idx (1+ strtab-idx))
+            (shstrtab-idx (1+ debug-line-idx))
          (entry-point (if (zerop (elf64-entry-point builder)) text-addr (elf64-entry-point builder)))
          (text-load-filesz (+ (- text-offset 0) text-size))
          (ro-load-filesz (- (+ eh-frame-hdr-offset eh-frame-hdr-size) rodata-offset))
@@ -571,7 +605,7 @@ The returned bytes start with Elf64_Chdr:
     ;; Program headers.
     (elf64-write-phdr out +pt-phdr+ +pf-r+ phoff (+ base phoff) (+ base phoff)
                       (* phnum +elf64-phdr-size+) (* phnum +elf64-phdr-size+) 8)
-    (when dynamic-p
+    (when interp-p
       (elf64-write-phdr out +pt-interp+ +pf-r+ interp-offset (+ base interp-offset)
                         (+ base interp-offset) (length interp-bytes) (length interp-bytes) 1))
     (elf64-write-phdr out +pt-load+ (logior +pf-r+ +pf-x+) 0 base base
@@ -588,7 +622,7 @@ The returned bytes start with Elf64_Chdr:
     (elf64-write-phdr out +pt-gnu-relro+ +pf-r+ data-offset data-addr data-addr
                       data-load-filesz data-load-filesz 1)
     ;; Section payloads.
-    (when dynamic-p
+    (when interp-p
       (binary-buffer-write-pad out (- interp-offset (length out)))
       (binary-buffer-write-bytes out interp-bytes))
     (binary-buffer-write-pad out (- text-offset (length out)))
@@ -619,12 +653,14 @@ The returned bytes start with Elf64_Chdr:
     (binary-buffer-write-bytes out sym-buf)
     (binary-buffer-write-pad out (- strtab-offset (length out)))
     (binary-buffer-write-bytes out strtab-bytes)
+    (binary-buffer-write-pad out (- debug-line-offset (length out)))
+    (binary-buffer-write-bytes out debug-line-bytes)
     (binary-buffer-write-pad out (- shstrtab-offset (length out)))
     (binary-buffer-write-bytes out shstrtab-bytes)
     (binary-buffer-write-pad out (- shoff (length out)))
     ;; Section headers.
     (elf64-write-shdr-with-addr out 0 +sht-null+ 0 0 0 0 0 0 0 0)
-    (when dynamic-p
+    (when interp-p
       (elf64-write-shdr-with-addr out sh-interp-off +sht-progbits+ +shf-alloc+
                                   (+ base interp-offset) interp-offset (length interp-bytes)
                                   0 0 1 0))
@@ -667,7 +703,9 @@ The returned bytes start with Elf64_Chdr:
                                 symtab-offset symtab-size strtab-idx sym-local-count
                                 8 +elf64-sym-size+)
     (elf64-write-shdr-with-addr out sh-strtab-off +sht-strtab+ 0 0
-                                strtab-offset strtab-size 0 0 1 0)
+                                 strtab-offset strtab-size 0 0 1 0)
+    (elf64-write-shdr-with-addr out sh-debug-line-off +sht-progbits+ 0 0
+                                debug-line-offset debug-line-size 0 0 1 0)
     (elf64-write-shdr-with-addr out sh-shstrtab-off +sht-strtab+ 0 0
                                 shstrtab-offset shstrtab-size 0 0 1 0)
     (binary-buffer-to-array out)))
@@ -772,10 +810,11 @@ For x86-64 executables, a small _start wrapper is prepended before CODE-BYTES."
                       (:exec nil)
                       (:dyn t)
                       (:pie t)
-                      (:shared t)))
-         (builder (if dynamic-p
-                      (make-elf64-dynamic :machine machine :interpreter interpreter)
-                      (make-elf64-executable :machine machine)))
+      (:shared t)))
+          (builder (if dynamic-p
+                       (make-elf64-dynamic :machine machine :interpreter interpreter
+                                           :shared-object (eq type :shared))
+                       (make-elf64-executable :machine machine)))
          (text-bytes (if (and (not dynamic-p) (eq arch :x86-64))
                          (elf64-build-x86-64-start-wrapper code-bytes)
                          code-bytes)))

@@ -734,8 +734,12 @@ assignment that native runtimes can translate to OS scheduler calls."
 (defun rt-heap-interleave (heap addr size)
   "Mark [ADDR, ADDR+SIZE) as interleaved shared data.
 
-TODO(roadmap, FR-365): native Linux should use mbind(MPOL_INTERLEAVE) for
-global shared data pages. The Pure CL heap records region metadata only."
+FR-365: Pure CL implementation records interleaved region metadata in
+RT-HEAP-INTERLEAVED-REGIONS.  The NUMA-aware GC worker scheduler
+(rt-gc-numa-affinity) uses this metadata for deterministic work distribution.
+
+Deferred to Tier 6 (memory-gc.md): native Linux mbind(MPOL_INTERLEAVE) call
+for global shared data pages requires OS-level mmap/mbind integration."
   (check-type heap rt-heap)
   (check-type addr integer)
   (check-type size (integer 0 *))

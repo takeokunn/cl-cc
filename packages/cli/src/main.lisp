@@ -102,6 +102,7 @@ Options:
   --debug-info            Emit DWARF custom sections for wasm targets
   --emit-names            Emit extended wasm name metadata
   --deterministic         Enable reproducible build mode (FR-917)
+  --reproducible          Alias for --deterministic
 
 Version: ~A~%" *version*))
 
@@ -161,6 +162,7 @@ Options:
   --memory64            Enable opt-in Wasm Memory64/Table64 codegen
   --no-compress         Disable code payload compression (default)
   --deterministic       Strip volatile build timestamps where possible
+  --reproducible        Alias for --deterministic
   --aot                 Generate AOT static .wasm when targeting wasm
   --streaming           Generate instantiateStreaming JS glue for wasm
   --validate            Run WebAssembly.validate/wasmtime validation if available
@@ -339,7 +341,8 @@ subcommands, then dispatches to the appropriate handler."
                        (car (parsed-args-positional parsed))))
       (uiop:quit 0))
 
-    (when (flag parsed "--deterministic")
+    (when (or (flag parsed "--deterministic")
+              (flag parsed "--reproducible"))
       (configure-reproducible-build))
 
     (when (flag parsed "--dump-image")

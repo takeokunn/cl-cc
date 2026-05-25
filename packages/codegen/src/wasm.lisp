@@ -296,6 +296,9 @@ active segment fallback."
 (defun emit-wat-function-locals (reg-map stream)
   "Emit local variable declarations for a function body, matching numeric indices
    used by the trampoline emitter."
+  ;; Closure parameters are loaded from $cl_argN globals into leading eqref locals.
+  (dotimes (i (wasm-reg-map-pc-index reg-map))
+    (format stream "~%    (local eqref) ;; closure parameter local ~D" i))
   ;; $pc: i32 at index (wasm-reg-map-pc-index reg-map)
   (format stream "~%    (local i32) ;; $pc at index ~D"
           (wasm-reg-map-pc-index reg-map))
@@ -324,10 +327,12 @@ active segment fallback."
    Assumes build-wasm-function-wat has already been called on FUNC-DEF so that
    (wasm-func-body func-def) holds the pre-built trampoline body string."
   (let* ((wat-name (wasm-func-wat-name func-def))
-         (instructions (wasm-func-source-instructions func-def))
-         ;; Re-build the reg-map with the same parameters as build-wasm-function-wat
-         ;; so we know how many locals were allocated.
-         (reg-map (make-wasm-reg-map-for-function 0)))
+          (instructions (wasm-func-source-instructions func-def))
+          ;; Re-build the reg-map with the same parameters as build-wasm-function-wat
+          ;; so we know how many locals were allocated.
+          (param-regs (wasm-function-param-regs func-def))
+          (reg-map (make-wasm-reg-map-for-function (length param-regs))))
+    (initialize-wasm-param-locals reg-map param-regs)
     ;; Pre-collect all registers to populate reg-map local count.
     (collect-registers-from-instructions instructions reg-map)
     (when (or (wasm-func-exception-table func-def)

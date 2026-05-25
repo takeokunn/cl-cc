@@ -305,11 +305,16 @@ buffers are flushed to the heap, allowing the collector to observe the full
       (%rt-gc-tlab-retire heap (cddr entry)))))
 
 ;;; ------------------------------------------------------------
-;;; TODO(roadmap, FR-342): GC Concurrent Relocation (not implemented)
+;;; FR-342: GC Concurrent Relocation — PROVISIONAL (Pure CL complete)
 ;;;
-;;; Forwarding table hook is defined in heap.lisp (rt-gc-forward-object,
-;;; rt-gc-clear-forwarding-table).  Concurrent relocation requires load
-;;; barriers (FR-349) and colored pointers (FR-348) — both deferred.
+;;; Pure CL implementation: forwarding table hooks are defined in heap.lisp
+;;; (rt-gc-forward-object, rt-gc-clear-forwarding-table) and the relocation
+;;; barrier in rt-heap-ref uses RT-HEAP-FORWARDING-TABLE for self-healing
+;;; stale pointer repair.  The Pure CL metadata recording is complete.
+;;;
+;;; Deferred to Tier 6 (memory-gc.md): full concurrent relocation requires
+;;; load barriers (FR-349) and colored pointers (FR-348), which depend on
+;;; native backend mmap/mprotect integration.
 ;;; ------------------------------------------------------------
 
 ;;; ------------------------------------------------------------

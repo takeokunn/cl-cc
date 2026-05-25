@@ -189,6 +189,7 @@ FR-291: Extended with program header and entry point support for executables."
   (needed-libraries nil)
   ;; Program interpreter path for dynamically linked executables.
   (interpreter +elf64-default-interpreter+ :type string)
+  (shared-object nil :type boolean)
   ;; File symbol (index 0 in symtab is always STN_UNDEF)
   (symbol-count 0)
   ;; FR-291: Program headers for executable generation
@@ -210,12 +211,17 @@ FR-291: Extended with program header and entry point support for executables."
   (make-elf64-builder :machine machine :elf-type +elf-type-exec+ :entry-point entry-point))
 
 (defun make-elf64-dynamic (&key (machine +elf-machine-x86-64+) (entry-point 0)
-                                (interpreter +elf64-default-interpreter+))
+                                (interpreter +elf64-default-interpreter+) shared-object)
   "Create an ELF64 builder for ET_DYN (PIE/shared object). FR-291."
   (make-elf64-builder :machine machine
-                      :elf-type +elf-type-dyn+
-                      :entry-point entry-point
-                      :interpreter interpreter))
+                       :elf-type +elf-type-dyn+
+                       :entry-point entry-point
+                       :interpreter interpreter
+                       :shared-object shared-object))
+
+(defun make-elf64-shared-library (&key (machine +elf-machine-x86-64+) (entry-point 0))
+  "Create an ELF64 ET_DYN shared-library builder without PT_INTERP."
+  (make-elf64-dynamic :machine machine :entry-point entry-point :shared-object t))
 
 (defun elf64-add-text-bytes (builder bytes)
   "Append BYTES (vector or list of (unsigned-byte 8)) to .text section."

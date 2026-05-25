@@ -425,10 +425,10 @@ around the execution. Returns the value produced by RUN-COMPILED."
   "Download URL to OUTPUT using curl/fetch and verify optional SHA256."
   (ensure-directories-exist output)
   (cond
-    ((uiop:find-executable "curl")
+    ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "curl")))
      (uiop:run-program (list "curl" "-L" "-f" "-o" (namestring output) url)
                        :output :interactive :error-output :interactive))
-    ((uiop:find-executable "fetch")
+    ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "fetch")))
      (uiop:run-program (list "fetch" "-o" (namestring output) url)
                        :output :interactive :error-output :interactive))
     (t (error "No HTTP downloader found (need curl or fetch)")))
@@ -438,7 +438,7 @@ around the execution. Returns the value produced by RUN-COMPILED."
 (defun %extract-tar-gz (archive directory)
   "Extract ARCHIVE into DIRECTORY with the system tar implementation."
   (ensure-directories-exist (merge-pathnames #P".keep" directory))
-  (unless (uiop:find-executable "tar")
+  (unless (let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "tar")))
     (error "Cannot extract ~A: tar executable not found" archive))
   (uiop:run-program (list "tar" "-xzf" (namestring archive) "-C" (namestring directory))
                     :output :interactive :error-output :interactive)
@@ -835,16 +835,19 @@ exits with status 0 on success."
               (cond
                 ((eq language :lisp)
                   (let ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib)))
+                    (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)
                       ret)))
                 ((eq language :php)
-                 (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
-                   (let ((ret (%run-compiled-result result vm-state opts)))
-                     (%maybe-write-pgo-profile opts result vm-state)
-                     ret)))
-                 (t
-                  (let ((result (apply #'compile-string source :target :vm kwargs)))
+                  (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
+                    (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
+                    (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%maybe-write-pgo-profile opts result vm-state)
+                      ret)))
+                  (t
+                   (let ((result (apply #'compile-string source :target :vm kwargs)))
+                    (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)
                       ret))))
@@ -869,7 +872,7 @@ exits with status 0 on success."
                                                       :compression compression)))
               (format t "~A~%" result)
               (uiop:quit 0)))))
-      "save-core"))))
+      "save-core")))
 
 (defun %default-selfhost-file ()
   "Return the default self-hosting workload file."
@@ -1559,7 +1562,7 @@ with a source caret and type trace on failure."
   (format t "  jit-enabled       (default: t)   - Enable JIT compilation~%")
   (format t "  gc-epsilon        (default: nil) - No-op GC mode~%")
   (format t "  fast-math         (default: nil) - Non-strict FP optimizations~%")
-  (format t "  sandbox           (default: nil) - Seccomp runtime sandbox~%"))
+   (format t "  sandbox           (default: nil) - Seccomp runtime sandbox~%")
       "features"))))
 
 (defun %do-generate (parsed)

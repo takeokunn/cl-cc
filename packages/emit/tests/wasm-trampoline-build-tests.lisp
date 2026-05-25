@@ -114,6 +114,32 @@
     (assert-true (search "$blk_0" result))
     (assert-true (search "$blk_1" result))))
 
+(deftest wasm-tb-build-function-loads-closure-params
+  "build-wasm-function-wat loads closure params from the $cl_arg globals."
+  (let* ((func (cl-cc/codegen::make-wasm-function-def
+                :index 0
+                :wat-name "$fn_with_params"
+                :params '(:R0 :R1)
+                :source-instructions (list (cl-cc:make-vm-ret :reg :R0))))
+         (result (cl-cc/codegen::build-wasm-function-wat func)))
+    (assert-true (search "(local.set 0 (global.get $cl_arg0))" result))
+    (assert-true (search "(local.set 1 (global.get $cl_arg1))" result))))
+
+(deftest wasm-tb-emit-function-reserves-closure-param-locals
+  "emit-wat-function uses the same inferred param local layout as the trampoline body."
+  (let* ((func (cl-cc/codegen::make-wasm-function-def
+                :index 0
+                :wat-name "$fn_with_param_locals"
+                :params '(:R0 :R1)
+                :source-instructions (list (cl-cc:make-vm-ret :reg :R1)))))
+    (cl-cc/codegen::build-wasm-function-wat func)
+    (let ((result (%wat-string
+                   (lambda (s)
+                     (cl-cc/codegen::emit-wat-function func s)))))
+      (assert-true (search "closure parameter local 0" result))
+      (assert-true (search "closure parameter local 1" result))
+      (assert-true (search "$pc at index 2" result)))))
+
 ;;; ─── build-all-wasm-functions (module table setup) ───────────────────────
 
 (deftest wasm-tb-build-all-returns-module

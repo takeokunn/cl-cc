@@ -22,7 +22,27 @@
     #:lisp-implementation-type #:lisp-implementation-version
     #:machine-type #:machine-version #:machine-instance
     #:software-type #:software-version
-    #:room #:apropos #:apropos-list)
+    #:room #:apropos #:apropos-list
+    #:*read-base* #:*print-right-margin* #:*print-lines*
+    #:*print-case* #:*print-escape* #:*print-gensym* #:*print-array*
+    #:*trace-output*
+    #:sequence #:elt #:length #:subseq
+    #:stream-external-format
+    #:break #:describe #:inspect #:ed #:dribble
+    #:invoke-debugger #:trace #:untrace #:step
+    #:*read-suppress* #:*read-default-float-format* #:*read-eval*
+    #:*features* #:*modules*
+    #:method-qualifiers #:compute-applicable-methods
+    #:find-method #:add-method #:remove-method #:ensure-generic-function
+    #:open #:*load-pathname* #:*load-truename* #:*compile-file-pathname*
+    #:*compile-file-truename* #:*compile-print* #:*compile-verbose*
+    #:*load-print* #:*load-verbose*
+    #:quit #:exit
+    #:getenv #:setenv
+    #:*command-line-args* #:*default-external-format*
+    #:read-preserving-whitespace #:read-delimited-list
+    #:set-syntax-from-char
+)
   (:export
    ;; Re-export regalloc + emit symbols ---
    #:live-interval

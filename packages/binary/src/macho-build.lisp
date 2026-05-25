@@ -487,6 +487,10 @@ the platform codesign tool to replace it with a system-authored signature."
         offset)
   builder)
 
+(defun %write-macho-dylib-command (buffer &optional (path "/usr/lib/libSystem.B.dylib"))
+  "Emit LC_LOAD_DYLIB for PATH."
+  (serialize-dylib-command (make-dylib-command :name path) buffer))
+
 (defun build-mach-o (builder code-bytes &key compress)
   "Build complete Mach-O executable from BUILDER and CODE-BYTES.
 Returns a simple-array of (unsigned-byte 8).
@@ -527,7 +531,7 @@ reordering directly controls the final text layout."
           (dylinker-cmd-size 32)
           (main-cmd-size 24)
           (dyld-info-cmd-size 0)
-          (dylib-cmd-size 0)
+          (dylib-cmd-size (align-up (+ 24 (1+ (length "/usr/lib/libSystem.B.dylib"))) 8))
           (code-signature-cmd-size 0)
           (symtab-cmd-size (if has-symbols 24 0))
           (dysymtab-cmd-size (if has-symbols 80 0))
@@ -572,7 +576,7 @@ reordering directly controls the final text layout."
       (setf (mach-header-ncmds header)
              ;; PAGEZERO + user segs + LINKEDIT + DYLINKER + MAIN
              ;; [+ SYMTAB + DYSYMTAB]
-             (+ 4 (length user-segments) (if has-symbols 2 0))
+              (+ 5 (length user-segments) (if has-symbols 2 0))
             (mach-header-sizeofcmds header) cmds-size
             (mach-header-flags header) (logior +mh-dyldlink+ +mh-pie+)))
 
@@ -636,6 +640,9 @@ reordering directly controls the final text layout."
 
     ;; Serialize LC_LOAD_DYLINKER
     (serialize-lc-load-dylinker buffer)
+
+    ;; Serialize LC_LOAD_DYLIB for libSystem.
+    (%write-macho-dylib-command buffer)
 
     ;; Serialize LC_SYMTAB / LC_DYSYMTAB when symbols exist
     (when has-symbols

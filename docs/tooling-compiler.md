@@ -6,26 +6,26 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 ### Phase 21 — コンパイラ・言語フロントエンド最適化
 
-#### FR-125: Declaration Processing (type/inline/ignore/optimize)
+#### ✅ FR-125: Declaration Processing (type/inline/ignore/optimize)
 
-- **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
-- **内容**: `(declare (type fixnum x))` → register-type-mapへの登録、`(declare (inline f))` → インライン化フォース、`(declare (ignore x))` → 未使用警告抑制
-- **根拠**: expander.lispにdeclare処理ハンドラが存在しない
-- **難易度**: Medium
+- **実装**: `packages/compile/src/context.lisp:219-239` (`%declaration-type-bindings`), `context.lisp:166-178` (`%declaration-inline-policy`), `codegen-core-let.lisp:21-26` (`%ast-let-binding-ignored-p`), `codegen-core-let-emit-pass.lisp:187-194` (unused-variable suppression), `comp-env.lisp:55` (`special`/`ignorable`/`dynamic-extent` 認識)
+- **内容**: `(declare (type fixnum x))` → type-bindings登録、`(declare (inline f))` → inline-policy設定、`(declare (ignore x))` → 未使用警告抑制
+- **根拠**: 全 declare 節 (`type`, `inline`, `notinline`, `ignore`, `ignorable`, `special`, `dynamic-extent`, `optimize`, `forward-reference`) が compile 層で処理済み。FR-318 テストが ignore 警告抑制を検証。
+- **難易度**: Medium → ✅ COMPLETE
 
-#### FR-126: define-compiler-macro
+#### ✅ FR-126: define-compiler-macro
 
-- **対象**: `packages/expand/src/expander.lisp`
-- **内容**: `*compiler-macro-registry*` (関数名→展開関数) の追加。呼び出しパターンに応じた特化展開をユーザが定義可能
-- **根拠**: expander.lispにcompiler-macroの仕組みが存在しない
-- **難易度**: Medium
+- **実装**: `packages/expand/src/macros-stdlib-ansi.lisp:269-277` (macro registration), `packages/expand/src/expander-data.lisp:51` (`*compiler-macro-table*`), `packages/expand/src/macro.lisp:99-105` (`register-compiler-macro`), `macro.lisp:211-213` (`lookup-compiler-macro`), `expander.lisp:81-88` (expander integration)
+- **内容**: `*compiler-macro-table*` (関数名→展開関数) の追加。呼び出しパターンに応じた特化展開をユーザが定義可能。`&whole`/`&environment` 完全対応。
+- **根拠**: 完全な compiler macro システム。expander が `lookup-compiler-macro` + `invoke-registered-expander` 経由で compiler macro を解決。
+- **難易度**: Medium → ✅ COMPLETE
 
-#### FR-127: Type Proclamations (declaim/proclaim ftype)
+#### ✅ FR-127: Type Proclamations (declaim/proclaim ftype)
 
-- **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen-functions.lisp:17-21`
-- **内容**: `(declaim (ftype (function (fixnum) fixnum) foo))` を解析し`*function-type-registry*`に登録、呼び出し時の型チェック省略に活用
-- **根拠**: `*function-type-registry*`は存在するがdeclaim処理なし
-- **難易度**: Medium
+- **実装**: `packages/expand/src/runtime-stdlib-3-expander.lisp:22-27` (`%record-declaim-ftype-clause`), `runtime-stdlib-3-expander.lisp:43-48` (`declaim` マクロ), `expander-typed-params.lisp:19-21` (`*function-type-registry*`), `macros-runtime-support.lisp:60-87` (inline/optimize 処理)
+- **内容**: `(declaim (ftype (function (fixnum) fixnum) foo))` を解析し `*global-proclamations*` に登録。`type`, `inline`, `notinline`, `optimize`, `ftype`, `special` 全節対応。
+- **根拠**: declaim の全節が runtime-stdlib-3-expander で処理済み。ftype は `*global-proclamations*` にルーティング（`*function-type-registry*` は typed-param syntax 用）。
+- **難易度**: Medium → ✅ COMPLETE
 
 #### ✅ FR-128: Typecase Jump Table Dispatch
 
@@ -55,19 +55,19 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: 現状インライナーがcall siteでのみこれを検出するが、定義時点での除去がない
 - **難易度**: Low
 
-#### FR-132: Closure Environment Trimming
+#### ✅ FR-132: Closure Environment Trimming
 
-- **対象**: `packages/compile/src/closure.lisp`, `packages/compile/src/codegen.lisp`
+- **実装**: `packages/ast/src/closure.lisp:195-212` (`trim-captured-vars`), `packages/compile/src/codegen-functions-emit.lisp:53-55` (lambda), `codegen-functions-emit.lisp:123-125` (defun), `codegen-locals.lisp:142-143` (flet), `codegen-locals.lisp:403` (labels)
 - **内容**: クロージャボディ内で一切読まれないキャプチャ変数を`vm-captured-vars`から除去
-- **根拠**: `find-free-variables`が存在するが`vm-captured-vars`フィルタリングに未活用
-- **難易度**: Medium
+- **根拠**: `trim-captured-vars` が `find-free-variables` の結果に基づき未使用キャプチャをフィルタリング。全クロージャ種別 (lambda/defun/flet/labels) で統合済み。
+- **難易度**: Medium → ✅ COMPLETE
 
-#### FR-133: Tail Call Through `apply`
+#### ✅ FR-133: Tail Call Through `apply`
 
-- **対象**: `packages/compile/src/codegen.lisp` (ast-apply)
-- **内容**: 末尾位置の`(apply f args)`に`vm-tail-call`を発行（現状は`vm-apply` + returnになる）
-- **根拠**: `ctx-tail-position`が利用可能だが`ast-apply`コンパイルで未使用
-- **難易度**: Medium
+- **実装**: `packages/compile/src/codegen-values.lisp:39-44` (`%compile-apply-flat-call` で `vm-tail-call`), `codegen-values.lisp:57-61` (`%compile-apply-dynamic-spread` で `vm-apply :tail-p t`), `codegen-values.lisp:63-94` (`compile-ast ast-apply`), `codegen-calls.lisp:358-371` (fast path)
+- **内容**: 末尾位置の`(apply f args)`に`vm-tail-call`を発行。flat apply (literal spread) は `vm-tail-call`、dynamic spread は `vm-apply :tail-p t`
+- **根拠**: `ctx-tail-position` が `ast-apply` コンパイル時に読み取られ、全 apply パスに伝播。flat/dynamic/list-call-spread の3層ディスパッチ。
+- **難易度**: Medium → ✅ COMPLETE
 
 #### ✅ FR-134: Named-let Support
 

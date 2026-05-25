@@ -23,6 +23,7 @@
            :parsed-args-command
            :parsed-args-positional
            :parsed-args-flags
-           ;; Flag accessor helpers
-           :flag
-           :flag-or))
+            ;; Flag accessor helpers
+            :flag
+            :flag-or
+            :getopt))

@@ -93,6 +93,10 @@ let
       src = "packages/closer-mop";
       deps = [ "cl-cc-sb-mop" ];
     };
+    cl-cc-docgen = {
+      src = "packages/docgen";
+      deps = [ ];
+    };
     cl-cc-php = {
       src = "packages/php";
       deps = [
@@ -248,7 +252,7 @@ let
     };
     cl-cc-cli = {
       src = "packages/cli";
-      deps = [ "cl-cc" ];
+      deps = [ "cl-cc" "cl-cc-docgen" ];
     };
     cl-cc-testing-framework = {
       src = "packages/testing-framework";
@@ -256,6 +260,10 @@ let
         "cl-cc"
         "cl-cc-php"
       ];
+    };
+    cl-cc-tools = {
+      src = "packages/tools";
+      deps = [ "cl-cc" ];
     };
   };
 
@@ -293,6 +301,7 @@ let
         cl-cc
         cl-cc-cli
         cl-cc-testing-framework
+        cl-cc-tools
       ];
     };
     "cl-cc-test/e2e" = sbcl.buildASDFSystem {
@@ -304,6 +313,7 @@ let
         cl-cc
         cl-cc-cli
         cl-cc-testing-framework
+        cl-cc-tools
       ];
     };
   };

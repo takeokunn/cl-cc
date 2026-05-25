@@ -460,13 +460,16 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
-(defun %make-compile-opts (&key pass-pipeline speed (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
-                                  print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                  print-pass-stats stats-stream trace-json-stream)
+(defun %make-compile-opts (&key pass-pipeline speed (safety 1) (space 0) (debug 0) (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
+                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                   print-pass-stats stats-stream trace-json-stream)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
   (let ((resolved-speed (or speed (%global-optimize-quality 'speed))))
   (list :pass-pipeline       pass-pipeline
         :speed               resolved-speed
+        :safety              safety
+        :space               space
+        :debug               debug
         :inline-threshold-scale inline-threshold-scale
         :block-compile       block-compile
         :print-pass-timings  print-pass-timings

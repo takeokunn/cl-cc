@@ -2,6 +2,9 @@
 
 (in-package :cl-cc/test)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (load (asdf:system-relative-pathname :cl-cc "src/ffi/dynlib.lisp")))
+
 (in-suite cl-cc-unit-suite)
 
 (deftest fr-417-pinned-unboxed-array-provides-data-pointer
@@ -27,22 +30,35 @@
   "load-shared-library/find-foreign-symbol/unload-shared-library handle a host libc symbol."
   (let ((path (%test-libc-path)))
     (when path
-      (let ((library (cl-cc/runtime:load-shared-library path)))
+      (let ((library (cl-cc/ffi:load-shared-library path)))
         (unwind-protect
              (progn
-               (assert-true (cl-cc/runtime:rt-shared-library-p library))
-               (assert-equal path (cl-cc/runtime:rt-shared-library-path library))
-               (assert-true (cl-cc/runtime:find-foreign-symbol library "printf")))
-          (cl-cc/runtime:unload-shared-library library))
-        (assert-true (cl-cc/runtime:rt-shared-library-closed-p library))))))
+               (assert-true (cl-cc/ffi:dl-lib-p library))
+               (assert-equal path (cl-cc/ffi:dl-lib-name library))
+               (assert-true (cl-cc/ffi:dl-lib-loaded library))
+               (assert-true (functionp (cl-cc/ffi:find-foreign-symbol "printf" library)))
+               (assert-null (cl-cc/ffi:find-foreign-symbol "cl_cc_symbol_that_does_not_exist" library)))
+          (cl-cc/ffi:unload-shared-library library))
+        (assert-false (cl-cc/ffi:dl-lib-loaded library))))))
+
+(deftest dynlib-found-symbol-is-callable
+  "find-foreign-symbol returns a callable host-backed function object for no-arg int functions."
+  (let ((path (%test-libc-path)))
+    (when path
+      (let ((library (cl-cc/ffi:load-shared-library path)))
+        (unwind-protect
+             (let ((getpid (cl-cc/ffi:find-foreign-symbol "getpid" library)))
+               (assert-true (functionp getpid))
+               (assert-true (integerp (funcall getpid))))
+          (cl-cc/ffi:unload-shared-library library))))))
 
 #+darwin
 (deftest dynlib-load-framework-foundation
   "load-framework resolves and loads a macOS framework by framework name."
-  (let ((library (cl-cc/runtime:load-framework "Foundation")))
+  (let ((library (cl-cc/ffi:load-framework "Foundation")))
     (unwind-protect
          (progn
-           (assert-true (cl-cc/runtime:rt-shared-library-p library))
-           (assert-equal "Foundation"
-                         (cl-cc/runtime:rt-shared-library-framework-name library)))
-      (cl-cc/runtime:unload-shared-library library))))
+            (assert-true (cl-cc/ffi:dl-lib-p library))
+            (assert-equal "/System/Library/Frameworks/Foundation.framework/Foundation"
+                          (cl-cc/ffi:dl-lib-name library)))
+      (cl-cc/ffi:unload-shared-library library))))

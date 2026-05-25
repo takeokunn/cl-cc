@@ -26,8 +26,9 @@
 (defmacro compile-time-test (name expr)
   `(eval-when (:compile-toplevel) (assert ,expr () "Compile-time test ~A failed" ,name)))
 
-;; FR-839: Macro Expansion Memoization
-(defvar *macro-expansion-cache* (make-hash-table :test #'equal :weakness :key))
+;; FR-839: Macro Expansion Memoization (VM-local cache to avoid namespace conflict
+;; with cl-cc/expand:*macro-expansion-cache*)
+(defvar *vm-macro-expansion-cache* (make-hash-table :test #'equal :weakness :key))
 
 ;; FR-842: Function Versioning / Argument Specialization
 (defun version-function (fn arg-values) (declare (ignore fn arg-values)) fn)
@@ -42,5 +43,5 @@
 (defun split-hot-cold (fn profile) (declare (ignore fn profile)) fn)
 
 (export '(defsession the-value *liquid-types-enabled* pack unpack
-          macrostep define-syntax compile-time-test *macro-expansion-cache*
+          macrostep define-syntax compile-time-test
           version-function specialize-simd specialize-loop-count split-hot-cold))

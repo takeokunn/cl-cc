@@ -40,8 +40,8 @@
        (ensure-system-asd :cl-cc-closer-mop "packages/closer-mop/cl-cc-closer-mop.asd" here)
        (ensure-system-asd :cl-cc-php "packages/php/cl-cc-php.asd" here)
        (ensure-system-asd :cl-cc-pipeline "packages/pipeline/cl-cc-pipeline.asd" here)
-      (ensure-system-asd :cl-cc-selfhost "packages/selfhost/cl-cc-selfhost.asd" here)
-      (ensure-system-asd :cl-cc-repl "packages/repl/cl-cc-repl.asd" here))))
+       (ensure-system-asd :cl-cc-selfhost "packages/selfhost/cl-cc-selfhost.asd" here)
+        (ensure-system-asd :cl-cc-repl "packages/repl/cl-cc-repl.asd" here))))
 
 (asdf:defsystem :cl-cc
   :description "CL-CC: Common Lisp Compiler Collection"
@@ -53,7 +53,7 @@
                :cl-cc-type :cl-cc-optimize :cl-cc-regalloc :cl-cc-emit :cl-cc-expand
                :cl-cc-compile :cl-cc-cps :cl-cc-codegen :cl-cc-vm :cl-cc-stdlib
                  :cl-cc-sb-mop :cl-cc-sb-pcl :cl-cc-closer-mop
-               :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl)
+                :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl)
   :components
   ((:module "src"
     :pathname "packages/umbrella-src"
@@ -75,6 +75,10 @@
       ;; guards so the production Nix derivation succeeds without them.
       (maybe-load-asd :cl-cc-cli "packages/cli/cl-cc-cli.asd" here)
       (maybe-load-asd :cl-cc-testing-framework "packages/testing-framework/cl-cc-testing-framework.asd" here)
+      ;; Register the real FR-796/FR-797 protocol tool system when present.
+      ;; VM no longer defines fallback packages; this optional ASDF reference is
+      ;; the development/test bridge to packages/tools/cl-cc-tools.asd.
+      (maybe-load-asd :cl-cc-tools "packages/tools/cl-cc-tools.asd" here)
       (maybe-load-asd :cl-cc-test "cl-cc-test.asd" here))))
 
 ;; :cl-cc-cli is defined in packages/cli/cl-cc-cli.asd.

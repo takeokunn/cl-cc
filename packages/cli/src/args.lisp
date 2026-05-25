@@ -82,6 +82,8 @@
      ("--compress" . :bool)
       ("--no-compress" . :bool)
       ("--deterministic" . :bool)
+      ("--reproducible" . :bool)
+      ("--script" . :bool)
       ("--build-id" . :string)
       ("--asan" . :bool)
     ("--msan" . :bool)
@@ -150,6 +152,20 @@ keyed by their canonical string (e.g. \"--output\")."
     (loop while rest do
       (let ((arg (pop rest)))
         (cond
+          ;; Script mode: cl-cc --script tool.lisp arg -- --literal
+          ;; Treat the script path as the command and preserve the rest as
+          ;; script argv, dropping a single explicit positional separator.
+          ((string= arg "--script")
+           (setf (gethash "--script" ht) t)
+           (unless rest
+             (error 'arg-parse-error
+                    :message "Flag --script requires a script file"))
+           (setf (parsed-args-command result) (pop rest)
+                 (parsed-args-positional result)
+                 (loop for token in rest
+                       unless (string= token "--") collect token))
+           (setf rest nil))
+
           ;; Long flag: --name or --name=value
           ((%long-flag-p arg)
            (multiple-value-bind (name inline-val) (%split-equals arg)

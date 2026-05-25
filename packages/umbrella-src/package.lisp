@@ -1,7 +1,9 @@
 (defpackage :cl-cc
   (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/sb-mop :cl-cc/sb-pcl :closer-mop :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl)
   (:shadowing-import-from :cl-cc/expand
-    #:define-syntax)
+    #:define-syntax
+)
+
   (:shadowing-import-from :cl-cc/vm
     #:get-universal-time #:get-internal-real-time #:get-internal-run-time
     #:internal-time-units-per-second #:sleep #:time
@@ -20,7 +22,28 @@
     #:lisp-implementation-type #:lisp-implementation-version
     #:machine-type #:machine-version #:machine-instance
     #:software-type #:software-version
-    #:room #:apropos #:apropos-list))
+    #:room #:apropos #:apropos-list
+    #:*read-base* #:*print-right-margin* #:*print-lines*
+    #:*print-case* #:*print-escape* #:*print-gensym* #:*print-array*
+    #:*trace-output*
+    #:sequence #:elt #:length #:subseq
+    #:stream-external-format
+    #:break #:describe #:inspect #:ed #:dribble
+    #:invoke-debugger #:trace #:untrace #:step
+    #:*read-suppress* #:*read-default-float-format* #:*read-eval*
+    #:*features* #:*modules*
+    #:method-qualifiers #:compute-applicable-methods
+    #:find-method #:add-method #:remove-method #:ensure-generic-function
+    #:open #:*load-pathname* #:*load-truename* #:*compile-file-pathname*
+    #:*compile-file-truename* #:*compile-print* #:*compile-verbose*
+    #:*load-print* #:*load-verbose*
+    #:quit #:exit
+    #:getenv #:setenv
+    #:*command-line-args* #:*default-external-format*
+    #:read-preserving-whitespace #:read-delimited-list
+    #:set-syntax-from-char
+    #:vm-type-of
+))
 
 (in-package :cl-cc)
 

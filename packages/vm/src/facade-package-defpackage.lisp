@@ -79,7 +79,9 @@
              #:describe
              #:inspect
              #:ed
-             #:dribble))
+             #:dribble
+            #:emit
+            #:vm-type-of))
 
 (in-package :cl-cc/vm)
 

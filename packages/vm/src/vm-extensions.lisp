@@ -490,18 +490,3 @@ remainder.  Other numbers preserve the existing host-compatible behavior."
   "FR-914: Call THUNK with a continuation prompt boundary."
   (declare (ignore tag handler))
   (funcall thunk))
-
-;;; FR-796/FR-797: LSP/DAP tool packages — define stubs so tests can find them.
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (find-package :cl-cc/tools/lsp)
-    (defpackage :cl-cc/tools/lsp
-      (:use :cl)
-      (:export #:make-lsp-server #:lsp-start #:lsp-stop
-               #:read-jsonrpc-message #:write-jsonrpc-message
-               #:lsp-handle-request #:lsp-open-document #:lsp-publish-diagnostics)))
-  (unless (find-package :cl-cc/tools/dap)
-    (defpackage :cl-cc/tools/dap
-      (:use :cl)
-      (:export #:make-dap-server #:dap-start #:dap-stop
-               #:read-jsonrpc-message #:write-jsonrpc-message
-               #:dap-handle-request))))
