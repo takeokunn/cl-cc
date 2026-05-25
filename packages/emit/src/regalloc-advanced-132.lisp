@@ -56,15 +56,75 @@ Rematerializable values: constants, simple single-operand operations, loop-invar
   (push (make-burs-rule :pattern pattern :replacement replacement :cost cost)
         *burs-rules*))
 
+(defconstant +burs-terminal-cost+ 1000
+  "Fallback cost for covering terminal IR leaves without a registered rule.")
+
+(defun %burs-pattern-frontier (pattern tree)
+  "Return frontier subtrees when PATTERN structurally matches TREE, or NIL.
+Symbol leaves in PATTERN are tile operands and must match terminal IR leaves.
+Conses in PATTERN must match the IR operator and arity exactly."
+  (cond
+    ((symbolp pattern)
+     (and (atom tree) (list tree)))
+    ((and (consp pattern) (consp tree)
+          (eq (car pattern) (car tree))
+          (= (length pattern) (length tree)))
+     (loop for pattern-child in (cdr pattern)
+           for tree-child in (cdr tree)
+           for frontier = (%burs-pattern-frontier pattern-child tree-child)
+           when (null frontier)
+             do (return nil)
+           append frontier))
+    (t nil)))
+
+(defun %make-burs-terminal-rule (tree)
+  "Create a synthetic terminal-covering rule for TREE."
+  (make-burs-rule :pattern (list 'terminal tree)
+                  :replacement (list 'identity tree)
+                  :cost +burs-terminal-cost+))
+
 (defun burs-select-instructions (ir-tree)
   "Select optimal instruction sequence for IR-TREE using BURS dynamic programming.
 Computes minimum-cost covering of each node."
-  (declare (ignore ir-tree))
-  ;; DP-based instruction selection using registered rules
-  (let ((best-cost most-positive-fixnum)
-        (best-rules nil))
-    ;; TODO: Implement full DP covering algorithm
-    (values best-rules best-cost)))
+  (let ((memo (make-hash-table :test #'equal))
+        (ordered-rules (reverse *burs-rules*)))
+    (labels ((cover (tree)
+               (multiple-value-bind (cached cached-p) (gethash tree memo)
+                 (if cached-p
+                     (values (first cached) (second cached))
+                     (multiple-value-bind (rules cost) (cover-uncached tree)
+                       (setf (gethash tree memo) (list rules cost))
+                       (values rules cost)))))
+             (cover-uncached (tree)
+               (if (atom tree)
+                   (let ((rule (%make-burs-terminal-rule tree)))
+                     (values (list rule) (burs-rule-cost rule)))
+                   (let ((best-cost most-positive-fixnum)
+                         (best-rules nil))
+                     (dolist (rule ordered-rules)
+                       (let ((frontier (%burs-pattern-frontier
+                                        (burs-rule-pattern rule) tree)))
+                         (when frontier
+                           (let ((candidate-cost (burs-rule-cost rule))
+                                 (candidate-rules nil)
+                                 (valid-cover-p t))
+                             (dolist (subtree frontier)
+                               (multiple-value-bind (subtree-rules subtree-cost)
+                                   (cover subtree)
+                                 (if subtree-rules
+                                     (progn
+                                       (incf candidate-cost subtree-cost)
+                                       (setf candidate-rules
+                                             (append candidate-rules subtree-rules)))
+                                     (setf valid-cover-p nil))))
+                             (when (and valid-cover-p (< candidate-cost best-cost))
+                               (setf best-cost candidate-cost)
+                               (setf best-rules (append candidate-rules
+                                                        (list rule))))))))
+                     (if best-rules
+                         (values best-rules best-cost)
+                         (error "No BURS cover for IR tree: ~S" tree))))))
+      (cover ir-tree))))
 
 ;; Pre-register standard x86-64 BURS rules
 (eval-when (:load-toplevel :execute)

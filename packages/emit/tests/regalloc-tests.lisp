@@ -67,8 +67,49 @@
          (intervals (compute-live-intervals instructions))
          (r0-int (find :r0 intervals :key #'interval-vreg)))
     (assert-false (null r0-int))
-    (assert-= 0 (interval-start r0-int))
-    (assert-= 4 (interval-end r0-int))))
+     (assert-= 0 (interval-start r0-int))
+     (assert-= 4 (interval-end r0-int))))
+
+;;; BURS Instruction Selection Tests
+
+(deftest burs-select-instructions-selects-minimum-cost-cover
+  "BURS instruction selection covers the tree bottom-up and chooses the cheapest rule."
+  (let ((cl-cc/emit:*burs-rules* nil))
+    (cl-cc/emit:register-burs-rule '(add lhs rhs) '(slow-add lhs rhs) 10)
+    (cl-cc/emit:register-burs-rule '(add lhs rhs) '(fast-add lhs rhs) 1)
+    (multiple-value-bind (rules cost)
+        (cl-cc/emit:burs-select-instructions '(add r1 r2))
+      (assert-= 2001 cost)
+      (assert-equal '((identity r1) (identity r2) (fast-add lhs rhs))
+                    (mapcar #'cl-cc/emit::burs-rule-replacement rules)))))
+
+(deftest burs-select-instructions-prefers-earlier-rule-on-cost-tie
+  "BURS instruction selection tie-breaks equal-cost rules by registration order."
+  (let ((cl-cc/emit:*burs-rules* nil))
+    (cl-cc/emit:register-burs-rule '(add lhs rhs) '(first-add lhs rhs) 1)
+    (cl-cc/emit:register-burs-rule '(add lhs rhs) '(second-add lhs rhs) 1)
+    (multiple-value-bind (rules cost)
+        (cl-cc/emit:burs-select-instructions '(add r1 r2))
+      (assert-= 2001 cost)
+      (assert-equal '(first-add lhs rhs)
+                    (cl-cc/emit::burs-rule-replacement (third rules))))))
+
+(deftest burs-select-instructions-matches-nested-tile-patterns
+  "BURS instruction selection matches multi-node tiles such as memory operands."
+  (let ((cl-cc/emit:*burs-rules* nil))
+    (cl-cc/emit:register-burs-rule '(add (load addr) reg) '(add reg (mem addr)) 2)
+    (cl-cc/emit:register-burs-rule '(add reg1 reg2) '(add reg1 reg2) 1)
+    (multiple-value-bind (rules cost)
+        (cl-cc/emit:burs-select-instructions '(add (load local) r1))
+      (assert-= 2002 cost)
+      (assert-equal '((identity local) (identity r1) (add reg (mem addr)))
+                    (mapcar #'cl-cc/emit::burs-rule-replacement rules)))))
+
+(deftest burs-select-instructions-signals-on-uncoverable-nonterminal
+  "BURS instruction selection rejects non-leaf trees without any matching rule."
+  (let ((cl-cc/emit:*burs-rules* nil))
+    (assert-signals error
+      (cl-cc/emit:burs-select-instructions '(unknown r1)))))
 
 ;;; FR-068: Post-RA Instruction Scheduling
 
