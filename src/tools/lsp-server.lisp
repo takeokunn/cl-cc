@@ -9,7 +9,7 @@
 
 (in-package :cl-cc/tools/lsp)
 
-(defstruct (lsp-server (:constructor make-lsp-server (&key)))
+(defstruct (lsp-server (:constructor make-lsp-server (&key &allow-other-keys)))
   (documents (make-hash-table :test #'equal))
   (symbols (make-hash-table :test #'equal))
   (shutdown-requested-p nil)

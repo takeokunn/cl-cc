@@ -5,7 +5,7 @@
 (defvar *lsp-enabled* nil
   "When non-NIL, the LSP server accepts JSON-RPC over stdio.")
 
-(defstruct (lsp-server (:constructor make-lsp-server (&key)))
+(defstruct (lsp-server (:constructor make-lsp-server (&key &allow-other-keys)))
   (documents (make-hash-table :test #'equal) :type hash-table)
   (symbols (make-hash-table :test #'equal) :type hash-table)
   (shutdown-requested-p nil)

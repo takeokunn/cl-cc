@@ -5,7 +5,7 @@
 (defvar *dap-enabled* nil
   "When non-NIL, the DAP server accepts Debug Adapter Protocol requests.")
 
-(defstruct (dap-server (:constructor make-dap-server (&key)))
+(defstruct (dap-server (:constructor make-dap-server (&key &allow-other-keys)))
   (seq 1 :type integer)
   (breakpoints (make-hash-table :test #'equal) :type hash-table)
   (variables (make-hash-table :test #'eql) :type hash-table)
