@@ -123,10 +123,18 @@ check the host bridge whitelist."
 
 (defun vm-save-registers (state)
   "Return a snapshot copy of the current register file."
-  (let ((copy (make-hash-table :test (hash-table-test (vm-state-registers state)))))
-    (maphash (lambda (k v) (setf (gethash k copy) v))
-             (vm-state-registers state))
-    copy))
+  (let ((registers (vm-state-registers state)))
+    (typecase registers
+      (hash-table
+       (let ((copy (make-hash-table :test (hash-table-test registers))))
+         (maphash (lambda (k v) (setf (gethash k copy) v)) registers)
+         copy))
+      (simple-vector
+       (copy-seq registers))
+      (vector
+       (copy-seq registers))
+      (t
+       (error "Unsupported VM register file: ~S" registers)))))
 
 (defun vm-save-registers-subset (state regs)
   "Return a snapshot copy containing only REGS from STATE.
@@ -144,12 +152,18 @@ helper for known-call snapshot trimming experiments."
 (defun vm-restore-registers (state saved-regs)
   "Replace the current register file with the SAVED-REGS snapshot."
   (when saved-regs
-    (if (gethash :__subset-snapshot__ saved-regs)
-        (vm-restore-registers-subset state saved-regs)
-        (progn
-          (clrhash (vm-state-registers state))
-          (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
-                   saved-regs)))))
+    (typecase saved-regs
+      (hash-table
+       (if (gethash :__subset-snapshot__ saved-regs)
+           (vm-restore-registers-subset state saved-regs)
+           (progn
+             (clrhash (vm-state-registers state))
+             (maphash (lambda (k v) (setf (gethash k (vm-state-registers state)) v))
+                      saved-regs))))
+      (vector
+       (replace (vm-state-registers state) saved-regs))
+      (t
+       (error "Unsupported VM register snapshot: ~S" saved-regs)))))
 
 (defun vm-restore-registers-subset (state saved-regs)
   "Restore only the bindings present in SAVED-REGS into STATE." 

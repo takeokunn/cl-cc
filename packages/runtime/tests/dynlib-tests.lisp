@@ -2,9 +2,8 @@
 
 (in-package :cl-cc/test)
 
-;;; cl-cc/ffi package and src/ffi/dynlib.lisp are loaded via cl-cc umbrella system.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (require :cl-cc))
+  (load (asdf:system-relative-pathname :cl-cc "src/ffi/dynlib.lisp")))
 
 (in-suite cl-cc-unit-suite)
 

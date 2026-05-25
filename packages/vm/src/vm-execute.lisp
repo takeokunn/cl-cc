@@ -105,15 +105,24 @@ again before restoration, keeping continuations multi-shot. KIND is :FULL,
   prompt-stack
   closure-env
   values-list
+  labels
   (used-p nil :type boolean))
 
 (defun %vm-copy-register-table (table)
-  (let ((copy (make-hash-table :test (hash-table-test table))))
-    (maphash (lambda (key value) (setf (gethash key copy) value)) table)
-    copy))
+  (typecase table
+    (hash-table
+     (let ((copy (make-hash-table :test (hash-table-test table))))
+       (maphash (lambda (key value) (setf (gethash key copy) value)) table)
+       copy))
+    (simple-vector
+     (copy-seq table))
+    (vector
+     (copy-seq table))
+    (t
+     (error "Unsupported VM register file: ~S" table))))
 
-(defun vm-capture-continuation (state pc dst-reg &key (kind :full) prompt-frame)
-  "Copy STATE's VM stack to a heap continuation object." 
+(defun vm-capture-continuation (state pc dst-reg &key (kind :full) prompt-frame labels)
+  "Copy STATE's VM control stack to a reusable heap continuation object." 
   (let* ((call-stack (copy-tree (vm-call-stack state)))
          (method-stack (copy-tree (vm-method-call-stack state)))
          (handler-stack (copy-tree (vm-handler-stack state)))
@@ -132,7 +141,8 @@ again before restoration, keeping continuations multi-shot. KIND is :FULL,
      :method-call-stack method-stack
      :prompt-stack prompt-stack
      :closure-env (vm-closure-env state)
-     :values-list (copy-list (vm-values-list state)))))
+     :values-list (copy-list (vm-values-list state))
+     :labels labels)))
 
 (defun vm-invoke-continuation (state continuation value)
   "Restore CONTINUATION into STATE, store VALUE, and return the resume PC." 
@@ -550,7 +560,9 @@ hook is installed, this records no target and execution remains in the interpret
 
 (defmethod execute-instruction ((inst vm-call/cc) state pc labels)
   (let* ((func (vm-resolve-function state (vm-reg-get state (vm-func-reg inst))))
-         (cont (vm-capture-continuation state (1+ pc) (vm-dst inst) :kind :full))
+         (cont (vm-capture-continuation state (1+ pc) (vm-dst inst)
+                                        :kind :full
+                                        :labels labels))
          (arg-reg (gensym "CONT-REG")))
     (vm-reg-set state arg-reg cont)
     (%vm-dispatch-call func state pc labels (list arg-reg) (vm-dst inst) nil)))

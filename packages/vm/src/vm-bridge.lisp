@@ -33,6 +33,15 @@ Synchronized: parallel test workers populate this concurrently.")
 (defvar *vm-current-state* nil
   "Dynamically bound to the VM state while invoking host bridge callables.")
 
+(defvar *vm-current-pc* nil
+  "Dynamically bound to the continuation PC while invoking host bridge callables.")
+
+(defvar *vm-current-dst-reg* nil
+  "Dynamically bound to the destination register while invoking host bridge callables.")
+
+(defvar *vm-current-labels* nil
+  "Dynamically bound to the current VM label table while invoking host bridge callables.")
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((package (or (find-package :cffi)
                      (make-package :cffi :use '(:cl)))))

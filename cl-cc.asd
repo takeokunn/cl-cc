@@ -59,8 +59,7 @@
     :pathname "packages/umbrella-src"
     :serial t
     :components
-    ((:file "package")))
-   (:file "src/ffi/dynlib")))
+    ((:file "package")))))
 
 (eval-when (:load-toplevel :execute)
   (require :asdf)
