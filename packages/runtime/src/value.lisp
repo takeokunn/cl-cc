@@ -393,3 +393,12 @@ Returns an RT-PINNED-UNBOXED-ARRAY-BUFFER holding a stable data pointer."
   (setf (rt-pinned-unboxed-array-buffer-released-p buffer) t
         (rt-pinned-unboxed-array-buffer-data-pointer buffer) nil)
   (values))
+
+(defun rt-pinned-array-data-pointer (buffer)
+  "Return the stable data pointer of BUFFER while it is pinned.
+Signals an error if the buffer has been released."
+  (check-type buffer rt-pinned-unboxed-array-buffer)
+  (when (rt-pinned-unboxed-array-buffer-released-p buffer)
+    (error "Pinned array buffer has already been released."))
+  (or (rt-pinned-unboxed-array-buffer-data-pointer buffer)
+      (error "Pinned array data pointer is unavailable on this implementation.")))
