@@ -284,4 +284,4 @@ Returns a function that takes a continuation."
                                      nil
                                      (cons n (trmc-pipeline-fixture (- n 1)))))
                                (trmc-pipeline-fixture 4))"
-                            :pass-pipeline '(:trmc :fold :jump)))))
+                             :pass-pipeline '(:trmc :fold :jump))))
