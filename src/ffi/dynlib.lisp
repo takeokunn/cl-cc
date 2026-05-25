@@ -59,6 +59,10 @@
 (defun unload-shared-library (lib) (setf (dl-lib-loaded lib) nil) (remhash (dl-lib-name lib) *loaded-libs*) (values))
 (defun list-loaded-libraries () (loop for lib being the hash-values of *loaded-libs* when (dl-lib-loaded lib) collect (dl-lib-name lib)))
 (defun find-foreign-symbol (name lib)
+  "Find foreign symbol NAME in dynamic library LIB.
+Note: Currently uses the host's global symbol table (sb-sys:find-dynamic-foreign-symbol-address),
+not library-scoped resolution.  The LIB argument is validated for loaded state only.
+Library-scoped dlsym via sb-alien:extern-alien or native C FFI is deferred to FR-719."
   (unless (and (typep lib 'dl-lib) (dl-lib-loaded lib))
     (error "Cannot look up foreign symbol ~S in an unloaded library: ~S" name lib))
   (let ((address (%foreign-symbol-address name)))
