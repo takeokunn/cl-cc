@@ -27,13 +27,14 @@
                                     (:io :create)
                                     (:probe nil)
                                     (otherwise :error))))
-              (external-format-designator
-                (if (vm-open-file-external-format-reg inst)
-                    (vm-reg-get state (vm-open-file-external-format-reg inst))
-                    (vm-open-file-external-format inst)))
-               (normalized-external-format
-                 (when external-format-designator
-                   (%normalize-text-encoding nil external-format-designator)))
+               (external-format-designator
+                 (if (vm-open-file-external-format-reg inst)
+                     (vm-reg-get state (vm-open-file-external-format-reg inst))
+                     (or (vm-open-file-external-format inst)
+                         *default-external-format*)))
+                (normalized-external-format
+                  (when external-format-designator
+                    (%vm-normalize-external-format external-format-designator)))
                (element-type (if (vm-element-type-reg inst)
                                  (vm-reg-get state (vm-element-type-reg inst))
                                  (vm-open-file-element-type inst)))
@@ -44,13 +45,14 @@
                                         :if-does-not-exist if-not-exists)
                                   (when element-type
                                     (list :element-type element-type))
-                                  (when normalized-external-format
-                                    (list :external-format normalized-external-format))))
+                                   (when normalized-external-format
+                                     (list :external-format (%vm-host-external-format normalized-external-format)))))
               (stream (progn
                         (vm-check-tainted-usage path-str :path)
                         (apply #'open open-args))))
-         (when stream
-           (setf (gethash handle (vm-open-files state)) stream))
+          (when stream
+            (vm-set-stream-external-format stream normalized-external-format)
+            (setf (gethash handle (vm-open-files state)) stream))
         (vm-reg-set state (vm-dst inst) (if stream handle nil))
         (values (1+ pc) nil nil))
     (file-error (e)

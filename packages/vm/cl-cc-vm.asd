@@ -60,9 +60,10 @@
     (:file "io-predicates")
     (:file "io-runners")
      (:file "pathname")
-      (:file "stream")
-                              (:file "string-builder")
-      (:file "format")
+       (:file "stream")
+                               (:file "string-builder")
+       (:file "ryu")
+       (:file "format")
      (:file "pprint")
      (:file "conditions")
    (:file "conditions-instructions")
@@ -90,8 +91,16 @@
      (:file "phases-151-153")
      (:file "phases-154-156")
      (:file "phases-157-160")
-     (:file "persistent")
-     (:file "runtime-stdlib-2-completion")))
+      (:file "persistent")
+      (:file "runtime-stdlib-2-completion")
+      (:file "runtime-stdlib-3")
+       (:file "vm-bytecode-stdlib3")
+       (:file "vm-dynamic-wind")
+        (:file "vm-source-tracking")
+        (:file "vm-debug")
+        (:file "vm-ryu")
+       (:file "vm-terminal")
+       (:file "vm-serialize")))
 
 ;;;; ---------------------------------------------------------------------
 ;;;; Tests — run with (asdf:test-system :cl-cc-vm) or :cl-cc-vm/tests.
@@ -147,8 +156,12 @@
     (:file "phases-148-150")
     (:file "phases-151-153")
     (:file "phases-154-156")
-    (:file "phases-157-160")
-    (:file "runtime-stdlib-2-completion-tests"))
+     (:file "phases-157-160")
+      (:file "runtime-stdlib-2-completion-tests")
+      (:file "runtime-stdlib-3-tests")
+      (:file "runtime-stdlib-3-numeric-tests")
+      (:file "runtime-stdlib-3-debug-tests")
+      (:file "runtime-stdlib-3-io-tests"))
   ;; NOTE: run-tests invokes the canonical cl-cc-suite (unit + integration + e2e),
   ;; not a VM-subset. There is intentionally one test entry point; suite filtering
   ;; is done via keyword args to run-tests, not via per-package ASDF systems.

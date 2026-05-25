@@ -10,6 +10,12 @@
 
 (in-package :cl-cc/cli)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package :ql)
+    (defpackage :ql
+      (:use :cl)
+      (:export #:quickload #:system-apropos #:update-all-dists))))
+
 ;; `compile-opts` is defined in main-dump.lisp, which loads after this file.
 ;; Prevent premature inlining warnings for its accessors during compile-file.
 (declaim (notinline compile-opts-flamegraph-path
@@ -37,8 +43,12 @@
                      compile-opts-msan
                      compile-opts-tsan
                      compile-opts-ubsan
-                      compile-opts-hwasan
-                      compile-opts-werror))
+                       compile-opts-hwasan
+                       compile-opts-werror
+                       ;; FR-276/241/153: new optimization/tracing flags
+                       compile-opts-opt-level
+                       compile-opts-trace-macros
+                       compile-opts-memoize-macros))
 
 (defun %call-with-runtime-sanitizer-flags (opts thunk)
   "Execute THUNK with runtime sanitizer toggles derived from OPTS."
@@ -49,6 +59,19 @@
         (cl-cc/runtime::*rt-ubsan-enabled* (not (null (compile-opts-ubsan opts))))
         (cl-cc/parse::*werror-p* (not (null (compile-opts-werror opts)))))
     (funcall thunk)))
+
+(defun %call-with-expander-flags (opts thunk)
+  "FR-241/153: Execute THUNK with expander tracing/memoization toggles from OPTS."
+  (let ((cl-cc/expand:*trace-macros* (not (null (compile-opts-trace-macros opts))))
+        (cl-cc/expand:*enable-macro-memoization*
+         (not (null (compile-opts-memoize-macros opts)))))
+    (funcall thunk)))
+
+(defun %call-with-optimizer-flags (opts thunk)
+  "FR-276: Execute THUNK with optimizer level pre-configured from OPTS."
+  (when (compile-opts-opt-level opts)
+    (cl-cc/optimize:apply-optimization-level (compile-opts-opt-level opts)))
+  (funcall thunk))
 
 (defun %pgo-profile-instructions (result)
   "Return instruction list to profile from RESULT, preferring optimized stream."
@@ -260,6 +283,14 @@ around the execution. Returns the value produced by RUN-COMPILED."
 ;;; Local Quicklisp/ASDF integration (FR-763)
 ;;; ─────────────────────────────────────────────────────────────────────────
 
+(defparameter *quicklisp-client-directory*
+  (merge-pathnames #P"quicklisp/" (user-homedir-pathname))
+  "Default Quicklisp client directory searched by cl-cc ASDF integration.")
+
+(defparameter *local-project-directories*
+  (list (truename #P"./"))
+  "Local project directories scanned for .asd files before Quicklisp fallback.")
+
 (defun %cl-cc-registry-path ()
   (merge-pathnames #P".cl-cc-systems.sexp" (user-homedir-pathname)))
 
@@ -332,15 +363,150 @@ around the execution. Returns the value produced by RUN-COMPILED."
     (let ((path (getf entry :path)))
       (when (probe-file path)
         (pushnew (uiop:pathname-directory-pathname (pathname path))
-                 asdf:*central-registry* :test #'equal)))))
+                 asdf:*central-registry* :test #'equal))))
+  (dolist (dir *local-project-directories*)
+    (when (probe-file dir)
+      (pushnew (truename dir) asdf:*central-registry* :test #'equal)))
+  (let ((local (merge-pathnames #P"local-projects/" *quicklisp-client-directory*)))
+    (when (probe-file local)
+      (pushnew (truename local) asdf:*central-registry* :test #'equal))))
+
+(defun %split-words (line)
+  (let ((words nil)
+        (start nil))
+    (loop for i from 0 below (length line)
+          for ch = (char line i)
+          do (if (find ch " 	")
+                 (when start
+                   (push (subseq line start i) words)
+                   (setf start nil))
+                 (unless start (setf start i)))
+          finally (when start (push (subseq line start) words)))
+    (nreverse words)))
+
+(defun %parse-qlfile (&optional (path #P"qlfile"))
+  "Parse a Bundler-style qlfile into dependency plists."
+  (when (probe-file path)
+    (with-open-file (in path :direction :input)
+      (loop for line = (read-line in nil nil)
+            while line
+            for trimmed = (string-trim '(#\Space #\Tab) line)
+            unless (or (string= trimmed "") (char= (char trimmed 0) #\#))
+              collect (let ((words (%split-words trimmed)))
+                        (list :source (first words)
+                              :name (second words)
+                              :args (cddr words)))))))
+
+(defun %read-qlfile-lock (&optional (path #P"qlfile.lock"))
+  (when (probe-file path)
+    (with-open-file (in path :direction :input)
+      (read in nil nil))))
+
+(defun %write-qlfile-lock (entries &optional (path #P"qlfile.lock"))
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (write (list :format :cl-cc-qlfile-lock-v1
+                 :generated-at (get-universal-time)
+                 :entries entries)
+           :stream out :pretty t))
+  path)
+
+(defun %sha256-file (path)
+  "Return a SHA256 hex digest for PATH using the existing codegen helper."
+  (cl-cc/codegen:wasm-file-content-hash path :bits 256))
+
+(defun %verify-sha256 (path expected)
+  (let ((actual (%sha256-file path)))
+    (unless (or (null expected) (string= (string-downcase expected) (string-downcase actual)))
+      (error "SHA256 mismatch for ~A: expected ~A, got ~A" path expected actual))
+    actual))
+
+(defun %download-file (url output &key sha256)
+  "Download URL to OUTPUT using curl/fetch and verify optional SHA256."
+  (ensure-directories-exist output)
+  (cond
+    ((uiop:find-executable "curl")
+     (uiop:run-program (list "curl" "-L" "-f" "-o" (namestring output) url)
+                       :output :interactive :error-output :interactive))
+    ((uiop:find-executable "fetch")
+     (uiop:run-program (list "fetch" "-o" (namestring output) url)
+                       :output :interactive :error-output :interactive))
+    (t (error "No HTTP downloader found (need curl or fetch)")))
+  (%verify-sha256 output sha256)
+  output)
+
+(defun %extract-tar-gz (archive directory)
+  "Extract ARCHIVE into DIRECTORY with the system tar implementation."
+  (ensure-directories-exist (merge-pathnames #P".keep" directory))
+  (unless (uiop:find-executable "tar")
+    (error "Cannot extract ~A: tar executable not found" archive))
+  (uiop:run-program (list "tar" "-xzf" (namestring archive) "-C" (namestring directory))
+                    :output :interactive :error-output :interactive)
+  directory)
+
+(defun %quicklisp-dist-url ()
+  "Return a conservative Quicklisp dist archive URL used by cl-cc update."
+  "https://beta.quicklisp.org/quicklisp/quicklisp.tar")
+
+(defun %quicklisp-update-dists (&optional package)
+  "Update Quicklisp metadata when Quicklisp exists, otherwise refresh qlfile.lock."
+  (let* ((ql-package (find-package :ql))
+         (update (and ql-package (find-symbol "UPDATE-ALL-DISTS" ql-package))))
+    (cond
+      ((and update (fboundp update)
+            (not (eq (symbol-function update) #'ql-update-all-dists)))
+       (funcall update :prompt nil))
+      (t
+       (let* ((entries (%parse-qlfile))
+              (selected (if package
+                            (remove-if-not (lambda (entry)
+                                             (string= (%normalize-system-name (getf entry :name))
+                                                      (%normalize-system-name package)))
+                                           entries)
+                            entries)))
+         (%write-qlfile-lock selected))))))
+
+(defun ql-quickload (system &key silent verbose)
+  "Compatibility wrapper for ql:quickload used by cl-cc's local registry."
+  (declare (ignore verbose))
+  (or (%quickload-system-if-available system)
+      (progn
+        (%ensure-asdf-system system)
+        (asdf:load-system system)
+        (unless silent (format t "Loaded ~A~%" system))
+        system)))
+
+(defun ql-system-apropos (term)
+  "Compatibility wrapper for ql:system-apropos over ASDF and the local registry."
+  (let ((needle (string-downcase (string term)))
+        (results nil))
+    (dolist (entry (%read-system-registry))
+      (when (search needle (getf entry :name) :test #'char-equal)
+        (push (getf entry :name) results)))
+    (dolist (system (asdf:registered-systems))
+      (let ((name (%normalize-system-name system)))
+        (when (search needle name :test #'char-equal)
+          (pushnew name results :test #'string=))))
+    (sort results #'string<)))
+
+(defun ql-update-all-dists (&key prompt)
+  (declare (ignore prompt))
+  (%quicklisp-update-dists))
+
+(eval-when (:load-toplevel :execute)
+  (setf (fdefinition (intern "QUICKLOAD" :ql)) #'ql-quickload
+        (fdefinition (intern "SYSTEM-APROPOS" :ql)) #'ql-system-apropos
+        (fdefinition (intern "UPDATE-ALL-DISTS" :ql)) #'ql-update-all-dists))
 
 ;; ──── FR-763: Quicklisp integration ────
 (defun %quickload-system-if-available (name)
   "Try to load NAME through Quicklisp when Quicklisp is present.
 Returns true when Quicklisp successfully loaded the system."
   (let* ((ql-package (find-package :ql))
-         (quickload (and ql-package (find-symbol "QUICKLOAD" ql-package))))
-    (when quickload
+          (quickload (and ql-package (find-symbol "QUICKLOAD" ql-package))))
+    (when (and quickload
+               (fboundp quickload)
+               (not (eq (symbol-function quickload) #'ql-quickload)))
       (handler-case
           (progn
             (funcall quickload name :silent t)
@@ -649,16 +815,19 @@ exits with status 0 on success."
          (stdlib (flag parsed "--stdlib"))
           (verbose (flag parsed "--verbose"))
           (timeout (%get-timeout parsed))
-         (opts (%parse-compile-opts parsed))
-          (source (%read-command-source file))
-          (no-stdlib (flag parsed "--no-stdlib")))
+          (opts (%parse-compile-opts parsed))
+           (core-path (flag parsed "--core"))
+           (source (%read-command-source file))
+           (no-stdlib (flag parsed "--no-stdlib")))
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
-    (%with-cli-error-handler
-      (%call-with-cli-timeout timeout
-       (lambda ()
-         (%call-with-optional-output-file
+     (%with-cli-error-handler
+       (%call-with-cli-timeout timeout
+        (lambda ()
+          (when core-path
+            (cl-cc/runtime:rt-load-core core-path))
+          (%call-with-optional-output-file
           (compile-opts-trace-json-path opts)
           (lambda (stream)
             (let* ((vm-state (%maybe-make-profiled-vm-state opts))
@@ -681,6 +850,26 @@ exits with status 0 on success."
                       ret))))
               (uiop:quit 0)))))
        "run"))))
+
+(defun %do-save-core (parsed)
+  "Handle `cl-cc save-core' using the CL-CC-native core image writer."
+  (let ((timeout (%get-timeout parsed)))
+    (%call-with-cli-timeout timeout
+      (lambda ()
+        (let* ((path (%required-file-arg parsed "save-core"))
+               (compression (or (flag parsed "--compression")
+                                (and (flag parsed "--compress") "zlib")))
+               (toplevel-text (flag parsed "--toplevel"))
+               (toplevel (and toplevel-text (read-from-string toplevel-text)))
+               (executable (flag parsed "--executable")))
+          (%with-cli-error-handler
+            (let ((result (cl-cc/runtime:rt-save-core path
+                                                      :toplevel toplevel
+                                                      :executable executable
+                                                      :compression compression)))
+              (format t "~A~%" result)
+              (uiop:quit 0)))))
+      "save-core"))))
 
 (defun %default-selfhost-file ()
   "Return the default self-hosting workload file."
@@ -1232,12 +1421,17 @@ with a source caret and type trace on failure."
       "audit")))
 
 (defun %do-doc (parsed)
-  "API documentation generation: FR-902. Extract docstrings."
+  "API documentation generation: FR-321. Extract docstrings to Markdown."
   (let ((timeout (%get-timeout parsed)))
     (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "Generating API documentation...~%")
-        (format t "Documentation generated.~%"))
+        (let ((file (%required-file-arg parsed "doc"))
+              (output-path (flag-or parsed "--output" "-o")))
+          (if output-path
+              (progn
+                (generate-api-docs file :output-path output-path)
+                (format t "Documentation generated: ~A~%" output-path))
+              (write-string (generate-api-docs file) *standard-output*))))
       "doc")))
 
 (defun %do-doctest (parsed)
@@ -1358,12 +1552,15 @@ with a source caret and type trace on failure."
 
 (defun %do-features (parsed)
   "Feature flags: FR-812. List available feature flags."
-  (declare (ignore parsed))
-  (format t "Feature flags:~%")
+  (let ((timeout (%get-timeout parsed)))
+    (%call-with-cli-timeout timeout
+      (lambda ()
+        (format t "Feature flags:~%")
   (format t "  jit-enabled       (default: t)   - Enable JIT compilation~%")
   (format t "  gc-epsilon        (default: nil) - No-op GC mode~%")
   (format t "  fast-math         (default: nil) - Non-strict FP optimizations~%")
   (format t "  sandbox           (default: nil) - Seccomp runtime sandbox~%"))
+      "features"))))
 
 (defun %do-generate (parsed)
   "Build-time codegen: FR-815. Generate code from schema."
@@ -1374,10 +1571,26 @@ with a source caret and type trace on failure."
       "generate")))
 
 (defun %do-update (parsed)
-  "Package update: FR-813. Update dependencies and lockfile."
+  "Package update: FR-813/FR-1039. Update Quicklisp deps and qlfile.lock."
+  (let ((timeout (%get-timeout parsed))
+        (package (car (parsed-args-positional parsed))))
+    (%with-cli-error-handler
+      (%call-with-cli-timeout timeout
+        (lambda ()
+          (format t "Updating ~A...~%" (or package "dependencies"))
+          (%quicklisp-update-dists package)
+          (format t "Lockfile updated: qlfile.lock~%"))
+        "update")
+      (uiop:quit 0))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; FR-361: Dependency Graph Visualization
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %do-dep-graph (parsed)
+  "Dependency graph: FR-361. Generate ASDF dependency graph as DOT."
   (let ((timeout (%get-timeout parsed)))
     (%call-with-cli-timeout timeout
       (lambda ()
-        (format t "Updating dependencies...~%")
-        (format t "Lockfile updated: cl-cc.lock~%"))
-      "update")))
+        (%handle-dep-graph (parsed-args-positional parsed)))
+      "dep-graph")))

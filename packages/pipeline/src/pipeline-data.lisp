@@ -59,6 +59,7 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (print-opt-remarks  nil)
   (opt-remarks-stream nil)
   (opt-remarks-mode   :all    :type keyword)
+  (opt-bisect-limit   nil)
   (retpoline          nil)
   (spectre-mitigations nil)
   (stack-protector    nil)

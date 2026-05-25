@@ -18,10 +18,11 @@
      #:*defstruct-slot-registry*
      #:*defstruct-type-registry*
      #:*setf-compound-place-handlers*
-     #:*declaim-inline-registry*
-    #:*declaim-optimize-registry*
-    #:with-fresh-defstruct-registries
-    #:declaration-optimize-quality
+      #:*declaim-inline-registry*
+     #:*declaim-optimize-registry*
+     #:*global-proclamations*
+     #:with-fresh-defstruct-registries
+     #:declaration-optimize-quality
 
    ;; --- expander-core.lisp --- macro expander construction -------------
    #:make-macro-expander
@@ -93,4 +94,17 @@
    #:memoize
    #:memoize-stats
    #:memoize-clear
-   #:*memoize-registry*))
+   #:*memoize-registry*
+    ;; --- FR-153 / FR-241: macro expansion memoization + tracing ----------
+    #:*enable-macro-memoization*
+    #:*macro-expansion-cache*
+    #:clear-macro-expansion-cache
+    #:*trace-macros*
+    #:*macro-expand-depth*
+    ;; --- FR-130: perfect hash tables (exported for testing) -------------
+    #:*compiler-special-forms-table*
+    #:*all-builtin-names-table*
+    #:*binary-builtins-table*
+    #:*unary-builtins-table*
+    #:*variadic-fold-builtins-table*
+    #:*variadic-fold-or-list-table*))

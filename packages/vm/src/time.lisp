@@ -7,7 +7,8 @@
           sleep
           encode-universal-time
           decode-universal-time
-          time))
+          time
+          with-timeout))
 
 (defconstant internal-time-units-per-second cl:internal-time-units-per-second
   "Number of internal-time units in one second for the host-backed VM clock.")
@@ -54,7 +55,19 @@ Returns exactly the values produced by FORM."
         (elapsed (gensym "ELAPSED-")))
     `(let ((,start (get-internal-real-time)))
        (let ((,values (multiple-value-list ,form)))
-         (let ((,elapsed (/ (- (get-internal-real-time) ,start)
-                            (float internal-time-units-per-second))))
-           (format *trace-output* "~&; Evaluation took ~,6F seconds.~%" ,elapsed))
-         (values-list ,values)))))
+          (let ((,elapsed (/ (- (get-internal-real-time) ,start)
+                             (float internal-time-units-per-second))))
+            (format *trace-output* "~&; Evaluation took ~,6F seconds.~%" ,elapsed))
+          (values-list ,values)))))
+
+(defmacro with-timeout ((seconds &optional timeout-result) &body body)
+  "Evaluate BODY with a host-backed timeout where supported.
+On timeout, return TIMEOUT-RESULT.  This mirrors SBCL's WITH-TIMEOUT in the VM
+  surface while keeping a portable fallback for non-SBCL hosts."
+  #+sbcl
+  `(sb-ext:with-timeout (,seconds ,timeout-result)
+     ,@body)
+  #-sbcl
+  (declare (ignore seconds))
+  #-sbcl
+  `(progn ,@body))

@@ -1,5 +1,7 @@
 # Tooling: Advanced Compilation I
 
+> **Status**: 🔶 In progress — 136 FRs total. Many FRs have partial or full implementations in codebase (e.g., LICM, loop opts, GVN, SCCP, escape analysis, polyhedral, MemorySSA, tiered/JIT/OSR/deopt, VRP, BCE, overflow checks, ICF, stack canary/clash/CFI, perf-map, sanitizers, NUMA/arena/huge-pages, IR verify/remarks/incremental/hot-reload) but lack ✅ markers in this document. Full audit with individual status markers is pending. See `docs/README.md` for overall progress.
+
 ML-driven optimization, parallel/distributed compilation, WebAssembly targets, structured concurrency, formal verification, CHERI security, advanced optimization passes, ABI.
 
 ---
@@ -714,7 +716,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: Loop rotationはLICM（FR-400）・ベクトル化（FR-345）の前提変換。ループ最適化パイプラインの最初のステップ
 - **難易度**: Medium
 
-#### FR-474: Critical Edge Splitting (クリティカルエッジ分割)
+#### ✅ FR-474: Critical Edge Splitting (クリティカルエッジ分割)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, FR-147（SSA構築）
 - **現状**: SSA phiノードにコピー挿入が必要なクリティカルエッジ（複数出口→複数入口）の処理が不明確
@@ -1166,7 +1168,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: Bazel BEP / Buck2 build events。IDE・CI・ダッシュボードとの統合標準プロトコル。2026年でBazel BEPがデファクト化
 - **難易度**: Medium
 
-#### FR-545: Documentation String Preservation (ドキュメント文字列保存)
+#### ✅ FR-545: Documentation String Preservation (ドキュメント文字列保存)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/binary/src/`
 - **現状**: `defun`本体のdocstringはコンパイル時に捨てられる可能性

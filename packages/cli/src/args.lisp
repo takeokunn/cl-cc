@@ -52,7 +52,8 @@
      ("--verbose" . :bool)
     ("--strict"  . :bool)
      ("--pass-pipeline" . :string)
-      ("--debug-info" . :bool)
+      ("--opt-bisect-limit" . :string)
+       ("--debug-info" . :bool)
       ("--sanitize" . :string)
       ("--lto" . :string)
       ("--eh-model" . :string)
@@ -89,6 +90,13 @@
     ("--hwasan" . :bool)
       ("--timeout" . :string)
       ("--no-timeout" . :bool)
+      ;; FR-276: optimization level
+      ("-O" . :string)
+      ("--opt-level" . :string)
+      ;; FR-241: macro expansion tracing
+      ("--trace-macros" . :bool)
+      ;; FR-153: macro expansion memoization
+      ("--memoize-macros" . :bool)
      ("--dump-image" . :string)
      ("--Werror" . :bool)
      ("--help"    . :bool)

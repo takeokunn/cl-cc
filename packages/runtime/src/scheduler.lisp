@@ -1,5 +1,14 @@
 ;;;;; Green Threads Scheduler (FR-257, FR-258)
 (in-package :cl-cc/runtime)
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package :bt)
+    (defpackage :bt
+      (:use :cl)
+      (:export #:make-thread #:join-thread #:thread-name #:current-thread
+               #:thread-alive-p #:all-threads #:interrupt-thread
+               #:destroy-thread #:thread-yield))))
+
 (defstruct (rt-green-thread (:constructor %make-rt-green-thread))
   (id 0) (thunk nil) (status :ready) (result nil) (error nil)
   (wake-time nil) (cancelled-p nil) (priority :normal) (context nil))
@@ -295,3 +304,141 @@ the implementation portable while preserving the CAS-style try/fail API shape."
 (defun rt-thread-pool-shutdown (pool)
   (setf (rt-thread-pool-shutdown-p pool) t)
   pool)
+
+;;; Native OS threads (FR-1097)
+
+(defstruct rt-native-thread
+  "Runtime wrapper around an implementation-native OS thread."
+  (host-thread nil)
+  (name nil :type (or null string))
+  (return-value nil)
+  (error nil)
+  (state :new)
+  (gc-state nil))
+
+(defvar *rt-native-thread-registry* (make-hash-table :test #'eq))
+
+(defun %rt-register-native-thread (wrapper host-thread)
+  (setf (rt-native-thread-host-thread wrapper) host-thread
+        (gethash host-thread *rt-native-thread-registry*) wrapper)
+  wrapper)
+
+(defun %rt-current-native-wrapper ()
+  #+sbcl
+  (or (gethash sb-thread:*current-thread* *rt-native-thread-registry*)
+      (let* ((name (ignore-errors (sb-thread:thread-name sb-thread:*current-thread*)))
+             (wrapper (make-rt-native-thread :host-thread sb-thread:*current-thread*
+                                             :name name
+                                             :state :running)))
+        (%rt-register-native-thread wrapper sb-thread:*current-thread*)
+        wrapper))
+  #-sbcl
+  (or (gethash :single-thread *rt-native-thread-registry*)
+      (setf (gethash :single-thread *rt-native-thread-registry*)
+            (make-rt-native-thread :host-thread :single-thread
+                                   :name "main"
+                                   :state :running))))
+
+(defun rt-make-thread (function &key name)
+  "Create an actual native OS thread and return an RT-NATIVE-THREAD wrapper."
+  (check-type function function)
+  (let ((wrapper (make-rt-native-thread :name name :state :starting)))
+    #+sbcl
+    (flet ((run-thread ()
+             (let ((*rt-current-green-thread* nil))
+               (%rt-register-native-thread wrapper sb-thread:*current-thread*)
+               (setf (rt-native-thread-state wrapper) :running
+                     (rt-native-thread-gc-state wrapper) :active)
+               (rt-gc-register-thread :id sb-thread:*current-thread*
+                                      :state (list :id sb-thread:*current-thread*
+                                                   :name (or name "rt-native-thread")
+                                                   :native-thread wrapper))
+               (unwind-protect
+                    (handler-case
+                        (setf (rt-native-thread-return-value wrapper) (funcall function)
+                              (rt-native-thread-state wrapper) :finished)
+                      (error (c)
+                        (setf (rt-native-thread-error wrapper) c
+                              (rt-native-thread-state wrapper) :failed)
+                        (error c)))
+                 (rt-gc-unregister-thread sb-thread:*current-thread*)))))
+      (%rt-register-native-thread
+       wrapper
+       (sb-thread:make-thread #'run-thread :name (or name "rt-native-thread"))))
+    #-sbcl
+    (progn
+      (setf (rt-native-thread-state wrapper) :running
+            (rt-native-thread-return-value wrapper) (funcall function)
+            (rt-native-thread-state wrapper) :finished)
+      (%rt-register-native-thread wrapper :single-thread))
+    wrapper))
+
+(defun rt-thread-join (thread &optional timeout)
+  "Join THREAD and return its function return value."
+  (check-type thread rt-native-thread)
+  #+sbcl
+  (if timeout
+      (sb-thread:join-thread (rt-native-thread-host-thread thread) :timeout timeout :default nil)
+      (sb-thread:join-thread (rt-native-thread-host-thread thread)))
+  #-sbcl (declare (ignore timeout))
+  (when (rt-native-thread-error thread)
+    (error (rt-native-thread-error thread)))
+  (rt-native-thread-return-value thread))
+
+(defun rt-thread-name (thread)
+  (etypecase thread
+    (rt-native-thread (or (rt-native-thread-name thread)
+                          #+sbcl (ignore-errors (sb-thread:thread-name (rt-native-thread-host-thread thread)))
+                          #-sbcl nil))
+    #+sbcl (sb-thread:thread (sb-thread:thread-name thread))))
+
+(defun rt-current-thread ()
+  (%rt-current-native-wrapper))
+
+(defun rt-thread-alive-p (thread)
+  (check-type thread rt-native-thread)
+  #+sbcl (sb-thread:thread-alive-p (rt-native-thread-host-thread thread))
+  #-sbcl (eq (rt-native-thread-state thread) :running))
+
+(defun rt-all-threads ()
+  #+sbcl
+  (mapcar (lambda (host-thread)
+            (or (gethash host-thread *rt-native-thread-registry*)
+                (%rt-register-native-thread
+                 (make-rt-native-thread :host-thread host-thread
+                                        :name (ignore-errors (sb-thread:thread-name host-thread))
+                                        :state (if (sb-thread:thread-alive-p host-thread) :running :finished))
+                 host-thread)))
+          (sb-thread:list-all-threads))
+  #-sbcl (list (%rt-current-native-wrapper)))
+
+(defun rt-interrupt-thread (thread function)
+  "Interrupt THREAD and run FUNCTION in that thread when supported."
+  (check-type thread rt-native-thread)
+  (check-type function function)
+  #+sbcl (sb-thread:interrupt-thread (rt-native-thread-host-thread thread) function)
+  #-sbcl (funcall function))
+
+(defun rt-destroy-thread (thread)
+  "Forcefully terminate THREAD. Discouraged; prefer cooperative cancellation."
+  (check-type thread rt-native-thread)
+  (setf (rt-native-thread-state thread) :destroyed)
+  #+sbcl (sb-thread:terminate-thread (rt-native-thread-host-thread thread))
+  #-sbcl nil)
+
+(defun rt-thread-yield ()
+  "Yield the current native thread's CPU time slice."
+  #+sbcl (sb-thread:thread-yield)
+  #-sbcl (sleep 0)
+  t)
+
+(eval-when (:load-toplevel :execute)
+  (setf (fdefinition (intern "MAKE-THREAD" :bt)) #'rt-make-thread
+        (fdefinition (intern "JOIN-THREAD" :bt)) #'rt-thread-join
+        (fdefinition (intern "THREAD-NAME" :bt)) #'rt-thread-name
+        (fdefinition (intern "CURRENT-THREAD" :bt)) #'rt-current-thread
+        (fdefinition (intern "THREAD-ALIVE-P" :bt)) #'rt-thread-alive-p
+        (fdefinition (intern "ALL-THREADS" :bt)) #'rt-all-threads
+        (fdefinition (intern "INTERRUPT-THREAD" :bt)) #'rt-interrupt-thread
+        (fdefinition (intern "DESTROY-THREAD" :bt)) #'rt-destroy-thread
+        (fdefinition (intern "THREAD-YIELD" :bt)) #'rt-thread-yield))

@@ -219,10 +219,16 @@ Returns (values spec remaining).  SPEC is modified in place when a match is foun
 (defun %parse-for-clause (remaining)
   "Dispatch FOR var sub-kw ... → (values spec remaining) via *loop-for-parsers*."
   (let* ((var    (pop remaining))
+         (of-type (when (and remaining (loop-kw-p (car remaining) "OF-TYPE"))
+                    (pop remaining)
+                    (pop remaining)))
          (kw     (pop remaining))
          (parser (cdr (assoc (symbol-name kw) *loop-for-parsers* :test #'string-equal))))
     (unless parser
       (error "Unknown FOR keyword ~S.  Valid keywords: FROM IN ON ACROSS = BEING" kw))
-    (funcall parser var remaining)))
+    (multiple-value-bind (spec rest) (funcall parser var remaining)
+      (when of-type
+        (setf (getf spec :of-type) of-type))
+      (values spec rest))))
 
 ) ; end eval-when (for sub-parsers)

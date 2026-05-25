@@ -61,7 +61,10 @@ Prefer `our-eval`; signal an explicit error if the selfhosted evaluator is not y
   "Drop cached macroexpansions after macro environment changes."
   (%with-macroexpansion-cache-lock
     (setf *macroexpand-step-cache* (make-hash-table :test #'eq :weakness :key)
-          *macroexpand-all-cache* (make-hash-table :test #'eq :weakness :key))))
+          *macroexpand-all-cache* (make-hash-table :test #'eq :weakness :key)))
+  ;; FR-153: also clear the memoization cache when macros are redefined
+  (when (fboundp 'clear-macro-expansion-cache)
+    (clear-macro-expansion-cache)))
 
 (defun %contains-uninterned-symbol-p (node)
   "Return T when NODE or any subtree contains an uninterned symbol.

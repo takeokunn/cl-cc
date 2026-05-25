@@ -348,40 +348,33 @@ Coding Agent 用逐次実装タスクリスト。
 
 ## Phase 6: 高度最適化 (Medium-Hard)
 
-- [ ] **FR-128** Typecase ジャンプテーブル
+- [x] **FR-128** Typecase ジャンプテーブル
   - 詳細: `docs/tooling-compiler.md` の FR-128 セクションを参照
-  - 対象: `packages/expand/src/macros-basic.lisp`
+  - 対象: `packages/expand/src/macros-control-flow-case.lisp`
   - 内容: `(typecase x (fixnum ..) (cons ..))` をネスト if でなく型タグインデックスのジャンプテーブルにコンパイル
 
-- [ ] **FR-130** Perfect Hash for Compiler Dispatch
+- [x] **FR-130** Perfect Hash for Compiler Dispatch
   - 詳細: `docs/tooling-compiler.md` の FR-130 セクションを参照
-  - 対象: `packages/expand/src/expander.lisp`
-  - 内容: `compiler-macroexpand-all` の 25 分岐 `cond` をコンパイル時生成の minimal perfect hash に変換
+  - 対象: `packages/expand/src/expander-data.lisp`, `packages/expand/src/expander.lisp`, `packages/expand/src/expander-core.lisp`, `packages/expand/src/expander-basic.lisp`
+  - 内容: `*compiler-special-forms*`、`*all-builtin-names*`、`*binary-builtins*`、`*variadic-fold-builtins*` などを hash table 化。compiler-macroexpand-all の hot path で `gethash` (O(1)) に置換
+
+- [x] **FR-135** Loop マクロ品質修正
+  - 詳細: `docs/tooling-compiler.md` の FR-135 セクションを参照
+  - 対象: `packages/expand/src/loop-iter-emitters.lisp`
+  - 内容: `:across` ベクタループの不要 nil 初期化除去。`:hash-keys`/`:hash-values` は既存実装で修正済み。
 
 - [x] **FR-136** Character Class ルックアップテーブル (実装済み: strings.lisp:84-182 に既存)
-   - 詳細: `docs/runtime-core.md` の FR-136 セクションを参照
-   - 対象: `packages/vm/src/strings.lisp`
-   - 内容: `vm-alpha-char-p` 等を 256 バイト配列ルックアップに変換
 
 - [x] **FR-137** String Literal Pool (実装済み: codegen-core.lisp 等に既存)
-   - 詳細: `docs/runtime-core.md` の FR-137 セクションを参照
-   - 対象: `packages/compile/src/codegen-core.lisp`
-   - 内容: コンパイル時の `*string-literal-pool*` で同一文字列リテラルを単一 `vm-const` に重複排除
 
-- [ ] **FR-152** 推移的関数純粋性推論
+- [x] **FR-152** 推移的関数純粋性推論
   - 詳細: `docs/tooling-compiler.md` の FR-152 セクションを参照
-  - 対象: `packages/optimize/src/effects.lisp`, `packages/optimize/src/optimizer.lisp`
-  - 内容: コールグラフを走査して純粋関数を推移的に伝播。DCE/CSE の対象に含める
+  - 対象: `packages/optimize/src/effects.lisp`, `packages/optimize/src/package.lisp`
+  - 内容: コールグラフを走査して純粋関数を推移的に伝播。`compute-function-purity`、`register-function-instructions`、`call-site-effect-kind` API 追加
 
 - [x] **FR-183** Known Function Property Database
-  - 詳細: `docs/runtime-core.md` の FR-183 セクションを参照
-  - 対象: `packages/compile/src/builtin-registry.lisp`, `packages/optimize/src/optimizer.lisp`
-  - 内容: 各ビルトイン関数に属性付与: `:pure`、`:foldable`、`:nonneg-result`、`:always-returns`
 
 - [x] **FR-562** Unicode サポート
-  - 詳細: `docs/ansi-cl-lang.md` の FR-562 セクションを参照
-  - 対象: `packages/parse/src/cl/lexer.lisp`, `packages/vm/src/strings.lisp`
-  - 内容: Unicode code point 全域 (U+0000〜U+10FFFF)。`char-code`/`code-char` の 21-bit 対応。UTF-8/UTF-16 ストリームエンコーディング
 
 ---
 

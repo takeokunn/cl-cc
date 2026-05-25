@@ -62,13 +62,87 @@
 (define-vm-unary-instruction vm-imagpart  :imagpart  "Return imaginary part of number.")
 (define-vm-unary-instruction vm-conjugate :conjugate "Return complex conjugate.")
 (define-vm-unary-instruction vm-phase     :phase     "Return phase angle of complex number.")
-(define-vm-binary-instruction vm-complex  :complex   "Construct a complex number from real and imaginary parts.")
+(define-vm-binary-instruction vm-complex-inst :complex "Construct a complex number from real and imaginary parts.")
 
 (define-simple-instruction vm-realpart  :unary  realpart)
 (define-simple-instruction vm-imagpart  :unary  imagpart)
 (define-simple-instruction vm-conjugate :unary  conjugate)
 (define-simple-instruction vm-phase     :unary  phase)
-(define-simple-instruction vm-complex   :binary complex)
+(define-simple-instruction vm-complex-inst :binary complex)
+
+(defun make-vm-complex (&rest initargs)
+  "Compatibility constructor for the :COMPLEX VM instruction.
+The VM-COMPLEX symbol is reserved for the native complex value struct."
+  (apply #'make-vm-complex-inst initargs))
+
+;;; FR-955 / FR-956: Override host-backed rational/complex instruction bodies
+;;; with the native VM number tower while preserving public CL-compatible values
+;;; at instruction boundaries.
+
+(defmethod execute-instruction ((inst vm-rational) state pc labels)
+  (declare (ignore labels))
+  (let ((result (%vm-externalize-ratio
+                 (vm-rational (vm-reg-get state (vm-src inst))))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-rationalize) state pc labels)
+  (declare (ignore labels))
+  (let ((result (%vm-externalize-ratio
+                 (vm-rationalize (vm-reg-get state (vm-src inst))))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-numerator) state pc labels)
+  (declare (ignore labels))
+  (let ((ratio (%vm-coerce-ratio (vm-reg-get state (vm-src inst)))))
+    (vm-reg-set state (vm-dst inst) (vm-ratio-numerator ratio))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-denominator) state pc labels)
+  (declare (ignore labels))
+  (let ((ratio (%vm-coerce-ratio (vm-reg-get state (vm-src inst)))))
+    (vm-reg-set state (vm-dst inst) (vm-ratio-denominator ratio))
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-gcd) state pc labels)
+  (declare (ignore labels))
+  (let* ((lhs (vm-reg-get state (vm-lhs inst)))
+         (rhs (vm-reg-get state (vm-rhs inst)))
+         (result (vm-bignum-to-integer
+                  (vm-bignum-gcd lhs rhs))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-realpart) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst) (vm-realpart (vm-reg-get state (vm-src inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-imagpart) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst) (vm-imagpart (vm-reg-get state (vm-src inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-conjugate) state pc labels)
+  (declare (ignore labels))
+  (let ((result (%vm-externalize-complex
+                 (vm-complex-conjugate (vm-reg-get state (vm-src inst))))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-phase) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst) (vm-complex-phase (vm-reg-get state (vm-src inst))))
+  (values (1+ pc) nil nil))
+
+(defmethod execute-instruction ((inst vm-complex-inst) state pc labels)
+  (declare (ignore labels))
+  (let ((result (%vm-externalize-complex
+                 (vm-complex-make (vm-reg-get state (vm-lhs inst))
+                                  (vm-reg-get state (vm-rhs inst))))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
 
 ;;; FR-507: Environment query functions (nullary — return host CL values)
 

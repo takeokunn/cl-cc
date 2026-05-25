@@ -49,8 +49,9 @@
    (:file "macros-runtime-support") ; declarations, IO/hash/coerce/LTV/feature runtime macros
    (:file "macros-clos-protocol")  ; CLOS protocol: print-unreadable-object, describe, change-class
    (:file "macros-mop-support")   ; MOP introspection macros + parse-float + reinitialize-instance
-     (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
-     (:file "deftransform")        ; deftransform: type-specialized compile-time transforms
+      (:file "expander-data")       ; expander: grammar tables + dispatch table declarations
+      (:file "runtime-stdlib-3-expander") ; runtime-stdlib-3 expander-side proclamations
+      (:file "deftransform")        ; deftransform: type-specialized compile-time transforms
      (:file "expander-helpers")    ; expander: shared helper functions extracted from expander.lisp
     (:file "expander-defstruct-copy") ; expander: COPY-STRUCTURE expansion
      (:file "expander-defstruct-boa")  ; expander: BOA constructors for defstruct

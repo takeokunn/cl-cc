@@ -132,6 +132,9 @@ enables it for SPEED >= 2.")
 (defun %maybe-run-idiom-recognition (instructions)
   (%opt-run-pass-if-fbound 'opt-pass-idiom-recognition instructions))
 
+(defun %maybe-run-trmc (instructions)
+  (%opt-run-pass-if-fbound 'opt-pass-trmc instructions))
+
 (defun %maybe-run-value-range-propagation (instructions)
   (%opt-run-pass-if-fbound 'opt-pass-value-range-propagation instructions))
 
@@ -674,6 +677,7 @@ not fusing across intervening writes to the multiply destination or operands."
       (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
       (:fill-recognition          . ,#'opt-pass-fill-recognition)
        (:copy-recognition          . ,#'opt-pass-copy-recognition)
+       (:trmc                      . ,#'%maybe-run-trmc)
        (:auto-vectorization        . ,#'opt-pass-auto-vectorization)
        (:slp-vectorize             . ,#'opt-pass-slp-vectorize)
        (:function-outlining        . ,#'opt-pass-function-outlining)
@@ -768,9 +772,10 @@ not fusing across intervening writes to the multiply destination or operands."
         :idiom-recognition
         :bswap-recognition
      :rotate-recognition
-     :fill-recognition
-      :copy-recognition
-      :auto-vectorization
+      :fill-recognition
+       :copy-recognition
+       :trmc
+       :auto-vectorization
       :slp-vectorize
        :function-outlining
        :safepoint-polling
@@ -885,6 +890,17 @@ the e-graph engine.")
 (defun %opt-pass-name-string (f)
   (string-upcase (format nil "~A" f)))
 
+(defun %opt-bisect-limit-reached-p ()
+  "Return T when optimization bisection should skip further pass invocations."
+  (and (integerp *opt-bisect-limit*)
+       (<= 0 *opt-bisect-limit*)
+       (>= *opt-bisect-count* *opt-bisect-limit*)))
+
+(defun %opt-note-bisect-change (changed)
+  "Record one changed optimization pass for the bisection counter."
+  (when (and changed (integerp *opt-bisect-limit*) (<= 0 *opt-bisect-limit*))
+    (incf *opt-bisect-count*)))
+
 (defun %opt-write-trace-json (stream events)
   "Write Chrome-trace-compatible JSON EVENTS to STREAM."
   (format stream "{\"traceEvents\":[")
@@ -926,6 +942,8 @@ the e-graph engine.")
 Returns the final instruction list."
   (let ((current prog))
     (dolist (f passes current)
+      (when (%opt-bisect-limit-reached-p)
+        (return current))
       (let* ((before       current)
              (before-count (length before))
              (start        (get-internal-real-time))
@@ -952,9 +970,10 @@ Returns the final instruction list."
                 (opt-trace-events trace))
           (incf (opt-trace-ts-us trace) dur-us))
         (when (and (boundp '*translation-validation-enabled*)
-                   *translation-validation-enabled*
-                   (fboundp 'validate-optimizer-translation))
+                    *translation-validation-enabled*
+                    (fboundp 'validate-optimizer-translation))
           (validate-optimizer-translation f before next))
+        (%opt-note-bisect-change changed)
         (setf current next)))))
 
 (defun opt-converged-p (prev next)
@@ -1014,6 +1033,13 @@ short-circuits before the expensive sexp comparison."
 (defvar *skip-optimizer-passes* nil
   "When non-NIL, optimize-instructions returns its input unchanged.")
 
+(defvar *opt-bisect-limit* nil
+  "Maximum number of optimization pass invocations allowed to change the instruction stream.
+NIL disables optimization bisection.")
+
+(defvar *opt-bisect-count* 0
+  "Number of optimization pass invocations that changed the instruction stream in the current dynamic scope.")
+
 (defvar *verify-optimizer-instructions* nil
   "When non-NIL, run opt-verify-instructions after every convergence pass to
 catch ill-formed sequences (duplicate labels, unknown jump targets, use-before-define).")
@@ -1030,15 +1056,50 @@ Returns the resulting gate value for convenience."
   (when speed
     (setf *opt-enable-sealed-gf-devirtualization* (>= speed 2))
     (setf *opt-enable-pure-call-optimization* (>= speed 3)))
-  *opt-enable-pure-call-optimization*)
+   *opt-enable-pure-call-optimization*)
+
+;;; ─── FR-276: Optimization Levels (-O0 to -O3) ─────────────────────────────
+;;;
+;;; Each level maps to a pre-configured set of optimizer parameters.
+;;; The level can be set via the CLI (-O0/-O1/-O2/-O3) or via
+;;; (declare (optimize ...)) in source code.
+
+(defparameter *optimization-level-params*
+  '((0 :inline-threshold-scale 0   :max-iterations 1  :pass-pipeline :o0
+       :speed 0 :enable-egraph nil :description "Fold + DCE only (fast debug build)")
+    (1 :inline-threshold-scale 0.5 :max-iterations 5  :pass-pipeline :o1
+       :speed 1 :enable-egraph nil :description "Fold + Jump + DCE + basic inline")
+    (2 :inline-threshold-scale 1.0 :max-iterations 20 :pass-pipeline :o2
+       :speed 2 :enable-egraph t   :description "Full pipeline (production default)")
+    (3 :inline-threshold-scale 2.0 :max-iterations 40 :pass-pipeline :o3
+       :speed 3 :enable-egraph t   :description "Aggressive: full pipeline + e-graph saturation"))
+  "FR-276: Pre-configured optimizer parameters for each -O level.")
+
+(defun opt-level-params (level)
+  "Return the parameter plist for optimization LEVEL (0-3).
+LEVEL is clamped to 0..3."
+  (let* ((lvl (max 0 (min 3 (or level 2))))
+         (entry (assoc lvl *optimization-level-params*)))
+    (cdr entry)))
+
+(defun apply-optimization-level (level)
+  "Configure the global optimizer state for optimization LEVEL (0-3).
+Returns the parameter plist that was applied."
+  (let ((params (opt-level-params level)))
+    (setf *opt-inline-threshold-scale* (getf params :inline-threshold-scale)
+          *opt-enable-pure-call-optimization* (>= (getf params :speed) 3)
+          *opt-enable-sealed-gf-devirtualization* (>= (getf params :speed) 2)
+          *enable-prolog-peephole* (getf params :enable-egraph))
+    params))
 
 (defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline
                                                   print-pass-timings timing-stream
                                                   print-pass-stats   stats-stream
                                                   print-opt-remarks  opt-remarks-stream
                                                   (opt-remarks-mode :all)
-                                                  speed
-                                                  (inline-threshold-scale 1)
+                                                   speed
+                                                   opt-bisect-limit
+                                                   (inline-threshold-scale 1)
                                                   trace-json-stream
                                                   block-compile
                                           retpoline spectre-mitigations
@@ -1053,6 +1114,8 @@ When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
   (when *skip-optimizer-passes*
     (return-from optimize-instructions (values instructions nil)))
   (let* ((*opt-inline-threshold-scale* inline-threshold-scale)
+         (*opt-bisect-limit* (or opt-bisect-limit *opt-bisect-limit*))
+         (*opt-bisect-count* 0)
          (*block-compile* (or block-compile *block-compile*))
          (*opt-enable-pure-call-optimization*
           (if speed (>= speed 3) *opt-enable-pure-call-optimization*))

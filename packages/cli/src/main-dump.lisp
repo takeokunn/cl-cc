@@ -197,6 +197,7 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
 (defstruct (compile-opts (:constructor make-compile-opts))
   "Pipeline control and diagnostic flags shared by run / compile / eval."
   (pass-pipeline      nil)
+  (opt-bisect-limit   nil)
   (debug-info         nil)
   (sanitize           nil)
   (lto                nil)
@@ -230,12 +231,21 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
   (tsan               nil)
   (ubsan              nil)
   (hwasan             nil)
-  (werror             nil))
+   (werror             nil)
+   ;; FR-276: optimization level (-O0 to -O3)
+   (opt-level          nil)
+   ;; FR-241: macro expansion tracing
+   (trace-macros       nil)
+   ;; FR-153: macro expansion memoization
+   (memoize-macros     nil))
 
 (defun %parse-compile-opts (parsed)
   "Extract all pipeline/tracing flags from PARSED into a compile-opts struct."
   (make-compile-opts
     :pass-pipeline      (flag parsed "--pass-pipeline")
+    :opt-bisect-limit   (%parse-opt-bisect-limit
+                         (or (flag parsed "--opt-bisect-limit")
+                             (uiop:getenv "CL_CC_OPT_BISECT")))
     :debug-info         (flag parsed "--debug-info")
     :sanitize           (flag parsed "--sanitize")
     :lto                (flag parsed "--lto")
@@ -270,7 +280,30 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
    :tsan               (flag parsed "--tsan")
    :ubsan              (flag parsed "--ubsan")
    :hwasan             (flag parsed "--hwasan")
-   :werror             (flag parsed "--Werror")))
+   :werror             (flag parsed "--Werror")
+    ;; FR-276: optimization level
+    :opt-level          (%parse-opt-level (or (flag parsed "-O")
+                                              (flag parsed "--opt-level")))
+    ;; FR-241/153: macro tracing and memoization
+    :trace-macros       (flag parsed "--trace-macros")
+    :memoize-macros     (flag parsed "--memoize-macros")))
+
+(defun %parse-opt-level (spec)
+  "Parse an optimization level spec string (-O0/-O1/-O2/-O3 or 0/1/2/3).
+Returns an integer 0-3 or NIL."
+  (when spec
+    (let ((level (ignore-errors (parse-integer spec))))
+      (and level (<= 0 level 3) level))))
+
+(defun %parse-opt-bisect-limit (spec)
+  "Parse --opt-bisect-limit / CL_CC_OPT_BISECT as a non-negative integer or NIL."
+  (let ((text (and spec (string-trim '(#\Space #\Tab #\Newline #\Return) spec))))
+    (when (and text (plusp (length text)))
+      (let ((limit (ignore-errors (parse-integer text :junk-allowed nil))))
+        (unless (and (integerp limit) (<= 0 limit))
+          (format *error-output* "Invalid opt bisect limit: ~A (expected non-negative integer)~%" spec)
+          (uiop:quit 2))
+        limit))))
 
 (defun %compile-opts-kwargs (opts stream)
   "Return a flat keyword plist for compile-string.
@@ -329,9 +362,10 @@ STREAM is the resolved trace-json output stream (may be nil)."
              (speed (profile-speed profile))
              (inline-scale (profile-inline-scale profile)))
         (append (list :trace-json-stream  stream
-                       :print-pass-stats   (compile-opts-print-pass-stats opts)
-                       :pass-pipeline      (compile-opts-pass-pipeline opts)
-                       :inline-threshold-scale inline-scale)
+                        :print-pass-stats   (compile-opts-print-pass-stats opts)
+                        :pass-pipeline      (compile-opts-pass-pipeline opts)
+                        :opt-bisect-limit   (compile-opts-opt-bisect-limit opts)
+                        :inline-threshold-scale inline-scale)
                 (if (compile-opts-tier opts)
                     (list :compilation-tier
                           (cl-cc/pipeline:normalize-compilation-tier

@@ -27,15 +27,22 @@
            #:random-state
            #:random-state-p
            #:make-random-state
-           #:*random-state*
-           #:random
-           #:*print-base*
+            #:*random-state*
+            #:random
+            #:*trace-output*
+            #:*print-base*
            #:*print-radix*
            #:*print-circle*
            #:*print-pretty*
            #:*print-level*
-           #:*print-length*
-           #:*print-readably*
+            #:*print-length*
+            #:*print-case*
+            #:*print-escape*
+            #:*print-gensym*
+            #:*print-array*
+            #:*print-lines*
+            #:*print-right-margin*
+            #:*print-readably*
            #:*print-pprint-dispatch*
            #:with-standard-io-syntax
            #:pprint-logical-block
@@ -46,23 +53,33 @@
            #:set-pprint-dispatch
            #:get-pprint-dispatch
            #:*readtable*
-           #:copy-readtable
-           #:set-macro-character
-           #:get-macro-character
-            #:set-dispatch-macro-character
-            #:get-dispatch-macro-character
-             #:readtable-case
-             #:sequence
+            #:copy-readtable
+            #:set-macro-character
+            #:get-macro-character
+             #:set-dispatch-macro-character
+             #:get-dispatch-macro-character
+              #:readtable-case
+              #:stream-external-format
+              #:sequence
             #:elt
             #:length
             #:subseq
             #:copy-structure
             #:method-qualifiers
             #:compute-applicable-methods
-            #:find-method
-            #:add-method
-            #:remove-method
-            #:ensure-generic-function))
+             #:find-method
+             #:add-method
+             #:remove-method
+             #:ensure-generic-function
+             #:trace
+             #:untrace
+             #:step
+             #:break
+             #:invoke-debugger
+             #:describe
+             #:inspect
+             #:ed
+             #:dribble))
 
 (in-package :cl-cc/vm)
 

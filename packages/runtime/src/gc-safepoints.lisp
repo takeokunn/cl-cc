@@ -1,5 +1,25 @@
 (in-package :cl-cc/runtime)
 
+;;; Precise safepoint and stack-map notes (FR-1115)
+;;;
+;;; The runtime treats a safepoint as a compiler- or VM-emitted poll where a
+;;; mutator can safely service deferred work: pending GC, cooperative
+;;; preemption, and async OS signals.  Native backends should emit polls at
+;;; function entry, loop back-edges, allocation slow paths, and explicit foreign
+;;; calls.  Each safepoint that can expose live heap references must have a
+;;; stack map in *RT-GC-STACKMAP-TABLE* keyed by frame id.
+;;;
+;;; Stack maps are precise: every live object slot is listed as
+;;; (FRAME-OFFSET . :OBJECT), while scalar slots (:FIXNUM, :DOUBLE, :CHAR, ...)
+;;; are ignored by the collector.  JIT/AOT object files may store the same data
+;;; in a read-only `.gc_map` section containing records:
+;;;
+;;;   u32 frame-id-delta | u16 slot-count | repeated sleb128 offset-delta + u8 kind
+;;;
+;;; Frame ids and offsets are delta-encoded to reduce code-size impact.  The
+;;; decoder reconstructs monotonically increasing frame ids and slot offsets
+;;; before registering RT-STACKMAP objects with RT-GC-REGISTER-STACKMAP.
+
 (defmacro without-gcing ((heap) &body body)
   "Run BODY while inhibiting automatic GC for HEAP."
   `(let ((old-inhibit (rt-heap-gc-inhibit ,heap)))
@@ -53,6 +73,8 @@ KIND documents the compiler/VM position: :FUNCTION-ENTRY, :LOOP-BACK-EDGE,
 inside WITHOUT-GCING), the request stays pending.  Otherwise a minor collection
 is serviced after briefly marking THREAD-ID as safe."
   (declare (ignore kind))
+  (when (fboundp 'rt-process-pending-signals)
+    (rt-process-pending-signals))
   (when *rt-preemption-pending*
     (when *rt-preemption-yield-hook*
       (funcall *rt-preemption-yield-hook* thread-id))
@@ -69,6 +91,42 @@ is serviced after briefly marking THREAD-ID as safe."
                  (rt-gc-minor-collect heap))
             (rt-gc-leave-safe-region thread-id)))))
   heap)
+
+(defun rt-emit-gc-safepoint (&key heap (kind :jit) frame-id live-slots thread-id)
+  "Register optional stack-map metadata and poll a JIT/native safepoint.
+
+HEAP defaults to *RT-CURRENT-GC-HEAP*.  FRAME-ID and LIVE-SLOTS are optional
+compiler metadata; when supplied, LIVE-SLOTS should be an alist of
+(frame-offset . kind).  Returns HEAP after servicing pending GC/signals."
+  (let ((target-heap (or heap *rt-current-gc-heap*)))
+    (when frame-id
+      (rt-gc-register-stackmap frame-id live-slots :source kind))
+    (rt-gc-safepoint-check target-heap
+                           :kind kind
+                           :thread-id (or thread-id *rt-current-thread-id*))))
+
+(defun rt-compress-stackmap-slots (slots)
+  "Return delta-encoded stack-map SLOTS for compact `.gc_map` emission.
+
+Input is an alist of (absolute-offset . kind).  Output is an alist of
+(offset-delta . kind) sorted by absolute offset."
+  (let ((previous 0)
+        (sorted (sort (copy-list slots) #'< :key #'car)))
+    (loop for (offset . kind) in sorted
+          for delta = (- offset previous)
+          do (setf previous offset)
+          collect (cons delta kind))))
+
+(defun rt-decompress-stackmap-slots (compressed)
+  "Inflate delta-encoded stack-map slots produced by RT-COMPRESS-STACKMAP-SLOTS."
+  (let ((offset 0))
+    (loop for (delta . kind) in compressed
+          do (incf offset delta)
+          collect (cons offset kind))))
+
+(defun rt-gc-map-section-documentation ()
+  "Return documentation for the native `.gc_map` section format."
+  "`.gc_map` records are delta encoded: u32 frame-id-delta, u16 slot-count, then slot-count repetitions of sleb128 frame-offset-delta plus u8 slot-kind. Slot kind 1 denotes :OBJECT; scalar kinds are ignored by GC. The loader expands records and calls RT-GC-REGISTER-STACKMAP before code execution.")
 
 (defmacro with-gc-function-entry-safepoint ((heap &optional (thread-id '*rt-current-thread-id*)) &body body)
   "Run BODY after polling a function-entry safepoint."

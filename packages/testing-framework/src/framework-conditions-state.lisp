@@ -51,3 +51,7 @@
 When coverage mode is enabled, the test framework recompiles the local ASDF
 systems with coverage instrumentation before executing tests. This guard
 prevents recursive reload loops while that happens.")
+
+(defvar *benchmark-registry* '()
+  "List of benchmark plists (:NAME :FN :WARMUP :ITERATIONS :DOCSTRING).
+Registered automatically by DEFBENCHMARK.")

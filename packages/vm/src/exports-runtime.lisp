@@ -330,9 +330,16 @@
     vm-hash-table-object
     vm-hash-table-internal
     vm-hash-table-weakness
-    rt-hash-table-weakness
-    rt-make-hash-table
-   vm-make-hash-table
+     rt-hash-table-weakness
+     rt-make-hash-table
+     *hash-table-rehash-policy*
+     +hash-table-rehash-policies+
+     valid-hash-table-rehash-policy-p
+     hash-table-simd-lookup-available-p
+     *vm-primitive-type-dispatch*
+     vm-typecase-dispatch
+     vm-typep-check
+    vm-make-hash-table
    vm-gethash
    vm-sethash
    vm-remhash
@@ -353,9 +360,33 @@
     vm-hash-table-reg
     vm-hash-default
     vm-hash-fn
-     string-to-octets
-     octets-to-string
-     unicode-general-category
+      string-to-octets
+      octets-to-string
+      *default-external-format*
+      vm-open
+      vm-stream-external-format
+      vm-set-stream-external-format
+      vm-encode-string
+      vm-decode-bytes
+      *print-case*
+      *print-escape*
+      *print-gensym*
+      *print-array*
+      *print-lines*
+      *print-right-margin*
+      vm-float-to-string
+      vm-isatty
+      vm-terminal-size
+      vm-ansi-color
+      vm-ansi-reset
+      vm-with-raw-terminal
+      vm-read-key
+      vm-readline
+      vm-make-load-form
+      vm-make-load-form-saving-slots
+      vm-write-to-fasl
+      vm-read-from-fasl
+      unicode-general-category
      unicode-alpha-char-p
      unicode-digit-char-p
      unicode-upper-case-p

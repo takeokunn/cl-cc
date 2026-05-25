@@ -55,11 +55,13 @@
           deftest-compile
           deftest-codegen
           deftest-vm
-          defbenchmark
-          run-benchmark
-          benchmark-statistics
-          benchmark-result-json
-          write-benchmark-result-json
+           defbenchmark
+           run-benchmark
+           benchmark-statistics
+           benchmark-result-json
+           write-benchmark-result-json
+           run-all-benchmarks
+           *benchmark-registry*
           testing
           defbefore
           defafter

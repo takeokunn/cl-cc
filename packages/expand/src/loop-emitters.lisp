@@ -56,8 +56,10 @@ END-TAG is the loop exit label; WHILE/UNTIL use it, ALWAYS/NEVER/THEREIS ignore 
 
 (define-loop-acc-emitter :sum (acc-var acc-form bindings result-form into-var)
   (declare (ignore result-form into-var))
-  (push (list acc-var 0) bindings)
-  (values (list 'setq acc-var (list '+ acc-var acc-form)) bindings nil))
+  ;; FR-1124: arithmetic accumulator inference.  The THE wrapper gives the
+  ;; compiler a stable numeric accumulator type without changing LOOP semantics.
+  (push (list acc-var (list 'the 'number 0)) bindings)
+  (values (list 'setq acc-var (list 'the 'number (list '+ acc-var acc-form))) bindings nil))
 
 (define-loop-acc-emitter :count (acc-var acc-form bindings result-form into-var)
   (declare (ignore result-form into-var))

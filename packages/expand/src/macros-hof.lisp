@@ -144,44 +144,75 @@ emit a runtime TYPECASE with an OTHERWISE coercion to list."
        (dolist (,x ,list ,acc)
          (setq ,acc (nconc ,acc (funcall ,fn-var ,x)))))))
 
-;; EVERY: true iff pred returns non-nil for every element
-(our-defmacro every (pred list)
-  (%sequence-dispatch-expand
-   list
-   (lambda (seq)
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X")))
-       `(let ((,fn-var ,pred))
-          (block nil
-            (dolist (,x ,seq t)
-              (unless (funcall ,fn-var ,x)
-                (return nil)))))))
-   (lambda (seq) (%predicate-indexed-expand pred seq t t))
-   (lambda (seq) (%predicate-indexed-expand pred seq t t :stringp t))))
+;; EVERY: true iff pred returns non-nil for every tuple of sequence elements.
+(our-defmacro every (pred list &rest more-lists)
+  (if more-lists
+      (let ((fn-var (gensym "FN"))
+            (seq-vars (loop repeat (1+ (length more-lists)) collect (gensym "SEQ")))
+            (cells (gensym "CELLS")))
+        `(let ((,fn-var ,pred)
+               ,@(loop for var in seq-vars
+                       for seq in (cons list more-lists)
+                       collect `(,var (coerce ,seq 'list))))
+           (loop for ,cells = (list ,@seq-vars)
+                 while (every #'identity ,cells)
+                 do (unless (apply ,fn-var (mapcar #'car ,cells))
+                      (return nil))
+                    ,@(loop for var in seq-vars
+                            collect `(setq ,var (cdr ,var)))
+                 finally (return t))))
+      (%sequence-dispatch-expand
+       list
+       (lambda (seq)
+         (let ((fn-var (gensym "FN"))
+               (x (gensym "X")))
+           `(let ((,fn-var ,pred))
+              (block nil
+                (dolist (,x ,seq t)
+                  (unless (funcall ,fn-var ,x)
+                    (return nil)))))))
+       (lambda (seq) (%predicate-indexed-expand pred seq t t))
+       (lambda (seq) (%predicate-indexed-expand pred seq t t :stringp t)))))
 
-;; SOME: returns first truthy pred result, or nil
-(our-defmacro some (pred list)
-  (%sequence-dispatch-expand
-   list
-   (lambda (seq)
-     (let ((fn-var (gensym "FN"))
-           (x (gensym "X"))
-           (result (gensym "R")))
-       `(let ((,fn-var ,pred))
-          (block nil
-            (dolist (,x ,seq nil)
-              (let ((,result (funcall ,fn-var ,x)))
-                (when ,result (return ,result))))))))
-   (lambda (seq) (%predicate-indexed-expand pred seq t nil :return-value-p t))
-   (lambda (seq) (%predicate-indexed-expand pred seq t nil :stringp t :return-value-p t))))
+;; SOME: returns first truthy pred result across sequence element tuples, or nil.
+(our-defmacro some (pred list &rest more-lists)
+  (if more-lists
+      (let ((fn-var (gensym "FN"))
+            (seq-vars (loop repeat (1+ (length more-lists)) collect (gensym "SEQ")))
+            (cells (gensym "CELLS"))
+            (result (gensym "RESULT")))
+        `(let ((,fn-var ,pred)
+               ,@(loop for var in seq-vars
+                       for seq in (cons list more-lists)
+                       collect `(,var (coerce ,seq 'list))))
+           (loop for ,cells = (list ,@seq-vars)
+                 while (every #'identity ,cells)
+                 do (let ((,result (apply ,fn-var (mapcar #'car ,cells))))
+                      (when ,result (return ,result)))
+                    ,@(loop for var in seq-vars
+                            collect `(setq ,var (cdr ,var)))
+                 finally (return nil))))
+      (%sequence-dispatch-expand
+       list
+       (lambda (seq)
+         (let ((fn-var (gensym "FN"))
+               (x (gensym "X"))
+               (result (gensym "R")))
+           `(let ((,fn-var ,pred))
+              (block nil
+                (dolist (,x ,seq nil)
+                  (let ((,result (funcall ,fn-var ,x)))
+                    (when ,result (return ,result))))))))
+       (lambda (seq) (%predicate-indexed-expand pred seq t nil :return-value-p t))
+       (lambda (seq) (%predicate-indexed-expand pred seq t nil :stringp t :return-value-p t)))))
 
 ;; NOTANY: true iff pred returns nil for every element
-(our-defmacro notany (pred list)
-  `(not (some ,pred ,list)))
+(our-defmacro notany (pred list &rest more-lists)
+  `(not (some ,pred ,list ,@more-lists)))
 
 ;; NOTEVERY: true iff pred returns nil for at least one element
-(our-defmacro notevery (pred list)
-  `(not (every ,pred ,list)))
+(our-defmacro notevery (pred list &rest more-lists)
+  `(not (every ,pred ,list ,@more-lists)))
 
 ;; COMPLEMENT: invert a predicate by wrapping it in NOT/APPLY.
 (our-defmacro complement (fn)

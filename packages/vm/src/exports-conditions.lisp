@@ -26,10 +26,24 @@
    vm-pop-handler-from-stack
    vm-clear-condition-context
     *active-restarts*
-    *debugger-hook*
-    *break-on-signals*
-    invoke-debugger
-    break
+     *debugger-hook*
+     *break-on-signals*
+     *vm-error-output-format*
+     *trace-output*
+     invoke-debugger
+     break
+     trace
+     untrace
+     step
+     describe
+     inspect
+     ed
+     dribble
+     vm-levenshtein-distance
+     vm-did-you-mean
+     format-rich-condition
+     format-condition-json
+     format-stack-trace
 
     ;; ─── Condition Types ───────────────────────────────────────────────────────
     vm-condition
@@ -109,8 +123,14 @@
     compute-restarts
     restart-case
     restart-bind
-    with-simple-restart
-    vm-abort-restart
+     with-simple-restart
+     describe-restart
+     restart-interactive
+     vm-with-simple-restart
+     vm-compute-active-restarts
+     vm-invoke-restart-interactively
+     vm-show-restart-menu
+     vm-abort-restart
     vm-muffle-warning-restart
     vm-use-value-restart
     vm-store-value-restart
@@ -119,8 +139,21 @@
     vm-invoke-restart
     vm-find-standard-restart
     vm-invoke-debugger
-    vm-break
-    vm-restart-name
+     vm-break
+     vm-trace
+     vm-untrace
+     vm-traced-p
+     vm-with-trace
+     vm-step
+     vm-step-prompt
+     vm-apropos
+     vm-apropos-list
+     vm-describe
+     vm-inspect
+     vm-room
+     vm-ed
+     vm-dribble
+     vm-restart-name
     vm-handler-type
    vm-handler-entry-saved-regs
 

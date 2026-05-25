@@ -30,6 +30,11 @@ Used by `(declaim (inline ...))` / `(declaim (notinline ...))` during source com
   "Maps optimize qualities to global quality levels 0..3.
 Used by `(declaim (optimize ...))` during source compilation.")
 
+(defvar *global-proclamations* (make-hash-table :test #'eq)
+  "Maps proclamation kinds to proclamation metadata tables.
+FR-935 stores TYPE, FTYPE, and SPECIAL proclamations here while preserving the
+existing inline and optimize registries for their specialized consumers.")
+
 (defvar *macro-eval-fn* #'%bootstrap-macro-eval
   "Function used to evaluate macro bodies at compile time.
 Initially a bootstrap wrapper that prefers our-eval and only falls back to host
@@ -128,6 +133,51 @@ These recurse into subforms but their head is not macro-expanded.")
   (append *variadic-fold-builtins* '(- list) *binary-builtins* *unary-builtins* *cxr-builtins*)
   "Union of all known builtin names — used by #'name → lambda wrapping.")
 
+;;; ── Perfect Hash Tables (FR-130) ──────────────────────────────────────────
+;;;
+;;; Hash-table versions of the linear lookup lists above.
+;;; compiler-macroexpand-all and expander-core are the hot paths;
+;;; gethash is O(1) while member/%list-contains-eq are O(n).
+
+(defparameter *compiler-special-forms-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *compiler-special-forms*) (setf (gethash s ht) t))
+    ht)
+  "Hash table of *compiler-special-forms* for O(1) lookup.")
+
+(defparameter *all-builtin-names-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *all-builtin-names*) (setf (gethash s ht) t))
+    ht)
+  "Hash table of *all-builtin-names* for O(1) builtin-name lookup.")
+
+(defparameter *binary-builtins-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *binary-builtins*) (setf (gethash s ht) t))
+    ht)
+  "Hash table of *binary-builtins* for O(1) lookup.")
+
+(defparameter *unary-builtins-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *unary-builtins*) (setf (gethash s ht) t))
+    ht)
+  "Hash table of *unary-builtins* for O(1) lookup.")
+
+(defparameter *variadic-fold-builtins-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *variadic-fold-builtins*) (setf (gethash s ht) t))
+    ht)
+  "Hash table of *variadic-fold-builtins* for O(1) lookup.")
+
+(defparameter *variadic-fold-or-list-table*
+  (let ((ht (make-hash-table :test #'eq)))
+    (dolist (s *variadic-fold-builtins*) (setf (gethash s ht) t))
+    (setf (gethash '- ht) t)
+    ;; Note: 'list is handled by a dedicated branch in expand-apply-named-fn,
+    ;; not included here to avoid misclassifying it as a fold operation.
+    ht)
+  "Hash table of (*variadic-fold-builtins* plus '-) for O(1) lookup.")
+
 ;; Rounding operations whose 1-arg form normalises to 2-arg (divisor = 1).
 (defparameter *rounding-ops* '(floor ceiling truncate round)
   "Rounding ops for which (op x) normalises to (op x 1) (FR-301).")
@@ -163,3 +213,50 @@ These recurse into subforms but their head is not macro-expanded.")
   "Dispatch: form-head symbol → handler fn (form → expanded-form).
 Handler contract: form → fully-expanded form (may call compiler-macroexpand-all recursively).
 Handlers take precedence over *compiler-special-forms* recurse-fallback.")
+
+;;; ── FR-153: Macro expansion memoization ────────────────────────────────────
+;;;
+;;; Side-effect-free macros (defun/let/cond etc.) are expanded once and the
+;;; result is cached.  Uses EQUAL for the form key (not just sxhash) to avoid
+;;; collisions.  Disabled by default; enable with --memoize-macros CLI flag.
+
+(defvar *enable-macro-memoization* nil
+  "FR-153: When T, macro expansion results are cached for reuse.
+Disabled by default because caching side-effecting or environment-dependent
+macros could produce stale results.")
+
+(defvar *macro-expansion-cache* (make-hash-table :test #'equal)
+  "FR-153: Memoization cache for macro expansion results.
+Keys are (macro-name . form) conses using EQUAL; values are expanded forms.
+Cleared between compilation units to avoid stale entries.")
+
+(defun %macro-cache-key (name form)
+  "Build a cache key for macro NAME applied to FORM.
+Uses EQUAL on the cons so structural equality is checked."
+  (cons name form))
+
+(defun %cached-macro-expansion (name form)
+  "Return two values: (cached-form, present-p).
+Uses gethash second value to distinguish NIL cached expansion from cache miss."
+  (when *enable-macro-memoization*
+    (gethash (%macro-cache-key name form) *macro-expansion-cache*)))
+
+(defun %cache-macro-expansion (name form expanded)
+  "Store EXPANDED as the cached expansion of (NAME FORM)."
+  (when *enable-macro-memoization*
+    (setf (gethash (%macro-cache-key name form) *macro-expansion-cache*) expanded)))
+
+(defun clear-macro-expansion-cache ()
+  "Clear the macro expansion memoization cache.
+Called between compilation units or when macros are redefined."
+  (clrhash *macro-expansion-cache*))
+;;; ── End of FR-153 ────────────────────────────────────────────────────────
+
+;;; ── FR-241: Macro Expansion Tracing ────────────────────────────────────────
+
+(defvar *trace-macros* nil
+  "FR-241: When T, print each macro expansion step with indentation.
+Set by --trace-macros CLI flag.")
+
+(defvar *macro-expand-depth* 0
+  "Current macro expansion recursion depth for indentation.")

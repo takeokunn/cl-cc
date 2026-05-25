@@ -351,8 +351,10 @@
     ;; Precise roots (FR-332)
      #:rt-gc-add-root-typed #:*gc-threads*
       #:rt-gc-enter-safe-region #:rt-gc-leave-safe-region #:*gc-inhibit-during-signals*
-      #:*gc-pending* #:rt-gc-request #:rt-gc-safepoint-check
-      #:rt-gc-register-thread #:rt-gc-unregister-thread
+       #:*gc-pending* #:rt-gc-request #:rt-gc-safepoint-check
+       #:rt-emit-gc-safepoint #:rt-compress-stackmap-slots
+       #:rt-decompress-stackmap-slots #:rt-gc-map-section-documentation
+       #:rt-gc-register-thread #:rt-gc-unregister-thread
       #:rt-gc-register-stackmap #:rt-gc-generate-stackmap-stub #:rt-gc-scan-stackmaps
       #:rt-stackmap #:make-rt-stackmap #:rt-stackmap-slots
       #:rt-poison-return-address #:rt-unpoison-return-address
@@ -373,6 +375,7 @@
      #:rt-gc-heap-snapshot
      ;; Runtime image snapshot/restore (FR-350, FR-563)
      #:rt-image-register-global #:rt-save-image #:rt-load-image
+     #:rt-save-core #:rt-load-core #:*saved-core-pathname*
      #:rt-capture-image-state #:rt-restore-image-state
      ;; DOT graph (FR-415)
      #:rt-gc-heap-dump-dot
@@ -442,9 +445,25 @@
    #:rt-rcu-read-lock #:rt-rcu-synchronize
    ;; ── QSBR (qsbr.lisp) ─────────────────────────────────────────────
    #:rt-qsbr-init #:rt-qsbr-register-thread #:rt-qsbr-synchronize
-   ;; ── OS abstraction (os.lisp) ─────────────────────────────────────
-   #:rt-open #:rt-close #:rt-getenv #:rt-argv #:rt-exit
-    ;; ── Network (net.lisp) ───────────────────────────────────────────
+    ;; ── OS abstraction (os.lisp) ─────────────────────────────────────
+    #:rt-open #:rt-close #:rt-getenv #:rt-argv #:rt-exit
+    #:rt-run-program #:rt-process #:rt-process-p #:rt-process-pid
+    #:rt-process-status #:rt-process-exit-code #:rt-process-input
+    #:rt-process-output #:rt-process-error #:rt-process-wait
+    #:rt-process-kill #:rt-process-alive-p #:rt-shell
+    #:rt-fork #:rt-exec #:rt-waitpid
+    ;; ── Native threads (scheduler.lisp) ───────────────────────────────
+    #:rt-native-thread #:rt-native-thread-p #:rt-make-thread
+    #:rt-thread-join #:rt-thread-name #:rt-current-thread
+    #:rt-thread-alive-p #:rt-all-threads #:rt-interrupt-thread
+    #:rt-destroy-thread #:rt-thread-yield #:*rt-native-thread-registry*
+    ;; ── Signals (signals.lisp) ───────────────────────────────────────
+    #:+rt-sighup+ #:+rt-sigint+ #:+rt-sigterm+ #:+rt-sigusr1+
+    #:+rt-sigusr2+ #:+rt-sigwinch+ #:rt-set-signal-handler
+    #:rt-get-signal-handler #:rt-signal-mask #:rt-unblock-signal
+    #:rt-with-signal-handler #:rt-process-pending-signals
+    #:*pending-signals* #:*shutdown-hooks* #:keyboard-interrupt
+     ;; ── Network (net.lisp) ───────────────────────────────────────────
     #:+rt-af-inet+ #:+rt-af-inet6+ #:+rt-sock-stream+ #:+rt-sock-dgram+
     #:rt-socket-address #:make-rt-socket-address
     #:rt-socket-address-host #:rt-socket-address-port #:rt-socket-address-family

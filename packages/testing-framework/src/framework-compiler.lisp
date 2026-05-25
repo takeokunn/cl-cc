@@ -120,18 +120,75 @@ Syntax:
     body...)
 
 The generated function accepts :WARMUP, :ITERATIONS, and :OUTPUT-STREAM keyword
-overrides and returns the plist produced by RUN-BENCHMARK."
+overrides and returns the plist produced by RUN-BENCHMARK.
+The benchmark is automatically registered in *BENCHMARK-REGISTRY*."
   (multiple-value-bind (docstring warmup iterations output-stream body-forms)
       (%parse-defbenchmark-body body)
-    `(defun ,name (&key (warmup ,warmup)
-                         (iterations ,iterations)
-                         (output-stream ,output-stream))
-       ,(or docstring (format nil "Run benchmark ~A." name))
-       (run-benchmark ',name
-                      (lambda () ,@body-forms)
-                      :warmup warmup
-                      :iterations iterations
-                      :output-stream output-stream))))
+    `(progn
+       (defun ,name (&key (warmup ,warmup)
+                           (iterations ,iterations)
+                           (output-stream ,output-stream))
+         ,(or docstring (format nil "Run benchmark ~A." name))
+         (run-benchmark ',name
+                        (lambda () ,@body-forms)
+                        :warmup warmup
+                        :iterations iterations
+                        :output-stream output-stream))
+       (pushnew (list :name ',name
+                      :docstring ,docstring
+                      :warmup ,warmup
+                      :iterations ,iterations)
+                *benchmark-registry*
+                :key (lambda (entry) (getf entry :name))
+                :test #'eq)
+       ',name)))
+
+
+(defun run-all-benchmarks (&key (output-directory nil)
+                                (warmup-override nil)
+                                (iteration-override nil))
+  "Run every benchmark in *BENCHMARK-REGISTRY*.
+When OUTPUT-DIRECTORY is non-NIL, each benchmark's JSON result is written to
+<name>.json in that directory.  Returns a list of result plists."
+  (let ((results '())
+        (dir (when output-directory
+               (ensure-directories-exist output-directory)
+               output-directory)))
+    (dolist (entry (reverse *benchmark-registry*))
+      (let* ((name (getf entry :name))
+             (warmup (or warmup-override (getf entry :warmup) 1))
+             (iterations (or iteration-override (getf entry :iterations) 10))
+             (result-path (and dir
+                               (merge-pathnames
+                                (format nil "~(~A~).json" name)
+                                dir)))
+             (output-stream (and result-path
+                                 (open result-path
+                                       :direction :output
+                                       :if-exists :supersede
+                                       :if-does-not-exist :create))))
+        (format t "# benchmark ~(~A~)...~%" name)
+        (force-output)
+        (handler-case
+            (let* ((result (funcall name :warmup warmup
+                                    :iterations iterations
+                                    :output-stream output-stream))
+                   (mean-ns (getf result :mean-ns))
+                   (min-ns  (getf result :min-ns))
+                   (max-ns  (getf result :max-ns)))
+              (when output-stream
+                (close output-stream))
+              (push result results)
+              (format t "#   mean=~,2Fms min=~,2Fms max=~,2Fms (~D iters)~%"
+                      (/ mean-ns 1000000.0) (/ min-ns 1000000.0)
+                      (/ max-ns 1000000.0) (getf result :iteration-count))
+              (force-output))
+          (error (e)
+            (when output-stream
+              (ignore-errors (close output-stream)))
+            (format *error-output* "#   ERROR: ~A~%" e)
+            (force-output)))))
+    results))
 
 (defun %json-escape-string (value)
   "Return VALUE escaped for JSON string output."

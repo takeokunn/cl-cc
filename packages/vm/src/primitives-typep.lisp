@@ -17,7 +17,7 @@
 (defparameter *vm-primitive-type-predicates*
   (list
    (cons 'integer #'integerp)
-   (cons 'fixnum #'integerp)
+   (cons 'fixnum (lambda (v) (typep v 'fixnum)))
    (cons 'float #'floatp)
    (cons 'single-float #'floatp)
    (cons 'double-float #'floatp)
@@ -57,6 +57,16 @@
    (cons 'hash-table (lambda (v) (typep v 'vm-hash-table-object)))
    (cons 'bit (lambda (v) (or (eql v 0) (eql v 1)))))
   "Alist mapping type-symbol to single-argument predicate function for vm-typep-check.")
+
+(defparameter *vm-primitive-type-dispatch*
+  (let ((table (make-hash-table :test #'eq)))
+    (dolist (entry *vm-primitive-type-predicates* table)
+      (setf (gethash (car entry) table) (cdr entry))))
+  "Tag-oriented primitive TYPEP dispatch table.
+
+This is the fast path for fixnum/cons/null/symbol and other primitive type
+specifiers.  Compound specifiers fall through to `*vm-compound-type-handlers*` or
+host TYPEP, including `(satisfies predicate)` fallback.")
 
 ;;; Ordered dispatch list for vm-type-of: first matching predicate wins.
 (defparameter *vm-type-of-dispatch*
@@ -160,6 +170,13 @@ cl-cc/type refinement object, returns NIL for all values."
 ;;; Data table: maps compound type-specifier head symbols to handler functions.
 ;;; Each handler is (value type-sym) → boolean.
 ;;; Note: lambdas here call vm-typep-check by symbol — resolved at call time, not load time.
+(defun %vm-typep-range-check (value low high)
+  "Return true when VALUE is inside LOW/HIGH bounds from CL numeric type specs."
+  (and (or (eq low '*) (null low)
+           (if (consp low) (> value (car low)) (>= value low)))
+       (or (eq high '*) (null high)
+           (if (consp high) (< value (car high)) (<= value high)))))
+
 (defparameter *vm-compound-type-handlers*
   (let ((ht (make-hash-table :test #'eq)))
     (flet ((reg (sym fn) (setf (gethash sym ht) fn)))
@@ -170,6 +187,12 @@ cl-cc/type refinement object, returns NIL for all values."
       (reg 'and       (lambda (v ts) (every (lambda (t2) (vm-typep-check v t2)) (cdr ts))))
       (reg 'not       (lambda (v ts) (not (vm-typep-check v (second ts)))))
       (reg 'member    (lambda (v ts) (member v (cdr ts) :test #'eql)))
+      (reg 'integer   (lambda (v ts)
+                        (and (integerp v)
+                             (%vm-typep-range-check v (second ts) (third ts)))))
+      (reg 'real      (lambda (v ts)
+                        (and (realp v)
+                             (%vm-typep-range-check v (second ts) (third ts)))))
       (reg 'eql       (lambda (v ts) (eql v (second ts))))
       (reg 'values    (lambda (v ts) (declare (ignore v ts)) t))
       (reg 'function  (lambda (v ts) (declare (ignore ts))
@@ -178,11 +201,23 @@ cl-cc/type refinement object, returns NIL for all values."
   "Hash table mapping compound type-specifier head symbols to handlers (value type-sym) → boolean.
 Used by vm-typep-check for compound forms: (or ...), (and ...), (not ...), etc.")
 
+(defun vm-typecase-dispatch (value clauses)
+  "Return the first clause whose type specifier accepts VALUE.
+
+CLAUSES is an alist of (TYPE . PAYLOAD).  Primitive tags use the same hash-table
+fast path as VM-TYPEP-CHECK, giving TYPECASE-like users a compact jump-table API;
+compound forms such as `(or fixnum float)`, ranges such as `(integer 0 100)`, and
+`(satisfies pred)` use the normal TYPEP fallback path."
+  (loop for (type . payload) in clauses
+        when (vm-typep-check value type)
+          do (return (values payload type))
+        finally (return (values nil nil))))
+
 (defun vm-typep-check (value type-sym)
   "Check if VALUE is of TYPE-SYM using table dispatch for primitive and compound types."
   (setf type-sym (%vm-typep-normalize-sym type-sym))
   (let ((pred (and (symbolp type-sym)
-                   (cdr (assoc type-sym *vm-primitive-type-predicates*)))))
+                   (gethash type-sym *vm-primitive-type-dispatch*))))
     (cond
       ;; Fast table lookup for all primitive types
       (pred

@@ -27,28 +27,28 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: `*function-type-registry*`は存在するがdeclaim処理なし
 - **難易度**: Medium
 
-#### FR-128: Typecase Jump Table Dispatch
+#### ✅ FR-128: Typecase Jump Table Dispatch
 
 - **対象**: `packages/expand/src/macros-basic.lisp:271-291`
 - **内容**: `(typecase x (fixnum ..) (cons ..))` をネストifでなく型タグインデックスのジャンプテーブルにコンパイル
 - **根拠**: 現状は単純な `if (typep x ...)` チェーンに展開
 - **難易度**: Medium
 
-#### FR-129: Compile-Time `intern` Resolution
+#### ✅ FR-129: Compile-Time `intern` Resolution
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**: シンボル名とパッケージがリテラル定数の`(intern "CAR" :cl)`をコンパイル時に解決して`vm-const`に変換
 - **根拠**: 多くのソースファイルがこのパターンを多用、毎回ランタイムinternが発生
 - **難易度**: Low
 
-#### FR-130: Perfect Hash for Compiler Dispatch
+#### ✅ FR-130: Perfect Hash for Compiler Dispatch
 
 - **対象**: `packages/expand/src/expander.lisp`
 - **内容**: `compiler-macroexpand-all`の25分岐condをコンパイル時生成のminimal perfect hashに変換
 - **根拠**: 全フォームがこの関数を通過する最内ループ
 - **難易度**: Medium
 
-#### FR-131: Non-Closure Promotion
+#### ✅ FR-131: Non-Closure Promotion
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **内容**: `vm-captured-vars = nil`のlambda定義時点でクロージャオブジェクト割り当てなしの静的関数参照に昇格
@@ -69,14 +69,14 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: `ctx-tail-position`が利用可能だが`ast-apply`コンパイルで未使用
 - **難易度**: Medium
 
-#### FR-134: Named-let Support
+#### ✅ FR-134: Named-let Support
 
 - **対象**: `packages/expand/src/macros-basic.lisp`
 - **内容**: named-let構文を`labels`内の再帰関数に展開するマクロを追加、末尾再帰ループのイディオムをサポート
 - **根拠**: 現状named-let構文が存在しない
 - **難易度**: Medium
 
-#### FR-135: Loop Macro Quality Fixes
+#### ✅ FR-135: Loop Macro Quality Fixes
 
 - **対象**: `packages/expand/src/loop-emitters.lisp:173-247`
 - **内容**: 特定されたサブオプティマリティを修正:
@@ -117,7 +117,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: `pipeline.lisp:258-348` — `*stdlib-compiled*`以外のキャッシュ機構ゼロ
 - **難易度**: Hard
 
-#### FR-152: 推移的関数純粋性推論
+#### ✅ FR-152: 推移的関数純粋性推論
 
 - **対象**: `packages/optimize/src/effects.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: `effects.lisp` の効果分類は**命令レベル**のみ。ユーザー定義関数の純粋性は追跡されない
@@ -125,7 +125,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: `effects.lisp:1-150` — 効果テーブルは命令のみ。関数呼び出し`vm-call`は`:unknown`扱い
 - **難易度**: Medium
 
-#### FR-153: マクロ展開メモ化
+#### ✅ FR-153: マクロ展開メモ化
 
 - **対象**: `packages/expand/src/expander.lisp`
 - **現状**: `make-macro-expander`（`expander.lisp:96`）は毎回クロージャを生成。展開結果はキャッシュなし
@@ -217,7 +217,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 ### Phase 50 — セキュリティ硬化
 
-#### FR-237: Stack Canary / Stack Protector (スタックカナリア)
+#### ✅ FR-237: Stack Canary / Stack Protector (スタックカナリア)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
 - **現状**: 関数プロローグ/エピローグにスタック保護機構なし。バッファオーバーフロー検出不可
@@ -245,7 +245,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 ### Phase 51 — コンパイラ診断・デバッグ基盤
 
-#### FR-240: Source Location Propagation (ソース位置伝播)
+#### ✅ FR-240: Source Location Propagation (ソース位置伝播)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/ast/src/ast.lisp`
 - **現状**: `ast.lisp:14-16` — ASTノードに`source-file`, `source-line`, `source-column`フィールドが存在するがcodegenで一切参照されない。VM命令やネイティブコードにソース位置が紐づかない
@@ -253,7 +253,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: 全モダンコンパイラの基本機能。デバッグ体験の根幹
 - **難易度**: Medium
 
-#### FR-241: Macro Expansion Tracing (マクロ展開トレース)
+#### ✅ FR-241: Macro Expansion Tracing (マクロ展開トレース)
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `compiler-macroexpand-all`がサイレントに全マクロを展開。中間段階の確認手段なし
@@ -261,7 +261,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: SBCL sb-ext:_macroexpand-hook_ / Clojure macroexpand-all。マクロデバッグの基本ツール
 - **難易度**: Easy
 
-#### FR-242: Compilation Time Profiling (コンパイル時間プロファイリング)
+#### ✅ FR-242: Compilation Time Profiling (コンパイル時間プロファイリング)
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイルパイプライン各フェーズの実行時間計測なし。ボトルネック特定不可
@@ -269,7 +269,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: GCC -ftime-report / Clang -ftime-trace / Rust -Ztime-passes。コンパイラ自体の性能改善サイクルに必須
 - **難易度**: Easy
 
-#### FR-243: Incremental Parsing Integration (インクリメンタルパース統合)
+#### ✅ FR-243: Incremental Parsing Integration (インクリメンタルパース統合)
 
 - **対象**: `packages/parse/src/incremental.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: `incremental.lisp:1-176` — tree-sitterスタイルのインクリメンタルパーサが完全実装済みだがパイプライン未接続。`*parse-cache*`（`incremental.lisp:132-150`）のcache-lookup/cache-storeがexportされるが未呼び出し
@@ -281,7 +281,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 
 ### Phase 61 — コンパイラパスインフラ
 
-#### FR-276: Optimization Levels (-O0 to -O3) (最適化レベル)
+#### ✅ FR-276: Optimization Levels (-O0 to -O3) (最適化レベル)
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/optimize/src/optimizer.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: 全最適化が無条件実行。インライン閾値=15（`optimizer.lisp:1018`）、最大反復=20（`optimizer.lisp:1042`）がハードコード。CLIに最適化レベルオプションなし
@@ -305,7 +305,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: LLVM `-verify-each` / GCC `--enable-checking`。最適化パスのバグを早期検出
 - **難易度**: Medium
 
-#### FR-279: IR Dump CLI Integration (IRダンプCLI統合)
+#### ✅ FR-279: IR Dump CLI Integration (IRダンプCLI統合)
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/ir/src/printer.lisp`
 - **現状**: `ir/printer.lisp`にIRプリンタが実装済みだが、CLIからの呼び出し手段なし。パス間IRの比較不可
@@ -313,7 +313,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: LLVM `-print-before-all`/`-print-after-all` / GCC `-fdump-tree-all`。最適化デバッグの標準手法
 - **難易度**: Easy
 
-#### FR-280: Per-Pass Statistics Collection (パス別統計収集)
+#### ✅ FR-280: Per-Pass Statistics Collection (パス別統計収集)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: E-graphのみ`egraph-stats`（`egraph.lisp:420-424`）で`:classes`/`:memo-size`/`:worklist`を返す。メインオプティマイザに統計収集なし
@@ -321,7 +321,7 @@ Compiler frontend optimization, isolated infrastructure, binary/link/FFI, compil
 - **根拠**: GCC `-fopt-info` / LLVM `-stats`。どのパスが効果的かの定量評価に必須
 - **難易度**: Easy
 
-#### FR-281: Optimization Bisection Support (最適化二分探索)
+#### ✅ FR-281: Optimization Bisection Support (最適化二分探索)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: E-graphに`fuel`パラメータ（`egraph.lisp:299-317`）があるが、メインオプティマイザにfuelなし。最適化バグの原因パス特定手段なし

@@ -104,11 +104,15 @@
            (rest (cddddr form))
            (test (getf rest :test))
            (key (getf rest :key))
-           (test-not (getf rest :test-not)))
+            (test-not (getf rest :test-not))
+            (count (getf rest :count))
+            (from-end (getf rest :from-end)))
       (append (list 'substitute new old seq)
-              (when test (list :test test))
-              (when key (list :key key))
-              (when test-not (list :test-not test-not))))))
+               (when test (list :test test))
+               (when key (list :key key))
+               (when test-not (list :test-not test-not))
+               (when count (list :count count))
+               (when from-end (list :from-end from-end))))))
 
 ;;; nsubstitute-if / nsubstitute-if-not differ only in the target delegate name.
 (register-macro 'nsubstitute-if

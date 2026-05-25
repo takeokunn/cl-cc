@@ -97,7 +97,7 @@
 ;; function — wrap builtins in first-class lambda
 (define-expander-for function (form)
   (let ((name (second form)))
-    (if (and (symbolp name) (%list-contains-eq name *all-builtin-names*))
+    (if (and (symbolp name) (gethash name *all-builtin-names-table*)) ;; FR-130: perfect hash
         (expand-function-builtin name)
         form)))
 

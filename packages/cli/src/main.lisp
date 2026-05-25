@@ -23,6 +23,7 @@
 Commands:
   run      <file>         Compile and run source file
   compile  <file>         Compile to native binary
+  save-core <file>        Save a CL-CC native core image
   eval     <expr>         Evaluate an expression inline
   repl                    Start interactive REPL
   check    <file>         Type-check only, no execution
@@ -45,6 +46,7 @@ Commands:
   macrostep <file>        Step through macro expansion (FR-836)
   bisect    [range]       Find regression commit (FR-809)
   features                List feature flags (FR-812)
+  dep-graph               Generate ASDF dependency graph (FR-361)
   generate  <schema>      Build-time code generation (FR-815)
   update    [pkg]         Update dependencies (FR-813)
   help     [command]      Show this help or command-specific help
@@ -91,6 +93,10 @@ Options:
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
   --dump-image <file>     Dump an initialized SBCL image/executable
+  --core <file>           Load a CL-CC core before `run'
+  --executable            Add a loader stub when saving a core
+  --toplevel <symbol>     Toplevel function for saved core execution
+  --compression <name>    Core compression: zlib, gzip, lz4, zstd, none
   --system <name>         Compile an ASDF system and dependencies
   --source-map            Emit external .wasm.map and sourceMappingURL
   --debug-info            Emit DWARF custom sections for wasm targets
@@ -128,6 +134,7 @@ Options:
   --trace-emit            Print VM/OPT/ASM compilation stages
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
+  --core <file>           Load a CL-CC core before compiling/running the file
   --source-map            Emit external .wasm.map for wasm targets
   --debug-info            Emit DWARF custom sections for wasm targets
   --emit-names            Emit extended wasm name metadata
@@ -176,6 +183,15 @@ Options:
   --trace-emit            Print VM/OPT/ASM compilation stages
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
+ ")
+    ("save-core" . "Usage: cl-cc save-core <file> [--executable] [--toplevel <fn>] [--compression zstd]
+
+  Save a CL-CC-native core image with registered runtime roots and reachable heap objects.
+
+Options:
+  --executable            Prepend a portable loader-stub marker
+  --toplevel <fn>         Symbol naming the core toplevel function
+  --compression <name>    Compression: none, zlib, gzip, lz4, zstd
  ")
     ("eval" . "Usage: cl-cc eval [options] <expr>
 
@@ -279,8 +295,9 @@ Options:
 
 (defparameter *cli-command-dispatch*
   '(("run"      . %do-run)
-    ("compile"  . %do-compile)
-    ("eval"     . %do-eval)
+     ("compile"  . %do-compile)
+     ("save-core" . %do-save-core)
+     ("eval"     . %do-eval)
     ("repl"     . %do-repl)
     ("check"    . %do-check)
     ("selfhost" . %do-selfhost)
@@ -300,8 +317,9 @@ Options:
      ("objdump"      . %do-objdump)
     ("macrostep"    . %do-macrostep)
     ("bisect"       . %do-bisect)
-    ("features"     . %do-features)
-    ("generate"     . %do-generate)
+     ("features"     . %do-features)
+     ("dep-graph"    . %do-dep-graph)
+     ("generate"     . %do-generate)
     ("update"       . %do-update))
   "Alist mapping command name strings to their handler functions.")
 
@@ -332,13 +350,15 @@ subcommands, then dispatches to the appropriate handler."
         ((null command)
          (%print-global-help)
          (uiop:quit 0))
-        ((string= command "help")
-          (%print-help (car (parsed-args-positional parsed)))
-          (uiop:quit 0))
-        ((string= command "install")
-         (%do-install parsed))
-        ((string= command "uninstall")
-         (%do-uninstall parsed))
+         ((string= command "help")
+           (%print-help (car (parsed-args-positional parsed)))
+           (uiop:quit 0))
+         ((string= command "install")
+          (let ((timeout (%get-timeout parsed)))
+            (%call-with-cli-timeout timeout (lambda () (%do-install parsed)) "install")))
+         ((string= command "uninstall")
+          (let ((timeout (%get-timeout parsed)))
+            (%call-with-cli-timeout timeout (lambda () (%do-uninstall parsed)) "uninstall")))
           (t
           (let ((entry (assoc command *cli-command-dispatch* :test #'string=)))
             (if entry

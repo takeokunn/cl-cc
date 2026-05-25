@@ -201,6 +201,31 @@ let
       loadAsdSystems = [ ":cl-cc" ];
     };
 
+    benchmarks = mkSbclScript {
+      name = "benchmarks";
+      description = "Run all registered benchmarks and write JSON results to benchmark-results/";
+      sbclVariant = "tests";
+      enableDispatchSemFix = true;
+      enableFaslCacheCleaner = true;
+      extraSbclFlags = [
+        "--core"
+        "${testImage}/cl-cc-test.core"
+      ];
+      lispPostLoadEvalForms = [
+        "(setf *default-pathname-defaults* (uiop:getcwd))"
+        "(setf uiop:*temporary-directory* (uiop:temporary-directory))"
+        ''(load (merge-pathnames "cl-cc-test.asd" *default-pathname-defaults*))''
+        "(asdf:load-system :cl-cc-test :force t)"
+        ''(format t "# running all benchmarks~%")''
+        ''(handler-case
+             (cl-cc/test:run-all-benchmarks
+              :output-directory #p"benchmark-results/")
+           (error (e)
+             (format *error-output* "~&FATAL: ~A~%" e)
+             (uiop:quit 1)))''
+      ];
+    };
+
     repl = mkSbclScript {
       name = "repl";
       sbclVariant = "production";

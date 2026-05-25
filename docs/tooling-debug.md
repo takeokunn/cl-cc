@@ -6,7 +6,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 67 — デバッグ・診断
 
-#### FR-310: Interactive VM Debugger (対話型VMデバッガ)
+#### ✅ FR-310: Interactive VM Debugger (対話型VMデバッガ)
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `run-compiled`（`vm-run.lisp:124`）と`run-vm`（`vm-run.lisp:265`）はタイトループでフック挿入点なし。ステップ実行・ブレークポイント・インスペクト不可
@@ -14,7 +14,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: GDB / LLDB / SBCL `(break)`。デバッグなしでの開発は非現実的
 - **難易度**: Hard
 
-#### FR-311: Native Code Disassembler (ネイティブコード逆アセンブラ)
+#### ⚠️ FR-311: Native Code Disassembler (ネイティブコード逆アセンブラ)
 
 - **対象**: 新規`packages/emit/src/disasm/x86-64-disasm.lisp`, `packages/emit/src/disasm/aarch64-disasm.lisp`
 - **現状**: バイトコードISA逆アセンブラ（`packages/bytecode/src/decode.lisp:202`、`disassemble-instruction`）は存在。x86-64/ARM64のネイティブ命令デコーダなし
@@ -22,7 +22,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: SBCL `(disassemble #'foo)` / GCC `objdump`。コンパイラ開発に逆アセンブル機能は必須
 - **難易度**: Very Hard
 
-#### FR-312: REPL Enhancements (REPL拡張)
+#### ✅ FR-312: REPL Enhancements (REPL拡張)
 
 - **対象**: `packages/cli/src/main.lisp`
 - **現状**: REPL（`main.lisp:256-302`）はベア`read-line`ループ。括弧バランス（`%count-parens`、`main.lisp:243`）のみ。履歴・タブ補完・readline統合なし
@@ -30,7 +30,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: SBCL + linedit / SLIME / rlwrap。対話型開発の基本機能
 - **難易度**: Medium
 
-#### FR-313: Call Stack Pretty-Printer (コールスタック整形表示)
+#### ✅ FR-313: Call Stack Pretty-Printer (コールスタック整形表示)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: `vm-call-stack`（`vm.lisp:345`）は`(return-pc dst-reg old-closure-env saved-regs)`の生リスト。フォーマッタなし。`vm-signal-error`（`vm-run.lisp:74-98`）はバックトレースを出力しない
@@ -38,7 +38,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: SBCL `(sb-debug:print-backtrace)` / GDB `bt`。エラー診断の基本
 - **難易度**: Medium
 
-#### FR-314: VM Watchpoints/Tracepoints (VMウォッチポイント/トレースポイント)
+#### ⚠️ FR-314: VM Watchpoints/Tracepoints (VMウォッチポイント/トレースポイント)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: `vm-reg-set`（`vm-run.lisp:306-310`）と`vm-reg-get`（`vm-run.lisp:301-304`）にフックなし。トレース/ウォッチインフラなし
@@ -46,7 +46,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: GDB watchpoints / DTrace / SBCL `(trace)`。実行時動作の観測に必須
 - **難易度**: Medium
 
-#### FR-315: Object Inspector (オブジェクトインスペクタ)
+#### ✅ FR-315: Object Inspector (オブジェクトインスペクタ)
 
 - **対象**: `packages/vm/src/vm.lisp`
 - **現状**: VMクロージャ（`vm.lisp:19-31`、6スロット）・consセル・ヒープオブジェクトに人間可読インスペクションAPIなし。CLOSオブジェクトは`:__class__`付きハッシュテーブルだがプリンタなし
@@ -54,7 +54,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: SBCL `(inspect obj)` / SLIME Inspector。オブジェクト構造の理解に必須
 - **難易度**: Easy
 
-#### FR-316: Benchmark/Profiling Framework (ベンチマーク/プロファイリングフレームワーク)
+#### ✅ FR-316: Benchmark/Profiling Framework (ベンチマーク/プロファイリングフレームワーク)
 
 - **対象**: `packages/testing-framework/src/framework-compiler.lisp`, `packages/vm/src/vm-run.lisp`, 新規`benchmarks/`
 - **現状**: `assert-faster-than`（`framework-compiler.lisp:238`）と`assert-no-consing`（`framework-compiler.lisp:257`）はテストアサーション用のみ。スタンドアロンベンチマークランナーなし。VM命令カウンタなし
@@ -62,7 +62,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: Criterion (Haskell/Rust) / Google Benchmark。性能回帰の定量検出
 - **難易度**: Medium
 
-#### FR-317: Structured Diagnostics (構造化診断)
+#### ✅ FR-317: Structured Diagnostics (構造化診断)
 
 - **対象**: `packages/parse/src/diagnostics.lisp`, `packages/vm/src/conditions.lisp`
 - **現状**: `diagnostic`構造体（`diagnostics.lisp:7-14`）にseverity/span/message/hints/notesあり。しかしエラーコード・fix-itサジェスト・機械可読IDなし。VM conditions（`conditions.lisp:17-67`）はプレーンテキスト`:report`。`ast-error`（`ast.lisp:355-360`）はフォーマット文字列
@@ -70,7 +70,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: Rust compiler diagnostics / Clang `-fdiagnostics-format=json`。IDE統合の前提
 - **難易度**: Medium
 
-#### FR-318: Compiler Warning System (コンパイラ警告システム)
+#### ✅ FR-318: Compiler Warning System (コンパイラ警告システム)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/parse/src/diagnostics.lisp`
 - **現状**: `diagnostic`構造体は`:warning`重大度対応（`diagnostics.lisp:9`）。パーサは`make-parse-warning`（`diagnostics.lisp:85`）を使用。しかしcodegen.lispは構造化警告を一切出力しない。未使用変数・型不一致・非推奨関数の警告なし
@@ -82,7 +82,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 68 — 開発者エコシステム
 
-#### FR-319: LSP Server (Language Server Protocol サーバー)
+#### ✅ FR-319: LSP Server (Language Server Protocol サーバー)
 
 - **対象**: 新規`src/lsp/`モジュール, `cl-cc.asd`, `packages/cli/src/main.lisp`
 - **現状**: LSP関連コードなし。JSON-RPCなし。CLIに`lsp`サブコマンドなし（`main.lisp:480-497`）
@@ -90,7 +90,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: LSP Specification / rust-analyzer / clangd。モダンIDE統合の標準
 - **難易度**: Very Hard
 
-#### FR-320: Code Formatter (コードフォーマッタ)
+#### ✅ FR-320: Code Formatter (コードフォーマッタ)
 
 - **対象**: 新規`src/format/formatter.lisp`
 - **現状**: `type-to-string`（型プリンタ）、`cst-to-sexp`（`cst.lisp:96-122`）は存在。ソースコードフォーマッタなし。CST trivia構造体（`cst.lisp:10-16`）は空白/コメントを保持するがinverse未実装
@@ -98,7 +98,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: gofmt / rustfmt / Prettier。コードスタイル統一の標準ツール
 - **難易度**: Medium
 
-#### FR-321: API Documentation Generator (APIドキュメント生成)
+#### ✅ FR-321: API Documentation Generator (APIドキュメント生成)
 
 - **対象**: 新規`src/tools/docgen.lisp`
 - **現状**: docstring抽出・ドキュメント生成コードなし。多くの関数にdocstring存在（e.g., `cst.lisp:21`, `incremental.lisp:12`）だが抽出ツールなし
@@ -114,7 +114,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: bencher.dev / GitHub Action benchmark-action。性能リグレッションの自動検出
 - **難易度**: Medium
 
-#### FR-323: Compilation Cache (コンパイルキャッシュ)
+#### ✅ FR-323: Compilation Cache (コンパイルキャッシュ)
 
 - **対象**: `packages/pipeline/pipeline.lisp`, 新規`packages/compile/src/cache.lisp`
 - **現状**: `compile-expression`（`pipeline.lisp:4-37`）は常にゼロからリコンパイル。パースキャッシュ（`incremental.lisp:132-150`、`*parse-cache*`）はsxhashベースのインメモリのみで永続化なし
@@ -122,7 +122,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: ccache / sccache / SBCL FASL。リビルド時間の大幅削減
 - **難易度**: Hard
 
-#### FR-324: Static Analysis / Linting (静的解析/リンティング)
+#### ✅ FR-324: Static Analysis / Linting (静的解析/リンティング)
 
 - **対象**: 新規`src/analysis/`モジュール, `packages/cli/src/main.lisp`
 - **現状**: 型チェッカー（`packages/type/src/`）、変数解析（`ast.lisp`の`find-free-variables`等）、診断インフラ（`diagnostics.lisp`）、DCE（オプティマイザ）が個別に存在。統合リンティングツールなし
@@ -130,7 +130,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: ESLint / clippy / SBCL style-warnings。コード品質の自動保証
 - **難易度**: Medium
 
-#### FR-325: ASDF System Parallelization (ASDFシステム並列化)
+#### ✅ FR-325: ASDF System Parallelization (ASDFシステム並列化)
 
 - **対象**: `cl-cc.asd`
 - **現状**: ルートおよびモジュール内で`:serial t`（`cl-cc.asd:16`）。独立モジュール（`type/`, `vm/io.lisp`, `vm/list.lisp`, `vm/strings.lisp`等）も直列コンパイル
@@ -142,7 +142,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 87 — コンパイルパイプライン改善
 
-#### FR-502: our-load AST pipeline
+#### ⚠️ FR-502: our-load AST pipeline
 
 - **対象**: `packages/pipeline/pipeline.lisp`
 - **現状**: `our-load`がソースを文字列→S式→`eval`のパスを取り、AST変換・最適化をバイパスする場合がある
@@ -150,7 +150,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: セルフホスティングの安定化。文字列roundtripによる情報消失を防ぐ
 - **難易度**: Medium
 
-#### FR-503: declaim / deftype 処理
+#### ✅ FR-503: declaim / deftype 処理
 
 - **対象**: `packages/pipeline/pipeline.lisp`
 - **現状**: `declaim`がprescan時に無視され、`deftype`が型エイリアスとして機能しない
@@ -158,7 +158,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: ANSI CL 3.3.4 — declaim, deftype
 - **難易度**: Medium
 
-#### FR-504: prescan 多重パッケージ
+#### ⚠️ FR-504: prescan 多重パッケージ
 
 - **対象**: `packages/pipeline/pipeline.lisp`
 - **現状**: `%prescan-in-package`が単一パッケージの切り替えのみ対応。同一ファイルに複数`in-package`が出現する場合に誤動作
@@ -174,7 +174,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: `./cl-cc selfhost`の安定性向上
 - **難易度**: Medium
 
-#### FR-506: エラー回復 (Error Recovery)
+#### ✅ FR-506: エラー回復 (Error Recovery)
 
 - **対象**: `packages/compile/src/codegen.lisp`
 - **現状**: コンパイル時エラーが例外として伝播し、後続フォームのコンパイルが停止する
@@ -186,7 +186,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 70 — JIT・動的コンパイル
 
-#### FR-330: Baseline JIT (ベースラインJIT)
+#### ✅ FR-330: Baseline JIT (ベースラインJIT)
 
 - **対象**: `packages/vm/src/vm-run.lisp`, 新規`src/jit/baseline.lisp`
 - **現状**: VMはフラットベクタのインタープリタ（`run-vm`、`vm-run.lisp:265`）。ネイティブコード生成は`packages/emit/src/x86-64-codegen.lisp`に存在するがVM実行とは分離されている
@@ -194,7 +194,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: V8 Liftoff / SpiderMonkey Baseline / LuaJIT。インタープリタの10〜30x高速化が初回コンパイルコストなしに得られる
 - **難易度**: Hard
 
-#### FR-331: Tiered Compilation (階層型コンパイル)
+#### ✅ FR-331: Tiered Compilation (階層型コンパイル)
 
 - **対象**: 新規`src/jit/tiered.lisp`, `src/jit/baseline.lisp`, `packages/pipeline/pipeline.lisp`
 - **現状**: コンパイルパスは1段階のみ（`our-eval`→`run-vm`）
@@ -218,7 +218,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: V8 Deoptimizer / HotSpot Uncommon Trap / Graal Deopt。投機的最適化の安全網
 - **難易度**: Very Hard
 
-#### FR-334: Polymorphic Inline Caches / PIC (多相インラインキャッシュ)
+#### ✅ FR-334: Polymorphic Inline Caches / PIC (多相インラインキャッシュ)
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `src/jit/baseline.lisp`
 - **現状**: `execute-instruction`でのジェネリック関数ディスパッチはハッシュテーブル検索（`vm-clos.lisp`）。呼び出しサイトごとのキャッシュなし
@@ -230,7 +230,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 71 — リンク時・全プログラム最適化
 
-#### FR-335: Link-Time Optimization / LTO (リンク時最適化)
+#### ✅ FR-335: Link-Time Optimization / LTO (リンク時最適化)
 
 - **対象**: `packages/binary/src/macho.lisp`, `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: コンパイル単位はファイル単位で独立。リンク時には機械語バイト列のみ接続（`macho.lisp`）
@@ -246,7 +246,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: `./cl-cc selfhost`内のconstant-heavy呼び出しで特に効果的。ループ内の呼び出しコスト削減
 - **難易度**: Hard
 
-#### FR-337: Devirtualization (仮想ディスパッチ解消)
+#### ✅ FR-337: Devirtualization (仮想ディスパッチ解消)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: CLOS`defmethod`呼び出しは常にディスパッチテーブル検索（`vm-clos.lisp`）。型情報があっても直接呼び出しに変換されない
@@ -330,7 +330,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 74 — コードカバレッジ・テスト品質
 
-#### FR-350: Line/Branch Coverage (行・分岐カバレッジ)
+#### ✅ FR-350: Line/Branch Coverage (行・分岐カバレッジ)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/testing-framework/src/framework.lisp`
 - **現状**: 現行の in-repo テストフレームワークにカバレッジ計測機構なし。`deftest-each`/`deftest`マクロにカバレッジフックなし
@@ -346,7 +346,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: GCC `-fcondition-coverage` (GCC 13+) / LLVM MC/DC Coverage (LLVM 18+)。2026年コンパイラのMC/DC対応はデファクト標準化
 - **難易度**: Hard
 
-#### FR-352: Mutation Testing (ミューテーションテスト)
+#### ✅ FR-352: Mutation Testing (ミューテーションテスト)
 
 - **対象**: `packages/testing-framework/src/framework-fuzz.lisp`, 新規`src/tools/mutator.lisp`
 - **現状**: PBT（`framework-fuzz.lisp`）はランダム入力生成。プログラム変異によるテスト有効性検証なし
@@ -366,7 +366,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 
 ### Phase 75 — メモリ・プロファイリング
 
-#### FR-355: Heap Profiler (ヒーププロファイラ)
+#### ✅ FR-355: Heap Profiler (ヒーププロファイラ)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `rt-alloc`（`heap.lisp`）でオブジェクト割り当てをカウントする仕組みなし。GCサイクル統計なし
@@ -402,7 +402,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: Cargo / npm / uv（Python）。パッケージ管理の内製化はコンパイラエコシステムの自立性に直結
 - **難易度**: Very Hard
 
-#### FR-361: Dependency Graph Visualization (依存グラフ可視化)
+#### ✅ FR-361: Dependency Graph Visualization (依存グラフ可視化)
 
 - **対象**: `cl-cc.asd`, 新規`src/tools/dep-graph.lisp`
 - **現状**: `cl-cc.asd`の`:depends-on`チェーンは手動把握のみ

@@ -225,13 +225,13 @@ Evaluate BODY immediately for :compile-toplevel; include in output for :execute/
   "Wrap a known builtin NAME in a first-class lambda for higher-order use."
   (compiler-macroexpand-all
    (cond
-     ((%list-contains-eq name *variadic-fold-builtins*)
+     ((gethash name *variadic-fold-builtins-table*) ;; FR-130: perfect hash
       (%build-variadic-fold-lambda name))
      ((eq name '-)                           (%build-subtract-lambda))
      ((eq name 'list)
       (let ((args (gensym "ARGS")))
         `(lambda (&rest ,args) ,args)))
-     ((%list-contains-eq name *binary-builtins*)
+     ((gethash name *binary-builtins-table*) ;; FR-130: perfect hash
       (let ((a (gensym "A")) (b (gensym "B")))
         `(lambda (,a ,b) (,name ,a ,b))))
      (t
@@ -241,7 +241,7 @@ Evaluate BODY immediately for :compile-toplevel; include in output for :execute/
 (defun expand-apply-named-fn (fn-name args-form)
   "Expand (apply 'FN-NAME args-form) where FN-NAME is a known symbol.
 Variadic builtins get a dolist fold; others normalise to (apply #'fn args)."
-  (if (%list-contains-eq fn-name (list* '- 'list *variadic-fold-builtins*))
+  (if (gethash fn-name *variadic-fold-or-list-table*) ;; FR-130: perfect hash
       (let ((acc (gensym "ACC")) (x (gensym "X")) (lst (gensym "LST")))
         (if (eq fn-name '-)
             (compiler-macroexpand-all

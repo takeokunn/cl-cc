@@ -153,6 +153,73 @@ subtype of any earlier clause, it can never be reached and can be dropped."
                   (progn ,@body)
                   ,(%typecase-build-typep-chain rest key-var))))))
 
+;;; ─── FR-128: Typecase Jump Table Dispatch ─────────────────────────────────
+;;;
+;;; When all TYPECASE clauses target simple, well-known types that are pairwise
+;;; disjoint, we generate a computed-dispatch jump table instead of a linear
+;;; chain of TYPE-P checks.  The key variable is evaluated once, its type tag
+;;; is extracted via TYPE-OF, and a CASE form dispatches to the matching arm.
+
+(defparameter *typecase-jump-table-tag-map*
+  '((fixnum      . integer)
+    (integer     . integer)
+    (cons        . cons)
+    (list        . cons)       ; (listp x) → cons or nil; nil handled as 'null
+    (symbol      . symbol)
+    (string      . string)
+    (character   . character)
+    (function    . function)
+    (float       . float)
+    (single-float . float)
+    (double-float . float)
+    (hash-table  . hash-table)
+    (vector      . vector)
+    (array       . vector)     ; most arrays behave as vectors at the tag level
+    (simple-vector . vector)
+    (null        . null)
+    (nil         . null)
+    (t           . t)
+    (otherwise   . t))
+  "Maps CL type specifiers to type-tag categories for jump-table dispatch.")
+
+(defun %typecase-type->tag-category (type)
+  "Return the type-tag category symbol for TYPE, or NIL if not simple enough."
+  (when (and (symbolp type) (not (null type)))
+    (cdr (assoc type *typecase-jump-table-tag-map* :test #'eq))))
+
+(defun %typecase-jump-table-eligible-p (typed-clauses)
+  "Return T when all TYPED-CLAUSES are simple, disjoint, and suitable for
+a type-tag jump table dispatch."
+  (and (>= (length typed-clauses) 2)
+       (every (lambda (cl)
+                (let ((tag (%typecase-type->tag-category (car cl))))
+                  ;; Must be a simple type with a known tag category
+                  (and tag (not (eq tag 't)))))
+              typed-clauses)
+       ;; All tag categories must be distinct (no overlap)
+       (let ((tags (mapcar (lambda (cl) (%typecase-type->tag-category (car cl)))
+                           typed-clauses)))
+         (= (length tags) (length (remove-duplicates tags :test #'eq))))))
+
+(defun %typecase-build-jump-table (typed-clauses key-var default-form)
+  "Build a CASE dispatch on the VM type tag of KEY-VAR for TYPED-CLAUSES.
+Uses VM-TYPE-OF which returns stable integer type tags suitable for CASE dispatch."
+  (let* ((pairs (loop for clause in typed-clauses
+                      for type = (car clause)
+                      for tag = (%typecase-type->tag-category type)
+                      for tag-symbol = (intern (symbol-name tag) :keyword)
+                      collect (list tag-symbol (cons 'progn (cdr clause)))))
+         (default-clause (if default-form
+                             `(t ,default-form)
+                             `(t nil))))
+    `(case (vm-type-of ,key-var)
+       ,@(mapcar (lambda (pair)
+                   `(,(car pair) ,(second pair)))
+                 pairs)
+       ,default-clause)))
+
+;;; ─── End of FR-128 jump table ────────────────────────────────────────────
+
 (defun %typecase-types-disjoint-p (type1 type2)
   "Return T when TYPE1 and TYPE2 are known-disjoint.
 
@@ -267,8 +334,14 @@ left-half type matches."
          (default-form (if default-clause
                            `(progn ,@(cdr default-clause))
                            nil))
-         (dispatch-form (if (%typecase-should-use-decision-tree-p typed-clauses)
-                             (%typecase-build-decision-tree typed-clauses key-var default-form)
-                             (%typecase-build-typep-chain pruned-cases key-var))))
+         ;; FR-128: prefer jump table for simple disjoint types when VM-TYPE-OF is available.
+         ;; The jump table computes the VM type tag once and dispatches via CASE.
+         (dispatch-form (cond
+                          ((%typecase-jump-table-eligible-p typed-clauses)
+                           (%typecase-build-jump-table typed-clauses key-var default-form))
+                          ((%typecase-should-use-decision-tree-p typed-clauses)
+                           (%typecase-build-decision-tree typed-clauses key-var default-form))
+                          (t
+                           (%typecase-build-typep-chain pruned-cases key-var)))))
     `(let ((,key-var ,keyform))
        ,dispatch-form)))

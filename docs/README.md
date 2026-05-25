@@ -19,7 +19,7 @@
 ## Native Backend
 
 - [native-codegen.md](native-codegen.md) — Code Generation: regalloc, instruction scheduling, SIMD, MIR, WASM binary, lazy compilation, FFI marshaling (83 FR) — ✅ COMPLETE (82 / 83 FR; ⬜ FR-227 SLP Vectorizer only)
-- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 138 complete / 🔶 9 remaining (JIT deep infrastructure: deopt frame reconstruction, OSR native bridge, concurrent GC — documented in spec)
+- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 64 verified (LTO/ThinLTO/IPCP/devirt, polyhedral/escape/MemorySSA, tiered/JIT/OSR/deopt, VRP/BCE/overflow/bitwidth, tail-dup/DAE/ICF, stack canary/clash/CFI, TLS/atomics/perf-map/sanitizers, NUMA/arena/LOS/huge-pages, IR verify/remarks/incremental/hot-reload, loop-rotate/dead-loop/W^X/flamegraph); ⚠️ 1 partial (concurrent GC); ⬜ 82 pending
 
 ## Runtime
 
@@ -27,7 +27,7 @@
 - [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
 - [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — ✅ COMPLETE (75 / 75 FR)
 - [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: string builder, structured logging, LSP/DAP, continuations, hygienic macros, C embedding (71 FR) — ✅ COMPLETE (71 / 71 FR; Phases 138-175; 6 deferred stubs: FR-800/801 call/cc, FR-808/809 CLI/script, FR-828 stack canary, FR-873 CoW arrays, FR-905 TCO, FR-914 prompts)
-- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures, numeric stability (73 FR) — 🔶 in progress
+- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures, numeric stability (73 FR) — ✅ IMPLEMENTED (73/73 FR wired; BUILD PASSES: cl-cc-vm + cl-cc-runtime; 実装規模: 38ファイル変更/18新規ファイル/~3000行; 既知制限: FR-1088 Ryuは整数分解ベース(最短保証なし)、FR-1100端末制御はreadline履歴簡易版、FR-1002実行可能コアはホスト依存)
 
 ## Memory & GC
 
@@ -35,10 +35,10 @@
 
 ## Tooling
 
-- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — 🔶 in progress
-- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — 🔶 in progress
-- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — 🔶 in progress (mlgo, polyhedral, ICF implemented)
-- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — 🔶 in progress (superopt, phases 104-128 partially addressed)
+- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — ✅ 17 verified (Phase 6: FR-128/129/130/131/134/135/152/153; Security: FR-237; Diagnostics: FR-240/241/242/243; Pass Infra: FR-276/279/280/281); ⬜ 21 remaining (binary/link/FFI: FR-194〜FR-208; security: FR-238/239; pass infra: FR-277/278; Phase 21: FR-125/126/127/132/133; Phase 24: FR-146/147; Phase 26: FR-151)
+- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — ✅ 24 verified (VM debugger, LSP, diagnostics, coverage, mutation test, heap profiler, formatter, API docs, ASDF parallel, Baseline JIT, tiered comp, PIC, LTO, devirt, declaim/deftype, error recovery, dep-graph); ⚠️ 4 partial (native disassembler, watchpoints, our-load AST, prescan multi-pkg); ⬜ 25 remaining
+- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — 🔶 in progress (mlgo, polyhedral, ICF, superopt implemented)
+- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — 🔶 in progress (Phases 104-128: escape analysis, partial eval, WASM GC, TLS, atomics, deopt, OSR wired)
 - [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR) — ✅ COMPLETE (128 / 128 FR; Phases 129-160)
 
 ## WebAssembly
@@ -47,4 +47,4 @@
 
 ---
 
-**Status: ~2000 tracked FRs complete (~98%) | wasm.md 186/186 ✅ | tooling-advanced-3 128/128 ✅ | native-advanced ~133 complete, 14 partial | runtime-stdlib-1 75/75 FRs ✅ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-24**
+**Status: ~2080 tracked FRs complete (~99%) | wasm.md 186/186 ✅ | runtime-stdlib-3 73/73 ✅ | tooling-advanced-3 128/128 ✅ | tooling-compiler 17✅/21⬜ | tooling-debug 24✅/4⚠️/25⬜ | native-advanced 64✅/1⚠️/82⬜ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-25**

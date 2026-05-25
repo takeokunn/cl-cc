@@ -57,14 +57,15 @@ generically so a host SHA-256 primitive can replace this stable fallback later."
     (and cached (string= cached (pipeline-source-hash source-file)))))
 
 (defun pipeline-write-deps (source-file dependencies &key cache-dir)
-  "Write SOURCE-FILE dependency sidecar as `source-file :depends-on (...)`."
+  "Write SOURCE-FILE dependency sidecar as a single list: (source :depends-on (dep ...))."
   (let ((deps-path (pipeline-deps-path source-file :cache-dir cache-dir)))
     (ensure-directories-exist deps-path)
     (with-open-file (out deps-path :direction :output :if-exists :supersede
-                                   :if-does-not-exist :create)
-      (format out "~S :depends-on (~{~S~^ ~})~%"
-              (namestring (truename source-file))
-              (mapcar (lambda (dep) (namestring (truename dep))) dependencies)))
+                                    :if-does-not-exist :create)
+      (format out "~S~%"
+              (list (namestring (truename source-file))
+                    :depends-on
+                    (mapcar (lambda (dep) (namestring (truename dep))) dependencies))))
     deps-path))
 
 (defun pipeline-record-incremental-state (source-file &key dependencies cache-dir)
@@ -76,3 +77,117 @@ generically so a host SHA-256 primitive can replace this stable fallback later."
       (format out "~A~%" (pipeline-source-hash source-file)))
     (pipeline-write-deps source-file (or dependencies '()) :cache-dir cache-dir)
     hash-path))
+
+;;; ── FR-640: Pipeline integration stubs ─────────────────────────────────────
+;;;
+;;; Wire the incremental compilation cache into the compilation pipeline.
+;;; These functions bridge the gap between the source-hashing infrastructure
+;;; above and the compile pipeline's decision of whether to re-compile.
+
+(defvar *incremental-dirty-reason* nil
+  "FR-640: Reason string for why incremental state is dirty, or NIL if clean.")
+
+(defvar *incremental-dirty-state* nil
+  "FR-640: T when the incremental compilation state is dirty (needs recompile).")
+
+(defun incremental-state-dirty-p ()
+  "FR-640: Return T when the incremental compilation state indicates a recompile
+is needed."
+  *incremental-dirty-state*)
+
+(defun incremental-state-reason ()
+  "FR-640: Return a human-readable reason string for why incremental state is
+dirty, or NIL if the state is clean."
+  (values *incremental-dirty-reason*
+          (not (null *incremental-dirty-reason*))))
+
+(defun prepare-incremental-compilation (source-file &key cache-dir)
+  "FR-640: Prepare incremental compilation for SOURCE-FILE.
+Returns T when recompilation is needed (state is dirty), NIL when cached state
+is still current and compilation can be skipped.
+Sets *INCREMENTAL-DIRTY-STATE* and *INCREMENTAL-DIRTY-REASON*."
+  ;; Reset state at function start to avoid stale previous values
+  (setf *incremental-dirty-state* nil
+        *incremental-dirty-reason* nil)
+  (let* ((cache-dir (or cache-dir *incremental-cache-directory*))
+         (dep-files nil))
+    (cond
+      ((not (probe-file source-file))
+       (setf *incremental-dirty-state* nil
+             *incremental-dirty-reason* "source file does not exist")
+       nil)
+       ((not (pipeline-incremental-current-p source-file :cache-dir cache-dir))
+        (setf *incremental-dirty-state* t
+              *incremental-dirty-reason* "source hash changed")
+        t)
+       (t
+        ;; Check dependency freshness
+        (let ((deps-path (pipeline-deps-path source-file :cache-dir cache-dir)))
+          (when (probe-file deps-path)
+            (with-open-file (in deps-path :direction :input)
+              (let ((form (read in nil nil)))
+                ;; Form is: "source-path :depends-on (dep1 dep2 ...)"
+                (when (and (consp form) (eq (second form) :depends-on))
+                  (setf dep-files (third form)))))))
+        (dolist (dep dep-files)
+          ;; Only recompile if a dependency is MISSING or its content hash changed
+          (when (or (not (probe-file dep))
+                    (not (pipeline-incremental-current-p dep :cache-dir cache-dir)))
+            (setf *incremental-dirty-state* t
+                  *incremental-dirty-reason*
+                  (format nil "dependency ~A changed or missing" dep))
+            (return t)))
+        (when (not *incremental-dirty-state*)
+          (setf *incremental-dirty-state* nil
+                *incremental-dirty-reason* nil))
+        *incremental-dirty-state*))))
+
+(defun commit-incremental-compilation (source-file &key dependencies cache-dir)
+  "FR-640: Commit the incremental compilation state for SOURCE-FILE after a
+successful compilation. Writes the hash and dependency sidecar files."
+  (pipeline-record-incremental-state source-file
+                                     :dependencies dependencies
+                                     :cache-dir cache-dir)
+  (setf *incremental-dirty-state* nil
+        *incremental-dirty-reason* nil)
+  t)
+
+;;; ── FR-641: Hot Reload infrastructure ─────────────────────────────────────
+;;;
+;;; Provides a lock-protected function entry that can be atomically swapped
+;;; via HOT-RELOAD-SWAP and safely called via HOT-RELOAD-CALL.  Active-call
+;;; tracking prevents swaps while the function is executing.
+
+(defstruct (hot-reload-entry (:constructor make-hot-reload-entry (name fn)))
+  "FR-641: Lock-protected hot-reloadable function entry.
+NAME is a debug identifier; FN is the current function implementation.
+The LOCK protects SWAP operations; ACTIVE-COUNT tracks concurrent callers
+to prevent swapping during execution."
+  (name        nil :type symbol :read-only t)
+  (fn          nil :type function)
+  (lock        (sb-thread:make-mutex :name (format nil "hot-reload ~A" name))
+               :type sb-thread:mutex :read-only t)
+  (active-count 0 :type fixnum))
+
+(defun hot-reload-swap (entry new-fn)
+  "FR-641: Atomically swap the function in ENTRY to NEW-FN.
+Blocks until no active callers are using the entry (active-count = 0).
+Returns the old function."
+  ;; Poll with yield until all active callers drain
+  (loop while (plusp (hot-reload-entry-active-count entry))
+        do (sleep 0.001))
+  (sb-thread:with-mutex ((hot-reload-entry-lock entry))
+    (let ((old (hot-reload-entry-fn entry)))
+      (setf (hot-reload-entry-fn entry) new-fn)
+      old)))
+
+(defun hot-reload-call (entry)
+  "FR-641: Call the current function in ENTRY with active-call tracking.
+Increments ACTIVE-COUNT before the call, decrements after.
+Returns whatever the function returns."
+  (sb-thread:with-mutex ((hot-reload-entry-lock entry))
+    (incf (hot-reload-entry-active-count entry)))
+  (unwind-protect
+       (funcall (hot-reload-entry-fn entry))
+    (sb-thread:with-mutex ((hot-reload-entry-lock entry))
+      (decf (hot-reload-entry-active-count entry)))))

@@ -299,55 +299,77 @@ Returns (values handler-found-p handler-info) or signals error."
 
 ;;; ─── Condition Construction Helpers ──────────────────────────────────────────
 
-(defun make-vm-type-error (vm-state expected-type datum &key error-code ((:fix-it vm-fix-it)))
+(defun make-vm-type-error (vm-state expected-type datum
+                           &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-type-error condition."
   (make-condition 'vm-type-error
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                   :expected-type expected-type
-                   :datum datum))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                    :expected-type expected-type
+                    :datum datum))
 
 (defun make-vm-simple-error (vm-state format-control format-arguments
-                             &key error-code ((:fix-it vm-fix-it)))
+                             &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-simple-error condition."
   (make-condition 'vm-simple-error
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                  :format-control format-control
-                  :format-arguments format-arguments))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                   :format-control format-control
+                   :format-arguments format-arguments))
 
 (defun make-vm-simple-warning (vm-state format-control format-arguments
-                               &key error-code ((:fix-it vm-fix-it)))
+                               &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-simple-warning condition."
   (make-condition 'vm-simple-warning
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                  :format-control format-control
-                  :format-arguments format-arguments))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                   :format-control format-control
+                   :format-arguments format-arguments))
 
-(defun make-vm-unbound-variable (vm-state variable-name &key error-code ((:fix-it vm-fix-it)))
+(defun make-vm-unbound-variable (vm-state variable-name
+                                 &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-unbound-variable condition."
   (make-condition 'vm-unbound-variable
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                  :name variable-name))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                   :name variable-name))
 
-(defun make-vm-undefined-function (vm-state function-name &key error-code ((:fix-it vm-fix-it)))
+(defun make-vm-undefined-function (vm-state function-name
+                                   &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-undefined-function condition."
   (make-condition 'vm-undefined-function
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                  :name function-name))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                   :name function-name))
 
-(defun make-vm-division-by-zero (vm-state dividend &key error-code ((:fix-it vm-fix-it)))
+(defun make-vm-division-by-zero (vm-state dividend
+                                 &key error-code ((:fix-it vm-fix-it)) source-location source-text suggestions)
   "Construct a vm-division-by-zero condition."
   (make-condition 'vm-division-by-zero
                   :vm-state vm-state
-                  :error-code error-code
-                  :fix-it vm-fix-it
-                  :dividend dividend))
+                   :error-code error-code
+                   :fix-it vm-fix-it
+                   :source-location source-location
+                   :source-text source-text
+                   :suggestions suggestions
+                   :dividend dividend))

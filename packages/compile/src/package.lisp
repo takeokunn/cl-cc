@@ -116,8 +116,23 @@
         #:ctx-hash-table-test-bindings
      #:ctx-tail-position
      #:ctx-target
-     #:ctx-diagnostics
-   #:*builtin-special-variables* #:*repl-global-variables*
+      #:ctx-diagnostics
+    #:compilation-environment
+    #:make-compilation-environment
+    #:compilation-environment-p
+    #:copy-compilation-environment
+    #:compilation-environment-parent
+    #:compilation-environment-variables
+    #:compilation-environment-functions
+    #:compilation-environment-declarations
+    #:augment-environment
+    #:variable-information
+    #:function-information
+    #:declaration-information
+    #:define-declaration
+    #:parse-macro
+    #:compilation-environment-from-context
+    #:*builtin-special-variables* #:*repl-global-variables*
    #:*repl-label-counter* #:*repl-capture-label-counter*
   #:*labels-boxed-fns* #:*local-tail-jump-fns* #:*compiling-typed-fn*
    #:make-register #:make-label #:emit #:lookup-var

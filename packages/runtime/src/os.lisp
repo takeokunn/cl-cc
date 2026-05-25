@@ -25,6 +25,23 @@
   (exited-p nil)
   (signal nil))
 
+(defstruct rt-process
+  "Runtime process object used by RT-RUN-PROGRAM.
+
+PID is the operating-system process id when available.  STATUS tracks the
+runtime lifecycle (:RUNNING, :EXITED, :SIGNALED, or :UNKNOWN).  EXIT-CODE is
+filled by RT-PROCESS-WAIT or by an eager wait requested from RT-RUN-PROGRAM.
+INPUT, OUTPUT, and ERROR are host streams corresponding to the child stdin,
+stdout, and stderr pipes when :PIPE was requested.  HOST-PROCESS stores the
+implementation/UIOP process handle used for portable process management."
+  (pid nil)
+  (status :running)
+  (exit-code nil)
+  (input nil)
+  (output nil)
+  (error nil)
+  (host-process nil))
+
 (defvar *rt-saved-argv* nil)
 (defvar *rt-max-call-stack-depth* 10000)
 (defvar *rt-stack-depth* 0)
@@ -144,6 +161,110 @@
                               :exited-p (and wpid (not (zerop wpid))))))
   #-sbcl (declare (ignore pid nohang))
   #-sbcl (make-rt-process-status))
+
+(defun %rt-uiop-process-stream-option (role option)
+  "Translate runtime process stream OPTION for ROLE into a UIOP launch option."
+  (declare (ignore role))
+  (etypecase option
+    (null nil)
+    (stream option)
+    (symbol
+     (ecase option
+       (:pipe :stream)
+       (:null nil)
+       (:inherit :interactive)))))
+
+(defun %rt-process-info-accessor (name process-info)
+  "Call UIOP process-info accessor NAME when it is available."
+  (let ((symbol (find-symbol (string name) :uiop)))
+    (when (and symbol (fboundp symbol))
+      (funcall (symbol-function symbol) process-info))))
+
+(defun %rt-process-info-pid (process-info)
+  (or (%rt-process-info-accessor :process-info-pid process-info)
+      #+sbcl (ignore-errors (sb-ext:process-pid process-info))
+      #-sbcl nil))
+
+(defun %rt-process-info-exit-code (process-info)
+  (or (%rt-process-info-accessor :process-info-exit-code process-info)
+      #+sbcl (ignore-errors (sb-ext:process-exit-code process-info))
+      #-sbcl nil))
+
+(defun %rt-process-info-stream (process-info accessor fallback-slot)
+  (or (%rt-process-info-accessor accessor process-info)
+      (ignore-errors (slot-value process-info fallback-slot))))
+
+(defun %rt-command-vector (command args)
+  (cons command (mapcar #'princ-to-string args)))
+
+(defun rt-run-program (command args &key (input :inherit) (output :pipe) (error :inherit) (wait nil))
+  "Run COMMAND with ARGS and return an RT-PROCESS object.
+
+INPUT, OUTPUT, and ERROR accept :PIPE, :NULL, :INHERIT, or an existing stream.
+When WAIT is true, wait for process termination before returning.  The
+implementation delegates to UIOP:LAUNCH-PROGRAM, which uses fork/exec with pipe
+redirection on POSIX hosts and the platform process API elsewhere."
+  (check-type command string)
+  (let* ((process-info
+           (uiop:launch-program (%rt-command-vector command args)
+                                :input (%rt-uiop-process-stream-option :input input)
+                                :output (%rt-uiop-process-stream-option :output output)
+                                :error-output (%rt-uiop-process-stream-option :error error)
+                                :ignore-error-status t))
+         (process (make-rt-process
+                   :pid (%rt-process-info-pid process-info)
+                   :host-process process-info
+                   :input (%rt-process-info-stream process-info :process-info-input 'input)
+                   :output (%rt-process-info-stream process-info :process-info-output 'output)
+                   :error (%rt-process-info-stream process-info :process-info-error-output 'error-output))))
+    (when wait
+      (rt-process-wait process))
+    process))
+
+(defun rt-process-wait (process &optional check-for-stopped)
+  "Wait for PROCESS and return its exit code."
+  (declare (ignore check-for-stopped))
+  (check-type process rt-process)
+  (let* ((info (rt-process-host-process process))
+         (code (or (ignore-errors (uiop:wait-process info :ignore-error-status t))
+                   (%rt-process-info-exit-code info))))
+    (setf (rt-process-exit-code process) code
+          (rt-process-status process) :exited)
+    code))
+
+(defun rt-process-kill (process signal)
+  "Send SIGNAL to PROCESS. Returns true when a signal was sent or requested."
+  (check-type process rt-process)
+  (check-type signal integer)
+  (let ((pid (rt-process-pid process)))
+    (cond
+      ((and pid #+sbcl t #-sbcl nil)
+       #+sbcl (%rt-sb-posix-call :kill pid signal)
+       t)
+      (t
+       (let ((info (rt-process-host-process process)))
+         (when (fboundp 'uiop:terminate-process)
+           (uiop:terminate-process info)
+           t))))))
+
+(defun rt-process-alive-p (process)
+  "Return true while PROCESS appears to still be running."
+  (check-type process rt-process)
+  (let ((info (rt-process-host-process process)))
+    (cond
+      ((eq (rt-process-status process) :exited) nil)
+      ((fboundp 'uiop:process-alive-p)
+       (uiop:process-alive-p info))
+      (t
+       (let ((pid (rt-process-pid process)))
+         (and pid
+              (let ((status (rt-waitpid pid :nohang t)))
+                (not (rt-process-status-exited-p status)))))))))
+
+(defun rt-shell (command)
+  "Run COMMAND through the user's shell and return stdout as a string."
+  (check-type command string)
+  (uiop:run-program command :output :string :error-output :interactive :ignore-error-status t))
 
 (defun rt-gettime (&optional (clock :monotonic))
   (ecase clock

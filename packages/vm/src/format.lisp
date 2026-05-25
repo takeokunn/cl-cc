@@ -92,19 +92,27 @@
 (defmethod execute-instruction ((inst vm-princ) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (princ val (vm-output-stream state))
+    (write-string (vm-write-object-to-string val :escape nil
+                                             :circle (%vm-read-print-var state '*print-circle* nil))
+                  (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-prin1) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (prin1 val (vm-output-stream state))
+    (write-string (vm-write-object-to-string val :escape t
+                                             :circle (%vm-read-print-var state '*print-circle* nil))
+                  (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-print-inst) state pc labels)
   (declare (ignore labels))
   (let ((val (vm-reg-get state (vm-src inst))))
-    (print val (vm-output-stream state))
+    (terpri (vm-output-stream state))
+    (write-string (vm-write-object-to-string val :escape t
+                                             :circle (%vm-read-print-var state '*print-circle* nil))
+                  (vm-output-stream state))
+    (write-char #\Space (vm-output-stream state))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-terpri-inst) state pc labels)
@@ -160,7 +168,8 @@
 
 (defstruct (%vm-format-context (:constructor %make-vm-format-context (args)))
   (args #() :type vector)
-  (index 0 :type fixnum))
+  (index 0 :type fixnum)
+  (last-arg nil))
 
 (defun %vm-format-remaining-count (ctx)
   (- (length (%vm-format-context-args ctx))
@@ -171,7 +180,31 @@
     (when (>= index (length (%vm-format-context-args ctx)))
       (error "FORMAT argument exhausted"))
     (prog1 (aref (%vm-format-context-args ctx) index)
+      (setf (%vm-format-context-last-arg ctx)
+            (aref (%vm-format-context-args ctx) index))
       (setf (%vm-format-context-index ctx) (1+ index)))))
+
+(defun %vm-format-plural (ctx colonp atsignp stream)
+  "Implement FORMAT ~P pluralization. ~:P reuses the previous arg; ~@P emits y/ies."
+  (let ((value (if colonp
+                   (%vm-format-context-last-arg ctx)
+                   (%vm-format-next-arg ctx))))
+    (%vm-format-write stream
+                      (if atsignp
+                          (if (eql value 1) "y" "ies")
+                          (if (eql value 1) "" "s")))))
+
+(defun %vm-format-write-directive (ctx colonp atsignp stream)
+  "Implement FORMAT ~W through WRITE, honoring the common pretty/readable flags."
+  (let ((value (%vm-format-next-arg ctx)))
+    (let ((*print-pretty* (or colonp *print-pretty*))
+          (*print-circle* (or atsignp *print-circle*))
+          (cl:*print-pretty* (or colonp *print-pretty*))
+          (cl:*print-circle* (or atsignp *print-circle*)))
+      (%vm-format-write stream
+                        (vm-write-object-to-string value
+                                                   :escape *print-escape*
+                                                   :circle *print-circle*)))))
 
 (defun %vm-format-peek-arg (ctx)
   (let ((index (%vm-format-context-index ctx)))
@@ -286,17 +319,17 @@
       (t (%vm-format-write stream (%vm-format-english value colonp))))))
 
 (defun %vm-format-float (directive value params stream)
-  ;; Float printing is intentionally simple; it uses CL's numeric conversion for
-  ;; one directive while the VM processor owns directive parsing and dispatch.
-  (let ((control (with-output-to-string (out)
-                   (write-char #\~ out)
-                   (loop for p on params
-                         for v = (car p)
-                         for firstp = t then nil
-                         unless firstp do (write-char #\, out)
-                         when v do (princ v out))
-                   (write-char directive out))))
-    (%vm-format-write stream (format nil control value))))
+  (declare (ignore params))
+  (let ((mode (case directive
+                (#\F :fixed)
+                (#\E :exponential)
+                (#\G :shortest)
+                (#\$ :fixed)
+                (otherwise :shortest))))
+    (%vm-format-write stream
+                      (if (fboundp 'vm-float-to-string)
+                          (vm-float-to-string value :mode mode)
+                          (format nil "~A" value)))))
 
 (defun %vm-format-character (char colonp atsignp stream)
   (let ((ch (if (characterp char) char (code-char char))))
@@ -450,9 +483,11 @@
                        (#\X (%vm-format-integer (%vm-format-next-arg ctx) 16 colonp atsignp params stream))
                        (#\R (%vm-format-radix (%vm-format-next-arg ctx) colonp atsignp params stream))
                        ((#\F #\E #\G #\$) (%vm-format-float dir (%vm-format-next-arg ctx) params stream))
-                       (#\C (%vm-format-character (%vm-format-next-arg ctx) colonp atsignp stream))
-                       (#\T (let ((colnum (or (%vm-format-param params 0 1) 1)))
-                              (dotimes (_ colnum) (declare (ignore _)) (rt-write-char #\Space stream))))
+                        (#\C (%vm-format-character (%vm-format-next-arg ctx) colonp atsignp stream))
+                        (#\P (%vm-format-plural ctx colonp atsignp stream))
+                        (#\W (%vm-format-write-directive ctx colonp atsignp stream))
+                        (#\T (let ((colnum (or (%vm-format-param params 0 1) 1)))
+                               (dotimes (_ colnum) (declare (ignore _)) (rt-write-char #\Space stream))))
                        (#\* (let ((n (or (%vm-format-param params 0 1) 1)))
                               (cond
                                 (colonp (decf (%vm-format-context-index ctx) n))

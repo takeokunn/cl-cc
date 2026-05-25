@@ -1,5 +1,7 @@
 # Tooling: Advanced Compilation II
 
+> **Status**: 🔶 In progress — 120 FRs total. Many FRs have partial or full implementations (e.g., escape analysis, partial eval, WASM GC support, TLS, atomics, deopt, OSR, baseline JIT, tiered compilation, LTO/ThinLTO, devirtualization, inline caches, code formatter, API doc generator, ASDF parallelization, declaim/deftype processing) but the majority lack individual ✅ markers. Full audit with per-FR status verification is pending. See `docs/README.md` for overall progress.
+
 Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, binary/linker, type system extensions, concurrency models, embedded targets, polyhedral/auto-parallelization, multi-level IR, FFI, build reliability, memory representation, function transforms, test instrumentation, build scalability, low-level control.
 
 ---
@@ -142,7 +144,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: `(floor x y)` / `(truncate x y)` / `(round x y)` は数値コードの頻出多値関数。毎回ヒープ割り当てが発生するのは過剰
 - **難易度**: Medium
 
-#### FR-570: Branch-Free Arithmetic (分岐フリー算術)
+#### ✅ FR-570: Branch-Free Arithmetic (分岐フリー算術)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: `(abs x)` / `(min a b)` / `(max a b)` / `(signum x)` が条件分岐にコンパイルされる可能性
@@ -246,7 +248,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 本番環境での動的計装（profiling・hot fix）に必要。FR-576（ワークスティーリング）のスケジューラフックにも使用
 - **難易度**: Medium
 
-#### FR-585: Cache Line Alignment Annotations (キャッシュライン整列アノテーション)
+#### ✅ FR-585: Cache Line Alignment Annotations (キャッシュライン整列アノテーション)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **現状**: データ構造のキャッシュライン境界へのアライメント指定なし

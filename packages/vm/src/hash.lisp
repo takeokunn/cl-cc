@@ -7,6 +7,32 @@
 
 ;;; VM Hash Table Heap Object
 
+(defparameter *hash-table-rehash-policy* :swiss
+  "Preferred hash-table probing/rehash policy for VM hash tables.
+
+Allowed values are :SWISS, :ROBIN-HOOD, and :CHAINING.  The current portable VM
+uses the host hash table as the backing store and records this policy as an API
+contract for code generation and runtime selection.  Native backends may lower
+:SWISS to SwissTable/F14-style group probing with SIMD control-byte lookup when
+the target supports it; otherwise lookups fall back to the portable host-backed
+path with identical semantics.")
+
+(defparameter +hash-table-rehash-policies+ '(:swiss :robin-hood :chaining)
+  "Documented hash-table implementation policies accepted by the VM API.")
+
+(defun valid-hash-table-rehash-policy-p (policy)
+  "Return true when POLICY is one of the documented VM hash-table policies."
+  (member policy +hash-table-rehash-policies+ :test #'eq))
+
+(defun hash-table-simd-lookup-available-p (&optional (policy *hash-table-rehash-policy*))
+  "Return true when SIMD lookup is available for POLICY on the current backend.
+
+Portable interpreter builds return NIL. Native x86-64/AArch64 code generators can
+specialize this predicate once SwissTable/F14 control-byte probing is lowered to
+target SIMD instructions."
+  (declare (ignore policy))
+  nil)
+
 (defclass vm-hash-table-object ()
   ((table :initarg :table :reader vm-hash-table-internal
            :documentation "The underlying Common Lisp hash table")
@@ -78,8 +104,15 @@
     (setf args (append args (list :weakness weakness))))
   (apply #'make-hash-table args)))
 
-(defun rt-make-hash-table (&key (test 'eql) size rehash-size rehash-threshold weakness)
-  "Create a VM hash-table object with optional WEAKNESS metadata."
+(defun rt-make-hash-table (&key (test 'eql) size rehash-size rehash-threshold weakness
+                             (policy *hash-table-rehash-policy*))
+  "Create a VM hash-table object with optional WEAKNESS metadata.
+
+POLICY is validated against `+hash-table-rehash-policies+`. The portable runtime
+stores data in a host hash table; native backends may use POLICY to select Swiss,
+Robin-Hood, or chaining layouts without changing the public API."
+  (unless (valid-hash-table-rehash-policy-p policy)
+    (error "Unsupported hash-table rehash policy: ~S" policy))
   (make-instance 'vm-hash-table-object
                  :table (vm-make-host-hash-table :test test
                                                  :size size

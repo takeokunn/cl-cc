@@ -18,9 +18,10 @@
   :pathname "src"
   :serial t
   :components
-  ((:file "package")
-   ;; Compiler context and primitive helpers
-   (:file "context")
+   ((:file "package")
+    ;; Compiler context and primitive helpers
+    (:file "context")
+    (:file "comp-env")
    ;; Builtin dispatch registry
    (:file "builtin-registry-data")
    (:file "builtin-registry-data-ext")

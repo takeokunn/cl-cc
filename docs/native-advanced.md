@@ -1,12 +1,14 @@
 # Native Backend: Advanced Optimization & Platform
 
+> **Status**: ✅ 64 verified, ⚠️ 1 partial (FR-620 Concurrent GC), ⬜ 82 pending — 147 FRs total. Verified include: LTO/ThinLTO/IPCP/devirt, polyhedral/escape/MemorySSA, tiered/JIT/OSR/deopt, VRP/BCE/overflow/bitwidth, tail-dup/DAE/ICF, stack canary/clash/CFI, TLS/atomics/perf-map/sanitizers, NUMA/arena/LOS/huge-pages, IR verify/remarks/incremental/hot-reload, loop-rotate/dead-loop/W^X/flamegraph. See `docs/README.md` for overall progress.
+
 LTO, advanced optimization passes, staged compilation, security hardening, GC integration, debug info, zero-cost exceptions, modern ISA, ML-driven optimization, WASM edge runtime, value range analysis, threading, developer experience, binary hardening, post-link optimization, functional language optimization, standard optimization passes, target/platform completion, profiling, modern IR, code quality, GC lifecycle, advanced concurrency, formal verification, tooling/IDE, security completion.
 
 ---
 
 ### Phase 90 — リンク時最適化 (LTO)
 
-#### FR-500: LTO (Link-Time Optimization) — モジュール間最適化基盤
+#### ✅ FR-500: LTO (Link-Time Optimization) — モジュール間最適化基盤
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
@@ -16,7 +18,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM LTO / GCC `-flto`。単一ファイルでは見えない関数が呼び出し側から特化できる
 - **難易度**: Very Hard
 
-#### FR-501: ThinLTO — スケーラブルな並列LTO
+#### ✅ FR-501: ThinLTO — スケーラブルな並列LTO
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -26,7 +28,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM ThinLTO。コンパイル時間O(N²)→O(N)に削減しながらLTOの大部分の恩恵を得る
 - **難易度**: Very Hard
 
-#### FR-502: Interprocedural Constant Propagation (IPCP)
+#### ✅ FR-502: Interprocedural Constant Propagation (IPCP)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -36,7 +38,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM IPSCCP / GCC ipa-cp。ホット関数の定数伝播を関数境界越えに拡張
 - **難易度**: Hard
 
-#### FR-503: Whole-Program Devirtualization (仮想関数の完全脱仮想化)
+#### ✅ FR-503: Whole-Program Devirtualization (仮想関数の完全脱仮想化)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -82,7 +84,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM AliasAnalysis infrastructure。エイリアスが不明だと多くの最適化が保守的になる
 - **難易度**: Very Hard
 
-#### FR-513: Polyhedral Optimization (多面体最適化)
+#### ✅ FR-513: Polyhedral Optimization (多面体最適化)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **内容**:
@@ -92,7 +94,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM Polly / GCC Graphite。数値・科学計算ループで数倍の高速化
 - **難易度**: Very Hard
 
-#### FR-514: Loop Fusion / Loop Fission (ループ融合・分割)
+#### ✅ FR-514: Loop Fusion / Loop Fission (ループ融合・分割)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -102,7 +104,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-floop-nest-optimize`. FR-513の多面体最適化の部分実装として単独でも有用
 - **難易度**: Hard
 
-#### FR-515: Loop Tiling / Blocking (ループタイリング)
+#### ✅ FR-515: Loop Tiling / Blocking (ループタイリング)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -112,7 +114,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-floop-block` / LLVM LoopTiling。行列演算で2-10x高速化
 - **難易度**: Hard
 
-#### FR-516: Escape Analysis (エスケープ解析)
+#### ✅ FR-516: Escape Analysis (エスケープ解析)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**:
@@ -123,7 +125,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Java HotSpot scalar replacement / Go escape analysis。GCポーズ削減の最重要手法
 - **難易度**: Hard
 
-#### FR-517: Memory SSA (メモリSSA)
+#### ✅ FR-517: Memory SSA (メモリSSA)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/mir/src/mir.lisp`
 - **内容**:
@@ -137,7 +139,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 92 — 段階的コンパイル・実行時最適化
 
-#### FR-520: Tiered Compilation (段階的コンパイル)
+#### ✅ FR-520: Tiered Compilation (段階的コンパイル)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
@@ -148,7 +150,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: V8 (Ignition → Maglev → Turbofan) / HotSpot (C1 → C2)。起動時間と最大性能を両立
 - **難易度**: Very Hard
 
-#### FR-521: On-Stack Replacement (OSR) — スタック上置換
+#### ✅ FR-521: On-Stack Replacement (OSR) — スタック上置換
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -158,7 +160,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: HotSpot OSR / V8 OSR。長寿命ループが多い CL プログラムで重要
 - **難易度**: Very Hard
 
-#### FR-522: Deoptimization (脱最適化)
+#### ✅ FR-522: Deoptimization (脱最適化)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -168,7 +170,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: V8 Deoptimize / Graal DeoptimizeNode。型特化JITの安全性を保証
 - **難易度**: Very Hard
 
-#### FR-523: Speculative Inlining with Inline Cache (ICベース推測インライン化)
+#### ✅ FR-523: Speculative Inlining with Inline Cache (ICベース推測インライン化)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -178,7 +180,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: V8 Turbofan speculative inlining / HotSpot speculative devirtualization。CLOSの動的ディスパッチを事実上の直接呼び出しに変換
 - **難易度**: Hard
 
-#### FR-524: Value Profiling (値プロファイリング)
+#### ✅ FR-524: Value Profiling (値プロファイリング)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -188,7 +190,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: HotSpot value profiling / HHVM type profiling
 - **難易度**: Medium
 
-#### FR-525: AutoFDO / Sample-Based PGO (サンプリングベースPGO)
+#### ✅ FR-525: AutoFDO / Sample-Based PGO (サンプリングベースPGO)
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -202,7 +204,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 93 — セキュリティ・ハードニング
 
-#### FR-530: Control Flow Integrity (CFI) — 制御フロー完全性
+#### ✅ FR-530: Control Flow Integrity (CFI) — 制御フロー完全性
 
 - **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
@@ -226,7 +228,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: ARMv8.3-A Architecture Reference Manual。Apple Silicon の標準セキュリティ機能
 - **難易度**: Medium
 
-#### FR-532: Stack Canary / Stack Protection (スタックカナリア)
+#### ✅ FR-532: Stack Canary / Stack Protection (スタックカナリア)
 
 - **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
@@ -236,7 +238,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fstack-protector-strong` / clang SSP。スタックバッファオーバーフローの検出
 - **難易度**: Easy
 
-#### FR-533: Stack Clash Protection (スタッククラッシュ保護)
+#### ✅ FR-533: Stack Clash Protection (スタッククラッシュ保護)
 
 - **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
@@ -246,7 +248,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fstack-clash-protection`。Qualys 発見の Stack Clash 脆弱性クラスを緩和
 - **難易度**: Easy
 
-#### FR-534: Speculative Execution Mitigation (投機実行緩和)
+#### ✅ FR-534: Speculative Execution Mitigation (投機実行緩和)
 
 - **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
@@ -337,7 +339,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-g3` / clang Debug Info. デバッガでの変数ウォッチに必要
 - **難易度**: Hard
 
-#### FR-553: PerfMap / JIT Map File Output (perf 用マップファイル出力)
+#### ✅ FR-553: PerfMap / JIT Map File Output (perf 用マップファイル出力)
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -347,7 +349,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: V8 `--perf-prof` / JVM `-XX:+PrintPerfMap`。JIT コードのプロファイリングに必須
 - **難易度**: Easy
 
-#### FR-554: Sanitizer Instrumentation Integration (サニタイザ計装統合)
+#### ✅ FR-554: Sanitizer Instrumentation Integration (サニタイザ計装統合)
 
 - **対象**: `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -590,7 +592,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fmove-loop-invariants` / LLVM `LoopInvariantCodeMotion`. 数値ループで最も効果的な基礎最適化の一つ
 - **難易度**: Medium
 
-#### FR-601: Loop Unrolling (ループアンロール)
+#### ✅ FR-601: Loop Unrolling (ループアンロール)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -601,7 +603,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-funroll-loops` / LLVM `LoopUnroll`. ベクトル化（FR-226）の前処理としても機能
 - **難易度**: Medium
 
-#### FR-602: Loop Unswitching (ループアンスイッチング)
+#### ✅ FR-602: Loop Unswitching (ループアンスイッチング)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -645,7 +647,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-fassociative-math` / LLVM `Reassociate`. CSEの命中率を大幅改善する前処理
 - **難易度**: Medium
 
-#### FR-606: Dead Argument Elimination (DAE) — デッド引数除去
+#### ✅ FR-606: Dead Argument Elimination (DAE) — デッド引数除去
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **内容**:
@@ -656,7 +658,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM `DeadArgumentElimination` pass. レジスタ圧力削減とインライン化後のクリーンアップに有効
 - **難易度**: Medium
 
-#### FR-607: Identical Code Folding / Function Merging (同一コード折り畳み)
+#### ✅ FR-607: Identical Code Folding / Function Merging (同一コード折り畳み)
 
 - **対象**: `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -667,7 +669,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM LLD ICF / gold ICF. コードサイズを数%〜数十%削減（大規模テンプレート展開時）
 - **難易度**: Medium
 
-#### FR-608: Tail Duplication (末尾複製)
+#### ✅ FR-608: Tail Duplication (末尾複製)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **内容**:
@@ -681,7 +683,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 101 — 値範囲解析・安全性最適化
 
-#### FR-610: VRP (Value Range Propagation) — 値範囲伝播
+#### ✅ FR-610: VRP (Value Range Propagation) — 値範囲伝播
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -692,7 +694,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: GCC `-ftree-vrp` / LLVM `LazyValueInfo`. BCE・Null チェック除去・オーバーフロー除去の基盤
 - **難易度**: Hard
 
-#### FR-611: Bounds Check Elimination (BCE) — 配列境界チェック除去
+#### ✅ FR-611: Bounds Check Elimination (BCE) — 配列境界チェック除去
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -713,7 +715,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: V8 null check elimination / Java JIT null check folding
 - **難易度**: Medium
 
-#### FR-613: Integer Overflow Check Elimination (整数オーバーフローチェック除去)
+#### ✅ FR-613: Integer Overflow Check Elimination (整数オーバーフローチェック除去)
 
 - **対象**: `packages/vm/src/primitives.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -723,7 +725,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: SBCL の fixnum 最適化と同等の効果。タイトな数値ループで最大2倍の高速化
 - **難易度**: Hard
 
-#### FR-614: Bitwidth Reduction / Integer Narrowing (ビット幅削減)
+#### ✅ FR-614: Bitwidth Reduction / Integer Narrowing (ビット幅削減)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`
 - **内容**:
@@ -738,7 +740,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 102 — GC高度化・メモリ管理
 
-#### FR-620: Concurrent GC — 並行マーキング (Shenandoah / ZGC スタイル)
+#### ⚠️ FR-620: Concurrent GC — 並行マーキング (Shenandoah / ZGC スタイル)
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**:
@@ -750,7 +752,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Shenandoah GC (OpenJDK) / ZGC. GCポーズを10ms以下に抑えるレイテンシ重視アーキテクチャ
 - **難易度**: Very Hard
 
-#### FR-621: Compacting GC / Object Moving (コンパクションGC)
+#### ✅ FR-621: Compacting GC / Object Moving (コンパクションGC)
 
 - **対象**: `packages/runtime/src/gc.lisp`, `packages/runtime/src/heap.lisp`
 - **内容**:
@@ -761,7 +763,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Standard GC algorithm. ヒープ断片化による性能劣化（malloc 検索コスト増大）を防止
 - **難易度**: Very Hard
 
-#### FR-622: Large Object Space (LOS) — 大オブジェクト専用アリーナ
+#### ✅ FR-622: Large Object Space (LOS) — 大オブジェクト専用アリーナ
 
 - **対象**: `packages/runtime/src/heap.lisp`
 - **内容**:
@@ -772,7 +774,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Java G1GC LOS / Hotspot large object handling. 大オブジェクトのコピーコストを除去
 - **難易度**: Hard
 
-#### FR-623: Huge Pages Support (ヒュージページ対応)
+#### ✅ FR-623: Huge Pages Support (ヒュージページ対応)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/binary/src/macho.lisp`, `packages/binary/src/elf.lisp`
 - **内容**:
@@ -783,7 +785,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Linux hugetlbfs / macOS superpage. TLB ミスを1/512 に削減; JVM `-XX:+UseHugePagesInMetaspace` と同等
 - **難易度**: Medium
 
-#### FR-624: NUMA-Aware Memory Allocation (NUMAアウェア割り当て)
+#### ✅ FR-624: NUMA-Aware Memory Allocation (NUMAアウェア割り当て)
 
 - **対象**: `packages/runtime/src/heap.lisp`
 - **内容**:
@@ -793,7 +795,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Linux NUMA API. 4ソケット以上のサーバーで10-30%のスループット改善
 - **難易度**: Hard
 
-#### FR-625: Arena Allocation for Compiler Phases (コンパイラ内アリーナ割り当て)
+#### ✅ FR-625: Arena Allocation for Compiler Phases (コンパイラ内アリーナ割り当て)
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -808,7 +810,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 103 — スレッド・並行性モデル
 
-#### FR-630: Thread-Local Storage Code Generation (TLSコード生成)
+#### ✅ FR-630: Thread-Local Storage Code Generation (TLSコード生成)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
@@ -820,7 +822,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: ELF TLS Specification / Drepper "ELF Handling For Thread-Local Storage". マルチスレッド CL の基礎
 - **難易度**: Hard
 
-#### FR-631: Atomic Operations / Memory Model (アトミック操作・メモリモデル)
+#### ✅ FR-631: Atomic Operations / Memory Model (アトミック操作・メモリモデル)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/codegen/src/x86-64-codegen-core.lisp`, `packages/codegen/src/aarch64-codegen.lisp`
 - **内容**:
@@ -842,7 +844,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM parallel compilation / Rust `cargo` の並列コンパイル. ビルド時間をコア数に比例して短縮
 - **難易度**: Hard
 
-#### FR-633: Lock-Free VM Instruction Dispatch (ロックフリーVMディスパッチ)
+#### ✅ FR-633: Lock-Free VM Instruction Dispatch (ロックフリーVMディスパッチ)
 
 - **対象**: `packages/vm/src/vm.lisp`
 - **内容**:
@@ -857,7 +859,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 
 ### Phase 104 — 開発者体験・ビルドインフラ
 
-#### FR-640: Incremental Compilation (インクリメンタルコンパイル)
+#### ✅ FR-640: Incremental Compilation (インクリメンタルコンパイル)
 
 - **対象**: `packages/pipeline/src/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
@@ -868,7 +870,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Rust `cargo` incremental / Bazel dependency tracking. 大規模プロジェクトでのビルド時間をO(変更量)に
 - **難易度**: Hard
 
-#### FR-641: Hot Reload / Live Patching (ホットリロード)
+#### ✅ FR-641: Hot Reload / Live Patching (ホットリロード)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/cli/src/main.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -879,7 +881,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: Erlang hot code loading / Common Lisp image-based development. CL の live coding 文化の核心機能
 - **難易度**: Hard
 
-#### FR-642: IR Verification Passes (IR検証パス)
+#### ✅ FR-642: IR Verification Passes (IR検証パス)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/mir/src/mir.lisp`
 - **内容**:
@@ -890,7 +892,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM `verifyFunction` / GCC `verify_ssa`. 最適化バグの早期発見に不可欠
 - **難易度**: Medium
 
-#### FR-643: Optimization Pass Pipeline Configuration (最適化パイプライン設定)
+#### ✅ FR-643: Optimization Pass Pipeline Configuration (最適化パイプライン設定)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **内容**:
@@ -901,7 +903,7 @@ LTO, advanced optimization passes, staged compilation, security hardening, GC in
 - **根拠**: LLVM `opt -passes=...` / GCC pass framework. パス開発・実験・チューニングの基盤
 - **難易度**: Medium
 
-#### FR-644: Compiler Diagnostics / Optimization Remarks (最適化レマーク)
+#### ✅ FR-644: Compiler Diagnostics / Optimization Remarks (最適化レマーク)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/pipeline/src/pipeline.lisp`
 - **内容**:
@@ -1144,7 +1146,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: GCC `-fpeel-loops` / LLVM `LoopPeel`. ベクトル化の前処理として LLVM が内部的に多用
 - **難易度**: Medium
 
-#### FR-683: Loop Rotation (ループ回転)
+#### ✅ FR-683: Loop Rotation (ループ回転)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/optimize/src/cfg.lisp`
 - **内容**:
@@ -1179,7 +1181,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: GCC/LLVM が -O1 以上で必ず実行。除算命令は最も遅いスカラー算術命令の一つ
 - **難易度**: Medium
 
-#### FR-686: Dead Loop Elimination (デッドループ除去)
+#### ✅ FR-686: Dead Loop Elimination (デッドループ除去)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **内容**:
@@ -1252,7 +1254,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: ARM MTE Architecture Specification (ARMv8.5-A). Google Android 15 / Samsung Galaxy S24 以降で HW 搭載済み
 - **難易度**: Hard
 
-#### FR-694: ELF W^X Enforcement (ELF W^X 強制)
+#### ✅ FR-694: ELF W^X Enforcement (ELF W^X 強制)
 
 - **対象**: `packages/binary/src/elf.lisp`
 - **内容**:
@@ -1302,7 +1304,7 @@ CL・Scheme・ML 系コンパイラ特有の最適化。汎用コンパイラド
 - **根拠**: Google Cloud Profiler / Elastic Universal Profiler. 2024-2026年の可観測性スタンダード
 - **難易度**: Hard
 
-#### FR-702: Flame Graph Generation (フレームグラフ生成)
+#### ✅ FR-702: Flame Graph Generation (フレームグラフ生成)
 
 - **対象**: `packages/cli/src/main.lisp`
 - **内容**:

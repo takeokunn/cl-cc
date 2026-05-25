@@ -19,7 +19,8 @@ optimize-instructions."
         :trace-json-stream  (pipeline-opts-trace-json-stream opts)
         :print-opt-remarks  (pipeline-opts-print-opt-remarks opts)
          :opt-remarks-stream (pipeline-opts-opt-remarks-stream opts)
-        :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)))
+         :opt-remarks-mode   (pipeline-opts-opt-remarks-mode opts)
+         :opt-bisect-limit   (pipeline-opts-opt-bisect-limit opts)))
 
 (defun %opts->codegen-kwargs (opts)
   "Extract backend hardening/sanitizer options from OPTS."
@@ -495,6 +496,7 @@ value carries top-level source locations for later AST annotation.
                                       pass-pipeline print-pass-timings timing-stream coverage
                                        print-opt-remarks opt-remarks-stream
                                        (opt-remarks-mode :all)
+                                       opt-bisect-limit
                                        print-pass-stats stats-stream trace-json-stream
                                           retpoline spectre-mitigations stack-protector shadow-stack
                                            asan msan tsan ubsan hwasan pgo-profile-data
@@ -520,19 +522,20 @@ streams, and PGO counter plan."
                    :timing-stream timing-stream :print-pass-stats print-pass-stats
                   :stats-stream stats-stream :trace-json-stream trace-json-stream
                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
-                  :opt-remarks-mode opt-remarks-mode
-                   :retpoline retpoline
-                   :spectre-mitigations spectre-mitigations
-                   :stack-protector stack-protector
-                   :shadow-stack shadow-stack
-                   :asan asan
-                   :msan msan
-                   :tsan tsan
-                   :ubsan ubsan
-                   :hwasan hwasan
-                   :pgo-profile-data pgo-profile-data
-                   :compilation-tier (normalize-compilation-tier compilation-tier)))
-         (ctx           (make-instance 'compiler-context :safety safety))
+                   :opt-remarks-mode opt-remarks-mode
+                   :opt-bisect-limit opt-bisect-limit
+                    :retpoline retpoline
+                    :spectre-mitigations spectre-mitigations
+                    :stack-protector stack-protector
+                    :shadow-stack shadow-stack
+                    :asan asan
+                    :msan msan
+                    :tsan tsan
+                    :ubsan ubsan
+                    :hwasan hwasan
+                    :pgo-profile-data pgo-profile-data
+                    :compilation-tier (normalize-compilation-tier compilation-tier)))
+          (ctx           (make-instance 'compiler-context :safety safety))
          (*constant-pool* (make-hash-table :test #'equal))
           (ast           (%pipeline-optimize-ast (%prepare-ast expr) opts))
          (inferred-type (%type-check-safe ctx ast type-check)))
@@ -582,11 +585,12 @@ Uses max(current-speed, local-speed) when local speed is an integer."
     opts))
 
 (defun compile-string (source &key (target :x86_64) type-check (language :lisp) (safety 1)
-                                      source-file speed (inline-threshold-scale 1)
-                                      block-compile debug-info sanitize lto eh-model incremental perf-map parallel
-                                      pass-pipeline print-pass-timings timing-stream coverage
-                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                     print-pass-stats stats-stream trace-json-stream
+                                       source-file speed (inline-threshold-scale 1)
+                                       block-compile debug-info sanitize lto eh-model incremental perf-map parallel
+                                       pass-pipeline print-pass-timings timing-stream coverage
+                                      print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                      opt-bisect-limit
+                                      print-pass-stats stats-stream trace-json-stream
                                        retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan pgo-profile-data
                                       verify-transforms
@@ -618,6 +622,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :stats-stream stats-stream :trace-json-stream trace-json-stream
                     :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
                     :opt-remarks-mode opt-remarks-mode
+                   :opt-bisect-limit opt-bisect-limit
                     :retpoline retpoline
                     :spectre-mitigations spectre-mitigations
                     :stack-protector stack-protector
@@ -652,42 +657,42 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                                   block-compile debug-info sanitize lto eh-model incremental perf-map parallel
                                                     pass-pipeline print-pass-timings timing-stream coverage
                                                   print-opt-remarks opt-remarks-stream
-                                                  (opt-remarks-mode :all)
-                                                 print-pass-stats stats-stream trace-json-stream
-                                                    retpoline spectre-mitigations stack-protector shadow-stack
-                                                     asan msan tsan ubsan hwasan pgo-profile-data
-                                                     verify-transforms
-                                                     (compilation-tier *compilation-tier*))
-  "Compile Lisp SOURCE with the standard library forms prepended.
-
-The standard library is obtained from GET-STDLIB-FORMS, combined with parsed
-SOURCE forms, and compiled as one top-level batch. SOURCE-FILE preserves source
-locations for user forms; stdlib forms receive NIL locations. Returns the same
-compilation-result object shape as COMPILE-STRING."
-  (multiple-value-bind (source-forms source-locations)
-      (if source-file
-          (%lisp-top-level-source-forms-and-locations source source-file)
-          (values (parse-all-forms source) nil))
-    (let* ((opts (%make-pipeline-opts
-                   :target target :type-check type-check :safety safety
-                    :speed speed
-                    :inline-threshold-scale inline-threshold-scale
-                     :block-compile block-compile
-                     :debug-info debug-info
-                     :sanitize sanitize
-                     :lto lto
-                     :eh-model eh-model
-                     :incremental incremental
-                     :perf-map perf-map
-                     :parallel parallel
-                   :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
-                   :coverage coverage
-                   :verify-transforms verify-transforms
-                   :timing-stream timing-stream :print-pass-stats print-pass-stats
-                   :stats-stream stats-stream :trace-json-stream trace-json-stream
-                   :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
-                   :opt-remarks-mode opt-remarks-mode
-                    :retpoline retpoline
+                                     (opt-remarks-mode :all)
+                                     opt-bisect-limit
+                                     print-pass-stats stats-stream trace-json-stream
+                                       retpoline spectre-mitigations stack-protector shadow-stack
+                                       asan msan tsan ubsan hwasan pgo-profile-data
+                                      verify-transforms
+                                       (compilation-tier *compilation-tier*))
+ "Compile SOURCE text and return a compilation-result object.
+ 
+LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
+Lisp input, enables source-location annotations on top-level AST nodes and host
+macro evaluation for real file compilation. TARGET and the remaining keyword
+arguments are forwarded to the expression, top-level, and optimization stages."
+   (multiple-value-bind (forms source-locations)
+       (parse-source-for-language source language :source-file source-file)
+     (let* ((opts  (%make-pipeline-opts
+                     :target target :type-check type-check :safety safety
+                      :speed speed
+                      :inline-threshold-scale inline-threshold-scale
+                       :block-compile block-compile
+                       :debug-info debug-info
+                       :sanitize sanitize
+                       :lto lto
+                       :eh-model eh-model
+                       :incremental incremental
+                       :perf-map perf-map
+                       :parallel parallel
+                     :pass-pipeline pass-pipeline :print-pass-timings print-pass-timings
+                     :coverage coverage
+                     :verify-transforms verify-transforms
+                     :timing-stream timing-stream :print-pass-stats print-pass-stats
+                     :stats-stream stats-stream :trace-json-stream trace-json-stream
+                     :print-opt-remarks print-opt-remarks :opt-remarks-stream opt-remarks-stream
+                     :opt-remarks-mode opt-remarks-mode
+                     :opt-bisect-limit opt-bisect-limit
+                     :retpoline retpoline
                     :spectre-mitigations spectre-mitigations
                    :stack-protector stack-protector
                    :shadow-stack shadow-stack

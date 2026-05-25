@@ -19,18 +19,23 @@
         (below    (getf iter :below))
         (above    (getf iter :above))
         (by-form  (getf iter :by))
+        (of-type  (getf iter :of-type))
         (downward (getf iter :downward))
         (bindings nil) (end-tests nil) (step-forms nil))
-    (push (list var from) bindings)
+    (push (list var (if of-type (list 'the of-type from) from)) bindings)
     (if downward
         ;; FR-695: downward iteration
         (progn
-          (push (list 'setq var (list '- var (or by-form 1))) step-forms)
+          (push (list 'setq var (if of-type
+                                    (list 'the of-type (list '- var (or by-form 1)))
+                                    (list '- var (or by-form 1)))) step-forms)
           (cond (to    (push (list '< var to)     end-tests))
                 (above (push (list '<= var above) end-tests))))
         ;; upward iteration (original)
         (progn
-          (push (list 'setq var (list '+ var (or by-form 1))) step-forms)
+          (push (list 'setq var (if of-type
+                                    (list 'the of-type (list '+ var (or by-form 1)))
+                                    (list '+ var (or by-form 1)))) step-forms)
           (cond (to    (push (list '> var to)     end-tests))
                 (below (push (list '>= var below) end-tests)))))
     (values bindings end-tests nil step-forms)))
@@ -123,8 +128,10 @@ When false, REAL-VAR is itself the iteration cell, matching LOOP FOR x ON ..."
     (push (list vec-var vec-form)                           bindings)
     (push (list len-var (list 'length vec-var))             bindings)
     (push (list idx-var 0)                                  bindings)
-    (push (list var     nil)                                bindings)
+    ;; FR-135: var is set in pre-body; no nil initialization needed
     (push (list '>= idx-var len-var)                        end-tests)
+    ;; Direct AREF path: keep vector, index, and current element in lexical locals
+    ;; so later compiler phases/native backends can keep them in registers.
     (push (list 'setq var     (list 'aref vec-var idx-var)) pre-body)
     (push (list 'setq idx-var (list '+ idx-var 1))          step-forms)
     (values bindings end-tests pre-body step-forms)))

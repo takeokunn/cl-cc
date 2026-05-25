@@ -7,7 +7,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc)
+  :depends-on (:cl-cc :cl-cc-docgen)
   :pathname "src"
   :serial t
   :components
@@ -17,4 +17,5 @@
     (:file "main-utils")   ; Utilities, flamegraph, SSA block name helpers
     (:file "flamegraph")
      (:file "main-dump")    ; ANSI colors, dump-*-phase functions, compile-opts struct
-   (:file "handlers")))   ; Subcommand handlers only
+   (:file "handlers")   ; Subcommand handlers only
+   (:file "dep-graph"))) ; FR-361: Dependency graph visualization

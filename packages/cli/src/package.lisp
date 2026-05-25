@@ -10,7 +10,9 @@
                 :compilation-result-program
                 :run-compiled)
   (:import-from :cl-cc/type
-                :type-to-string)
+                 :type-to-string)
+  (:import-from :cl-cc/docgen
+                :generate-api-docs)
   (:export :main
            :parse-args
            :arg-parse-error

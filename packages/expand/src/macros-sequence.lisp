@@ -53,7 +53,7 @@
        ,d)))
 
 ;; MISMATCH (FR-506): first position where sequences differ
-(our-defmacro mismatch (seq1 seq2 &key test key from-end)
+(our-defmacro mismatch (seq1 seq2 &key test key from-end (start1 0) end1 (start2 0) end2)
   "Return index of first mismatch between SEQ1 and SEQ2, or NIL if equal.
 Supports :test (default #'eql), :key, :from-end."
   (let ((s1 (gensym "S1"))
@@ -85,10 +85,19 @@ Supports :test (default #'eql), :key, :from-end."
       (if from-end
           ;; from-end: run forward mismatch on reversed seqs, map index back
           (let ((len1 (gensym "LEN1")) (len2 (gensym "LEN2")) (mi (gensym "MI")))
-            `(let ((,len1 (length ,seq1)) (,len2 (length ,seq2))
-                   (,mi ,forward-loop))
+            `(let* ((,len1 (length ,seq1)) (,len2 (length ,seq2))
+                    (,mi (mismatch (subseq ,seq1 ,start1 ,end1)
+                                   (subseq ,seq2 ,start2 ,end2)
+                                   ,@(when test `(:test ,test))
+                                   ,@(when key `(:key ,key)))))
                (if (null ,mi) nil (- (min ,len1 ,len2) ,mi))))
-          forward-loop))))
+          (if (or end1 end2 (not (eql start1 0)) (not (eql start2 0)))
+              `(let ((,idx (mismatch (subseq ,seq1 ,start1 ,end1)
+                                     (subseq ,seq2 ,start2 ,end2)
+                                     ,@(when test `(:test ,test))
+                                     ,@(when key `(:key ,key)))))
+                 (and ,idx (+ ,start1 ,idx)))
+              forward-loop)))))
 
 ;; DELETE (FR-504): like REMOVE but destructive — delegates to remove (with keyword support)
 (our-defmacro delete (item seq &key test key test-not)
@@ -136,9 +145,29 @@ Supports :test (default #'eql), :key, :from-end."
       (list 'remove-duplicates seq)))
 
 ;; SUBSTITUTE (FR-505): replace occurrences of old with new (with optional :test/:key)
-(our-defmacro substitute (new old seq &key test key test-not)
+(our-defmacro substitute (new old seq &key test key test-not count from-end)
   "Return new sequence with each matching OLD replaced by NEW."
-  (if (or test key test-not)
+  (if (or count from-end)
+      (let ((src (gensym "SEQ")) (out (gensym "OUT")) (remaining (gensym "COUNT"))
+            (new-var (gensym "NEW")) (old-var (gensym "OLD"))
+            (x (gensym "X")) (acc (gensym "ACC")) (tst-var (gensym "TST")) (kfn-var (gensym "KEY")))
+        `(let* ((,src ,(if from-end `(reverse ,seq) seq))
+                (,new-var ,new)
+                (,old-var ,old)
+                (,remaining ,(or count nil))
+                (,tst-var ,(cond (test-not `(complement ,test-not)) (test test) (t '#'eql)))
+                (,kfn-var ,(or key '#'identity))
+                (,acc nil))
+           (dolist (,x ,src)
+             (if (and (or (null ,remaining) (> ,remaining 0))
+                      (funcall ,tst-var ,old-var (funcall ,kfn-var ,x)))
+                 (progn
+                   (when ,remaining (setq ,remaining (- ,remaining 1)))
+                   (setq ,acc (cons ,new-var ,acc)))
+                 (setq ,acc (cons ,x ,acc))))
+           (let ((,out (nreverse ,acc)))
+             ,(if from-end `(reverse ,out) out))))
+      (if (or test key test-not)
       (let ((new-var (gensym "NEW")) (old-var (gensym "OLD")) (x (gensym "X"))
             (tst-var (gensym "TST")) (kfn-var (gensym "KEY")) (acc (gensym "ACC")))
         `(let ((,new-var ,new) (,old-var ,old) (,acc nil)
@@ -150,7 +179,7 @@ Supports :test (default #'eql), :key, :from-end."
       (let ((new-var (gensym "NEW")) (old-var (gensym "OLD")) (x (gensym "X")) (acc (gensym "ACC")))
         `(let ((,new-var ,new) (,old-var ,old) (,acc nil))
            (dolist (,x ,seq (nreverse ,acc))
-             (setq ,acc (cons (if (eql ,x ,old-var) ,new-var ,x) ,acc)))))))
+             (setq ,acc (cons (if (eql ,x ,old-var) ,new-var ,x) ,acc))))))))
 
 ;; Shared expansion for substitute-if / substitute-if-not.
 ;; MATCH-FORM: the value chosen when PRED is true (new-var or x).

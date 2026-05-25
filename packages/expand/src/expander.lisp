@@ -87,22 +87,39 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
                   form
                   (compiler-macroexpand-all expanded))))
           (t
-           (multiple-value-bind (transformed transformed-p)
-               (deftransform-expand-1 form nil)
-             (cond
-               (transformed-p
-                (compiler-macroexpand-all transformed))
-               ((%list-contains-eq (car form) *compiler-special-forms*)
-                (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
-               (t
-                (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
-                  (if expanded-p
-                      (compiler-macroexpand-all exp)
-                      ;; FR-120: accessor read inlining — (accessor obj) → (slot-value obj 'slot)
-                      (let ((mapping (when (and (symbolp (car form))
-                                                (= (length (cdr form)) 1))
-                                       (gethash (car form) *accessor-slot-map*))))
-                        (if mapping
-                            (compiler-macroexpand-all
-                              (list 'slot-value (second form) (list 'quote (cdr mapping))))
-                            (mapcar #'compiler-macroexpand-all form))))))))))))))
+            (multiple-value-bind (transformed transformed-p)
+                (deftransform-expand-1 form nil)
+              (cond
+                (transformed-p
+                 (compiler-macroexpand-all transformed))
+                ;; FR-130: O(1) gethash instead of O(n) %list-contains-eq
+                ((gethash (car form) *compiler-special-forms-table*)
+                 (cons (car form) (mapcar #'compiler-macroexpand-all (cdr form))))
+                (t
+                 ;; FR-153: check memoization cache BEFORE macro expansion
+                 ;; to avoid re-expansion cost and side effects on cache hit.
+                 ;; Uses gethash second value to distinguish NIL from cache miss.
+                 (multiple-value-bind (cached present-p)
+                     (and (consp form) (symbolp (car form))
+                          (%cached-macro-expansion (car form) form))
+                   (if present-p
+                       (compiler-macroexpand-all cached)
+                       (multiple-value-bind (exp expanded-p) (our-macroexpand-1 form)
+                         (if expanded-p
+                             ;; FR-241: trace when not from cache
+                             (let ((*macro-expand-depth* (1+ *macro-expand-depth*)))
+                               (when *trace-macros*
+                                 (format *trace-output* "~&~v@{ ~}~S: ~S~%  -> ~S~%"
+                                         *macro-expand-depth* ""
+                                         (car form) form exp))
+                               (let ((result (compiler-macroexpand-all exp)))
+                                 (%cache-macro-expansion (car form) form result)
+                                 result))
+                             ;; FR-120: accessor read inlining — (accessor obj) → (slot-value obj 'slot)
+                             (let ((mapping (when (and (symbolp (car form))
+                                                       (= (length (cdr form)) 1))
+                                              (gethash (car form) *accessor-slot-map*))))
+                               (if mapping
+                                   (compiler-macroexpand-all
+                                    (list 'slot-value (second form) (list 'quote (cdr mapping))))
+                                   (mapcar #'compiler-macroexpand-all form))))))))))))))))

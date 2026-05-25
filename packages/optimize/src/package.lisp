@@ -36,7 +36,16 @@
     #:lisp-implementation-type #:lisp-implementation-version
     #:machine-type #:machine-version #:machine-instance
     #:software-type #:software-version
-    #:room #:apropos #:apropos-list)
+    #:room #:apropos #:apropos-list
+    ;; ── FR-130 / pre-existing: CL symbols now exported by CL-CC/VM ─────
+    #:*read-base* #:*read-eval* #:*read-suppress* #:*read-default-float-format*
+    #:*print-right-margin* #:*print-lines* #:*print-case*
+    #:*print-escape* #:*print-gensym* #:*print-array*
+    #:*trace-output* #:*debugger-hook* #:*break-on-signals*
+    #:*features* #:*load-pathname* #:*load-truename* #:*compile-file-pathname* #:*compile-file-truename*
+    #:*default-external-format*
+    #:stream-external-format #:break #:inspect #:describe
+    #:invoke-debugger #:step #:ed #:open #:close #:write-char #:read-char #:write-string #:read-line #:write-line #:terpri #:fresh-line #:finish-output #:force-output #:clear-output #:clear-input #:listen #:peek-char #:unread-char #:read-byte #:write-byte #:file-position #:file-length #:probe-file #:delete-file #:rename-file #:directory #:truename #:file-write-date #:DRIBBLE #:TRACE #:UNTRACE)
   (:export
    ;; ─── effects.lisp — effect-kind classification ─────────────────────
    #:vm-inst-effect-kind
@@ -276,14 +285,31 @@
        #:opt-pass-ml-regalloc
 
        ;; ─── optimizer-pipeline.lisp — top-level entry point ───────────────
-       #:optimize-instructions
-       #:compiler-self-profiling-capabilities
+        #:optimize-instructions
+        ;; ─── FR-152: transitive function purity ──────────────────────────
+        #:*function-instruction-table*
+        #:*user-function-purity-cache*
+        #:compute-function-purity
+        #:invalidate-function-purity
+        #:register-function-instructions
+        #:clear-all-purity-cache
+        #:call-site-effect-kind
+        #:user-function-pure-p
+        #:user-function-cse-eligible-p
+        #:user-function-dce-eligible-p
+        ;; ─── FR-276: optimization levels ─────────────────────────────────
+        #:*optimization-level-params*
+        #:opt-level-params
+        #:apply-optimization-level
+        #:compiler-self-profiling-capabilities
        #:build-analytics-summary
       #:*optimization-report-stream*
        #:*block-compile*
        #:*max-inline-size*
-       #:*skip-optimizer-passes*
+      #:*skip-optimizer-passes*
      #:*verify-optimizer-instructions*
+     #:*opt-bisect-limit*
+     #:*opt-bisect-count*
      #:*opt-enable-pure-call-optimization*
      #:*opt-enable-sealed-gf-devirtualization*
      #:opt-pass-schedule-local

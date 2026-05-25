@@ -695,8 +695,8 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
          (osr-entry-points nil))
     (multiple-value-setq (optimized leaf-p)
       (let ((cl-cc/optimize:*skip-optimizer-passes*
-              (or cl-cc/optimize:*skip-optimizer-passes*
-                  (zerop compilation-tier))))
+               (or cl-cc/optimize:*skip-optimizer-passes*
+                   (zerop compilation-tier))))
         (apply #'optimize-instructions instructions opts)))
     (multiple-value-setq (deopt-info osr-entry-points)
       (%build-deopt-info instructions))

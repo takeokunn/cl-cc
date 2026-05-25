@@ -78,8 +78,10 @@
       (:file "io-tests")
       (:file "io-runners-tests")
       (:file "string-builder-tests")
-      (:file "runtime-stdlib-2-vm-tests")
-      (:file "vm-mop-tests")))
+       (:file "runtime-stdlib-2-vm-tests")
+       (:file "runtime-stdlib-3-tests")
+       (:file "runtime-stdlib-3-numeric-tests")
+       (:file "vm-mop-tests")))
     (:module "ast-tests"
      :pathname "packages/ast/tests"
      :serial t
@@ -218,8 +220,10 @@
      (:file "macros-sequence-fold-tests")
      (:file "macros-stdlib-list-set-tests")
       (:file "fr-555-copy-structure-tests")
-      (:file "syntax-rules-tests")
-      (:file "runtime-stdlib-2-expand-tests")))
+       (:file "syntax-rules-tests")
+        (:file "runtime-stdlib-2-expand-tests")
+        (:file "runtime-stdlib-3-expander-tests")
+        (:file "runtime-stdlib-3-sequence-tests")))
    (:module "type-tests"
     :pathname "packages/type/tests"
     :serial t
@@ -486,9 +490,11 @@
      (:file "heap-gc-tests")
      (:file "heap-trace-tests")
       (:file "gc-write-barrier-tests")
-       (:file "runtime-subsystem-fr-tests")
-       (:file "runtime-stdlib-2-runtime-tests")
-       (:file "continuous-profile-tests")
+         (:file "runtime-subsystem-fr-tests")
+         (:file "runtime-stdlib-2-runtime-tests")
+         (:file "runtime-stdlib-3-os-tests")
+         (:file "runtime-stdlib-3-image-tests")
+        (:file "continuous-profile-tests")
        (:file "value-tests")
       (:file "frame-tests")))
    (:module "bytecode-tests"

@@ -50,6 +50,35 @@ violation was found.  All others return NIL when there is no accumulator."
 
 ;;; ── The LOOP macro ───────────────────────────────────────────────────────
 
+(our-defmacro iota (n &optional (start 0) (step 1))
+  "Return a list of N arithmetic sequence values: START, START+STEP, ..."
+  (let ((nv (gensym "N")) (sv (gensym "START")) (stepv (gensym "STEP"))
+        (i (gensym "I")) (acc (gensym "ACC")))
+    `(let ((,nv ,n) (,sv ,start) (,stepv ,step) (,acc nil))
+       (dotimes (,i ,nv (nreverse ,acc))
+         (setq ,acc (cons (+ ,sv (* ,i ,stepv)) ,acc))))))
+
+(defun %loop-iota-pattern (clauses)
+  "Return an IOTA expansion for `(loop for i from 0 below n collect i)`, or NIL."
+  (when (and (= (length clauses) 8)
+             (loop-kw-p (first clauses) "FOR")
+             (symbolp (second clauses))
+             (loop-kw-p (third clauses) "FROM")
+             (eql (fourth clauses) 0)
+             (loop-kw-p (fifth clauses) "BELOW")
+             (loop-kw-p (seventh clauses) "COLLECT")
+             (eq (second clauses) (eighth clauses)))
+    `(iota ,(sixth clauses))))
+
+(defun %loop-nested-register-note (iterations)
+  "Return a declaration hint for nested arithmetic loops.
+
+Lexical LET*/TAGBODY lowering already exposes inner iteration variables to native
+register allocation. This declaration documents the intent and lets CL hosts avoid
+spurious dynamic-extent assumptions while keeping semantics unchanged."
+  (when (> (count :from iterations :key (lambda (it) (getf it :type))) 1)
+    '(declare (optimize (speed 3)))))
+
 (our-defmacro loop (&rest clauses)
   "LOOP macro with full ANSI iteration, accumulation, filtering, and control.
 
@@ -66,7 +95,8 @@ Accumulation: COLLECT/SUM/COUNT/MAXIMIZE/MINIMIZE/APPEND/NCONC expr [INTO var]
 Filtering:    WHEN/IF/UNLESS test
 Control:      WHILE/UNTIL test   ALWAYS/NEVER/THEREIS test
 Body:         DO forms...   INITIALLY forms...   FINALLY forms..."
-  (let* ((ir           (parse-loop-clauses clauses))
+  (or (%loop-iota-pattern clauses)
+      (let* ((ir           (parse-loop-clauses clauses))
          (iterations   (getf ir :iterations))
          (body         (getf ir :body))
          (accumulations (getf ir :accumulations))
@@ -133,7 +163,9 @@ Body:         DO forms...   INITIALLY forms...   FINALLY forms..."
             (assembled-finally (%loop-replace-finish finally end-tag)))
         `(block ,(or loop-name nil)  ; FR-638: named loop
            (let* ,(nreverse bindings)
-             ,@initially
+              ,@(let ((hint (%loop-nested-register-note iterations)))
+                  (when hint (list hint)))
+              ,@initially
              (tagbody
                 ,start-tag
                 ,@(mapcar (lambda (test) `(when ,test (go ,end-tag))) (nreverse end-tests))
@@ -143,4 +175,4 @@ Body:         DO forms...   INITIALLY forms...   FINALLY forms..."
                 (go ,start-tag)
                 ,end-tag)
              ,@assembled-finally
-             ,@(%loop-build-return-forms result-form acc-vars conditions)))))))
+              ,@(%loop-build-return-forms result-form acc-vars conditions))))))))

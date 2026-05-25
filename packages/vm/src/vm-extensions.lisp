@@ -398,10 +398,20 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 ;;; FR-884: floor two-value return
-(defun vm-floor (dividend divisor)
-  "FR-884: floor with two-value return (quotient and remainder)."
-  (multiple-value-bind (q r) (floor dividend divisor)
-    (values q r)))
+(defun vm-floor (dividend &optional (divisor 1))
+  "FR-884/FR-955: floor with two-value return.
+
+For native VM ratios, return an integer quotient and a normalized VM ratio
+remainder.  Other numbers preserve the existing host-compatible behavior."
+  (if (or (vm-ratio-p dividend) (vm-ratio-p divisor))
+      (let ((ratio (vm-rational-div dividend divisor)))
+        (multiple-value-bind (q r) (vm-bignum-burnikel-ziegler-divide
+                                    (vm-ratio-numerator ratio)
+                                    (vm-ratio-denominator ratio)
+                                    :rounding :floor)
+          (values q (vm-make-ratio r (vm-ratio-denominator ratio)))))
+      (multiple-value-bind (q r) (floor dividend divisor)
+        (values q r))))
 
 ;;; FR-885: ffloor/fceiling/ftruncate/fround
 (defun vm-ffloor (dividend divisor)

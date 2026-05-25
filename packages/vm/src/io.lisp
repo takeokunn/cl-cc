@@ -28,6 +28,30 @@
 (defparameter *print-circle* nil
   "When true, detect and mark circular/shared printed structure.")
 
+(defparameter *print-case* :upcase
+  "Case conversion used when printing symbols: :UPCASE, :DOWNCASE, or :CAPITALIZE.")
+
+(defparameter *print-escape* t
+  "When true, print escape characters needed for READ to recover the object.")
+
+(defparameter *print-gensym* t
+  "When true, print uninterned symbols with the #: prefix.")
+
+(defparameter *print-array* t
+  "When true, print array contents when possible.")
+
+(defparameter *print-lines* nil
+  "Maximum pretty-printer lines to emit, or NIL for unlimited lines.")
+
+(defparameter *print-right-margin* nil
+  "Pretty-printer target line width, or NIL for the implementation default.")
+
+(defparameter *default-external-format* :utf-8
+  "Default external format for VM character streams.")
+
+(defvar *vm-stream-external-formats* (make-hash-table :test #'eq)
+  "Side table mapping host stream objects to VM external-format designators.")
+
 (defstruct vm-circle-print-context
   (counts (make-hash-table :test #'eq))
   (labels (make-hash-table :test #'eq))
@@ -89,7 +113,14 @@
   ctx)
 
 (defun %vm-circle-write-atom (object stream escape-p)
-  (let ((cl:*print-escape* escape-p))
+  (let ((cl:*print-escape* escape-p)
+        (cl:*print-case* *print-case*)
+        (cl:*print-base* *print-base*)
+        (cl:*print-radix* *print-radix*)
+        (cl:*print-gensym* *print-gensym*)
+        (cl:*print-array* *print-array*)
+        (cl:*print-lines* *print-lines*)
+        (cl:*print-right-margin* *print-right-margin*))
     (write object :stream stream)))
 
 (defun %vm-circle-write-object (object stream ctx escape-p)
@@ -123,11 +154,14 @@
                        (%vm-circle-write-object tail stream ctx escape-p)))
        (write-char #\) stream))
       ((vectorp object)
-       (write-string "#(" stream)
-       (loop for i from 0 below (length object)
-             do (when (plusp i) (write-char #\Space stream))
-                (%vm-circle-write-object (aref object i) stream ctx escape-p))
-       (write-char #\) stream))
+       (if *print-array*
+           (progn
+             (write-string "#(" stream)
+             (loop for i from 0 below (length object)
+                   do (when (plusp i) (write-char #\Space stream))
+                      (%vm-circle-write-object (aref object i) stream ctx escape-p))
+             (write-char #\) stream))
+           (format stream "#<~A ~D>" (type-of object) (length object))))
       ((hash-table-p object)
        (write-string "#<HASH-TABLE" stream)
        (maphash (lambda (key value)
@@ -149,7 +183,19 @@
 (defun vm-write-object-to-string (object &key (escape t) (circle *print-circle*))
   "Return OBJECT's printed representation, using the host fast path unless CIRCLE is true."
   (if (not circle)
-      (let ((cl:*print-escape* escape)) (write-to-string object))
+      (let ((cl:*print-escape* escape)
+            (cl:*print-case* *print-case*)
+            (cl:*print-base* *print-base*)
+            (cl:*print-radix* *print-radix*)
+            (cl:*print-gensym* *print-gensym*)
+            (cl:*print-array* *print-array*)
+            (cl:*print-lines* *print-lines*)
+            (cl:*print-right-margin* *print-right-margin*)
+            (cl:*print-level* *print-level*)
+            (cl:*print-length* *print-length*)
+            (cl:*print-pretty* *print-pretty*)
+            (cl:*print-readably* *print-readably*))
+        (write-to-string object))
       (let ((ctx (make-vm-circle-print-context)))
         (%vm-circle-labeling-visit object ctx (make-hash-table :test #'eq))
         (%vm-circle-assign-labels ctx)
@@ -205,6 +251,160 @@
 
 (defun %unsupported (feature)
   (error "~a is unsupported on this host Lisp" feature))
+
+(defun %vm-normalize-external-format (format)
+  "Normalize VM external format designators to canonical keywords."
+  (case (or format *default-external-format*)
+    ((:utf8 :utf-8) :utf-8)
+    ((:utf16 :utf-16 :utf-16le) :utf-16le)
+    (:utf-16be :utf-16be)
+    ((:utf32 :utf-32 :utf-32le) :utf-32le)
+    (:utf-32be :utf-32be)
+    ((:latin1 :latin-1 :iso-8859-1) :latin-1)
+    (:ascii :ascii)
+    (otherwise (error "Unsupported external format: ~S" format))))
+
+(defun %vm-host-external-format (format)
+  "Return the closest host external-format designator for FORMAT."
+  (case (%vm-normalize-external-format format)
+    (:latin-1 :latin-1)
+    (otherwise (%vm-normalize-external-format format))))
+
+(defun %vm-signal-or-substitute-encoding-error (mode replacement)
+  (ecase mode
+    (:error (error "Character cannot be represented in requested external format"))
+    (:replace replacement)
+    (:ignore nil)))
+
+(defun %vm-replacement-character ()
+  (or (code-char #xfffd) #\?))
+
+(defun %vm-encode-latin/ascii (string limit error-mode)
+  (let ((bytes (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+    (loop for ch across string
+          for code = (char-code ch)
+          do (cond
+               ((<= code limit) (vector-push-extend code bytes))
+               (t (let ((sub (%vm-signal-or-substitute-encoding-error error-mode 63)))
+                    (when sub (vector-push-extend sub bytes))))))
+    bytes))
+
+(defun vm-encode-string (string format &key (error-mode :error))
+  "Encode STRING into an (UNSIGNED-BYTE 8) vector using FORMAT.
+ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
+  (check-type string string)
+  (let ((format (%vm-normalize-external-format format)))
+    (case format
+      (:ascii (%vm-encode-latin/ascii string 127 error-mode))
+      (:latin-1 (%vm-encode-latin/ascii string 255 error-mode))
+      (otherwise
+       #+sbcl
+       (handler-case
+           (sb-ext:string-to-octets string :external-format (%vm-host-external-format format))
+         (error (e)
+           (ecase error-mode
+             (:error (error e))
+             ((:replace :ignore)
+              ;; Re-encode after replacing non-Latin BMP surrogates defensively.
+              (sb-ext:string-to-octets
+               (with-output-to-string (out)
+                 (loop for ch across string
+                       do (if (code-char (char-code ch))
+                              (write-char ch out)
+                              (unless (eq error-mode :ignore) (write-char (%vm-replacement-character) out)))))
+               :external-format (%vm-host-external-format format))))))
+       #-sbcl
+       (declare (ignore error-mode))
+       #-sbcl
+       (error "VM external-format encoding requires SBCL for ~S" format)))))
+
+(defun %vm-coerce-octets (bytes)
+  (cond
+    ((typep bytes '(array (unsigned-byte 8) (*))) bytes)
+    ((vectorp bytes)
+     (let ((out (make-array (length bytes) :element-type '(unsigned-byte 8))))
+       (dotimes (i (length bytes) out) (setf (aref out i) (aref bytes i)))))
+    ((listp bytes)
+     (make-array (length bytes) :element-type '(unsigned-byte 8) :initial-contents bytes))
+    (t (error "Expected octet vector/list: ~S" bytes))))
+
+(defun %vm-detect-bom (bytes requested-format)
+  "Return canonical format and starting offset after recognizing a Unicode BOM."
+  (let ((n (length bytes))
+        (fmt (%vm-normalize-external-format requested-format)))
+    (cond
+      ((and (>= n 4) (= (aref bytes 0) #xFF) (= (aref bytes 1) #xFE)
+            (= (aref bytes 2) 0) (= (aref bytes 3) 0))
+       (values :utf-32le 4))
+      ((and (>= n 4) (= (aref bytes 0) 0) (= (aref bytes 1) 0)
+            (= (aref bytes 2) #xFE) (= (aref bytes 3) #xFF))
+       (values :utf-32be 4))
+      ((and (>= n 3) (= (aref bytes 0) #xEF) (= (aref bytes 1) #xBB) (= (aref bytes 2) #xBF))
+       (values :utf-8 3))
+      ((and (>= n 2) (= (aref bytes 0) #xFF) (= (aref bytes 1) #xFE))
+       (values :utf-16le 2))
+      ((and (>= n 2) (= (aref bytes 0) #xFE) (= (aref bytes 1) #xFF))
+       (values :utf-16be 2))
+      (t (values fmt 0)))))
+
+(defun %vm-decode-latin/ascii (bytes limit error-mode)
+  (with-output-to-string (out)
+    (loop for byte across bytes
+          do (cond
+               ((<= byte limit) (write-char (code-char byte) out))
+               (t (ecase error-mode
+                    (:error (error "Invalid byte ~D for requested external format" byte))
+                    (:replace (write-char (%vm-replacement-character) out))
+                    (:ignore nil)))))))
+
+(defun vm-decode-bytes (bytes format &key (error-mode :error))
+  "Decode BYTES into a string using FORMAT, auto-removing UTF BOMs."
+  (let ((octets (%vm-coerce-octets bytes)))
+    (multiple-value-bind (format start) (%vm-detect-bom octets format)
+      (let ((payload (if (zerop start) octets (subseq octets start))))
+        (case format
+          (:ascii (%vm-decode-latin/ascii payload 127 error-mode))
+          (:latin-1 (%vm-decode-latin/ascii payload 255 error-mode))
+          (otherwise
+           #+sbcl
+           (handler-case
+               (sb-ext:octets-to-string payload :external-format (%vm-host-external-format format))
+             (error (e)
+               (ecase error-mode
+                 (:error (error e))
+                 (:replace (string (%vm-replacement-character)))
+                 (:ignore ""))))
+           #-sbcl
+           (declare (ignore error-mode))
+           #-sbcl
+           (error "VM external-format decoding requires SBCL for ~S" format)))))))
+
+(defun vm-stream-external-format (stream)
+  "Return STREAM's VM external format, defaulting to *DEFAULT-EXTERNAL-FORMAT*."
+  (gethash stream *vm-stream-external-formats* *default-external-format*))
+
+(defun vm-set-stream-external-format (stream fmt)
+  "Associate STREAM with external format FMT and return FMT's canonical form."
+  (setf (gethash stream *vm-stream-external-formats*)
+        (%vm-normalize-external-format fmt)))
+
+(defun vm-open (file &key (direction :input) (if-exists :supersede)
+                       if-does-not-exist if-not-exists
+                       (external-format *default-external-format*) element-type)
+  "Open FILE with VM external-format normalization and stream metadata tracking."
+  (let* ((fmt (%vm-normalize-external-format external-format))
+         (args (append (list file :direction direction
+                             :if-exists if-exists
+                             :if-does-not-exist (or if-does-not-exist if-not-exists
+                                                   (case direction
+                                                     ((:output :io) :create)
+                                                     (:probe nil)
+                                                     (otherwise :error))))
+                       (when element-type (list :element-type element-type))
+                       (list :external-format (%vm-host-external-format fmt))))
+         (stream (apply #'open args)))
+    (when stream (vm-set-stream-external-format stream fmt))
+    stream))
 
 (defun %socket-class (family)
   #+sbcl
@@ -569,22 +769,34 @@
 (defmacro with-standard-io-syntax (&body body)
   "Execute BODY with ANSI standard I/O control variables bound to defaults."
   `(let ((*print-base* 10)
-         (*print-radix* nil)
-         (*print-circle* nil)
-         (*print-pretty* nil)
-         (*print-level* nil)
-         (*print-length* nil)
-         (*print-readably* nil)
-         (*print-pprint-dispatch* (copy-pprint-dispatch nil))
-         (*readtable* (copy-readtable nil))
-         (cl:*print-base* 10)
-         (cl:*print-radix* nil)
-         (cl:*print-circle* nil)
-         (cl:*print-pretty* nil)
-         (cl:*print-level* nil)
-         (cl:*print-length* nil)
-         (cl:*print-readably* nil)
-         (cl:*readtable* (cl:copy-readtable nil)))
+          (*print-radix* nil)
+          (*print-circle* nil)
+          (*print-pretty* nil)
+          (*print-level* nil)
+          (*print-length* nil)
+          (*print-case* :upcase)
+          (*print-escape* t)
+          (*print-gensym* t)
+          (*print-array* t)
+          (*print-lines* nil)
+          (*print-right-margin* nil)
+          (*print-readably* nil)
+          (*print-pprint-dispatch* (copy-pprint-dispatch nil))
+          (*readtable* (copy-readtable nil))
+          (cl:*print-base* 10)
+          (cl:*print-radix* nil)
+          (cl:*print-circle* nil)
+          (cl:*print-pretty* nil)
+          (cl:*print-level* nil)
+          (cl:*print-length* nil)
+          (cl:*print-case* :upcase)
+          (cl:*print-escape* t)
+          (cl:*print-gensym* t)
+          (cl:*print-array* t)
+          (cl:*print-lines* nil)
+          (cl:*print-right-margin* nil)
+          (cl:*print-readably* nil)
+          (cl:*readtable* (cl:copy-readtable nil)))
      ,@body))
 
 (defclass vm-io-state (vm-state)
