@@ -1,12 +1,12 @@
 # Runtime: Core & Data Structures
 
-**Status: ✅ COMPLETE (51/52 FRs implemented)**
+**Status: ✅ COMPLETE (52/52 FRs implemented)**
 
 Lisp runtime optimization, string/symbol/exception optimization, runtime infrastructure, data structure/sequence optimization, runtime extensions, collection optimization.
 
-> ⚠️ FR-045 (TRMC / Tail Recursion Modulo Cons) is the sole unimplemented feature.
-> All other 51 FRs are implemented with passing tests (7759 pass, 0 fail at commit 44f4a65).
-> Verified: 2026-05-23
+> ✅ FR-045 (TRMC / Tail Recursion Modulo Cons) is implemented across the CPS and optimizer layers.
+> All 52 FRs are implemented with passing tests.
+> Verified: 2026-05-25
 
 ---
 
@@ -45,13 +45,15 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
   - 現状: 常に `butlast`/`append` でリスト操作が発生
 - **難易度**: Low
 
-#### FR-045: Tail Recursion Modulo Cons (TRMC) ⚠️ NOT YET IMPLEMENTED
+#### FR-045: Tail Recursion Modulo Cons (TRMC) ✅
 
-- **対象**: `packages/compile/src/codegen.lisp` + `packages/compile/src/cps.lisp`
+- **対象**: `packages/cps/src/cps.lisp`, `packages/optimize/src/optimizer-trmc.lisp`, `packages/optimize/src/optimizer-pipeline.lisp`, `packages/expand/src/pattern-opt-131.lisp`
 - **内容**:
-  - `(cons x (f y))` が末尾位置にある場合、アキュムレータ変換で反復に変換
-  - `map`/`filter` 相当の再帰リスト構築がO(n)スタック消費しなくなる
-  - GCC の `-foptimize-sibling-calls` の Lisp版
+  - 末尾位置の `(cons x (self ...))` / cons-chain を検出し、`labels` 内部ワーカー + アキュムレータへ変換
+  - CPS層は `if` / `progn` / `block` / `let` / `let*` ラッパをまたいだ自己再帰 cons-chain を処理
+  - optimizer層は宣言 `(optimize (tail-recursion-modulo-cons t))` または強制実行時に `list*` 終端パターンも処理
+  - 非再帰の dotted-list base は変換せず、base case は `nreverse` / `nreconc` で元の順序と末尾を保持
+  - `map`/`filter` 相当の再帰リスト構築でスタック消費を抑制する Lisp版 sibling-call/list-build 最適化
 - **難易度**: Hard
 
 #### FR-046: Condition System Zero-Cost Fast Path ✅

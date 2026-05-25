@@ -180,8 +180,12 @@
    #:encode-double #:decode-double
    #:encode-pointer #:decode-pointer #:pointer-tag
    #:encode-char #:decode-char
-   #:encode-bool
-   ;; CL interop
+    #:encode-bool
+    #:+rt-bignum-type-tag+ #:+rt-bignum-digit-base+
+    #:rt-native-bignum-allocate #:rt-native-bignum-p
+    #:rt-native-bignum-to-integer #:rt-native-integer->value
+    #:rt-native-bignum-add #:rt-native-bignum-sub #:rt-native-bignum-mul
+    ;; CL interop
    #:cl-value->val #:val->cl-value
    ;; ---------------------------------------------------------------
    ;; Register file and stack frames (frame.lisp)

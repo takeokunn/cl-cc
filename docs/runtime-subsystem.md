@@ -784,7 +784,7 @@ Inline caches, safepoints, numeric tower, FFI, debugging/profiling, concurrent r
 #### FR-615: Full Proper Tail Calls (完全末尾呼び出し最適化)
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen.lisp`
-- **現状**: FR-045 (TRMC) は `(cons x (f y))` パターンのみ。相互再帰の末尾呼び出し最適化は限定的
+- **現状**: FR-045 (TRMC) は自己再帰の cons-chain / `list*` パターンをCPS層とoptimizer層で実装済み。ただし相互再帰 `(f → g → f)` のTRMC/TCOはまだ限定的で、FR-615の完全末尾呼び出し最適化の対象として残る
 - **内容**:
   - CPS変換後の全末尾位置を検出（`ast-tail-position-p`述語）
   - 末尾呼び出し位置の `vm-call` → `vm-tail-call` 命令に変換
