@@ -80,8 +80,9 @@ Gensym-hygienic expansions are never cached."
   (and (consp form)
        (symbolp (car form))
        (member (symbol-name (car form))
-                '("DECLAIM" "DEFINE-COMPILER-MACRO" "DEFINE-DEFTRANSFORM")
-                :test #'string=)))
+                 '("DECLAIM" "DEFINE-COMPILER-MACRO" "DEFINE-DEFTRANSFORM"
+                   "AWAIT" "ASYNC-HANDLER")
+                 :test #'string=)))
 
 (defun %cacheable-macroexpansion-p (form)
   "Return T when FORM is safe to reuse from the macroexpansion cache."

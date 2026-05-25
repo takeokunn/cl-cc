@@ -72,6 +72,12 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
   #-sbcl nil
   "Command-line arguments visible to VM stdlib code.")
 
+(defparameter *command-line-arguments* *command-line-args*
+  "Stable script-visible command-line arguments after the script name.")
+
+(defparameter *script-argv* *command-line-arguments*
+  "Compatibility alias for script-mode argv.")
+
 (defun getenv (name)
   "Return environment variable NAME, preserving vm-getenv taint marking."
   (vm-getenv name))
@@ -161,6 +167,8 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
           getenv
           setenv
           *command-line-args*
+          *command-line-arguments*
+          *script-argv*
           exit
           quit
           *features*

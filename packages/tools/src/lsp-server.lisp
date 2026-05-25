@@ -8,8 +8,8 @@
 (defstruct (lsp-server (:constructor make-lsp-server (&key)))
   (documents (make-hash-table :test #'equal) :type hash-table)
   (symbols (make-hash-table :test #'equal) :type hash-table)
-  (shutdown-requested-p nil :type boolean)
-  (running-p nil :type boolean))
+  (shutdown-requested-p nil)
+  (running-p nil))
 
 (defun %assoc= (key alist)
   (cdr (assoc key alist :test #'string=)))

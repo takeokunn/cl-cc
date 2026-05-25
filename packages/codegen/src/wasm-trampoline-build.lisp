@@ -397,22 +397,6 @@ compare tags/payloads without changing the trampoline architecture."
 ;;; Step 6: Build complete WAT body for a single wasm-function-def
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun wasm-function-param-regs (func-def)
-  "Return the VM registers used as FUNC-DEF's closure parameters."
-  (or (wasm-func-params func-def)
-      (when (fboundp 'wasm-func-captures)
-        (let ((captures (funcall (symbol-function 'wasm-func-captures) func-def)))
-          (when (listp captures)
-            captures)))
-      nil))
-
-(defun initialize-wasm-param-locals (reg-map param-regs)
-  "Reserve local indices 0..N-1 for PARAM-REGS in REG-MAP."
-  (loop for reg in param-regs
-        for index from 0
-        do (setf (gethash reg (wasm-reg-map-table reg-map)) index))
-  reg-map)
-
 (defun build-wasm-function-wat (func-def)
   "Build the WAT trampoline body for FUNC-DEF.
    Populates the :body slot with a list containing a single WAT string.

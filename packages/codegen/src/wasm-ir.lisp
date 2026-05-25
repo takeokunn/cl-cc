@@ -284,8 +284,24 @@
      :known-types (make-hash-table)
      :fixnum-ranges (make-hash-table)
      :array-element-types (make-hash-table)
-     :try-stack nil
+    :try-stack nil
    :try-depth 0))
+
+(defun wasm-function-param-regs (func-def)
+  "Return the VM registers used as FUNC-DEF's closure parameters."
+  (or (wasm-func-params func-def)
+      (when (fboundp 'wasm-func-captures)
+        (let ((captures (funcall (symbol-function 'wasm-func-captures) func-def)))
+          (when (listp captures)
+            captures)))
+      nil))
+
+(defun initialize-wasm-param-locals (reg-map param-regs)
+  "Reserve local indices 0..N-1 for PARAM-REGS in REG-MAP."
+  (loop for reg in param-regs
+        for index from 0
+        do (setf (gethash reg (wasm-reg-map-table reg-map)) index))
+  reg-map)
 
 (defun wasm-reg-to-local (reg-map reg)
   "Return the WASM local index for VM register REG.

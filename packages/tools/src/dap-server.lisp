@@ -11,7 +11,7 @@
   (variables (make-hash-table :test #'eql) :type hash-table)
   (next-variable-reference 2 :type integer)
   (vm-state nil)
-  (running-p nil :type boolean))
+  (running-p nil))
 
 (defun read-jsonrpc-message (&optional (stream *standard-input*))
   (cl-cc/tools/lsp:read-jsonrpc-message stream))

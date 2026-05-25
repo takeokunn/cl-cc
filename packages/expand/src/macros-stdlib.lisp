@@ -51,9 +51,84 @@
   `(call/cc (lambda (,k)
               (abort-to-prompt 'reset (progn ,@body)))))
 
+(defvar *target-backend* nil
+  "Dynamic macro-expansion target selector used by backend-sensitive stdlib macros.
+Recognized Wasm values are :WASM, :WASM32, :WASM64, :WASM32-WASI, and
+:WASM64-UNKNOWN-UNKNOWN.  NIL means the normal VM/native synchronous path.")
+
+(defun %target-backend-symbol-value (package-name symbol-name)
+  "Return SYMBOL-NAME's value in PACKAGE-NAME when it is bound, otherwise NIL."
+  (let ((package (find-package package-name)))
+    (when package
+      (multiple-value-bind (symbol status) (find-symbol symbol-name package)
+        (when (and status (boundp symbol))
+          (symbol-value symbol))))))
+
+(defun %current-target-backend ()
+  "Return the best available compile target backend for macro expansion."
+  (or *target-backend*
+      (%target-backend-symbol-value :cl-cc/compile "*TARGET-BACKEND*")
+      (%target-backend-symbol-value :cl-cc/codegen "*TARGET-BACKEND*")
+      (%target-backend-symbol-value :cl-cc/emit "*TARGET-BACKEND*")
+      (let ((env (uiop:getenv "CLCC_TARGET_BACKEND")))
+        (when (and env (plusp (length env)))
+          (intern (string-upcase env) :keyword)))))
+
+(defun %wasm-target-backend-p (&optional (target (%current-target-backend)))
+  "Return true when TARGET denotes a WebAssembly backend."
+  (let ((name (cond
+                ((keywordp target) target)
+                ((symbolp target) (intern (symbol-name target) :keyword))
+                ((stringp target) (intern (string-upcase target) :keyword))
+                (t nil))))
+    (and (member name '(:wasm :wasm32 :wasm64 :wasm32-wasi :wasm64-unknown-unknown)
+                 :test #'eq)
+         t)))
+
+(defun %wasm-promise-reference-p (value)
+  "Return true for values that represent opaque Wasm/JS Promise references.
+
+The Wasm backend treats this function as a runtime predicate over externref-backed
+JS Promise objects.  The host fallback also recognizes simple tagged values so
+macro tests and VM execution can exercise the same branch without a JS engine."
+  (or (and (consp value)
+           (or (eq (car value) :wasm-promise)
+               (eq (car value) 'wasm-promise)))
+      (and (hash-table-p value)
+           (gethash :wasm-promise value))
+      (and (typep value 'structure-object)
+           (ignore-errors (slot-value value 'promise)))))
+
+(defun %wasm-js-await (promise)
+  "Backend intrinsic for FR-217 Promise await lowering.
+
+In Wasm emission this call is lowered to JS Promise Integration (`await' via
+WebAssembly.Suspending/promising glue).  On the host it is intentionally a
+synchronous identity fallback, which preserves non-Wasm VM semantics."
+  promise)
+
+(defun %wasm-js-catch (promise rejection-handler)
+  "Backend intrinsic for FR-217 Promise `.catch()' lowering.
+
+Wasm emission lowers this call to PROMISE.catch(REJECTION-HANDLER), where JS
+rejections are converted into CL condition dispatch.  The host fallback returns
+PROMISE unchanged unless it is a tagged rejected promise of the form
+(:WASM-PROMISE :REJECTED CONDITION)."
+  (if (and (consp promise)
+           (eq (car promise) :wasm-promise)
+           (eq (getf (cdr promise) :state) :rejected))
+      (funcall rejection-handler (getf (cdr promise) :reason))
+      promise))
+
 (our-defmacro await (form)
-  "FR-217 async API stub for CL:AWAIT; preserve FORM until Wasm JS promise lowering is selected."
-  form)
+  "FR-217 async API: await Wasm JS Promise refs, synchronously pass through values."
+  (if (%wasm-target-backend-p)
+      (let ((value (gensym "AWAIT-VALUE")))
+        `(let ((,value ,form))
+           (if (%wasm-promise-reference-p ,value)
+               (%wasm-js-await ,value)
+               ,value)))
+      form))
 
 (our-defmacro defun-forward (name lambda-list &body body)
   "Declare NAME as forward-referenced and define it with DEFUN."
@@ -62,8 +137,25 @@
      ,@body))
 
 (our-defmacro async-handler (form &body clauses)
-  "FR-217 async API stub for CL:ASYNC-HANDLER; model promise rejection with HANDLER-CASE."
-  `(handler-case (await ,form) ,@clauses))
+  "FR-217 async API: handle promise rejection through CL condition clauses.
+
+On Wasm targets, Promise references are lowered to `.catch()' before AWAIT so JS
+rejections enter the Common Lisp condition system.  On non-Wasm targets this is
+the synchronous HANDLER-CASE fallback."
+  (if (%wasm-target-backend-p)
+      (let ((promise (gensym "ASYNC-PROMISE"))
+            (rejection (gensym "ASYNC-REJECTION")))
+        `(handler-case
+             (let ((,promise ,form))
+               (if (%wasm-promise-reference-p ,promise)
+                   (await (%wasm-js-catch
+                           ,promise
+                           (lambda (,rejection)
+                             (handler-case (error ,rejection)
+                               ,@clauses))))
+                   ,promise))
+           ,@clauses))
+      `(handler-case (await ,form) ,@clauses)))
 
 ;; ROTATEF macro
 (our-defmacro rotatef (&rest places)

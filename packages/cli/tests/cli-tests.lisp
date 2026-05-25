@@ -245,6 +245,40 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
     (%with-temp-file (path content)
       (assert-string= content (cl-cc/cli::%read-command-source path)))))
 
+(deftest fr-808-read-command-source-strips-leading-shebang
+  "FR-808: file read path strips a leading POSIX shebang before parsing."
+  (%with-temp-file (path (format nil "#!/usr/bin/env cl-cc~%(+ 1 2)~%"))
+    (assert-string= (format nil "(+ 1 2)~%")
+                    (cl-cc/cli::%read-command-source path))))
+
+(deftest fr-809-bind-command-line-arguments-installs-stable-api
+  "FR-809: command-line argument binding updates CLI and runtime globals."
+  (let ((state (cl-cc/vm:make-vm-state)))
+    (cl-cc/cli::%bind-command-line-arguments '("alpha" "beta") state)
+    (assert-equal '("alpha" "beta") (cl-cc/cli::cl-cc-argv))
+    (assert-equal '("alpha" "beta") cl-cc:*command-line-arguments*)
+    (assert-equal '("alpha" "beta") cl-cc:*script-argv*)
+    (assert-equal '("alpha" "beta")
+                  (gethash 'cl-cc:*command-line-arguments*
+                           (cl-cc/vm:vm-global-vars state)))))
+
+(deftest fr-917-configure-reproducible-build-sets-stable-metadata
+  "FR-917: reproducible build mode sets deterministic environment and metadata."
+  (let ((old-det (uiop:getenv "CLCC_DETERMINISTIC"))
+        (old-epoch (uiop:getenv "SOURCE_DATE_EPOCH")))
+    (unwind-protect
+         (progn
+           (setf (uiop:getenv "CLCC_DETERMINISTIC") nil
+                 (uiop:getenv "SOURCE_DATE_EPOCH") nil)
+           (let ((metadata (cl-cc/cli::configure-reproducible-build :epoch "123" :seed 7)))
+             (assert-string= "1" (uiop:getenv "CLCC_DETERMINISTIC"))
+             (assert-string= "123" (uiop:getenv "SOURCE_DATE_EPOCH"))
+             (assert-true (cl-cc/cli::cl-cc-deterministic-build-p))
+             (assert-eq :cl-cc-reproducible-build-v1 (getf metadata :format))
+             (assert-= 7 (getf metadata :seed))))
+      (setf (uiop:getenv "CLCC_DETERMINISTIC") old-det
+            (uiop:getenv "SOURCE_DATE_EPOCH") old-epoch))))
+
 (defun %run-do-compile-dump-ir-annotate-source-output (path)
   "Run do-compile dump-ir logic directly: compile-string + %dump-ir-phase.
 We bypass %do-compile because uiop:quit interception (via with-replaced-function

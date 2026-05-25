@@ -467,6 +467,17 @@ The runtime keys map logical plan IDs onto VM profile keys:
 ;;; Language-level parsing
 ;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %pipeline-strip-shebang-line (source)
+  "Return SOURCE with a leading POSIX #! interpreter line removed."
+  (let* ((text (or source ""))
+         (newline (position #\Newline text))
+         (first-line (if newline (subseq text 0 newline) text)))
+    (if (and (>= (length first-line) 2)
+             (char= (char first-line 0) #\#)
+             (char= (char first-line 1) #\!))
+        (if newline (subseq text (1+ newline)) "")
+        text)))
+
 (defun parse-source-for-language (source language &key source-file)
   "Parse SOURCE according to LANGUAGE, returning top-level forms for compilation.
 :LISP always returns normal s-expressions; when SOURCE-FILE is provided, a second
@@ -474,9 +485,10 @@ value carries top-level source locations for later AST annotation.
 :PHP calls parse-php-source which returns AST nodes directly."
   (cond
     ((eq language :lisp)
-     (if source-file
-         (%lisp-top-level-source-forms-and-locations source source-file)
-         (values (parse-all-forms source) nil)))
+     (let ((clean-source (%pipeline-strip-shebang-line source)))
+       (if source-file
+           (%lisp-top-level-source-forms-and-locations clean-source source-file)
+           (values (parse-all-forms clean-source) nil))))
     ((eq language :php)  (parse-php-source source))
     (t (error "Unknown language: ~S" language))))
 

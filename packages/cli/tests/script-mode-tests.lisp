@@ -35,3 +35,11 @@
   (let ((wrapped (cl-cc/cli::%source-with-script-bindings "(defun cl-cc:main (args) args)" '("x" "y"))))
     (assert-true (search "*SCRIPT-ARGV*" (string-upcase wrapped)))
     (assert-true (search "CL-CC:MAIN" (string-upcase wrapped)))))
+
+(deftest script-mode-parse-args-accepts-reproducible-alias
+  "FR-917: --reproducible is accepted as the public deterministic build flag."
+  :timeout 10
+  (let ((parsed (cl-cc/cli:parse-args '("compile" "tool.lisp" "--reproducible"))))
+    (assert-true (cl-cc/cli:flag parsed "--reproducible"))
+    (assert-true (cl-cc/cli::compile-opts-deterministic
+                  (cl-cc/cli::%parse-compile-opts parsed)))))

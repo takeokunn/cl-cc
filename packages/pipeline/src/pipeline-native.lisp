@@ -654,12 +654,22 @@ Returns the output file path on success."
           (%native-read-character-stream-loop in buf 0 (length buf)))
       (close in))))
 
+(defun %native-strip-shebang-line (source)
+  "Return SOURCE with a leading POSIX #! interpreter line removed."
+  (let* ((text (or source ""))
+         (newline (position #\Newline text))
+         (first-line (if newline (subseq text 0 newline) text)))
+    (if (and (>= (length first-line) 2)
+             (char= (char first-line 0) #\#)
+             (char= (char first-line 1) #\!))
+        (if newline (subseq text (1+ newline)) "")
+        text)))
+
 (defun %native-read-lisp-file (input-file)
-  (let ((in (open input-file :direction :input)))
-    (unwind-protect
-        (let ((*read-eval* nil))
-          (%native-read-lisp-forms-loop in (list :eof) nil))
-      (close in))))
+  (let ((source (%native-strip-shebang-line (%native-read-character-file input-file))))
+    (with-input-from-string (in source)
+      (let ((*read-eval* nil))
+        (%native-read-lisp-forms-loop in (list :eof) nil)))))
 
 (defun %native-read-file-source (input-file language)
   (if (eq language :php)
