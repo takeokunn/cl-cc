@@ -245,6 +245,7 @@ let
     cl-cc = {
       src = [
         (projectRoot + "/packages")
+        (projectRoot + "/src")
         (projectRoot + "/cl-cc.asd")
         (projectRoot + "/cl-cc-test.asd")
       ];
