@@ -106,7 +106,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: Staple / MGL-PAX (CL doc generators)。APIドキュメントの自動生成
 - **難易度**: Medium
 
-#### FR-322: Continuous Benchmarking CI (継続的ベンチマークCI)
+#### ✅ FR-322: Continuous Benchmarking CI (継続的ベンチマークCI)
 
 - **対象**: `.github/workflows/benchmark.yml`, ベンチマーク結果ストレージ
 - **現状**: CIはテスト実行のみ（`.github/workflows/ci.yml:1-33`, `nix flake check`）。性能追跡なし
@@ -166,7 +166,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: 複数パッケージを跨ぐソースファイルのセルフホスティング対応
 - **難易度**: Medium
 
-#### FR-505: compile-file セルフホスト読み込み
+#### ⚠️ FR-505: compile-file セルフホスト読み込み
 
 - **対象**: `packages/pipeline/pipeline.lisp`
 - **現状**: `compile-file`相当の機能でセルフホスト読み込みが`#.`/`#+`/`#-`の一部リーダーマクロで誤動作する可能性
@@ -254,7 +254,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: GCC `-fdevirtualize-speculatively` / LLVM devirt pass。CLOSのメソッド呼び出しが最大のオーバーヘッド源の一つ
 - **難易度**: Hard
 
-#### FR-338: Whole-Program Dead Code Elimination (全プログラムDCE)
+#### ⚠️ FR-338: Whole-Program Dead Code Elimination (全プログラムDCE)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/binary/src/macho.lisp`
 - **現状**: DCEは関数内レベルのみ（`opt-pass-dead-code`）。未呼び出し関数はバイナリに残留
@@ -354,7 +354,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: テストの質の定量指標。高カバレッジでも低mutation scoreならテストが弱い
 - **難易度**: Hard
 
-#### FR-353: Property-Based Testing Integration (PBT深化)
+#### ⚠️ FR-353: Property-Based Testing Integration (PBT深化)
 
 - **対象**: `packages/testing-framework/src/framework-fuzz.lisp`
 - **現状**: `%gen-expr`（`framework-fuzz.lisp`）は文法ベース生成。`deftest-fuzz`マクロは実装済み
@@ -374,7 +374,7 @@ Debugging, diagnostics, developer ecosystem, JIT, LTO, static analysis, SIMD, co
 - **根拠**: GCプレッシャーのホットスポット特定。セルフホスティング時のコンパイラ自身のメモリ使用プロファイリング
 - **難易度**: Medium
 
-#### FR-356: GC Statistics & Tuning API (GC統計・チューニングAPI)
+#### ✅ FR-356: GC Statistics & Tuning API (GC統計・チューニングAPI)
 
 - **対象**: `packages/runtime/src/gc.lisp`
 - **現状**: 2世代GC（`gc.lisp`）の統計出力・チューニングパラメータ公開なし

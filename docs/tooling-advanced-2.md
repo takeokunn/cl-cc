@@ -164,7 +164,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 107 — エコシステム・診断追加
 
-#### 🔶 FR-574: Compilation Database / compile_commands.json (コンパイルデータベース)
+#### ✅ FR-574: Compilation Database / compile_commands.json (コンパイルデータベース)
 
 - **対象**: `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **現状**: 各ファイルのコンパイルオプション・インクルードパスの構造化記録なし
@@ -764,7 +764,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: C/C++プロジェクトへのcl-ccコンポーネント組み込み。企業規模のモノレポ（Bazel/Buck2）でのcl-cc利用
 - **難易度**: Hard
 
-#### 🔶 FR-664: Compiler Directives / Pragma System (コンパイラディレクティブシステム)
+#### ✅ FR-664: Compiler Directives / Pragma System (コンパイラディレクティブシステム)
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`, `packages/parse/src/cl/parser.lisp`
 - **現状**: `(declare ...)` フォームは型宣言と最適化ヒントに限定。汎用コンパイラ制御ディレクティブなし

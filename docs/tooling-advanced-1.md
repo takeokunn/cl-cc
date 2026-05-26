@@ -332,7 +332,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-fomit-frame-pointer` / Clang. RBP1本分のレジスタ節約はx86-64（16本中）で~6%の差
 - **難易度**: Medium
 
-#### 🔶 FR-416: Stack Frame Packing (スタックフレームパッキング)
+#### ⚠️ FR-416: Stack Frame Packing (スタックフレームパッキング)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: ローカル変数のスタック配置にアライメント最適化なし
@@ -488,7 +488,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: LSP 3.16（2020〜）. 大規模CLプロジェクトでの「どこからこの関数が呼ばれるか」確認が困難な問題を解決
 - **難易度**: Medium
 
-#### 🔶 FR-440: Workspace Symbols / Fuzzy Search (ワークスペースシンボル検索)
+#### ✅ FR-440: Workspace Symbols / Fuzzy Search (ワークスペースシンボル検索)
 
 - **対象**: `src/lsp/`
 - **現状**: ファイル内シンボルのみ検索可能（存在するかも未確認）
@@ -516,7 +516,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: perf + DWARF unwinding は2026年のLinux標準プロファイリング手法。プロダクション環境での継続プロファイリングが可能
 - **難易度**: Hard
 
-#### 🔶 FR-444: Flame Graph Generation (フレームグラフ生成)
+#### ✅ FR-444: Flame Graph Generation (フレームグラフ生成)
 
 - **対象**: `packages/cli/src/main.lisp`, FR-316（ベンチマークフレームワーク）
 - **現状**: ベンチマーク結果はテキスト/JSON出力のみ。可視化なし
@@ -780,7 +780,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 98 — 診断・コンパイラ品質向上
 
-#### 🔶 FR-484: "Did You Mean?" Suggestion Engine (候補提示エラーエンジン)
+#### ⚠️ FR-484: "Did You Mean?" Suggestion Engine (候補提示エラーエンジン)
 
 - **対象**: `packages/parse/src/diagnostics.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 未定義変数/関数のエラーメッセージはシンボル名のみ。類似シンボル候補なし
@@ -788,7 +788,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL のtypoエラーメッセージは現在未定義の名前をそのまま表示するだけ。Rustが採用して以来コンパイラのデファクト機能に
 - **難易度**: Easy
 
-#### 🔶 FR-485: Warnings as Errors / -Werror (警告をエラーに昇格)
+#### ✅ FR-485: Warnings as Errors / -Werror (警告をエラーに昇格)
 
 - **対象**: `packages/parse/src/diagnostics.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 警告（`:warning` severity）と診断は分離されているが、ビルド失敗への変換機構なし
@@ -1120,7 +1120,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `__attribute__((symver))` / ELF symbol versioning。共有ライブラリのメジャーバージョン非互換変更を安全に管理
 - **難易度**: Medium
 
-#### 🔶 FR-539: Deprecation API (廃止予定API管理)
+#### ⚠️ FR-539: Deprecation API (廃止予定API管理)
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/parse/src/diagnostics.lisp`
 - **現状**: 廃止予定関数を示す仕組みなし。`(declare (ignore x))`程度の宣言のみ
@@ -1128,7 +1128,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL `(deprecated :early "1.2.3")` / GCC `__attribute__((deprecated))`. APIの進化と後方互換性の管理に必須
 - **難易度**: Easy
 
-#### 🔶 FR-540: Branch Probability Hints / likely-unlikely (分岐確率ヒント)
+#### ⚠️ FR-540: Branch Probability Hints / likely-unlikely (分岐確率ヒント)
 
 - **対象**: `packages/expand/src/macros-basic.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: 分岐確率情報なし。コンパイラは全分岐を50/50と仮定
@@ -1144,7 +1144,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: `rdtsc`（高精度タイマー）・`cpuid`（CPU情報）・`pause`（spin-wait最適化）等のコンパイラが直接生成しない命令へのアクセスに不可欠
 - **難易度**: Hard
 
-#### 🔶 FR-542: Hot/Cold Code Annotation (ホット/コールドコードアノテーション)
+#### ⚠️ FR-542: Hot/Cold Code Annotation (ホット/コールドコードアノテーション)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: PGO（FR-480/FR-508）なしではコードの温度推定不可

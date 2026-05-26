@@ -37,11 +37,11 @@
 
 ## Phase 4 — Native Backend Layer
 
-### FR-008: Float Unboxing 🔶
+### FR-008: Float Unboxing ⚠️
 - **Files**: `packages/codegen/src/x86-64-codegen-core.lisp`
 - XMM register constants defined; float vreg detection exists. End-to-end float unboxing through codegen not exhaustively verified.
 
-### FR-009: Inline Caching for Generic Functions 🔶
+### FR-009: Inline Caching for Generic Functions ⚠️
 - **Files**: `packages/vm/src/vm-ic.lisp`
 - IC file exists. Functional verification of cache hit/miss/invalidation incomplete.
 
