@@ -423,10 +423,14 @@ still exercising the same concurrent sweep entry point."
       :old-total       - total capacity of old space
       :heap-occupancy-pct - young+old occupancy percentage
       :free-list-count - number of free-list entries in old space"
-  (append
-   (list :minor-gc-count  (rt-heap-minor-gc-count heap)
-        :major-gc-count  (rt-heap-major-gc-count heap)
-        :words-collected (rt-heap-words-collected heap)
+   (append
+    (list :minor-gcs       (rt-heap-minor-gc-count heap)
+          :major-gcs       (rt-heap-major-gc-count heap)
+          :total-collected-bytes (* 8 (rt-heap-words-collected heap))
+          :pause-ms-p99    (* 1000.0d0 (rt-heap-gc-pause-max heap))
+          :minor-gc-count  (rt-heap-minor-gc-count heap)
+         :major-gc-count  (rt-heap-major-gc-count heap)
+         :words-collected (rt-heap-words-collected heap)
         :words-promoted  (rt-heap-words-promoted heap)
         :young-used      (- (rt-heap-young-free heap)
                             (rt-heap-young-from-base heap))

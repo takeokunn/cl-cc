@@ -46,6 +46,23 @@
     (assert-true (member g-label out))
     (assert-true (member top-call out))))
 
+(deftest global-dce-removes-unreachable-func-ref-definition
+  "FR-338: whole-program DCE removes unreachable func-ref-defined functions too."
+  (let* ((ref (make-vm-func-ref :dst :r0 :label "dead-ref" :params '(:r1)))
+         (register (cl-cc:make-vm-register-function :name 'dead-ref :src :r0))
+         (label (make-vm-label :name "dead-ref"))
+         (body (make-vm-const :dst :r2 :value 7))
+         (ret (make-vm-ret :reg :r2))
+         (top (make-vm-const :dst :r3 :value :ok))
+         (out (cl-cc/optimize::opt-pass-global-dce
+               (list ref register label body ret top))))
+    (assert-false (member ref out))
+    (assert-false (member register out))
+    (assert-false (member label out))
+    (assert-false (member body out))
+    (assert-false (member ret out))
+    (assert-true (member top out))))
+
 (deftest-each known-callee-labels-track-const-func-ref-and-move
   "Known-callee helper resolves labels through closure/const/move chains."
   :cases (("direct-closure" :r0)

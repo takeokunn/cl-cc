@@ -40,6 +40,24 @@ Contract: handler receives the full form and returns a fully-expanded form."
         (append (list 'defmethod name qualifier lambda-list) expanded-body)
         (append (list 'defmethod name lambda-list) expanded-body))))
 
+(defun %expander-werror-enabled-p ()
+  (let* ((pkg (find-package :cl-cc/parse))
+         (sym (and pkg (find-symbol "*WERROR-P*" pkg))))
+    (and sym (boundp sym) (symbol-value sym))))
+
+(defun %warn-unknown-pragma (name)
+  (let ((message (format nil "Unknown pragma ~S" name)))
+    (if (%expander-werror-enabled-p)
+        (error "~A" message)
+        (warn "~A" message))))
+
+(define-expander-for pragma (form)
+  "Consume compiler pragma forms. Unknown pragmas warn unless -Werror is active."
+  (let ((name (second form)))
+    (unless (member name '(optimize diagnostic push pop) :test #'eq)
+      (%warn-unknown-pragma name))
+    nil))
+
 ;;; ── Main dispatcher ──────────────────────────────────────────────────────
 ;;;
 ;;; The inference engine: 4 clauses, ~15 lines.

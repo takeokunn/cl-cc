@@ -47,6 +47,15 @@
 
 (in-package :cl-cc)
 
+(defun gc-stats (&optional heap)
+  "Return CL-CC runtime GC statistics as a plist.
+
+Stable public keys include :MINOR-GCS, :MAJOR-GCS,
+:TOTAL-COLLECTED-BYTES, and :PAUSE-MS-P99."
+  (cl-cc/runtime:gc-stats heap))
+
+(export 'gc-stats :cl-cc)
+
 ;; Re-export all child-package symbols from :cl-cc umbrella, then wire
 ;; use-package bridges so expand/compile source files can see each other's
 ;; exports without qualification (Phase 3c/3d: now real ASDF systems).

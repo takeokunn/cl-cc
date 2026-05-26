@@ -87,6 +87,7 @@
 (defconstant +rv-load-fp+ #x07)
 (defconstant +rv-store-fp+ #x27)
 (defconstant +rv-op-fp+ #x53)
+(defconstant +rv-zicond-funct7+ #b0000111)
 
 (defstruct (riscv64-assembler (:constructor %make-riscv64-assembler))
   (target (cl-cc/target:find-target :riscv64))
@@ -209,6 +210,12 @@
 (defun encode-rv-mul (rd rs1 rs2) (encode-rv-r +rv-op+ rd 0 rs1 rs2 1))
 (defun encode-rv-div (rd rs1 rs2) (encode-rv-r +rv-op+ rd 4 rs1 rs2 1))
 (defun encode-rv-rem (rd rs1 rs2) (encode-rv-r +rv-op+ rd 6 rs1 rs2 1))
+(defun encode-rv-czero-eqz (rd rs1 rs2)
+  "Encode Zicond CZERO.EQZ rd, rs1, rs2."
+  (encode-rv-r +rv-op+ rd #b101 rs1 rs2 +rv-zicond-funct7+))
+(defun encode-rv-czero-nez (rd rs1 rs2)
+  "Encode Zicond CZERO.NEZ rd, rs1, rs2."
+  (encode-rv-r +rv-op+ rd #b111 rs1 rs2 +rv-zicond-funct7+))
 
 (defun encode-rv-addi (rd rs1 imm) (encode-rv-i +rv-op-imm+ rd 0 rs1 imm))
 (defun encode-rv-slli (rd rs1 shamt) (encode-rv-shift-i rd 1 rs1 shamt 0))
@@ -311,10 +318,11 @@
             (ash rd 7) (ash (ldb (byte 2 3) imm) 5) (ash (ldb (byte 3 0) imm) 2))))
 
 (defparameter *riscv64-r-encoders*
-  `((:add . ,#'encode-rv-add) (:sub . ,#'encode-rv-sub) (:and . ,#'encode-rv-and)
-    (:or . ,#'encode-rv-or) (:xor . ,#'encode-rv-xor) (:sll . ,#'encode-rv-sll)
-    (:srl . ,#'encode-rv-srl) (:sra . ,#'encode-rv-sra) (:mul . ,#'encode-rv-mul)
-    (:div . ,#'encode-rv-div) (:rem . ,#'encode-rv-rem)))
+    `((:add . ,#'encode-rv-add) (:sub . ,#'encode-rv-sub) (:and . ,#'encode-rv-and)
+     (:or . ,#'encode-rv-or) (:xor . ,#'encode-rv-xor) (:sll . ,#'encode-rv-sll)
+     (:srl . ,#'encode-rv-srl) (:sra . ,#'encode-rv-sra) (:mul . ,#'encode-rv-mul)
+    (:div . ,#'encode-rv-div) (:rem . ,#'encode-rv-rem)
+    (:czero.eqz . ,#'encode-rv-czero-eqz) (:czero.nez . ,#'encode-rv-czero-nez)))
 
 (defparameter *riscv64-i-encoders*
   `((:addi . ,#'encode-rv-addi) (:andi . ,#'encode-rv-andi) (:ori . ,#'encode-rv-ori)

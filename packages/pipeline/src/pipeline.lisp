@@ -40,7 +40,9 @@ compile-toplevel-forms."
   (append (list :target     (pipeline-opts-target opts)
                 :type-check (pipeline-opts-type-check opts)
                 :safety     (pipeline-opts-safety opts)
-                :verify-transforms (pipeline-opts-verify-transforms opts))
+                :verify-transforms (pipeline-opts-verify-transforms opts)
+                :werror (pipeline-opts-werror opts)
+                :werror-categories (pipeline-opts-werror-categories opts))
           (%opts->optimize-kwargs opts)
           (%opts->codegen-kwargs opts)))
 
@@ -425,24 +427,40 @@ The runtime keys map logical plan IDs onto VM profile keys:
           (setf *repl-capture-label-counter* (ctx-next-label ctx))
           nil)
       (let* ((target (pipeline-opts-target opts))
-             (runtime-instructions
-              (%pipeline-runtime-instructions target full-instrs optimized-instrs))
-              (program (make-vm-program :instructions runtime-instructions
-                                        :result-register result-reg
-                                        :leaf-p leaf-p
-                                        :compilation-tier (pipeline-opts-compilation-tier opts)))
-             (result-type (if (pipeline-opts-type-check opts) inferred-type nil)))
-        (make-compilation-result
-         :program                program
-         :assembly               (emit-assembly program :target target)
+              (runtime-instructions
+               (%pipeline-runtime-instructions target full-instrs optimized-instrs))
+               (program (make-vm-program :instructions runtime-instructions
+                                         :result-register result-reg
+                                         :leaf-p leaf-p
+                                         :compilation-tier (pipeline-opts-compilation-tier opts)))
+              (result-type (if (pipeline-opts-type-check opts) inferred-type nil))
+              (diagnostics (nreverse (ctx-diagnostics ctx)))
+              (cl-cc/parse:*werror-p* (pipeline-opts-werror opts))
+              (cl-cc/parse:*werror-categories*
+                (mapcar (lambda (category) (string-downcase (string category)))
+                        (pipeline-opts-werror-categories opts))))
+         (multiple-value-bind (warnings errors)
+             (let ((warnings nil) (errors nil))
+               (dolist (diag diagnostics)
+                 (let ((effective (cl-cc/parse::%maybe-promote-warning-diagnostic diag)))
+                   (if (eq (cl-cc/parse:diagnostic-severity effective) :error)
+                       (push effective errors)
+                       (push effective warnings))))
+               (values (nreverse warnings) (nreverse errors)))
+         (make-compilation-result
+          :program                program
+          :assembly               (emit-assembly program :target target)
          :type                   result-type
          :type-env               (ctx-type-env ctx)
          :cps                    cps
-          :ast                    ast
-          :vm-instructions        full-instrs
-          :optimized-instructions optimized-instrs
-          :warnings               (nreverse (ctx-diagnostics ctx))
-          :pgo-counter-plan       pgo-counter-plan)))))
+           :ast                    ast
+           :vm-instructions        full-instrs
+           :optimized-instructions optimized-instrs
+           :branch-probability-hints (cl-cc/compile::%ast-branch-probability-hints ast)
+           :code-placement-hints (cl-cc/compile::%ast-code-placement-hints ast)
+           :warnings               warnings
+           :errors                 errors
+           :pgo-counter-plan       pgo-counter-plan))))))
 
 (defun %compile-string-forms (forms opts)
   "Compile already-parsed FORMS through the single-form or top-level path."
@@ -512,8 +530,8 @@ value carries top-level source locations for later AST annotation.
                                        print-pass-stats stats-stream trace-json-stream
                                           retpoline spectre-mitigations stack-protector shadow-stack
                                            asan msan tsan ubsan hwasan pgo-profile-data
-                                           verify-transforms
-                                           (compilation-tier *compilation-tier*))
+                                            verify-transforms werror werror-categories
+                                            (compilation-tier *compilation-tier*))
   "Compile EXPR and return a compilation-result object.
 
 EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
@@ -546,6 +564,8 @@ streams, and PGO counter plan."
                     :ubsan ubsan
                     :hwasan hwasan
                     :pgo-profile-data pgo-profile-data
+                    :werror werror
+                    :werror-categories werror-categories
                     :compilation-tier (normalize-compilation-tier compilation-tier)))
           (ctx           (make-instance 'compiler-context :safety safety))
          (*constant-pool* (make-hash-table :test #'equal))
@@ -605,8 +625,8 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                       print-pass-stats stats-stream trace-json-stream
                                        retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan pgo-profile-data
-                                      verify-transforms
-                                       (compilation-tier *compilation-tier*))
+                                      verify-transforms werror werror-categories
+                                        (compilation-tier *compilation-tier*))
   "Compile SOURCE text and return a compilation-result object.
 
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -645,6 +665,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :ubsan ubsan
                     :hwasan hwasan
                     :pgo-profile-data pgo-profile-data
+                    :werror werror
+                    :werror-categories werror-categories
                     :compilation-tier (normalize-compilation-tier compilation-tier)))
            (result (%call-with-source-file-macro-eval
                     (and (eq language :lisp) source-file)
@@ -674,8 +696,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                      print-pass-stats stats-stream trace-json-stream
                                        retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan pgo-profile-data
-                                      verify-transforms
-                                       (compilation-tier *compilation-tier*))
+                                       verify-transforms werror werror-categories
+                                        (compilation-tier *compilation-tier*))
  "Compile SOURCE text and return a compilation-result object.
  
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -713,8 +735,10 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                    :tsan tsan
                    :ubsan ubsan
                     :hwasan hwasan
-                     :pgo-profile-data pgo-profile-data
-                     :compilation-tier (normalize-compilation-tier compilation-tier)))
+                      :pgo-profile-data pgo-profile-data
+                      :werror werror
+                      :werror-categories werror-categories
+                      :compilation-tier (normalize-compilation-tier compilation-tier)))
            (*enable-cps-vm-primary-path* nil)
            (stdlib-forms (get-stdlib-forms))
            (all-forms (append stdlib-forms source-forms))

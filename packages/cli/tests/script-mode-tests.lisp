@@ -43,3 +43,13 @@
     (assert-true (cl-cc/cli:flag parsed "--reproducible"))
     (assert-true (cl-cc/cli::compile-opts-deterministic
                   (cl-cc/cli::%parse-compile-opts parsed)))))
+
+(deftest cli-parse-args-accepts-gc-heap-flags
+  "FR-356: --gc-min-heap and --gc-max-heap parse as positive byte counts."
+  :timeout 10
+  (let* ((parsed (cl-cc/cli:parse-args '("compile" "tool.lisp"
+                                         "--gc-min-heap" "1048576"
+                                         "--gc-max-heap=4194304")))
+         (opts (cl-cc/cli::%parse-compile-opts parsed)))
+    (assert-eql 131072 (cl-cc/cli::compile-opts-gc-min-heap opts))
+    (assert-eql 524288 (cl-cc/cli::compile-opts-gc-max-heap opts))))

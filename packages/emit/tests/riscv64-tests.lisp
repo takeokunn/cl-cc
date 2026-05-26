@@ -117,6 +117,21 @@
     (assert-equal #b111 (ldb (byte 3 12) nez))
     (assert-equal cl-cc/codegen::+rv-zicond-funct7+ (ldb (byte 7 25) nez))))
 
+(deftest riscv64-emit-zicond-pseudo-ops
+  "FR-576: emit facade accepts Zicond CZERO pseudo-op forms directly."
+  (let ((eqz (cl-cc/emit::encode-rv-czero-eqz 10 11 12))
+        (nez (cl-cc/emit::encode-rv-czero-nez 10 11 12)))
+    (assert-equal (list (ldb (byte 8 0) eqz)
+                        (ldb (byte 8 8) eqz)
+                        (ldb (byte 8 16) eqz)
+                        (ldb (byte 8 24) eqz))
+                  (%riscv64-emit-list '(:czero.eqz :a0 :a1 :a2)))
+    (assert-equal (list (ldb (byte 8 0) nez)
+                        (ldb (byte 8 8) nez)
+                        (ldb (byte 8 16) nez)
+                        (ldb (byte 8 24) nez))
+                  (%riscv64-emit-list '(:czero.nez :a0 :a1 :a2)))))
+
 (deftest riscv64-select-emits-zicond-sequence
   "FR-576: vm-select lowers to CZERO.EQZ + CZERO.NEZ + OR with no branches."
   (let* ((assignment (make-hash-table :test #'eq))

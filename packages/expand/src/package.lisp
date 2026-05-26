@@ -9,7 +9,7 @@
 
 (defpackage :cl-cc/expand
   (:use :cl :cl-cc/bootstrap)
-  (:shadow #:compiler-macro-function)
+  (:shadow #:compiler-macro-function #:diagnostic)
   (:export
    ;; --- expander-data.lisp --- constant table + accessor/struct maps -----
    #:*constant-table*
@@ -54,16 +54,21 @@
    #:generate-lambda-bindings
 
    ;; --- expander.lisp --- compiler macro expansion --------------------
-   #:compiler-macroexpand-all
+    #:compiler-macroexpand-all
+    #:pragma
 
    ;; --- control-flow macros ------------------------------------------
-   #:dolist
-   #:dotimes
-   #:do
+    #:dolist
+    #:dotimes
+    #:do
    #:do*
    #:case
-   #:typecase
-   #:loop
+    #:typecase
+    #:loop
+    #:define-deprecated-function
+    #:likely
+    #:unlikely
+    #:*deprecated-function-registry*
 
    ;; --- expander-typed-params.lisp --- typed lambda-list helpers ----------
    #:*function-type-registry*

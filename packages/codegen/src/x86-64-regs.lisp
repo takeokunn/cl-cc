@@ -67,6 +67,52 @@
        (plusp spill-count)
        (<= spill-count 16)))
 
+(defun %x86-64-normalize-frame-local (local)
+  "Normalize LOCAL to (name size align) for stack-frame packing."
+  (cond
+    ((and (consp local) (keywordp (car local)))
+     (let ((name (getf local :name))
+           (size (getf local :size))
+           (align (or (getf local :align) (getf local :alignment))))
+       (list name size (or align size))))
+    ((consp local)
+     (destructuring-bind (name size &optional align) local
+       (list name size (or align size))))
+    (t (error "Invalid x86-64 frame local descriptor: ~S" local))))
+
+(defun %x86-64-align-up (value alignment)
+  "Round VALUE up to ALIGNMENT bytes."
+  (if (or (null alignment) (<= alignment 1))
+      value
+      (* alignment (ceiling value alignment))))
+
+(defun x86-64-pack-stack-frame-locals (locals &key (stack-alignment 16))
+  "Pack mixed-width LOCALS into a compact x86-64 stack frame.
+
+LOCALS accepts either (NAME SIZE &optional ALIGN) descriptors or plists with
+:NAME, :SIZE and optional :ALIGN/:ALIGNMENT.  The return values are an alist of
+(NAME . NEGATIVE-OFFSET) and the final stack-aligned frame size.  Wider and more
+strictly aligned locals are placed first, which reduces padding for mixed-width
+frames while preserving ABI alignment for the whole frame."
+  (let ((normalized (mapcar #'%x86-64-normalize-frame-local locals)))
+    (dolist (entry normalized)
+      (destructuring-bind (name size align) entry
+        (declare (ignore name))
+        (unless (and (integerp size) (plusp size))
+          (error "Frame local size must be positive, got ~S" size))
+        (unless (and (integerp align) (plusp align))
+          (error "Frame local alignment must be positive, got ~S" align))))
+    (let ((offset 0)
+          (layout nil))
+      (dolist (entry (stable-sort (copy-list normalized) #'>
+                                  :key (lambda (x) (max (third x) (second x)))))
+        (destructuring-bind (name size align) entry
+          (setf offset (%x86-64-align-up offset align))
+          (incf offset size)
+          (push (cons name (- offset)) layout)))
+      (values (nreverse layout)
+              (%x86-64-align-up offset stack-alignment)))))
+
 (defparameter *vm-reg-map*
   `((:R0 . ,+rax+)
     (:R1 . ,+rcx+)

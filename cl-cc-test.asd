@@ -35,8 +35,9 @@
      :components
      ((:file "test-support")
       (:file "args-tests")
-      (:file "cli-tests")
-      (:file "main-tests")
+       (:file "cli-tests")
+       (:file "flamegraph-tests")
+       (:file "main-tests")
       (:file "main-dump-tests")
       (:file "main-utils-tests")))
     (:module "vm-tests"

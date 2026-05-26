@@ -135,8 +135,65 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
 (deftest cli-command-dispatch-covers-all-public-subcommands
   "The CLI dispatch table still exposes the expected public commands."
   (let ((commands (mapcar #'car cl-cc/cli::*cli-command-dispatch*)))
-    (dolist (expected '("run" "compile" "eval" "repl" "check" "selfhost"))
+    (dolist (expected '("run" "compile" "eval" "repl" "check" "selfhost"
+                        "symbols" "profile" "compile-commands"))
       (assert-true (member expected commands :test #'string=)))))
+
+(deftest cli-symbol-index-fuzzy-finds-definitions
+  "FR-440: workspace symbol index covers core definition forms and fuzzy search."
+  (uiop:with-temporary-file (:pathname source :type "lisp" :keep t)
+    (with-open-file (out source :direction :output :if-exists :supersede)
+      (write-line "(defun compile-file-command (x) x)" out)
+      (write-line "(defmacro with-compiler (() &body body) `(progn ,@body))" out)
+      (write-line "(defclass compiler-state () ())" out)
+      (write-line "(defvar *compiler-cache* nil)" out))
+    (unwind-protect
+         (let* ((entries (cl-cc/cli::%build-symbol-index source))
+                (matches (cl-cc/cli::%filter-symbol-index entries "cfc"))
+                (names (mapcar (lambda (entry) (getf entry :name)) entries)))
+           (assert-true (member "compile-file-command" names :test #'string=))
+           (assert-true (member "with-compiler" names :test #'string=))
+           (assert-true (member "compiler-state" names :test #'string=))
+           (assert-true (member "*compiler-cache*" names :test #'string=))
+           (assert-= 1 (length matches))
+           (assert-string= "compile-file-command" (getf (first matches) :name)))
+      (ignore-errors (delete-file source)))))
+
+(deftest cli-compile-commands-json-has-required-fields
+  "FR-574: compile_commands.json contains file, command, and directory fields."
+  (uiop:with-temporary-file (:pathname source :type "lisp" :keep t)
+    (uiop:with-temporary-file (:pathname output :type "json" :keep t)
+      (with-open-file (out source :direction :output :if-exists :supersede)
+        (write-line "(defun hello () 42)" out))
+      (unwind-protect
+           (progn
+             (cl-cc/cli::%generate-compile-commands :root source :output output)
+             (let ((json (cl-cc/cli::%read-file output)))
+               (assert-true (search "\"file\"" json))
+               (assert-true (search "\"command\"" json))
+               (assert-true (search "\"directory\"" json))
+               (assert-true (search "cl-cc compile" json))
+               (assert-true (search (namestring source) json))))
+        (ignore-errors (delete-file source))
+        (ignore-errors (delete-file output))))))
+
+(deftest cli-profile-folded-stacks-generate-svg
+  "FR-444: folded stack input with sample counts is rendered as a valid SVG flame graph."
+  (uiop:with-temporary-file (:pathname input :type "folded" :keep t)
+    (uiop:with-temporary-file (:pathname output :type "svg" :keep t)
+      (with-open-file (out input :direction :output :if-exists :supersede)
+        (write-line "main;compile;emit 7" out)
+        (write-line "main;compile;optimize 3" out))
+      (unwind-protect
+           (progn
+             (cl-cc/cli::%write-flamegraph-from-perf-data output :input-path input)
+             (let ((svg (cl-cc/cli::%read-file output)))
+               (assert-true (search "<svg" svg))
+               (assert-true (search "<rect" svg))
+               (assert-true (search "emit" svg))
+               (assert-true (search "7 samples" svg))))
+        (ignore-errors (delete-file input))
+        (ignore-errors (delete-file output))))))
 
 (deftest cli-maybe-make-profiled-vm-state-disabled
   "No profiled VM state is created when flamegraph output is not requested."

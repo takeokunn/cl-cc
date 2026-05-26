@@ -27,7 +27,17 @@
                  :trials 1)))
     (assert-eq :fail (getf result :status))
     (assert-eql 42 (getf result :value))
-    (assert-eql 10 (getf result :minimized-value))))
+    (assert-eql 6 (getf result :minimized-value))))
+
+(deftest fr-353-integer-shrinking-binary-searches-boundary
+  "FR-353: integer shrinking deterministically binary-searches to the minimal failing boundary."
+  :tags '(:fr-353)
+  (assert-eql 6
+              (minimize-failing-input 1000
+                                      (lambda (value) (> value 5))))
+  (assert-eql -6
+              (minimize-failing-input -1000
+                                      (lambda (value) (< value -5)))))
 
 (deftest fr-353-type-annotation-generators-derive-values
   "FR-353: type annotations resolve to registered property generators."

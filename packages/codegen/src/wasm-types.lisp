@@ -284,6 +284,7 @@
 (defconstant +wasm-f32x4-relaxed-max+ 142)
 (defconstant +wasm-f64x2-relaxed-min+ 143)
 (defconstant +wasm-f64x2-relaxed-max+ 144)
+(defconstant +wasm-i16x8-relaxed-q15mulr-s+ 145)
 
 (defun wasm-encode-simd-op (simd-opcode)
   "Encode a prefixed SIMD/relaxed-SIMD opcode."

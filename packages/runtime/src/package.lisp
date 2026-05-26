@@ -255,7 +255,7 @@
    ;; GC public API
    #:rt-gc-alloc #:rt-gc-add-root #:rt-gc-remove-root
     #:rt-gc-write-barrier #:rt-gc-minor-collect #:rt-gc-major-collect
-    #:rt-gc-stats
+     #:rt-gc-stats #:gc-stats
     #:rt-gc-configure-concurrent-mode
     #:rt-gc-concurrent-assist
      #:*rt-concurrent-gc-enabled-p*

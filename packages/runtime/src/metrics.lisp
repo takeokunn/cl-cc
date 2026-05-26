@@ -152,3 +152,11 @@
          (let ((name (%metric-name-string (rt-gauge-name m))))
            (format s "# TYPE ~a gauge~%" name)
            (format s "~a ~f~%" name (rt-gauge-value m))))))))
+
+(defun gc-stats (&optional heap)
+  "Return the public GC statistics plist.
+
+When HEAP is NIL, use *RT-CURRENT-GC-HEAP* if bound; otherwise return a fresh
+empty heap snapshot.  The stable public fields are :MINOR-GCS, :MAJOR-GCS,
+:TOTAL-COLLECTED-BYTES, and :PAUSE-MS-P99."
+  (rt-gc-stats (or heap *rt-current-gc-heap* (make-rt-heap))))

@@ -232,12 +232,16 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
   (ubsan              nil)
   (hwasan             nil)
    (werror             nil)
+   (werror-category    nil)
    ;; FR-276: optimization level (-O0 to -O3)
    (opt-level          nil)
    ;; FR-241: macro expansion tracing
    (trace-macros       nil)
    ;; FR-153: macro expansion memoization
-   (memoize-macros     nil))
+   (memoize-macros     nil)
+   ;; FR-356: runtime GC heap tuning flags (stored as heap words)
+   (gc-min-heap        nil)
+   (gc-max-heap        nil))
 
 (defun %parse-compile-opts (parsed)
   "Extract all pipeline/tracing flags from PARSED into a compile-opts struct."
@@ -282,12 +286,24 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
    :ubsan              (flag parsed "--ubsan")
    :hwasan             (flag parsed "--hwasan")
    :werror             (flag parsed "--Werror")
+   :werror-category    (flag parsed "--Werror-category")
     ;; FR-276: optimization level
     :opt-level          (%parse-opt-level (or (flag parsed "-O")
                                               (flag parsed "--opt-level")))
     ;; FR-241/153: macro tracing and memoization
     :trace-macros       (flag parsed "--trace-macros")
-    :memoize-macros     (flag parsed "--memoize-macros")))
+    :memoize-macros     (flag parsed "--memoize-macros")
+    :gc-min-heap        (%parse-gc-heap-words (flag parsed "--gc-min-heap") "--gc-min-heap")
+    :gc-max-heap        (%parse-gc-heap-words (flag parsed "--gc-max-heap") "--gc-max-heap")))
+
+(defun %parse-gc-heap-words (spec flag-name)
+  "Parse a GC heap byte count SPEC for FLAG-NAME into runtime heap words."
+  (when spec
+    (let ((bytes (ignore-errors (parse-integer spec :junk-allowed nil))))
+      (unless (and (integerp bytes) (plusp bytes))
+        (format *error-output* "Invalid ~A: ~A (expected positive byte count)~%" flag-name spec)
+        (uiop:quit 2))
+      (ceiling bytes 8))))
 
 (defun %parse-opt-level (spec)
   "Parse an optimization level spec string (-O0/-O1/-O2/-O3 or 0/1/2/3).
@@ -417,9 +433,16 @@ STREAM is the resolved trace-json output stream (may be nil)."
                   (if (compile-opts-ubsan opts)
                       (list :ubsan t)
                       nil)
-                   (if (compile-opts-hwasan opts)
-                       (list :hwasan t)
-                       nil)
-                    (list :print-pass-timings (compile-opts-print-pass-timings opts)
+                    (if (compile-opts-hwasan opts)
+                        (list :hwasan t)
+                        nil)
+                    (if (compile-opts-werror opts)
+                        (list :werror t)
+                        nil)
+                    (if (compile-opts-werror-category opts)
+                        (list :werror-categories
+                              (list (compile-opts-werror-category opts)))
+                        nil)
+                     (list :print-pass-timings (compile-opts-print-pass-timings opts)
                          :print-opt-remarks  (not (null remarks))
                        :opt-remarks-mode   (or remarks :all)))))))

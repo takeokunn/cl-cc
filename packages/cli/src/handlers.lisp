@@ -44,11 +44,13 @@
                      compile-opts-tsan
                      compile-opts-ubsan
                        compile-opts-hwasan
-                       compile-opts-werror
-                       ;; FR-276/241/153: new optimization/tracing flags
-                       compile-opts-opt-level
-                       compile-opts-trace-macros
-                       compile-opts-memoize-macros))
+                        compile-opts-werror
+                        ;; FR-276/241/153: new optimization/tracing flags
+                        compile-opts-opt-level
+                        compile-opts-trace-macros
+                        compile-opts-memoize-macros
+                        compile-opts-gc-min-heap
+                        compile-opts-gc-max-heap))
 
 (defun %call-with-runtime-sanitizer-flags (opts thunk)
   "Execute THUNK with runtime sanitizer toggles derived from OPTS."
@@ -57,6 +59,12 @@
         (cl-cc/runtime::*rt-tsan-enabled* (not (null (compile-opts-tsan opts))))
         (cl-cc/runtime::*rt-hwasan-enabled* (not (null (compile-opts-hwasan opts))))
         (cl-cc/runtime::*rt-ubsan-enabled* (not (null (compile-opts-ubsan opts))))
+        (cl-cc/runtime:*gc-young-size-words*
+         (or (compile-opts-gc-min-heap opts)
+             cl-cc/runtime:*gc-young-size-words*))
+        (cl-cc/runtime:*gc-old-size-words*
+         (or (compile-opts-gc-max-heap opts)
+             cl-cc/runtime:*gc-old-size-words*))
         (cl-cc/parse::*werror-p* (not (null (compile-opts-werror opts)))))
     (funcall thunk)))
 
@@ -802,6 +810,208 @@ Accepts either a path to a .asd file or a system name for Quicklisp installation
           (format t "Uninstalled ~A~%" name)
           (format t "System not registered: ~A~%" name))
       (uiop:quit 0))))
+
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; Easy tooling / observability commands
+;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %pathname-directory-p (path)
+  "Return T when PATH denotes an existing directory."
+  (and path (uiop:directory-exists-p path)))
+
+(defun %default-workspace-source-root ()
+  "Return the default source root used by workspace tooling commands."
+  (or (probe-file #p"packages/") (uiop:getcwd)))
+
+(defun %collect-lisp-source-files (&optional root)
+  "Return Lisp source files under ROOT, sorted by namestring."
+  (let ((base (or root (%default-workspace-source-root)))
+        (files nil))
+    (labels ((walk-directory (dir)
+               (dolist (file (uiop:directory-files dir))
+                 (when (member (pathname-type file) '("lisp" "cl") :test #'string=)
+                   (push file files)))
+               (dolist (subdir (uiop:subdirectories dir))
+                 (walk-directory subdir))))
+      (cond
+        ((%pathname-directory-p base)
+         (walk-directory (uiop:ensure-directory-pathname base)))
+        ((and (probe-file base)
+              (member (pathname-type base) '("lisp" "cl") :test #'string=))
+         (push (pathname base) files))))
+    (sort files #'string< :key #'namestring)))
+
+(defun %starts-with-ci-p (prefix text)
+  "Case-insensitive PREFIX test for TEXT."
+  (let ((prefix (string-downcase (string prefix)))
+        (text (string-downcase (string text))))
+    (and (<= (length prefix) (length text))
+         (string= prefix text :end2 (length prefix)))))
+
+(defun %definition-kind-token (kind)
+  "Return source token text for definition KIND."
+  (ecase kind
+    (:defun "defun")
+    (:defmacro "defmacro")
+    (:defclass "defclass")
+    (:defvar "defvar")))
+
+(defun %definition-line-kind (line)
+  "Return the definition kind keyword when LINE starts with an indexed form."
+  (let ((trimmed (string-trim '(#\Space #\Tab) line)))
+    (cond
+      ((%starts-with-ci-p "(defun" trimmed) :defun)
+      ((%starts-with-ci-p "(defmacro" trimmed) :defmacro)
+      ((%starts-with-ci-p "(defclass" trimmed) :defclass)
+      ((%starts-with-ci-p "(defvar" trimmed) :defvar)
+      (t nil))))
+
+(defun %extract-definition-name (line kind)
+  "Extract the symbol name following KIND in LINE."
+  (let* ((trimmed (string-trim '(#\Space #\Tab) line))
+         (start (length (format nil "(~A" (%definition-kind-token kind)))))
+    (loop while (and (< start (length trimmed))
+                     (find (char trimmed start) '(#\Space #\Tab #\Newline)))
+          do (incf start))
+    (let ((end (or (position-if (lambda (ch)
+                                  (or (find ch '(#\Space #\Tab #\Newline))
+                                      (char= ch (code-char 40))))
+                                trimmed :start start)
+                   (length trimmed))))
+      (when (< start end)
+        (subseq trimmed start end)))))
+
+(defun %index-symbols-in-file (file)
+  "Return workspace symbol entries found in FILE."
+  (let ((entries nil))
+    (with-open-file (in file :direction :input)
+      (loop for line = (read-line in nil nil)
+            for line-number from 1
+            while line
+            for kind = (%definition-line-kind line)
+            when kind do
+              (let ((name (%extract-definition-name line kind)))
+                (when name
+                  (push (list :name name
+                              :kind kind
+                              :file (namestring file)
+                              :line line-number)
+                        entries)))))
+    (nreverse entries)))
+
+(defun %build-symbol-index (&optional root)
+  "Build a workspace symbol index under ROOT."
+  (loop for file in (%collect-lisp-source-files root)
+        append (%index-symbols-in-file file)))
+
+(defun %fuzzy-match-p (query candidate)
+  "Return T when QUERY characters appear in order in CANDIDATE."
+  (let ((q (string-downcase (or query "")))
+        (c (string-downcase (or candidate "")))
+        (pos 0))
+    (if (zerop (length q))
+        t
+        (loop for ch across q
+              do (let ((found (position ch c :start pos)))
+                   (unless found (return-from %fuzzy-match-p nil))
+                   (setf pos (1+ found)))
+              finally (return t)))))
+
+(defun %filter-symbol-index (entries query)
+  "Filter ENTRIES by fuzzy QUERY when QUERY is non-NIL."
+  (if query
+      (remove-if-not (lambda (entry) (%fuzzy-match-p query (getf entry :name))) entries)
+      entries))
+
+(defun %print-symbol-index (entries &optional (stream *standard-output*))
+  "Print symbol index entries in a stable line-oriented format."
+  (dolist (entry entries)
+    (format stream "~(~A~) ~A ~A:~D~%"
+            (getf entry :kind)
+            (getf entry :name)
+            (getf entry :file)
+            (getf entry :line))))
+
+(defun %do-symbols (parsed)
+  "Handle `cl-cc symbols' workspace symbol indexing and fuzzy search."
+  (let* ((root (or (car (parsed-args-positional parsed)) (%default-workspace-source-root)))
+         (query (flag parsed "--fuzzy"))
+         (timeout (%get-timeout parsed)))
+    (%with-cli-error-handler
+      (%call-with-cli-timeout timeout
+        (lambda ()
+          (%print-symbol-index (%filter-symbol-index (%build-symbol-index root) query))
+          (uiop:quit 0))
+        "symbols"))))
+
+(defun %json-escape (text)
+  "Return TEXT escaped for JSON string literals."
+  (with-output-to-string (out)
+    (loop for ch across (princ-to-string text)
+          do (case ch
+               (#\\ (write-string "\\\\" out))
+               (#\" (write-string "\\\"" out))
+               (#\Newline (write-string "\\n" out))
+               (#\Return (write-string "\\r" out))
+               (#\Tab (write-string "\\t" out))
+               (t (write-char ch out))))))
+
+(defun %compile-command-entry (file directory)
+  "Return a compile_commands.json entry plist for FILE."
+  (let ((namestring (namestring file)))
+    (list :file namestring
+          :command (format nil "cl-cc compile ~A" namestring)
+          :directory directory)))
+
+(defun %write-compile-commands-json (path entries)
+  "Write ENTRIES to PATH as a JSON compilation database."
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (format out "[~%")
+    (loop for entry in entries
+          for first = t then nil
+          unless first do (format out ",~%")
+          do (format out "  {\"file\":\"~A\",\"command\":\"~A\",\"directory\":\"~A\"}"
+                     (%json-escape (getf entry :file))
+                     (%json-escape (getf entry :command))
+                     (%json-escape (getf entry :directory))))
+    (format out "~%]~%"))
+  path)
+
+(defun %generate-compile-commands (&key root output)
+  "Generate compile_commands.json entries for Lisp source files under ROOT."
+  (let* ((directory (namestring (uiop:getcwd)))
+         (entries (mapcar (lambda (file) (%compile-command-entry file directory))
+                          (%collect-lisp-source-files root)))
+         (target (or output "compile_commands.json")))
+    (%write-compile-commands-json target entries)))
+
+(defun %do-compile-commands (parsed)
+  "Handle `cl-cc compile-commands'."
+  (let ((timeout (%get-timeout parsed))
+        (root (or (car (parsed-args-positional parsed)) (%default-workspace-source-root)))
+        (output (or (flag-or parsed "--output" "-o") "compile_commands.json")))
+    (%with-cli-error-handler
+      (%call-with-cli-timeout timeout
+        (lambda ()
+          (format t "~A~%" (%generate-compile-commands :root root :output output))
+          (uiop:quit 0))
+        "compile-commands"))))
+
+(defun %do-profile (parsed)
+  "Handle `cl-cc profile' folded-stack to SVG flame graph generation."
+  (let ((timeout (%get-timeout parsed))
+        (input (car (parsed-args-positional parsed)))
+        (output (flag parsed "--flamegraph")))
+    (unless output
+      (%quit-command-usage-error "profile" "profile requires --flamegraph <out.svg>."))
+    (%with-cli-error-handler
+      (%call-with-cli-timeout timeout
+        (lambda ()
+          (%write-flamegraph-from-perf-data output :input-path input)
+          (format t "~A~%" output)
+          (uiop:quit 0))
+        "profile"))))
 
 (defun %do-run (parsed)
   "Handle the `cl-cc run' subcommand using PARSED command-line arguments.

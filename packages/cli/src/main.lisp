@@ -28,6 +28,9 @@ Commands:
   repl                    Start interactive REPL
   check    <file>         Type-check only, no execution
   selfhost [file]         Run the self-hosting profile workload
+  symbols  [path]         Index workspace symbols; use --fuzzy <query>
+  profile  <folded>       Generate profiling artifacts such as flame graphs
+  compile-commands [path] Generate compile_commands.json
   install  <system.asd>   Register/compile a local ASDF system
   uninstall <system>      Remove a registered local system
   fuzz     [--seed N]     Compiler fuzzing (FR-794)
@@ -87,9 +90,12 @@ Options:
   --bolt                  Enable BOLT-style native binary layout optimization
   --profile               Enable VM profile collection/reporting
   --flamegraph <file>     Write a sampled VM flame graph SVG (run/eval only)
+  --fuzzy <query>         Fuzzy symbol query (symbols only)
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
   --strict                Treat type warnings as errors (check only)
+  --Werror                Treat compiler warnings as errors
+  --Werror-category <cat> Treat matching warning category/code as error
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
   --dump-image <file>     Dump an initialized SBCL image/executable
@@ -133,6 +139,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --Werror                Treat compiler warnings as errors
+  --Werror-category <cat> Treat matching warning category/code as error
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
   --core <file>           Load a CL-CC core before compiling/running the file
@@ -183,6 +191,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --Werror                Treat compiler warnings as errors
+  --Werror-category <cat> Treat matching warning category/code as error
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
  ")
@@ -217,6 +227,8 @@ Options:
     --flamegraph <file>     Write a sampled VM flame graph SVG
   --stats                 Print per-pass optimizer stats
   --trace-emit            Print VM/OPT/ASM compilation stages
+  --Werror                Treat compiler warnings as errors
+  --Werror-category <cat> Treat matching warning category/code as error
   --timeout <seconds>     Maximum execution time (default: 30 seconds)
   --no-timeout            Disable CLI timeout for debugging
  ")
@@ -270,6 +282,20 @@ Options:
 
   Register a local ASDF system file for cl-cc system compilation.
 ")
+    ("symbols" . "Usage: cl-cc symbols [path] [--fuzzy <query>]
+
+  Build a lightweight workspace symbol index for defun, defmacro, defclass,
+  and defvar forms. PATH defaults to packages/.
+")
+    ("profile" . "Usage: cl-cc profile <folded-stacks.txt> --flamegraph <out.svg>
+
+  Convert folded stack samples (for example: main;worker;leaf 42) to SVG.
+")
+    ("compile-commands" . "Usage: cl-cc compile-commands [path] [-o compile_commands.json]
+
+  Generate a JSON compilation database with file, command, and directory
+  fields for each Lisp source file. PATH defaults to packages/.
+")
     ("uninstall" . "Usage: cl-cc uninstall <system>
 
   Remove a previously registered local ASDF system from the cl-cc registry.
@@ -302,8 +328,11 @@ Options:
      ("eval"     . %do-eval)
     ("repl"     . %do-repl)
     ("check"    . %do-check)
-    ("selfhost" . %do-selfhost)
-    ;; ── Phase 129-160: Advanced Compilation III commands ──
+     ("selfhost" . %do-selfhost)
+     ("symbols" . %do-symbols)
+     ("profile" . %do-profile)
+     ("compile-commands" . %do-compile-commands)
+     ;; ── Phase 129-160: Advanced Compilation III commands ──
     ("fuzz"         . %do-fuzz)
     ("reduce"       . %do-reduce)
     ("audit"        . %do-audit)

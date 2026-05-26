@@ -71,6 +71,8 @@ pipeline functions instead of threading 12 separate keyword arguments."
   (hwasan             nil)
   (compress           nil)
   (pgo-profile-data   nil)
+  (werror             nil)
+  (werror-categories  nil)
   (compilation-tier   *compilation-tier* :type integer))
 
 ;;; ─────────────────────────────────────────────────────────────────────────

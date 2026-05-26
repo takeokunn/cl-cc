@@ -25,8 +25,20 @@
     (assert-true (member :young-total     stats))
     (assert-true (member :old-used        stats))
     (assert-true (member :old-total       stats))
-    (assert-true (member :heap-occupancy-pct stats))
-    (assert-true (member :free-list-count stats))))
+     (assert-true (member :heap-occupancy-pct stats))
+     (assert-true (member :free-list-count stats))))
+
+(deftest gc-stats-public-facade-returns-fr-356-keys
+  "FR-356: public gc-stats exposes stable GC counters and byte/pause metrics."
+  (let* ((heap (%make-small-heap))
+         (stats (cl-cc/runtime:gc-stats heap)))
+    (assert-true (member :minor-gcs stats))
+    (assert-true (member :major-gcs stats))
+    (assert-true (member :total-collected-bytes stats))
+    (assert-true (member :pause-ms-p99 stats))
+    (assert-= 0 (getf stats :minor-gcs))
+    (assert-= 0 (getf stats :major-gcs))
+    (assert-= 0 (getf stats :total-collected-bytes))))
 
 (deftest gc-stats-minor-gc-count-increments
   "After one minor GC, :minor-gc-count is 1."

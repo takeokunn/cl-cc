@@ -29,6 +29,8 @@
   (vm-instructions nil)
   (optimized-instructions nil)
   (pgo-counter-plan nil)
+  (branch-probability-hints nil :type list)
+  (code-placement-hints nil :type list)
   (warnings nil :type list)
   (errors nil :type list))
 
@@ -461,8 +463,8 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
 (defun %make-compile-opts (&key pass-pipeline speed (safety 1) (space 0) (debug 0) (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
-                                   print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                   print-pass-stats stats-stream trace-json-stream)
+                                    print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                    print-pass-stats stats-stream trace-json-stream werror werror-categories)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
   (let ((resolved-speed (or speed (%global-optimize-quality 'speed))))
   (list :pass-pipeline       pass-pipeline
@@ -479,7 +481,9 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
         :opt-remarks-mode    opt-remarks-mode
         :print-pass-stats    print-pass-stats
         :stats-stream        stats-stream
-        :trace-json-stream   trace-json-stream)))
+        :trace-json-stream   trace-json-stream
+        :werror              werror
+        :werror-categories   werror-categories)))
 
 (defun %ast-declarations-for-optimize-policy (ast)
   "Return declaration list associated with AST when available."
@@ -494,6 +498,38 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
   (loop for decl in (%ast-declarations-for-optimize-policy ast)
         when (and (consp decl) (eq (car decl) 'forward-reference))
           append (remove-if-not #'symbolp (cdr decl))))
+
+(defun %ast-branch-probability-hints (ast)
+  "Return :LIKELY/:UNLIKELY declaration hints carried by AST."
+  (loop for decl in (%ast-declarations-for-optimize-policy ast)
+        when (and (consp decl)
+                  (eq (car decl) 'branch-probability)
+                  (member (cadr decl) '(:likely :unlikely) :test #'eq))
+          collect (cadr decl)))
+
+(defun %ast-code-placement-hints (ast)
+  "Return :HOT/:COLD code placement declarations carried by AST."
+  (loop for decl in (%ast-declarations-for-optimize-policy ast)
+        when (and (consp decl)
+                  (member (car decl) '(hot cold) :test #'eq))
+          collect (ecase (car decl)
+                    (hot :hot)
+                    (cold :cold))))
+
+(defun %diagnostics-after-werror (diagnostics opts)
+  "Split DIAGNOSTICS into warnings and promoted errors using OPTS."
+  (let ((cl-cc/parse:*werror-p* (getf opts :werror))
+        (cl-cc/parse:*werror-categories*
+          (mapcar (lambda (category) (string-downcase (string category)))
+                  (getf opts :werror-categories)))
+        (warnings nil)
+        (errors nil))
+    (dolist (diag diagnostics)
+      (let ((effective (cl-cc/parse::%maybe-promote-warning-diagnostic diag)))
+        (if (eq (cl-cc/parse:diagnostic-severity effective) :error)
+            (push effective errors)
+            (push effective warnings))))
+    (values (nreverse warnings) (nreverse errors))))
 
 (defun %maybe-bump-opts-speed-from-ast (opts ast)
   "Merge local `(declare (optimize (speed ...)))` into OPTS conservatively.
@@ -717,17 +753,22 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
     (cl-cc/vm::vm-register-program-exception-table
      program
      (%build-exception-table (vm-program-instructions program)))
-    (make-compilation-result :program                program
-                             :assembly               (emit-assembly program :target target)
-                             :globals                (ctx-global-functions ctx)
-                             :type                   last-type
-                             :type-env               (ctx-type-env ctx)
-                              :cps                    last-cps
-                              :ast                    (nreverse compiled-asts)
-                               :vm-instructions        instructions
-                               :optimized-instructions optimized
-                               :warnings               (nreverse (ctx-diagnostics ctx))
-                               :errors                 (nreverse errors))))
+    (multiple-value-bind (warnings promoted-errors)
+        (%diagnostics-after-werror (nreverse (ctx-diagnostics ctx)) opts)
+      (let ((compiled-ast-list (nreverse compiled-asts)))
+        (make-compilation-result :program                program
+                               :assembly               (emit-assembly program :target target)
+                               :globals                (ctx-global-functions ctx)
+                               :type                   last-type
+                               :type-env               (ctx-type-env ctx)
+                                :cps                    last-cps
+                                :ast                    compiled-ast-list
+                                 :vm-instructions        instructions
+                                 :optimized-instructions optimized
+                                 :branch-probability-hints (mapcan #'%ast-branch-probability-hints (copy-list compiled-ast-list))
+                                 :code-placement-hints (mapcan #'%ast-code-placement-hints (copy-list compiled-ast-list))
+                                 :warnings               warnings
+                                 :errors                 (append (nreverse errors) promoted-errors))))))
 
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
@@ -735,9 +776,9 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
                                           block-compile
                                          pass-pipeline print-pass-timings timing-stream coverage
                                         print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
-                                         print-pass-stats stats-stream trace-json-stream
-                                          retpoline spectre-mitigations stack-protector shadow-stack
-                                          asan msan tsan ubsan hwasan verify-transforms (compilation-tier 1))
+                                          print-pass-stats stats-stream trace-json-stream
+                                           retpoline spectre-mitigations stack-protector shadow-stack
+                                           asan msan tsan ubsan hwasan verify-transforms werror werror-categories (compilation-tier 1))
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
@@ -760,9 +801,11 @@ Returns a compilation-result struct with program, assembly, and globals."
                                           :print-opt-remarks print-opt-remarks
                                           :opt-remarks-stream opt-remarks-stream
                                            :opt-remarks-mode opt-remarks-mode
-                                            :print-pass-stats print-pass-stats
-                                            :stats-stream stats-stream
-                                            :trace-json-stream trace-json-stream)))
+                                             :print-pass-stats print-pass-stats
+                                             :stats-stream stats-stream
+                                             :trace-json-stream trace-json-stream
+                                             :werror werror
+                                             :werror-categories werror-categories)))
     (let ((*compile-time-value-env*    nil)
            (*compile-time-function-env* nil)
             (*pending-exception-table-entries* nil)
@@ -771,7 +814,11 @@ Returns a compilation-result struct with program, assembly, and globals."
              (*forward-declared-functions* nil)
              (*unresolved-forward-refs* nil)
              (*load-time-value-cells* nil)
-            (*next-load-time-value-cell-id* 0))
+             (*next-load-time-value-cell-id* 0)
+             (cl-cc/parse:*werror-p* werror)
+             (cl-cc/parse:*werror-categories*
+               (mapcar (lambda (category) (string-downcase (string category)))
+                       werror-categories)))
        (loop for form in forms
              for form-index from 0
              do (unless (%top-level-in-package-form-p form)

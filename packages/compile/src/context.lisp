@@ -388,11 +388,31 @@ Used by run-string-repl to persist the label counter across calls.")
 (defun %list-intersection-eq (left right)
   (intersection left right :test #'eq))
 
+(defun %hash-table-keys (table)
+  (let (keys)
+    (maphash (lambda (key value)
+               (declare (ignore value))
+               (push key keys))
+             table)
+    keys))
+
+(defun %visible-symbol-candidates (ctx)
+  (remove-duplicates
+   (append (mapcar #'car (ctx-env ctx))
+           (%hash-table-keys (ctx-global-variables ctx))
+           (%hash-table-keys (ctx-global-functions ctx)))
+   :test #'eq))
+
 (defun lookup-var (ctx sym)
   (let ((entry (assoc sym (ctx-env ctx) :test #'eq)))
     (if entry
         (cdr entry)
-        (error "Unbound variable"))))
+        (let* ((diag (cl-cc/parse:undefined-symbol-diagnostic
+                      sym (%visible-symbol-candidates ctx) (cons 0 0)))
+               (notes (cl-cc/parse::diagnostic-notes diag)))
+          (error "~A~@[ ~A~]"
+                 (cl-cc/parse:diagnostic-message diag)
+                 (first notes))))))
 
 (defun %capture-candidates-from-env (env)
   "Return (var . reg) capture candidates from ENV in lookup precedence order."

@@ -84,28 +84,14 @@
 
 (defun format-diagnostic-list (diags source &optional (stream *standard-output*))
   "Format a list of diagnostics with summary.
-When *WERROR-P* is non-NIL, warnings are promoted to errors before output."
-  (let ((diags (if *werror-p*
-                   (mapcar (lambda (d)
-                             (if (eq (diagnostic-severity d) :warning)
-                                 (make-diagnostic :severity :error
-                                                  :span (diagnostic-span d)
-                                                  :source-file (diagnostic-source-file d)
-                                                  :message (format nil "[upgraded from warning] ~A"
-                                                                   (diagnostic-message d))
-                                                  :hints (diagnostic-hints d)
-                                                  :notes (diagnostic-notes d)
-                                                  :error-code (diagnostic-error-code d)
-                                                  :fix-it (diagnostic-fix-it d))
-                                 d))
-                           diags)
-                   diags)))
+When *WERROR-P* or *WERROR-CATEGORIES* matches, warnings are promoted to errors before output."
+  (let ((diags (mapcar #'%maybe-promote-warning-diagnostic diags)))
     (dolist (d diags)
       (format-diagnostic d source stream)
       (terpri stream))
     (let ((nerr (count :error diags :key #'diagnostic-severity))
           (nwarn (count :warning diags :key #'diagnostic-severity)))
-      (when *werror-p*
+      (when (or *werror-p* *werror-categories*)
         (format stream "~&note: warnings treated as errors (-Werror)~%"))
       (format stream "~&~D error~:P, ~D warning~:P~%" nerr nwarn))))
 
@@ -113,6 +99,40 @@ When *WERROR-P* is non-NIL, warnings are promoted to errors before output."
 
 (defvar *werror-p* nil
   "When non-NIL, all diagnostics with :warning severity are promoted to :error.")
+
+(defvar *werror-categories* nil
+  "List of warning categories/error-codes promoted to errors.")
+
+(defun %diagnostic-category (diag)
+  (or (diagnostic-error-code diag)
+      (and (consp (diagnostic-notes diag))
+           (find-if (lambda (note)
+                      (and (stringp note)
+                           (search "category:" note)))
+                    (diagnostic-notes diag)))))
+
+(defun warning-as-error-p (diag)
+  "Return true when DIAG should be promoted by the active -Werror policy."
+  (and (eq (diagnostic-severity diag) :warning)
+       (or *werror-p*
+           (let ((category (%diagnostic-category diag)))
+             (and category
+                  (member (string-downcase (string category))
+                          *werror-categories*
+                          :test #'string=))))))
+
+(defun %maybe-promote-warning-diagnostic (diag)
+  (if (warning-as-error-p diag)
+      (make-diagnostic :severity :error
+                       :span (diagnostic-span diag)
+                       :source-file (diagnostic-source-file diag)
+                       :message (format nil "[upgraded from warning] ~A"
+                                        (diagnostic-message diag))
+                       :hints (diagnostic-hints diag)
+                       :notes (diagnostic-notes diag)
+                       :error-code (diagnostic-error-code diag)
+                       :fix-it (diagnostic-fix-it diag))
+      diag))
 
 ;;; Did You Mean? suggestion engine (FR-484)
 
@@ -141,6 +161,21 @@ Candidates with distance > MAX-DISTANCE are filtered out."
                       when (<= d max-distance)
                       collect (cons c d))))
     (mapcar #'car (stable-sort scored #'< :key #'cdr))))
+
+(defun undefined-symbol-diagnostic (symbol candidates span &key source-file (kind :variable))
+  "Build an undefined symbol diagnostic with up to three ranked suggestions."
+  (let* ((suggestions (did-you-mean (string symbol) candidates :max-results 3))
+         (notes (when suggestions
+                  (list (format nil "did you mean ~{~S~^, ~}?" suggestions))))
+         (hints (mapcar (lambda (candidate)
+                          (cons (format nil "did you mean ~S?" candidate) span))
+                        suggestions)))
+    (make-parse-error (format nil "Undefined ~A ~S" kind symbol)
+                      span
+                      :source-file source-file
+                      :hints hints
+                      :notes notes
+                      :error-code "E-UNDEFINED-SYMBOL")))
 
 ;;; Convenience constructors
 

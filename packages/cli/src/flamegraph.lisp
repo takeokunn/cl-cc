@@ -97,11 +97,20 @@
 
 (defun %perf-script-line->sample (line samples)
   "Add one folded-stack sample from a simple perf script line to SAMPLES."
-  (cond
-    ((search ";" line)
-     (%flamegraph-inc-sample samples (string-trim '(#\Space #\Tab) line)))
+  (let* ((trimmed (string-trim '(#\Space #\Tab) line))
+         (parts (uiop:split-string trimmed :separator '(#\Space #\Tab)))
+         (last-part (car (last parts)))
+         (count (and (> (length parts) 1)
+                     (ignore-errors (parse-integer last-part :junk-allowed nil))))
+         (stack (if count
+                    (subseq trimmed 0 (position-if (lambda (ch) (member ch '(#\Space #\Tab)))
+                                                   trimmed :from-end t))
+                    trimmed)))
+    (cond
+    ((search ";" stack)
+     (%flamegraph-inc-sample samples (string-trim '(#\Space #\Tab) stack) (or count 1)))
     ((and (> (length line) 0) (not (find (char line 0) " \t#")))
-     (%flamegraph-inc-sample samples (format nil "cpu;~A" (string-trim '(#\Space #\Tab) line)))))
+     (%flamegraph-inc-sample samples (format nil "cpu;~A" trimmed) 1))))
   samples)
 
 (defun %read-flamegraph-samples-from-file (path)

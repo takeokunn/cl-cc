@@ -189,10 +189,12 @@
    #:compilation-result-cps
    #:compilation-result-ast
     #:compilation-result-vm-instructions
-    #:compilation-result-optimized-instructions
-     #:compilation-result-pgo-counter-plan
-     #:compilation-result-errors
-     #:compilation-result-warnings
+     #:compilation-result-optimized-instructions
+      #:compilation-result-pgo-counter-plan
+      #:compilation-result-branch-probability-hints
+      #:compilation-result-code-placement-hints
+      #:compilation-result-errors
+      #:compilation-result-warnings
 
    ;; ── CPS transformation re-exports ──
    #:cps-transform

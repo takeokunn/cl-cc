@@ -194,6 +194,37 @@ BASE-ADDR is the virtual memory address for the segment."
     (push data-segment (mach-o-builder-segments builder))
     builder))
 
+(defun %mach-o-find-data-const-segment (builder)
+  "Return BUILDER's existing __DATA_CONST segment, if any."
+  (find "__DATA_CONST" (mach-o-builder-segments builder)
+        :key #'segment-command-segname :test #'string=))
+
+(defun %mach-o-append-data-const-bytes (segment const-bytes)
+  "Append CONST-BYTES to SEGMENT's __const payload and update section sizes."
+  (let* ((old-payload (segment-command-payload segment))
+         (old-size (length old-payload))
+         (new-size (+ old-size (length const-bytes)))
+         (payload (make-array new-size :element-type '(unsigned-byte 8)
+                              :initial-element 0))
+         (section (or (find "__const" (segment-command-sections segment)
+                            :key #'section-sectname :test #'string=)
+                      (make-section :sectname "__const"
+                                    :segname "__DATA_CONST"
+                                    :addr (segment-command-vmaddr segment)
+                                    :align 4))))
+    (replace payload old-payload :start1 0)
+    (replace payload const-bytes :start1 old-size)
+    (setf (section-size section) new-size
+          (segment-command-payload segment) payload
+          (segment-command-vmsize segment) (align-up new-size #x1000)
+          (segment-command-filesize segment) new-size
+          (segment-command-nsects segment) 1
+          (segment-command-cmdsize segment) (+ 72 80)
+          (segment-command-maxprot segment) 4
+          (segment-command-initprot segment) 4
+          (segment-command-sections segment) (list section))
+    old-size))
+
 (defun add-data-const-segment (builder const-bytes &key (base-addr #x100002000))
   "Add a read-only __DATA_CONST segment for immutable constants.
 
@@ -204,28 +235,29 @@ constant data are rejected by the operating system."
             (type (simple-array (unsigned-byte 8) (*)) const-bytes))
   (let* ((dedup-key (coerce const-bytes 'list))
          (existing (gethash dedup-key (mach-o-builder-data-const-dedup-table builder))))
-    (when existing
-      (return-from add-data-const-segment builder))
-    (setf (gethash dedup-key (mach-o-builder-data-const-dedup-table builder)) base-addr))
-  (let* ((const-size (length const-bytes))
-         (const-section (make-section
-                         :sectname "__const"
-                         :segname "__DATA_CONST"
-                         :addr base-addr
-                         :size const-size
-                         :align 4))
-         (const-segment (make-segment-command
-                         :segname "__DATA_CONST"
-                         :vmaddr base-addr
-                         :vmsize (align-up const-size #x1000)
-                         :payload const-bytes
-                         :nsects 1
-                         :maxprot 4    ; r--
-                         :initprot 4   ; r--
-                         :cmdsize (+ 72 (* 80 1))
-                         :sections (list const-section))))
-    (push const-segment (mach-o-builder-segments builder))
-    builder))
+    (unless existing
+      (let ((segment (or (%mach-o-find-data-const-segment builder)
+                         (let ((new-segment
+                                 (make-segment-command
+                                  :segname "__DATA_CONST"
+                                  :vmaddr base-addr
+                                  :vmsize #x1000
+                                  :payload (make-array 0 :element-type '(unsigned-byte 8))
+                                  :nsects 1
+                                  :maxprot 4    ; r--
+                                  :initprot 4   ; r--
+                                  :cmdsize (+ 72 (* 80 1))
+                                  :sections (list (make-section
+                                                   :sectname "__const"
+                                                   :segname "__DATA_CONST"
+                                                   :addr base-addr
+                                                   :size 0
+                                                   :align 4)))))
+                           (push new-segment (mach-o-builder-segments builder))
+                           new-segment))))
+        (setf (gethash dedup-key (mach-o-builder-data-const-dedup-table builder))
+              (%mach-o-append-data-const-bytes segment const-bytes)))))
+  builder)
 
 (defun macho-build-unwind-info (code-size &key
                                             (encoding +compact-unwind-x86-64-mode-stack-immd+)

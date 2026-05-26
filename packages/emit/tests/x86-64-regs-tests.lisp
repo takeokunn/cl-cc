@@ -33,6 +33,25 @@
   "x86-64-red-zone-spill-p: leaf=T with count=0 returns NIL."
   (assert-false (cl-cc/codegen::x86-64-red-zone-spill-p t 0)))
 
+(deftest x86-64-stack-frame-packing-mixed-width-locals
+  "FR-416: mixed-width stack locals are reordered by alignment to avoid padding holes."
+  (multiple-value-bind (layout frame-size)
+      (cl-cc/codegen::x86-64-pack-stack-frame-locals
+       '((:flag 1 1) (:wide 8 8) (:word 4 4))
+       :stack-alignment 8)
+    (assert-equal '((:wide . -8) (:word . -12) (:flag . -13)) layout)
+    (assert-equal 16 frame-size)))
+
+(deftest x86-64-stack-frame-packing-accepts-plist-locals
+  "FR-416: stack-frame packer accepts plist descriptors from future lowering passes."
+  (multiple-value-bind (layout frame-size)
+      (cl-cc/codegen::x86-64-pack-stack-frame-locals
+       '((:name :byte :size 1 :align 1)
+         (:name :double :size 8 :align 8))
+       :stack-alignment 16)
+    (assert-equal '((:double . -8) (:byte . -9)) layout)
+    (assert-equal 16 frame-size)))
+
 ;;; ─── vm-reg-to-x86 (no regalloc) ─────────────────────────────────────────
 
 (deftest-each x86-64-regs-vm-reg-to-x86-naive-map

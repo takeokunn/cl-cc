@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: benchmark-${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +32,47 @@ jobs:
 
       - name: Run benchmarks
         run: nix run .#benchmarks --print-build-logs
-        continue-on-error: true
+
+      - name: Detect benchmark regressions
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, sys
+
+          threshold = float(os.environ.get("BENCHMARK_REGRESSION_THRESHOLD", "1.10"))
+          baseline_dir = "benchmark-baseline"
+          result_files = sorted(glob.glob("benchmark-results/*.json"))
+          regressions = []
+
+          for path in result_files:
+              name = os.path.basename(path)
+              baseline_path = os.path.join(baseline_dir, name)
+              if not os.path.exists(baseline_path):
+                  continue
+              with open(path) as current_file, open(baseline_path) as baseline_file:
+                  current = json.load(current_file)
+                  baseline = json.load(baseline_file)
+              current_mean = current.get("mean-ns") or current.get("mean_ns")
+              baseline_mean = baseline.get("mean-ns") or baseline.get("mean_ns")
+              if not current_mean or not baseline_mean:
+                  continue
+              ratio = float(current_mean) / float(baseline_mean)
+              if ratio > threshold:
+                  regressions.append(f"{name}: {ratio:.2f}x slower ({current_mean} ns vs {baseline_mean} ns)")
+
+          os.makedirs("benchmark-results", exist_ok=True)
+          with open("benchmark-results/regression-report.md", "w") as report:
+              report.write("# Benchmark regression report\n\n")
+              if regressions:
+                  report.write("Regressions detected:\n\n")
+                  for item in regressions:
+                      report.write(f"- {item}\n")
+              else:
+                  report.write("No regressions detected.\n")
+
+          if regressions:
+              print("\n".join(regressions))
+              sys.exit(1)
+          PY
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
