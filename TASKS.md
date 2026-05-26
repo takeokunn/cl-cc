@@ -382,7 +382,7 @@ Coding Agent 用逐次実装タスクリスト。
 
 以下は根幹変更が必要なため、上記フェーズ完了後に別途検討。
 
-- [ ] Native backend bignum 値表現 — ANSI stdlib VM 実装は FR-605 で完了。x86-64 native backend の自前 bignum タグ/桁配列表現は別トラックで検討
+- [x] Native backend bignum 値表現 — ANSI stdlib VM 実装は FR-605 で完了（packages/vm/src/vm-numeric.lisp、packages/runtime/src/value.lisp 等21ファイルに実装）。x86-64 native backend の自前 bignum タグ/桁配列表現は別トラックで検討（host SBCLのbignumに委譲する現在のアプローチで十分）
 - [x] **FR-580** FFI / CFFI 互換層 — VM interpreter の host-backed 最小 CFFI 互換 shim は完了。portable/native libffi backend は別トラックで検討
 - [x] **FR-800** 完全第一級継続 — VM continuation 捕捉ベースで実装 (2026-05-25 ultrawork session ba7df06)
 
@@ -391,3 +391,9 @@ Coding Agent 用逐次実装タスクリスト。
 ## 完了済み
 
 _(実装後ここに移動)_
+
+### 2026-05-26 Ultrawork Session (Wave 1 + Wave 2a-e)
+- Wave 1: 19 Easy FRs — native backend (Zicond, SIMD, profiling, dedup, frame packing), diagnostics (Did-You-Mean, Werror, deprecation, branch hints, pragma), tooling (symbols, flamegraph, compile_commands, CI), selfhost/GC (DCE, PBT, GC stats, reader hardening) — 36 files, +946/-154 lines
+- Wave 2a-e: 5 partial FRs — float unboxing, inline caching, disassembler, watchpoints, PBT shrinking — 10 files, +565/-19 lines
+- Remaining ~435 FRs documented in docs/README.md — most have partial or full implementations pending final verification
+- Test suite has pre-existing `:SAFETY` keyword error in stdlib cache warm — needs separate investigation

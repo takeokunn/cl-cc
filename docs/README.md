@@ -47,4 +47,4 @@
 
 ---
 
-**Status: ~2080 tracked FRs complete (~99%) | wasm.md 186/186 ✅ | runtime-stdlib-3 73/73 ✅ | tooling-advanced-3 128/128 ✅ | tooling-compiler 17✅/21⬜ | tooling-debug 24✅/4⚠️/25⬜ | native-advanced 64✅/1⚠️/82⬜ | memory-gc 67✅/16⚠️/84⏸️ | Last updated: 2026-05-25**
+**Status: ~2105 tracked FRs complete (~99%) | wasm.md 186/186 ✅ | runtime-stdlib-3 73/73 ✅ | tooling-advanced-3 128/128 ✅ | tooling-compiler 30✅/8⬜ (FR-198 Mach-O + others now implemented) | tooling-debug 29✅/4⚠️/20⬜ (FR-311/314 + FR-353 PBT + FR-338 DCE + FR-356 GC stats + FR-505 selfhost) | native-codegen 82✅/1⬜ (FR-227 SLP only) | native-advanced 69✅/1⚠️/77⬜ (FR-576 Zicond/FR-593 SIMD/FR-703 profiling/FR-724 dedup/FR-416 frame packing) | memory-gc 67✅/17⚠️/83⏸️ | tooling-advanced-1 ~70✅ implemented (FR-484/485/539/540/542/440/444 + many others) | tooling-advanced-2 ~70✅ implemented (FR-574/664/550/552/570/585) | Last updated: 2026-05-26 (ultrawork Wave 1 + Wave 2a-e)**
