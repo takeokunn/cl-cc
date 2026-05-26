@@ -209,3 +209,36 @@
                    (cl-cc/bytecode:disassemble-chunk chunk s))))
     (assert-true (search "Constant pool" out))
     (assert-true (search "42" out))))
+
+(deftest disassemble-chunk-multi-instruction
+  "disassemble-chunk prints mnemonics and operands for all format types
+   (3op, 2op, imm, branch, special) in a single chunk."
+  (let* ((code (make-array 6
+                           :element-type '(unsigned-byte 32)
+                           :initial-contents
+                           (list (cl-cc/bytecode:encode-load-fixnum 0 42)   ;; imm
+                                 (cl-cc/bytecode:encode-load-fixnum 1 7)    ;; imm
+                                 (cl-cc/bytecode:encode-add 2 0 1)          ;; 3op
+                                 (cl-cc/bytecode:encode-return 2)           ;; 2op
+                                 (cl-cc/bytecode:encode-jump 0)             ;; branch
+                                 (cl-cc/bytecode:encode-nop))))             ;; special
+         (chunk (cl-cc/bytecode:make-bytecode-chunk
+                 :code code
+                 :constants (vector)))
+         (out   (with-output-to-string (s)
+                  (cl-cc/bytecode:disassemble-chunk chunk s))))
+    ;; Verify instruction count
+    (assert-true (search "6 instruction" out))
+    ;; Verify mnemonics for each format type
+    (assert-true (search "LOAD_FIXNUM" out))
+    (assert-true (search "ADD" out))
+    (assert-true (search "RETURN" out))
+    (assert-true (search "JUMP" out))
+    (assert-true (search "NOP" out))
+    ;; Verify operand formatting
+    (assert-true (search "r0, 42" out))
+    (assert-true (search "r1, 7" out))
+    (assert-true (search "r2, r0, r1" out))
+    (assert-true (search "r2" out))
+    ;; Verify hex word display
+    (assert-true (search "00000000" out))))

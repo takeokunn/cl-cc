@@ -111,22 +111,30 @@
 ;;; ------------------------------------------------------------
 
 (defun shrink-integer (n)
-  "Return smaller integer candidates moving N toward zero."
+  "Return smaller integer candidates moving N toward zero.
+Generates the full binary-search path (n/2, n/4, ...) so that greedy
+descent quickly reaches the minimal failing value."
   (cond
     ((zerop n) nil)
-    ((> (abs n) 1) (remove-duplicates (list 0 (truncate n 2)) :test #'eql))
-    (t (list 0))))
+    (t (let ((candidates (list 0)))
+         (do ((k (truncate n 2) (truncate k 2)))
+             ((zerop k))
+           (push k candidates))
+         (remove-duplicates candidates :test #'eql)))))
 
 (defun shrink-list (list)
-  "Return smaller list candidates by deletion and element shrinking."
+  "Return smaller list candidates by deletion, binary-search halving, and element shrinking."
   (when list
     (let ((candidates '()))
       (push nil candidates)
       (when (cdr list)
         (push (cdr list) candidates)
         (push (butlast list) candidates))
-      (when (> (length list) 2)
-        (push (subseq list 0 (floor (length list) 2)) candidates))
+      (let ((len (length list)))
+        (when (> len 2)
+          (let ((half (floor len 2)))
+            (push (subseq list 0 half) candidates)
+            (push (subseq list half) candidates))))
       (loop for index from 0
             for item in list
             do (dolist (shrunk (shrink item))
@@ -136,16 +144,17 @@
       (remove-duplicates (nreverse candidates) :test #'equal))))
 
 (defun shrink-string (string)
-  "Return shorter string candidates."
+  "Return shorter string candidates via binary-search halving and prefix removal."
   (let ((length (length string)))
     (cond
       ((zerop length) nil)
       ((= length 1) (list ""))
-      (t (remove-duplicates
-          (list ""
-                (subseq string 0 (floor length 2))
-                (subseq string 1))
-          :test #'string=)))))
+      (t (let* ((half (floor length 2))
+                (candidates (list ""
+                                  (subseq string 0 half)
+                                  (subseq string half)
+                                  (subseq string 1))))
+           (remove-duplicates candidates :test #'string=))))))
 
 (defun shrink (value)
   "Return deterministic smaller candidates for VALUE.

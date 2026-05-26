@@ -39,6 +39,60 @@
               (minimize-failing-input -1000
                                       (lambda (value) (< value -5)))))
 
+(deftest fr-353-shrink-integer-produces-binary-search-candidates
+  "FR-353: shrink-integer generates binary-search path milestones toward zero."
+  :tags '(:fr-353)
+  ;; Large positive: all halving steps
+  (let ((candidates (shrink-integer 1000)))
+    (assert-true (member 0 candidates))
+    (assert-true (member 500 candidates))
+    (assert-true (member 250 candidates))
+    (assert-true (member 125 candidates)))
+  ;; Small positive
+  (let ((candidates (shrink-integer 3)))
+    (assert-true (member 0 candidates))
+    (assert-true (member 1 candidates)))
+  ;; Negative: shrinks toward zero via truncation
+  (let ((candidates (shrink-integer -10)))
+    (assert-true (member 0 candidates))
+    (assert-true (member -5 candidates)))
+  ;; Zero returns nil
+  (assert-null (shrink-integer 0))
+  ;; One returns (0)
+  (assert-equal '(0) (shrink-integer 1)))
+
+(deftest fr-353-shrink-list-includes-binary-search-halves
+  "FR-353: list shrinking produces both left and right half candidates."
+  :tags '(:fr-353)
+  (let ((candidates (shrink '(1 2 3 4 5 6))))
+    (assert-true (member nil candidates :test #'equal))
+    (assert-true (member '(1 2 3) candidates :test #'equal))
+    (assert-true (member '(4 5 6) candidates :test #'equal))))
+
+(deftest fr-353-shrink-list-minimizes-failing-property
+  "FR-353: shrinking a list with a failing predicate finds the minimal sublist.
+Property: all list elements must be positive.
+Shrinking (3 -8 5) should converge to the singleton (-1)."
+  :tags '(:fr-353)
+  (let ((result (minimize-failing-input
+                 '(3 -8 5)
+                 (lambda (list)
+                   (some #'minusp list))
+                 :max-rounds 50)))
+    ;; The minimal failing list contains one negative number
+    (assert-true (= 1 (length result)))
+    (assert-true (minusp (first result)))
+    ;; The negative number is minimal (closest to zero): -1
+    (assert-eql -1 (first result))))
+
+(deftest fr-353-shrink-string-includes-binary-search-halves
+  "FR-353: string shrinking produces both left and right half candidates."
+  :tags '(:fr-353)
+  (let ((candidates (shrink-string "hello")))
+    (assert-true (member "" candidates :test #'string=))
+    (assert-true (member "he" candidates :test #'string=))
+    (assert-true (member "llo" candidates :test #'string=))))
+
 (deftest fr-353-type-annotation-generators-derive-values
   "FR-353: type annotations resolve to registered property generators."
   :tags '(:fr-353)

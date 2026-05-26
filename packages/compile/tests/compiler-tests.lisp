@@ -194,3 +194,25 @@
   (form)
   (let* ((result (compile-string form)) (cps (compilation-result-cps result)))
     (assert-true (or (null cps) (listp cps)))))
+
+;;; ─── FR-008 Float Unboxing ─────────────────────────────────────────────────
+
+(deftest-compile float-unboxing-arith
+  "Float arithmetic compiles to float-specific VM ops and produces correct results."
+  :cases (("float-add" 3.0   "(+ 1.0 2.0)")
+          ("float-sub" 2.0   "(- 5.0 3.0)")
+          ("float-mul" 12.0  "(* 3.0 4.0)")
+          ("float-div" 2.5   "(/ 10.0 4.0)")
+          ("float-nested" 7.0 "(+ (* 2.0 3.0) 1.0)")))
+
+(deftest float-unboxing-instruction-selection
+  "Float binop expressions compile to float-specific VM instructions."
+  (assert-compiles-to "(+ 1.0 2.0)" :contains 'vm-float-add)
+  (assert-compiles-to "(- 5.0 3.0)" :contains 'vm-float-sub)
+  (assert-compiles-to "(* 3.0 4.0)" :contains 'vm-float-mul)
+  (assert-compiles-to "(/ 10.0 4.0)" :contains 'vm-float-div))
+
+(deftest float-unboxing-via-the
+  "Float arithmetic with explicit THE type annotation selects float ops."
+  (assert-run= 3.0 "(the float (+ 1.0 2.0))")
+  (assert-run= 12.0 "(the float (* 3.0 4.0))"))

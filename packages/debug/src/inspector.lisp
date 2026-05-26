@@ -91,3 +91,55 @@ metadata, CL-CC VM closure captures, and hash-table key/value entries."
           :type (type-of object)
           :summary (%safe-princ-to-string object)
           :parts (%object-inspector-parts object))))
+
+;;; ─── FR-314: VM Watchpoints ──────────────────────────────────────────────
+
+(defparameter *vm-watchpoints* (make-hash-table :test #'eql)
+  "Watchpoint table.  Maps register designators to T (watched).
+When a watched register is written, VM-WATCHPOINT-CONDITION is signaled
+from the VM interpreter register-write path.")
+
+(define-condition vm-watchpoint-condition (condition)
+  ((reg       :initarg :reg       :reader vm-watchpoint-reg)
+   (old-value :initarg :old-value :reader vm-watchpoint-old-value)
+   (new-value :initarg :new-value :reader vm-watchpoint-new-value)
+   (pc        :initarg :pc        :initform nil :reader vm-watchpoint-pc))
+  (:report (lambda (c s)
+             (format s "Watchpoint: register ~S changed from ~S to ~S"
+                     (vm-watchpoint-reg c)
+                     (vm-watchpoint-old-value c)
+                     (vm-watchpoint-new-value c)))))
+
+(defun add-vm-watchpoint (register)
+  "Add a watchpoint on REGISTER.  Every subsequent write to REGISTER through
+VM-REG-SET will signal VM-WATCHPOINT-CONDITION before the write completes."
+  (setf (gethash register *vm-watchpoints*) t)
+  register)
+
+(defun remove-vm-watchpoint (register)
+  "Remove an existing watchpoint on REGISTER."
+  (remhash register *vm-watchpoints*)
+  register)
+
+(defun clear-vm-watchpoints ()
+  "Remove all VM watchpoints."
+  (clrhash *vm-watchpoints*))
+
+(defmethod vm-reg-set :around ((state vm-state) reg value)
+  "FR-314: Watchpoint hook — signal VM-WATCHPOINT-CONDITION on watched registers.
+
+Provides a CONTINUE restart so that handlers can inspect the write and
+let execution proceed."
+  (let ((old-value (gethash reg (vm-state-registers state))))
+    (if (gethash reg *vm-watchpoints*)
+        (let ((result (call-next-method)))
+          (restart-case
+              (signal 'vm-watchpoint-condition
+                      :reg reg
+                      :old-value old-value
+                      :new-value value)
+            (continue ()
+              :report "Continue execution after watchpoint"
+              nil))
+          result)
+        (call-next-method))))

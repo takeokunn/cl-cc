@@ -73,7 +73,7 @@
                    :instructions (list (cl-cc:make-vm-const :dst :r0 :value 1)
                                        (cl-cc:make-vm-halt :reg :r0))
                    :result-register :r0))
-         (count 0))
+          (count 0))
     (handler-bind ((cl-cc:step-condition
                      (lambda (_condition)
                        (declare (ignore _condition))
@@ -82,3 +82,24 @@
       (cl-cc:step (:mode :into)
         (assert-= 1 (cl-cc:run-compiled program))))
     (assert-= 2 count)))
+
+(deftest watchpoint-detects-register-write
+  "FR-314: VM watchpoints signal VM-WATCHPOINT-CONDITION when a watched
+register is written during VM execution."
+  (let* ((program (cl-cc:make-vm-program
+                   :instructions (list (cl-cc:make-vm-const :dst :r0 :value 10)
+                                       (cl-cc:make-vm-const :dst :r0 :value 20)
+                                       (cl-cc:make-vm-halt :reg :r0))
+                   :result-register :r0))
+         (seen nil))
+    (cl-cc:add-vm-watchpoint :r0)
+    (handler-bind ((cl-cc:vm-watchpoint-condition
+                     (lambda (c)
+                       (push (list (cl-cc:vm-watchpoint-reg c)
+                                   (cl-cc:vm-watchpoint-old-value c)
+                                   (cl-cc:vm-watchpoint-new-value c))
+                             seen))))
+      (assert-= 20 (cl-cc:run-compiled program)))
+    (cl-cc:clear-vm-watchpoints)
+    ;; :r0 was written first with nil→10, then 10→20
+    (assert-equal '((:r0 nil 10) (:r0 10 20)) (nreverse seen))))

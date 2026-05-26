@@ -143,6 +143,11 @@ Literals reuse a per-compilation-unit vm-const register via an EQUAL hash table.
      (multiple-value-bind (scheme found-p)
          (type-env-lookup (ast-var-name ast) (ctx-type-env ctx))
        (if found-p (instantiate scheme) nil)))
+    ((typep ast 'ast-quote)
+     (let ((val (ast-quote-value ast)))
+       (cond
+         ((floatp val) +codegen-float-type+)
+         (t nil))))
     (t nil)))
 
 (defun %proven-fixnum-type-p (ty)
