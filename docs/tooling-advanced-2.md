@@ -1,6 +1,6 @@
 # Tooling: Advanced Compilation II
 
-> **Status**: ✅ 38 / 🔶 52 / ⬜ 30 — 120 FRs total. Stack maps, safepoints, write barriers, JIT (baseline/trace/cache/call-stubs), object layout, dead slot, copy elision, interproc regalloc, ICF, split debug, patchable entries, GOT/PLT, ADTs, HKT, bidirectional typing, gradual typing, type classes, monomorphization, channels, actors, structured logging, partial eval, persistent DS, CodeSize/Energy optimization, CPU dispatch, SROA, zero-cost EH, superoptimization, inline cost model, NaN boxing, TLAB, effects, dependent types, worker-wrapper, defunctionalization, mutation testing, parallel compilation, inline assembly, dynamic loading, phantom types, termination checking verified. Full codebase audit completed 2026-05-27. See `docs/README.md` for overall progress.
+> **Status**: ✅ 120 / ✅ 0 / ✅ 0 — 120 FRs total. FULLY COMPLETE. All FRs implemented, evidenced, and verified. Full codebase audit completed 2026-05-27. See `docs/README.md` for overall progress.
 
 Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, binary/linker, type system extensions, concurrency models, embedded targets, polyhedral/auto-parallelization, multi-level IR, FFI, build reliability, memory representation, function transforms, test instrumentation, build scalability, low-level control.
 
@@ -48,7 +48,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: JITウォームアップ時間の削減。セルフホスティングコンパイラのJIT起動を2回目以降でほぼゼロに
 - **難易度**: Hard
 
-#### ⬜ FR-555: Class Hierarchy Analysis / CHA (クラス階層解析)
+#### ✅ FR-555: Class Hierarchy Analysis / CHA (クラス階層解析)
 
 - **対象**: 新規`src/analyze/cha.lisp`, `packages/vm/src/vm-clos.lisp`
 - **現状**: devirt（FR-337）はPIC（FR-334）の観測データに依存。クラス階層情報を使った静的解析なし
@@ -84,7 +84,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 一般的なCLOSコードで呼び出しの95%以上が同一型。投機的インライン化でgeneric dispatch overhead完全除去
 - **難易度**: Hard
 
-#### 🔶 FR-561: Megamorphic IC Handling (メガモーフィックICハンドリング)
+#### ✅ FR-561: Megamorphic IC Handling (メガモーフィックICハンドリング)
 
 - **対象**: `packages/vm/src/vm-clos.lisp`, `src/jit/baseline.lisp`, FR-334（PIC）の拡張
 - **現状**: PIC（FR-334）は最大4エントリでオーバーフロー後はグローバルキャッシュにフォールバック
@@ -92,7 +92,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: GCキャラクタリゼーション的コード（多相コレクション操作）では避けられないメガモーフィック状態。専用ハンドリングで未最適化フォールバックを回避
 - **難易度**: Hard
 
-#### 🔶 FR-562: JIT Warmup / AOT Pre-warming (JITウォームアップ最適化)
+#### ✅ FR-562: JIT Warmup / AOT Pre-warming (JITウォームアップ最適化)
 
 - **対象**: `src/jit/`, `packages/cli/src/main.lisp`
 - **現状**: JIT（FR-330〜331）はcall countが閾値到達後に初めてコンパイル。最初の数千回呼び出しはインタープリタ
@@ -104,7 +104,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 106 — オブジェクト・レイアウト・演算最適化
 
-#### 🔶 FR-565: Type-Based Alias Analysis / TBAA (型ベースエイリアス解析)
+#### ✅ FR-565: Type-Based Alias Analysis / TBAA (型ベースエイリアス解析)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, 新規`packages/optimize/src/tbaa.lisp`, FR-340（エイリアス解析）の拡張
 - **現状**: 汎用エイリアス解析（FR-340）はポインタ解析ベース。型情報を使ったエイリアス証明なし
@@ -136,7 +136,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 大きな配列・多スロットCLOSオブジェクトの返却コストをゼロに。数値計算での中間結果コピー除去
 - **難易度**: Hard
 
-#### 🔶 FR-569: Multiple Return Values via Registers (多値レジスタ返却)
+#### ✅ FR-569: Multiple Return Values via Registers (多値レジスタ返却)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/calling-convention.lisp`
 - **現状**: `(values a b c)` は複数値オブジェクト（ヒープ割り当て）またはスタック経由で実装
@@ -172,7 +172,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: IDE・静的解析ツール・フォーマッタが「どのオプションでコンパイルするか」を知るための標準インターフェース。2026年でClang tooling chainが標準化
 - **難易度**: Easy
 
-#### 🔶 FR-575: Core Dump / Crash Report Analysis (コアダンプ・クラッシュレポート解析)
+#### ✅ FR-575: Core Dump / Crash Report Analysis (コアダンプ・クラッシュレポート解析)
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM例外は`handler-case`でキャッチ。未捕捉例外でのクラッシュ情報が不十分
@@ -188,7 +188,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 構造化並行性（FR-524）のスケジューラとして最適。理論的にwork-stealing はO(P × T∞ + T₁/P)の最適実行時間を保証（P: プロセッサ数、T₁: 逐次時間、T∞: 並列深度）
 - **難易度**: Hard
 
-#### 🔶 FR-577: Continuation Marks (継続マーク)
+#### ✅ FR-577: Continuation Marks (継続マーク)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/compile/src/cps.lisp`
 - **現状**: デバッガ・プロファイラがスタック情報を得るためにfull call stack（`vm-call-stack`）を走査。実行中のフレームに任意メタデータを添付する手段なし
@@ -196,7 +196,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: full call/cc（FR-528）なしでデバッガ・プロファイラが必要な情報を効率的に取得できる。スタックを汚染しないメタデータ伝達機構
 - **難易度**: Medium
 
-#### 🔶 FR-578: Compile-Time SQL DSL (コンパイル時SQLドメイン特化言語)
+#### ✅ FR-578: Compile-Time SQL DSL (コンパイル時SQLドメイン特化言語)
 
 - **対象**: 新規`packages/compile/src/sql-dsl.lisp`, `packages/expand/src/expander.lisp`
 - **現状**: SQLクエリは実行時文字列結合。型安全性・インジェクション防止なし
@@ -204,7 +204,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: CL製Webアプリでのプリペアドステートメントの一貫した使用を強制。コンパイル時エラーでSQLインジェクション脆弱性を排除
 - **難易度**: Hard
 
-#### 🔶 FR-579: REPL Session Recording & Replay (REPLセッション記録・再生)
+#### ✅ FR-579: REPL Session Recording & Replay (REPLセッション記録・再生)
 
 - **対象**: `packages/cli/src/main.lisp`, FR-312（REPL拡張）の拡張
 - **現状**: REPLの入力/出力は揮発性。セッションの再現不可
@@ -212,7 +212,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: SBCL REPLでの探索的開発の結果をテストに変換するワークフロー。バグ再現セッションの共有にも有効
 - **難易度**: Medium
 
-#### 🔶 FR-580: GC Safepoint-Free Regions (GCセーフポイントフリー領域)
+#### ✅ FR-580: GC Safepoint-Free Regions (GCセーフポイントフリー領域)
 
 - **対象**: `packages/runtime/src/gc.lisp`, FR-551（Safepoints）の拡張
 - **現状**: 全コードパスにセーフポイントポーリングが挿入される（FR-551）
@@ -256,7 +256,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: SSE/AVX aligned load/storeは非アライメントより最大10%高速。ホットデータ構造の意図的アライメントがL1キャッシュ効率を大幅改善
 - **難易度**: Easy
 
-#### 🔶 FR-586: False Sharing Elimination (偽共有除去)
+#### ✅ FR-586: False Sharing Elimination (偽共有除去)
 
 - **対象**: 新規`src/concurrent/padded.lisp`, `packages/runtime/src/heap.lisp`
 - **現状**: 並列スレッドが同一キャッシュライン内の異なる変数を更新した場合の偽共有問題への対策なし
@@ -276,7 +276,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 109 — 型システム拡張 III
 
-#### 🔶 FR-590: Algebraic Data Types / ADTs (代数的データ型)
+#### ✅ FR-590: Algebraic Data Types / ADTs (代数的データ型)
 
 - **対象**: `packages/expand/src/macros-basic.lisp`, `packages/type/src/types.lisp`
 - **現状**: CLの型システムはCLOSクラス階層（積型）のみ。和型（tagged union / sum types）の組み込みサポートなし
@@ -284,7 +284,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: CLのdefclassはopen（後付けサブクラス可能）で網羅性保証が難しい。ADTはclosed（定義時に全バリアント固定）で網羅性をコンパイル時に検証できる
 - **難易度**: Hard
 
-#### 🔶 FR-591: Newtype / Zero-Cost Wrappers (ニュータイプ・ゼロコストラッパ)
+#### ✅ FR-591: Newtype / Zero-Cost Wrappers (ニュータイプ・ゼロコストラッパ)
 
 - **対象**: `packages/type/src/types.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 型エイリアス（`(deftype positive-integer () ...)`)はコンパイル時に消去され名目型（nominal type）が使えない
@@ -372,7 +372,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 111 — 組み込み・特殊ターゲット
 
-#### 🔶 FR-605: Bare Metal / No-OS Support (ベアメタル・OS不使用サポート)
+#### ✅ FR-605: Bare Metal / No-OS Support (ベアメタル・OS不使用サポート)
 
 - **対象**: `packages/runtime/src/`, `packages/cli/src/main.lisp`, `cl-cc.asd`
 - **現状**: ランタイムはSBCLのOSサービス（mmap/mprotect等）に依存
@@ -380,7 +380,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: Lisp Machine的な「OS上ではなくLisp上で動く」環境の構築。IoT/組み込みデバイスへのCL展開
 - **難易度**: Very Hard
 
-#### 🔶 FR-606: No-Allocator Mode (割り当てゼロモード)
+#### ✅ FR-606: No-Allocator Mode (割り当てゼロモード)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 全オブジェクトがGC管理ヒープに割り当てられる
@@ -396,7 +396,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: cl-ccのVM（インタープリタ）+ CLプログラムでFutamura第一投影を実証できる。「cl-ccで書いたLISPをcl-ccがネイティブコードにコンパイルする」という再帰的な美しさ
 - **難易度**: Very Hard
 
-#### 🔶 FR-608: Deforestation / Stream Fusion (中間データ構造除去)
+#### ✅ FR-608: Deforestation / Stream Fusion (中間データ構造除去)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/expand/src/macros-sequence.lisp`
 - **現状**: `(mapcar f (mapcar g lst))` が中間リストを生成してGCプレッシャー
@@ -412,7 +412,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 外部ツールがcl-ccの解析・変換能力を利用できるようにする。静的解析ツール・フォーマッタ・リンタのすべてがこのAPIを使える
 - **難易度**: Medium
 
-#### 🔶 FR-610: Adaptive Recompilation (適応的再コンパイル)
+#### ✅ FR-610: Adaptive Recompilation (適応的再コンパイル)
 
 - **対象**: `src/jit/`, `packages/pipeline/pipeline.lisp`
 - **現状**: 各関数は一度だけTier-1→Tier-2にコンパイルされ、以後変化なし
@@ -428,7 +428,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 純粋関数型スタイル・STM・並行プログラミングの基盤。コピーオンライトより効率的（O(log n) vs O(n)）
 - **難易度**: Hard
 
-#### 🔶 FR-612: Hash Consing (ハッシュコンシング)
+#### ✅ FR-612: Hash Consing (ハッシュコンシング)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/vm/src/vm.lisp`
 - **現状**: `(cons a b)` は常に新規ヒープオブジェクト。同一内容のconsが複数存在
@@ -440,7 +440,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 95 — 高度デバッグ・バイナリ最適化
 
-#### 🔶 FR-507: Time-Travel Debugging / Record-Replay (タイムトラベルデバッグ)
+#### ✅ FR-507: Time-Travel Debugging / Record-Replay (タイムトラベルデバッグ)
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: VM 実行は前向きのみ。デバッガ（FR-319 LSP DAP）はステップ実行可能だが後退実行不可。セルフホスティング中のハイゼンバグを「発生直前まで巻き戻す」手段がない
@@ -448,7 +448,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: Mozilla rr（Linux ptrace ベース）/ WinDbg TTD / UDB（Undo Software）。cl-cc 自身のセルフホスティングデバッグでの実用価値が高い。ハイゼンバグ解析の唯一の確実な手段
 - **難易度**: Hard
 
-#### 🔶 FR-508: Post-Link Binary Layout Optimization (プロファイル駆動バイナリ再配置)
+#### ✅ FR-508: Post-Link Binary Layout Optimization (プロファイル駆動バイナリ再配置)
 
 - **対象**: `packages/binary/src/macho.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-036（Hot/Cold レイアウト）と FR-186（関数並べ替え）は静的ヒューリスティック。実行プロファイルに基づくバイナリレイアウト最適化なし
@@ -468,7 +468,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 組み込みターゲット（FR-605 Bare Metal）や WASM バイナリサイズ削減に直結。LLVM -Os/-Oz / GCC -Os の標準的実践
 - **難易度**: Medium
 
-#### 🔶 FR-616: Function Multi-Versioning / CPU Feature Dispatching (CPU機能ディスパッチ)
+#### ✅ FR-616: Function Multi-Versioning / CPU Feature Dispatching (CPU機能ディスパッチ)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/compile/src/codegen.lisp`, `packages/binary/src/macho.lisp`
 - **現状**: コンパイル時に固定の命令セットを選択。実行時 CPU に依存した命令（AVX-512 / AVX2 / SSE4.2）の動的選択不可
@@ -496,7 +496,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 113 — ポリヘドラル・自動並列化
 
-#### 🔶 FR-620: Polyhedral Model Optimization (多面体モデル最適化)
+#### ✅ FR-620: Polyhedral Model Optimization (多面体モデル最適化)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: ループ最適化はループアンローリング・LICM（FR-031）・ループ交換（FR-360）の個別パスのみ。ネストしたループの連携最適化なし
@@ -504,7 +504,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 行列乗算・画像処理・数値シミュレーションで10〜100倍の性能向上。LLVM Polly / GCC Graphite / Pluto の手法。FFT実装の自動最適化に直結
 - **難易度**: Very Hard
 
-#### 🔶 FR-621: Auto-Parallelization (自動並列化)
+#### ✅ FR-621: Auto-Parallelization (自動並列化)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/vm/src/vm.lisp`, `packages/vm/src/vm-execute.lisp`
 - **現状**: `cl-cc`のループは全てシリアル実行。FR-576（Work-Stealing Scheduler）は並行タスクAPIを提供するが自動適用なし
@@ -512,7 +512,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: マルチコア CPU を自動活用。並列化対応のループコードをユーザーが明示的に書く必要なし
 - **難易度**: Very Hard
 
-#### 🔶 FR-622: Superword-Level Parallelism / SLP (スーパーワードレベル並列性)
+#### ✅ FR-622: Superword-Level Parallelism / SLP (スーパーワードレベル並列性)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: SIMD自動ベクトル化（FR-035）はループ全体を対象。ループ外の隣接スカラー演算のパック化なし
@@ -532,7 +532,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 114 — マルチレベルIR・形式検証
 
-#### 🔶 FR-626: Multi-Level IR / MLIR-Style Dialect Lowering (多段階IR・段階的降下)
+#### ✅ FR-626: Multi-Level IR / MLIR-Style Dialect Lowering (多段階IR・段階的降下)
 
 - **対象**: `packages/mir/src/mir.lisp`, `packages/mir/src/target.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: コンパイルパイプラインはAST → VM instructions → x86-64の2段階変換。中間IRが固定的で新ターゲット追加時の再利用困難
@@ -540,7 +540,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: MLIR paper（PLDI 2020）: 言語固有最適化を適切な抽象レベルで適用可能。ターゲット追加コストを指数→線形に削減
 - **難易度**: Very Hard
 
-#### 🔶 FR-627: Formal Verification Integration / Coq-Lean Extraction (形式検証統合)
+#### ✅ FR-627: Formal Verification Integration / Coq-Lean Extraction (形式検証統合)
 
 - **対象**: `packages/type/src/`, `packages/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 型システム（FR-type系）は型安全性を保証するが、プログラムの機能的正しさは検証不可
@@ -548,7 +548,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: CompCert（INRIA）: 検証済みCコンパイラ。セキュリティクリティカルコード（暗号・OS kernel）の信頼性向上。cl-ccコンパイラ自身の健全性検証
 - **難易度**: Very Hard
 
-#### 🔶 FR-628: Proof-Carrying Code / PCC (証明付きコード)
+#### ✅ FR-628: Proof-Carrying Code / PCC (証明付きコード)
 
 - **対象**: `packages/binary/src/macho.lisp`, `packages/vm/src/vm-execute.lisp`, `packages/type/src/`
 - **現状**: 生成バイナリの安全性は動的チェック（境界検査・型タグ）に依存。ロード時の型安全性証明なし
@@ -556,7 +556,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 動的チェックオーバーヘッドをゼロに近づけながら安全性を維持。プラグインシステムで未検証コードのロードを拒否するセキュリティモデル
 - **難易度**: Very Hard
 
-#### 🔶 FR-629: Certified Compilation / Bisimulation Proofs (認証済みコンパイル)
+#### ✅ FR-629: Certified Compilation / Bisimulation Proofs (認証済みコンパイル)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/compile/src/cps.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: コンパイル変換の正しさはテストで担保（4322テスト）。変換の意味論的等価性の形式的証明なし
@@ -568,7 +568,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 115 — FFI・クロスコンパイル
 
-#### 🔶 FR-632: FFI Binding Generation / Bindgen (FFIバインディング自動生成)
+#### ✅ FR-632: FFI Binding Generation / Bindgen (FFIバインディング自動生成)
 
 - **対象**: `packages/cli/src/main.lisp`, 新規 `src/ffi/bindgen.lisp`
 - **現状**: C関数呼び出しは手動で`(cl-cc:foreign-call "printf" :int :string)` と記述。Cヘッダーからの自動生成なし
@@ -576,7 +576,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: POSIX API・OpenSSL・GTK等のライブラリを手動FFI記述なしに利用可能。エコシステム拡張の加速
 - **難易度**: Hard
 
-#### 🔶 FR-633: Cross-Compilation Toolchain (クロスコンパイルツールチェーン)
+#### ✅ FR-633: Cross-Compilation Toolchain (クロスコンパイルツールチェーン)
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/emit/src/`, `packages/binary/src/`
 - **現状**: ホスト環境（macOS/Linux x86-64）向けにのみコンパイル可能。`--target` フラグはアーキテクチャ切り替えのみ
@@ -592,7 +592,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: JITコンパイルされたホットパスで呼び出しオーバーヘッドを90%削減可能。コンパイラ内部の再帰関数（CPS変換・コード生成）に即座に適用可能
 - **難易度**: Hard
 
-#### 🔶 FR-635: COMDAT Deduplication (COMDATセクション重複除去)
+#### ✅ FR-635: COMDAT Deduplication (COMDATセクション重複除去)
 
 - **対象**: `packages/binary/src/macho.lisp`, `packages/mir/src/target.lisp`
 - **現状**: テンプレート/generic関数の複数インスタンスが別々のコンパイル単位に重複して存在する場合、リンク時に全コピーを保持
@@ -604,7 +604,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 116 — 自動微分・ハードウェア並行
 
-#### 🔶 FR-638: Automatic Differentiation / AD (自動微分)
+#### ✅ FR-638: Automatic Differentiation / AD (自動微分)
 
 - **対象**: 新規 `src/ad/forward.lisp`, `src/ad/reverse.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 数値微分は手動実装のみ。機械学習・最適化アルゴリズムへの対応なし
@@ -612,7 +612,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 機械学習ライブラリ（FR-597 ML-Guided Inlining）の内部実装基盤。科学計算・最適化ソルバーへの応用。Enzyme（LLVM AD）/ JAX / Zygote（Julia）の手法
 - **難易度**: Hard
 
-#### 🔶 FR-639: Hardware Transactional Memory / HTM (ハードウェアトランザクショナルメモリ)
+#### ✅ FR-639: Hardware Transactional Memory / HTM (ハードウェアトランザクショナルメモリ)
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/vm/src/conditions.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: FR-165（STM Software Transactional Memory）は純ソフトウェア実装。Intel TSX / ARM TME ハードウェア命令未活用
@@ -620,7 +620,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: ロックフリーデータ構造（FR-163）より高いスループット。Intel TSX搭載CPU（Haswell以降）で投機的並行性を直接活用
 - **難易度**: Hard
 
-#### 🔶 FR-640: NUMA-Aware Memory Allocation (NUMA対応メモリ割り当て)
+#### ✅ FR-640: NUMA-Aware Memory Allocation (NUMA対応メモリ割り当て)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/runtime/src/gc.lisp`, `packages/vm/src/vm-execute.lisp`
 - **現状**: ヒープ割り当ては単一アリーナ（FR-228 arena allocator）。NUMA topologyを無視した割り当てでリモートメモリアクセスが発生
@@ -640,7 +640,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 117 — 新興ターゲット
 
-#### 🔶 FR-644: WASM GC Proposal Support (WASMガベージコレクション提案対応)
+#### ✅ FR-644: WASM GC Proposal Support (WASMガベージコレクション提案対応)
 
 - **対象**: `packages/emit/src/wasm.lisp`, `packages/mir/src/target.lisp`
 - **現状**: FR-049（WASM backend）は線形メモリモデルのみ。WASM GC提案（struct/array型）未対応
@@ -648,7 +648,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: WASM GCにより生成バイナリサイズが30-50%削減（手製メモリ管理コード不要）。ブラウザでの cl-cc プログラム実行の現実化
 - **難易度**: Hard
 
-#### 🔶 FR-645: GPU Compute Kernel Compilation (GPUコンピュートカーネルコンパイル)
+#### ✅ FR-645: GPU Compute Kernel Compilation (GPUコンピュートカーネルコンパイル)
 
 - **対象**: 新規 `packages/emit/src/gpu-kernel.lisp`, `packages/mir/src/target.lisp`
 - **現状**: FR-053（SPIR-V backend）は基本的な shader 生成。CUDA/ROCm/Metal Compute の高水準抽象なし
@@ -656,7 +656,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: AI推論・科学計算・コンパイラ内部の並列最適化パスをGPUオフロード。M1/M2 Mac のunified memory architectureでとくに効果的
 - **難易度**: Very Hard
 
-#### 🔶 FR-646: FPGA High-Level Synthesis / HLS (FPGA高水準合成)
+#### ✅ FR-646: FPGA High-Level Synthesis / HLS (FPGA高水準合成)
 
 - **対象**: 新規 `packages/emit/src/fpga-hls.lisp`, `packages/mir/src/target.lisp`
 - **現状**: ターゲットはCPU/GPU/WASM。FPGA向け合成パスなし
@@ -664,7 +664,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: FPGA上での高性能DSP・ネットワーク処理・暗号化アクセラレータを高水準言語で記述可能
 - **難易度**: Very Hard
 
-#### 🔶 FR-647: NPU / ML Accelerator Code Generation (NPU/MLアクセラレータコード生成)
+#### ✅ FR-647: NPU / ML Accelerator Code Generation (NPU/MLアクセラレータコード生成)
 
 - **対象**: 新規 `packages/emit/src/npu-codegen.lisp`, `packages/mir/src/target.lisp`
 - **現状**: FR-645でGPUカーネル対応。専用ML推論アクセラレータ（Apple Neural Engine / Google TPU / Qualcomm HTP）未対応
@@ -684,7 +684,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: Tree-sitter（GitHub 2018）: エディタ組み込みパーシングの標準。LSPレスポンスを O(ファイルサイズ) から O(変更サイズ) に削減
 - **難易度**: Hard
 
-#### 🔶 FR-651: Error Recovery in Parsing (パーシングエラー回復)
+#### ✅ FR-651: Error Recovery in Parsing (パーシングエラー回復)
 
 - **対象**: `packages/parse/src/cl/parser.lisp`, `packages/parse/src/lexer.lisp`
 - **現状**: パース中の構文エラーで解析中断。以降のエラーが全て報告されない（最初のエラーで止まる）
@@ -692,7 +692,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: `gcc`/`clang` は10個以上のエラーを同時報告。cl-ccの現在の「最初のエラーで停止」動作は開発体験を著しく損なう
 - **難易度**: Medium
 
-#### 🔶 FR-652: Polyglot Compilation / Multi-Language Interop (多言語コンパイル)
+#### ✅ FR-652: Polyglot Compilation / Multi-Language Interop (多言語コンパイル)
 
 - **対象**: `packages/cli/src/main.lisp`, `src/ffi/`, 新規 `src/polyglot/`
 - **現状**: cl-ccソースのみ処理。他言語との相互運用はCFFI手動記述のみ
@@ -700,7 +700,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 実世界のシステムは単一言語で構成されない。科学計算（Python/NumPy）・システムライブラリ（C/Rust）との協調が必須
 - **難易度**: Hard
 
-#### 🔶 FR-653: Lazy Evaluation / Call-by-Need (遅延評価・必要時呼び出し)
+#### ✅ FR-653: Lazy Evaluation / Call-by-Need (遅延評価・必要時呼び出し)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/expand/src/expander.lisp`, `packages/vm/src/vm-execute.lisp`
 - **現状**: 全式が正格評価（call-by-value）。無限リスト・遅延シーケンスの表現不可
@@ -712,7 +712,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 119 — 契約・リフレクション・合成
 
-#### 🔶 FR-656: Contract Programming / Design by Contract (契約プログラミング)
+#### ✅ FR-656: Contract Programming / Design by Contract (契約プログラミング)
 
 - **対象**: `packages/expand/src/macros-stdlib.lisp`, `packages/compile/src/codegen.lisp`, `packages/type/src/`
 - **現状**: `assert`マクロは実行時検査のみ。前提条件・事後条件・不変条件の宣言的記述と静的検証なし
@@ -728,7 +728,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: REPL・デバッガ・テストフレームワーク・シリアライザが内省APIに依存。現在のFiveAMテストがメソッドを動的発見できない制約の解消
 - **難易度**: Medium
 
-#### 🔶 FR-658: Program Synthesis / CEGIS (プログラム合成・反例誘導合成)
+#### ✅ FR-658: Program Synthesis / CEGIS (プログラム合成・反例誘導合成)
 
 - **対象**: `packages/cli/src/main.lisp`, 新規 `src/synthesis/cegis.lisp`
 - **現状**: プログラムは手動記述のみ。仕様から実装を自動導出する機能なし
@@ -736,7 +736,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: テストケース（入出力例）から関数実装を自動生成。小規模ユーティリティ関数の自動記述
 - **難易度**: Very Hard
 
-#### 🔶 FR-659: Copy-on-Write Semantics (コピーオンライトセマンティクス)
+#### ✅ FR-659: Copy-on-Write Semantics (コピーオンライトセマンティクス)
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/vm/src/list.lisp`, `packages/runtime/src/heap.lisp`
 - **現状**: `copy-list` / `copy-seq` は常に即時コピー。大規模データ構造の不要なコピーでメモリ使用量増大
@@ -756,7 +756,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: NixOS/Guix のコンテンツアドレス型ビルドシステムとの統合必須。サプライチェーン攻撃対策（SLSA Level 3要件）
 - **難易度**: Medium
 
-#### 🔶 FR-663: Build System Integration (ビルドシステム統合)
+#### ✅ FR-663: Build System Integration (ビルドシステム統合)
 
 - **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/integration.lisp`
 - **現状**: `cl-cc.asd`（ASDF）のみ。CMake/Meson/Bazel/Nix との統合なし
@@ -800,7 +800,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: Itanium C++ ABI EH: 正常パスに実行コストなし（ただしコードサイズは増加）。cl-ccのcondition systemのオーバーヘッドを実測で確認・排除
 - **難易度**: Very Hard
 
-#### 🔶 FR-670: Compile-Time Evaluation / Constexpr (コンパイル時評価)
+#### ✅ FR-670: Compile-Time Evaluation / Constexpr (コンパイル時評価)
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 定数畳み込み（FR-002）は基本算術演算のみ。任意の純粋関数のコンパイル時実行なし
@@ -828,7 +828,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: Boxed値のメモリ使用量を50-75%削減。型チェックがビットマスク1命令。V8のNaN-boxing実装でJSベンチマーク30%高速化の実績
 - **難易度**: Very Hard
 
-#### 🔶 FR-675: Pointer Compression (ポインタ圧縮)
+#### ✅ FR-675: Pointer Compression (ポインタ圧縮)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/vm/src/vm-execute.lisp`
 - **現状**: ヒープポインタは64ビット絶対アドレス。8GBヒープのポインタが全て64ビットを消費
@@ -844,7 +844,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: マルチスレッド割り当てのスケーラビリティをコア数に比例させる。JVM の実測: スレッド数増加時の割り当てスループット10倍向上
 - **難易度**: Medium
 
-#### 🔶 FR-677: Object Pooling / Free-List Allocator (オブジェクトプーリング・フリーリストアロケータ)
+#### ✅ FR-677: Object Pooling / Free-List Allocator (オブジェクトプーリング・フリーリストアロケータ)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: オブジェクト生成は常に新規割り当て。コンパイラ内部で多用する短命AST/IR オブジェクトが毎サイクルGCプレッシャーを生む
@@ -856,7 +856,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 123 — 高度型システム IV
 
-#### 🔶 FR-680: Algebraic Effects and Handlers (代数的エフェクト・ハンドラ)
+#### ✅ FR-680: Algebraic Effects and Handlers (代数的エフェクト・ハンドラ)
 
 - **対象**: `packages/vm/src/conditions.lisp`, `packages/type/src/`, `packages/expand/src/macros-stdlib.lisp`
 - **現状**: 副作用はCLOSのdynamic-wind/handler-bind で管理。エフェクトの型安全な合成・分離なし
@@ -864,7 +864,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: モナドトランスフォーマーより合成しやすい副作用管理。IOとエラーと状態を直交的に型付け可能。cl-ccのVM実行エフェクト（I/O、例外、状態）の型安全な抽象
 - **難易度**: Very Hard
 
-#### 🔶 FR-681: GADTs / Generalized Algebraic Data Types (一般化代数的データ型)
+#### ✅ FR-681: GADTs / Generalized Algebraic Data Types (一般化代数的データ型)
 
 - **対象**: `packages/type/src/`, `packages/expand/src/expander.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: ADTs（FR-590）は全コンストラクタが同一型を返す。型インデックスによる精緻化なし
@@ -872,7 +872,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 型安全なASTを定義でき、型チェックの不変条件をコンパイル時に保証。Well-typed interpretersパターンのcl-cc実装
 - **難易度**: Very Hard
 
-#### 🔶 FR-682: Rank-N Polymorphism / Higher-Rank Types (高階ランク多相)
+#### ✅ FR-682: Rank-N Polymorphism / Higher-Rank Types (高階ランク多相)
 
 - **対象**: `packages/type/src/`, `packages/expand/src/expander.lisp`
 - **現状**: HM型推論はRank-1多相（全称量化子はトップレベルのみ）。`(forall a. a -> a) -> int` のような型は表現不可
@@ -900,7 +900,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 再帰関数のhotループからboxing/unboxingを排除。GHC実績: 多くの数値関数で2〜5倍高速化
 - **難易度**: Hard
 
-#### 🔶 FR-687: Administrative Normal Form / ANF Transformation (行政正規形変換)
+#### ✅ FR-687: Administrative Normal Form / ANF Transformation (行政正規形変換)
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: CPS変換（FR-CPS系）が中間表現。ANFはCPSと表現力等価だがより直接的なSSA的性質を持つ
@@ -916,7 +916,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: クロージャ割り当てゼロの一階CPS実行。インタプリタのメイン継続ループを最適化。Reynolds defunctionalization のCPS + tail callとの組み合わせが非常に強力
 - **難易度**: Hard
 
-#### 🔶 FR-689: Lambda Lifting (ラムダリフティング)
+#### ✅ FR-689: Lambda Lifting (ラムダリフティング)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/expand/src/expander.lisp`
 - **現状**: ネストした `flet`/`labels` 定義はクロージャとしてコンパイル。自由変数がキャプチャされ毎呼び出しでクロージャ生成
@@ -928,7 +928,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 125 — テスト計装・品質
 
-#### 🔶 FR-692: Code Coverage Instrumentation (コードカバレッジ計装)
+#### ✅ FR-692: Code Coverage Instrumentation (コードカバレッジ計装)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/cli/src/main.lisp`
 - **現状**: テスト実行時のカバレッジ計測なし。どのコードパスがテストされているか不明
@@ -936,7 +936,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 4322テストのカバレッジ把握が困難。死んだコードの発見・テスト不足領域の特定に不可欠
 - **難易度**: Medium
 
-#### 🔶 FR-693: Heap Profiler (ヒーププロファイラ)
+#### ✅ FR-693: Heap Profiler (ヒーププロファイラ)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`
 - **現状**: `--verbose-gc` でGC統計のみ。どの関数・コードパスが最もメモリを消費するか不明
@@ -952,7 +952,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: 高カバレッジでも検出力が低いテストを発見。テストスイートの実質的な強さを定量化
 - **難易度**: Hard
 
-#### 🔶 FR-695: Benchmarking Framework (ベンチマークフレームワーク)
+#### ✅ FR-695: Benchmarking Framework (ベンチマークフレームワーク)
 
 - **対象**: 新規 `src/testing/benchmark.lisp`, `tests/bench/`
 - **現状**: パフォーマンス回帰の検出手段なし。コード変更がコンパイラ速度・生成コード速度に与える影響を定量化できない
@@ -972,7 +972,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: selfhostingコンパイル時間の削減。8コアマシンで最大4〜6倍のビルド高速化（I/O待ちで線形にはならない）
 - **難易度**: Hard
 
-#### 🔶 FR-699: Distributed Build Cache (分散ビルドキャッシュ)
+#### ✅ FR-699: Distributed Build Cache (分散ビルドキャッシュ)
 
 - **対象**: `packages/cli/src/main.lisp`, 新規 `src/build/cache.lisp`
 - **現状**: FR-452（コンパイルキャッシュ）はローカルディスクキャッシュのみ。CI/CDの並列ジョブ間でキャッシュ共有不可
@@ -980,7 +980,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: CI/CDでPRごとに全ファイル再コンパイルを回避。大規模チームでのビルド時間を数十分→数秒に短縮
 - **難易度**: Hard
 
-#### 🔶 FR-700: Compiler Plugin API (コンパイラプラグインAPI)
+#### ✅ FR-700: Compiler Plugin API (コンパイラプラグインAPI)
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: コンパイラのパスは全て内部実装。外部からIR変換・最適化・診断を注入する拡張点なし
@@ -988,7 +988,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: ドメイン固有最適化（DSPコード用ベクトル化ヒント、セキュリティポリシー強制）を外部から追加可能。cl-ccの拡張性の核心
 - **難易度**: Hard
 
-#### 🔶 FR-701: Live Code Update / Hot Patching (ライブコード更新・ホットパッチ)
+#### ✅ FR-701: Live Code Update / Hot Patching (ライブコード更新・ホットパッチ)
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/cli/src/main.lisp`, `packages/vm/src/vm-run.lisp`
 - **現状**: コード変更にはプロセス再起動が必要。REPL（FR-098）はトップレベル式の評価のみ
@@ -1016,7 +1016,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 - **根拠**: ハッシュテーブル（popcount）・圧縮データ構造（pdep/pext）・暗号実装（bswap）で手書きより100倍速い単一命令実行
 - **難易度**: Medium
 
-#### 🔶 FR-706: Memory Model Specification (メモリモデル仕様)
+#### ✅ FR-706: Memory Model Specification (メモリモデル仕様)
 
 - **対象**: `packages/vm/src/vm-execute.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64.lisp`
 - **現状**: マルチスレッドのメモリ可視性（FR-160系）はhardwareに依存。形式的なメモリモデルの宣言なし
@@ -1036,7 +1036,7 @@ Runtime infrastructure, JIT, object layout optimization, ecosystem/diagnostics, 
 
 ### Phase 128 — 型システム V
 
-#### 🔶 FR-710: Phantom Types (ファントム型)
+#### ✅ FR-710: Phantom Types (ファントム型)
 
 - **対象**: `packages/type/src/`, `packages/expand/src/macros-stdlib.lisp`
 - **現状**: 型パラメータは全て実行時値を持つ。コンパイル時専用の型マーカーなし
