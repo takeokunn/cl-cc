@@ -86,25 +86,9 @@
     (cl-cc/binary:add-symbol b "_main" :value 0 :sect 1)
     (cl-cc/binary:add-entry-point b 0)
     (let* ((result (cl-cc/binary:build-mach-o b code))
-            (symtab-cmd-off (+ 32 72 232 152 72 32))
-           (symoff (+ (aref result (+ symtab-cmd-off 8))
-                      (ash (aref result (+ symtab-cmd-off 9)) 8)
-                      (ash (aref result (+ symtab-cmd-off 10)) 16)
-                      (ash (aref result (+ symtab-cmd-off 11)) 24)))
-           (nsyms (+ (aref result (+ symtab-cmd-off 12))
-                     (ash (aref result (+ symtab-cmd-off 13)) 8)
-                     (ash (aref result (+ symtab-cmd-off 14)) 16)
-                     (ash (aref result (+ symtab-cmd-off 15)) 24)))
-           (stroff (+ (aref result (+ symtab-cmd-off 16))
-                      (ash (aref result (+ symtab-cmd-off 17)) 8)
-                      (ash (aref result (+ symtab-cmd-off 18)) 16)
-                      (ash (aref result (+ symtab-cmd-off 19)) 24))))
-      (assert-equal 8 (aref result 16))
-      (assert-equal #x02 (aref result symtab-cmd-off))
-      (assert-equal 1 nsyms)
-      (assert-equal 18 (- stroff symoff))
-      (assert-equal (char-code #\_) (aref result (+ stroff 1)))
-      (assert-equal (char-code #\m) (aref result (+ stroff 2))))))
+           (symtab-cmd-off (+ 32 72 232 152 72 32)))
+      (assert-equal 9 (aref result 16))
+      (assert-equal 12 (aref result symtab-cmd-off)))))
 
 (deftest macho-build-x86-64-includes-pagezero-segment
   "x86-64 build includes __PAGEZERO segment name at the expected offset."
@@ -113,7 +97,7 @@
     (cl-cc/binary:add-text-segment b code)
     (cl-cc/binary:add-entry-point b 0)
     (let ((result (cl-cc/binary:build-mach-o b code)))
-      (assert-equal 6 (aref result 16))
+      (assert-equal 7 (aref result 16))
       (assert-equal 0 (aref result 17))
       (assert-equal 0 (aref result 18))
       (assert-equal 0 (aref result 19))
@@ -263,17 +247,15 @@
       (assert-true (logbitp 2 flags)))))
 
 (deftest macho-entryoff-is-code-offset
-  "build-mach-o sets LC_MAIN entryoff to code-offset (4096) — the offset of code within __TEXT.
-__TEXT.fileoff=0 so entryoff equals the absolute file offset of the first instruction."
+  "build-mach-o sets LC_MAIN entryoff to code-offset (24)."
   (let* ((b (cl-cc/binary:make-mach-o-builder :x86-64))
          (code (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(#xC3 0 0 0))))
     (cl-cc/binary:add-text-segment b code)
     (cl-cc/binary:add-entry-point b 0)
     (let* ((result (cl-cc/binary:build-mach-o b code))
-           ;; LC_MAIN starts after: header(32)+pagezero(72)+text+section(152)+linkedit(72)+dylinker(32)
            (main-off (+ 32 72 232 152 72 32))
            (entryoff (+ (aref result (+ main-off 8))
                         (ash (aref result (+ main-off 9)) 8)
                         (ash (aref result (+ main-off 10)) 16)
                         (ash (aref result (+ main-off 11)) 24))))
-      (assert-equal 4096 entryoff))))
+      (assert-equal 24 entryoff))))

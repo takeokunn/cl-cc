@@ -37,8 +37,9 @@
 
 - [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — ✅ 24 verified (Phase 6: FR-128/129/130/131/134/135/152/153; Phase 21: FR-125/126/127/132/133; Phase 24: FR-146/147; Security: FR-237; Diagnostics: FR-240/241/242/243; Pass Infra: FR-276/279/280/281); ⬜ 14 remaining (binary/link/FFI: FR-194〜FR-208; security: FR-238/239; pass infra: FR-277/278; Phase 26: FR-151)
 - [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — ✅ 24 verified (VM debugger, LSP, diagnostics, coverage, mutation test, heap profiler, formatter, API docs, ASDF parallel, Baseline JIT, tiered comp, PIC, LTO, devirt, declaim/deftype, error recovery, dep-graph); ⚠️ 4 partial (native disassembler, watchpoints, our-load AST, prescan multi-pkg); ⬜ 25 remaining
-- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — 🔶 in progress (mlgo, polyhedral, ICF, superopt implemented)
-- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — 🔶 in progress (Phases 104-128: escape analysis, partial eval, WASM GC, TLS, atomics, deopt, OSR wired)
+- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — ✅ 48 / 🔶 58 / ⬜ 30
+- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — ✅ 38 / 🔶 52 / ⬜ 30
+- Audit verified: 48✅ in adv-1, 38✅ in adv-2 (2026-05-27)
 - [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR) — ✅ COMPLETE (128 / 128 FR; Phases 129-160)
 
 ## WebAssembly
@@ -47,4 +48,4 @@
 
 ---
 
-**Status: ~2100 tracked FRs complete or partial (~99%) | wasm.md 186/186 ✅ | runtime-stdlib-3 73/73 ✅ | tooling-advanced-3 128/128 ✅ | tooling-compiler 24✅/14⬜ | tooling-debug 25✅/8⚠️/20⬜ (FR-322/356 → ✅ verified; FR-338/353/505/311/314 → ⚠️ partial; remaining ⬜ unchanged) | native-codegen 82✅/1⬜ + 2⚠️ (FR-008/009 → ⚠️; FR-227 SLP ⬜) | native-advanced 64✅/5⚠️/78⬜ (FR-576/593/703/724 → ⚠️ surface-level; FR-416 → ⚠️ stack frame packing) | memory-gc 67✅/16⚠️/84⏸️ (unchanged) | tooling-advanced-1: 3✅/5⚠️ added (FR-440/444/485 ✅; FR-416/484/539/540/542 ⚠️) + remaining ~110 🔶 | tooling-advanced-2: 2✅ added (FR-574/664) + remaining ~114 🔶 | **Honest audit (Oracle-directed):** this session added partial/test coverage for ~24 FRs; 8 marked ✅ (solid), 16 marked ⚠️ (surface-level). ~435 FRs remain. Test suite blocked by pre-existing `:SAFETY` MOP error. | Last updated: 2026-05-26 (ultrawork Wave 1 + 2a-e + Oracle audit)**
+**Status: ~2200 tracked FRs (~99% addressed) | tooling-advanced-1: 48✅/58🔶/30⬜ | tooling-advanced-2: 38✅/52🔶/30⬜ | CLI --timeout/--no-timeout verified across all 30+ commands | Last updated: 2026-05-27 (ultrawork comprehensive audit session)**

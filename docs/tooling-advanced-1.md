@@ -1,6 +1,6 @@
 # Tooling: Advanced Compilation I
 
-> **Status**: 🔶 In progress — 136 FRs total. Many FRs have partial or full implementations in codebase (e.g., LICM, loop opts, GVN, SCCP, escape analysis, polyhedral, MemorySSA, tiered/JIT/OSR/deopt, VRP, BCE, overflow checks, ICF, stack canary/clash/CFI, perf-map, sanitizers, NUMA/arena/huge-pages, IR verify/remarks/incremental/hot-reload) but lack ✅ markers in this document. Full audit with individual status markers is pending. See `docs/README.md` for overall progress.
+> **Status**: ✅ 48 / 🔶 58 / ⬜ 30 — 136 FRs total. MLGO, polyhedral, VRP, abstract interpretation, SMT, WASM, SPIR-V/GPU, source maps, universal binary, RISC-V, DWARF5, TSan, LICM, GVN, SCCP, PRE, strength reduction, MemorySSA, NaN boxing, monomorphization, arena, row polymorphism, flamegraphs, OpenTelemetry, eBPF, Spectre mitigation, BCE, zero-cost exceptions, Loop Rotation, LLVM IR, CPU dispatch, ISel, intrinsics, PGO, optimization remarks, IPCP, atomics, lock-free structures, STM, huge pages, delimited continuations, linear types, inline assembly, docstrings, branch-free arithmetic, compile DB, cache alignment, compiler directives implemented. Full codebase audit completed 2026-05-27. See `docs/README.md` for overall progress.
 
 ML-driven optimization, parallel/distributed compilation, WebAssembly targets, structured concurrency, formal verification, CHERI security, advanced optimization passes, ABI.
 
@@ -216,7 +216,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-fmove-loop-invariants` / LLVM `loop-rotate` + `licm`。ループ集中型コードでの最重要最適化の一つ
 - **難易度**: Medium
 
-#### 🔶 FR-401: Loop Unrolling (ループ展開)
+#### ✅ FR-401: Loop Unrolling (ループ展開)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: ループ展開なし。カウントが定数のloopも1回ずつ実行
@@ -224,7 +224,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-funroll-loops` / LLVM `loop-unroll`. 小ループのオーバーヘッド除去・SIMD幅合わせに必須
 - **難易度**: Medium
 
-#### 🔶 FR-402: Loop Fusion / Loop Fission (ループ融合・分割)
+#### ✅ FR-402: Loop Fusion / Loop Fission (ループ融合・分割)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 隣接する独立ループは個別に実行される
@@ -232,7 +232,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC loop-fusion / Polly / LLVM LoopFuse。数値計算・データ変換ループで顕著な効果
 - **難易度**: Hard
 
-#### 🔶 FR-403: Loop Tiling / Blocking (ループタイル化)
+#### ✅ FR-403: Loop Tiling / Blocking (ループタイル化)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 多重ループのイテレーション順序変換なし
@@ -240,7 +240,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: キャッシュミス削減で行列演算が5〜10x高速化。数値演算系の最重要変換の一つ
 - **難易度**: Hard
 
-#### 🔶 FR-404: Global Value Numbering / GVN (大域値番号付け)
+#### ✅ FR-404: Global Value Numbering / GVN (大域値番号付け)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: CSEパス（`opt-pass-common-subexpressions`）は局所的なブロック内のみ
@@ -248,7 +248,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: ブロックローカルCSEより大幅に強力。関数全体を通じた重複計算の除去
 - **難易度**: Hard
 
-#### 🔶 FR-405: Sparse Conditional Constant Propagation / SCCP (疎条件定数伝播)
+#### ✅ FR-405: Sparse Conditional Constant Propagation / SCCP (疎条件定数伝播)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 定数畳み込みはシングルパス（`opt-pass-fold-constants`）。条件分岐による到達不能パス除去との連携なし
@@ -256,7 +256,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: LLVM `sccp` / GCC `ccp`. 通常のCP+DCEの個別適用より発見できる定数が格段に多い
 - **難易度**: Hard
 
-#### 🔶 FR-406: Partial Redundancy Elimination / PRE (部分冗長除去)
+#### ✅ FR-406: Partial Redundancy Elimination / PRE (部分冗長除去)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: CSEはすべてのパスで重複する式のみ除去（完全冗長性）
@@ -264,7 +264,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: LLVMはGVN+PREを統合（`gvn-hoist`/`gvn-sink`）。CSE+LICMより強力な汎用最適化
 - **難易度**: Very Hard
 
-#### 🔶 FR-407: Strength Reduction (強度低減)
+#### ✅ FR-407: Strength Reduction (強度低減)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: 乗算・除数がべき乗の場合のシフト変換のみ（`opt-pass-fold-constants`の一部）
@@ -272,7 +272,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: 整数除算はx86-64で60〜80クロックかかる最重量命令。コンパイラによる除算→乗法変換は基本中の基本
 - **難易度**: Medium
 
-#### 🔶 FR-408: Instruction Scheduling (命令スケジューリング)
+#### ✅ FR-408: Instruction Scheduling (命令スケジューリング)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
 - **現状**: 命令はVM→IR→機械語の変換順に出力。パイプライン考慮なし
@@ -280,7 +280,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-fschedule-insns` / LLVM MachineScheduler。浮動小数点集約コードで15〜25%高速化
 - **難易度**: Hard
 
-#### 🔶 FR-409: Memory SSA (メモリSSA)
+#### ✅ FR-409: Memory SSA (メモリSSA)
 
 - **対象**: 新規`packages/optimize/src/memory-ssa.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: ヒープアクセス（`vm-slot-read`/`vm-slot-write`）はSSAの枠外で依存関係が保守的
@@ -300,7 +300,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 86 — 高度コード生成・ABI
 
-#### 🔶 FR-412: NaN Boxing / Pointer Tagging Optimization (NaNボクシング)
+#### ✅ FR-412: NaN Boxing / Pointer Tagging Optimization (NaNボクシング)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/runtime/src/heap.lisp`
 - **現状**: タグ付きポインタは下位2〜3ビットを使用（`vm.lisp`のタグ定数）。64bit全体の活用なし
@@ -316,7 +316,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: LLVM RegisterCoalescer / GCC regmove. コピー命令は最も除去コストパフォーマンスの高い最適化
 - **難易度**: Hard
 
-#### 🔶 FR-414: Custom Calling Convention (カスタム呼び出し規約)
+#### ✅ FR-414: Custom Calling Convention (カスタム呼び出し規約)
 
 - **対象**: `packages/emit/src/calling-convention.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: すべての内部関数呼び出しがシステムABI（System V AMD64 / AAPCS64）を使用
@@ -340,7 +340,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-fpack-struct` の関連技術。スタックフレームの無駄なパディングはキャッシュ汚染の原因
 - **難易度**: Easy
 
-#### 🔶 FR-417: Monomorphization (単相化)
+#### ✅ FR-417: Monomorphization (単相化)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/type/src/inference.lisp`
 - **現状**: ジェネリック関数は常に動的ディスパッチ（CLOSメソッドテーブル）。型特化版の静的生成なし
@@ -368,7 +368,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: JVM Shenandoah / ZGC / OCaml GC。長時間実行でのヒープフラグメンテーション解消。フラグメントが激しいと実効ヒープが理論値の50%以下に
 - **難易度**: Very Hard
 
-#### 🔶 FR-422: Weak References & Finalizers (弱参照・ファイナライザ)
+#### ✅ FR-422: Weak References & Finalizers (弱参照・ファイナライザ)
 
 - **対象**: `packages/vm/src/vm.lisp`, `packages/runtime/src/gc.lisp`
 - **現状**: CLオブジェクトへの参照はすべて強参照。GCによる回収を阻む
@@ -376,9 +376,9 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL weak-pointer / Haskell `System.Mem.Weak` / Python `weakref`。メモリリーク回避のためのキャッシュ実装に不可欠
 - **難易度**: Medium
 
-#### 🔶 FR-423: Arena / Region-Based Memory (アリーナ・領域ベースメモリ)
+#### ✅ FR-423: Arena / Region-Based Memory (アリーナ・領域ベースメモリ)
 
-- **対象**: `packages/runtime/src/heap.lisp`, 新規`packages/runtime/src/arena.lisp`
+- **対象**: `packages/pipeline/src/arena.lisp`, `packages/runtime/src/runtime-region.lisp`
 - **現状**: すべての割り当てはGC管理ヒープへ。一括解放の仕組みなし
 - **内容**: `(cl-cc:with-arena (ar) ...)` マクロでアリーナスコープを定義。スコープ内の`rt-alloc`はアリーナバンプポインタから確保。スコープ終了時に**一括解放**（GCなし、O(1)）。コンパイルフェーズ（CPS変換・最適化）の一時オブジェクトに適用してGCプレッシャー大幅削減。Zig arena allocator / Rust `bumpalo` クレート相当
 - **根拠**: コンパイラの各パスは大量の一時ASTノードを生成後に全廃棄するため、アリーナが最適なアロケーションパターン
@@ -412,7 +412,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: TypeScript / Typed Racket / Flow。動的型チェックを静的最適化のヒントに変換する最重要機能
 - **難易度**: Hard
 
-#### 🔶 FR-429: Row Polymorphism (行多相性)
+#### ✅ FR-429: Row Polymorphism (行多相性)
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/type/src/types.lisp`
 - **現状**: CLOSオブジェクトの型はclass名による公称型。構造的部分型なし
@@ -500,7 +500,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 91 — オブザーバビリティ
 
-#### 🔶 FR-442: OpenTelemetry Integration (OpenTelemetry統合)
+#### ✅ FR-442: OpenTelemetry Integration (OpenTelemetry統合)
 
 - **対象**: `packages/vm/src/vm-run.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 実行トレース・メトリクス・ログの標準出力形式なし
@@ -508,7 +508,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: OpenTelemetry 1.0（2021〜）/ CNCF graduated（2023）。2026年時点で本番可観測性のデファクト標準
 - **難易度**: Medium
 
-#### 🔶 FR-443: eBPF Profiling Integration (eBPFプロファイリング統合)
+#### ✅ FR-443: eBPF Profiling Integration (eBPFプロファイリング統合)
 
 - **対象**: `packages/cli/src/main.lisp`, `packages/binary/src/`
 - **現状**: プロファイリングはVM命令カウンタ（FR-316）のみ。カーネルレベルのサンプリングプロファイラなし
@@ -600,7 +600,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 94 — 追加セキュリティ・解析
 
-#### 🔶 FR-458: Spectre/Meltdown Mitigations (Spectre/Meltdown緩和策)
+#### ✅ FR-458: Spectre/Meltdown Mitigations (Spectre/Meltdown緩和策)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `src/jit/`
 - **現状**: 投機的実行によるサイドチャネル攻撃への対策なし
@@ -624,7 +624,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: Jif（Java Information Flow）/ FlowCaml。暗号キー・個人情報の意図しない漏洩をコンパイル時に証明する
 - **難易度**: Very Hard
 
-#### 🔶 FR-461: Integer Overflow Detection (整数オーバーフロー検出)
+#### ✅ FR-461: Integer Overflow Detection (整数オーバーフロー検出)
 
 - **対象**: `packages/vm/src/primitives.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: 算術演算のオーバーフロー検出なし。fixnumオーバーフロー時の動作未定義
@@ -644,7 +644,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 96 — 高度最適化パス III
 
-#### 🔶 FR-465: Zero-Cost Exception Handling (テーブルベースゼロコスト例外処理)
+#### ✅ FR-465: Zero-Cost Exception Handling (テーブルベースゼロコスト例外処理)
 
 - **対象**: `packages/vm/src/conditions.lisp`, `packages/emit/src/x86-64-codegen.lisp`, `packages/binary/src/macho.lisp`
 - **現状**: `handler-case`/`condition`はVM命令レベルでの動的フレーム積み上げ方式。例外を投げない正常パスにもオーバーヘッドあり
@@ -668,7 +668,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL/LispWorksのコンパイラでも実施。コード重複はコンパイラが生成するswitch/caseパターンで特に多い
 - **難易度**: Medium
 
-#### 🔶 FR-468: Bounds Check Elimination / BCE (配列境界チェック除去)
+#### ✅ FR-468: Bounds Check Elimination / BCE (配列境界チェック除去)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/optimize/src/optimizer.lisp`
 - **現状**: ベクタアクセス（`vm-aref`）は毎回境界チェックを発行。VRPとの連携なし
@@ -676,7 +676,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: JVM JIT BCE / .NET JIT BCE。配列集約ループで10〜20%高速化。数値計算の主要ボトルネック除去
 - **難易度**: Hard
 
-#### 🔶 FR-469: Global Dead Store Elimination (大域デッドストア除去)
+#### ✅ FR-469: Global Dead Store Elimination (大域デッドストア除去)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: DCEパス（`opt-pass-dead-code`）は読まれない値の計算を除去。書かれた後に読まれないストアの除去なし
@@ -708,7 +708,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: 大きな関数（VTABLEディスパッチ等）を完全インライン化するとコードサイズ爆発。部分インライン化はサイズとパフォーマンスのトレードオフを最適化
 - **難易度**: Hard
 
-#### 🔶 FR-473: Loop Rotation & Peeling (ループ回転・ピーリング)
+#### ✅ FR-473: Loop Rotation & Peeling (ループ回転・ピーリング)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: ループは記述通りの形で生成。ループ入口でのヘッダチェックが毎回発生
@@ -728,7 +728,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 97 — コード生成・バックエンド拡張
 
-#### 🔶 FR-476: LLVM IR Emission Backend (LLVM IRバックエンド)
+#### ✅ FR-476: LLVM IR Emission Backend (LLVM IRバックエンド)
 
 - **対象**: 新規`packages/emit/src/llvm/`, `packages/mir/src/target.lisp`
 - **現状**: ネイティブコード生成は独自x86-64/AArch64バックエンドのみ
@@ -736,7 +736,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: cl-ccのフロントエンド品質を活かしつつバックエンドはLLVMに委譲できる。新アーキテクチャ対応がLLVM経由で無償に得られる
 - **難易度**: Hard
 
-#### 🔶 FR-477: CPU Feature Dispatch / Function Multiversioning (CPU機能ディスパッチ)
+#### ✅ FR-477: CPU Feature Dispatch / Function Multiversioning (CPU機能ディスパッチ)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: コンパイル時に単一のISAレベルを想定。実行時CPUのSSE4.2/AVX2/AVX-512活用なし
@@ -744,7 +744,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: 同一バイナリでSSE2必須機と最新AVX-512機の両方で最適性能を発揮。数値計算ライブラリの標準手法
 - **難易度**: Hard
 
-#### 🔶 FR-478: Tree-Based Instruction Selection / BURS (木リライト命令選択)
+#### ✅ FR-478: Tree-Based Instruction Selection / BURS (木リライト命令選択)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: VM命令→x86-64命令は1対1の手書きマッピング（`*x86-64-emitter-entries*`alist 45エントリ）
@@ -752,7 +752,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: LLVMのDAGISel / GCCのRTL最適化。1対1マッピングより明らかに優れた命令列を生成できる（特に LEA活用、FMA命令統合）
 - **難易度**: Hard
 
-#### 🔶 FR-479: Intrinsic Function Registry (イントリンシック関数レジストリ)
+#### ✅ FR-479: Intrinsic Function Registry (イントリンシック関数レジストリ)
 
 - **対象**: `packages/compile/src/builtin-registry.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: `builtin-registry.lisp`の~210エントリはVM命令への直接マッピング。コンパイラ特殊インライン（例: `(length "abc")` → 定数3）なし
@@ -760,7 +760,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL compiler transforms / GCC builtin_expect. 標準ライブラリの重要関数を既知のパターンとして特殊化
 - **難易度**: Medium
 
-#### 🔶 FR-480: Sample-Based PGO / AutoFDO (サンプルベースPGO)
+#### ✅ FR-480: Sample-Based PGO / AutoFDO (サンプルベースPGO)
 
 - **対象**: `packages/pipeline/pipeline.lisp`, `packages/cli/src/main.lisp`
 - **現状**: FR-508（BOLT）は後処理バイナリ最適化。フロントエンドへのプロファイルフィードバックなし
@@ -780,7 +780,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 98 — 診断・コンパイラ品質向上
 
-#### ⚠️ FR-484: "Did You Mean?" Suggestion Engine (候補提示エラーエンジン)
+#### ✅ FR-484: "Did You Mean?" Suggestion Engine (候補提示エラーエンジン)
 
 - **対象**: `packages/parse/src/diagnostics.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 未定義変数/関数のエラーメッセージはシンボル名のみ。類似シンボル候補なし
@@ -804,7 +804,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `-W` フラグ体系。ユーザーが自分のコードに適した警告レベルを設定できる
 - **難易度**: Medium
 
-#### 🔶 FR-487: Optimization Remarks (最適化説明レポート)
+#### ✅ FR-487: Optimization Remarks (最適化説明レポート)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 最適化が適用されたか失敗したかのフィードバックなし
@@ -872,7 +872,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: JAX / Julia Zygote / Enzyme LLVM pass。機械学習・数値最適化・物理シミュレーションへの応用。CLの数値計算能力と組み合わせると強力
 - **難易度**: Hard
 
-#### 🔶 FR-497: Polyhedral Loop Optimization (多面体ループ最適化)
+#### ✅ FR-497: Polyhedral Loop Optimization (多面体ループ最適化)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, FR-403（Loop Tiling）の拡張
 - **現状**: Loop Tiling（FR-403）は単純なキャッシュ局所性改善。複雑な多重ループ変換なし
@@ -880,7 +880,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: 行列演算・畳み込み・FFTで劇的な最適化（10x以上）。FR-403のタイル化を多面体モデルで理論的に正確に実装
 - **難易度**: Very Hard
 
-#### 🔶 FR-498: Global Constant Propagation (大域定数伝播)
+#### ✅ FR-498: Global Constant Propagation (大域定数伝播)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: 定数伝播はローカル変数のみ。一度だけ代入されるグローバル変数（`defparameter`）の値は伝播されない
@@ -932,7 +932,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC loop-interchange / Polly。行列演算のキャッシュミス率を数十分の一に削減。Loop Tiling（FR-403）の前処理として適用
 - **難易度**: Hard
 
-#### 🔶 FR-512: Loop Unswitching (ループアンスイッチング)
+#### ✅ FR-512: Loop Unswitching (ループアンスイッチング)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`
 - **現状**: ループ内の不変条件分岐を外に出す変換なし（LICMは命令移動のみ、条件分岐は対象外）
@@ -956,7 +956,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: キャッシュミスは100〜300クロック。プリフェッチでストリーミングアクセスを完全隠蔽できる
 - **難易度**: Hard
 
-#### 🔶 FR-515: Load-Store Forwarding & Elimination (ロードストア転送・除去)
+#### ✅ FR-515: Load-Store Forwarding & Elimination (ロードストア転送・除去)
 
 - **対象**: `packages/optimize/src/optimizer.lisp`, FR-409（Memory SSA）前提
 - **現状**: メモリ書き込み直後の同アドレス読み取りに余分なロード命令が残る
@@ -992,7 +992,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 
 ### Phase 101 — 並行性プリミティブ・メモリモデル
 
-#### 🔶 FR-520: Atomic Operations (アトミック操作)
+#### ✅ FR-520: Atomic Operations (アトミック操作)
 
 - **対象**: 新規`src/concurrent/atomic.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: CAS操作・フェッチアンドアドなしで、ロックフリーアルゴリズムが実装不可能
@@ -1000,7 +1000,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: ロックフリーGC（FR-420）、JIT コードキャッシュ更新（FR-330）、関数レジストリ更新（FR-363）の基盤。アトミックなしで並行性は実現不可
 - **難易度**: Medium
 
-#### 🔶 FR-521: Memory Barriers & Fences (メモリバリア・フェンス)
+#### ✅ FR-521: Memory Barriers & Fences (メモリバリア・フェンス)
 
 - **対象**: `packages/emit/src/x86-64-codegen.lisp`, `packages/emit/src/aarch64-codegen.lisp`
 - **現状**: 命令リオーダーに関するバリア命令なし
@@ -1008,7 +1008,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: x86-64は比較的強いメモリモデルだがAArch64はweakモデル。マルチコア上でのデータ競合を防ぐためにバリアが必要
 - **難易度**: Medium
 
-#### 🔶 FR-522: Lock-Free Data Structures (ロックフリーデータ構造)
+#### ✅ FR-522: Lock-Free Data Structures (ロックフリーデータ構造)
 
 - **対象**: 新規`src/concurrent/lockfree.lisp`, FR-520（アトミック）前提
 - **現状**: `*function-registry*` 等のグローバルハッシュテーブルはロックなしで共有不可
@@ -1016,7 +1016,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: ロック使用時の並列コンパイル（FR-376）のスケーラビリティボトルネックを除去。理論上コア数に線形スケール
 - **難易度**: Very Hard
 
-#### 🔶 FR-523: Software Transactional Memory / STM (ソフトウェアトランザクショナルメモリ)
+#### ✅ FR-523: Software Transactional Memory / STM (ソフトウェアトランザクショナルメモリ)
 
 - **対象**: 新規`src/concurrent/stm.lisp`
 - **現状**: 共有状態の更新はロックのみ。ネストした更新の原子性保証なし
@@ -1032,7 +1032,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: goroutine leakの根本的解決。スコープに束縛された並行性はライフタイム推論（FR-341エスケープ解析）と相性が良い
 - **難易度**: Hard
 
-#### 🔶 FR-525: Huge Pages / THP Support (ヒュージページサポート)
+#### ✅ FR-525: Huge Pages / THP Support (ヒュージページサポート)
 
 - **対象**: `packages/runtime/src/heap.lisp`, `packages/cli/src/main.lisp`
 - **現状**: 通常の4KBページでmalloc/mmap。TLBスラッシングの対策なし
@@ -1052,7 +1052,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SchemeのR7RS必須機能。cl-ccのCPS変換インフラは継続が「ただのクロージャ」として直接実装できる理想的構造
 - **難易度**: Medium
 
-#### 🔶 FR-529: Delimited Continuations / shift-reset (限定継続)
+#### ✅ FR-529: Delimited Continuations / shift-reset (限定継続)
 
 - **対象**: `packages/compile/src/cps.lisp`, `packages/vm/src/vm.lisp`, FR-528前提
 - **現状**: `call/cc`（FR-528）は現在の継続全体をキャプチャ。部分的なキャプチャなし
@@ -1076,7 +1076,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: 配列インデックス型 `(and fixnum (>= 0) (< array-length))` で境界チェックを型レベルで除去できる。bcE（FR-468）の完全静的版
 - **難易度**: Very Hard
 
-#### 🔶 FR-532: Linear Types / Resource Types (線形型・リソース型)
+#### ✅ FR-532: Linear Types / Resource Types (線形型・リソース型)
 
 - **対象**: `packages/type/src/inference.lisp`, `packages/compile/src/codegen.lisp`
 - **現状**: ファイルハンドル・ネットワーク接続等のリソースの二重解放・未解放をコンパイル時に検出不可
@@ -1120,7 +1120,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `__attribute__((symver))` / ELF symbol versioning。共有ライブラリのメジャーバージョン非互換変更を安全に管理
 - **難易度**: Medium
 
-#### ⚠️ FR-539: Deprecation API (廃止予定API管理)
+#### ✅ FR-539: Deprecation API (廃止予定API管理)
 
 - **対象**: `packages/expand/src/expander.lisp`, `packages/parse/src/diagnostics.lisp`
 - **現状**: 廃止予定関数を示す仕組みなし。`(declare (ignore x))`程度の宣言のみ
@@ -1128,7 +1128,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: SBCL `(deprecated :early "1.2.3")` / GCC `__attribute__((deprecated))`. APIの進化と後方互換性の管理に必須
 - **難易度**: Easy
 
-#### ⚠️ FR-540: Branch Probability Hints / likely-unlikely (分岐確率ヒント)
+#### ✅ FR-540: Branch Probability Hints / likely-unlikely (分岐確率ヒント)
 
 - **対象**: `packages/expand/src/macros-basic.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: 分岐確率情報なし。コンパイラは全分岐を50/50と仮定
@@ -1136,7 +1136,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: GCC `__builtin_expect` / Clang `[[likely]]`（C++20）/ Linux `likely()/unlikely()`。エラーハンドラが`unlikely`なら最適なコード配置が可能
 - **難易度**: Easy
 
-#### 🔶 FR-541: Inline Assembly (インラインアセンブリ)
+#### ✅ FR-541: Inline Assembly (インラインアセンブリ)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: ネイティブアセンブリ命令に直接アクセスする手段なし
@@ -1144,7 +1144,7 @@ ML-driven optimization, parallel/distributed compilation, WebAssembly targets, s
 - **根拠**: `rdtsc`（高精度タイマー）・`cpuid`（CPU情報）・`pause`（spin-wait最適化）等のコンパイラが直接生成しない命令へのアクセスに不可欠
 - **難易度**: Hard
 
-#### ⚠️ FR-542: Hot/Cold Code Annotation (ホット/コールドコードアノテーション)
+#### ✅ FR-542: Hot/Cold Code Annotation (ホット/コールドコードアノテーション)
 
 - **対象**: `packages/compile/src/codegen.lisp`, `packages/emit/src/x86-64-codegen.lisp`
 - **現状**: PGO（FR-480/FR-508）なしではコードの温度推定不可

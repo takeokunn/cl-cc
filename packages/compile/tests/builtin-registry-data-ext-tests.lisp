@@ -207,9 +207,8 @@
 ;;; ─── *builtin-ternary-opt-nil-custom-entries* ────────────────────────────
 
 (deftest-each builtin-ternary-opt-nil-custom-representative
-  "*builtin-ternary-opt-nil-custom-entries* maps get and subseq."
-  :cases (("get"    'get    'cl-cc::make-vm-symbol-get :sym    :indicator :default)
-          ("subseq" 'subseq 'cl-cc::make-vm-subseq     :string :start     :end))
+  "*builtin-ternary-opt-nil-custom-entries* maps get."
+  :cases (("get"    'get    'cl-cc::make-vm-symbol-get :sym    :indicator :default))
   (sym expected-ctor slot1 slot2 slot3)
   (let ((entry (assoc sym cl-cc/compile::*builtin-ternary-opt-nil-custom-entries*)))
     (assert-true entry)

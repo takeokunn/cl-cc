@@ -462,7 +462,9 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
       (when ok
         (push (cons (ast-defvar-name ast) value) *compile-time-value-env*)))))
 
-(defun %make-compile-opts (&key pass-pipeline speed (safety 1) (space 0) (debug 0) (inline-threshold-scale 1) block-compile print-pass-timings timing-stream
+(defun %make-compile-opts (&key pass-pipeline speed (safety 1) (space 0) (debug 0) (inline-threshold-scale 1) block-compile 
+                                    opt-bisect-limit
+                                    print-pass-timings timing-stream
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream werror werror-categories)
   "Build a compilation options plist suitable for APPLYing to compile-*/optimize-* functions."
@@ -474,6 +476,7 @@ Returns the inferred type, or NIL on failure (structured warning recorded unless
         :debug               debug
         :inline-threshold-scale inline-threshold-scale
         :block-compile       block-compile
+        :opt-bisect-limit    opt-bisect-limit
         :print-pass-timings  print-pass-timings
         :timing-stream       timing-stream
         :print-opt-remarks   print-opt-remarks
@@ -773,12 +776,13 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
 
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
                                           speed (inline-threshold-scale 1)
-                                          block-compile
+                                          block-compile opt-bisect-limit
                                          pass-pipeline print-pass-timings timing-stream coverage
                                         print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                           print-pass-stats stats-stream trace-json-stream
                                            retpoline spectre-mitigations stack-protector shadow-stack
-                                           asan msan tsan ubsan hwasan verify-transforms werror werror-categories (compilation-tier 1))
+                                           asan msan tsan ubsan hwasan verify-transforms werror werror-categories (compilation-tier 1)
+                                           &allow-other-keys)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
 Returns a compilation-result struct with program, assembly, and globals."
@@ -794,6 +798,7 @@ Returns a compilation-result struct with program, assembly, and globals."
          (type-env      (type-env-empty))
          (opts          (%make-compile-opts :pass-pipeline pass-pipeline
                                               :speed speed
+                                              :opt-bisect-limit opt-bisect-limit
                                               :inline-threshold-scale inline-threshold-scale
                                               :block-compile block-compile
                                             :print-pass-timings print-pass-timings
@@ -924,9 +929,44 @@ unless a caller opts into FR-861 dispatch lowering."
           codegen-inline-arith-dispatch-entry
           codegen-inline-arith-dispatch-plan
            emit-inline-arith-dispatch
-           *forward-reference-patch-table*
-           record-forward-reference
-            resolve-forward-references
-            unresolved-forward-reference-error
-            *unresolved-forward-refs*
-            *codegen-inline-arith-dispatch-enabled*))
+            *forward-reference-patch-table*
+            record-forward-reference
+             resolve-forward-references
+             unresolved-forward-reference-error
+             *unresolved-forward-refs*
+             *codegen-inline-arith-dispatch-enabled*
+             ;; FR-542: hot/cold code annotations
+             declare-hot
+             declare-cold
+             cold-path))
+
+;;; ── FR-542: Hot/Cold Code Annotations ─────────────────────────────────
+
+(defvar *code-temperature-registry* (make-hash-table :test 'eq)
+  "Maps function names to :hot or :cold temperature hints for code placement.")
+
+(defun %declare-function-temperature (name temperature)
+  "Register NAME with TEMPERATURE (:hot or :cold) for code placement.
+Hot functions go to .text.hot section; cold functions to .text.cold."
+  (setf (gethash name *code-temperature-registry*) temperature))
+
+(defmacro declare-hot ()
+  "FR-542: Declare the current function as hot-path.
+Equivalent to GCC __attribute__((hot)). Hot functions are placed in
+the .text.hot section for I-cache locality."
+  `(push (cons :code-placement :hot) (compilation-result-code-placement-hints *compilation-result*)))
+
+(defmacro declare-cold ()
+  "FR-542: Declare the current function as cold-path.
+Equivalent to GCC __attribute__((cold)). Cold functions are placed in
+the .text.cold section, away from hot code to improve I-cache density."
+  `(push (cons :code-placement :cold) (compilation-result-code-placement-hints *compilation-result*)))
+
+(defmacro cold-path (&body body)
+  "FR-542: Mark BODY as a cold execution path.
+Used for error handlers and rarely-taken branches. The compiler
+may outline this code to .text.cold and place it away from the
+hot instruction stream."
+  `(progn
+     (push (cons :code-placement :cold) (compilation-result-code-placement-hints *compilation-result*))
+     ,@body))

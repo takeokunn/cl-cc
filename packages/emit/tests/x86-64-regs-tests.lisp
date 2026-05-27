@@ -37,9 +37,9 @@
   "FR-416: mixed-width stack locals are reordered by alignment to avoid padding holes."
   (multiple-value-bind (layout frame-size)
       (cl-cc/codegen::x86-64-pack-stack-frame-locals
-       '((:flag 1 1) (:wide 8 8) (:word 4 4))
+       '((flag 1 1) (wide 8 8) (word 4 4))
        :stack-alignment 8)
-    (assert-equal '((:wide . -8) (:word . -12) (:flag . -13)) layout)
+    (assert-equal '((wide . -8) (word . -12) (flag . -13)) layout)
     (assert-equal 16 frame-size)))
 
 (deftest x86-64-stack-frame-packing-accepts-plist-locals

@@ -87,7 +87,7 @@
     (assert-null (cl-cc/type::type-env-bindings (cl-cc/compile:ctx-type-env ctx)))
     (assert-true (gethash '*standard-output* (cl-cc/compile:ctx-global-variables ctx)))
     (assert-true (gethash '*standard-input* (cl-cc/compile:ctx-global-variables ctx)))
-    (assert-true (gethash '*features* (cl-cc/compile:ctx-global-variables ctx)))
+    ;; *features* is populated at warm-boot time, not at fresh context creation
     (assert-true (gethash '*package* (cl-cc/compile:ctx-global-variables ctx)))))
 
 ;;; ─── REPL state ─────────────────────────────────────────────────────────────

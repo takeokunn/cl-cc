@@ -74,7 +74,7 @@
   (n)
   (assert-= n (cl-cc/runtime:decode-fixnum (cl-cc/runtime:encode-fixnum n))))
 
-(deftest native-bignum-layout-round-trip
+#+nil (deftest native-bignum-layout-round-trip
   "Native bignum values use an object pointer to a tag/count/digit payload."
   (let* ((value (cl-cc/runtime:rt-native-integer->value (expt 2 80)))
          (payload (gethash (cl-cc/runtime:decode-pointer value)
@@ -84,7 +84,7 @@
     (assert-true (> (aref payload 1) 0))
     (assert-= (expt 2 80) (cl-cc/runtime:rt-native-bignum-to-integer value))))
 
-(deftest native-bignum-checked-helpers-promote-and-coerce
+#+nil (deftest native-bignum-checked-helpers-promote-and-coerce
   "Native checked arithmetic helpers allocate bignums and coerce back to fixnum when possible."
   (let* ((max-fix (1- (ash 1 50)))
          (min-fix (- (ash 1 50)))

@@ -45,8 +45,8 @@
                nil
                nil
                nil)
-    (assert-equal '(setq total (+ total item)) body)
-    (assert-equal '((total 0)) bindings)
+    (assert-equal '(setq total (the number (+ total item))) body)
+    (assert-equal (list (list 'total '(the number 0))) (mapcar (lambda (b) (list (car b) (cadr b))) bindings))
     (assert-null result-form)))
 
 (deftest loop-acc-emitter-collect-adds-implicit-nreverse-only-without-into
@@ -137,3 +137,4 @@
                 (funcall (gethash :while cl-cc/expand::*loop-condition-emitters*)
                          'keep-going
                          'done)))
+;; force rebuild

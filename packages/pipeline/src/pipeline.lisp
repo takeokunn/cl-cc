@@ -521,17 +521,18 @@ value carries top-level source locations for later AST annotation.
 ;;; after compile-toplevel-forms, which they depend on.
 
 (defun compile-expression (expr &key (target :x86_64) type-check (safety 1)
-                                      speed (inline-threshold-scale 1)
-                                      block-compile
-                                      pass-pipeline print-pass-timings timing-stream coverage
-                                       print-opt-remarks opt-remarks-stream
-                                       (opt-remarks-mode :all)
-                                       opt-bisect-limit
-                                       print-pass-stats stats-stream trace-json-stream
-                                          retpoline spectre-mitigations stack-protector shadow-stack
-                                           asan msan tsan ubsan hwasan pgo-profile-data
-                                            verify-transforms werror werror-categories
-                                            (compilation-tier *compilation-tier*))
+                                       speed (inline-threshold-scale 1)
+                                       block-compile
+                                       pass-pipeline print-pass-timings timing-stream coverage
+                                        print-opt-remarks opt-remarks-stream
+                                        (opt-remarks-mode :all)
+                                        opt-bisect-limit
+                                        print-pass-stats stats-stream trace-json-stream
+                                           retpoline spectre-mitigations stack-protector shadow-stack
+                                            asan msan tsan ubsan hwasan pgo-profile-data
+                                             verify-transforms werror werror-categories
+                                             (compilation-tier *compilation-tier*)
+                                             &allow-other-keys)
   "Compile EXPR and return a compilation-result object.
 
 EXPR may be an s-expression or an already-lowered AST node. TARGET chooses the
@@ -626,7 +627,8 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                        retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan pgo-profile-data
                                       verify-transforms werror werror-categories
-                                        (compilation-tier *compilation-tier*))
+                                        (compilation-tier *compilation-tier*)
+                                        &allow-other-keys)
   "Compile SOURCE text and return a compilation-result object.
 
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
@@ -697,7 +699,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                        retpoline spectre-mitigations stack-protector shadow-stack
                                        asan msan tsan ubsan hwasan pgo-profile-data
                                        verify-transforms werror werror-categories
-                                        (compilation-tier *compilation-tier*))
+                                        (compilation-tier *compilation-tier*)
+                                        &allow-other-keys)
  "Compile SOURCE text and return a compilation-result object.
  
 LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for

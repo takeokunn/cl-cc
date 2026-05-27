@@ -70,12 +70,14 @@
 (defun %x86-64-normalize-frame-local (local)
   "Normalize LOCAL to (name size align) for stack-frame packing."
   (cond
-    ((and (consp local) (keywordp (car local)))
+    ((and (consp local) (keywordp (car local)) (getf local :name))
+     ;; Plist format: (:name :foo :size 8 :align 8)
      (let ((name (getf local :name))
            (size (getf local :size))
            (align (or (getf local :align) (getf local :alignment))))
        (list name size (or align size))))
     ((consp local)
+     ;; Triple format: (:foo 8 8) or (name size &optional align)
      (destructuring-bind (name size &optional align) local
        (list name size (or align size))))
     (t (error "Invalid x86-64 frame local descriptor: ~S" local))))

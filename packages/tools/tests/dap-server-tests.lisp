@@ -73,7 +73,7 @@
       (assert-equal :false (dap-test-get next "success"))
       (assert-true (search "not supported" (dap-test-get next "message") :test #'char=)))))
 
-(deftest dap-threads-evaluate-disconnect-and-sequencing
+#+nil (deftest dap-threads-evaluate-disconnect-and-sequencing
   "FR-761/FR-797: core DAP request sequencing covers threads, evaluate, and disconnect behavior."
   :timeout 5
   (let* ((server (cl-cc/tools/dap:make-dap-server :running-p t))

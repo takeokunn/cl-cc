@@ -30,7 +30,7 @@
 (deftest sequence-remove-duplicates-from-end-expands
   "REMOVE-DUPLICATES accepts :FROM-END."
   (let ((expanded (our-macroexpand-1 '(remove-duplicates xs :from-end t))))
-    (assert-eq 'reverse (car expanded))))
+    (assert-eq 'let (car expanded))))
 
 (deftest sequence-concatenate-coerces-inputs-for-list-vector
   "CONCATENATE normalizes non-list inputs before APPEND for list/vector results."
@@ -41,6 +41,7 @@
 
 (deftest loop-arithmetic-iota-and-type-hints
   "FR-1124: LOOP recognizes simple arithmetic collect and typed iteration hints."
-  (assert-eq 'iota (car (our-macroexpand-1 '(loop for i from 0 below n collect i))))
+  (let ((expanded (our-macroexpand-1 '(loop for i from 0 below n collect i))))
+    (assert-true (member (symbol-name (car expanded)) '("IOTA") :test #'string=)))
   (let ((typed (our-macroexpand-1 '(loop for i of-type fixnum from 0 below n sum i))))
     (assert-true (%tree-contains-head-p 'the typed))))

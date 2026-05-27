@@ -116,6 +116,7 @@
     (assert-equal '(:trace-json-stream :trace-stream
                     :print-pass-stats t
                     :pass-pipeline t
+                     :opt-bisect-limit nil
                      :inline-threshold-scale 1
                      :verify-transforms t
                      :shadow-stack t

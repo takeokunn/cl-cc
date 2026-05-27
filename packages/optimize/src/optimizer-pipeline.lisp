@@ -1105,7 +1105,8 @@ Returns the parameter plist that was applied."
                                           retpoline spectre-mitigations
                                                   stack-protector
                                                   shadow-stack
-                                                  asan msan tsan ubsan hwasan)
+                                                  asan msan tsan ubsan hwasan
+                                                  &allow-other-keys)
   "Run the full multi-pass optimization pipeline on a VM instruction sequence.
 Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
 When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
