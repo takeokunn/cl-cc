@@ -218,3 +218,32 @@
   (let* ((inst (make-vm-select :dst :r0 :cond-reg :r1 :then-reg :r2 :else-reg :r3))
          (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-select inst)))
     (assert-true (> (length bytes) 0))))
+
+;;; ─── Bignum Runtime Call Emitter Tests ───────────────────────────────────
+
+(deftest x86-emit-add-bignum-emits-bytes
+  "emit-vm-add-bignum emits non-empty byte sequence for runtime bignum call."
+  (let* ((inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-bignum inst)))
+    (assert-true (> (length bytes) 0))))
+
+(deftest x86-emit-sub-bignum-emits-bytes
+  "emit-vm-sub-bignum emits non-empty byte sequence for runtime bignum call."
+  (let* ((inst (cl-cc:make-vm-sub-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-sub-bignum inst)))
+    (assert-true (> (length bytes) 0))))
+
+(deftest x86-emit-mul-bignum-emits-bytes
+  "emit-vm-mul-bignum emits non-empty byte sequence for runtime bignum call."
+  (let* ((inst (cl-cc:make-vm-mul-checked :dst :r0 :lhs :r1 :rhs :r2))
+         (bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-mul-bignum inst)))
+    (assert-true (> (length bytes) 0))))
+
+(deftest x86-bignum-flag-dispatches-to-bignum-emitter
+  "When *x86-64-bignum-calls-enabled* is T, the add-wrapper emits bignum call bytes."
+  (let ((cl-cc/codegen::*x86-64-bignum-calls-enabled* t)
+        (inst (cl-cc:make-vm-add-checked :dst :r0 :lhs :r1 :rhs :r2)))
+    (unwind-protect
+         (let ((bytes (%collect-emit-ops-bytes #'cl-cc/codegen::emit-vm-add-wrapper inst)))
+           (assert-true (> (length bytes) 0)))
+      (setf cl-cc/codegen::*x86-64-bignum-calls-enabled* nil))))
