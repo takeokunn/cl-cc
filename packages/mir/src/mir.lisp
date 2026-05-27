@@ -24,7 +24,7 @@
    Use MIR-NEW-VALUE to allocate; never construct directly."
   (id       0   :type fixnum)   ; globally unique ID within the function
   (name     nil)                ; optional debug name symbol
-  (type     :any)               ; type annotation: :integer :pointer :boolean :any ...
+  (type     :any)               ; type annotation: :integer :bignum :pointer :boolean :any ...
   (def-inst nil)                ; back-pointer to the mir-inst that defines this value
   (use-count 0  :type fixnum))  ; number of uses (informational; updated by lowering)
 
@@ -260,6 +260,13 @@ types join to :ANY instead of inventing a union representation."
                 (eq (mir-operand-type operand) expected-type))
               operands)))
 
+(defun %mir-operands-any-type-p (operands type)
+  "Return T when any OPERANDS entry has TYPE."
+  (and operands
+       (some (lambda (operand)
+               (eq (mir-operand-type operand) type))
+             operands)))
+
 (defun mir-infer-inst-type (inst)
   "Infer a conservative result type for MIR instruction INST."
   (let ((srcs (miri-srcs inst)))
@@ -270,9 +277,10 @@ types join to :ANY instead of inventing a union representation."
        (if srcs (mir-operand-type (first srcs)) (miri-type inst)))
       ((:add :sub :mul :div :mod :neg
         :band :bor :bxor :bnot :shl :shr :ushr)
-       (if (%mir-operands-all-type-p srcs :integer)
-           :integer
-           (miri-type inst)))
+       (cond
+         ((%mir-operands-any-type-p srcs :bignum) :bignum)
+         ((%mir-operands-all-type-p srcs :integer) :integer)
+         (t (miri-type inst))))
       ((:lt :le :gt :ge :eq :ne)
        :boolean)
       (:load
