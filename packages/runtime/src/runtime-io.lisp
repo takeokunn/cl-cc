@@ -270,28 +270,3 @@ host package universe."
   "Multiply A and B.  Returns fixnum when possible."
   (rt-native-integer->value
    (* (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
-
-;;; ─── JIT-Callable Bignum Bridges (for native codegen slow path) ────────────
-;;;
-;;; The native codegen emits CALL instructions to these C-callable wrappers
-;;; when fixnum arithmetic overflows.  define-alien-callable produces a C ABI
-;;; function reachable via sb-alien:extern-alien / %runtime-function-address.
-;;; All values are raw 64-bit (NaN-boxed fixnum or bignum pointer).
-
-#+sbcl
-(sb-alien:define-alien-callable cl_cc_bignum_add
-    ((a (unsigned 64)) (b (unsigned 64)))
-  (unsigned 64)
-  (rt-native-bignum-add a b))
-
-#+sbcl
-(sb-alien:define-alien-callable cl_cc_bignum_sub
-    ((a (unsigned 64)) (b (unsigned 64)))
-  (unsigned 64)
-  (rt-native-bignum-sub a b))
-
-#+sbcl
-(sb-alien:define-alien-callable cl_cc_bignum_mul
-    ((a (unsigned 64)) (b (unsigned 64)))
-  (unsigned 64)
-  (rt-native-bignum-mul a b))
