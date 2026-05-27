@@ -295,7 +295,29 @@
            (cl-cc/vm::lock-package pkg)
            (assert-signals cl-cc/vm::package-locked-error
              (cl-cc/vm::check-package-lock pkg :intern))
-           (cl-cc/vm::unlock-package pkg)
-           ;; Unlocked should not signal
-           (assert-true (null (cl-cc/vm::check-package-lock pkg :intern))))
-      (%str-delete-package-if-exists :fr896-lock-test-d))))
+            (cl-cc/vm::unlock-package pkg)
+            ;; Unlocked should not signal
+            (assert-true (null (cl-cc/vm::check-package-lock pkg :intern))))
+       (%str-delete-package-if-exists :fr896-lock-test-d))))
+
+;;; ─── Self-Host Mode (FR-626) ──────────────────────────────────────────────
+
+(deftest sym-self-host-intern-works-with-runtime-registry
+  "In self-host mode with runtime registry available, vm-intern-symbol succeeds."
+  (let ((cl-cc/vm::*vm-self-host-mode* t)
+        (s (str-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "SELF-HOST-INTERN-SYM")
+    (str-exec (cl-cc:make-vm-intern-symbol :dst :R0 :src :R1 :pkg nil) s)
+    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
+      (assert-true (symbolp result))
+      (assert-equal "SELF-HOST-INTERN-SYM" (symbol-name result)))))
+
+(deftest sym-self-host-find-package-works-with-runtime-registry
+  "In self-host mode, vm-find-package finds a runtime-registered package."
+  (let ((cl-cc/vm::*vm-self-host-mode* t)
+        (s (str-vm)))
+    ;; Register a package in the runtime registry
+    (cl-cc/runtime:rt-make-package :self-host-test-pkg)
+    (cl-cc/vm::vm-reg-set s :R1 :self-host-test-pkg)
+    (str-exec (cl-cc:make-vm-find-package :dst :R0 :src :R1) s)
+    (assert-true (cl-cc/vm::vm-reg-get s :R0))))
