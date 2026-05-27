@@ -110,10 +110,18 @@
   (let* ((name (%vm-host-string (vm-reg-get state (vm-src inst))))
           (pkg-designator (when (vm-intern-pkg inst)
                              (%vm-host-string (vm-reg-get state (vm-intern-pkg inst)))))
-         (result (if pkg-designator
-                      (intern name (or (%vm-find-package-local-nickname pkg-designator)
-                                       (find-package pkg-designator)))
-                      (intern name))))
+         (result
+           ;; Try runtime package intern first (self-hosting path via *runtime-intern-fn*)
+           (cond
+             ((and cl-cc/bootstrap:*runtime-intern-fn* pkg-designator)
+              (funcall cl-cc/bootstrap:*runtime-intern-fn* name pkg-designator))
+             (cl-cc/bootstrap:*runtime-intern-fn*
+              (funcall cl-cc/bootstrap:*runtime-intern-fn* name))
+             (pkg-designator
+              (intern name (or (%vm-find-package-local-nickname pkg-designator)
+                               (find-package pkg-designator))))
+             (t
+              (intern name)))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -141,10 +149,14 @@
 (defmethod execute-instruction ((inst vm-find-package) state pc labels)
   (declare (ignore labels))
   (let* ((name (vm-reg-get state (vm-src inst)))
-         (result (or (%vm-find-package-local-nickname name)
-                     (and cl-cc/bootstrap:*runtime-find-package-fn*
-                           (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
-                      (find-package name))))
+         (result (or
+                  ;; Package-local nicknames first (ANSI CL semantics)
+                  (%vm-find-package-local-nickname name)
+                  ;; Runtime package registry (self-hosting path — PRIMARY)
+                  (and cl-cc/bootstrap:*runtime-find-package-fn*
+                       (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
+                  ;; Host CL fallback (bootstrap phase only)
+                  (find-package name))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
@@ -159,7 +171,8 @@
                                pkg-designator
                                (funcall cl-cc/bootstrap:*runtime-find-package-fn* pkg-designator))))
           (host-pkg-designator (if (hash-table-p pkg-designator)
-                                   (gethash :name pkg-designator)
+                                   (or (gethash :name pkg-designator)
+                                       (gethash :host-package pkg-designator))
                                    (or (and pkg-designator
                                             (%vm-find-package-local-nickname pkg-designator))
                                        pkg-designator))))
@@ -170,6 +183,8 @@
                    (found (and table (gethash name table))))
               (if found
                   (values found (if (member found exports :test #'eq) :external :internal))
+                  ;; Not found in runtime table — fall back to host CL lookup.
+                  ;; The runtime package may mirror a host package via :host-package.
                   (find-symbol name host-pkg-designator)))
             (if host-pkg-designator
                 (find-symbol name host-pkg-designator)
