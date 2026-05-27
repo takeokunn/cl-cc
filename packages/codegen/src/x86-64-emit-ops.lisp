@@ -352,11 +352,30 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
     (emit-byte #x0F stream)
     (emit-byte #x0B stream)))
 
+(defun emit-vm-sub-checked (inst stream)
+  "vm-sub-checked: dst = lhs - rhs with hardware overflow trap (FR-149/303)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-sub-rr64 dst rhs stream)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
+
+(defun emit-vm-mul-checked (inst stream)
+  "vm-mul-checked: dst = lhs * rhs with hardware overflow trap (FR-149/303).
+   IMUL sets OF on overflow when the full result does not fit in the destination."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 dst lhs stream)
+    (emit-imul-rr64 dst rhs stream)
+    (emit-jno-rel32 2 stream)
+    (emit-byte #x0F stream)
+    (emit-byte #x0B stream)))
+
 ;;; ─── Bignum Runtime Call Emitters (ANSI CL number tower) ──────────────────
-;;;
-;;; When active, these replace inline arithmetic with CALL to C-callable
-;;; bignum bridges (cl_cc_bignum_add/sub/mul).  Pattern (~22 bytes):
-;;;   MOV RDI,lhs (3) + MOV RSI,rhs (3) + MOV R11,addr (10) + CALL R11 (3) + MOV dst,RAX (3)
 
 (defun %bignum-bridge-address (name)
   "Resolve the address of a bignum C-callable bridge function NAME at load-time."
