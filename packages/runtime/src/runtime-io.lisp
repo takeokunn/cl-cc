@@ -225,3 +225,48 @@ host package universe."
   (%rt-install-bootstrap-hook :intern-fn #'rt-intern)
   (%rt-install-bootstrap-hook :set-symbol-value-fn #'rt-set-symbol-value)
   (%rt-register-vm-runtime-callables))
+
+;;; ─── Native Bignum Support (ANSI CL Ch.12 Number Tower) ────────────────────
+;;;
+;;; The native codegen calls these runtime helpers when integer arithmetic
+;;; overflows fixnum range.  Bignums are represented as tagged cons cells
+;;; (:bignum . cl-integer).  The codegen fast path handles fixnum arithmetic
+;;; inline; these functions handle the slow path (overflow / mixed types).
+
+(declaim (inline rt-native-bignum-p))
+
+(defun rt-native-bignum-allocate (n)
+  "Allocate a bignum value wrapping the CL integer N."
+  (cons :bignum n))
+
+(defun rt-native-bignum-p (value)
+  "Return T when VALUE is a bignum."
+  (and (consp value) (eq (car value) :bignum)))
+
+(defun rt-native-bignum-to-integer (value)
+  "Convert a fixed-size (fixnum or bignum) VALUE to a CL integer."
+  (if (rt-native-bignum-p value)
+      (cdr value)
+      (decode-fixnum value)))
+
+(defun rt-native-integer->value (n)
+  "Box a CL integer N into the runtime value representation.
+  Returns an encoded fixnum when N fits, otherwise a bignum."
+  (if (typep n 'fixnum)
+      (encode-fixnum n)
+      (rt-native-bignum-allocate n)))
+
+(defun rt-native-bignum-add (a b)
+  "Add two fixed-size integer values A and B.  Returns fixnum when possible."
+  (rt-native-integer->value
+   (+ (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
+
+(defun rt-native-bignum-sub (a b)
+  "Subtract B from A.  Returns fixnum when possible."
+  (rt-native-integer->value
+   (- (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
+
+(defun rt-native-bignum-mul (a b)
+  "Multiply A and B.  Returns fixnum when possible."
+  (rt-native-integer->value
+   (* (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
