@@ -29,6 +29,13 @@ closures, and reader states."))
 (defvar *pgo-data-path* #P".cl-cc-pgo.msgpack"
   "Default path for lightweight persisted PGO data.")
 
+(defvar *vm-self-host-mode* nil
+  "When T, VM operations refuse host CL fallbacks.  Package operations
+(vm-intern-symbol, vm-find-package) must use the runtime package registry
+exclusively; FORMAT must use the native renderer without host SBCL fallback.
+This mode exists to validate ANSI CL self-hosting readiness.
+Set via (setf *vm-self-host-mode* t) or --self-host CLI flag.")
+
 (defstruct fasl-toc
   "Minimal FASL table-of-contents descriptor for demand-loading hooks."
   (path nil)

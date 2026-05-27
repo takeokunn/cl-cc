@@ -117,6 +117,10 @@
               (funcall cl-cc/bootstrap:*runtime-intern-fn* name pkg-designator))
              (cl-cc/bootstrap:*runtime-intern-fn*
               (funcall cl-cc/bootstrap:*runtime-intern-fn* name))
+             ;; In self-host mode, refuse host CL fallback
+             (*vm-self-host-mode*
+              (error "Package self-hosting required: cannot intern ~S without runtime package registry"
+                     name))
              (pkg-designator
               (intern name (or (%vm-find-package-local-nickname pkg-designator)
                                (find-package pkg-designator))))
@@ -155,6 +159,10 @@
                   ;; Runtime package registry (self-hosting path — PRIMARY)
                   (and cl-cc/bootstrap:*runtime-find-package-fn*
                        (funcall cl-cc/bootstrap:*runtime-find-package-fn* name))
+                  ;; In self-host mode, refuse host CL fallback
+                  (and *vm-self-host-mode*
+                       (error "Package self-hosting required: package ~S not found in runtime registry"
+                              name))
                   ;; Host CL fallback (bootstrap phase only)
                   (find-package name))))
     (vm-reg-set state (vm-dst inst) result)

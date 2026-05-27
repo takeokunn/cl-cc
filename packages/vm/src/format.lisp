@@ -607,9 +607,11 @@ it via runtime stream functions and return NIL."
          (result (handler-case
                      (%vm-format-native fmt-str arg-vals)
                    (error ()
-                     ;; Keep the host fallback for directives outside the native
-                     ;; subset and for compatibility while FR-626 matures.
-                     (apply #'format nil fmt-str arg-vals)))))
+                     (if *vm-self-host-mode*
+                         (error "FORMAT self-hosting required: native renderer failed on ~S"
+                                fmt-str)
+                         ;; Host fallback for unit-test/bootstrap contexts only.
+                         (apply #'format nil fmt-str arg-vals))))))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
