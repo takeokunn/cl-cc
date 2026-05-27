@@ -251,8 +251,10 @@ host package universe."
 
 (defun rt-native-integer->value (n)
   "Box a CL integer N into the runtime value representation.
-  Returns an encoded fixnum when N fits, otherwise a bignum."
-  (if (typep n 'fixnum)
+  Returns an encoded fixnum when N fits in 51-bit signed range;
+  otherwise returns a bignum."
+  (if (and (>= n #.(- (ash 1 50)))
+           (<= n #.(1- (ash 1 50))))
       (encode-fixnum n)
       (rt-native-bignum-allocate n)))
 
