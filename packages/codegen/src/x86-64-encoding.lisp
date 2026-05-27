@@ -26,6 +26,12 @@
 (defparameter *amx-enabled* nil
   "When true, experimental Intel AMX tile encoders may be selected.")
 
+(defparameter *x86-64-bignum-calls-enabled* nil
+  "When T, integer arithmetic ops (vm-add/sub/mul) emit CALL to runtime bignum
+functions instead of inline x86-64 instructions.  Enables full ANSI CL number
+tower in native codegen.  Set to T for correctness; NIL for performance (fixnum
+wraparound on overflow).")
+
 ;;; x86-64 Register Encoding
 
 ;; Register codes (4-bit values)

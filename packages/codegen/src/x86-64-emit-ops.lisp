@@ -375,6 +375,56 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
     (emit-byte #x0F stream)
     (emit-byte #x0B stream)))
 
+;;; ─── Bignum Runtime Call Emitters (ANSI CL number tower) ──────────────────
+;;;
+;;; When *x86-64-bignum-calls-enabled* is T, these replace the inline arithmetic
+;;; emitters.  They call C-callable bridge functions (cl_cc_bignum_add/sub/mul)
+;;; defined in runtime-io.lisp via define-alien-callable.
+;;;
+;;; Pattern (17 bytes, no stack manipulation needed):
+;;;   MOV RDI,lhs (3) + MOV RSI,rhs (3) + MOV R11,addr (10) + CALL R11 (3) + MOV dst,RAX (3) = 22 bytes
+
+(defun %bignum-bridge-address (name)
+  "Resolve the address of a bignum C-callable bridge function NAME at load-time."
+  (sb-sys:sap-int
+   (sb-alien:alien-sap
+    (sb-alien:extern-alien name (function (sb-alien:unsigned 64)
+                                          (sb-alien:unsigned 64)
+                                          (sb-alien:unsigned 64))))))
+
+(defun emit-vm-add-bignum (inst stream)
+  "vm-add via bignum runtime call: dst = lhs + rhs (full CL integer arithmetic)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 +rdi+ lhs stream)
+    (emit-mov-rr64 +rsi+ rhs stream)
+    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_add")) stream)
+    (emit-call-r64 +r11+ stream)
+    (emit-mov-rr64 dst +rax+ stream)))
+
+(defun emit-vm-sub-bignum (inst stream)
+  "vm-sub via bignum runtime call: dst = lhs - rhs (full CL integer arithmetic)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 +rdi+ lhs stream)
+    (emit-mov-rr64 +rsi+ rhs stream)
+    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_sub")) stream)
+    (emit-call-r64 +r11+ stream)
+    (emit-mov-rr64 dst +rax+ stream)))
+
+(defun emit-vm-mul-bignum (inst stream)
+  "vm-mul via bignum runtime call: dst = lhs * rhs (full CL integer arithmetic)."
+  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+        (lhs (vm-reg-to-x86 (vm-lhs inst)))
+        (rhs (vm-reg-to-x86 (vm-rhs inst))))
+    (emit-mov-rr64 +rdi+ lhs stream)
+    (emit-mov-rr64 +rsi+ rhs stream)
+    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_mul")) stream)
+    (emit-call-r64 +r11+ stream)
+    (emit-mov-rr64 dst +rax+ stream)))
+
 (defun emit-vm-integer-mul-high-u (inst stream)
   "vm-integer-mul-high-u: dst = unsigned high 64 bits of lhs*rhs."
   (let ((dst (vm-reg-to-x86 (vm-dst inst)))

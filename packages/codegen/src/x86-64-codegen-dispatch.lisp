@@ -328,7 +328,28 @@ materializes explicit CET SS instructions under the shadow-stack gate:
             (x86-64-lea-address-index inst)
             (x86-64-lea-address-scale inst)
              (x86-64-lea-address-displacement inst)
-             stream))
+              stream))
+
+;;; ─── Bignum-aware emitter wrappers ────────────────────────────────────────
+;;;
+;;; When *x86-64-bignum-calls-enabled* is T, these dispatch to the bignum
+;;; runtime-call emitters (emit-vm-add-bignum etc.) instead of inline x86-64
+;;; instructions.  When NIL (default), use the fast inline path.
+
+(defun emit-vm-add-wrapper (inst stream)
+  (if *x86-64-bignum-calls-enabled*
+      (emit-vm-add-bignum inst stream)
+      (emit-vm-add inst stream)))
+
+(defun emit-vm-sub-wrapper (inst stream)
+  (if *x86-64-bignum-calls-enabled*
+      (emit-vm-sub-bignum inst stream)
+      (emit-vm-sub inst stream)))
+
+(defun emit-vm-mul-wrapper (inst stream)
+  (if *x86-64-bignum-calls-enabled*
+      (emit-vm-mul-bignum inst stream)
+      (emit-vm-mul inst stream)))
 
 (defparameter *x86-64-emitter-entries*
   '(;; Core instructions
@@ -336,15 +357,16 @@ materializes explicit CET SS instructions under the shadow-stack gate:
     (x86-64-lea-address . emit-x86-64-lea-address-inst)
     (x86-64-bextr-field . emit-x86-64-bextr-field-inst)
     (vm-move         . emit-vm-move)
-    (vm-add          . emit-vm-add)
+    ;; vm-add/sub/mul dispatch through bignum-aware wrappers
+    (vm-add          . emit-vm-add-wrapper)
     ;; FR-171: vm-integer-add uses LEA optimization (active)
     (vm-integer-add  . emit-vm-integer-add)
     (vm-float-add    . emit-vm-float-add)
-    (vm-sub          . emit-vm-sub)
-    (vm-integer-sub  . emit-vm-sub)
+    (vm-sub          . emit-vm-sub-wrapper)
+    (vm-integer-sub  . emit-vm-sub-wrapper)
     (vm-float-sub    . emit-vm-float-sub)
-    (vm-mul          . emit-vm-mul)
-    (vm-integer-mul  . emit-vm-mul)
+    (vm-mul          . emit-vm-mul-wrapper)
+    (vm-integer-mul  . emit-vm-mul-wrapper)
     (vm-integer-mul-high-u . emit-vm-integer-mul-high-u)
     (vm-integer-mul-high-s . emit-vm-integer-mul-high-s)
     ;; Checked arithmetic (FR-303 overflow detection)
