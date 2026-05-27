@@ -266,6 +266,11 @@ host package universe."
   (rt-native-integer->value
    (- (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
 
+(defun rt-native-bignum-mul (a b)
+  "Multiply A and B.  Returns fixnum when possible."
+  (rt-native-integer->value
+   (* (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
+
 ;;; ─── JIT-Callable Bignum Bridges (for native codegen slow path) ────────────
 
 #+sbcl
