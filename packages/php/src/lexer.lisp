@@ -37,11 +37,13 @@
     "null" "true" "false" "readonly" "enum" "static" "abstract" "final"
     "public" "protected" "private" "do" "break" "continue" "switch" "case"
     "default" "try" "catch" "finally" "use" "namespace" "list" "as" "in"
-    "instanceof" "print" "yield" "from" "fn" "const")
+    "instanceof" "print" "yield" "from" "fn" "const"
+    "include" "require" "include_once" "require_once"
+    "declare" "goto" "clone" "array")
   "PHP reserved keywords (lowercased).")
 
 (defvar *php-type-keywords*
-  '("int" "string" "float" "bool" "array" "void" "mixed" "null" "never"
+  '("int" "string" "float" "bool" "void" "mixed" "never"
     "object" "callable" "iterable" "self" "parent" "static")
   "PHP type keywords (lowercased).")
 
@@ -225,9 +227,15 @@
 ;;; Identifier / keyword lexer
 
 (defun lex-identifier (source pos)
-  "Lex an identifier or keyword starting at POS. Returns (values token new-pos)."
+  "Lex an identifier or keyword starting at POS. Returns (values token new-pos).
+  Supports namespace-qualified names like Foo\\Bar\\Baz."
   (let ((start pos))
-    (loop while (and (< pos (length source)) (php-alnum-p (char source pos)))
+    (loop while (and (< pos (length source))
+                     (or (php-alnum-p (char source pos))
+                         ;; Backslash as namespace separator
+                         (and (char= (char source pos) #\\)
+                              (< (1+ pos) (length source))
+                              (php-alpha-p (char source (1+ pos))))))
           do (incf pos))
     (let* ((raw (subseq source start pos))
            (lower (string-downcase raw)))

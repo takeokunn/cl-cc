@@ -388,9 +388,9 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
   "Resolve the address of a bignum C-callable bridge function NAME at load-time."
   (sb-sys:sap-int
    (sb-alien:alien-sap
-    (sb-alien:extern-alien name (function (sb-alien:unsigned 64)
-                                          (sb-alien:unsigned 64)
-                                          (sb-alien:unsigned 64))))))
+    (sb-alien:extern-alien name (function (unsigned 64)
+                                          (unsigned 64)
+                                          (unsigned 64))))))
 
 (defun emit-vm-add-bignum (inst stream)
   "vm-add via bignum runtime call: dst = lhs + rhs (full CL integer arithmetic)."

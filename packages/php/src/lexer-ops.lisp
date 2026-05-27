@@ -47,6 +47,7 @@
          (tok1 :T-OP "&"))
         (#\|
          (tok2 "||" :T-OP "||")
+         (tok2 "|>" :T-OP "|>")
          (tok1 :T-OP "|"))
         (#\!
          (tok3 "!==" :T-OP "!==")
@@ -84,6 +85,10 @@
          (tok2 "/=" :T-OP "/=")
          (tok1 :T-OP "/"))
         (#\.
+         (when (and ch2 (char= ch2 #\.)
+                    ch3 (char= ch3 #\.))
+           (return-from lex-operator
+             (values (make-php-token :T-ELLIPSIS "...") (+ pos 3))))
          (tok2 ".=" :T-OP ".=")
          (tok1 :T-OP "."))
         (#\:
@@ -168,13 +173,35 @@
              (push tok tokens)
              (setf pos new-pos)))
           ;; Heredoc <<< (minimal: skip to end marker)
-          ;; Not fully supported; signal an informative error
-          ((and (char= ch #\<)
-                (< (+ pos 2) len)
-                (char= (char source (1+ pos)) #\<)
-                (char= (char source (+ pos 2)) #\<))
-           (error "PHP lex error: heredoc syntax (<<<) is not supported"))
-          ;; Operators, punctuation
+           ((and (char= ch #\<)
+                 (< (+ pos 2) len)
+                 (char= (char source (1+ pos)) #\<)
+                 (char= (char source (+ pos 2)) #\<))
+            ;; Parse <<<IDENTIFIER or <<<'IDENTIFIER' (nowdoc)
+            (let* ((start (+ pos 3))
+                   (nowdoc-p (and (< start len) (char= (char source start) #\')))
+                   (id-start (if nowdoc-p (1+ start) start))
+                   (id-end id-start))
+              (loop while (and (< id-end len) (not (member (char source id-end)
+                                                           '(#\Newline #\Return))))
+                    do (incf id-end))
+              (let ((id (subseq source id-start id-end)))
+                (when nowdoc-p
+                  (when (and (< id-end len) (char= (char source id-end) #\'))
+                    (incf id-end)))
+                ;; Skip to end marker (ID alone on a line, possibly followed by ;)
+                (let ((body-start (if (< id-end len) (1+ id-end) id-end))
+                      (marker (format nil "~%~A" id)))
+                  (let ((marker-pos (search marker source :start2 body-start)))
+                    (if marker-pos
+                        (let ((body (subseq source body-start marker-pos))
+                              (end (+ marker-pos (length marker))))
+                          (when (and (< end len) (char= (char source end) #\;))
+                            (incf end))
+                          (push (make-php-token :T-STRING body) tokens)
+                          (setf pos end))
+                        (error "PHP lex error: heredoc end marker ~S not found" id)))))))
+           ;; Operators, punctuation
           (t
            (multiple-value-bind (tok new-pos) (lex-operator source pos)
              (push tok tokens)

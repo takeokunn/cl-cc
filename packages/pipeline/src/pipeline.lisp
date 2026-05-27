@@ -688,7 +688,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                              (%non-in-package-form-locations forms source-locations))
           result))))
 
-(defun compile-string-with-stdlib (source &key (target :x86_64) type-check (safety 1)
+(defun compile-string-with-stdlib (source &key (target :x86_64) type-check (language :lisp) (safety 1)
                                                   source-file speed (inline-threshold-scale 1)
                                                   block-compile debug-info sanitize lto eh-model incremental perf-map parallel
                                                     pass-pipeline print-pass-timings timing-stream coverage
@@ -744,7 +744,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                       :compilation-tier (normalize-compilation-tier compilation-tier)))
            (*enable-cps-vm-primary-path* nil)
            (stdlib-forms (get-stdlib-forms))
-           (all-forms (append stdlib-forms source-forms))
+           (all-forms (append stdlib-forms forms))
             (result (%call-with-source-file-macro-eval
                      source-file
                      (lambda ()
@@ -766,5 +766,5 @@ arguments are forwarded to the expression, top-level, and optimization stages."
            result
            (append (mapcar (lambda (_form) nil)
                            (%non-in-package-forms stdlib-forms))
-                   (%non-in-package-form-locations source-forms source-locations)))
+                   (%non-in-package-form-locations forms source-locations)))
           result))))

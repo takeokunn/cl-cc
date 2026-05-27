@@ -280,18 +280,18 @@ host package universe."
 
 #+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_add
-    ((a (sb-alien:unsigned 64)) (b (sb-alien:unsigned 64)))
-  (sb-alien:unsigned 64)
+    ((a (unsigned 64)) (b (unsigned 64)))
+  (unsigned 64)
   (rt-native-bignum-add a b))
 
 #+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_sub
-    ((a (sb-alien:unsigned 64)) (b (sb-alien:unsigned 64)))
-  (sb-alien:unsigned 64)
+    ((a (unsigned 64)) (b (unsigned 64)))
+  (unsigned 64)
   (rt-native-bignum-sub a b))
 
 #+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_mul
-    ((a (sb-alien:unsigned 64)) (b (sb-alien:unsigned 64)))
-  (sb-alien:unsigned 64)
+    ((a (unsigned 64)) (b (unsigned 64)))
+  (unsigned 64)
   (rt-native-bignum-mul a b))
