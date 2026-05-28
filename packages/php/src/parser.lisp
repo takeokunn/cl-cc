@@ -181,6 +181,15 @@ syntax such as Foo\\{Bar, Baz}."
           (ast-imports node) (copy-tree *php-current-imports*)))
   node)
 
+(defun %php-consume-expected (token stream)
+  "Consume TOKEN from STREAM and return the remaining stream."
+  (nth-value 1 (php-expect token stream)))
+
+(defun %php-keyword-p (stream keyword)
+  "Return true when STREAM starts with KEYWORD."
+  (and stream (eq (php-peek-type stream) :T-KEYWORD)
+       (eq (php-peek-value stream) keyword)))
+
 ;;; Expression parser (php-parse-primary, php-parse-new, php-parse-postfix,
 ;;; php-parse-unary, php-parse-binop, php-parse-mul/add/cmp/and/or,
 ;;; php-parse-expr, php-parse-arglist) is in parser-expr.lisp (loads next).

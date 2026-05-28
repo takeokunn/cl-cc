@@ -8,16 +8,9 @@
 (defmacro define-php-stmt-parser (keyword (stream known-vars) &body body)
   "Register a statement parser for KEYWORD in *php-stmt-parsers*."
   `(setf (gethash ,keyword *php-stmt-parsers*)
-         (lambda (,stream ,known-vars) ,@body)))
+          (lambda (,stream ,known-vars) ,@body)))
 
-(defun %php-consume-expected (token stream)
-  "Consume TOKEN from STREAM and return the remaining stream."
-  (nth-value 1 (php-expect token stream)))
-
-(defun %php-keyword-p (stream keyword)
-  "Return true when STREAM starts with KEYWORD."
-  (and stream (eq (php-peek-type stream) :T-KEYWORD)
-       (eq (php-peek-value stream) keyword)))
+;;; %php-consume-expected and %php-keyword-p are defined in parser.lisp
 
 (defun %php-include-keyword-value (value)
   "Normalize include/require identifiers or keywords to statement keywords."

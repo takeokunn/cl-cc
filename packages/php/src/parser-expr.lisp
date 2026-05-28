@@ -375,9 +375,21 @@
        :body (list value))
       value))
 
+(defun %php-find-free-vars (body)
+  "Return a list of free variable symbols referenced in BODY AST."
+  (let ((free nil))
+    (labels ((walk (node)
+               (when (typep node 'cl-cc/ast:ast-var)
+                 (pushnew (cl-cc/ast:ast-var-name node) free :test #'eq))
+               (when (typep node 'cl-cc/ast:ast-node)
+                 (dolist (child (cl-cc/ast:ast-children node))
+                   (when child (walk child))))))
+      (walk body)
+      free)))
+
 (defun %php-arrow-captures (body params known-vars)
   "Return PHP variables captured by an arrow function body."
-  (set-difference (intersection (find-free-variables body) known-vars :test #'eq)
+  (set-difference (intersection (%php-find-free-vars body) known-vars :test #'eq)
                   params :test #'eq))
 
 (defun %php-parse-arrow-function (stream known-vars)

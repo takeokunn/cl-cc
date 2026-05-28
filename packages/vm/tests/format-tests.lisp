@@ -112,6 +112,149 @@
     (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
     (assert-equal "count: 99" (cl-cc/vm::vm-reg-get s :R0))))
 
+;;; ─── format directive coverage tests ───────────────────────────────────────
+
+(deftest-each fmt-directive-tilde-percent
+  "~% emits newline."
+  :cases (("single" "a~%b" nil "a" (string #\Newline) "b")
+          ("count" "a~2%b" nil "a" (format nil "~%~%") "b"))
+  (fmt-str args &rest expected-parts)
+  (declare (ignore args))
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 fmt-str)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal (apply #'concatenate 'string expected-parts)
+                  (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-ampersand
+  "~& emits fresh-line."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "a~&b")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal (format nil "a~&b") (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-tilde
+  "~~ emits literal tilde."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~~hello~~")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal "~hello~" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-b-o-x
+  "~B ~O ~X format in binary/octal/hex."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~B ~O ~X")
+    (cl-cc/vm::vm-reg-set s :R2 42)
+    (cl-cc/vm::vm-reg-set s :R3 42)
+    (cl-cc/vm::vm-reg-set s :R4 42)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2 :R3 :R4)) s)
+    (assert-equal "101010 52 2A" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-f
+  "~F formats floating-point."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~F")
+    (cl-cc/vm::vm-reg-set s :R2 3.14d0)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
+      (assert-true (search "3.14" result)))))
+
+(deftest fmt-directive-tilde-c
+  "~C formats character."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~C")
+    (cl-cc/vm::vm-reg-set s :R2 #\A)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "A" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-s
+  "~S formats with escaping."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~S")
+    (cl-cc/vm::vm-reg-set s :R2 "hello")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "\"hello\"" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-t
+  "~T tabulates to column."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "a~4Tb")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal "a   b" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-asterisk
+  "~* jumps arguments."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~*~D")
+    (cl-cc/vm::vm-reg-set s :R2 1)
+    (cl-cc/vm::vm-reg-set s :R3 2)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2 :R3)) s)
+    (assert-equal "2" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-question
+  "~? does recursive formatting."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~?")
+    (cl-cc/vm::vm-reg-set s :R2 "~A")
+    (cl-cc/vm::vm-reg-set s :R3 "hello")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2 :R3)) s)
+    (assert-equal "hello" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-bracket
+  "~[ does conditional formatting."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~[zero~;one~;two~]")
+    (cl-cc/vm::vm-reg-set s :R2 1)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "one" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-brace
+  "~{ iterates over list."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~{~A~}")
+    (cl-cc/vm::vm-reg-set s :R2 '(#\a #\b #\c))
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "abc" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-caret
+  "~^ escapes when no more args."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~{~A~^, ~}")
+    (cl-cc/vm::vm-reg-set s :R2 '(#\a #\b #\c))
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "a, b, c" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-at-d
+  "~@D always prints sign."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~@D")
+    (cl-cc/vm::vm-reg-set s :R2 42)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "+42" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-colon-d
+  "~:D prints with commas."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "~:D")
+    (cl-cc/vm::vm-reg-set s :R2 1000)
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
+    (assert-equal "1,000" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-i
+  "~I indents (new Wave 2 directive)."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "x~4Iy")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    ;; ~4I indents 4 spaces from current position
+    (assert-equal "x    y" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-underscore
+  "~_ emits newline (new Wave 2 directive)."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "a~_b")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal (format nil "a~_b") (cl-cc/vm::vm-reg-get s :R0))))
+
 ;;; ─── String Output Stream ────────────────────────────────────────────────
 
 (deftest fmt-string-output-stream-single-write-roundtrips

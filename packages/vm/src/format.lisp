@@ -562,12 +562,58 @@
                        (#\^ (when (or (null params)
                                       (zerop (%vm-format-remaining-count ctx)))
                               (return-from %vm-format-render (values ctx t))))
-                       (#\/ (let ((slash (position #\/ format-string :start next :end limit)))
-                              (unless slash (error "Unterminated ~~/ FORMAT directive"))
-                              (%vm-format-call-user-function (subseq format-string next slash)
-                                                            (%vm-format-next-arg ctx)
-                                                            colonp atsignp params stream)
-                              (setf next (1+ slash))))
+                        (#\/ (let ((slash (position #\/ format-string :start next :end limit)))
+                               (unless slash (error "Unterminated ~~/ FORMAT directive"))
+                               (%vm-format-call-user-function (subseq format-string next slash)
+                                                             (%vm-format-next-arg ctx)
+                                                             colonp atsignp params stream)
+                               (setf next (1+ slash))))
+                        ;; ─── ~I (indent) ────────────────────────────────────────
+                        ;; ~nI → indent relative. ~n:I → indent to column n.
+                        ;; ~n@I → indent relative to current column + n.
+                        (#\I (let ((n (or (%vm-format-param params 0 0) 0)))
+                               (cond
+                                 (colonp
+                                  ;; ~n:I — indent to absolute column n
+                                  (let* ((current (%vm-format-context-column ctx))
+                                         (spaces (if (> n current) (- n current) 0)))
+                                    (dotimes (_ spaces) (declare (ignore _))
+                                      (rt-write-char #\Space stream))
+                                    (setf (%vm-format-context-column ctx)
+                                          (max (%vm-format-context-column ctx) n))))
+                                 (atsignp
+                                  ;; ~n@I — newline then indent n relative to current position
+                                  (rt-terpri stream)
+                                  (setf (%vm-format-context-column ctx) 0)
+                                  (dotimes (_ n) (declare (ignore _))
+                                    (rt-write-char #\Space stream))
+                                  (incf (%vm-format-context-column ctx) n))
+                                 (t
+                                  ;; ~nI — indent n spaces relative to current position (no newline)
+                                  (dotimes (_ n) (declare (ignore _))
+                                    (rt-write-char #\Space stream))
+                                  (incf (%vm-format-context-column ctx) n)))))
+                        ;; ─── ~_ (conditional newline) ───────────────────────────
+                        ;; ~_ → newline. ~n_ → n newlines.
+                        ;; ~:_ → process like ~% but at section start (pprint).
+                        ;; ~@_ → call pprint-newline :fill.
+                        (#\_ (let ((n (or (%vm-format-param params 0 1) 1)))
+                               (cond
+                                 (colonp
+                                  ;; ~:_ — like ~% for pprint (basic: just newline)
+                                  (dotimes (_ n) (declare (ignore _))
+                                    (rt-terpri stream)
+                                    (setf (%vm-format-context-column ctx) 0)))
+                                 (atsignp
+                                  ;; ~@_ — pprint-newline :fill (basic: conditional newline)
+                                  (when (plusp n)
+                                    (rt-terpri stream)
+                                    (setf (%vm-format-context-column ctx) 0)))
+                                 (t
+                                  ;; ~_ — emit newline
+                                  (dotimes (_ n) (declare (ignore _))
+                                    (rt-terpri stream)
+                                    (setf (%vm-format-context-column ctx) 0))))))
                        (otherwise (error "Unsupported FORMAT directive: ~A" directive)))
                      (setf pos next)))
                   (progn
