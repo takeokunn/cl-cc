@@ -61,7 +61,12 @@
 (defparameter *rt-bootstrap-function-symbols*
   '(+ - * / 1+ 1- < > <= >= eql equal equalp char= char-equal
     boundp makunbound fboundp fdefinition intern gensym symbol-value
-    make-string-output-stream get-output-stream-string write-string)
+    make-string-output-stream get-output-stream-string write-string
+    ;; Wave 4: pathname and file system bootstrap
+    make-pathname merge-pathnames namestring pathname-name pathname-type
+    pathname-directory pathnamep probe-file delete-file rename-file
+    truename load
+    make-broadcast-stream make-concatenated-stream make-echo-stream)
   "Conservative bootstrap function seed for the runtime registry.
 This avoids scanning every host package while still covering the small guest-facing
 surface that currently relies on `rt-fboundp` during bootstrapping and tests.")
@@ -189,7 +194,28 @@ host package universe."
                         ("RT-SYMBOL-PACKAGE" . ,#'rt-symbol-package)
                         ("RT-DO-SYMBOLS" . ,#'rt-do-symbols)
                         ("RT-SYMBOL-NAME" . ,#'rt-symbol-name)
-                       ("RT-SYMBOL-VALUE" . ,#'rt-symbol-value)))
+                        ("RT-SYMBOL-VALUE" . ,#'rt-symbol-value)
+                        ;; Wave 4: Pathname, file system, compound streams, LOAD
+                        ("RT-MAKE-PATHNAME" . ,#'rt-make-pathname)
+                        ("RT-MERGE-PATHNAMES" . ,#'rt-merge-pathnames)
+                        ("RT-NAMESTRING" . ,#'rt-namestring)
+                        ("RT-PATHNAME-NAME" . ,#'rt-pathname-name)
+                        ("RT-PATHNAME-TYPE" . ,#'rt-pathname-type)
+                        ("RT-PATHNAME-DIRECTORY" . ,#'rt-pathname-directory)
+                        ("RT-PATHNAMEP" . ,#'rt-pathnamep)
+                        ("RT-PROBE-FILE" . ,#'rt-probe-file)
+                        ("RT-DELETE-FILE" . ,#'rt-delete-file)
+                        ("RT-RENAME-FILE" . ,#'rt-rename-file)
+                        ("RT-FILE-WRITE-DATE" . ,#'rt-file-write-date)
+                        ("RT-DIRECTORY" . ,#'rt-directory)
+                        ("RT-ENSURE-DIRECTORIES-EXIST" . ,#'rt-ensure-directories-exist)
+                        ("RT-TRUENAME" . ,#'rt-truename)
+                        ("RT-MAKE-BROADCAST-STREAM" . ,#'rt-make-broadcast-stream)
+                        ("RT-MAKE-CONCATENATED-STREAM" . ,#'rt-make-concatenated-stream)
+                        ("RT-MAKE-ECHO-STREAM" . ,#'rt-make-echo-stream)
+                        ("RT-READ-SEQUENCE" . ,#'rt-read-sequence)
+                        ("RT-WRITE-SEQUENCE" . ,#'rt-write-sequence)
+                        ("RT-LOAD" . ,#'rt-load)))
         (funcall vm-register (car entry) (cdr entry))))))
 
 (defun rt-find-package (name)
@@ -486,6 +512,85 @@ In runtime registry, search all package symbol tables."
   "Multiply A and B.  Returns fixnum when possible."
   (rt-native-integer->value
    (* (rt-native-bignum-to-integer a) (rt-native-bignum-to-integer b))))
+
+;;; ─── Pathname and File System Operations (Wave 4) ──────────────────────────
+
+(defun rt-make-pathname (&key host device directory name type version defaults case)
+  (declare (ignore host device version case))
+  (let ((p (if defaults
+               (merge-pathnames (make-pathname :directory directory :name name :type type) defaults)
+               (make-pathname :directory directory :name name :type type))))
+    p))
+
+(defun rt-merge-pathnames (pathname &optional defaults)
+  (merge-pathnames pathname (or defaults *default-pathname-defaults*)))
+
+(defun rt-namestring (pathname)
+  (namestring pathname))
+
+(defun rt-pathname-name (pathname)
+  (pathname-name pathname))
+
+(defun rt-pathname-type (pathname)
+  (pathname-type pathname))
+
+(defun rt-pathname-directory (pathname)
+  (pathname-directory pathname))
+
+(defun rt-pathnamep (object)
+  (pathnamep object))
+
+(defun rt-probe-file (pathname)
+  (probe-file pathname))
+
+(defun rt-delete-file (pathname)
+  (delete-file pathname))
+
+(defun rt-rename-file (file new-name)
+  (rename-file file new-name))
+
+(defun rt-file-write-date (pathname)
+  (file-write-date pathname))
+
+(defun rt-directory (pathname &key)
+  (directory pathname))
+
+(defun rt-ensure-directories-exist (pathname &key verbose)
+  (ensure-directories-exist pathname :verbose verbose))
+
+(defun rt-truename (pathname)
+  (truename pathname))
+
+;;; ─── Compound Streams ───────────────────────────────────────────────────────
+
+(defun rt-make-broadcast-stream (&rest streams)
+  (apply #'make-broadcast-stream streams))
+
+(defun rt-make-concatenated-stream (&rest streams)
+  (apply #'make-concatenated-stream streams))
+
+(defun rt-make-echo-stream (input-stream output-stream)
+  (make-echo-stream input-stream output-stream))
+
+(defun rt-make-two-way-stream (input-stream output-stream)
+  (make-two-way-stream input-stream output-stream))
+
+(defun rt-make-synonym-stream (symbol)
+  (make-synonym-stream symbol))
+
+;;; ─── Sequence I/O ───────────────────────────────────────────────────────────
+
+(defun rt-read-sequence (sequence stream &key start end)
+  (read-sequence sequence stream :start (or start 0) :end (or end (length sequence))))
+
+(defun rt-write-sequence (sequence stream &key start end)
+  (write-sequence sequence stream :start (or start 0) :end (or end (length sequence))))
+
+;;; ─── LOAD ───────────────────────────────────────────────────────────────────
+
+(defun rt-load (pathname &key verbose print if-does-not-exist external-format)
+  (declare (ignore verbose print if-does-not-exist external-format))
+  (load pathname))
 
 ;;; ─── JIT-Callable Bignum Bridges (for native codegen slow path) ────────────
 
