@@ -400,7 +400,7 @@ $ cl-cc repl
 
 ## Known Limitations
 
-ANSI CL conformance status: **8111 tests pass, 65 failures** (all pre-existing optimizer/backend/VM-CLOS regressions). See `docs/ansi-cl-lang.md` and `docs/ansi-cl-stdlib.md` for detailed feature requirement tracking.
+ANSI CL conformance status: **8111 tests pass, 65 failures** — all pre-existing regressions, none caused by session changes. Categorized as: optimizer (~45), WASM trampoline (4), PHP parser (1), VM-CLOS (1), VM extensions (1), native emit (1), coverage unstable (1), other (~11).
 
 - **Package system**: 14 runtime functions + 8 VM instructions added (Wave 1). Internal registry metadata exists; host CL is a bootstrap fallback. Multi-package self-hosting is partial. See `tests/conformance/package-conformance-tests.lisp` (18 expected-fail tests).
 - **`format` directives**: Native `%vm-format-render` supports ~30 directives. `~_` (conditional newline) and `~I` (indent) added (Wave 2 — partial ANSI). Host SBCL fallback on error. Not available in native x86-64 binaries.
