@@ -6,7 +6,7 @@
 
 (defsuite ansi-conformance-package-smoke-suite
   :description "Package system self-hosting smoke tests (should PASS)"
-  :parent cl-cc-conformance-suite
+  :parent cl-cc-unit-suite
   :parallel nil)
 
 (in-suite ansi-conformance-package-smoke-suite)

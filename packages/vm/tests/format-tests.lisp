@@ -190,3 +190,13 @@
     (let ((result (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (search "a" result))
       (assert-true (search "b" result)))))
+
+;;; ─── ~I directive test ─────────────────────────────────────────────────────
+
+(deftest fmt-directive-tilde-i
+  "~3I indents 3 spaces."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "x~3Iy")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
+      (assert-equal "x   y" result))))

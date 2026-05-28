@@ -493,7 +493,7 @@
                                      (target (if atsignp (+ current colnum) colnum))
                                      (spaces (if (>= current target) 0 (- target current))))
                                 (dotimes (_ spaces) (declare (ignore _))
-                                  (rt-write-char #\Space stream))
+                                  (write-char #\Space stream))
                                 (setf (%vm-format-context-column ctx) (+ current spaces))))
                         (#\| (dotimes (_ (or (%vm-format-param params 0 1) 1))
                                (declare (ignore _))
@@ -578,7 +578,7 @@
                                   (let* ((current (%vm-format-context-column ctx))
                                          (spaces (if (> n current) (- n current) 0)))
                                     (dotimes (_ spaces) (declare (ignore _))
-                                      (rt-write-char #\Space stream))
+                                      (write-char #\Space stream))
                                     (setf (%vm-format-context-column ctx)
                                           (max (%vm-format-context-column ctx) n))))
                                  (atsignp
@@ -586,12 +586,12 @@
                                   (rt-terpri stream)
                                   (setf (%vm-format-context-column ctx) 0)
                                   (dotimes (_ n) (declare (ignore _))
-                                    (rt-write-char #\Space stream))
+                                    (write-char #\Space stream))
                                   (incf (%vm-format-context-column ctx) n))
                                  (t
                                   ;; ~nI — indent n spaces relative to current position (no newline)
                                   (dotimes (_ n) (declare (ignore _))
-                                    (rt-write-char #\Space stream))
+                                    (write-char #\Space stream))
                                   (incf (%vm-format-context-column ctx) n)))))
                         ;; ─── ~_ (conditional newline) ───────────────────────────
                         ;; ~_ → newline. ~n_ → n newlines.
