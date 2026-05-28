@@ -35,8 +35,8 @@
   "rt-intern should create/find symbols in a package."
   :timeout 10
   :tags '(:package :smoke :intern)
-  (let ((pkg (cl-cc/runtime::rt-find-package "CL-USER"))
-        (sym (cl-cc/runtime::rt-intern "SMOKE-TEST-SYM" pkg)))
+  (let* ((pkg (cl-cc/runtime::rt-find-package "CL-USER"))
+         (sym (cl-cc/runtime::rt-intern "SMOKE-TEST-SYM" pkg)))
     (assert-true sym)
     (assert-equal "SMOKE-TEST-SYM" (cl-cc/runtime::rt-symbol-name sym))))
 
@@ -115,6 +115,6 @@
   "rt-symbol-name should return symbol name string."
   :timeout 10
   :tags '(:package :smoke :symbol-name)
-  (let ((pkg (cl-cc/runtime::rt-find-package "CL-USER"))
-        (sym (cl-cc/runtime::rt-intern "SYMBOL-NAME-TEST" pkg)))
+  (let* ((pkg (cl-cc/runtime::rt-find-package "CL-USER"))
+         (sym (cl-cc/runtime::rt-intern "SYMBOL-NAME-TEST" pkg)))
     (assert-equal "SYMBOL-NAME-TEST" (cl-cc/runtime::rt-symbol-name sym))))
