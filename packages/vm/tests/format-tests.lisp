@@ -112,6 +112,24 @@
     (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs '(:R2)) s)
     (assert-equal "count: 99" (cl-cc/vm::vm-reg-get s :R0))))
 
+;;; ─── Wave 2: ~I and ~_ directive tests ─────────────────────────────────────
+
+(deftest fmt-directive-tilde-i
+  "~3I indents 3 spaces (new Wave 2 directive)."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 "x~3Iy")
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (assert-equal "x   y" (cl-cc/vm::vm-reg-get s :R0))))
+
+(deftest fmt-directive-tilde-underscore
+  "~_ emits newline (new Wave 2 directive)."
+  (let ((s (fmt-vm)))
+    (cl-cc/vm::vm-reg-set s :R1 (format nil "a~_b"))
+    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
+    (let ((result (cl-cc/vm::vm-reg-get s :R0)))
+      (assert-true (search "a" result))
+      (assert-true (search "b" result)))))
+
 ;;; ─── format directive coverage tests ───────────────────────────────────────
 
 (deftest fmt-directive-tilde-percent
