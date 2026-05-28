@@ -342,7 +342,7 @@
 
 (defun %vm-format-directive-char-p (char)
   (or (alpha-char-p char)
-      (find char "%&~*?[]{}<>^/;$")))
+      (find char "%&~*?[]{}<>^/;$|_I")))
 
 (defun %vm-format-parse-param-token (token ctx)
   (cond
