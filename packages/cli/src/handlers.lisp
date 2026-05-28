@@ -1151,21 +1151,21 @@ For files: compiles a single source file to native binary or IR dump."
     ;; ── System compilation path ──
     (when system-name
       (%with-cli-error-handler
-        (%call-with-cli-timeout
-         timeout
-         (lambda ()
-           (let ((result (%compile-system-to-native system-name output arch compress
-                                                    (list :bolt-profile (flag parsed "--bolt-profile"))
-                                                    :bolt (flag parsed "--bolt")
-                                                    :bolt-profile (flag parsed "--bolt-profile"))))
-             (format t "~A~%" result)
-             (uiop:quit 0)))
-         "system-compile"))
+        (%call-with-cli-timeout timeout
+          (lambda ()
+            (let ((result (%compile-system-to-native system-name output arch compress
+                                                     (list :bolt-profile (flag parsed "--bolt-profile"))
+                                                     :bolt (flag parsed "--bolt")
+                                                     :bolt-profile (flag parsed "--bolt-profile"))))
+              (format t "~A~%" result)
+              (uiop:quit 0))))
+        "system-compile"))
       (return-from %do-compile))
     ;; ── File compilation path ──
-     (let* ((file (%required-file-arg parsed "compile"))
-            (lang-flag (or (flag parsed "--lang") ""))
-            (language (%detect-language file lang-flag)))
+    (let* ((file (%required-file-arg parsed "compile"))
+           (lang-flag (or (flag parsed "--lang") ""))
+           (language (let ((l (%detect-language file lang-flag)))
+                        (if (string= lang-flag "") nil l))))
     (when verbose
       (format *error-output* "; cl-cc compile: ~A  arch=~A  output=~A~%"
               file arch-str (or output "(auto)")))
