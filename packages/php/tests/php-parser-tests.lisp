@@ -168,7 +168,7 @@
   "Characterization: fn($x) => $x + 1 should parse as a real lambda with parameters and body."
   (let ((value (%php-first-binding-value "<?php $inc = fn($x) => $x + 1;")))
     (assert-true (cl-cc:ast-lambda-p value))
-    (assert-equal '(X) (cl-cc:ast-lambda-params value))))
+    (assert-equal '("X") (mapcar #'symbol-name (cl-cc:ast-lambda-params value)))))
 
 (deftest php-parser-yield-expression-unsupported-error
   "Characterization: yield remains explicitly unsupported until generator lowering is implemented."
