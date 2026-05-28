@@ -11,6 +11,7 @@ nix develop
 nix run .#test       # canonical fast unit plan
 cl-cc repl           # interactive REPL
 cl-cc run file.lisp
+cl-cc run file.php   # PHP frontend (auto-detected by extension)
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
 ```
@@ -398,6 +399,89 @@ $ cl-cc repl
 => 3
 ```
 
+## PHP Frontend
+
+cl-cc includes a PHP frontend that compiles PHP source to the same CL AST and then through the same bytecode/native backend as Common Lisp programs. `.php` files are auto-detected; the `--lang php` flag selects it explicitly for any command.
+
+```bash
+cl-cc run file.php
+cl-cc run file.lisp --lang php
+cl-cc compile file.php -o out --arch x86-64
+cl-cc check file.php --strict
+```
+
+### Supported PHP Constructs
+
+**Statements**
+
+| PHP | Lowering |
+| --- | --- |
+| `echo $x;` | `ast-print` |
+| `return $x;` / `return;` | `ast-return-from` |
+| `if ($c) { } else { }` | `ast-if` |
+| `while ($c) { }` | `ast-block` + tagbody loop |
+| `for ($i=0; $i<n; $i++) { }` | `ast-progn` (init + while loop) |
+| `foreach ($arr as $v)` / `foreach ($arr as $k => $v)` | `ast-let` |
+| `function f($a, $b) { }` | `ast-defun` |
+| `class C extends B { }` | `ast-defclass` |
+| `switch ($x) { case 1: … default: }` | `ast-let` + `ast-block` + `ast-tagbody` |
+| `break N;` / `continue N;` | `ast-go` within nested tagbodies |
+| `try { } catch (Ex $e) { } finally { }` | `ast-unwind-protect` wrapping `ast-handler-case` |
+| `throw new Ex();` | `ast-throw` |
+| `namespace Foo\\Bar;` / `use Vendor\\X as Y;` | AST metadata (`ast-namespace`, `ast-imports`) |
+
+**Expressions**
+
+| PHP | Lowering |
+| --- | --- |
+| `[1, 2, 3]` / `array(1, 2, 3)` | `%php-array` call |
+| `["a" => 1, "b" => 2]` | `%php-array` with key/value pairs |
+| `$a[0]` | `%php-array-ref` |
+| `$a[0] = $v` | `%php-array-set` |
+| `$a ?? $b` | temp `ast-let` + `ast-if` |
+| `$c ? $yes : $no` | `ast-if` |
+| `fn($x) => $x + 1` | capture-wrapped `ast-lambda` |
+| `match ($v) { 1 => 'one', default => 'x' }` | nested strict-equality conditional chain |
+| `$a <=> $b` | `%php-spaceship` |
+| `$a >> $n` | `%php-shift-right` |
+| `$a instanceof C` | `%php-instanceof` |
+
+**Type annotations** — parameter and return type annotations (`int`, `?string`, `int\|string`, `void`, `never`, `mixed`, `static`, nullable/union/intersection types) are preserved as `:php-param-types` / `:php-return-type` in the `ast-defun` declarations. Class properties and constants preserve their declared PHP types on `ast-slot-def` nodes.
+
+### Runtime Helpers
+
+PHP's semantics (ordered arrays, loose equality, truthiness, exceptions) are bridged via a set of VM host functions that are automatically registered when compiling PHP source:
+
+```
+%php-array            Ordered associative array (preserves insertion order)
+%php-array-ref        Array element read
+%php-array-set        Array element write
+%php-array-unset      Array element delete (preserving order)
+%php-array-pairs      Ordered (key . value) pair list
+%php-array-key-exists Array key presence check
+%php-eq-loose         PHP == (type-coercing) equality
+%php-eq-strict        PHP === (type-strict) equality
+%php-truthy           PHP truthiness (0, "", "0", [], null → false)
+%php-null-p           PHP null check
+%php-to-number        PHP numeric coercion
+%php-count / %php-strlen / %php-strtolower / %php-strtoupper
+%php-isset            PHP isset() semantics
+%php-throw            Signal a php-exception condition
+%php-exception-matches-p  PHP catch-type matching
+%php-spaceship        <=> operator: returns -1, 0, or 1
+%php-shift-right      >> right bitshift
+%php-instanceof       instanceof type check against host runtime
+%php-match-error      Unhandled match arm signal
+%php-list-bind        PHP list() destructuring representation
+%php-yield / %php-yield-from  Generator yield representation (runtime data)
+```
+
+### Unsupported
+
+- `yield` / `yield from` inside function bodies — the parser signals an error; runtime data representations exist but generator coroutine lowering is not yet implemented.
+- Named arguments, first-class callables (`strlen(...)` syntax), fibers.
+- PHP-specific standard library (`array_map`, `implode`, etc.) — calls are compiled as generic function calls; provide a prelude file with CL implementations as needed.
+
 ## Known Limitations
 
 ANSI CL conformance status: **8111 tests pass, 65 failures** — all pre-existing regressions, none caused by session changes. Categorized as: optimizer (~45), WASM trampoline (4), PHP parser (1), VM-CLOS (1), VM extensions (1), native emit (1), coverage unstable (1), other (~11).
@@ -437,10 +521,12 @@ rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/
 ## CLI Reference
 
 ```
-cl-cc run <file>          Compile and run a .lisp file
+cl-cc run <file>          Compile and run a .lisp or .php file
+  --lang lisp|php         Source language (auto-detected from extension)
   --timeout <seconds>     Maximum execution time (default: 30)
   --no-timeout            Disable CLI timeout for debugging
 cl-cc compile <file>      Compile to native Mach-O binary
+  --lang lisp|php         Source language (auto-detected from extension)
   --arch x86-64|arm64
   -o <output>
   --timeout <seconds>     Maximum execution time (default: 30)
@@ -453,6 +539,7 @@ cl-cc repl                Interactive REPL (definitions persist)
   --timeout <seconds>     Per-form execution timeout (default: 30)
   --no-timeout            Disable REPL form timeout for debugging
 cl-cc check <file>        Type-check without executing
+  --lang lisp|php         Source language (auto-detected from extension)
   --strict                Treat type warnings as errors
   --timeout <seconds>     Maximum execution time (default: 30)
   --no-timeout            Disable CLI timeout for debugging
