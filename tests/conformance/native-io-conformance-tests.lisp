@@ -10,7 +10,8 @@
 
 (defsuite ansi-conformance-native-io-suite
   :description "ANSI CL Native I/O / Stream / Pathname Conformance Tests"
-  :parent cl-cc-e2e-suite)
+  :parent cl-cc-conformance-suite
+  :parallel nil)
 
 (in-suite ansi-conformance-native-io-suite)
 

@@ -102,7 +102,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                                   output-directory)))
              (next-file ()
                #+sbcl
-                (cl-cc/runtime:rt-with-mutex (lock)
+                (cl-cc/runtime::rt-with-mutex (lock)
                  (let ((ready (%parallel-ready-file pending completed graph)))
                    (when ready
                      (setf pending (remove ready pending :test #'string=))
@@ -114,7 +114,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                    ready)))
              (record-result (name output)
                #+sbcl
-                (cl-cc/runtime:rt-with-mutex (lock)
+                (cl-cc/runtime::rt-with-mutex (lock)
                  (setf (gethash name completed) t)
                  (push (cons name output) results))
                #-sbcl
@@ -122,7 +122,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                       (push (cons name output) results)))
              (record-error (name condition)
                #+sbcl
-                (cl-cc/runtime:rt-with-mutex (lock)
+                (cl-cc/runtime::rt-with-mutex (lock)
                  (push (cons name condition) errors)
                  (setf (gethash name completed) t))
                #-sbcl

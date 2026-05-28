@@ -81,6 +81,23 @@
     (assert-true (every (lambda (tok) (eq :T-OP (php-tok-type tok)))
                         (butlast tokens)))))  ; exclude :T-EOF
 
+(deftest php-parser-expression-gap-operator-tokens
+  "Characterization: PHP gap operators must be preserved at lexer level for parser support."
+  (let ((tokens (cl-cc/php:tokenize-php-source
+                 "<?php $a ?? $b; $c ? $d : $e; fn($x) => $x;")))
+    (assert-true (find "??" tokens :key #'php-tok-value :test #'equal))
+    (assert-true (find "?" tokens :key #'php-tok-value :test #'equal))
+    (assert-true (find "=>" tokens :key #'php-tok-value :test #'equal))
+    (assert-true (find :fn tokens :key #'php-tok-value :test #'eq))))
+
+(deftest php-parser-array-gap-lexer-tokens
+  "Characterization: short/associative/legacy array syntax tokens must all survive lexing."
+  (let ((tokens (cl-cc/php:tokenize-php-source
+                 "<?php [1,2,3]; [\"a\"=>1,\"b\"=>2]; array(1,2,3);")))
+    (assert-true (find :T-LBRACKET tokens :key #'php-tok-type :test #'eq))
+    (assert-true (find "=>" tokens :key #'php-tok-value :test #'equal))
+    (assert-true (find :array tokens :key #'php-tok-value :test #'eq))))
+
 ;;; ─── Parser Tests ───────────────────────────────────────────────────────────
 
 (deftest php-parse-single-forms

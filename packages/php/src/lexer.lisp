@@ -26,6 +26,7 @@
 ;;;;   :T-SEMI           - ;
 ;;;;   :T-COMMA          - ,
 ;;;;   :T-COLON          - :
+;;;;   :T-BACKSLASH      - \\ namespace separator
 
 (in-package :cl-cc/php)
 
@@ -227,15 +228,10 @@
 ;;; Identifier / keyword lexer
 
 (defun lex-identifier (source pos)
-  "Lex an identifier or keyword starting at POS. Returns (values token new-pos).
-  Supports namespace-qualified names like Foo\\Bar\\Baz."
+  "Lex an identifier or keyword starting at POS. Returns (values token new-pos)."
   (let ((start pos))
     (loop while (and (< pos (length source))
-                     (or (php-alnum-p (char source pos))
-                         ;; Backslash as namespace separator
-                         (and (char= (char source pos) #\\)
-                              (< (1+ pos) (length source))
-                              (php-alpha-p (char source (1+ pos))))))
+                     (php-alnum-p (char source pos)))
           do (incf pos))
     (let* ((raw (subseq source start pos))
            (lower (string-downcase raw)))

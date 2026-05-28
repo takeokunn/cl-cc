@@ -123,10 +123,11 @@
     :pathname "packages/php/tests"
     :serial t
     :components
-    ((:file "php-tests")
-     (:file "php-parser-tests")
-     (:file "php-grammar-tests")
-     (:file "php-grammar-stmt-tests")))
+     ((:file "php-tests")
+      (:file "php-parser-tests")
+      (:file "php-compile-tests")
+      (:file "php-grammar-tests")
+      (:file "php-grammar-stmt-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
@@ -533,10 +534,11 @@
      :pathname "tests/conformance"
      :serial t
      :components
-     ((:file "package-conformance-tests")
+     (      (:file "package-conformance-tests")
+      (:file "package-smoke-tests")
       (:file "format-conformance-tests")
       (:file "number-conformance-tests")
-      (:file "native-io-conformance-tests")))
+      (:file "native-io-conformance-tests"))))
    :perform (asdf:test-op (op c)
                (declare (ignore op c))
                (uiop:symbol-call :cl-cc/test 'run-tests)))

@@ -90,6 +90,9 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
     (machine-instance            . make-vm-machine-instance)
     (software-type               . make-vm-software-type)
     (software-version            . make-vm-software-version)
+    ;; Package
+    (list-all-packages           . make-vm-list-all-packages-inst)
+    (software-version            . make-vm-software-version)
     (short-site-name             . make-vm-short-site-name)
     (long-site-name              . make-vm-long-site-name))
   "Alist of (cl-symbol . vm-constructor) for nullary builtins: (fn) → (:dst).")
@@ -164,7 +167,14 @@ read-char and read-line have optional stream args, so they use :stream-input-opt
 
 (defparameter *builtin-binary-opt-nil-slot-entries*
   '((intern make-vm-intern-symbol :src :pkg)
-     (find-symbol make-vm-find-symbol :src :pkg))
+     (find-symbol make-vm-find-symbol :src :pkg)
+     ;; Package operations (ANSI CL Ch.11) — optional 2nd arg defaults to current package
+     (export make-vm-export-inst :symbols :pkg)
+     (import make-vm-import-inst :symbols :pkg)
+     (use-package make-vm-use-package-inst :packages-to-use :pkg)
+     (unuse-package make-vm-unuse-package-inst :packages-to-unuse :pkg)
+     (shadow make-vm-shadow-inst :symbol-names :pkg)
+     (unintern make-vm-unintern-inst :symbol :pkg))
   "Binary builtins with :dst + 2 custom slots. 2nd arg optional, nil slot when absent.
    (cl-sym vm-ctor slot1 slot2).")
 

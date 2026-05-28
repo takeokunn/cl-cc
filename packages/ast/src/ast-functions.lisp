@@ -27,6 +27,7 @@ All structural knowledge about AST shapes lives here."
   (typecase node
     ;; Leaves: no children
     ((or ast-int ast-var ast-hole ast-quote ast-function ast-go) nil)
+    (ast-list (ast-list-elements node))
     ;; Binary operation
     (ast-binop (list (ast-binop-lhs node) (ast-binop-rhs node)))
     ;; Conditional

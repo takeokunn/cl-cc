@@ -126,6 +126,61 @@
   "Convert PHP identifier string to a CL symbol."
   (intern (string-upcase (if (stringp str) str (symbol-name str)))))
 
+(defvar *php-current-namespace* nil
+  "Current PHP namespace name for subsequent top-level AST nodes.")
+
+(defvar *php-current-imports* nil
+  "Current PHP import descriptors for subsequent top-level AST nodes.")
+
+(defvar *php-pending-top-level-forms* nil
+  "Top-level forms spliced by statement parsers such as braced namespaces.")
+
+(defun %php-qualified-name-segment-p (stream)
+  "Return true when STREAM starts with a token usable as a qualified-name segment."
+  (member (php-peek-type stream) '(:T-IDENT :T-TYPE) :test #'eq))
+
+(defun %php-qualified-name-segment-string (tok)
+  "Return TOK's text as a PHP qualified-name segment."
+  (let ((value (php-tok-value tok)))
+    (cond ((stringp value) value)
+          ((symbolp value) (string-downcase (symbol-name value)))
+          (t (princ-to-string value)))))
+
+(defun php-parse-qualified-name (stream &key allow-empty)
+  "Parse a PHP qualified name from STREAM.
+Returns (values name rest). Supports tokenized names (Foo T-BACKSLASH Bar) and
+legacy lexer output where a single T-IDENT may already contain backslashes. A
+trailing backslash before a non-segment token is left unconsumed for group-use
+syntax such as Foo\\{Bar, Baz}."
+  (let ((current stream)
+        (absolute-p nil)
+        (segments nil))
+    (when (eq (php-peek-type current) :T-BACKSLASH)
+      (setf absolute-p t
+            current (cdr current)))
+    (unless (%php-qualified-name-segment-p current)
+      (if allow-empty
+          (return-from php-parse-qualified-name (values nil stream))
+          (error "PHP parse error: expected qualified name but got ~S" (php-peek current))))
+    (loop
+      (unless (%php-qualified-name-segment-p current)
+        (return))
+      (push (%php-qualified-name-segment-string (php-peek current)) segments)
+      (setf current (cdr current))
+      (if (and (eq (php-peek-type current) :T-BACKSLASH)
+               (%php-qualified-name-segment-p (cdr current)))
+          (setf current (cdr current))
+          (return)))
+    (values (format nil "~@[\\~]~{~A~^\\~}" absolute-p (nreverse segments))
+            current)))
+
+(defun php-annotate-top-level-node (node)
+  "Attach current PHP namespace/import metadata to NODE and return it."
+  (when (and node (ast-node-p node))
+    (setf (ast-namespace node) *php-current-namespace*
+          (ast-imports node) (copy-tree *php-current-imports*)))
+  node)
+
 ;;; Expression parser (php-parse-primary, php-parse-new, php-parse-postfix,
 ;;; php-parse-unary, php-parse-binop, php-parse-mul/add/cmp/and/or,
 ;;; php-parse-expr, php-parse-arglist) is in parser-expr.lisp (loads next).

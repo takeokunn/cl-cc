@@ -637,6 +637,8 @@ macro evaluation for real file compilation. TARGET and the remaining keyword
 arguments are forwarded to the expression, top-level, and optimization stages."
   (multiple-value-bind (forms source-locations)
       (parse-source-for-language source language :source-file source-file)
+    (when (eq language :php)
+      (php-check-supported-forms forms))
     (let* ((opts  (%make-pipeline-opts
                     :target target :type-check type-check :safety safety
                      :speed speed
@@ -709,6 +711,8 @@ macro evaluation for real file compilation. TARGET and the remaining keyword
 arguments are forwarded to the expression, top-level, and optimization stages."
    (multiple-value-bind (forms source-locations)
        (parse-source-for-language source language :source-file source-file)
+     (when (eq language :php)
+       (php-check-supported-forms forms))
      (let* ((opts  (%make-pipeline-opts
                      :target target :type-check type-check :safety safety
                       :speed speed

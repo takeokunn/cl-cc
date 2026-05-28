@@ -8,7 +8,8 @@
 
 (defsuite ansi-conformance-format-suite
   :description "ANSI CL FORMAT Directive Conformance Tests"
-  :parent cl-cc-e2e-suite)
+  :parent cl-cc-conformance-suite
+  :parallel nil)
 
 (in-suite ansi-conformance-format-suite)
 

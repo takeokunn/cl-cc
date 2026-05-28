@@ -65,7 +65,9 @@
        (dolist (,var ,syms-var ,result)
           ,@body))))
 
-;; export is handled by the host-backed package layer.
+;; export, import, use-package, unuse-package, shadow, unintern,
+;; shadowing-import are ANSI CL FUNCTIONS (not macros). They are
+;; dispatched via the builtin registry to VM instructions.
 
 ;; do-symbols / do-external-symbols / do-all-symbols (FR-361)
 ;; Expand to dolist over package symbol lists provided by the runtime package layer.

@@ -76,6 +76,10 @@ via sb-thread:join-thread :timeout instead.")
                (lambda (c)
                   (return-from %run-body
                     (%make-test-result name number suite :pending (pending-reason c)))))
+              (expected-fail-condition
+               (lambda (c)
+                  (return-from %run-body
+                    (%make-test-result name number suite :xfail (expected-fail-reason c)))))
              (sb-kernel:redefinition-with-defun
               (lambda (c)
                 (declare (ignore c))
@@ -104,15 +108,17 @@ LC_ALL-independent integer arithmetic, never scientific notation."
          internal-time-units-per-second))
 
 (defun %run-single-test (test-plist number results-so-far)
-  "Run one test and return a result plist with :duration-ns and :source-file attached."
+  "Run one test and return a result plist with :duration-ns and :source-file attached.
+Tests tagged :expected-fail have their status converted: pass → :xpass, fail → handled by %run-test-body as :xfail."
   (let* ((name        (getf test-plist :name))
-         (fn          (getf test-plist :fn))
-         (timeout     (%effective-test-timeout test-plist))
-         (suite       (getf test-plist :suite))
-         (source-file (getf test-plist :source-file))
-         (start-time  (get-internal-real-time))
-         (duration-ns 0)
-         (result nil))
+          (fn          (getf test-plist :fn))
+          (timeout     (%effective-test-timeout test-plist))
+          (suite       (getf test-plist :suite))
+          (source-file (getf test-plist :source-file))
+          (tags        (getf test-plist :tags))
+          (start-time  (get-internal-real-time))
+          (duration-ns 0)
+          (result nil))
     (when (uiop:getenv "CLCC_TEST_TRACE")
       (format *error-output* "# [trace] running ~A~%" name)
       (force-output *error-output*))
@@ -133,6 +139,12 @@ LC_ALL-independent integer arithmetic, never scientific notation."
                                      (format nil "  ---~%  message: \"fixture error: ~A\"~%  ..."
                                              (princ-to-string e))))))))
       (setf duration-ns (%compute-duration-ns start-time (get-internal-real-time))))
+    ;; Convert unexpected passes on expected-fail tests to :xpass
+    (when (and result
+               (eq (getf result :status) :pass)
+               (member :expected-fail tags))
+      (setf result (%make-test-result name number suite :xpass
+                                       "UNEXPECTED PASS: test tagged :expected-fail passed. The feature may be fixed!")))
     (if result
         (append result (list :duration-ns duration-ns :source-file source-file))
         (append (%fail-result name number suite

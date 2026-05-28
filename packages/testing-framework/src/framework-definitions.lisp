@@ -102,7 +102,7 @@ Returns (values docstring timeout depends-on tags body-forms)."
                  (persist-assoc *suite-registry* ',suite-name new-entry)))))))
 
 ;;; ------------------------------------------------------------
-;;; Skip / Pending
+;;; Skip / Pending / Expected-Fail
 ;;; ------------------------------------------------------------
 
 (defun skip (reason)
@@ -112,3 +112,33 @@ Returns (values docstring timeout depends-on tags body-forms)."
 (defun pending (reason)
   "Signal a pending condition with the given reason."
   (signal 'pending-condition :reason reason))
+
+(defun expected-fail (reason)
+  "Signal an expected-fail condition with the given reason.
+Expected-fail tests are tagged :expected-fail and handled specially by the runner:
+ - If they FAIL → status :xfail (ok, expected)
+ - If they PASS → status :xpass (not ok, unexpected — the fix may have landed!)"
+  (signal 'expected-fail-condition :reason reason))
+
+(defmacro defexpected (name &body body)
+  "Define a test that is EXPECTED TO FAIL (due to an unimplemented feature).
+Behaves like deftest but auto-tags as :expected-fail and wraps body
+in a handler that converts failures to expected-fail conditions.
+Syntax:
+   (defexpected name
+     \"docstring\"
+     :timeout 10
+     body-form...)"
+  (multiple-value-bind (docstring timeout depends-on tags body-forms)
+      (%parse-deftest-body body)
+    (let ((all-tags (cons :expected-fail (or tags '())))
+          (rdoc (or docstring (format nil "EXPECTED-FAIL: ~A" name))))
+      `(deftest ,name
+         ,rdoc
+         :timeout ,(or timeout 60)
+         :depends-on ,depends-on
+         :tags ',all-tags
+         (handler-case
+             (progn ,@body-forms)
+           (error (c)
+             (expected-fail (format nil "~A: ~A" ',name c))))))))

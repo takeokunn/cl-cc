@@ -3,4 +3,8 @@
   (:export
    #:tokenize-php-source
    #:parse-php-source
-   #:parse-php-source-to-cst))
+   #:parse-php-source-to-cst
+   #:%php-array
+   #:%php-array-ref
+    #:%php-array-set
+    #:php-check-supported-forms))

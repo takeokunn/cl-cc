@@ -172,8 +172,23 @@ host package universe."
                         ("RT-ELT" . ,#'rt-elt)
                        ("RT-APPEND" . ,#'rt-append)
                        ("RT-FBOUNDP" . ,#'rt-fboundp)
-                       ("RT-INTERN" . ,#'rt-intern)
-                       ("RT-GENSYM" . ,#'rt-gensym)
+                        ("RT-INTERN" . ,#'rt-intern)
+                        ("RT-GENSYM" . ,#'rt-gensym)
+                        ("RT-EXPORT" . ,#'rt-export)
+                        ("RT-IMPORT" . ,#'rt-import)
+                        ("RT-USE-PACKAGE" . ,#'rt-use-package)
+                        ("RT-UNUSE-PACKAGE" . ,#'rt-unuse-package)
+                        ("RT-SHADOW" . ,#'rt-shadow)
+                        ("RT-UNINTERN" . ,#'rt-unintern)
+                        ("RT-FIND-SYMBOL" . ,#'rt-find-symbol)
+                        ("RT-PACKAGE-NAME" . ,#'rt-package-name)
+                        ("RT-PACKAGE-NICKNAMES" . ,#'rt-package-nicknames)
+                        ("RT-RENAME-PACKAGE" . ,#'rt-rename-package)
+                        ("RT-DELETE-PACKAGE" . ,#'rt-delete-package)
+                        ("RT-LIST-ALL-PACKAGES" . ,#'rt-list-all-packages)
+                        ("RT-SYMBOL-PACKAGE" . ,#'rt-symbol-package)
+                        ("RT-DO-SYMBOLS" . ,#'rt-do-symbols)
+                        ("RT-SYMBOL-NAME" . ,#'rt-symbol-name)
                        ("RT-SYMBOL-VALUE" . ,#'rt-symbol-value)))
         (funcall vm-register (car entry) (cdr entry))))))
 
@@ -206,6 +221,205 @@ host package universe."
     (setf (gethash :exports pkg)
           (union syms (gethash :exports pkg) :test #'eq))
     syms))
+
+;;; ─── Extended Runtime Package Operations (ANSI CL Ch.11) ──────────────────
+
+(defun rt-import (symbols &optional package)
+  "Import SYMBOLS into PACKAGE, making them internal."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols pkg))
+         (syms (if (listp symbols) symbols (list symbols))))
+    (dolist (sym syms)
+      (let ((name (string sym)))
+        ;; Check for conflict with existing symbol
+        (multiple-value-bind (existing status)
+            (rt-find-symbol name pkg)
+          (when (and existing (not (eq existing sym)))
+            (if (eq status :external)
+                ;; Name conflict: existing external symbol
+                (error "Name conflict: ~S already exported from ~A" name (rt-package-name pkg))
+                ;; Shadow the existing symbol with the imported one
+                (rt-unintern existing pkg))))
+        (setf (gethash name table) sym)
+        ;; Remove from inherited table if present
+        (let ((inherited (gethash :inherited pkg)))
+          (when inherited
+            (remhash name inherited)))))
+    t))
+
+(defun rt-use-package (packages-to-use &optional package)
+  "Make PACKAGES-TO-USE accessible to PACKAGE."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (use-list (gethash :use-list pkg))
+         (inherited (or (gethash :inherited pkg)
+                        (setf (gethash :inherited pkg) (make-hash-table :test #'equal))))
+         (pkgs (if (listp packages-to-use) packages-to-use (list packages-to-use))))
+    ;; Check for name conflicts among packages to use
+    (dolist (used-pkg pkgs)
+      (let ((used-meta (%rt-package-metadata used-pkg)))
+        (dolist (ext-sym (gethash :exports used-meta))
+          (let* ((name (string ext-sym))
+                 (existing (gethash name (gethash :symbols pkg))))
+            (when (and existing (not (eq existing ext-sym)))
+              (error "Name conflict: ~S is already present in ~A" name (rt-package-name pkg)))))))
+    ;; Merge use-list
+    (let ((new-use (append (mapcar #'%rt-package-metadata pkgs)
+                           (remove-if (lambda (u) (member (%rt-package-key u)
+                                                         (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))
+                                                         :test #'equal))
+                                      use-list))))
+      (setf (gethash :use-list pkg) new-use))
+    ;; Populate inherited symbols
+    (clrhash inherited)
+    (dolist (used-meta (gethash :use-list pkg))
+      (dolist (ext-sym (gethash :exports used-meta))
+        (setf (gethash (string ext-sym) inherited) ext-sym)))
+    t))
+
+(defun rt-unuse-package (packages-to-unuse &optional package)
+  "Remove PACKAGES-TO-UNUSE from the use-list of PACKAGE."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (pkgs (if (listp packages-to-unuse) packages-to-unuse (list packages-to-unuse)))
+         (keys-to-remove (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))))
+    (setf (gethash :use-list pkg)
+          (remove-if (lambda (u) (member (%rt-package-key u) keys-to-remove :test #'equal))
+                     (gethash :use-list pkg)))
+    ;; Rebuild inherited table
+    (let ((inherited (or (gethash :inherited pkg)
+                         (setf (gethash :inherited pkg) (make-hash-table :test #'equal)))))
+      (clrhash inherited)
+      (dolist (used-meta (gethash :use-list pkg))
+        (dolist (ext-sym (gethash :exports used-meta))
+          (setf (gethash (string ext-sym) inherited) ext-sym))))
+    t))
+
+(defun rt-shadow (symbol-names &optional package)
+  "Create shadowing symbols for SYMBOL-NAMES in PACKAGE."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols pkg))
+         (names (if (listp symbol-names) symbol-names (list symbol-names))))
+    (dolist (name names)
+      (let ((key (string name)))
+        (unless (gethash key table)
+          ;; Create a new internal symbol
+          (setf (gethash key table)
+                (let ((host-pkg (gethash :host-package pkg)))
+                  (if host-pkg
+                      (intern key host-pkg)
+                      (make-symbol key)))))))
+    t))
+
+(defun rt-unintern (symbol &optional package)
+  "Remove SYMBOL from PACKAGE."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols pkg))
+         (key (string symbol)))
+    (remhash key table)
+    ;; Remove from exports if present
+    (setf (gethash :exports pkg)
+          (remove symbol (gethash :exports pkg) :test #'eq))
+    t))
+
+(defun rt-find-symbol (name &optional package)
+  "Find symbol NAME in PACKAGE. Returns (values symbol status)."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols pkg))
+         (key (string name))
+         (sym (gethash key table)))
+    (if sym
+        (if (member sym (gethash :exports pkg) :test #'eq)
+            (values sym :external)
+            (values sym :internal))
+        ;; Check inherited symbols
+        (let ((inherited (gethash :inherited pkg)))
+          (if (and inherited (gethash key inherited))
+              (values (gethash key inherited) :inherited)
+              (values nil nil))))))
+
+(defun rt-package-name (package)
+  "Return the name string of PACKAGE."
+  (let ((pkg (%rt-package-metadata package)))
+    (gethash :name pkg)))
+
+(defun rt-package-nicknames (package)
+  "Return the list of nickname strings for PACKAGE."
+  (let ((pkg (%rt-package-metadata package)))
+    (gethash :nicknames pkg)))
+
+(defun rt-rename-package (package new-name &optional new-nicknames)
+  "Rename PACKAGE to NEW-NAME with optional NEW-NICKNAMES."
+  (let* ((pkg (%rt-package-metadata package))
+         (old-name (gethash :name pkg)))
+    ;; Remove old entry, add new
+    (remhash old-name *rt-package-registry*)
+    (setf (gethash :name pkg) new-name)
+    (when new-nicknames
+      (setf (gethash :nicknames pkg) new-nicknames))
+    (setf (gethash new-name *rt-package-registry*) pkg)
+    ;; Register nicknames
+    (when new-nicknames
+      (dolist (nick new-nicknames)
+        (setf (gethash nick *rt-package-registry*) pkg)))
+    pkg))
+
+(defun rt-delete-package (package)
+  "Delete PACKAGE from the runtime registry."
+  (let* ((pkg (%rt-package-metadata package))
+         (name (gethash :name pkg)))
+    (remhash name *rt-package-registry*)
+    ;; Remove nickname entries
+    (dolist (nick (gethash :nicknames pkg))
+      (remhash nick *rt-package-registry*))
+    t))
+
+(defun rt-list-all-packages ()
+  "Return a list of all registered runtime packages."
+  (let ((pkgs '())
+        (seen (make-hash-table :test #'eq)))
+    (maphash (lambda (key pkg)
+               (declare (ignore key))
+               (unless (gethash pkg seen)
+                 (setf (gethash pkg seen) t)
+                 (push pkg pkgs)))
+             *rt-package-registry*)
+    pkgs))
+
+(defun rt-symbol-package (symbol)
+  "Return the home package of SYMBOL, or NIL if uninterned.
+In runtime registry, search all package symbol tables."
+  (maphash (lambda (key pkg)
+             (declare (ignore key))
+             (let ((table (gethash :symbols pkg)))
+               (when (gethash (string symbol) table)
+                 (return-from rt-symbol-package pkg))))
+           *rt-package-registry*)
+  nil)
+
+(defun rt-do-symbols (fn &optional package)
+  "Call FN on each symbol in PACKAGE (present and inherited)."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols pkg))
+         (inherited (gethash :inherited pkg))
+         (seen (make-hash-table :test #'eq)))
+    (maphash (lambda (key sym)
+               (declare (ignore key))
+               (unless (gethash sym seen)
+                 (setf (gethash sym seen) t)
+                 (funcall fn sym)))
+             table)
+    (when inherited
+      (maphash (lambda (key sym)
+                 (declare (ignore key))
+                 (unless (gethash sym seen)
+                   (setf (gethash sym seen) t)
+                   (funcall fn sym)))
+               inherited))))
+
+(defun rt-symbol-name (symbol)
+  "Return the name string of SYMBOL."
+  (string symbol))
+
+;;; ─── Bootstrap Hook Installation ──────────────────────────────────────────
 
 (defun %rt-install-bootstrap-hook (key value)
   "Install VALUE into the bootstrap hook symbol named by KEY when available."

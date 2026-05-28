@@ -209,3 +209,14 @@
     (assert-signals cl-cc:ast-compilation-error
       (cl-cc:ast-error node "test error ~A" 42))))
 
+(deftest ast-node-namespace-and-imports-metadata
+  "AST nodes can store optional namespace and imports metadata."
+  (let ((node (cl-cc:make-ast-int :value 1
+                                  :namespace "App\\Example"
+                                  :imports '("Vendor\\Library"))))
+    (assert-equal "App\\Example" (cl-cc/ast:ast-namespace node))
+    (assert-equal '("Vendor\\Library") (cl-cc/ast:ast-imports node))
+    (setf (cl-cc/ast:ast-namespace node) "App\\Updated"
+          (cl-cc/ast:ast-imports node) '("Vendor\\Other"))
+    (assert-equal "App\\Updated" (cl-cc/ast:ast-namespace node))
+    (assert-equal '("Vendor\\Other") (cl-cc/ast:ast-imports node))))

@@ -111,6 +111,7 @@ let
         "cl-cc-vm"
         "cl-cc-prolog"
         "cl-cc-type"
+        "cl-cc-sb-mop"
       ];
     };
     cl-cc-target = {

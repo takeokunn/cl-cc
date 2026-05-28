@@ -12,7 +12,9 @@
   "Base struct for all AST nodes with optional source location tracking."
   (source-file nil)
   (source-line nil)
-  (source-column nil))
+  (source-column nil)
+  (namespace nil)
+  (imports nil))
 
 ;;; Intermediate AST Structs (shared slot groups)
 
@@ -189,6 +191,10 @@
 (defstruct (ast-quote (:include ast-node))
   "Quote special form AST node."
   (value nil))
+
+(defstruct (ast-list (:include ast-node))
+  "Runtime list construction AST node."
+  (elements nil :type list))
 
 (defstruct (ast-the (:include ast-node))
   "The type declaration AST node."

@@ -66,12 +66,12 @@
              (declare (ignore tok2))
              (values expr rest3 kv2)))))
       ((eq type :T-IDENT)
-       ;; Could be a function call or identifier
-       (multiple-value-bind (tok rest) (php-consume stream)
-         (let ((name (php-ident-sym (php-tok-value tok))))
-           (if (eq (php-peek-type rest) :T-LPAREN)
-               ;; Function call
-               (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
+        ;; Could be a function call or identifier
+        (multiple-value-bind (qualified-name rest) (php-parse-qualified-name stream)
+          (let ((name (php-ident-sym qualified-name)))
+            (if (eq (php-peek-type rest) :T-LPAREN)
+                ;; Function call
+                (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
                  (values (make-ast-call :func (make-ast-var :name name) :args args)
                          rest2 kv2))
                (values (make-ast-var :name name) rest known-vars)))))
@@ -81,8 +81,8 @@
   "Parse 'new ClassName(args)'."
   (multiple-value-bind (tok rest) (php-consume stream) ; consume 'new'
     (declare (ignore tok))
-    (multiple-value-bind (class-tok rest2) (php-expect :T-IDENT rest)
-      (let ((class-name (php-ident-sym (php-tok-value class-tok))))
+    (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
+      (let ((class-name (php-ident-sym qualified-name)))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
           (values (make-ast-make-instance
                    :class (make-ast-var :name class-name)
@@ -151,16 +151,15 @@
                                               :lhs obj :rhs (make-ast-int :value 1)))
                    rest rest2)))
           ;; Array access: $a[0] or $a[$i]
-          ((eq type :T-LBRACKET)
-           (multiple-value-bind (tok rest2) (php-consume rest)
-             (declare (ignore tok))
-             (multiple-value-bind (idx rest3 kv3) (php-parse-expr rest2 kv)
-               (multiple-value-bind (tok2 rest4) (php-expect :T-RBRACKET rest3)
-                 (declare (ignore tok2))
-                 (setf obj (make-ast-call :func (make-ast-var :name 'aref)
-                                           :args (list obj idx))
-                       rest rest4
-                       kv kv3)))))
+           ((eq type :T-LBRACKET)
+            (multiple-value-bind (tok rest2) (php-consume rest)
+              (declare (ignore tok))
+              (multiple-value-bind (idx rest3 kv3) (php-parse-expr rest2 kv)
+                (multiple-value-bind (tok2 rest4) (php-expect :T-RBRACKET rest3)
+                  (declare (ignore tok2))
+                  (setf obj (%php-array-ref-call obj idx)
+                        rest rest4
+                        kv kv3)))))
           (t (return)))))
     (values obj rest kv)))
 
@@ -229,26 +228,28 @@
   (php-parse-binop stream known-vars '("||") #'php-parse-and))
 
 (defun php-parse-expr (stream known-vars)
-  "Parse an expression. Handles assignment $var = expr."
-  (if (and (eq (php-peek-type stream) :T-VAR)
-           (let ((rest (cdr stream)))
-             (and rest (eq (php-peek-type rest) :T-OP)
-                  (equal "=" (php-peek-value rest)))))
-      ;; Assignment: $var = expr
-      (multiple-value-bind (var-tok rest) (php-consume stream)
-        (multiple-value-bind (op-tok rest2) (php-consume rest)
-          (declare (ignore op-tok))
-          (multiple-value-bind (val rest3 kv3) (php-parse-or rest2 known-vars)
-            (let* ((var-sym (php-var-sym (php-tok-value var-tok)))
-                   (already-known (member var-sym known-vars))
-                   (new-kv (if already-known kv3 (cons var-sym kv3))))
-              (values
-               (if already-known
-                   (make-ast-setq :var var-sym :value val)
-                   (make-ast-let :bindings (list (cons var-sym val)) :body nil))
-               rest3
-               new-kv)))))
-      (php-parse-or stream known-vars)))
+  "Parse an expression. Handles variable and PHP array-element assignment."
+  (multiple-value-bind (lhs rest kv) (php-parse-or stream known-vars)
+    (if (%php-assignment-op-p rest)
+        (let ((rest2 (cdr rest)))
+          (multiple-value-bind (val rest3 kv3) (php-parse-or rest2 kv)
+            (cond
+              ((ast-var-p lhs)
+               (let* ((var-sym (ast-var-name lhs))
+                      (already-known (member var-sym known-vars))
+                      (new-kv (if already-known kv3 (cons var-sym kv3))))
+                 (values
+                  (if already-known
+                      (make-ast-setq :var var-sym :value val)
+                      (make-ast-let :bindings (list (cons var-sym val)) :body nil))
+                  rest3
+                  new-kv)))
+              ((%php-array-ref-call-p lhs)
+               (destructuring-bind (arr key) (ast-call-args lhs)
+                 (values (%php-array-set-call arr key val) rest3 kv3)))
+              (t
+               (error "PHP parse error: unsupported assignment target ~S" lhs)))))
+        (values lhs rest kv))))
 
 (defun php-parse-arglist (stream known-vars)
   "Parse (arg1, arg2, ...). Assumes stream starts with T-LPAREN."
@@ -298,20 +299,23 @@
                (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
                known-vars))
       (:yield
-       (values (make-ast-call :func (make-ast-var :name 'yield) :args nil)
-               (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
-               known-vars))
+       (let ((message (if (and (eq (php-peek-type rest) :T-KEYWORD)
+                               (eq (php-peek-value rest) :from))
+                          "PHP yield from is not yet supported in cl-cc"
+                          "PHP yield is not yet supported in cl-cc")))
+         (values (make-ast-call :func (make-ast-var :name '%php-unsupported)
+                                :args (list (make-ast-quote :value message)))
+                 (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
+                 known-vars)))
       (:throw
        (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
          (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
                                   :value expr)
                  rest2 kv2)))
       (:array
-       (if (eq (php-peek-type rest) :T-LPAREN)
-           (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
-             (values (make-ast-call :func (make-ast-var :name 'make-array) :args args)
-                     rest2 kv2))
-           (values (make-ast-quote :value nil) rest known-vars)))
+        (if (eq (php-peek-type rest) :T-LPAREN)
+            (%php-parse-array-expr rest known-vars :open :T-LPAREN :close :T-RPAREN)
+            (values (make-ast-quote :value nil) rest known-vars)))
       (:list
        (if (eq (php-peek-type rest) :T-LPAREN)
            (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
@@ -323,27 +327,85 @@
                (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
                known-vars)))))
 
-(defun %php-parse-array-expr (stream known-vars)
-  "Parse short array syntax [expr, ...]."
-  (multiple-value-bind (tok rest) (php-consume stream)
+(defun %php-helper-var (name)
+  "Return an AST variable for a PHP runtime helper NAME."
+  (make-ast-var :name name))
+
+(defun %php-assignment-op-p (stream)
+  "Return true when STREAM begins with PHP simple assignment '='."
+  (and (eq (php-peek-type stream) :T-OP)
+       (equal "=" (php-peek-value stream))))
+
+(defun %php-double-arrow-p (stream)
+  "Return true when STREAM begins with PHP double-arrow '=>'."
+  (or (eq (php-peek-type stream) :T-DOUBLE-ARROW)
+      (and (eq (php-peek-type stream) :T-OP)
+           (equal "=>" (php-peek-value stream)))))
+
+(defun %php-array-ref-call (array key)
+  "Lower ARRAY[KEY] to the PHP ordered-array reference helper."
+  (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-ref)
+                 :args (list array key)))
+
+(defun %php-array-ref-call-p (node)
+  "Return true when NODE is a %php-array-ref helper call."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-array-ref)))
+       (= (length (ast-call-args node)) 2)))
+
+(defun %php-array-set-call (array key value)
+  "Lower ARRAY[KEY] = VALUE to the PHP ordered-array mutation helper."
+  (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-set)
+                 :args (list array key value)))
+
+(defun %php-array-entry (key-present-p key value)
+  "Build a runtime entry descriptor for %php-array."
+  (make-ast-list :elements (list (make-ast-quote :value key-present-p)
+                                 key
+                                 value)))
+
+(defun %php-array-call (entries)
+  "Build the %php-array constructor call for ENTRIES."
+  (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array)
+                 :args entries))
+
+(defun %php-parse-array-expr (stream known-vars &key (open :T-LBRACKET) (close :T-RBRACKET))
+  "Parse PHP short array [..] or legacy array(..) syntax."
+  (multiple-value-bind (tok rest) (php-expect open stream)
     (declare (ignore tok))
-    (if (eq (php-peek-type rest) :T-RBRACKET)
+    (if (eq (php-peek-type rest) close)
         (multiple-value-bind (tok2 rest2) (php-consume rest)
           (declare (ignore tok2))
-          (values (make-ast-call :func (make-ast-var :name 'make-array) :args nil)
-                  rest2 known-vars))
-        (let ((items nil) (current rest) (kv known-vars))
+          (values (%php-array-call nil) rest2 known-vars))
+        (let ((entries nil)
+              (current rest)
+              (kv known-vars))
           (loop
-            (multiple-value-bind (val rest2 kv2) (php-parse-expr current kv)
-              (push val items) (setf current rest2 kv kv2))
-            (when (and current (eq (php-peek-type current) :T-COMMA))
-              (setf current (cdr current)))
-            (when (eq (php-peek-type current) :T-RBRACKET) (return)))
-          (multiple-value-bind (tok2 rest2) (php-consume current)
+            (multiple-value-bind (first-expr rest2 kv2) (php-parse-expr current kv)
+              (if (%php-double-arrow-p rest2)
+                  (multiple-value-bind (arrow-tok rest3) (php-consume rest2)
+                    (declare (ignore arrow-tok))
+                    (multiple-value-bind (value-expr rest4 kv4) (php-parse-expr rest3 kv2)
+                      (push (%php-array-entry t first-expr value-expr) entries)
+                      (setf current rest4 kv kv4)))
+                  (progn
+                    (push (%php-array-entry nil (make-ast-quote :value nil) first-expr) entries)
+                    (setf current rest2 kv kv2))))
+            (cond
+              ((eq (php-peek-type current) :T-COMMA)
+               (setf current (cdr current))
+               (when (eq (php-peek-type current) close)
+                 (return)))
+              ((eq (php-peek-type current) close)
+               (return))
+              (t
+               (error "PHP parse error: expected comma or ~S in array literal, got ~S"
+                      close (php-peek current)))))
+          (multiple-value-bind (tok2 rest2) (php-expect close current)
             (declare (ignore tok2))
-            (values (make-ast-call :func (make-ast-var :name 'make-array)
-                                    :args (nreverse items))
-                    rest2 kv))))))
+            (values (%php-array-call (nreverse entries)) rest2 kv))))))
 
 (defun %php-skip-expression-like (stream stop-types &optional stop-op-values)
   "Skip expression tokens until boundary."

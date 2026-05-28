@@ -3,7 +3,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc-vm :cl-cc-prolog :cl-cc-type :cl-cc-ast)
+  :depends-on (:cl-cc-vm :cl-cc-prolog :cl-cc-type :cl-cc-ast :cl-cc-sb-mop)
   :pathname "src"
   :serial t
   :components

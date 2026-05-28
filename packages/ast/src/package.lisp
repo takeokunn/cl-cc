@@ -8,10 +8,11 @@
 (defpackage :cl-cc/ast
   (:use :cl)
   (:export
-   ;; Base and intermediate structs
-   #:ast-node #:make-ast-node #:ast-node-p
-   #:ast-source-file #:ast-source-line #:ast-source-column
-   #:ast-callable #:make-ast-callable #:ast-callable-p
+    ;; Base and intermediate structs
+    #:ast-node #:make-ast-node #:ast-node-p
+    #:ast-source-file #:ast-source-line #:ast-source-column
+    #:ast-namespace #:ast-imports
+    #:ast-callable #:make-ast-callable #:ast-callable-p
    #:ast-local-fns #:make-ast-local-fns #:ast-local-fns-p
    #:ast-local-fns-bindings #:ast-local-fns-body
    ;; Leaves
@@ -73,10 +74,11 @@
    #:ast-handler-case #:make-ast-handler-case #:ast-handler-case-p
    #:ast-handler-case-form #:ast-handler-case-clauses
    ;; Call/quote/the
-   #:ast-call #:make-ast-call #:ast-call-p
-   #:ast-call-func #:ast-call-args
-   #:ast-quote #:make-ast-quote #:ast-quote-p #:ast-quote-value
-   #:ast-the #:make-ast-the #:ast-the-p
+    #:ast-call #:make-ast-call #:ast-call-p
+    #:ast-call-func #:ast-call-args
+    #:ast-quote #:make-ast-quote #:ast-quote-p #:ast-quote-value
+    #:ast-list #:make-ast-list #:ast-list-p #:ast-list-elements
+    #:ast-the #:make-ast-the #:ast-the-p
    #:ast-the-type #:ast-the-value
    ;; CLOS
    #:ast-slot-def #:make-ast-slot-def #:ast-slot-def-p

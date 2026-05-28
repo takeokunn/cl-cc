@@ -208,6 +208,177 @@
 
 (define-simple-instruction vm-keywordp :pred1 keywordp)
 
+;;; ─── Extended Package Operation Instructions (ANSI CL Ch.11) ────────────────
+
+(define-vm-instruction vm-export-inst (vm-instruction)
+  "Export symbols from a package."
+  (dst nil :reader vm-dst)
+  (symbols nil :reader vm-export-symbols)
+  (pkg nil :reader vm-export-pkg)
+  (:sexp-tag :export)
+  (:sexp-slots dst symbols pkg))
+
+(defmethod execute-instruction ((inst vm-export-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((symbols (vm-reg-get state (vm-export-symbols inst)))
+         (pkg (vm-reg-get state (vm-export-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-export symbols pkg)
+                     (export symbols pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-export symbols pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-import-inst (vm-instruction)
+  "Import symbols into a package."
+  (dst nil :reader vm-dst)
+  (symbols nil :reader vm-import-symbols)
+  (pkg nil :reader vm-import-pkg)
+  (:sexp-tag :import)
+  (:sexp-slots dst symbols pkg))
+
+(defmethod execute-instruction ((inst vm-import-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((symbols (vm-reg-get state (vm-import-symbols inst)))
+         (pkg (vm-reg-get state (vm-import-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-import symbols pkg)
+                     (import symbols pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-import symbols pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-use-package-inst (vm-instruction)
+  "Make packages accessible to another package."
+  (dst nil :reader vm-dst)
+  (packages-to-use nil :reader vm-use-packages)
+  (pkg nil :reader vm-use-pkg)
+  (:sexp-tag :use-package)
+  (:sexp-slots dst packages-to-use pkg))
+
+(defmethod execute-instruction ((inst vm-use-package-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((pkgs (vm-reg-get state (vm-use-packages inst)))
+         (pkg (vm-reg-get state (vm-use-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-use-package pkgs pkg)
+                     (use-package pkgs pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-use-package pkgs pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-unuse-package-inst (vm-instruction)
+  "Remove packages from the use-list of another package."
+  (dst nil :reader vm-dst)
+  (packages-to-unuse nil :reader vm-unuse-packages)
+  (pkg nil :reader vm-unuse-pkg)
+  (:sexp-tag :unuse-package)
+  (:sexp-slots dst packages-to-unuse pkg))
+
+(defmethod execute-instruction ((inst vm-unuse-package-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((pkgs (vm-reg-get state (vm-unuse-packages inst)))
+         (pkg (vm-reg-get state (vm-unuse-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-unuse-package pkgs pkg)
+                     (unuse-package pkgs pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-unuse-package pkgs pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-shadow-inst (vm-instruction)
+  "Create shadowing symbols in a package."
+  (dst nil :reader vm-dst)
+  (symbol-names nil :reader vm-shadow-names)
+  (pkg nil :reader vm-shadow-pkg)
+  (:sexp-tag :shadow)
+  (:sexp-slots dst symbol-names pkg))
+
+(defmethod execute-instruction ((inst vm-shadow-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((names (vm-reg-get state (vm-shadow-names inst)))
+         (pkg (vm-reg-get state (vm-shadow-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-shadow names pkg)
+                     (shadow names pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-shadow names pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-unintern-inst (vm-instruction)
+  "Remove a symbol from its home package."
+  (dst nil :reader vm-dst)
+  (symbol nil :reader vm-unintern-symbol)
+  (pkg nil :reader vm-unintern-pkg)
+  (:sexp-tag :unintern)
+  (:sexp-slots dst symbol pkg))
+
+(defmethod execute-instruction ((inst vm-unintern-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((sym (vm-reg-get state (vm-unintern-symbol inst)))
+         (pkg (vm-reg-get state (vm-unintern-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (and cl-cc/runtime::*rt-package-registry*
+                          (hash-table-p pkg))
+                     (cl-cc/runtime::rt-unintern sym pkg)
+                     (unintern sym pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-unintern sym pkg)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-package-name-inst (vm-instruction)
+  "Get the name of a package."
+  (dst nil :reader vm-dst)
+  (pkg nil :reader vm-package-name-pkg)
+  (:sexp-tag :package-name)
+  (:sexp-slots dst pkg))
+
+(defmethod execute-instruction ((inst vm-package-name-inst) state pc labels)
+  (declare (ignore labels))
+  (let* ((pkg (vm-reg-get state (vm-package-name-pkg inst)))
+         (result #-cl-cc-self-hosting
+                 (if (hash-table-p pkg)
+                     (cl-cc/runtime::rt-package-name pkg)
+                     (package-name pkg))
+                 #+cl-cc-self-hosting
+                 (cl-cc/runtime::rt-package-name pkg)))
+    (vm-reg-set state (vm-dst inst)
+                (%vm-maybe-sso-string result))
+    (values (1+ pc) nil nil)))
+
+(define-vm-instruction vm-list-all-packages-inst (vm-instruction)
+  "List all registered packages."
+  (dst nil :reader vm-dst)
+  (:sexp-tag :list-all-packages)
+  (:sexp-slots dst))
+
+(defmethod execute-instruction ((inst vm-list-all-packages-inst) state pc labels)
+  (declare (ignore labels))
+  (let ((result #-cl-cc-self-hosting
+                (if cl-cc/runtime::*rt-package-registry*
+                    (cl-cc/runtime::rt-list-all-packages)
+                    (list-all-packages))
+                #+cl-cc-self-hosting
+                (cl-cc/runtime::rt-list-all-packages)))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
 ;;; ─── Character Predicate Instructions ───────────────────────────────────────
 
 ;; define-vm-unary-instruction is defined in vm.lisp (available to all vm/ files).

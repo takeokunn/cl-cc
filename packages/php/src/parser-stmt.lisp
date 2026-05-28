@@ -49,14 +49,33 @@
 (defvar *php-loop-break-target* nil
   "Dynamically bound innermost loop/switch break target.")
 
+(defvar *php-break-targets* nil
+  "Dynamically bound stack of loop/switch break targets, innermost first.")
+
 (defvar *php-continue-targets* nil
   "Dynamically bound stack of loop continue targets, innermost first.")
+
+(defun %php-break-target (level)
+  "Return the break target for LEVEL, where 1 means the innermost loop/switch."
+  (let ((index (max 0 (1- (or level 1)))))
+    (if level
+        (nth index *php-break-targets*)
+        (or (first *php-break-targets*)
+            *php-loop-break-target*))))
 
 (defun %php-continue-target (level)
   "Return the continue target for LEVEL, where 1 means the innermost loop."
   (let ((index (max 0 (1- (or level 1)))))
-    (or (nth index *php-continue-targets*)
-        *php-loop-continue-target*)))
+    (if level
+        (nth index *php-continue-targets*)
+        (or (first *php-continue-targets*)
+            *php-loop-continue-target*))))
+
+(defun %php-parse-control-level (stream)
+  "Parse an optional integer break/continue LEVEL and return LEVEL and STREAM."
+  (if (eq (php-peek-type stream) :T-INT)
+      (values (php-peek-value stream) (cdr stream))
+      (values nil stream)))
 
 (defun %php-skip-to-stmt-end (stream)
   "Skip tokens until a top-level semicolon or block close."
@@ -79,6 +98,29 @@
                (t (setf current (cdr current)))))
     current))
 
+(defun %php-make-tagbody (items &optional initial-tag)
+  "Build an AST-TAGBODY from flat tag/form ITEMS.
+Symbols and integers start new tag sections; AST nodes are accumulated under
+the current tag, matching the core CL lowerer's ast-tagbody representation."
+  (let ((tags nil)
+        (current-tag initial-tag)
+        (current-forms nil))
+    (labels ((flush-current ()
+               (when current-tag
+                 (push (cons current-tag (nreverse current-forms)) tags))))
+      (dolist (item items)
+        (if (or (symbolp item) (integerp item))
+            (progn
+              (flush-current)
+              (setf current-tag item
+                    current-forms nil))
+            (progn
+              (unless current-tag
+                (setf current-tag (gensym "TAGBODY-START-")))
+              (push item current-forms))))
+      (flush-current)
+      (make-ast-tagbody :tags (nreverse tags)))))
+
 (defun php-parse-block (stream known-vars)
   "Parse { stmt* }."
   (let ((current (%php-consume-expected :T-LBRACE stream))
@@ -93,6 +135,29 @@
         (setf current rest2 kv kv2)))
     (values (nreverse stmts) (%php-consume-expected :T-RBRACE current) kv)))
 
+(defun %php-parse-namespace-block-body (stream known-vars namespace-name)
+  "Parse a braced namespace body and annotate each enclosed top-level form."
+  (let ((*php-current-namespace* namespace-name)
+        (*php-current-imports* nil)
+        (*php-pending-top-level-forms* nil)
+        (current (%php-consume-expected :T-LBRACE stream))
+        (stmts nil)
+        (kv known-vars))
+    (loop
+      (setf current (php-skip-semis current))
+      (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
+        (return))
+      (multiple-value-bind (stmt rest2 kv2) (php-parse-statement current kv)
+        (cond
+          (*php-pending-top-level-forms*
+           (dolist (form (reverse *php-pending-top-level-forms*))
+             (push form stmts))
+           (setf *php-pending-top-level-forms* nil))
+          (stmt
+           (push (php-annotate-top-level-node stmt) stmts)))
+        (setf current rest2 kv kv2)))
+    (values (nreverse stmts) (%php-consume-expected :T-RBRACE current) kv)))
+
 (defun %php-parse-statement-body (stream known-vars)
   "Parse either a braced block or one PHP statement. Return a statement list."
   (if (eq (php-peek-type stream) :T-LBRACE)
@@ -100,30 +165,72 @@
       (multiple-value-bind (stmt rest kv) (php-parse-statement stream known-vars)
         (values (if stmt (list stmt) nil) rest kv))))
 
+(defun %php-type-keyword-token-p (stream)
+  "Return true when STREAM starts with a keyword valid in PHP type position."
+  (and stream
+       (eq (php-peek-type stream) :T-KEYWORD)
+       (member (php-peek-value stream) '(:array :null :true :false) :test #'eq)))
+
+(defun %php-type-atom-token-p (stream)
+  "Return true when STREAM starts with a PHP type atom."
+  (and stream
+       (or (eq (php-peek-type stream) :T-TYPE)
+           (eq (php-peek-type stream) :T-IDENT)
+           (%php-type-keyword-token-p stream))))
+
+(defun %php-type-token-string (token)
+  "Return TOKEN's PHP spelling for metadata storage."
+  (let ((value (php-tok-value token)))
+    (string-downcase
+     (etypecase value
+       (keyword (symbol-name value))
+       (symbol (symbol-name value))
+       (string value)))))
+
+(defun php-parse-type-annotation (stream)
+  "Parse a PHP type annotation from STREAM.
+Returns (values type-string remaining-stream). Handles nullable, union, and
+intersection type syntax as metadata only."
+  (let ((current stream)
+        (parts nil))
+    (when (eq (php-peek-type current) :T-NULLABLE)
+      (push "?" parts)
+      (setf current (cdr current)))
+    (unless (%php-type-atom-token-p current)
+      (return-from php-parse-type-annotation (values nil stream)))
+    (push (%php-type-token-string (php-peek current)) parts)
+    (setf current (cdr current))
+    (loop while (and current
+                     (eq (php-peek-type current) :T-OP)
+                     (member (php-peek-value current) '("|" "&") :test #'equal)
+                     (%php-type-atom-token-p (cdr current)))
+          do (push (php-peek-value current) parts)
+             (setf current (cdr current))
+             (push (%php-type-token-string (php-peek current)) parts)
+             (setf current (cdr current)))
+    (values (apply #'concatenate 'string (nreverse parts)) current)))
+
 (defun %php-skip-type-annotation (stream)
   "Consume an optional type annotation from STREAM."
-  (if (or (eq (php-peek-type stream) :T-TYPE)
-          (eq (php-peek-type stream) :T-IDENT)
-          (eq (php-peek-type stream) :T-NULLABLE))
-      (let ((rest (cdr stream)))
-        (if (or (eq (php-peek-type rest) :T-TYPE)
-                (eq (php-peek-type rest) :T-IDENT))
-            (cdr rest)
-            rest))
-      stream))
+  (nth-value 1 (php-parse-type-annotation stream)))
 
 (defun php-parse-param-list (stream)
-  "Parse (type? $param, ...)."
+  "Parse (type? $param, ...). Return params, rest, and type metadata."
   (let ((current (%php-consume-expected :T-LPAREN stream))
-        (params nil))
+        (params nil)
+        (param-types nil))
     (if (eq (php-peek-type current) :T-RPAREN)
-        (values nil (cdr current))
+        (values nil (cdr current) nil)
         (progn
           (loop
-            (setf current (%php-skip-type-annotation current))
-            (multiple-value-bind (var-tok rest) (php-expect :T-VAR current)
-              (push (php-var-sym (php-tok-value var-tok)) params)
-              (setf current rest))
+            (multiple-value-bind (param-type rest-after-type) (php-parse-type-annotation current)
+              (setf current (or rest-after-type current))
+              (multiple-value-bind (var-tok rest) (php-expect :T-VAR current)
+                (let ((param (php-var-sym (php-tok-value var-tok))))
+                  (push param params)
+                  (when param-type
+                    (push (cons param param-type) param-types)))
+                (setf current rest)))
             (when (and current (eq (php-peek-type current) :T-OP)
                        (equal "=" (php-peek-value current)))
               (setf current (cdr current))
@@ -134,18 +241,25 @@
             (if (eq (php-peek-type current) :T-COMMA)
                 (setf current (cdr current))
                 (return)))
-          (values (nreverse params) (%php-consume-expected :T-RPAREN current))))))
+          (values (nreverse params)
+                  (%php-consume-expected :T-RPAREN current)
+                  (nreverse param-types))))))
 
-(defun %php-skip-return-type (stream)
-  "Consume an optional : type annotation after a function parameter list."
+(defun php-parse-return-type (stream)
+  "Parse an optional : type annotation after a function parameter list."
   (if (and stream (eq (php-peek-type stream) :T-COLON))
-      (%php-skip-type-annotation (cdr stream))
-      stream))
+      (php-parse-type-annotation (cdr stream))
+      (values nil stream)))
+
+(defun %php-function-type-declarations (param-types return-type)
+  "Build PHP type metadata plist for AST callable declarations."
+  (append (when param-types (list :php-param-types param-types))
+          (when return-type (list :php-return-type return-type))))
 
 (defun %php-parse-label-stmt (stream known-vars)
   "Parse `label:` into a tagbody label marker."
   (multiple-value-bind (label-tok rest) (php-expect :T-IDENT stream)
-    (values (make-ast-tagbody :tags (list (php-ident-sym (php-tok-value label-tok))))
+    (values (make-ast-tagbody :tags (list (cons (php-ident-sym (php-tok-value label-tok)) nil)))
             (%php-consume-expected :T-COLON rest)
             known-vars)))
 
@@ -213,26 +327,32 @@
 (defun %php-lower-while-with-label (cond-expr body-stmts loop-tag)
   "Lower a PHP while loop using LOOP-TAG as the continue target."
   (make-ast-block :name nil
-    :body (list (make-ast-tagbody
-                 :tags (list* loop-tag
-                              (make-ast-if
-                               :cond cond-expr
-                               :then (make-ast-quote :value nil)
-                               :else (make-ast-return-from :name nil
-                                                          :value (make-ast-quote :value nil)))
-                              (append body-stmts
-                                      (list (make-ast-go :tag loop-tag))))))))
+    :body (list
+           (%php-make-tagbody
+            (append (list loop-tag
+                          (make-ast-if
+                           :cond cond-expr
+                           :then (make-ast-quote :value nil)
+                           :else (make-ast-return-from :name nil
+                                                      :value (make-ast-quote :value nil))))
+                    body-stmts
+                    (list (make-ast-go :tag loop-tag))
+                    (when *php-loop-break-target*
+                      (list *php-loop-break-target*)))))))
 
 (defun %php-lower-do-while-with-label (cond-expr body-stmts loop-tag)
   "Lower a PHP do/while loop using LOOP-TAG as the continue target."
   (make-ast-block :name nil
-    :body (list (make-ast-tagbody
-                 :tags (append (list loop-tag)
-                               body-stmts
-                               (list (make-ast-if
-                                      :cond cond-expr
-                                      :then (make-ast-go :tag loop-tag)
-                                      :else (make-ast-quote :value nil))))))))
+    :body (list
+           (%php-make-tagbody
+            (append (list loop-tag)
+                    body-stmts
+                    (list (make-ast-if
+                           :cond cond-expr
+                           :then (make-ast-go :tag loop-tag)
+                           :else (make-ast-quote :value nil)))
+                    (when *php-loop-break-target*
+                      (list *php-loop-break-target*)))))))
 
 (defun php-lower-switch (switch-expr cases default-body break-tag)
   "Lower a PHP switch/case/default to a let/tagbody dispatch form."
@@ -250,27 +370,22 @@
                                    :args (list (make-ast-var :name value-sym) case-val))
                             :then (make-ast-go :tag label)
                             :else (make-ast-quote :value nil)))
-             (list (make-ast-go :tag (or default-tag break-tag)))))
-           (case-forms
-            (loop for case in cases
-                  for label in case-labels
-                  collect (make-ast-tagbody
-                           :tags (list* label (cdr case)))))
-           (default-form
-            (when default-body
-              (make-ast-tagbody
-               :tags (list* default-tag
-                            (append default-body
-                                    (list (make-ast-go :tag break-tag))))))))
+              (list (make-ast-go :tag (or default-tag break-tag)))))
+            (case-forms
+             (loop for case in cases
+                   for label in case-labels
+                   append (list* label (cdr case))))
+            (default-forms
+             (when default-body
+               (list* default-tag default-body))))
       (make-ast-let
        :bindings (list (cons value-sym switch-expr))
        :body (list (make-ast-block :name nil
-                     :body (list (make-ast-progn
-                                  :forms (append dispatch-forms
-                                                 case-forms
-                                                 (when default-form (list default-form))
-                                                 (list (make-ast-tagbody
-                                                        :tags (list break-tag))))))))))))
+                      :body (list (%php-make-tagbody
+                                   (append dispatch-forms
+                                           case-forms
+                                           default-forms
+                                           (list break-tag))))))))))
 
 (defun %php-lower-foreach-with-label (arr-expr var-sym body-stmts loop-tag)
   "Lower a PHP foreach loop using LOOP-TAG as the continue target."
@@ -316,7 +431,84 @@
                                  :superclasses nil
                                  :slots (nreverse slots))
               (%php-consume-expected :T-RBRACE current)
-              known-vars))))
+               known-vars))))
+
+(defun %php-use-kind (stream)
+  "Return use kind and stream after optional function/const qualifier."
+  (cond ((%php-keyword-p stream :function) (values :function (cdr stream)))
+        ((%php-keyword-p stream :const) (values :const (cdr stream)))
+        (t (values :class stream))))
+
+(defun %php-optional-use-kind (stream)
+  "Return optional group-use kind qualifier and stream after it."
+  (cond ((%php-keyword-p stream :function) (values :function (cdr stream)))
+        ((%php-keyword-p stream :const) (values :const (cdr stream)))
+        (t (values nil stream))))
+
+(defun %php-parse-use-alias (stream)
+  "Parse optional `as Alias` and return alias/rest."
+  (if (%php-keyword-p stream :as)
+      (multiple-value-bind (alias-name rest) (php-parse-qualified-name (cdr stream))
+        (values alias-name rest))
+      (values nil stream)))
+
+(defun %php-make-import (kind name alias)
+  "Build a PHP import descriptor plist."
+  (list :type kind :name name :alias alias))
+
+(defun %php-join-qualified-prefix (prefix name)
+  "Join import PREFIX and NAME with a PHP namespace separator."
+  (cond ((or (null prefix) (string= prefix "")) name)
+        ((or (null name) (string= name "")) prefix)
+        ((char= (char prefix (1- (length prefix))) #\\) (concatenate 'string prefix name))
+        (t (format nil "~A\\~A" prefix name))))
+
+(defun %php-parse-group-use-items (stream prefix default-kind)
+  "Parse `{A, B as C}` group-use items after PREFIX."
+  (let ((current (%php-consume-expected :T-LBRACE stream))
+        (imports nil))
+    (loop
+      (multiple-value-bind (kind rest) (%php-optional-use-kind current)
+        (multiple-value-bind (name rest2) (php-parse-qualified-name rest)
+          (multiple-value-bind (alias rest3) (%php-parse-use-alias rest2)
+            (push (%php-make-import (or kind default-kind)
+                                    (%php-join-qualified-prefix prefix name)
+                                    alias)
+                  imports)
+            (setf current rest3))))
+      (cond ((eq (php-peek-type current) :T-COMMA)
+             (setf current (cdr current))
+             (when (eq (php-peek-type current) :T-RBRACE) (return)))
+            (t (return))))
+    (values (nreverse imports) (%php-consume-expected :T-RBRACE current))))
+
+(defun %php-parse-use-imports (stream kind)
+  "Parse one PHP use statement body and return import descriptors/rest."
+  (let ((current stream)
+        (imports nil))
+    (loop
+      (multiple-value-bind (name rest) (php-parse-qualified-name current)
+        (cond
+          ((and (eq (php-peek-type rest) :T-BACKSLASH)
+                (eq (php-peek-type (cdr rest)) :T-LBRACE))
+           (multiple-value-bind (group-imports rest2)
+               (%php-parse-group-use-items (cdr rest) name kind)
+             (setf imports (append imports group-imports)
+                   current rest2)))
+          ((eq (php-peek-type rest) :T-LBRACE)
+           (multiple-value-bind (group-imports rest2)
+               (%php-parse-group-use-items rest name kind)
+             (setf imports (append imports group-imports)
+                   current rest2)))
+          (t
+           (multiple-value-bind (alias rest2) (%php-parse-use-alias rest)
+             (setf imports (append imports (list (%php-make-import kind name alias))))
+             (setf current rest2)))))
+      (cond ((eq (php-peek-type current) :T-COMMA)
+             (setf current (cdr current)))
+            (t (return))))
+    (values imports
+            (%php-consume-expected :T-SEMI current))))
 
 (define-php-stmt-parser :echo (rest known-vars)
   ;; Echo supports comma-separated expressions: echo 1, 2, 3;
@@ -353,11 +545,12 @@
   (multiple-value-bind (cond-expr rest2 kv2) (%php-parse-paren-expr rest known-vars)
     (let* ((*php-loop-continue-target* (gensym "WHILE-LOOP-"))
            (*php-loop-break-target* (gensym "WHILE-END-"))
+           (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
            (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
       (multiple-value-bind (body-stmts rest3 kv3) (%php-parse-statement-body rest2 kv2)
         (values (%php-lower-while-with-label
                  cond-expr
-                 (append body-stmts (list *php-loop-break-target*))
+                  body-stmts
                  *php-loop-continue-target*)
                 rest3 kv3)))))
 
@@ -378,17 +571,18 @@
                     (values (make-ast-quote :value nil) rest kv)
                     (php-parse-expr rest kv))
               (let* ((rest (%php-consume-expected :T-RPAREN rest))
-                     (*php-loop-continue-target* (gensym "FOR-LOOP-"))
-                     (*php-loop-break-target* (gensym "FOR-END-"))
-                     (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
+                      (*php-loop-continue-target* (gensym "FOR-LOOP-"))
+                      (*php-loop-break-target* (gensym "FOR-END-"))
+                      (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
+                      (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
                 (multiple-value-bind (body-stmts rest _) (%php-parse-statement-body rest kv)
                   (declare (ignore _))
                   (values (make-ast-progn
                            :forms (list init (%php-lower-while-with-label
-                                              cond-expr
-                                              (append body-stmts
-                                                      (list incr *php-loop-break-target*))
-                                              *php-loop-continue-target*)))
+                                               cond-expr
+                                               (append body-stmts
+                                                       (list incr))
+                                               *php-loop-continue-target*)))
                           rest kv))))))))))
 
 (define-php-stmt-parser :foreach (rest known-vars)
@@ -404,18 +598,20 @@
                       rest6 rest7)))
             (let* ((*php-loop-continue-target* (gensym "FOREACH-LOOP-"))
                    (*php-loop-break-target* (gensym "FOREACH-END-"))
+                   (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
                    (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
               (multiple-value-bind (body-stmts rest8 kv8)
                   (%php-parse-statement-body (%php-consume-expected :T-RPAREN rest6) kv3)
                 (values (%php-lower-foreach-with-label
-                         arr-expr var-sym
-                         (append body-stmts (list *php-loop-break-target*))
-                         *php-loop-continue-target*)
+                          arr-expr var-sym
+                          body-stmts
+                          *php-loop-continue-target*)
                         rest8 kv8)))))))))
 
 (define-php-stmt-parser :do (rest known-vars)
   (let* ((*php-loop-continue-target* (gensym "DO-WHILE-LOOP-"))
          (*php-loop-break-target* (gensym "DO-WHILE-END-"))
+         (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
          (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
     (multiple-value-bind (body-stmts rest2 kv2) (%php-parse-statement-body rest known-vars)
       (unless (%php-keyword-p rest2 :while)
@@ -423,13 +619,15 @@
       (multiple-value-bind (cond-expr rest3 kv3) (%php-parse-paren-expr (cdr rest2) kv2)
         (values (%php-lower-do-while-with-label
                  cond-expr
-                 (append body-stmts (list *php-loop-break-target*))
+                  body-stmts
                  *php-loop-continue-target*)
                 (php-skip-semis rest3) kv3)))))
 
 (define-php-stmt-parser :switch (rest known-vars)
   (multiple-value-bind (switch-expr rest2 kv2) (%php-parse-paren-expr rest known-vars)
-    (let ((break-tag (gensym "SWITCH-END-")))
+    (let* ((break-tag (gensym "SWITCH-END-"))
+           (*php-loop-break-target* break-tag)
+           (*php-break-targets* (cons break-tag *php-break-targets*)))
       (multiple-value-bind (cases default-body rest3 kv3) (%php-parse-switch-body rest2 kv2 break-tag)
         (values (php-lower-switch switch-expr cases default-body break-tag) rest3 kv3)))))
 
@@ -462,20 +660,28 @@
                 current kv)))))
 
 (define-php-stmt-parser :continue (rest known-vars)
-  (let ((level nil))
-    (when (eq (php-peek-type rest) :T-INT)
-      (setf level (php-peek-value rest)
-            rest (cdr rest)))
-    (let ((current (if (eq (php-peek-type rest) :T-SEMI) rest (%php-skip-to-stmt-end rest))))
-      (values (make-ast-go :tag (or (%php-continue-target level) 'LOOP-HEAD-TAG))
+  (multiple-value-bind (level rest2) (%php-parse-control-level rest)
+    (let* ((target (%php-continue-target level))
+           (current (if (eq (php-peek-type rest2) :T-SEMI) rest2 (%php-skip-to-stmt-end rest2))))
+      (unless target
+        (error "PHP parse error: continue~@[ ~D~] has no matching loop" level))
+      (values (make-ast-go :tag target)
               (php-skip-semis current) known-vars))))
 
 (define-php-stmt-parser :break (rest known-vars)
-  (let ((current (if (eq (php-peek-type rest) :T-SEMI) rest (%php-skip-to-stmt-end rest))))
-    (values (if *php-loop-break-target*
-                (make-ast-go :tag *php-loop-break-target*)
-                (make-ast-return-from :name nil :value (make-ast-quote :value nil)))
-            (php-skip-semis current) known-vars)))
+  (multiple-value-bind (level rest2) (%php-parse-control-level rest)
+    (let* ((target (%php-break-target level))
+           (current (if (eq (php-peek-type rest2) :T-SEMI) rest2 (%php-skip-to-stmt-end rest2))))
+      (unless target
+        (error "PHP parse error: break~@[ ~D~] has no matching loop or switch" level))
+      (values (make-ast-go :tag target)
+              (php-skip-semis current) known-vars))))
+
+(define-php-stmt-parser :throw (rest known-vars)
+  (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
+    (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
+                            :value expr)
+            (php-skip-semis rest2) kv2)))
 
 (defun %php-parse-include-like (rest known-vars name)
   (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
@@ -496,14 +702,28 @@
             (php-skip-semis rest2) known-vars)))
 
 (define-php-stmt-parser :namespace (rest known-vars)
-  (values (make-ast-progn :forms nil)
-          (if (eq (php-peek-type rest) :T-LBRACE)
-              (nth-value 1 (php-parse-block rest known-vars))
-              (%php-skip-to-stmt-end rest))
-          known-vars))
+  (multiple-value-bind (namespace-name after-name)
+      (if (eq (php-peek-type rest) :T-LBRACE)
+          (values nil rest)
+          (php-parse-qualified-name rest))
+    (cond
+      ((eq (php-peek-type after-name) :T-LBRACE)
+       (multiple-value-bind (forms rest2 kv2)
+           (%php-parse-namespace-block-body after-name known-vars namespace-name)
+         (setf *php-pending-top-level-forms* forms)
+         (values nil rest2 kv2)))
+      ((eq (php-peek-type after-name) :T-SEMI)
+       (setf *php-current-namespace* namespace-name
+             *php-current-imports* nil)
+       (values nil (php-skip-semis after-name) known-vars))
+      (t (error "PHP parse error: expected { or ; after namespace declaration, got ~S"
+                (php-peek after-name))))))
 
 (define-php-stmt-parser :use (rest known-vars)
-  (values (make-ast-progn :forms nil) (%php-skip-to-stmt-end rest) known-vars))
+  (multiple-value-bind (kind use-rest) (%php-use-kind rest)
+    (multiple-value-bind (imports rest2) (%php-parse-use-imports use-rest kind)
+      (setf *php-current-imports* (append *php-current-imports* imports))
+      (values nil rest2 known-vars))))
 
 (define-php-stmt-parser :trait (rest known-vars) (%php-parse-classlike rest known-vars))
 (define-php-stmt-parser :interface (rest known-vars) (%php-parse-classlike rest known-vars))
@@ -512,11 +732,15 @@
 (define-php-stmt-parser :function (rest known-vars)
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym (php-tok-value name-tok))))
-      (multiple-value-bind (params rest) (php-parse-param-list rest)
-        (let ((rest (%php-skip-return-type rest)))
+      (multiple-value-bind (params rest param-types) (php-parse-param-list rest)
+        (multiple-value-bind (return-type rest) (php-parse-return-type rest)
           (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
             (declare (ignore _))
-            (values (make-ast-defun :name fn-name :params params :body body-stmts)
+            (values (make-ast-defun :name fn-name
+                                    :params params
+                                    :declarations (%php-function-type-declarations
+                                                   param-types return-type)
+                                    :body body-stmts)
                     rest known-vars)))))))
 ;; ─── Keyword aliases (underscore → dash) ─────────────────────────────────
 (setf (gethash :include-once *php-stmt-parsers*)

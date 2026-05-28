@@ -10,7 +10,8 @@
 
 (defsuite ansi-conformance-package-suite
   :description "ANSI CL Package System Conformance Tests"
-  :parent cl-cc-e2e-suite)
+  :parent cl-cc-conformance-suite
+  :parallel nil)
 
 (in-suite ansi-conformance-package-suite)
 

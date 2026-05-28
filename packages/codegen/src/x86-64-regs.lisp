@@ -287,4 +287,4 @@ YMM physical names and the existing XMM allocation class used for SIMD values."
 (defun x86-64-double-float-bits (value)
   "Return the IEEE754 bit pattern for VALUE as an unsigned 64-bit integer."
   (logand #xFFFFFFFFFFFFFFFF
-          (sb-kernel:double-float-bits (float value 1.0d0)))
+          (sb-kernel:double-float-bits (float value 1.0d0))))

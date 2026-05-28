@@ -38,6 +38,7 @@
         (#\]  (tok1 :T-RBRACKET "]"))
         (#\;  (tok1 :T-SEMI ";"))
         (#\,  (tok1 :T-COMMA ","))
+        (#\\  (tok1 :T-BACKSLASH "\\"))
         (#\~  (tok1 :T-OP "~"))
         (#\@  (tok1 :T-OP "@"))
         (#\%  (tok1 :T-OP "%"))

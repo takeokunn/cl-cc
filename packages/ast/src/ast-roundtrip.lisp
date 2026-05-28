@@ -202,6 +202,9 @@ KEY slots may include a fourth explicit keyword-name element."
 (defmethod ast-to-sexp ((node ast-quote))
   (list 'quote (ast-quote-value node)))
 
+(defmethod ast-to-sexp ((node ast-list))
+  (cons 'list (mapcar #'ast-to-sexp (ast-list-elements node))))
+
 (defmethod ast-to-sexp ((node ast-the))
   (list 'the
         (ast-the-type node)

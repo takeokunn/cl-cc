@@ -134,6 +134,7 @@
     (find-package     . make-vm-find-package)
     (keywordp         . make-vm-keywordp)
     (symbol-plist     . make-vm-symbol-plist)
+    (package-name     . make-vm-package-name-inst)
     ;; Time / system
     (sleep               . make-vm-sleep-inst)
     (decode-universal-time . make-vm-decode-universal-time)

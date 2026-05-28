@@ -384,3 +384,9 @@ Each handler form must return RESULT-REG on success or NIL to continue."
          (result-reg (make-register ctx)))
     (or (%try-compile-call-fast-paths func-expr func-sym args result-reg tail ctx)
         (%compile-normal-call          func-expr func-sym args result-reg tail ctx))))
+
+(defmethod compile-ast ((node ast-list) ctx)
+  "Compile a runtime list-construction AST node through the normal LIST call path."
+  (compile-ast (make-ast-call :func (make-ast-var :name 'list)
+                              :args (ast-list-elements node))
+               ctx))

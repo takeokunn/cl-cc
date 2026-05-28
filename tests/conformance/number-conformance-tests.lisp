@@ -9,7 +9,8 @@
 
 (defsuite ansi-conformance-number-suite
   :description "ANSI CL Number Tower Conformance Tests"
-  :parent cl-cc-e2e-suite)
+  :parent cl-cc-conformance-suite
+  :parallel nil)
 
 (in-suite ansi-conformance-number-suite)
 

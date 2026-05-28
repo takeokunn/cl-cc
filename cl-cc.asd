@@ -49,11 +49,11 @@
   :license "MIT"
   :version "0.1.0"
   :depends-on (:cl-cc-bootstrap :cl-cc-ast :cl-cc-prolog :cl-cc-parse :cl-cc-binary
-               :cl-cc-runtime :cl-cc-bytecode :cl-cc-ir :cl-cc-mir :cl-cc-target
-               :cl-cc-type :cl-cc-optimize :cl-cc-regalloc :cl-cc-emit :cl-cc-expand
-               :cl-cc-compile :cl-cc-cps :cl-cc-codegen :cl-cc-vm :cl-cc-stdlib
-                 :cl-cc-sb-mop :cl-cc-sb-pcl :cl-cc-closer-mop
-                :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl)
+                :cl-cc-runtime :cl-cc-bytecode :cl-cc-ir :cl-cc-mir :cl-cc-target
+                :cl-cc-type :cl-cc-optimize :cl-cc-regalloc :cl-cc-emit :cl-cc-expand
+                :cl-cc-compile :cl-cc-cps :cl-cc-codegen :cl-cc-vm :cl-cc-stdlib
+                  :cl-cc-sb-mop :cl-cc-sb-pcl :cl-cc-closer-mop
+                 :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl :cl-cc-php)
   :components
   ((:module "src"
     :pathname "packages/umbrella-src"
@@ -79,6 +79,9 @@
       ;; guards so the production Nix derivation succeeds without them.
       (maybe-load-asd :cl-cc-cli "packages/cli/cl-cc-cli.asd" here)
       (maybe-load-asd :cl-cc-testing-framework "packages/testing-framework/cl-cc-testing-framework.asd" here)
+      (maybe-load-asd :cl-cc-docgen "packages/docgen/cl-cc-docgen.asd" here)
+      ;; Register optional packages needed by downstream systems
+      (maybe-load-asd :cl-cc-sb-mop "packages/sb-mop/cl-cc-sb-mop.asd" here)
       ;; Register the real FR-796/FR-797 protocol tool system when present.
       ;; VM no longer defines fallback packages; this optional ASDF reference is
       ;; the development/test bridge to packages/tools/cl-cc-tools.asd.
