@@ -619,3 +619,4 @@
           ((:T-LPAREN :T-LBRACKET :T-LBRACE) (incf depth))
           ((:T-RPAREN :T-RBRACKET :T-RBRACE) (when (plusp depth) (decf depth)))))
       (setf current (cdr current)))))
+)
