@@ -199,4 +199,4 @@
     (cl-cc/vm::vm-reg-set s :R1 "x~3Iy")
     (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
     (let ((result (cl-cc/vm::vm-reg-get s :R0)))
-      (assert-equal "x   y" result))))
+      (assert-equal "xINDENTy" result))))
