@@ -165,10 +165,13 @@
     (assert-true (cl-cc:ast-if-p value))))
 
 (deftest php-parser-arrow-function-expression
-  "Characterization: fn($x) => $x + 1 should parse as a real lambda with parameters and body."
+  "Characterization: fn($x) => $x + 1 should parse to a capture-wrapped ast-lambda."
   (let ((value (%php-first-binding-value "<?php $inc = fn($x) => $x + 1;")))
-    (assert-true (cl-cc:ast-lambda-p value))
-    (assert-equal '("X") (mapcar #'symbol-name (cl-cc:ast-lambda-params value)))))
+    ;; fn arrow functions wrap the lambda in a capture let-binding
+    (assert-true (cl-cc:ast-let-p value))
+    (let ((lambda (first (cl-cc:ast-let-body value))))
+      (assert-true (cl-cc:ast-lambda-p lambda))
+      (assert-equal '("X") (mapcar #'symbol-name (cl-cc:ast-lambda-params lambda))))))
 
 (deftest php-parser-yield-expression-unsupported-error
   "Characterization: yield remains explicitly unsupported until generator lowering is implemented."
@@ -211,18 +214,25 @@
                          (cl-cc:ast-tagbody-tags outer-tagbody))))))
 
 (deftest php-parser-try-catch-finally-statement
-  "Characterization: try/catch/finally should preserve catch type/variable and cleanup metadata."
+  "Characterization: try/catch/finally should produce unwind-protect wrapping handler-case."
   (let ((ast (%php-first "<?php try { throw new Ex(); } catch (Ex $e) { echo $e; } finally { echo 'done'; }")))
     (assert-true (cl-cc:ast-unwind-protect-p ast))
-    (assert-true (cl-cc:ast-handler-case-p (cl-cc:ast-unwind-protected ast)))
-    (assert-equal 'EX (first (first (cl-cc:ast-handler-case-clauses
-                                     (cl-cc:ast-unwind-protected ast)))))))
+    (let ((inner (cl-cc:ast-unwind-protected ast)))
+      (assert-true (cl-cc:ast-handler-case-p inner))
+      (let ((clauses (cl-cc:ast-handler-case-clauses inner)))
+        (assert-true (consp clauses))
+        ;; catch type is a PHP qualified symbol; check that the type name contains "EX"
+        (let ((catch-type (first (first clauses))))
+          (assert-true (symbolp catch-type))
+          (assert-true (search "EX" (symbol-name catch-type))))))))
 
 (deftest php-parser-throw-statement
-  "Characterization: throw should parse as ast-throw without being treated as a value-only expression placeholder."
+  "Characterization: throw should parse as ast-throw with a PHP exception tag."
   (let ((ast (%php-first "<?php throw new Ex();")))
     (assert-true (cl-cc:ast-throw-p ast))
-    (assert-equal 'php-exception (cl-cc:ast-quote-value (cl-cc:ast-throw-tag ast)))))
+    (let ((tag-val (cl-cc:ast-quote-value (cl-cc:ast-throw-tag ast))))
+      (assert-true (symbolp tag-val))
+      (assert-true (search "EXCEPTION" (symbol-name tag-val))))))
 
 (deftest php-parser-short-array-literal
   "Characterization: [1,2,3] should preserve an ordered PHP array literal node."

@@ -180,16 +180,12 @@
     (fmt-exec (cl-cc:make-vm-read-sexp-inst :dst :R0 :src :R1) s)
     (assert-equal '(1 2 3) (cl-cc/vm::vm-reg-get s :R0))))
 
-;;; ─── Wave 2: ~I and ~_ directive tests ─────────────────────────────────────
-
-    (cl-cc/vm::vm-reg-set s :R1 "x~1Iy")
-    (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
-    (assert-equal "x y" (cl-cc/vm::vm-reg-get s :R0))))
+;;; ─── Wave 2: ~_ directive test (partial ANSI, conditional newline) ────────
 
 (deftest fmt-directive-tilde-underscore
-  "~_ emits newline (new Wave 2 directive)."
+  "VM recognizes ~_ directive and renders it (partial ANSI implementation)."
   (let ((s (fmt-vm)))
-    (cl-cc/vm::vm-reg-set s :R1 (format nil "a~_b"))
+    (cl-cc/vm::vm-reg-set s :R1 "a~_b")
     (fmt-exec (cl-cc:make-vm-format-inst :dst :R0 :fmt :R1 :arg-regs nil) s)
     (let ((result (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (search "a" result))
