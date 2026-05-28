@@ -43,6 +43,36 @@ auto-increment index to one greater than the key."
   (check-type arr hash-table)
   (gethash key arr))
 
+(defun %php-count (arr)
+  "Return the number of entries in PHP ordered array ARR."
+  (check-type arr hash-table)
+  (length (gethash +php-array-order-key+ arr)))
+
+(defun %php-strlen (s)
+  "Return the length of string S."
+  (check-type s string)
+  (length s))
+
+(defun %php-strtolower (s)
+  "Return S converted to lowercase."
+  (check-type s string)
+  (string-downcase s))
+
+(defun %php-strtoupper (s)
+  "Return S converted to uppercase."
+  (check-type s string)
+  (string-upcase s))
+
+(defun %php-isset (var)
+  "Return true when symbol VAR is bound."
+  (check-type var symbol)
+  (boundp var))
+
+(defun %php-array-key-exists (arr key)
+  "Return true when KEY exists in PHP ordered array ARR."
+  (check-type arr hash-table)
+  (member key (gethash +php-array-order-key+ arr) :test #'equal))
+
 (defun %php-array-next-auto-index (array)
   "Return and reserve ARRAY's current PHP auto-increment index."
   (let ((index (gethash +php-array-next-index-key+ array)))
@@ -64,3 +94,12 @@ to max(existing-next-index, key + 1), matching PHP array literal semantics."
         (%php-array-set array
                         (if key-present-p key (%php-array-next-auto-index array))
                         value)))))
+
+(defparameter *php-builtin-map*
+  `(("count" . ,#'%php-count)
+    ("strlen" . ,#'%php-strlen)
+    ("strtolower" . ,#'%php-strtolower)
+    ("strtoupper" . ,#'%php-strtoupper)
+    ("isset" . ,#'%php-isset)
+    ("array_key_exists" . ,#'%php-array-key-exists))
+  "Map PHP builtin names to runtime helper functions.")

@@ -146,17 +146,18 @@
 ;;; ─── Characterization tests for unsupported PHP support gaps ───────────────
 
 (deftest php-parser-match-expression
-  "Characterization: match should lower to a conditional AST, not a placeholder call."
+  "match lowers to a subject let with nested conditional dispatch."
   (let ((value (%php-first-binding-value
                 "<?php $result = match($x) { 1 => 'one', 2 => 'two', default => 'other' };")))
-    (assert-true (cl-cc:ast-if-p value))
+    (assert-true (cl-cc:ast-let-p value))
+    (assert-true (cl-cc:ast-if-p (first (cl-cc:ast-let-body value))))
     (assert-false (string= "MATCH" (or (%php-call-name value) "")))))
 
 (deftest php-parser-null-coalesce-expression
-  "Characterization: ?? should preserve the PHP null-coalescing operator in the AST."
+  "?? lowers to a temp let so the left-hand side is evaluated only once."
   (let ((value (%php-first-binding-value "<?php $result = $a ?? $b;")))
-    (assert-true (cl-cc:ast-binop-p value))
-    (assert-equal '?? (cl-cc:ast-binop-op value))))
+    (assert-true (cl-cc:ast-let-p value))
+    (assert-true (cl-cc:ast-if-p (first (cl-cc:ast-let-body value))))))
 
 (deftest php-parser-ternary-expression
   "Characterization: ternary ?: should parse as ast-if with cond/then/else."
@@ -172,12 +173,14 @@
 (deftest php-parser-yield-expression-unsupported-error
   "Characterization: yield remains explicitly unsupported until generator lowering is implemented."
   (assert-signals error
-    (cl-cc/php:parse-php-source "<?php function g() { yield 1; }")))
+    (cl-cc/php:php-check-supported-forms
+     (cl-cc/php:parse-php-source "<?php function g() { yield 1; }"))))
 
 (deftest php-parser-yield-from-expression-unsupported-error
   "Characterization: yield from remains explicitly unsupported until delegation generators exist."
   (assert-signals error
-    (cl-cc/php:parse-php-source "<?php function g() { yield from $items; }")))
+    (cl-cc/php:php-check-supported-forms
+     (cl-cc/php:parse-php-source "<?php function g() { yield from $items; }"))))
 
 (deftest php-parser-switch-case-default-statement
   "switch/case/default lowers to let + block + tagbody dispatch/fallthrough control flow."

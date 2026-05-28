@@ -6,5 +6,12 @@
    #:parse-php-source-to-cst
    #:%php-array
    #:%php-array-ref
-    #:%php-array-set
-    #:php-check-supported-forms))
+   #:%php-array-set
+   #:%php-count
+   #:%php-strlen
+   #:%php-strtolower
+   #:%php-strtoupper
+   #:%php-isset
+   #:%php-array-key-exists
+   #:*php-builtin-map*
+   #:php-check-supported-forms))

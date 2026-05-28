@@ -202,7 +202,7 @@
                    #'php-parse-add))
 
 (defun php-parse-coalesce (stream known-vars)
-  "Parse null coalescing ?? and ternary ?: operators."
+  "Parse null coalescing ?? without evaluating the left side twice."
   (multiple-value-bind (lhs rest kv) (php-parse-cmp stream known-vars)
     (loop
       (let ((type (php-peek-type rest)))
@@ -211,18 +211,33 @@
            (multiple-value-bind (op-tok rest2) (php-consume rest)
              (declare (ignore op-tok))
              (multiple-value-bind (rhs rest3 kv3) (php-parse-cmp rest2 kv)
-               (setf lhs (make-ast-if
-                          :cond (make-ast-binop :op '= :lhs lhs
-                                                 :rhs (make-ast-quote :value nil))
-                          :then rhs
-                          :else lhs)
+               (setf lhs (%php-lower-null-coalesce lhs rhs)
                      rest rest3
                      kv kv3))))
           (t (return)))))
     (values lhs rest kv)))
 
+(defun php-parse-ternary (stream known-vars)
+  "Parse PHP ternary and Elvis operators."
+  (multiple-value-bind (cond-expr rest kv) (php-parse-coalesce stream known-vars)
+    (if (eq (php-peek-type rest) :T-NULLABLE)
+        (multiple-value-bind (question-token rest2) (php-consume rest)
+          (declare (ignore question-token))
+          (if (eq (php-peek-type rest2) :T-COLON)
+              (multiple-value-bind (colon-token rest3) (php-consume rest2)
+                (declare (ignore colon-token))
+                (multiple-value-bind (else-expr rest4 kv4) (php-parse-expr rest3 kv)
+                  (values (%php-lower-elvis cond-expr else-expr) rest4 kv4)))
+              (multiple-value-bind (then-expr rest3 kv3) (php-parse-expr rest2 kv)
+                (multiple-value-bind (colon-token rest4) (php-expect :T-COLON rest3)
+                  (declare (ignore colon-token))
+                  (multiple-value-bind (else-expr rest5 kv5) (php-parse-expr rest4 kv3)
+                    (values (make-ast-if :cond cond-expr :then then-expr :else else-expr)
+                            rest5 kv5))))))
+        (values cond-expr rest kv))))
+
 (defun php-parse-and (stream known-vars)
-  (php-parse-binop stream known-vars '("&&") #'php-parse-coalesce))
+  (php-parse-binop stream known-vars '("&&") #'php-parse-ternary))
 
 (defun php-parse-or (stream known-vars)
   (php-parse-binop stream known-vars '("||") #'php-parse-and))
@@ -291,22 +306,11 @@
                      (nth-value 1 (php-parse-unary rest known-vars))
                      known-vars))))
       (:fn
-       (values (make-ast-call :func (make-ast-var :name 'fn) :args nil)
-               (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
-               known-vars))
+       (%php-parse-arrow-function rest known-vars))
       (:match
-       (values (make-ast-call :func (make-ast-var :name 'match) :args nil)
-               (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
-               known-vars))
+       (%php-parse-match-expression rest known-vars))
       (:yield
-       (let ((message (if (and (eq (php-peek-type rest) :T-KEYWORD)
-                               (eq (php-peek-value rest) :from))
-                          "PHP yield from is not yet supported in cl-cc"
-                          "PHP yield is not yet supported in cl-cc")))
-         (values (make-ast-call :func (make-ast-var :name '%php-unsupported)
-                                :args (list (make-ast-quote :value message)))
-                 (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
-                 known-vars)))
+       (%php-parse-yield-unsupported rest known-vars))
       (:throw
        (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
          (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
@@ -323,9 +327,206 @@
                      rest2 kv2))
            (values (make-ast-quote :value nil) rest known-vars)))
       (:function
-       (values (make-ast-call :func (make-ast-var :name 'function) :args nil)
-               (%php-skip-expression-like rest '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF))
-               known-vars)))))
+       (%php-parse-anonymous-function rest known-vars)))))
+
+(defun %php-null-quote ()
+  "Return the AST representation of PHP null."
+  (make-ast-quote :value nil))
+
+(defun %php-call (name &rest args)
+  "Build an AST call to NAME with ARGS."
+  (make-ast-call :func (make-ast-var :name name) :args args))
+
+(defun %php-not-null-cond (expr)
+  "Build (not (eq EXPR null)) as an AST expression."
+  (%php-call 'not (%php-call 'eq expr (%php-null-quote))))
+
+(defun %php-lower-null-coalesce (lhs rhs)
+  "Lower LHS ?? RHS without evaluating LHS twice."
+  (let ((tmp (gensym "PHP-COALESCE-")))
+    (make-ast-let
+     :bindings (list (cons tmp lhs))
+     :body (list (make-ast-if
+                  :cond (%php-not-null-cond (make-ast-var :name tmp))
+                  :then (make-ast-var :name tmp)
+                  :else rhs)))))
+
+(defun %php-lower-elvis (condition else-expr)
+  "Lower CONDITION ?: ELSE-EXPR without evaluating CONDITION twice."
+  (let ((tmp (gensym "PHP-ELVIS-")))
+    (make-ast-let
+     :bindings (list (cons tmp condition))
+     :body (list (make-ast-if
+                  :cond (make-ast-var :name tmp)
+                  :then (make-ast-var :name tmp)
+                  :else else-expr)))))
+
+(defun %php-unsupported (message &optional expr)
+  "Build a PHP unsupported-form marker call."
+  (make-ast-call :func (make-ast-var :name '%php-unsupported)
+                 :args (append (list (make-ast-quote :value message))
+                               (when expr (list expr)))))
+
+(defun %php-capture-wrapper (captures value)
+  "Wrap VALUE in explicit let-bindings that snapshot CAPTURES by value."
+  (if captures
+      (make-ast-let
+       :bindings (mapcar (lambda (name) (cons name (make-ast-var :name name))) captures)
+       :body (list value))
+      value))
+
+(defun %php-arrow-captures (body params known-vars)
+  "Return PHP variables captured by an arrow function body."
+  (set-difference (intersection (find-free-variables body) known-vars :test #'eq)
+                  params :test #'eq))
+
+(defun %php-parse-arrow-function (stream known-vars)
+  "Parse fn(params) => expr and lower it to captured ast-lambda."
+  (multiple-value-bind (params rest param-types) (php-parse-param-list stream)
+    (declare (ignore param-types))
+    (multiple-value-bind (return-type rest2) (php-parse-return-type rest)
+      (declare (ignore return-type))
+      (unless (and (eq (php-peek-type rest2) :T-OP)
+                   (equal "=>" (php-peek-value rest2)))
+        (error "PHP parse error: expected => after arrow function parameters"))
+      (multiple-value-bind (arrow-token rest3) (php-consume rest2)
+        (declare (ignore arrow-token))
+        (multiple-value-bind (body rest4 kv4) (php-parse-expr rest3 (append params known-vars))
+          (let* ((captures (%php-arrow-captures body params known-vars))
+                 (lambda (make-ast-lambda :params params :body (list body))))
+            (values (%php-capture-wrapper captures lambda) rest4 kv4))))))
+
+(defun %php-parse-closure-use-list (stream)
+  "Parse optional PHP closure use($x, $y) and return captures/rest."
+  (if (and (eq (php-peek-type stream) :T-KEYWORD)
+           (eq (php-peek-value stream) :use))
+      (let ((current (%php-consume-expected :T-LPAREN (cdr stream)))
+            (captures nil))
+        (unless (eq (php-peek-type current) :T-RPAREN)
+          (loop
+            (when (and (eq (php-peek-type current) :T-OP)
+                       (equal "&" (php-peek-value current)))
+              (setf current (cdr current)))
+            (multiple-value-bind (var-token rest) (php-expect :T-VAR current)
+              (push (php-var-sym (php-tok-value var-token)) captures)
+              (setf current rest))
+            (if (eq (php-peek-type current) :T-COMMA)
+                (setf current (cdr current))
+                (return))))
+        (values (nreverse captures) (%php-consume-expected :T-RPAREN current)))
+      (values nil stream)))
+
+(defun %php-parse-anonymous-function (stream known-vars)
+  "Parse function(params) use(vars) { body } as an ast-lambda with explicit captures."
+  (multiple-value-bind (params rest param-types) (php-parse-param-list stream)
+    (declare (ignore param-types))
+    (multiple-value-bind (captures rest2) (%php-parse-closure-use-list rest)
+      (multiple-value-bind (return-type rest3) (php-parse-return-type rest2)
+        (declare (ignore return-type))
+        (multiple-value-bind (body-stmts rest4 kv4)
+            (php-parse-block rest3 (append params captures known-vars))
+          (values (%php-capture-wrapper
+                   captures
+                   (make-ast-lambda :params params :body body-stmts))
+                  rest4 kv4))))))
+
+(defun %php-parse-yield-unsupported (stream known-vars)
+  "Parse yield/yield from as an unsupported marker with the yielded expression attached."
+  (if (and (eq (php-peek-type stream) :T-KEYWORD)
+           (eq (php-peek-value stream) :from))
+      (multiple-value-bind (from-token rest) (php-consume stream)
+        (declare (ignore from-token))
+        (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
+          (values (%php-unsupported "PHP yield from is not yet supported" expr)
+                  rest2 kv2)))
+      (if (member (php-peek-type stream) '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF) :test #'eq)
+          (values (%php-unsupported "PHP yield is not yet supported") stream known-vars)
+          (multiple-value-bind (expr rest2 kv2) (php-parse-expr stream known-vars)
+            (values (%php-unsupported "PHP yield is not yet supported" expr)
+                    rest2 kv2)))))
+
+(defun %php-match-error-call ()
+  "Return the fallback call used when no PHP match arm applies."
+  (%php-call '%php-match-error))
+
+(defun %php-build-match-condition (subject-sym tests)
+  "Build an OR of strict-equality tests for one match arm."
+  (let ((comparisons
+          (mapcar (lambda (test)
+                    (%php-call 'equal (make-ast-var :name subject-sym) test))
+                  tests)))
+    (reduce (lambda (lhs rhs)
+              (make-ast-binop :op 'or :lhs lhs :rhs rhs))
+            (cdr comparisons)
+            :initial-value (car comparisons))))
+
+(defun %php-lower-match (subject arms default-expr)
+  "Lower PHP match SUBJECT and ARMS to a subject let plus nested ast-if chain."
+  (let ((subject-sym (gensym "PHP-MATCH-SUBJECT-")))
+    (labels ((chain (remaining)
+               (if remaining
+                   (destructuring-bind (tests . value) (car remaining)
+                     (make-ast-if
+                      :cond (%php-build-match-condition subject-sym tests)
+                      :then value
+                      :else (chain (cdr remaining))))
+                   (or default-expr (%php-match-error-call)))))
+      (make-ast-let
+       :bindings (list (cons subject-sym subject))
+       :body (list (chain arms))))))
+
+(defun %php-parse-match-arm-tests (stream known-vars)
+  "Parse one PHP match arm condition list or default marker."
+  (if (and (eq (php-peek-type stream) :T-KEYWORD)
+           (eq (php-peek-value stream) :default))
+      (values :default (cdr stream) known-vars)
+      (let ((tests nil)
+            (current stream)
+            (kv known-vars))
+        (loop
+          (multiple-value-bind (test rest kv2) (php-parse-expr current kv)
+            (push test tests)
+            (setf current rest kv kv2))
+          (cond
+            ((%php-double-arrow-p current) (return))
+            ((eq (php-peek-type current) :T-COMMA)
+             (setf current (cdr current)))
+            (t (error "PHP parse error: expected comma or => in match arm, got ~S"
+                      (php-peek current)))))
+        (values (nreverse tests) current kv))))
+
+(defun %php-parse-match-expression (stream known-vars)
+  "Parse match(expr) { arms } and lower to let plus nested ifs."
+  (let ((current (%php-consume-expected :T-LPAREN stream)))
+    (multiple-value-bind (subject rest kv) (php-parse-expr current known-vars)
+      (setf current (%php-consume-expected :T-RPAREN rest))
+      (setf current (%php-consume-expected :T-LBRACE current))
+      (let ((arms nil)
+            (default-expr nil)
+            (kv-current kv))
+        (loop
+          (when (eq (php-peek-type current) :T-RBRACE)
+            (return))
+          (multiple-value-bind (tests rest2 kv2) (%php-parse-match-arm-tests current kv-current)
+            (setf current rest2 kv-current kv2)
+            (unless (%php-double-arrow-p current)
+              (error "PHP parse error: expected => in match arm, got ~S" (php-peek current)))
+            (multiple-value-bind (arrow-token rest3) (php-consume current)
+              (declare (ignore arrow-token))
+              (multiple-value-bind (value rest4 kv4) (php-parse-expr rest3 kv-current)
+                (if (eq tests :default)
+                    (setf default-expr value)
+                    (push (cons tests value) arms))
+                (setf current rest4 kv-current kv4))))
+          (cond
+            ((eq (php-peek-type current) :T-COMMA)
+             (setf current (cdr current)))
+            ((eq (php-peek-type current) :T-RBRACE))
+            (t (error "PHP parse error: expected comma or } after match arm, got ~S"
+                      (php-peek current)))))
+        (values (%php-lower-match subject (nreverse arms) default-expr)
+                (%php-consume-expected :T-RBRACE current)
+                kv-current)))))
 
 (defun %php-helper-var (name)
   "Return an AST variable for a PHP runtime helper NAME."
