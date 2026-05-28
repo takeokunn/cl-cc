@@ -400,14 +400,17 @@ $ cl-cc repl
 
 ## Known Limitations
 
-- **Package system**: runtime package operations now maintain internal registry metadata and use host Common Lisp only as a bootstrap fallback. Multi-package programs are not yet fully self-hosted.
-- **`format` directives**: Delegated to the host SBCL in the VM interpreter. Not available in native binaries.
-- **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL handles the arithmetic). Not represented in the native x86-64 backend (fixnum only).
-- **Native backend parity**: Some VM-interpreter facilities (`load`, host-backed FFI, host-backed `format`, and host stream bridges) are not yet available in native binaries.
+ANSI CL conformance status: **8111 tests pass, 65 failures** (all pre-existing optimizer/backend/VM-CLOS regressions). See `docs/ansi-cl-lang.md` and `docs/ansi-cl-stdlib.md` for detailed feature requirement tracking.
+
+- **Package system**: 14 runtime functions + 8 VM instructions added (Wave 1). Internal registry metadata exists; host CL is a bootstrap fallback. Multi-package self-hosting is partial. See `tests/conformance/package-conformance-tests.lisp` (18 expected-fail tests).
+- **`format` directives**: Native `%vm-format-render` supports ~30 directives. `~_` (conditional newline) and `~I` (indent) added (Wave 2 — partial ANSI). Host SBCL fallback on error. Not available in native x86-64 binaries.
+- **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL arithmetic + JIT-callable bridges in `runtime-io.lisp`). Not represented in the native x86-64 backend (fixnum only). See `tests/conformance/number-conformance-tests.lisp` (24 expected-fail tests).
+- **Native backend parity**: `load`, host-backed FFI, host-backed `format`, and host stream bridges not yet available in native binaries. 21 pathname/file/compound-stream/LOAD runtime functions added (Wave 4).
 - **Unicode normalization**: NFC/NFD is implemented for Latin-1 characters. Full Unicode 15 normalization (NFKC/NFKD, UCA collation) requires the complete Unicode Character Database.
 - **Concurrency**: Green threads, channels, actors, STM, lock-free structures, and EBR/RCU/QSBR are implemented as pure-CL primitives suitable for cooperative multitasking. Native OS thread scheduling and M:N threading are not yet integrated.
 - **Distributed systems**: Raft consensus and CRDTs have proof-of-concept implementations. They lack full RPC integration, log persistence, and network transport layers needed for production use.
-- **Standalone binary**: The `standalone` CLI option generates a native Mach-O/ELF binary with runtime linked, but full self-hosting (no host CL dependency at all) is not yet complete.
+- **Standalone binary**: The `standalone` CLI option generates a native Mach-O/ELF binary with runtime linked, but full self-hosting (no host CL dependency at all) is not yet complete. Self-host pipeline exists in `packages/selfhost/src/pipeline-selfhost.lisp`.
+- **I/O and streams**: 94 conformance tests in `tests/conformance/native-io-conformance-tests.lisp` (expected-fail). String streams, basic file I/O work via host CL bridging.
 
 ## Building & Testing
 
