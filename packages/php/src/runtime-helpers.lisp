@@ -8,6 +8,86 @@
 (defconstant +php-array-next-index-key+ :__php-array-next-index
   "Reserved hash-table key storing the next PHP auto-increment index.")
 
+(defvar +php-null+ '%php-null%
+  "PHP null sentinel distinct from CL nil.")
+
+(defun %php-null-p (x)
+  "Return true when X is the PHP null sentinel."
+  (eq x +php-null+))
+
+(defun %php-array-empty-p (ht)
+  "Return true when PHP ordered array HT contains no user entries."
+  (check-type ht hash-table)
+  (null (gethash +php-array-order-key+ ht)))
+
+(defun %php-value-type (x)
+  "Return the PHP runtime value type keyword for X."
+  (cond ((%php-null-p x) :null)
+        ((null x) :bool)
+        ((integerp x) :int)
+        ((floatp x) :float)
+        ((stringp x) :string)
+        ((hash-table-p x) :array)
+        (t (type-of x))))
+
+(defun %php-truthy (value)
+  "Return VALUE interpreted according to PHP truthiness rules."
+  (cond ((%php-null-p value) nil)
+        ((null value) nil)
+        ((and (integerp value) (zerop value)) nil)
+        ((and (floatp value) (zerop value)) nil)
+        ((and (stringp value) (or (string= value "") (string= value "0"))) nil)
+        ((and (hash-table-p value) (%php-array-empty-p value)) nil)
+        (t t)))
+
+(defun %php-to-number (s)
+  "Coerce PHP string S to a number for loose comparisons."
+  (check-type s string)
+  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) s)))
+    (cond ((string= trimmed "") 0)
+          ((find-if (lambda (ch) (member ch '(#\. #\e #\E))) trimmed)
+           (handler-case
+               (let ((value (read-from-string trimmed)))
+                 (if (numberp value) value 0))
+             (error () 0)))
+          (t
+           (handler-case
+               (or (parse-integer trimmed :junk-allowed t) 0)
+             (error () 0))))))
+
+(defun %php-eq-strict (a b)
+  "Return true when A and B are equal according to PHP === semantics."
+  (let ((type-a (%php-value-type a))
+        (type-b (%php-value-type b)))
+    (and (eq type-a type-b)
+         (case type-a
+           (:null t)
+           (:bool (eq a b))
+           ((:int :float :string) (equal a b))
+           (:array (eq a b))
+           (otherwise (equal a b))))))
+
+(defun %php-eq-loose (a b)
+  "Return true when A and B are equal according to PHP == semantics."
+  (let ((type-a (%php-value-type a))
+        (type-b (%php-value-type b)))
+    (cond ((and (eq type-a :bool) (eq type-b :bool))
+           (eq a b))
+          ((or (eq type-a :bool) (eq type-b :bool)
+               (eq type-a :null) (eq type-b :null))
+           (eq (%php-truthy a) (%php-truthy b)))
+          ((and (member type-a '(:int :float)) (member type-b '(:int :float)))
+           (= a b))
+          ((and (eq type-a :string) (member type-b '(:int :float)))
+           (= (%php-to-number a) b))
+          ((and (member type-a '(:int :float)) (eq type-b :string))
+           (= a (%php-to-number b)))
+          ((and (eq type-a :string) (eq type-b :string))
+           (if (or (string= a "") (string= b ""))
+               (= (%php-to-number a) (%php-to-number b))
+               (%php-eq-strict a b)))
+          (t (%php-eq-strict a b)))))
+
 (defun %php-array-key-present-p (array key)
   "Return true when ARRAY already contains PHP array KEY."
   (nth-value 1 (gethash key array)))
@@ -41,7 +121,8 @@ auto-increment index to one greater than the key."
 (defun %php-array-ref (arr key)
   "Return ARR[KEY] for a PHP ordered array helper hash-table."
   (check-type arr hash-table)
-  (gethash key arr))
+  (multiple-value-bind (value present-p) (gethash key arr)
+    (if present-p value +php-null+)))
 
 (defun %php-count (arr)
   "Return the number of entries in PHP ordered array ARR."

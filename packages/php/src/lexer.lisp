@@ -5,7 +5,7 @@
 ;;;;
 ;;;; Token types:
 ;;;;   :T-EOF            - end of input
-;;;;   :T-VAR            - $name (value = interned symbol, no $)
+;;;;   :T-VAR            - $name (value = raw string with $ prefix)
 ;;;;   :T-INT            - integer literal (value = integer)
 ;;;;   :T-FLOAT          - float literal (value = float)
 ;;;;   :T-STRING         - string literal (value = string content)
@@ -252,7 +252,7 @@
   (let ((start pos))
     (loop while (and (< pos (length source)) (php-alnum-p (char source pos)))
           do (incf pos))
-    (let ((name (intern (string-upcase (subseq source start pos)))))
+    (let ((name (subseq source (1- start) pos)))
       (values (make-php-token :T-VAR name) pos))))
 
 

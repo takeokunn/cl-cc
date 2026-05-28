@@ -132,8 +132,17 @@
   "Plain assignment is parsed as an expression statement."
   (let ((ast (%php-first "<?php $x = 42;")))
     (assert-true (or (typep ast 'cl-cc:ast-setq)
-                     (typep ast 'cl-cc:ast-let)
-                     (typep ast 'cl-cc:ast-call)))))
+                      (typep ast 'cl-cc:ast-let)
+                      (typep ast 'cl-cc:ast-call)))))
+
+(deftest php-parser-variable-names-preserve-case
+  "PHP variables are case-sensitive: $foo, $FOO, and $Foo are distinct AST symbols."
+  (let* ((asts (cl-cc/php:parse-php-source "<?php $foo = 1; $FOO = 2; $Foo = 3;"))
+         (names (mapcar (lambda (ast)
+                          (symbol-name (car (first (cl-cc:ast-let-bindings ast)))))
+                        asts)))
+    (assert-equal '("foo" "FOO" "Foo") names)
+    (assert-= 3 (length (remove-duplicates names :test #'string=)))))
 
 ;;; ─── Multiple top-level statements ───────────────────────────────────────
 
@@ -144,6 +153,69 @@
     (assert-true (every #'ast-print-p asts))))
 
 ;;; ─── Characterization tests for unsupported PHP support gaps ───────────────
+
+(deftest php-parser-null-distinct-from-false
+  "null and false produce different AST quote values."
+  (let ((null-ast (%php-first "<?php $x = null;"))
+        (false-ast (%php-first "<?php $x = false;")))
+    (let ((null-val (cl-cc:ast-quote-value (cdr (first (cl-cc:ast-let-bindings null-ast)))))
+          (false-val (cl-cc:ast-quote-value (cdr (first (cl-cc:ast-let-bindings false-ast))))))
+      (assert-false (eql null-val false-val)))))
+
+(deftest php-parser-truthiness-rules
+  "PHP conditionals should lower conditions through PHP truthiness rules."
+  (let ((ast (%php-first "<?php if ($x) { echo 1; } else { echo 2; }")))
+    (assert-true (cl-cc:ast-if-p ast))
+    (let ((cond (cl-cc:ast-if-cond ast)))
+      (assert-true (cl-cc:ast-call-p cond))
+      (assert-string= "%PHP-TRUTHY" (%php-call-name cond)))))
+
+(deftest php-parser-variable-case-sensitive
+  "$foo and $FOO produce different variable symbols."
+  (let ((ast (%php-first "<?php $foo = $FOO;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (let* ((bindings (cl-cc:ast-let-bindings ast))
+           (lhs (car (first bindings)))
+           (rhs (cdr (first bindings))))
+      (assert-true (cl-cc:ast-var-p rhs))
+      (assert-false (string= (symbol-name lhs) (symbol-name (cl-cc:ast-var-name rhs)))))))
+
+(deftest php-parser-count-builtin-lowering
+  "count($arr) should lower to %php-count helper, not raw function call."
+  (let ((ast (%php-first "<?php $n = count($arr);")))
+    (let ((call (cdr (first (cl-cc:ast-let-bindings ast)))))
+      (assert-true (cl-cc:ast-call-p call))
+      (assert-string= "%PHP-COUNT" (%php-call-name call)))))
+
+(deftest php-parser-isset-syntax-lowering
+  "isset($x) should be lowered without treating $x as a variable reference."
+  (let ((ast (%php-first "<?php $result = isset($x);")))
+    (let ((call (cdr (first (cl-cc:ast-let-bindings ast)))))
+      (assert-true (cl-cc:ast-call-p call))
+      (assert-true (search "ISSET" (%php-call-name call))))))
+
+(deftest php-parser-match-strict-comparison
+  "match should use strict equality, not EQUAL."
+  (let ((ast (%php-first "<?php $x = match($v) { 1 => 'one', 2 => 'two' };")))
+    (let ((val (cdr (first (cl-cc:ast-let-bindings ast)))))
+      (assert-true (cl-cc:ast-let-p val))
+      (let ((if-chain (first (cl-cc:ast-let-body val))))
+        (assert-true (cl-cc:ast-if-p if-chain))
+        (let ((cond (cl-cc:ast-if-cond if-chain)))
+          (assert-true (cl-cc:ast-call-p cond))
+          (assert-false (string= "EQUAL" (%php-call-name cond))))))))
+
+(deftest php-parser-foreach-ordered-iteration
+  "foreach should bind key and value and iterate array order."
+  (let ((ast (%php-first "<?php foreach ($arr as $k => $v) { echo $v; }")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (let ((bindings (cl-cc:ast-let-bindings ast)))
+      (assert-= 2 (length bindings)))))
+
+(deftest php-parser-throw-catch-consistency
+  "throw inside try should produce catchable exception structure."
+  (let ((ast (%php-first "<?php try { throw new Ex(); } catch (Ex $e) { echo 'caught'; }")))
+    (assert-true (cl-cc:ast-unwind-protect-p ast))))
 
 (deftest php-parser-match-expression
   "match lowers to a subject let with nested conditional dispatch."
@@ -171,7 +243,7 @@
     (assert-true (cl-cc:ast-let-p value))
     (let ((lambda (first (cl-cc:ast-let-body value))))
       (assert-true (cl-cc:ast-lambda-p lambda))
-      (assert-equal '("X") (mapcar #'symbol-name (cl-cc:ast-lambda-params lambda))))))
+      (assert-equal '("x") (mapcar #'symbol-name (cl-cc:ast-lambda-params lambda))))))
 
 (deftest php-parser-yield-expression-unsupported-error
   "Characterization: yield remains explicitly unsupported until generator lowering is implemented."
@@ -301,7 +373,7 @@
     (assert-true (cl-cc:ast-defun-p ast))
     (let ((decls (cl-cc:ast-defun-declarations ast)))
       (assert-equal "bool" (getf decls :php-return-type))
-      (assert-equal '(("A" . "int") ("B" . "?string") ("C" . "int|string"))
+      (assert-equal '(("a" . "int") ("b" . "?string") ("c" . "int|string"))
                     (mapcar (lambda (entry)
                               (cons (symbol-name (car entry)) (cdr entry)))
                             (getf decls :php-param-types))))))

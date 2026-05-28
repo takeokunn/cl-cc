@@ -118,9 +118,14 @@
 
 (defun php-var-sym (tok-value)
   "Convert a PHP variable token value to a CL symbol (strips $ conceptually)."
-  (if (symbolp tok-value)
-      tok-value
-      (intern (string-upcase tok-value))))
+  (let ((name (if (stringp tok-value)
+                  tok-value
+                  (symbol-name tok-value))))
+    (intern (if (and (plusp (length name))
+                    (char= #\$ (char name 0)))
+                (subseq name 1)
+                name)
+            :cl-cc/php)))
 
 (defun php-ident-sym (str)
   "Convert PHP identifier string to a CL symbol."

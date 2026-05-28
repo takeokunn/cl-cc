@@ -40,10 +40,10 @@
     (assert-equal expected-val (php-tok-value tok))))
 
 (deftest php-lex-variable-produces-t-var
-  "PHP lexer: $x produces a :T-VAR token with the variable name (without $)."
+  "PHP lexer: $x produces a :T-VAR token with the raw variable name."
   (let ((tokens (cl-cc/php:tokenize-php-source "<?php $x;")))
     (assert-eq :T-VAR (php-tok-type (first tokens)))
-    (assert-true (string-equal "x" (symbol-name (php-tok-value (first tokens)))))))
+    (assert-equal "$x" (php-tok-value (first tokens)))))
 
 (deftest php-lex-type-keyword-produces-t-type
   "PHP lexer: 'int' type keyword produces a :T-TYPE token with value :int."
