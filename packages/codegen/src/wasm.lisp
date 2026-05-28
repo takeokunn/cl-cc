@@ -876,7 +876,7 @@ primary eqref result back to i64."
 
 (defun wasm-tool-available-p (program)
   "Return T when PROGRAM can be found on PATH."
-  (let ((path (ignore-errors (sb-ext:posix-getenv "PATH"))))
+  (let ((path (ignore-errors (cl-cc/runtime:rt-getenv "PATH"))))
     (and path
          (loop with start = 0
                for end = (position #\: path :start start)

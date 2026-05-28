@@ -17,8 +17,10 @@ Default NIL preserves the existing optimizer output and the 7746/0 baseline.")
   "Return a trimmed single-line command result, or NIL on failure."
   (handler-case
       (let ((out (make-string-output-stream)))
-        (let ((proc (sb-ext:run-program program args :output out :error nil :search t)))
-          (when (zerop (sb-ext:process-exit-code proc))
+        (let ((proc #+sbcl (sb-ext:run-program program args :output out :error nil :search t)
+                    #-sbcl nil))
+          (when #+sbcl (zerop (sb-ext:process-exit-code proc))
+                #-sbcl nil
             (%autotune-trim (get-output-stream-string out)))))
     (error () nil)))
 

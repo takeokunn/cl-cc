@@ -22,7 +22,10 @@
 
 (defun nan-box-float (float-val)
   "Box a float value for NaN-boxed representation."
-  (sb-kernel:double-float-bits float-val))
+  #+sbcl
+  (sb-kernel:double-float-bits float-val)
+  #-sbcl
+  (error "NAN-BOX-FLOAT requires SBCL double-float bit access: ~S" float-val))
 
 (defun nan-box-fixnum (fixnum-val)
   "Box a fixnum into NaN space."

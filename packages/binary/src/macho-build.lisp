@@ -751,9 +751,10 @@ reordering directly controls the final text layout."
     (let ((codesign-program (probe-file "/usr/bin/codesign")))
       (when codesign-program
         (ignore-errors
-          (sb-ext:run-program (namestring codesign-program)
-                              (list "-s" "-" "-f" (namestring (pathname filename)))
-                              :search nil
-                              :output nil
-                              :error nil)))))
+          #+sbcl (sb-ext:run-program (namestring codesign-program)
+                      (list "-s" "-" "-f" (namestring (pathname filename)))
+                      :search nil
+                      :output nil
+                      :error nil)
+          #-sbcl nil)))
   filename)

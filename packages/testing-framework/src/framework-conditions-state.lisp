@@ -19,6 +19,11 @@
   (:report (lambda (c s)
              (format s "TODO: ~A" (pending-reason c)))))
 
+(define-condition expected-fail-condition (condition)
+  ((reason :initarg :reason :reader expected-fail-reason))
+  (:report (lambda (c s)
+             (format s "EXPECTED-FAIL: ~A" (expected-fail-reason c)))))
+
 ;;; ------------------------------------------------------------
 ;;; Internal State
 ;;; ------------------------------------------------------------

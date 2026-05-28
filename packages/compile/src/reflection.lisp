@@ -26,21 +26,21 @@
     (length (remove-if (lambda (x) (member x '(&optional &rest &key &allow-other-keys)))
                        info)))
   #-sbcl
-  0)
+  nil)
 
 (defun reflect-function-name (fn)
   "Return the name of function FN."
   #+sbcl
   (sb-kernel:%fun-name fn)
   #-sbcl
-  (princ-to-string fn))
+  nil)
 
 ;;; ──── Slot reflection ────
 (defun reflect-class-slots (class-name)
   "Return list of slot names for CLASS-NAME."
   #+sbcl
-  (mapcar #'sb-mop:slot-definition-name
-          (sb-mop:class-direct-slots (find-class class-name)))
+  (mapcar #'cl-cc/vm:slot-definition-name
+          (cl-cc/vm::class-direct-slots (find-class class-name)))
   #-sbcl
   nil)
 
@@ -59,13 +59,13 @@
   #+sbcl
   (sb-kernel:%simple-fun-p fn)
   #-sbcl
-  t)
+  nil)
 
 ;;; ──── Meta-object protocol extension ────
 (defun reflect-generic-function-methods (gf-name)
   "Return list of method specializers for GF-NAME."
   #+sbcl
-  (mapcar #'sb-mop:method-specializers
-          (sb-mop:generic-function-methods (fdefinition gf-name)))
+  (mapcar #'cl-cc/vm::method-specializers
+          (cl-cc/vm:generic-function-methods (fdefinition gf-name)))
   #-sbcl
   nil)

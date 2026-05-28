@@ -581,7 +581,15 @@
     #:rt-pinned-unboxed-array-buffer-array
     #:rt-pinned-unboxed-array-buffer-length
     #:rt-pinned-array-data-pointer #:rt-release-pinned-array
-    #:rt-pinned-unboxed-array-buffer-released-p))
+    #:rt-pinned-unboxed-array-buffer-released-p
+    ;; ── Self-host portability facades (portable.lisp) ──
+    #:rt-unsupported-operation #:rt-unsupported-operation-name
+    #:rt-unsupported
+    #:rt-current-thread-token
+    #:rt-make-lock #:rt-with-lock #:rt-lock #:rt-unlock #:rt-try-lock
+    #:rt-thread-yield
+    #:rt-atomic-compare-and-swap-symbol
+    #:rt-getenv #:rt-quit #:rt-with-timeout))
 
 (in-package :cl-cc/runtime)
 

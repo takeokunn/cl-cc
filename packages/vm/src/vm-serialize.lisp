@@ -21,8 +21,8 @@
 (defun %vm-serialize-slot-names (object)
   #+sbcl
   (handler-case
-      (loop for slot in (sb-mop:class-slots (class-of object))
-            for name = (sb-mop:slot-definition-name slot)
+      (loop for slot in (class-slots (class-of object))
+            for name = (slot-definition-name slot)
             when (slot-boundp object name) collect name)
     (error () nil))
   #-sbcl (declare (ignore object))

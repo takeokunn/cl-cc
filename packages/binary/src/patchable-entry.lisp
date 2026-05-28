@@ -104,7 +104,9 @@ The patched bytes must not exceed *PATCHABLE-ENTRY-BEFORE*."
     ;; Write new code bytes over the NOPs
     (loop for i from 0 below patch-size
           for byte across new-code-bytes
-          do (setf (sb-sys:sap-ref-8 (sb-sys:int-sap func-addr) i) byte))
+          do (setf #+sbcl (sb-sys:sap-ref-8 (sb-sys:int-sap func-addr) i)
+                 #-sbcl (aref new-code-bytes i) ; selfhost: no in-place patching
+                 byte))
     t))
 
 ;;; ──── Integration with codegen ────

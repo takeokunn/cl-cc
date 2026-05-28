@@ -171,7 +171,7 @@
   (callbacks (make-hash-table :test #'equal))
   (last-error (make-cl-cc-error))
   (closed-p nil :type boolean)
-  (lock (sb-thread:make-mutex :name "cl-cc embedding state lock")))
+  (lock (cl-cc/runtime:rt-make-lock "cl-cc embedding state lock")))
 
 (defvar *cl-cc-next-state-id* 0)
 
@@ -249,7 +249,7 @@
   "Evaluate CODE in STATE and return a cl-cc-value."
   (check-type state cl-cc-state)
   (check-type code string)
-  (sb-thread:with-mutex ((cl-cc-state-lock state))
+  (cl-cc/runtime:rt-with-lock ((cl-cc-state-lock state))
     (handler-case
         (progn
           (when (cl-cc-state-closed-p state)
@@ -264,7 +264,7 @@
   "Call FUNCTION-NAME in STATE with ARGS and return a cl-cc-value."
   (check-type state cl-cc-state)
   (check-type function-name string)
-  (sb-thread:with-mutex ((cl-cc-state-lock state))
+  (cl-cc/runtime:rt-with-lock ((cl-cc-state-lock state))
     (handler-case
         (progn
           (when (cl-cc-state-closed-p state)
@@ -285,7 +285,7 @@
   (check-type state cl-cc-state)
   (check-type name string)
   (check-type function function)
-  (sb-thread:with-mutex ((cl-cc-state-lock state))
+  (cl-cc/runtime:rt-with-lock ((cl-cc-state-lock state))
     (let ((callback (rt-make-callback function arg-types return-type)))
       (setf (gethash name (cl-cc-state-callbacks state)) callback)
       callback)))
@@ -299,7 +299,7 @@
 (defun cl-cc-cleanup (state)
   "Release resources associated with STATE."
   (check-type state cl-cc-state)
-  (sb-thread:with-mutex ((cl-cc-state-lock state))
+  (cl-cc/runtime:rt-with-lock ((cl-cc-state-lock state))
     (clrhash (cl-cc-state-callbacks state))
     (setf (cl-cc-state-vm state) nil
           (cl-cc-state-closed-p state) t)

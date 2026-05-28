@@ -4,7 +4,7 @@
 
 (defparameter *num-workers*
   #+sbcl (max 1 (or (ignore-errors
-                      (let ((value (sb-ext:posix-getenv "CLCC_PARALLEL")))
+                      (let ((value (cl-cc/runtime:rt-getenv "CLCC_PARALLEL")))
                         (and value (parse-integer value :junk-allowed nil))))
                     (ignore-errors
                       (let ((sym (find-symbol "CPU-COUNT" :uiop)))
@@ -93,7 +93,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
          (completed (make-hash-table :test #'equal))
          (results nil)
          (errors nil)
-         (lock #+sbcl (sb-thread:make-mutex :name "cl-cc parallel compiler") #-sbcl nil)
+          (lock #+sbcl (cl-cc/runtime:rt-make-mutex :name "cl-cc parallel compiler") #-sbcl nil)
          (worker-count (%parallel-worker-count workers files)))
     (labels ((file-path (name) (find name files :key #'%parallel-file-namestring :test #'string=))
              (output-path (file)
@@ -102,7 +102,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                                   output-directory)))
              (next-file ()
                #+sbcl
-               (sb-thread:with-mutex (lock)
+                (cl-cc/runtime:rt-with-mutex (lock)
                  (let ((ready (%parallel-ready-file pending completed graph)))
                    (when ready
                      (setf pending (remove ready pending :test #'string=))
@@ -114,7 +114,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                    ready)))
              (record-result (name output)
                #+sbcl
-               (sb-thread:with-mutex (lock)
+                (cl-cc/runtime:rt-with-mutex (lock)
                  (setf (gethash name completed) t)
                  (push (cons name output) results))
                #-sbcl
@@ -122,7 +122,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                       (push (cons name output) results)))
              (record-error (name condition)
                #+sbcl
-               (sb-thread:with-mutex (lock)
+                (cl-cc/runtime:rt-with-mutex (lock)
                  (push (cons name condition) errors)
                  (setf (gethash name completed) t))
                #-sbcl

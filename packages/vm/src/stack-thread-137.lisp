@@ -24,7 +24,7 @@ Called at function entry to detect stack exhaustion."
 (defun install-stack-guard-page ()
   "Place a guard page at stack end using mmap(PROT_NONE).
 SIGSEGV/SIGBUS on access is caught and converted to stack-overflow-error."
-  #+linux
+  #+(and sbcl linux)
   (sb-alien:alien-funcall
    (sb-alien:extern-alien "mmap" (function sb-alien:unsigned-long
                                     sb-alien:unsigned-long sb-alien:unsigned-long

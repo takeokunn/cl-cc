@@ -380,13 +380,13 @@ enabled by higher-level code."
 (defun x86-64-supports-avx512-p ()
   "Return T when AVX-512 support is enabled by flag or visible in host feature text."
   (or *x86-64-avx512-enabled*
-      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_AVX512")))
+      (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_AVX512")))
       (x86-64-host-supports-cpu-feature-p "avx512f")))
 
 (defun x86-64-supports-amx-p ()
   "Return T when Intel AMX support is enabled or detected via host CPUID text."
   (or *amx-enabled*
-      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_AMX")))
+      (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_AMX")))
       (x86-64-host-supports-cpu-feature-p "amx_tile")
       (x86-64-host-supports-cpu-feature-p "amx-tile")))
 

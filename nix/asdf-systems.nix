@@ -79,7 +79,7 @@ let
     };
     cl-cc-vm = {
       src = "packages/vm";
-      deps = [ "cl-cc-bootstrap" ];
+      deps = [ "cl-cc-bootstrap" "cl-cc-runtime" ];
     };
     cl-cc-sb-mop = {
       src = "packages/sb-mop";

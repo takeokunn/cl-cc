@@ -235,6 +235,7 @@ these must be reimplemented with actual tag checks."
 
 (defun a64-libm-address (libm-fn)
   "Return the process address of LIBM-FN as an unsigned 64-bit value."
+  #+sbcl
   (cond
     ((string= libm-fn "sin")
      (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap

@@ -350,11 +350,11 @@ serialized bytecode/tests that constructed closures with :CAPTURED-VALUES."
   "Return STATE's isolation mutex, creating it lazily when needed."
   (or (gethash state *vm-instance-locks*)
       (setf (gethash state *vm-instance-locks*)
-            (sb-thread:make-mutex :name "cl-cc/vm instance lock"))))
+            (cl-cc/runtime:rt-make-lock "cl-cc/vm instance lock"))))
 
 (defmacro with-vm-instance-lock ((state) &body body)
   "Execute BODY while holding STATE's per-instance isolation mutex."
-  `(sb-thread:with-mutex ((vm-instance-lock ,state))
+  `(cl-cc/runtime:rt-with-lock ((vm-instance-lock ,state))
      ,@body))
 
 (defun %vm-copy-hash-table (source &key (test #'eq))
@@ -384,7 +384,7 @@ consulted by helper lookups without mutating the shared environment."
     (when parent-env
       (setf (gethash state *vm-instance-parent-envs*) parent-env))
     (setf (gethash state *vm-instance-locks*)
-          (sb-thread:make-mutex :name "cl-cc/vm instance lock"))
+          (cl-cc/runtime:rt-make-lock "cl-cc/vm instance lock"))
     state))
 
 (defun vm-instance-global-value (state symbol &optional default)
@@ -936,8 +936,10 @@ Also engages SBCL's native package lock so that CL:INTERN signals an error."
   (vm-package-locked-p package))
 
 ;;; Alias package-locked-error to SBCL's native type so that standard
-;;; `intern` on a locked package signals a condition that matches our type.
+;;; Alias package-locked-error to SBCL's native type when available.
+;;; Under selfhost, package-locked-error is a standalone condition type.
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  #+sbcl
   (setf (find-class 'package-locked-error)
         (find-class 'sb-ext:package-locked-error)))
 

@@ -39,9 +39,9 @@ Handles defstruct inheritance: when vm-add inherits dst from vm-binop,
 vm-binop-dst works on vm-add instances, so all vm-binop subclasses are
 registered with vm-binop-dst unless they define a more-specific accessor."
   (let ((ht (make-hash-table :test #'eq)))
-    (dolist (method (sb-mop:generic-function-methods #'vm-dst))
+    (dolist (method (cl-cc/sb-mop:generic-function-methods #'vm-dst))
       (handler-case
-          (let* ((spec  (car (sb-mop:method-specializers method)))
+          (let* ((spec  (car (cl-cc/sb-mop:method-specializers method)))
                  (cname (class-name spec))
                  (acc   (find-symbol
                          (concatenate 'string (symbol-name cname) "-DST")
@@ -55,7 +55,7 @@ registered with vm-binop-dst unless they define a more-specific accessor."
                 ;; Walk subclasses transitively: they inherit the same dst slot,
                 ;; so the parent accessor works correctly on them too.
                 (labels ((visit (class)
-                           (dolist (sub (sb-mop:class-direct-subclasses class))
+                           (dolist (sub (cl-cc/sb-mop:class-direct-subclasses class))
                              (let ((sub-name (class-name sub)))
                                (unless (gethash sub-name ht)
                                  (setf (gethash sub-name ht) fn))

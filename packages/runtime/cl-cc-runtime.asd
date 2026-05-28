@@ -14,7 +14,7 @@
   :pathname "src"
   :serial t
   :components
-   ((:file "package")
+   (   (:file "package")
     (:file "runtime-region")
     (:file "runtime")
    (:file "runtime-ops")
@@ -47,7 +47,8 @@
       ;; ── Synchronization & concurrency primitives ──
       (:file "deadlock")
       (:file "sync")
-     (:file "lockfree")
+      (:file "portable")
+      (:file "lockfree")
      (:file "spsc")
      (:file "ebr")
      (:file "hazard")

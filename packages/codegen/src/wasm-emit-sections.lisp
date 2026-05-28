@@ -16,7 +16,7 @@
 
 (defun wasm-feature-enabled-p (env-name default)
   "Return feature gate state with ENV-NAME overriding DEFAULT when present." 
-  (let ((env (ignore-errors (sb-ext:posix-getenv env-name))))
+  (let ((env (ignore-errors (cl-cc/runtime:rt-getenv env-name))))
     (cond ((wasm-env-true-p env) t)
           ((wasm-env-false-p env) nil)
           (t default))))
@@ -83,7 +83,7 @@ Environment override: CLCC_WASM_TAILCALL=1|0"
 (defun wasm-import-cl-condition-tag-enabled-p ()
   "FR-310: Return T when $cl_condition_tag is imported from cl-core instead of defined locally.
 Default is NIL to preserve existing standalone modules."
-  (wasm-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_WASM_IMPORT_CL_CONDITION_TAG"))))
+  (wasm-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_WASM_IMPORT_CL_CONDITION_TAG"))))
 
 (defun wasm-simd-feature-enabled-p ()
   "FR-202: Return T when Wasm SIMD128 is enabled."

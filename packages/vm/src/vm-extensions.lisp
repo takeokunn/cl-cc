@@ -134,11 +134,11 @@
   (setf (symbol-plist sym) (%vm-symbol-property-entry->plist entry)))
 
 (defun %vm-symbol-property-get (state table sym indicator default)
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (%vm-symbol-property-entry-get (gethash sym table) indicator default)))
 
 (defun %vm-symbol-property-set (state table sym indicator value &key (sync-host-p nil))
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (let* ((entry (gethash sym table))
            (updated (%vm-symbol-property-entry-set entry indicator value)))
       (setf (gethash sym table) updated)
@@ -148,7 +148,7 @@
       value)))
 
 (defun %vm-symbol-property-remprop (state table sym indicator &key (sync-host-p nil))
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (multiple-value-bind (updated found-p)
         (%vm-symbol-property-entry-remprop (gethash sym table) indicator)
       (if updated
@@ -161,7 +161,7 @@
       found-p)))
 
 (defun %vm-symbol-property-replace-plist (state table sym plist &key (sync-host-p nil))
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (let ((normalized (and plist (%vm-normalize-symbol-property-entry plist))))
       (if normalized
           (setf (gethash sym table) normalized)
@@ -173,7 +173,7 @@
 
 (defun vm-symbol-plist-read-snapshot (state sym)
   "Return a copy of SYM's user-visible plist and the current read barrier."
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (values (%vm-symbol-property-entry->plist
              (gethash sym (vm-symbol-plists state)))
             (vm-symbol-plist-read-barrier state))))
@@ -192,7 +192,7 @@
 
 (defun vm-system-property-plist (state sym)
   "Return a plist snapshot of VM-only system properties for SYM."
-  (sb-thread:with-mutex ((vm-symbol-plist-lock state))
+  (cl-cc/runtime:rt-with-lock ((vm-symbol-plist-lock state))
     (%vm-symbol-property-entry->plist
      (gethash sym (vm-system-symbol-plists state)))))
 
@@ -495,7 +495,9 @@ mutable control-state containers."
 ;;; FR-880: User-defined hash table tests
 (defmacro define-hash-table-test (name test-fn hash-fn)
   "FR-880: Define a custom hash table test using TEST-FN and HASH-FN."
-  `(sb-ext:define-hash-table-test ,name ,test-fn ,hash-fn))
+  #+sbcl `(sb-ext:define-hash-table-test ,name ,test-fn ,hash-fn)
+  #-sbcl `(eval-when (:compile-toplevel :load-toplevel :execute)
+            (cl-cc/runtime:rt-unsupported "define-hash-table-test")))
 
 ;;; FR-847: Mutex/condition variable
 (defstruct (vm-mutex (:constructor make-mutex (&optional (name "mutex"))))

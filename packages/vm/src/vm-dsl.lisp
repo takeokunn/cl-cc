@@ -127,7 +127,7 @@ after which they are stored in an internal hashed representation.")
                           :documentation "Dedicated VM-only system property storage keyed by symbol.
 Used for runtime/compiler metadata such as :function and :type without exposing
 those properties through user-visible symbol-plist operations.")
-    (symbol-plist-lock :initform (sb-thread:make-mutex :name "cl-cc/vm symbol plist lock")
+    (symbol-plist-lock :initform (cl-cc/runtime:rt-make-lock "cl-cc/vm symbol plist lock")
                        :reader vm-symbol-plist-lock
                        :documentation "Mutex protecting atomic access to VM symbol plist tables.")
     (symbol-plist-read-barrier :initform 0 :accessor vm-symbol-plist-read-barrier

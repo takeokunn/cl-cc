@@ -390,11 +390,11 @@ formats such as:\n
     (or (ignore-errors
           (when (and (find-package :uiop)
                      (fboundp 'uiop:run-program))
-            (sb-ext:with-timeout *x86-64-host-probe-timeout-seconds*
-              (uiop:run-program
-               '("sysctl" "-a")
-               :output :string
-               :ignore-error-status t))))
+             (cl-cc/runtime:rt-with-timeout (*x86-64-host-probe-timeout-seconds*)
+               (uiop:run-program
+                '("sysctl" "-a")
+                :output :string
+                :ignore-error-status t))))
         (ignore-errors
           (with-open-file (in "/proc/cpuinfo" :direction :input)
             (let ((buf (make-string-output-stream)))
@@ -410,19 +410,19 @@ formats such as:\n
 
 (defun x86-64-supports-popcnt-p ()
   "Return T when POPCNT support is enabled or detected."
-  (or (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_POPCNT")))
+  (or (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_POPCNT")))
       (x86-64-host-supports-cpu-feature-p "popcnt")))
 
 (defun x86-64-supports-bmi1-p ()
   "Return T when BMI1/LZCNT support is enabled or detected."
-  (or (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_BMI1")))
-      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_LZCNT")))
+  (or (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_BMI1")))
+      (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_LZCNT")))
       (x86-64-host-supports-cpu-feature-p "bmi1")
       (x86-64-host-supports-cpu-feature-p "lzcnt")))
 
 (defun x86-64-supports-bmi2-p ()
   "Return T when BMI2 support is enabled or detected."
-  (or (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_BMI2")))
+  (or (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_BMI2")))
       (x86-64-host-supports-cpu-feature-p "bmi2")))
 
 (defun x86-64-host-supports-ibrs-p ()
@@ -440,7 +440,7 @@ Environment variables remain the primary override path."
      (ignore-errors
       (when (and (find-package :uiop)
                  (fboundp 'uiop:run-program))
-        (let ((out (sb-ext:with-timeout *x86-64-host-probe-timeout-seconds*
+        (let ((out (cl-cc/runtime:rt-with-timeout (*x86-64-host-probe-timeout-seconds*)
                       (uiop:run-program
                       '("sysctl" "-a")
                       :output :string
@@ -462,8 +462,8 @@ Environment variables remain the primary override path."
 Environment overrides:
 - CLCC_IBRS=1
 - CLCC_EIBRS=1"
-  (or (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_IBRS")))
-      (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_EIBRS")))
+  (or (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_IBRS")))
+      (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_EIBRS")))
       (x86-64-host-supports-ibrs-p)))
 
 (defun x86-64-supports-cet-ss-p ()
@@ -471,7 +471,7 @@ Environment overrides:
 
 Environment override:
 - CLCC_CET_SS=1"
-  (x86-64-env-true-p (ignore-errors (sb-ext:posix-getenv "CLCC_CET_SS"))))
+  (x86-64-env-true-p (ignore-errors (cl-cc/runtime:rt-getenv "CLCC_CET_SS"))))
 
 (defun x86-64-program-has-nonlocal-control-p (instructions)
   "Return T when INSTRUCTIONS include non-local control-flow operations.
