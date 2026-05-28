@@ -95,7 +95,9 @@ so subseq/string= never see negative bounds."
   '((:pass    "ok"      nil)
     (:fail    "not ok"  nil)
     (:skip    "ok"      "SKIP")
-    (:pending "not ok"  "TODO"))
+    (:pending "not ok"  "TODO")
+    (:xfail   "ok"      "TODO")
+    (:xpass   "not ok"  "TODO"))
   "Maps test status to TAP ok/not-ok prefix and optional # DIRECTIVE keyword.")
 
 (defun %tap-verbose-first-line (number name status detail)
@@ -164,6 +166,11 @@ those for ~99% silent passes was the dominant runtime cost."
 (defsuite cl-cc-serial-suite
   :description "Sequential-only unit tests"
   :parent cl-cc-unit-suite
+  :parallel nil)
+
+(defsuite cl-cc-conformance-suite
+  :description "ANSI CL conformance tests (expected-fail for known gaps)"
+  :parent cl-cc-e2e-suite
   :parallel nil)
 
 (in-suite cl-cc-suite)

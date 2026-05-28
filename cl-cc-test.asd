@@ -527,10 +527,19 @@
       :components
       ((:file "native-advanced-evidence-tests")
        (:file "tooling-advanced-1-evidence-tests")
-       (:file "tooling-advanced-2-evidence-tests"))))
-  :perform (asdf:test-op (op c)
-              (declare (ignore op c))
-              (uiop:symbol-call :cl-cc/test 'run-tests)))
+       (:file "tooling-advanced-2-evidence-tests")))
+    ;; --- ANSI Conformance Tests (expected-fail for known gaps) ---
+    (:module "conformance"
+     :pathname "tests/conformance"
+     :serial t
+     :components
+     ((:file "package-conformance-tests")
+      (:file "format-conformance-tests")
+      (:file "number-conformance-tests")
+      (:file "native-io-conformance-tests")))
+   :perform (asdf:test-op (op c)
+               (declare (ignore op c))
+               (uiop:symbol-call :cl-cc/test 'run-tests)))
 
 (asdf:defsystem :cl-cc-test/e2e
   :description "CL-CC self-hosting end-to-end regression tests"

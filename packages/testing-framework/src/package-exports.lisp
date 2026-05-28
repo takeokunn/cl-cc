@@ -14,11 +14,12 @@
           coverage-report-index-path
           coverage-report-exists-p
           coverage-report-empty-p
-          cl-cc-suite
-          cl-cc-unit-suite
-          cl-cc-integration-suite
-          cl-cc-integration-serial-suite
-          cl-cc-e2e-suite
+           cl-cc-suite
+           cl-cc-unit-suite
+           cl-cc-integration-suite
+           cl-cc-integration-serial-suite
+           cl-cc-e2e-suite
+           cl-cc-conformance-suite
           run-suite
           deftest
           defsuite
@@ -68,8 +69,10 @@
           set-test-timeouts!
           set-test-timeouts-by-prefix!
           set-suite-test-timeout!
-          skip
-          pending
+           skip
+           pending
+           expected-fail
+           defexpected
            deftest-fuzz
            shrink
            shrink-integer
