@@ -221,7 +221,10 @@
   (slots nil :type list)
   (default-initargs nil :type list)
   (metaclass nil)
-  (sealed nil))
+  (sealed nil)
+  (php-kind nil)
+  (php-enum-type nil)
+  (php-enum-cases nil :type list))
 
 (defstruct (ast-defgeneric (:include ast-node))
   "Generic function definition AST node (defgeneric)."

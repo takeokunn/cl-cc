@@ -20,12 +20,18 @@
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (defun run-cl-string (code &key (capture-output t))
-  "Compile and run CODE string through cl-cc pipeline. Returns (values stdout-str)."
+  "Compile and run CODE string through cl-cc pipeline.
+When output is captured, return stdout if the program wrote any; otherwise
+return the printed representation of the primary result."
   (let ((out (make-string-output-stream)))
-    (let ((*standard-output* (if capture-output out *standard-output*)))
-      (cl-cc:run-string code))
-    (when capture-output
-      (get-output-stream-string out))))
+    (let* ((*standard-output* (if capture-output out *standard-output*))
+           (value (cl-cc:run-string code)))
+      (if capture-output
+          (let ((output (get-output-stream-string out)))
+            (if (plusp (length output))
+                output
+                (princ-to-string value)))
+          value))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
 ;;; Expected-Fail: Basic Package Operations (self-host gaps)
@@ -33,7 +39,7 @@
 ;;; These test operations that work when bridged to host SBCL but
 ;;; fail in self-host mode or are incomplete in the runtime registry.
 
-(defexpected pkg-find-package-self-host
+(deftest pkg-find-package-self-host
   "find-package should work without host SBCL fallback in self-host mode."
   :timeout 30
   :tags '(:package :find-package :self-host)
@@ -44,7 +50,7 @@
       (assert-true pkg)
       (assert-equal "CL-USER" (cl-cc/vm::vm-symbol-name (cl-cc/vm::vm-package-name pkg))))))
 
-(defexpected pkg-intern-self-host
+(deftest pkg-intern-self-host
   "intern should create symbols in runtime package registry without host CL."
   :timeout 30
   :tags '(:package :intern :self-host)
@@ -55,7 +61,7 @@
       (assert-true sym)
       (assert-equal "MY-TEST-SYM" (cl-cc/vm::vm-symbol-name sym)))))
 
-(defexpected pkg-export-self-host
+(deftest pkg-export-self-host
   "export should make symbols external in runtime package registry."
   :timeout 30
   :tags '(:package :export :self-host)
@@ -68,7 +74,7 @@
         (assert-true sym)
         (assert-eq :external status)))))
 
-(defexpected pkg-import-self-host
+(deftest pkg-import-self-host
   "import should make symbols accessible in target package."
   :timeout 30
   :tags '(:package :import :self-host)
@@ -84,7 +90,7 @@
         (assert-true found)
         (assert-eq :internal status)))))
 
-(defexpected pkg-use-package-self-host
+(deftest pkg-use-package-self-host
   "use-package should make all exported symbols accessible."
   :timeout 30
   :tags '(:package :use-package :self-host)
@@ -100,7 +106,7 @@
         (assert-true found)
         (assert-eq :inherited status)))))
 
-(defexpected pkg-unuse-package-self-host
+(deftest pkg-unuse-package-self-host
   "unuse-package should remove inherited symbols."
   :timeout 30
   :tags '(:package :unuse-package :self-host)
@@ -116,7 +122,7 @@
           (cl-cc/vm::vm-find-symbol "FN" user)
         (assert-null found)))))
 
-(defexpected pkg-shadow-self-host
+(deftest pkg-shadow-self-host
   "shadow should create shadowing symbols in package."
   :timeout 30
   :tags '(:package :shadow :self-host)
@@ -138,7 +144,7 @@
 ;;; Expected-Fail: Package Name Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-package-name-self-host
+(deftest pkg-package-name-self-host
   "package-name should return the package name string."
   :timeout 30
   :tags '(:package :package-name :self-host)
@@ -147,7 +153,7 @@
     (let ((pkg (cl-cc/vm::vm-make-package "NAME-TEST-PKG")))
       (assert-equal "NAME-TEST-PKG" (cl-cc/vm::vm-package-name pkg)))))
 
-(defexpected pkg-package-nicknames-self-host
+(deftest pkg-package-nicknames-self-host
   "package-nicknames should return list of nickname strings."
   :timeout 30
   :tags '(:package :package-nicknames :self-host)
@@ -162,7 +168,7 @@
 ;;; Expected-Fail: Symbol Operations in Self-Host Mode
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-make-symbol-self-host
+(deftest pkg-make-symbol-self-host
   "make-symbol should create uninterned symbols without host CL."
   :timeout 30
   :tags '(:package :make-symbol :self-host)
@@ -173,7 +179,7 @@
       ;; make-symbol creates uninterned symbols
       (assert-null (cl-cc/vm::vm-symbol-package sym)))))
 
-(defexpected pkg-gensym-self-host
+(deftest pkg-gensym-self-host
   "gensym should generate unique symbols without host CL."
   :timeout 30
   :tags '(:package :gensym :self-host)
@@ -188,7 +194,7 @@
 ;;; Expected-Fail: defpackage Macro (E2E via run-string)
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-defpackage-e2e
+(deftest pkg-defpackage-e2e
   "defpackage should create usable packages via run-string."
   :timeout 60
   :tags '(:package :defpackage :e2e)
@@ -204,7 +210,7 @@
                  :capture-output t)))
     (assert-equal "Hello from e2e-pkg" result)))
 
-(defexpected pkg-defpackage-conflict-detection
+(deftest pkg-defpackage-conflict-detection
   "defpackage should detect symbol conflicts when using multiple packages."
   :timeout 60
   :tags '(:package :defpackage :conflict :e2e)
@@ -225,7 +231,7 @@
 ;;; Expected-Fail: Package Iteration
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-do-symbols-self-host
+(deftest pkg-do-symbols-self-host
   "do-symbols should iterate over package symbols."
   :timeout 30
   :tags '(:package :do-symbols :self-host)
@@ -239,7 +245,7 @@
         (push sym syms))
       (assert-= 2 (length syms)))))
 
-(defexpected pkg-list-all-packages-self-host
+(deftest pkg-list-all-packages-self-host
   "list-all-packages should return all registered packages."
   :timeout 30
   :tags '(:package :list-all-packages :self-host)
@@ -256,7 +262,7 @@
 ;;; Expected-Fail: delete-package / rename-package
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-delete-package-self-host
+(deftest pkg-delete-package-self-host
   "delete-package should remove package from registry."
   :timeout 30
   :tags '(:package :delete-package :self-host)
@@ -267,7 +273,7 @@
       (cl-cc/vm::vm-delete-package pkg)
       (assert-null (cl-cc/vm::vm-find-package "TEMP-PKG" nil)))))
 
-(defexpected pkg-rename-package-self-host
+(deftest pkg-rename-package-self-host
   "rename-package should change package name."
   :timeout 30
   :tags '(:package :rename-package :self-host)
@@ -282,7 +288,7 @@
 ;;; Expected-Fail: unintern
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected pkg-unintern-self-host
+(deftest pkg-unintern-self-host
   "unintern should remove symbol from package."
   :timeout 30
   :tags '(:package :unintern :self-host)

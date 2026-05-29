@@ -46,6 +46,11 @@
 (define-vm-unary-instruction vm-rationalize :rationalize "Rationalize a float to closest rational.")
 (define-vm-unary-instruction vm-numerator   :numerator   "Return numerator of rational.")
 (define-vm-unary-instruction vm-denominator :denominator "Return denominator of rational.")
+(define-vm-unary-instruction vm-bignump     :bignump     "Type predicate for bignums.")
+(define-vm-unary-instruction vm-floatp      :floatp      "Type predicate for floats.")
+(define-vm-unary-instruction vm-rationalp   :rationalp   "Type predicate for rationals.")
+(define-vm-unary-instruction vm-realp       :realp       "Type predicate for reals.")
+(define-vm-unary-instruction vm-complexp    :complexp    "Type predicate for complex numbers.")
 (define-vm-binary-instruction vm-gcd        :gcd         "Return greatest common divisor.")
 (define-vm-binary-instruction vm-lcm        :lcm         "Return least common multiple.")
 
@@ -53,6 +58,11 @@
 (define-simple-instruction vm-rationalize :unary  rationalize)
 (define-simple-instruction vm-numerator   :unary  numerator)
 (define-simple-instruction vm-denominator :unary  denominator)
+(define-simple-instruction vm-bignump     :pred1  (lambda (x) (typep x 'bignum)))
+(define-simple-instruction vm-floatp      :pred1  floatp)
+(define-simple-instruction vm-rationalp   :pred1  rationalp)
+(define-simple-instruction vm-realp       :pred1  realp)
+(define-simple-instruction vm-complexp    :pred1  complexp)
 (define-simple-instruction vm-gcd         :binary gcd)
 (define-simple-instruction vm-lcm         :binary lcm)
 

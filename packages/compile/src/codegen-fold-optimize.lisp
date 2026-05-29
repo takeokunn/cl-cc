@@ -180,7 +180,10 @@ Special folding nodes like ast-binop and ast-call stay in optimize-ast directly.
                         (if metaclass
                             (optimize-ast metaclass lexical-bound)
                             nil))
-    :sealed           (ast-defclass-sealed node)))
+                                :sealed           (ast-defclass-sealed node)
+                                :php-kind         (ast-defclass-php-kind node)
+                                :php-enum-type    (ast-defclass-php-enum-type node)
+                                :php-enum-cases   (ast-defclass-php-enum-cases node)))
 
 (defun %optimize-ast-defvar-node (node &optional lexical-bound)
   (%clone-source node #'make-ast-defvar

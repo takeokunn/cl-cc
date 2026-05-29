@@ -39,6 +39,17 @@
     (assert-eq :T-STRING (php-tok-type tok))
     (assert-equal expected-val (php-tok-value tok))))
 
+(deftest-each php-lex-braced-string-interpolation
+  "Braced interpolation forms lex as interpolated string segments."
+  :cases (("curly-variable" "<?php \"Hello {$name}\";" "$name")
+          ("dollar-curly" "<?php \"Hello ${name}\";" "$name"))
+  (source expected-var)
+  (let* ((tok (first (cl-cc/php:tokenize-php-source source)))
+         (value (php-tok-value tok)))
+    (assert-eq :T-STRING (php-tok-type tok))
+    (assert-eq :php-interpolated-string (first value))
+    (assert-equal expected-var (second (second (second value))))))
+
 (deftest php-lex-variable-produces-t-var
   "PHP lexer: $x produces a :T-VAR token with the raw variable name."
   (let ((tokens (cl-cc/php:tokenize-php-source "<?php $x;")))

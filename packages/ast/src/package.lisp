@@ -87,8 +87,9 @@
     #:ast-slot-type #:ast-slot-allocation
     #:ast-defclass #:make-ast-defclass #:ast-defclass-p
     #:ast-defclass-name #:ast-defclass-superclasses
-     #:ast-defclass-slots #:ast-defclass-default-initargs #:ast-defclass-metaclass
-     #:ast-defclass-sealed
+      #:ast-defclass-slots #:ast-defclass-default-initargs #:ast-defclass-metaclass
+      #:ast-defclass-sealed #:ast-defclass-php-kind
+      #:ast-defclass-php-enum-type #:ast-defclass-php-enum-cases
    #:ast-defgeneric #:make-ast-defgeneric #:ast-defgeneric-p
    #:ast-defgeneric-name #:ast-defgeneric-params #:ast-defgeneric-combination
    #:ast-defmethod #:make-ast-defmethod #:ast-defmethod-p

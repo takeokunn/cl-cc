@@ -132,7 +132,7 @@
          (lock (cl-cc/vm::vm-symbol-plist-lock s))
          (barrier-before (cl-cc/vm::vm-symbol-plist-read-barrier s)))
     (assert-true lock)
-    (sb-thread:with-mutex (lock)
+    (cl-cc/runtime:rt-with-lock (lock)
       (assert-equal barrier-before (cl-cc/vm::vm-symbol-plist-read-barrier s)))
     (cl-cc:vm-reg-set s 1 sym)
     (cl-cc:vm-reg-set s 2 :flag)

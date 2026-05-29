@@ -157,7 +157,7 @@
     #:rt-stream-element-type
     #:rt-fboundp #:rt-intern #:rt-gensym
     #:rt-symbol-value
-    #:rt-find-package #:rt-make-package #:rt-export
+    #:rt-find-package #:rt-make-package #:rt-export #:rt-package-name
     #:*rt-package-registry*
     #:rt-write-to-string
    ;; ---------------------------------------------------------------

@@ -27,6 +27,27 @@
 (define-rt-stream-op rt-finish-output finish-output ())
 (define-rt-stream-op rt-force-output  force-output  ())
 (define-rt-stream-op rt-clear-output  clear-output  ())
+(define-rt-stream-op rt-listen       listen       ())
+
+(defun rt-write-to-string (obj)
+  "Native-callable simple write-to-string. Uses current CL print-control variables."
+  (write-to-string obj))
+
+(defun rt-write-to-string-with-controls (obj &key base radix escape level length circle pretty case readably gensym array)
+  "Native-callable write-to-string with full ANSI print-control keyword support."
+  (let ((*print-base*   (or base *print-base*))
+        (*print-radix*  (or radix *print-radix*))
+        (*print-escape* (if (eq escape nil) nil t))
+        (*print-level*  level)
+        (*print-length* length)
+        (*print-circle* (or circle *print-circle*))
+        (*print-pretty* (or pretty *print-pretty*))
+        (*print-case*   (or case *print-case*))
+        (*print-readably* (or readably *print-readably*))
+        (*print-gensym* (or gensym *print-gensym*))
+        (*print-array*  (or array *print-array*)))
+    (write-to-string obj)))
+
 (defun rt-write-byte (byte &optional stream)
   (if stream (write-byte byte stream) (write-byte byte *standard-output*)))
 (defun rt-format (stream fmt &rest args)
@@ -61,7 +82,7 @@
 (defparameter *rt-bootstrap-function-symbols*
   '(+ - * / 1+ 1- < > <= >= eql equal equalp char= char-equal
     boundp makunbound fboundp fdefinition intern gensym symbol-value
-    make-string-output-stream get-output-stream-string write-string
+    make-string-output-stream get-output-stream-string write-string write-to-string
     ;; Wave 4: pathname and file system bootstrap
     make-pathname merge-pathnames namestring pathname-name pathname-type
     pathname-directory pathnamep probe-file delete-file rename-file
@@ -103,15 +124,39 @@ the compiler/runtime currently names directly during selfhost and test flows.")
     (string name-or-package)
     (symbol (string name-or-package))))
 
+(defun %rt-symbol-name-key (symbol-or-name)
+  "Return the package-symbol table key for SYMBOL-OR-NAME."
+  (etypecase symbol-or-name
+    (symbol (symbol-name symbol-or-name))
+    (string symbol-or-name)
+    (character (string symbol-or-name))))
+
+(defun %rt-ensure-package-slots (descriptor)
+  "Ensure DESCRIPTOR has all package-registry tables used by self-host mode."
+  (unless (gethash :symbols descriptor)
+    (setf (gethash :symbols descriptor) (make-hash-table :test #'equal)))
+  (unless (gethash :inherited descriptor)
+    (setf (gethash :inherited descriptor) (make-hash-table :test #'equal)))
+  (unless (nth-value 1 (gethash :exports descriptor))
+    (setf (gethash :exports descriptor) nil))
+  (unless (nth-value 1 (gethash :nicknames descriptor))
+    (setf (gethash :nicknames descriptor) nil))
+  (unless (nth-value 1 (gethash :use-list descriptor))
+    (setf (gethash :use-list descriptor) nil))
+  descriptor)
+
 (defun %rt-package-metadata (package)
   (if (hash-table-p package)
-      package
+      (%rt-ensure-package-slots package)
       (let ((key (%rt-package-key package)))
         (or (gethash key *rt-package-registry*)
             (let ((descriptor (make-hash-table :test #'eq)))
               (setf (gethash :name descriptor) key)
               (setf (gethash :host-package descriptor) (find-package key))
               (setf (gethash :exports descriptor) nil)
+              (setf (gethash :nicknames descriptor) nil)
+              (setf (gethash :use-list descriptor) nil)
+              (setf (gethash :inherited descriptor) (make-hash-table :test #'equal))
               (setf (gethash :symbols descriptor) (make-hash-table :test #'equal))
               (setf (gethash key *rt-package-registry*) descriptor)
               descriptor)))))
@@ -215,16 +260,17 @@ host package universe."
                         ("RT-MAKE-ECHO-STREAM" . ,#'rt-make-echo-stream)
                         ("RT-READ-SEQUENCE" . ,#'rt-read-sequence)
                         ("RT-WRITE-SEQUENCE" . ,#'rt-write-sequence)
+                        ("RT-WRITE-TO-STRING" . ,#'rt-write-to-string)
                         ("RT-LOAD" . ,#'rt-load)))
         (funcall vm-register (car entry) (cdr entry))))))
 
 (defun rt-find-package (name)
-  (gethash (%rt-package-key name) *rt-package-registry*))
+  (and name (gethash (%rt-package-key name) *rt-package-registry*)))
 
 (defun rt-intern (name &optional package)
   (let* ((pkg (or (and package (%rt-package-metadata package))
                    (and *package* (%rt-package-metadata *package*))))
-          (table (gethash :symbols pkg))
+          (table (gethash :symbols (%rt-ensure-package-slots pkg)))
           (key (string name))
           (host-package (gethash :host-package pkg)))
      (or (gethash key table)
@@ -233,20 +279,34 @@ host package universe."
                    (intern key host-package)
                    (make-symbol key))))))
 
-(defun rt-make-package (name &key use)
-  (let ((pkg (or (rt-find-package name)
-                 (%rt-register-package name))))
+(defun rt-make-package (name &key nicknames use)
+  (let* ((key (%rt-package-key name))
+         (pkg (%rt-ensure-package-slots
+               (or (rt-find-package key)
+                   (%rt-register-package key)))))
+    (setf (gethash key *rt-package-registry*) pkg)
+    (when nicknames
+      (setf (gethash :nicknames pkg) (mapcar #'%rt-package-key nicknames))
+      (dolist (nickname (gethash :nicknames pkg))
+        (setf (gethash nickname *rt-package-registry*) pkg)))
     (when use
-      (setf (gethash :use-list pkg)
-            (mapcar #'%rt-package-metadata use)))
+      (rt-use-package (mapcar #'%rt-package-metadata use) pkg))
     pkg))
 
 (defun rt-export (symbols package)
   (let* ((pkg (%rt-package-metadata package))
-         (syms (if (listp symbols) symbols (list symbols))))
+          (syms (if (listp symbols) symbols (list symbols))))
     (setf (gethash :exports pkg)
           (union syms (gethash :exports pkg) :test #'eq))
     syms))
+
+(defun rt-unexport (symbols &optional package)
+  "Make SYMBOLS internal in PACKAGE."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (syms (if (listp symbols) symbols (list symbols))))
+    (setf (gethash :exports pkg)
+          (set-difference (gethash :exports pkg) syms :test #'eq))
+    t))
 
 ;;; ─── Extended Runtime Package Operations (ANSI CL Ch.11) ──────────────────
 
@@ -256,7 +316,7 @@ host package universe."
          (table (gethash :symbols pkg))
          (syms (if (listp symbols) symbols (list symbols))))
     (dolist (sym syms)
-      (let ((name (string sym)))
+        (let ((name (%rt-symbol-name-key sym)))
         ;; Check for conflict with existing symbol
         (multiple-value-bind (existing status)
             (rt-find-symbol name pkg)
@@ -273,34 +333,47 @@ host package universe."
             (remhash name inherited)))))
     t))
 
-(defun rt-use-package (packages-to-use &optional package)
+(defun rt-use-package (packages-to-use &optional package &key (errorp t))
   "Make PACKAGES-TO-USE accessible to PACKAGE."
   (let* ((pkg (%rt-package-metadata (or package *package*)))
          (use-list (gethash :use-list pkg))
          (inherited (or (gethash :inherited pkg)
                         (setf (gethash :inherited pkg) (make-hash-table :test #'equal))))
          (pkgs (if (listp packages-to-use) packages-to-use (list packages-to-use))))
-    ;; Check for name conflicts among packages to use
-    (dolist (used-pkg pkgs)
-      (let ((used-meta (%rt-package-metadata used-pkg)))
+    (labels ((conflict (control &rest args)
+               (if errorp
+                   (apply #'error control args)
+                   (return-from rt-use-package :conflict))))
+      ;; Check for name conflicts among packages to use and with present symbols.
+      (let ((exports-by-name (make-hash-table :test #'equal)))
+        (dolist (used-pkg pkgs)
+          (let ((used-meta (%rt-package-metadata used-pkg)))
+            (dolist (ext-sym (gethash :exports used-meta))
+              (let* ((name (%rt-symbol-name-key ext-sym))
+                     (previous (gethash name exports-by-name)))
+                (when (and previous (not (eq previous ext-sym)))
+                  (conflict "Name conflict: ~S is exported by multiple used packages" name))
+                (setf (gethash name exports-by-name) ext-sym))))))
+      (dolist (used-pkg pkgs)
+        (let ((used-meta (%rt-package-metadata used-pkg)))
+          (dolist (ext-sym (gethash :exports used-meta))
+            (let* ((name (%rt-symbol-name-key ext-sym))
+                   (existing (gethash name (gethash :symbols pkg))))
+              (when (and existing (not (eq existing ext-sym)))
+                (conflict "Name conflict: ~S is already present in ~A" name (rt-package-name pkg)))))))
+      ;; Merge use-list
+      (let ((new-use (append (mapcar #'%rt-package-metadata pkgs)
+                             (remove-if (lambda (u) (member (%rt-package-key u)
+                                                            (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))
+                                                            :test #'equal))
+                                        use-list))))
+        (setf (gethash :use-list pkg) new-use))
+      ;; Populate inherited symbols
+      (clrhash inherited)
+      (dolist (used-meta (gethash :use-list pkg))
         (dolist (ext-sym (gethash :exports used-meta))
-          (let* ((name (string ext-sym))
-                 (existing (gethash name (gethash :symbols pkg))))
-            (when (and existing (not (eq existing ext-sym)))
-              (error "Name conflict: ~S is already present in ~A" name (rt-package-name pkg)))))))
-    ;; Merge use-list
-    (let ((new-use (append (mapcar #'%rt-package-metadata pkgs)
-                           (remove-if (lambda (u) (member (%rt-package-key u)
-                                                         (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))
-                                                         :test #'equal))
-                                      use-list))))
-      (setf (gethash :use-list pkg) new-use))
-    ;; Populate inherited symbols
-    (clrhash inherited)
-    (dolist (used-meta (gethash :use-list pkg))
-      (dolist (ext-sym (gethash :exports used-meta))
-        (setf (gethash (string ext-sym) inherited) ext-sym)))
-    t))
+          (setf (gethash (%rt-symbol-name-key ext-sym) inherited) ext-sym)))
+      t)))
 
 (defun rt-unuse-package (packages-to-unuse &optional package)
   "Remove PACKAGES-TO-UNUSE from the use-list of PACKAGE."
@@ -316,7 +389,7 @@ host package universe."
       (clrhash inherited)
       (dolist (used-meta (gethash :use-list pkg))
         (dolist (ext-sym (gethash :exports used-meta))
-          (setf (gethash (string ext-sym) inherited) ext-sym))))
+          (setf (gethash (%rt-symbol-name-key ext-sym) inherited) ext-sym))))
     t))
 
 (defun rt-shadow (symbol-names &optional package)
@@ -332,14 +405,28 @@ host package universe."
                 (let ((host-pkg (gethash :host-package pkg)))
                   (if host-pkg
                       (intern key host-pkg)
-                      (make-symbol key)))))))
+                      (make-symbol key)))))
+        (let ((inherited (gethash :inherited pkg)))
+          (when inherited (remhash key inherited)))))
+    t))
+
+(defun rt-shadowing-import (symbols &optional package)
+  "Import SYMBOLS into PACKAGE and mark them as shadowing present/inherited names."
+  (let* ((pkg (%rt-package-metadata (or package *package*)))
+         (table (gethash :symbols (%rt-ensure-package-slots pkg)))
+         (inherited (gethash :inherited pkg))
+         (syms (if (listp symbols) symbols (list symbols))))
+    (dolist (sym syms)
+      (let ((name (%rt-symbol-name-key sym)))
+        (when inherited (remhash name inherited))
+        (setf (gethash name table) sym)))
     t))
 
 (defun rt-unintern (symbol &optional package)
   "Remove SYMBOL from PACKAGE."
   (let* ((pkg (%rt-package-metadata (or package *package*)))
          (table (gethash :symbols pkg))
-         (key (string symbol)))
+          (key (%rt-symbol-name-key symbol)))
     (remhash key table)
     ;; Remove from exports if present
     (setf (gethash :exports pkg)
@@ -350,7 +437,7 @@ host package universe."
   "Find symbol NAME in PACKAGE. Returns (values symbol status)."
   (let* ((pkg (%rt-package-metadata (or package *package*)))
          (table (gethash :symbols pkg))
-         (key (string name))
+          (key (string name))
          (sym (gethash key table)))
     (if sym
         (if (member sym (gethash :exports pkg) :test #'eq)
@@ -372,19 +459,30 @@ host package universe."
   (let ((pkg (%rt-package-metadata package)))
     (gethash :nicknames pkg)))
 
+(defun rt-find-all-symbols (name)
+  "Return all present symbols named NAME across registered packages."
+  (let ((key (string name))
+        (symbols nil))
+    (maphash (lambda (_ pkg)
+               (declare (ignore _))
+               (let ((sym (gethash key (gethash :symbols pkg))))
+                 (when sym (pushnew sym symbols :test #'eq))))
+             *rt-package-registry*)
+    (nreverse symbols)))
+
 (defun rt-rename-package (package new-name &optional new-nicknames)
   "Rename PACKAGE to NEW-NAME with optional NEW-NICKNAMES."
   (let* ((pkg (%rt-package-metadata package))
          (old-name (gethash :name pkg)))
     ;; Remove old entry, add new
     (remhash old-name *rt-package-registry*)
-    (setf (gethash :name pkg) new-name)
+     (setf (gethash :name pkg) (%rt-package-key new-name))
     (when new-nicknames
-      (setf (gethash :nicknames pkg) new-nicknames))
-    (setf (gethash new-name *rt-package-registry*) pkg)
+      (setf (gethash :nicknames pkg) (mapcar #'%rt-package-key new-nicknames)))
+     (setf (gethash (gethash :name pkg) *rt-package-registry*) pkg)
     ;; Register nicknames
     (when new-nicknames
-      (dolist (nick new-nicknames)
+      (dolist (nick (gethash :nicknames pkg))
         (setf (gethash nick *rt-package-registry*) pkg)))
     pkg))
 
@@ -416,8 +514,10 @@ In runtime registry, search all package symbol tables."
   (maphash (lambda (key pkg)
              (declare (ignore key))
              (let ((table (gethash :symbols pkg)))
-               (when (gethash (string symbol) table)
-                 (return-from rt-symbol-package pkg))))
+                (multiple-value-bind (present foundp)
+                    (gethash (%rt-symbol-name-key symbol) table)
+                  (when (and foundp (eq present symbol))
+                    (return-from rt-symbol-package pkg)))))
            *rt-package-registry*)
   nil)
 
@@ -439,7 +539,25 @@ In runtime registry, search all package symbol tables."
                  (unless (gethash sym seen)
                    (setf (gethash sym seen) t)
                    (funcall fn sym)))
-               inherited))))
+                inherited))))
+
+(defun rt-do-external-symbols (fn &optional package)
+  "Call FN on each external symbol in PACKAGE."
+  (dolist (sym (copy-list (gethash :exports (%rt-package-metadata (or package *package*)))))
+    (funcall fn sym)))
+
+(defun rt-do-all-symbols (fn)
+  "Call FN on every present symbol in every registered package."
+  (let ((seen (make-hash-table :test #'eq)))
+    (maphash (lambda (_ pkg)
+               (declare (ignore _))
+               (maphash (lambda (_ sym)
+                          (declare (ignore _))
+                          (unless (gethash sym seen)
+                            (setf (gethash sym seen) t)
+                            (funcall fn sym)))
+                        (gethash :symbols pkg)))
+             *rt-package-registry*)))
 
 (defun rt-symbol-name (symbol)
   "Return the name string of SYMBOL."
@@ -518,9 +636,24 @@ In runtime registry, search all package symbol tables."
 (defun rt-make-pathname (&key host device directory name type version defaults case)
   (declare (ignore host device version case))
   (let ((p (if defaults
-               (merge-pathnames (make-pathname :directory directory :name name :type type) defaults)
-               (make-pathname :directory directory :name name :type type))))
+                (merge-pathnames (make-pathname :directory directory :name name :type type) defaults)
+                (make-pathname :directory directory :name name :type type))))
     p))
+
+(defun rt-make-pathname-native (host device directory name type version defaults)
+  "Native-callable positional-arg version of make-pathname.  All args may be NIL.
+   Calls CL:MAKE-PATHNAME with only non-NIL keyword arguments."
+  (let ((args nil))
+    (when host (push (cons :host host) args))
+    (when device (push (cons :device device) args))
+    (when directory (push (cons :directory directory) args))
+    (when name (push (cons :name name) args))
+    (when type (push (cons :type type) args))
+    (when version (push (cons :version version) args))
+    (let ((p (apply #'make-pathname (nreverse args))))
+      (if defaults
+          (merge-pathnames p defaults)
+          p))))
 
 (defun rt-merge-pathnames (pathname &optional defaults)
   (merge-pathnames pathname (or defaults *default-pathname-defaults*)))

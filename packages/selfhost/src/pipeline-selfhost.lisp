@@ -134,10 +134,12 @@ expansion during self-host loading)."
      (cl-cc/expand:lambda-list-info-environment . ,#'cl-cc/expand:lambda-list-info-environment)
      ;; macros-package-system.lisp interns rt-* symbols in :cl-cc/expand; register
      ;; them here (after :cl-cc/expand loads) so the VM bridge can resolve them.
-     (cl-cc/expand::rt-find-package . ,#'cl-cc/runtime:rt-find-package)
-     (cl-cc/expand::rt-make-package . ,#'cl-cc/runtime:rt-make-package)
-     (cl-cc/expand::rt-intern . ,#'cl-cc/runtime:rt-intern)
-      (cl-cc/expand::rt-export . ,#'cl-cc/runtime:rt-export))))
+      (cl-cc/expand::rt-find-package . ,#'cl-cc/runtime:rt-find-package)
+      (cl-cc/expand::rt-make-package . ,#'cl-cc/runtime:rt-make-package)
+      (cl-cc/expand::rt-use-package . ,#'cl-cc/expand::rt-use-package)
+      (cl-cc/expand::rt-intern . ,#'cl-cc/runtime:rt-intern)
+      (cl-cc/expand::rt-export . ,#'cl-cc/runtime:rt-export)
+      (cl-cc/expand::add-package-local-nickname . ,#'cl-cc/expand::add-package-local-nickname))))
 
 (defun run-string-typed (source &key (mode :warn) pass-pipeline print-pass-timings timing-stream print-opt-remarks opt-remarks-stream (opt-remarks-mode :all) print-pass-stats stats-stream trace-json-stream)
   "Compile and run SOURCE with type checking enabled.

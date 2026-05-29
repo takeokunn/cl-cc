@@ -14,8 +14,15 @@
   (let ((message-arg (first (ast-call-args ast))))
     (if (and (ast-quote-p message-arg)
              (stringp (ast-quote-value message-arg)))
-        (ast-quote-value message-arg)
-        "PHP form is not yet supported in cl-cc")))
+         (ast-quote-value message-arg)
+         "PHP form is not yet supported in cl-cc")))
+
+(defun %php-unsupported-classlike-message (kind)
+  "Return a diagnostic for unsupported PHP class-like declaration KIND."
+  (case kind
+    (:trait "PHP traits are not yet supported")
+    (:interface "PHP interfaces are not yet supported")
+    (otherwise nil)))
 
 (defun php-check-supported-forms (forms)
   "Signal an error if FORMS contains PHP AST markers for unsupported constructs."
@@ -23,10 +30,15 @@
              (cond
                ((null form) nil)
                ((%php-unsupported-call-p form)
-                (ast-error form "~A" (%php-unsupported-message form)))
-               ((typep form 'ast-node)
-                (dolist (child (ast-children form))
-                  (walk child)))
+                 (ast-error form "~A" (%php-unsupported-message form)))
+                ((and (ast-defclass-p form)
+                      (%php-unsupported-classlike-message (ast-defclass-php-kind form)))
+                 (ast-error form "~A"
+                            (%php-unsupported-classlike-message
+                             (ast-defclass-php-kind form))))
+                ((typep form 'ast-node)
+                 (dolist (child (ast-children form))
+                   (walk child)))
                ((consp form)
                 (walk (car form))
                 (walk (cdr form)))

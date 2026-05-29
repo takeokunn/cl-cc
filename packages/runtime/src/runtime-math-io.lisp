@@ -349,4 +349,5 @@ portable and lets tests drive liveness through the runtime marked-set model."
 (defun rt-read-from-string (s) (read-from-string s))
 (defun rt-read-sexp (stream) (read stream))
 (defun rt-coerce (x type) (coerce x type))
-(defun rt-write-to-string (x) (write-to-string x))
+(defun rt-write-to-string (x &rest args)
+  (apply #'write-to-string x args))

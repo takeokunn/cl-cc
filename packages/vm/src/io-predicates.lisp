@@ -27,8 +27,22 @@
 (defun %resolve-stream-val (state val)
   "Resolve VAL to a CL stream: if it's already a stream, return it;
 if it's an integer handle, look it up in STATE's stream tables."
-  (or (and (streamp val) val)
+  (or (and (or (streamp val) (vm-string-input-stream-p val)) val)
       (and (integerp val) (%resolve-integer-stream-handle val state))))
+
+(defun %vm-stream-predicate-result (stream pred-fn)
+  "Apply stream predicate PRED-FN to STREAM, including VM string input streams."
+  (cond
+    ((null stream) nil)
+    ((vm-string-input-stream-p stream)
+     (case pred-fn
+       (input-stream-p t)
+       (output-stream-p nil)
+       (open-stream-p t)
+       (interactive-stream-p nil)
+       (otherwise nil)))
+    (pred-fn (funcall pred-fn stream))
+    (t t)))
 
 ;;; Stream predicate dispatch — data table drives code generation.
 ;;; Each entry maps an instruction type to its CL predicate (or nil = just test existence).
@@ -38,11 +52,9 @@ PRED-FN nil means test stream existence only."
   `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
      (declare (ignore labels))
      (let* ((val    (vm-reg-get state (vm-src inst)))
-            (stream (%resolve-stream-val state val)))
+             (stream (%resolve-stream-val state val)))
        (vm-reg-set state (vm-dst inst)
-                   ,(if pred-fn
-                        `(if (and stream (,pred-fn stream)) t nil)
-                        `(if stream t nil)))
+                   (if (%vm-stream-predicate-result stream ',pred-fn) t nil))
        (values (1+ pc) nil nil))))
 
 (define-stream-predicate-instruction vm-streamp              nil)
@@ -55,7 +67,12 @@ PRED-FN nil means test stream existence only."
   (declare (ignore labels))
   (let* ((val (vm-reg-get state (vm-src inst)))
          (stream (%resolve-stream-val state val)))
-    (vm-reg-set state (vm-dst inst) (if stream (stream-element-type stream) nil))
+    (vm-reg-set state (vm-dst inst)
+                (if stream
+                    (if (vm-string-input-stream-p stream)
+                        'character
+                        (stream-element-type stream))
+                    nil))
     (values (1+ pc) nil nil)))
 
 ;;; Binary I/O Execution
@@ -82,8 +99,12 @@ PRED-FN nil means test stream existence only."
   `(defmethod execute-instruction ((inst ,inst-type) state pc labels)
      (declare (ignore labels))
      (let* ((handle (vm-reg-get state (vm-file-handle inst)))
-            (stream (vm-get-stream state handle)))
-       (,cl-fn stream)
+             (stream (vm-get-stream state handle)))
+       (if (vm-string-input-stream-p stream)
+           ,(if (eq cl-fn 'clear-input)
+                `(vm-string-input-stream-clear-input stream)
+                `(,cl-fn stream))
+           (,cl-fn stream))
        (values (1+ pc) nil nil))))
 
 (define-stream-control-instruction vm-force-output  force-output)
@@ -95,7 +116,12 @@ PRED-FN nil means test stream existence only."
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle)))
-    (vm-reg-set state (vm-dst inst) (if (listen stream) t nil))
+    (vm-reg-set state (vm-dst inst)
+                (if (if (vm-string-input-stream-p stream)
+                        (vm-string-input-stream-listen stream)
+                        (listen stream))
+                    t
+                    nil))
     (values (1+ pc) nil nil)))
 
 ;;; write-line Execution

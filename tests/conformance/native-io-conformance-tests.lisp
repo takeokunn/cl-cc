@@ -27,7 +27,7 @@
 ;;; Expected-Fail: String Streams
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-string-output-stream
+(deftest io-string-output-stream
   "make-string-output-stream and get-output-stream-string should work."
   :timeout 30
   :tags '(:io :string-stream :native :e2e)
@@ -37,7 +37,7 @@
                     (get-output-stream-string s))")))
     (assert-equal "hello" result)))
 
-(defexpected io-with-output-to-string
+(deftest io-with-output-to-string
   "with-output-to-string should capture output."
   :timeout 30
   :tags '(:io :with-output-to-string :native :e2e)
@@ -47,7 +47,7 @@
                     (write-string \"abc\" s))")))
     (assert-equal "42abc" result)))
 
-(defexpected io-with-input-from-string
+(deftest io-with-input-from-string
   "with-input-from-string should provide string as input."
   :timeout 30
   :tags '(:io :with-input-from-string :native :e2e)
@@ -60,18 +60,18 @@
 ;;; Expected-Fail: Character I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-read-char-write-char
+(deftest io-read-char-write-char
   "read-char and write-char should work with string streams."
   :timeout 30
   :tags '(:io :read-char :write-char :native :e2e)
   (let ((result (io-run
                  "(let ((out (make-string-output-stream)))
-                    (write-char #\X out)
-                    (write-char #\Y out)
+                    (write-char #\\X out)
+                    (write-char #\\Y out)
                     (get-output-stream-string out))")))
     (assert-equal "XY" result)))
 
-(defexpected io-peek-char
+(deftest io-peek-char
   "peek-char should look ahead without consuming."
   :timeout 30
   :tags '(:io :peek-char :native :e2e)
@@ -80,7 +80,7 @@
                     (list (peek-char nil s) (read-char s) (read-char s)))")))
     (assert-equal '(#\A #\A #\B) result)))
 
-(defexpected io-unread-char
+(deftest io-unread-char
   "unread-char should push character back."
   :timeout 30
   :tags '(:io :unread-char :native :e2e)
@@ -89,22 +89,22 @@
                     (let ((c (read-char s)))
                       (unread-char c s)
                       (list (read-char s) (read-char s))))")))
-    (assert-equal '(#\h #\h) result)))
+    (assert-equal '(#\h #\e) result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
 ;;; Expected-Fail: Line I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-read-line
+(deftest io-read-line
   "read-line should read until newline."
   :timeout 30
   :tags '(:io :read-line :native :e2e)
   (let ((result (io-run
-                 "(with-input-from-string (s \"hello~%world\")
+                 "(with-input-from-string (s (format nil \"hello~%world\"))
                     (list (read-line s) (read-line s)))")))
     (assert-equal '("hello" "world") result)))
 
-(defexpected io-write-line
+(deftest io-write-line
   "write-line should append newline."
   :timeout 30
   :tags '(:io :write-line :native :e2e)
@@ -118,7 +118,7 @@
 ;;; Expected-Fail: Print Functions
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-print-prin1-princ
+(deftest io-print-prin1-princ
   "print/princ/prin1 should work via native code."
   :timeout 30
   :tags '(:io :print :princ :prin1 :native :e2e)
@@ -129,7 +129,7 @@
                     (princ 42 s))")))
     (assert-equal "\"hello\" 42" result)))
 
-(defexpected io-write-to-string
+(deftest io-write-to-string
   "write-to-string should return string representation."
   :timeout 30
   :tags '(:io :write-to-string :native :e2e)
@@ -140,7 +140,7 @@
 ;;; Expected-Fail: Stream Predicates
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-stream-predicates
+(deftest io-stream-predicates
   "streamp/input-stream-p/output-stream-p should work."
   :timeout 30
   :tags '(:io :streamp :stream-predicates :native :e2e)
@@ -156,7 +156,7 @@
 ;;; Expected-Fail: File I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-open-close
+(deftest io-open-close
   "open and close should work with file streams."
   :timeout 30
   :tags '(:io :open :close :file :native :e2e)
@@ -170,7 +170,7 @@
                     :ok)")))
     (assert-equal :ok result)))
 
-(defexpected io-with-open-file
+(deftest io-with-open-file
   "with-open-file should handle file open/close automatically."
   :timeout 30
   :tags '(:io :with-open-file :native :e2e)
@@ -185,7 +185,7 @@
                     (read-line s))")))
     (assert-equal "hello" result)))
 
-(defexpected io-file-position-length
+(deftest io-file-position-length
   "file-position and file-length should work."
   :timeout 30
   :tags '(:io :file-position :file-length :native :e2e)
@@ -204,32 +204,32 @@
 ;;; Expected-Fail: Stream Control
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-force-finish-output
+(deftest io-force-finish-output
   "force-output and finish-output should not error."
   :timeout 30
   :tags '(:io :force-output :finish-output :native :e2e)
   (let ((result (io-run
                  "(let ((s (make-string-output-stream)))
-                    (write-char #\X s)
+                    (write-char #\\X s)
                     (finish-output s)
                     (force-output s)
                     :ok)")))
     (assert-equal :ok result)))
 
-(defexpected io-listen
+(deftest io-listen
   "listen should detect available input."
   :timeout 30
   :tags '(:io :listen :native :e2e)
   (let ((result (io-run
                  "(with-input-from-string (s \"hello\")
                     (list (listen s) (read-char s) (listen s)))")))
-    (assert-equal '(t #\h nil) result)))
+    (assert-equal '(t #\h t) result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
 ;;; Expected-Fail: Pathname Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-make-pathname
+(deftest io-make-pathname
   "make-pathname should construct pathnames."
   :timeout 30
   :tags '(:io :make-pathname :pathname :native :e2e)
@@ -238,7 +238,7 @@
                     (list (pathnamep p) (pathname-name p) (pathname-type p)))")))
     (assert-equal '(t "test" "txt") result)))
 
-(defexpected io-namestring
+(deftest io-namestring
   "namestring should convert pathname to string."
   :timeout 30
   :tags '(:io :namestring :pathname :native :e2e)
@@ -247,7 +247,7 @@
                     (namestring p))")))
     (assert-true (search "test.lisp" result :test #'char-equal))))
 
-(defexpected io-merge-pathnames
+(deftest io-merge-pathnames
   "merge-pathnames should fill in defaults."
   :timeout 30
   :tags '(:io :merge-pathnames :pathname :native :e2e)
@@ -257,7 +257,7 @@
                     (pathname-type m))")))
     (assert-equal "txt" result)))
 
-(defexpected io-probe-file
+(deftest io-probe-file
   "probe-file should detect file existence."
   :timeout 30
   :tags '(:io :probe-file :pathname :native :e2e)
@@ -273,7 +273,7 @@
                         :not-found))")))
     (assert-equal :exists result)))
 
-(defexpected io-delete-file
+(deftest io-delete-file
   "delete-file should remove a file."
   :timeout 30
   :tags '(:io :delete-file :pathname :native :e2e)
@@ -294,7 +294,7 @@
 ;;; Expected-Fail: File System Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-directory-listing
+(deftest io-directory-listing
   "directory should list files matching pattern."
   :timeout 30
   :tags '(:io :directory :pathname :native :e2e)
@@ -308,7 +308,7 @@
                     (length (directory \"/tmp/cl-cc-dir-test-*.txt\")))")))
     (assert-true (>= result 1))))
 
-(defexpected io-ensure-directories-exist
+(deftest io-ensure-directories-exist
   "ensure-directories-exist should create directories."
   :timeout 30
   :tags '(:io :ensure-directories-exist :pathname :native :e2e)
@@ -322,7 +322,7 @@
 ;;; Expected-Fail: LOAD (loading files at runtime)
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-load-file
+(deftest io-load-file
   "load should evaluate forms from a file."
   :timeout 30
   :tags '(:io :load :native :e2e)
@@ -342,7 +342,7 @@
 ;;; Expected-Fail: Compound Streams
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-broadcast-stream
+(deftest io-broadcast-stream
   "make-broadcast-stream should create broadcast stream."
   :timeout 30
   :tags '(:io :broadcast-stream :native :e2e)
@@ -355,7 +355,7 @@
                           (get-output-stream-string b)))")))
     (assert-equal '("hello" "hello") result)))
 
-(defexpected io-concatenated-stream
+(deftest io-concatenated-stream
   "make-concatenated-stream should concatenate input streams."
   :timeout 30
   :tags '(:io :concatenated-stream :native :e2e)
@@ -367,7 +367,7 @@
                           (read-char cc) (read-char cc) (read-char cc)))")))
     (assert-equal '(#\A #\B #\C #\D #\E #\F) result)))
 
-(defexpected io-echo-stream
+(deftest io-echo-stream
   "make-echo-stream should echo input to output."
   :timeout 30
   :tags '(:io :echo-stream :native :e2e)
@@ -383,7 +383,7 @@
 ;;; Expected-Fail: Sequence I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
-(defexpected io-read-sequence
+(deftest io-read-sequence
   "read-sequence should fill a sequence with stream input."
   :timeout 30
   :tags '(:io :read-sequence :native :e2e)
@@ -394,7 +394,7 @@
                       v))")))
     (assert-equal "ABC" result)))
 
-(defexpected io-write-sequence
+(deftest io-write-sequence
   "write-sequence should write sequence elements to stream."
   :timeout 30
   :tags '(:io :write-sequence :native :e2e)

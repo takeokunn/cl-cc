@@ -1,15 +1,25 @@
 (defpackage :cl-cc/php
   (:use :cl :cl-cc/ast :cl-cc/bootstrap :cl-cc/parse)
   (:export
-   #:tokenize-php-source
-    #:parse-php-source
-    #:parse-php-source-to-cst
-    #:+php-null+
+    #:tokenize-php-source
+     #:parse-php-source
+     #:parse-php-source-to-cst
+     #:php-attribute
+     #:make-php-attribute
+     #:php-attribute-name
+     #:php-attribute-args
+     #:php-attribute-target-type
+     #:%php-parse-attributes
+     #:%php-parse-attribute-group
+     #:%php-parse-attribute
+     #:%php-skip-attributes
+     #:+php-null+
     #:%php-array
     #:%php-array-empty-p
-    #:%php-array-ref
-    #:%php-array-set
-    #:%php-eq-loose
+     #:%php-array-ref
+     #:%php-array-set
+     #:%php-array-unset
+     #:%php-eq-loose
     #:%php-eq-strict
     #:%php-null-p
     #:%php-to-number
@@ -19,7 +29,30 @@
     #:%php-strlen
     #:%php-strtolower
    #:%php-strtoupper
-   #:%php-isset
-   #:%php-array-key-exists
-   #:*php-builtin-map*
+    #:%php-stringify
+    #:%php-concat
+    #:%php-modulo
+    #:%php-shift-left
+    #:%php-shift-right
+    #:%php-spaceship
+    #:%php-bitwise-and
+    #:%php-bitwise-or
+    #:%php-bitwise-xor
+    #:%php-bitwise-not
+    #:%php-isset
+    #:%php-array-key-exists
+     #:%php-yield
+     #:%php-yield-from
+      #:%php-throw
+       #:%php-make-exception
+       #:%php-exception-object-p
+       #:%php-exception-value
+       #:%php-exception-matches-p
+       #:%php-enum-make-case
+       #:%php-enum-cases
+       #:%php-enum-from
+       #:%php-enum-try-from
+       #:%php-enum-case-value
+       #:php-exception
+    #:*php-builtin-map*
    #:php-check-supported-forms))

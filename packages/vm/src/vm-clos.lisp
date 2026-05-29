@@ -137,9 +137,9 @@
     ((typep instance 'standard-object)
      (let* ((class (class-of instance))
             (copy (allocate-instance class)))
-       #+sbcl
-        (dolist (slot (class-slots class) copy)
-          (let ((slot-name (slot-definition-name slot)))
+        #+sbcl
+         (dolist (slot (sb-mop:class-slots class) copy)
+           (let ((slot-name (sb-mop:slot-definition-name slot)))
            (when (slot-boundp instance slot-name)
              (setf (slot-value copy slot-name)
                    (slot-value instance slot-name)))))
@@ -195,9 +195,9 @@
     ((typep object 'standard-object)
      (let ((copy (copy-instance object)))
        (setf (gethash object seen) copy)
-       #+sbcl
-        (dolist (slot (class-slots (class-of object)) copy)
-          (let ((slot-name (slot-definition-name slot)))
+        #+sbcl
+         (dolist (slot (sb-mop:class-slots (class-of object)) copy)
+           (let ((slot-name (sb-mop:slot-definition-name slot)))
            (when (slot-boundp object slot-name)
              (setf (slot-value copy slot-name)
                    (deep-copy (slot-value object slot-name) seen)))))))

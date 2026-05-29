@@ -39,6 +39,18 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
                  :source-line source-line
                  :source-column source-column))
 
+(defmethod lower-sexp-to-ast ((node ratio) &key source-file source-line source-column)
+  (make-ast-quote :value node
+                  :source-file source-file
+                  :source-line source-line
+                  :source-column source-column))
+
+(defmethod lower-sexp-to-ast ((node complex) &key source-file source-line source-column)
+  (make-ast-quote :value node
+                  :source-file source-file
+                  :source-line source-line
+                  :source-column source-column))
+
 (defmethod lower-sexp-to-ast ((node float) &key source-file source-line source-column)
   (make-ast-quote :value node
                   :source-file source-file
@@ -77,6 +89,16 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
   (cond
     ((member node '(nil t))
      (make-ast-quote :value node
+                     :source-file source-file
+                     :source-line source-line
+                     :source-column source-column))
+    ((eq node 'most-positive-fixnum)
+     (make-ast-quote :value most-positive-fixnum
+                     :source-file source-file
+                     :source-line source-line
+                     :source-column source-column))
+    ((eq node 'most-negative-fixnum)
+     (make-ast-quote :value most-negative-fixnum
                      :source-file source-file
                      :source-line source-line
                      :source-column source-column))

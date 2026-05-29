@@ -8,7 +8,8 @@
 
 (defsuite types-extended-coverage-suite
   :description "Extended coverage for types-extended/core/env uncovered branches"
-  :parent cl-cc-unit-suite)
+  :parent cl-cc-unit-suite
+  :parallel nil)
 
 (in-suite types-extended-coverage-suite)
 

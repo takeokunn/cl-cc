@@ -13,7 +13,9 @@
   "Build an OR of strict-equality tests for one match arm."
   (let ((comparisons
           (mapcar (lambda (test)
-                    (%php-call 'equal (make-ast-var :name subject-sym) test))
+                    (%php-call 'cl-cc/php::%php-eq-strict
+                               (make-ast-var :name subject-sym)
+                               test))
                   tests)))
     (reduce (lambda (lhs rhs)
               (make-ast-binop :op 'or :lhs lhs :rhs rhs))

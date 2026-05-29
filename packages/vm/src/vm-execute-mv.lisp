@@ -293,13 +293,26 @@
       (unless (vm-closure-label-table closure)
         (setf (vm-closure-label-table closure) labels))
       (setf (vm-closure-dispatch-tag closure) (cons :known-function name)))
-    (let ((existing (gethash name (vm-function-registry state))))
-      (if (vm-forward-reference-cell-p existing)
-          (progn
-            (setf (vm-forward-reference-cell-ref existing) closure)
-            (setf *vm-unresolved-forward-refs*
-                  (remove name *vm-unresolved-forward-refs* :key #'car :test #'eq)))
-          (setf (gethash name (vm-function-registry state)) closure)))
+    (flet ((register-name (function-name)
+             (let ((existing (gethash function-name (vm-function-registry state))))
+               (if (vm-forward-reference-cell-p existing)
+                   (progn
+                     (setf (vm-forward-reference-cell-ref existing) closure)
+                     (setf *vm-unresolved-forward-refs*
+                           (remove function-name *vm-unresolved-forward-refs* :key #'car :test #'eq)))
+                   (setf (gethash function-name (vm-function-registry state)) closure)))))
+      (register-name name)
+      ;; The reader currently tokenizes package-qualified references whose
+      ;; package is created earlier in the same input as CL-CC::|PKG::NAME|.
+      ;; When IN-PACKAGE has switched *PACKAGE* to a runtime descriptor before
+      ;; this DEFUN executes, also register that package-qualified spelling so
+      ;; calls such as E2E-PKG:HELLO-WORLD resolve without host fallback.
+      (let ((current-package (gethash '*package* (vm-global-vars state))))
+        (when (and (hash-table-p current-package) (symbolp name))
+          (let ((package-name (gethash :name current-package)))
+            (when package-name
+              (register-name (intern (format nil "~A::~A" package-name (symbol-name name))
+                                     :cl-cc)))))))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-declare-forward-reference) state pc labels)

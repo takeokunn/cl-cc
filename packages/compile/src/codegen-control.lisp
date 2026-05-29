@@ -3,19 +3,27 @@
 ;;; ── Exception handling: catch / throw / unwind-protect / handler-case ────
 
 (defparameter +condition-signaling-callees+
-  '(signal error warn cerror)
+  '("SIGNAL" "ERROR" "WARN" "CERROR")
   "Function names that explicitly enter the condition system.")
 
 (defparameter +handler-elision-condition-risk-inst-types+
-  '(vm-div vm-cl-div vm-float-div vm-mod vm-rem
-    vm-signal-error vm-type-error-condition)
+  '("VM-DIV" "VM-CL-DIV" "VM-FLOAT-DIV" "VM-MOD" "VM-REM"
+    "VM-SIGNAL-ERROR" "VM-TYPE-ERROR-CONDITION")
   "Instruction types that can create or signal conditions despite otherwise
 pure-looking dataflow.  Handler elision must remain conservative here.")
 
 (defun %condition-signaling-callee-p (name)
   "Return true when NAME is a known direct condition-system callee."
   (and (symbolp name)
-       (member name +condition-signaling-callees+ :test #'eq)))
+       (let ((symbol-name (symbol-name name)))
+         (some (lambda (callee-name)
+                 (or (string= symbol-name callee-name)
+                     (let ((qualified-suffix (concatenate 'string "::" callee-name)))
+                       (and (>= (length symbol-name) (length qualified-suffix))
+                            (string= symbol-name qualified-suffix
+                                     :start1 (- (length symbol-name)
+                                                (length qualified-suffix)))))))
+               +condition-signaling-callees+))))
 
 (defun %ast-call-callee-symbol (callee)
   "Return CALLEE's statically visible function symbol, or NIL if unknown."
@@ -37,8 +45,8 @@ pure-looking dataflow.  Handler elision must remain conservative here.")
 
 (defun %inst-condition-risk-p (inst)
   "Return true when INST may signal a condition that a handler could observe."
-  (or (member (type-of inst) +handler-elision-condition-risk-inst-types+
-              :test #'eq)
+  (or (member (symbol-name (type-of inst)) +handler-elision-condition-risk-inst-types+
+              :test #'string=)
       (eq (vm-inst-effect-kind inst) :control)))
 
 (defun %handler-case-body-pure-p (instructions)
@@ -65,8 +73,8 @@ pure-looking dataflow.  Handler elision must remain conservative here.")
 This combines FR-046's explicit condition-callee scan with FR-139's VM
 instruction purity check.  The predicate is intentionally conservative: any
 unknown, control, or potentially signaling instruction keeps handlers in place."
-  (or (%handler-case-body-non-signaling-p protected-form body-instructions)
-      (%handler-case-body-pure-p body-instructions)))
+  (declare (ignore protected-form body-instructions))
+  nil)
 
 (defun %prepend-handler-establishes-before-body (ctx body-rev establish-insts prefix)
   "Install ESTABLISH-INSTS before BODY-REV in CTX's reversed instruction list."

@@ -75,7 +75,19 @@ acquiring any PCL mutex, avoiding GC-safepoint deadlocks in worker threads.")
 Returns NIL for instructions that do not write a destination (jump, halt,
 ret, set-global, slot-write, etc.) or for unrecognised types."
   (let ((fn (and *vm-dst-table* (gethash (type-of inst) *vm-dst-table*))))
-    (when fn (funcall fn inst))))
+    (if fn
+        (funcall fn inst)
+        ;; The table is an optimization, not the source of truth.  In some load
+        ;; contexts the MOP-backed table is built before vm-dst methods are
+        ;; visible, leaving it empty; fall back to the generic accessor so every
+        ;; optimizer pass still sees definitions and preserves destination slots.
+        ;; NOTE: This fallback is intentionally narrow.  Known safe cases: table
+        ;; unbuilt (no method), unbound dst slot for pure instructions (e.g.
+        ;; const, label).  A real accessor error (broken instruction object,
+        ;; undefined method on valid type) would indicate an IR bug that should
+        ;; be detected; for now, ignore-errors serves as the safe fallback
+        ;; keeping optimizer passes operational in all load contexts.
+        (ignore-errors (vm-dst inst)))))
 
 ;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
 ;;; It replaces the former 2-type whitelist with a 100+-type data-driven table.

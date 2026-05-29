@@ -553,6 +553,145 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
 (define-cmp-emitter emit-vm-num-eq #x94 "vm-num-eq: dst = (lhs == rhs) ? 1 : 0  -- integer equality.")
 (define-cmp-emitter emit-vm-eq    #x94 "vm-eq: dst = (lhs == rhs) ? 1 : 0  -- general equality (same x86 encoding).")
 
+;;; ─── Native I/O Runtime-Call Emitters ───────────────────────────────────────
+;;;
+;;; These emitters bridge VM I/O instructions to native code by calling runtime
+;;; helper functions via the SysV ABI calling convention (RDI, RSI, RDX, RCX for
+;;; args 1-4, RAX for return value, R11 for indirect call target).
+;;; Pattern: emit-vm-print (line 280) — move args to ABI regs, load runtime
+;;; function address, call via R11, move RAX result to dst register.
+
+(defun emit-vm-unread-char (inst stream)
+  "Emit native code for vm-unread-char: (unread-char char stream-handle).
+   RDI = char, RSI = stream handle."
+  (let ((char-reg (vm-reg-to-x86 (vm-char-reg inst)))
+        (handle-reg (vm-reg-to-x86 (vm-file-handle inst))))
+    (unless (= char-reg +rdi+)
+      (emit-mov-rr64 +rdi+ char-reg stream))
+    (unless (= handle-reg +rsi+)
+      (emit-mov-rr64 +rsi+ handle-reg stream))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_unread_char")) stream)
+    (emit-call-r64 +r11+ stream)))
+
+(defun emit-vm-listen-inst (inst stream)
+  "Emit native code for vm-listen-inst: (listen stream-handle) → boolean in dst.
+   RDI = stream handle.  Result returned in RAX, copied to dst."
+  (let ((handle-reg (vm-reg-to-x86 (vm-file-handle inst)))
+        (dst-reg (vm-reg-to-x86 (vm-dst inst))))
+    (unless (= handle-reg +rdi+)
+      (emit-mov-rr64 +rdi+ handle-reg stream))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_listen")) stream)
+    (emit-call-r64 +r11+ stream)
+    (unless (= +rax+ dst-reg)
+      (emit-mov-rr64 dst-reg +rax+ stream))))
+
+(defun emit-vm-write-to-string-inst (inst stream)
+  "Emit native code for vm-write-to-string-inst: (write-to-string obj) → string in dst.
+   RDI = object.  Result returned in RAX, copied to dst."
+  (let ((src-reg (vm-reg-to-x86 (vm-src inst)))
+        (dst-reg (vm-reg-to-x86 (vm-dst inst))))
+    (unless (= src-reg +rdi+)
+      (emit-mov-rr64 +rdi+ src-reg stream))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_write_to_string")) stream)
+    (emit-call-r64 +r11+ stream)
+    (unless (= +rax+ dst-reg)
+      (emit-mov-rr64 dst-reg +rax+ stream))))
+
+(defun emit-vm-make-echo-stream (inst stream)
+  "Emit native code for vm-make-echo-stream: (make-echo-stream input output) → stream in dst.
+   RDI = input stream, RSI = output stream.  Result returned in RAX, copied to dst."
+  (let ((in-reg (vm-reg-to-x86 (vm-src1 inst)))
+        (out-reg (vm-reg-to-x86 (vm-src2 inst)))
+        (dst-reg (vm-reg-to-x86 (vm-dst inst))))
+    (unless (= in-reg +rdi+)
+      (emit-mov-rr64 +rdi+ in-reg stream))
+    (unless (= out-reg +rsi+)
+      (emit-mov-rr64 +rsi+ out-reg stream))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_make_echo_stream")) stream)
+    (emit-call-r64 +r11+ stream)
+    (unless (= +rax+ dst-reg)
+      (emit-mov-rr64 dst-reg +rax+ stream))))
+
+(defun emit-vm-make-pathname (inst stream)
+  "Emit native code for vm-make-pathname: (make-pathname &key host device directory
+   name type version defaults case) → pathname in dst.  Uses up to 7 positional
+   args passed via RDI–R9, then calls rt-make-pathname-native which decodes them.
+   Missing args are passed as NIL."
+  (let ((dst-reg (vm-reg-to-x86 (vm-dst inst)))
+        (args (list (vm-mkpn-host-reg inst)
+                    (vm-mkpn-device-reg inst)
+                    (vm-mkpn-directory-reg inst)
+                    (vm-mkpn-name-reg inst)
+                    (vm-mkpn-type-reg inst)
+                    (vm-mkpn-version-reg inst)
+                    (vm-mkpn-defaults-reg inst)))
+        (abi-regs (list +rdi+ +rsi+ +rdx+ +rcx+ +r8+ +r9+)))
+    (loop for arg-reg in args
+          for abi in abi-regs
+          when arg-reg do
+          (let ((x86-arg (vm-reg-to-x86 arg-reg)))
+            (unless (= x86-arg abi)
+              (emit-mov-rr64 abi x86-arg stream))))
+    ;; Pack the 7 args as a single list and call a bridge helper
+    ;; For simplicity, we use a single-arg bridge that takes a packed list
+    ;; format: arg count (rdi=7), then args in consecutive regs (rsi-r12)
+    ;; But for now, use the simpler positional helper
+    (let ((host-reg (vm-mkpn-host-reg inst))
+          (device-reg (vm-mkpn-device-reg inst))
+          (directory-reg (vm-mkpn-directory-reg inst))
+          (name-reg (vm-mkpn-name-reg inst))
+          (type-reg (vm-mkpn-type-reg inst))
+          (version-reg (vm-mkpn-version-reg inst))
+          (defaults-reg (vm-mkpn-defaults-reg inst)))
+      (when host-reg
+        (let ((x86-arg (vm-reg-to-x86 host-reg)))
+          (unless (= x86-arg +rdi+)
+            (emit-mov-rr64 +rdi+ x86-arg stream))))
+      (when device-reg
+        (let ((x86-arg (vm-reg-to-x86 device-reg)))
+          (unless (= x86-arg +rsi+)
+            (emit-mov-rr64 +rsi+ x86-arg stream))))
+      (when directory-reg
+        (let ((x86-arg (vm-reg-to-x86 directory-reg)))
+          (unless (= x86-arg +rdx+)
+            (emit-mov-rr64 +rdx+ x86-arg stream))))
+      (when name-reg
+        (let ((x86-arg (vm-reg-to-x86 name-reg)))
+          (unless (= x86-arg +rcx+)
+            (emit-mov-rr64 +rcx+ x86-arg stream))))
+      (when type-reg
+        (let ((x86-arg (vm-reg-to-x86 type-reg)))
+          (unless (= x86-arg +r8+)
+            (emit-mov-rr64 +r8+ x86-arg stream))))
+      (when version-reg
+        (let ((x86-arg (vm-reg-to-x86 version-reg)))
+          (unless (= x86-arg +r9+)
+            (emit-mov-rr64 +r9+ x86-arg stream)))))
+    ;; Push remaining args on stack if needed (defaults-reg goes on stack at [rsp])
+    (when (vm-mkpn-defaults-reg inst)
+      (let ((x86-arg (vm-reg-to-x86 (vm-mkpn-defaults-reg inst))))
+        (emit-push64 x86-arg stream)))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_make_pathname_native")) stream)
+    ;; RDI = count of positional args supplied (encoded as bitmask in RAX not needed)
+    ;; Use a simplified bridge: 7 args always, nil for missing
+    (emit-call-r64 +r11+ stream)
+    (when (vm-mkpn-defaults-reg inst)
+      (emit-pop64 +rcx+ stream))  ;; clean up stack arg
+    (unless (= +rax+ dst-reg)
+      (emit-mov-rr64 dst-reg +rax+ stream))))
+
+(defun emit-vm-load-file (inst stream)
+  "Emit native code for vm-load-file: (load pathname) → result in dst.
+   RDI = pathname.  Result returned in RAX, copied to dst."
+  (let ((src-reg (vm-reg-to-x86 (vm-src inst)))
+        (dst-reg (vm-reg-to-x86 (vm-dst inst))))
+    (unless (= src-reg +rdi+)
+      (emit-mov-rr64 +rdi+ src-reg stream))
+    (emit-mov-ri64 +r11+ (load-time-value (%runtime-function-address "rt_load")) stream)
+    (emit-call-r64 +r11+ stream)
+    (unless (= +rax+ dst-reg)
+      (emit-mov-rr64 dst-reg +rax+ stream))))
+
 ;;; Unary arithmetic/logical instruction emitters
 
 (define-unary-mov-emitter emit-vm-neg    emit-neg-r64 "vm-neg: dst = -src  (two's complement negation).")

@@ -208,22 +208,30 @@ intersection type syntax as metadata only."
   (nth-value 1 (php-parse-type-annotation stream)))
 
 (defun php-parse-param-list (stream)
-  "Parse (type? $param, ...). Return params, rest, and type metadata."
+  "Parse (attribute* type? $param, ...). Return params, rest, type metadata, and attribute metadata."
   (let ((current (%php-consume-expected :T-LPAREN stream))
         (params nil)
-        (param-types nil))
+        (param-types nil)
+        (param-attributes nil))
     (if (eq (php-peek-type current) :T-RPAREN)
         (values nil (cdr current) nil)
         (progn
           (loop
-            (multiple-value-bind (param-type rest-after-type) (php-parse-type-annotation current)
+            (multiple-value-bind (attributes rest-after-attributes) (%php-parse-attributes current)
+              (setf current rest-after-attributes)
+              (multiple-value-bind (param-type rest-after-type) (php-parse-type-annotation current)
               (setf current (or rest-after-type current))
+              (when (%php-reference-token-p current)
+                (error "PHP parse error: PHP parameter by reference (&$param) is not yet supported"))
               (multiple-value-bind (var-tok rest) (php-expect :T-VAR current)
                 (let ((param (php-var-sym (php-tok-value var-tok))))
                   (push param params)
                   (when param-type
-                    (push (cons param param-type) param-types)))
-                (setf current rest)))
+                    (push (cons param param-type) param-types))
+                  (when attributes
+                    (push (cons param (%php-attribute-metadata attributes :parameter))
+                          param-attributes)))
+                (setf current rest))))
             (when (and current (eq (php-peek-type current) :T-OP)
                        (equal "=" (php-peek-value current)))
               (setf current (cdr current))
@@ -236,7 +244,8 @@ intersection type syntax as metadata only."
                 (return)))
           (values (nreverse params)
                   (%php-consume-expected :T-RPAREN current)
-                  (nreverse param-types))))))
+                  (nreverse param-types)
+                  (nreverse param-attributes))))))
 
 (defun php-parse-return-type (stream)
   "Parse an optional : type annotation after a function parameter list."
@@ -248,6 +257,12 @@ intersection type syntax as metadata only."
   "Build PHP type metadata plist for AST callable declarations."
   (append (when param-types (list :php-param-types param-types))
           (when return-type (list :php-return-type return-type))))
+
+(defun %php-function-declarations (param-types return-type param-attributes attributes target-type)
+  "Build PHP callable metadata including types and attributes."
+  (append (%php-function-type-declarations param-types return-type)
+          (when param-attributes (list :php-param-attributes param-attributes))
+          (%php-attribute-metadata attributes target-type)))
 
 (defun %php-parse-label-stmt (stream known-vars)
   "Parse `label:` into a tagbody label marker."
@@ -380,49 +395,218 @@ intersection type syntax as metadata only."
                                            default-forms
                                            (list break-tag))))))))))
 
-(defun %php-lower-foreach-with-label (arr-expr var-sym body-stmts loop-tag)
+(defun %php-lower-foreach-with-label (arr-expr var-sym body-stmts loop-tag &optional key-sym)
   "Lower a PHP foreach loop using LOOP-TAG as the continue target."
   (let ((list-sym (gensym "FOREACH-LIST-")))
-    (make-ast-let
-     :bindings (list (cons list-sym arr-expr))
-     :body (list (%php-lower-while-with-label
-                  (make-ast-var :name list-sym)
-                  (list (make-ast-let
-                         :bindings (list (cons var-sym
-                                              (make-ast-call
-                                               :func (make-ast-var :name 'car)
-                                               :args (list (make-ast-var :name list-sym)))))
-                         :body (append body-stmts
-                                       (list (make-ast-setq
-                                              :var list-sym
-                                              :value (make-ast-call
+    (if key-sym
+        (let ((pair-sym (gensym "FOREACH-PAIR-")))
+          (make-ast-let
+           :bindings (list (cons list-sym
+                                 (make-ast-call :func (make-ast-var :name '%php-array-pairs)
+                                                :args (list arr-expr)))
+                           (cons pair-sym (make-ast-quote :value nil)))
+           :body (list (%php-lower-while-with-label
+                        (make-ast-var :name list-sym)
+                        (list (make-ast-setq
+                               :var pair-sym
+                               :value (make-ast-call
+                                       :func (make-ast-var :name 'car)
+                                       :args (list (make-ast-var :name list-sym))))
+                              (make-ast-let
+                               :bindings (list (cons key-sym
+                                                     (make-ast-call
+                                                      :func (make-ast-var :name 'car)
+                                                      :args (list (make-ast-var :name pair-sym))))
+                                               (cons var-sym
+                                                     (make-ast-call
                                                       :func (make-ast-var :name 'cdr)
-                                                      :args (list (make-ast-var :name list-sym))))))))
-                  loop-tag)))))
+                                                      :args (list (make-ast-var :name pair-sym)))))
+                               :body (append body-stmts
+                                             (list (make-ast-setq
+                                                    :var list-sym
+                                                    :value (make-ast-call
+                                                            :func (make-ast-var :name 'cdr)
+                                                            :args (list (make-ast-var :name list-sym))))))))
+                        loop-tag))))
+        (make-ast-let
+         :bindings (list (cons list-sym arr-expr))
+         :body (list (%php-lower-while-with-label
+                      (make-ast-var :name list-sym)
+                      (list (make-ast-let
+                             :bindings (list (cons var-sym
+                                                   (make-ast-call
+                                                    :func (make-ast-var :name 'car)
+                                                    :args (list (make-ast-var :name list-sym)))))
+                             :body (append body-stmts
+                                           (list (make-ast-setq
+                                                  :var list-sym
+                                                  :value (make-ast-call
+                                                          :func (make-ast-var :name 'cdr)
+                                                          :args (list (make-ast-var :name list-sym))))))))
+                      loop-tag))))))
 
-(defun %php-parse-classlike (stream known-vars &key enum-p)
+(defun %php-exception-object-cond (expr)
+  "Build a predicate call testing whether EXPR is a PHP exception payload."
+  (%php-call 'cl-cc/php::%php-exception-object-p expr))
+
+(defun %php-exception-match-cond (expr class-name)
+  "Build a predicate call testing whether EXPR matches PHP catch CLASS-NAME."
+  (%php-call 'cl-cc/php::%php-exception-matches-p
+             expr
+             (make-ast-quote :value class-name)))
+
+(defun %php-rethrow-exception (expr)
+  "Build a VM throw that propagates an unmatched PHP exception payload."
+  (make-ast-throw :tag (make-ast-quote :value 'php-exception)
+                  :value expr))
+
+(defun %php-catch-body (exception-sym var-sym body)
+  "Return BODY with PHP catch variable VAR-SYM bound to EXCEPTION-SYM when present."
+  (if var-sym
+      (make-ast-let :bindings (list (cons var-sym
+                                          (%php-call 'cl-cc/php::%php-exception-value
+                                                     (make-ast-var :name exception-sym))))
+                     :body body)
+      (make-ast-progn :forms body)))
+
+(defun %php-catch-dispatch (exception-sym clauses)
+  "Build nested PHP catch dispatch for EXCEPTION-SYM and CATCH CLAUSES."
+  (let ((exception-var (make-ast-var :name exception-sym)))
+    (if clauses
+        (destructuring-bind (class-name var-sym . body) (first clauses)
+          (make-ast-if :cond (%php-exception-match-cond exception-var class-name)
+                       :then (%php-catch-body exception-sym var-sym body)
+                       :else (%php-catch-dispatch exception-sym (rest clauses))))
+        (%php-rethrow-exception exception-var))))
+
+(defun %php-lower-try-catches (try-body clauses)
+  "Lower PHP try/catch using VM catch/throw plus PHP class-matching helpers."
+  (let ((exception-sym (gensym "PHP-EXCEPTION-RESULT-")))
+    (make-ast-let
+     :bindings (list (cons exception-sym
+                           (make-ast-catch :tag (make-ast-quote :value 'php-exception)
+                                           :body try-body)))
+     :body (list (make-ast-if
+                   :cond (%php-exception-object-cond (make-ast-var :name exception-sym))
+                   :then (%php-catch-dispatch exception-sym clauses)
+                   :else (make-ast-var :name exception-sym))))))
+
+(defun %php-catch-type-token-p (token)
+  "Return true when TOKEN can appear as a PHP catch class name."
+  (and token
+       (member (php-tok-type token) '(:T-IDENT :T-TYPE :T-KEYWORD) :test #'eq)))
+
+(defun %php-parse-catch-type-list (stream)
+  "Parse a PHP catch type or union type list, returning (values type stream)."
+  (let ((types nil)
+        (current stream))
+    (unless (or (eq (php-peek-type current) :T-BACKSLASH)
+                (%php-catch-type-token-p (php-peek current)))
+      (error "PHP parse error: expected catch type, got ~S" (php-peek current)))
+    (loop
+      (multiple-value-bind (catch-name after-name) (php-parse-qualified-name current)
+        (push (php-ident-sym (php-resolve-qualified-name catch-name :class)) types)
+        (setf current after-name))
+      (if (and (eq (php-peek-type current) :T-OP)
+               (equal (php-peek-value current) "|"))
+          (progn
+            (setf current (cdr current))
+            (unless (or (eq (php-peek-type current) :T-BACKSLASH)
+                        (%php-catch-type-token-p (php-peek current)))
+              (error "PHP parse error: expected catch type after |, got ~S" (php-peek current))))
+          (return)))
+    (let ((ordered (nreverse types)))
+      (values (if (rest ordered) ordered (first ordered)) current))))
+
+(defun %php-enum-backing-type (type)
+  "Return normalized PHP enum backing TYPE metadata."
+  (cond ((null type) nil)
+        ((string= type "int") :int)
+        ((string= type "string") :string)
+        (t (error "PHP parse error: enum backing type must be int or string, got ~S" type))))
+
+(defun %php-parse-enum-backing-type (stream)
+  "Parse optional : int|string enum backing type."
+  (if (eq (php-peek-type stream) :T-COLON)
+      (multiple-value-bind (type rest) (php-parse-type-annotation (cdr stream))
+        (values (%php-enum-backing-type type) rest))
+      (values nil stream)))
+
+(defun %php-enum-case-initform (class-name case-name value)
+  "Build an AST initform creating one PHP enum case singleton."
+  (%php-call 'cl-cc/php::%php-enum-make-case
+             (make-ast-quote :value class-name)
+             (make-ast-quote :value case-name)
+             (or value (make-ast-quote :value +php-null+))))
+
+(defun %php-parse-enum-case (stream known-vars class-name enum-type &optional attributes)
+  "Parse case NAME [= VALUE]; in an enum body."
+  (declare (ignore enum-type))
+  (let ((current (cdr stream)))
+    (multiple-value-bind (name-tok rest) (php-expect :T-IDENT current)
+      (let* ((case-name (php-ident-sym (php-tok-value name-tok)))
+             (value nil)
+             (current rest))
+        (when (%php-assignment-op-p current)
+          (multiple-value-bind (expr rest2 kv2) (php-parse-expr (cdr current) known-vars)
+            (declare (ignore kv2))
+            (setf value expr
+                  current rest2)))
+        (values (make-ast-slot-def :name case-name
+                                   :type enum-type
+                                   :initform (%php-enum-case-initform class-name case-name value)
+                                    :allocation :class
+                                    :imports (list :php-enum-case t
+                                                   :php-enum-value value
+                                                   :php-attributes (mapcar (lambda (attribute)
+                                                                             (setf (php-attribute-target-type attribute) :constant)
+                                                                             attribute)
+                                                                           attributes)))
+                (php-skip-semis current)
+                (list :name case-name :value value))))))
+
+(defun %php-parse-classlike (stream known-vars &key enum-p kind)
   "Parse trait/interface/enum as ast-defclass-style declarations."
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT stream)
-    (let ((current rest)
-          (slots nil))
-      (loop until (or (null current) (eq (php-peek-type current) :T-LBRACE))
-            do (setf current (cdr current)))
+    (let* ((class-name (php-ident-sym
+                        (php-resolve-qualified-name
+                         (php-tok-value name-tok) :class)))
+           (current rest)
+           (slots nil)
+           (enum-cases nil)
+           (enum-type nil)
+           (supers nil))
+      (when enum-p
+        (multiple-value-bind (parsed-type after-type)
+            (%php-parse-enum-backing-type current)
+          (setf enum-type parsed-type
+                current after-type)))
+      (multiple-value-bind (parsed-supers after-supers)
+          (%php-parse-class-superclasses current)
+        (setf supers parsed-supers
+              current after-supers))
       (setf current (%php-consume-expected :T-LBRACE current))
       (loop
         (setf current (php-skip-semis current))
         (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
           (return))
+        (multiple-value-bind (attributes after-attributes) (%php-parse-attributes current)
+          (setf current after-attributes)
         (if (and enum-p (%php-keyword-p current :case))
-            (progn
-              (setf current (cdr current))
-              (when (eq (php-peek-type current) :T-IDENT)
-                (push (make-ast-slot-def :name (php-ident-sym (php-peek-value current))) slots)
-                (setf current (cdr current)))
-              (setf current (%php-skip-to-stmt-end current)))
-            (setf current (%php-skip-to-stmt-end current))))
-      (values (make-ast-defclass :name (php-ident-sym (php-tok-value name-tok))
-                                 :superclasses nil
-                                 :slots (nreverse slots))
+            (multiple-value-bind (slot rest2 case-meta)
+                (%php-parse-enum-case current known-vars class-name enum-type attributes)
+              (push slot slots)
+              (push case-meta enum-cases)
+              (setf current rest2))
+            (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
+              (when slot (push slot slots))
+              (setf current rest2)))))
+      (values (make-ast-defclass :name class-name
+                                  :superclasses supers
+                                  :slots (nreverse slots)
+                                  :php-kind (or kind (and enum-p :enum))
+                                  :php-enum-type enum-type
+                                  :php-enum-cases (nreverse enum-cases))
               (%php-consume-expected :T-RBRACE current)
                known-vars))))
 
@@ -529,7 +713,7 @@ intersection type syntax as metadata only."
 (define-php-stmt-parser :if (rest known-vars)
   (multiple-value-bind (cond-expr rest2 kv2) (%php-parse-paren-expr rest known-vars)
     (multiple-value-bind (then-stmts rest3 kv3 else-ast) (%php-parse-if-tail rest2 kv2)
-      (values (make-ast-if :cond cond-expr
+      (values (make-ast-if :cond (%php-truthy-call cond-expr)
                            :then (make-ast-progn :forms then-stmts)
                            :else else-ast)
               rest3 kv3))))
@@ -582,12 +766,18 @@ intersection type syntax as metadata only."
   (let ((rest2 (%php-consume-expected :T-LPAREN rest)))
     (multiple-value-bind (arr-expr rest3 kv3) (php-parse-expr rest2 known-vars)
       (let ((rest4 (if (%php-keyword-p rest3 :as) (cdr rest3) (error "foreach: expected 'as'"))))
+        (when (%php-reference-token-p rest4)
+          (error "PHP parse error: PHP foreach by-reference value (&$value) is not yet supported"))
         (multiple-value-bind (var-tok rest5) (php-expect :T-VAR rest4)
-          (let ((var-sym (php-var-sym (php-tok-value var-tok)))
+          (let ((key-sym nil)
+                (var-sym (php-var-sym (php-tok-value var-tok)))
                 (rest6 rest5))
             (when (and rest6 (eq (php-peek-type rest6) :T-OP) (equal "=>" (php-peek-value rest6)))
+              (when (%php-reference-token-p (cdr rest6))
+                (error "PHP parse error: PHP foreach by-reference value (&$value) is not yet supported"))
               (multiple-value-bind (val-tok rest7) (php-expect :T-VAR (cdr rest6))
-                (setf var-sym (php-var-sym (php-tok-value val-tok))
+                (setf key-sym var-sym
+                      var-sym (php-var-sym (php-tok-value val-tok))
                       rest6 rest7)))
             (let* ((*php-loop-continue-target* (gensym "FOREACH-LOOP-"))
                    (*php-loop-break-target* (gensym "FOREACH-END-"))
@@ -598,8 +788,43 @@ intersection type syntax as metadata only."
                 (values (%php-lower-foreach-with-label
                           arr-expr var-sym
                           body-stmts
-                          *php-loop-continue-target*)
+                          *php-loop-continue-target*
+                          key-sym)
                         rest8 kv8)))))))))
+
+(define-php-stmt-parser :unset (rest known-vars)
+  (let ((current (%php-consume-expected :T-LPAREN rest))
+        (forms nil)
+        (kv known-vars))
+    (unless (eq (php-peek-type current) :T-RPAREN)
+      (loop
+        (multiple-value-bind (target rest2 kv2) (php-parse-expr current kv)
+          (cond
+            ((%php-array-ref-call-p target)
+             (destructuring-bind (array key) (ast-call-args target)
+               (push (%php-array-unset-call array key) forms)))
+            ((ast-var-p target)
+             (push (make-ast-setq :var (ast-var-name target)
+                                  :value (make-ast-quote :value +php-null+))
+                   forms)
+             (setf kv (remove (ast-var-name target) kv2 :test #'eq)))
+            (t
+             (error "PHP parse error: unsupported unset target ~S" target)))
+          (setf current rest2)
+          (cond
+            ((eq (php-peek-type current) :T-COMMA)
+             (setf current (cdr current)))
+            ((eq (php-peek-type current) :T-RPAREN)
+             (return))
+            (t
+             (error "PHP parse error: expected comma or ) in unset, got ~S"
+                    (php-peek current)))))))
+    (setf current (%php-consume-expected :T-RPAREN current))
+    (values (if (rest forms)
+                (make-ast-progn :forms (nreverse forms))
+                (or (first forms) (make-ast-quote :value +php-null+)))
+            (php-skip-semis current)
+            kv)))
 
 (define-php-stmt-parser :do (rest known-vars)
   (let* ((*php-loop-continue-target* (gensym "DO-WHILE-LOOP-"))
@@ -629,11 +854,9 @@ intersection type syntax as metadata only."
     (let ((clauses nil) (finally-body nil) (current rest2) (kv kv2))
       (loop while (%php-keyword-p current :catch)
             do (setf current (%php-consume-expected :T-LPAREN (cdr current)))
-               (let* ((type-tok (php-peek current))
-                      (type-sym (if (member (php-tok-type type-tok) '(:T-IDENT :T-TYPE :T-KEYWORD))
-                                    (php-ident-sym (php-tok-value type-tok))
-                                    'error)))
-                 (setf current (cdr current))
+               (multiple-value-bind (type-sym after-types)
+                   (%php-parse-catch-type-list current)
+                 (setf current after-types)
                  (let ((var-sym nil))
                    (when (eq (php-peek-type current) :T-VAR)
                      (setf var-sym (php-var-sym (php-peek-value current))
@@ -645,11 +868,8 @@ intersection type syntax as metadata only."
       (when (%php-keyword-p current :finally)
         (multiple-value-bind (body rest3 kv3) (php-parse-block (cdr current) kv)
           (setf finally-body body current rest3 kv kv3)))
-      (let ((protected (make-ast-handler-case :form (make-ast-progn :forms try-body)
-                                              :clauses (nreverse clauses))))
-        (values (if finally-body
-                    (make-ast-unwind-protect :protected protected :cleanup finally-body)
-                    protected)
+      (let ((protected (%php-lower-try-catches try-body (nreverse clauses))))
+        (values (make-ast-unwind-protect :protected protected :cleanup finally-body)
                 current kv)))))
 
 (define-php-stmt-parser :continue (rest known-vars)
@@ -673,7 +893,7 @@ intersection type syntax as metadata only."
 (define-php-stmt-parser :throw (rest known-vars)
   (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
     (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
-                            :value expr)
+                            :value (%php-exception-payload-call expr))
             (php-skip-semis rest2) kv2)))
 
 (defun %php-parse-include-like (rest known-vars name)
@@ -718,22 +938,23 @@ intersection type syntax as metadata only."
       (setf *php-current-imports* (append *php-current-imports* imports))
       (values nil rest2 known-vars))))
 
-(define-php-stmt-parser :trait (rest known-vars) (%php-parse-classlike rest known-vars))
-(define-php-stmt-parser :interface (rest known-vars) (%php-parse-classlike rest known-vars))
+(define-php-stmt-parser :trait (rest known-vars) (%php-parse-classlike rest known-vars :kind :trait))
+(define-php-stmt-parser :interface (rest known-vars) (%php-parse-classlike rest known-vars :kind :interface))
 (define-php-stmt-parser :enum (rest known-vars) (%php-parse-classlike rest known-vars :enum-p t))
 
 (define-php-stmt-parser :function (rest known-vars)
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
-    (let ((fn-name (php-ident-sym (php-tok-value name-tok))))
-      (multiple-value-bind (params rest param-types) (php-parse-param-list rest)
+    (let ((fn-name (php-ident-sym
+                    (php-resolve-qualified-name (php-tok-value name-tok) :function))))
+      (multiple-value-bind (params rest param-types param-attributes) (php-parse-param-list rest)
         (multiple-value-bind (return-type rest) (php-parse-return-type rest)
           (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
             (declare (ignore _))
             (values (make-ast-defun :name fn-name
-                                    :params params
-                                    :declarations (%php-function-type-declarations
-                                                   param-types return-type)
-                                    :body body-stmts)
+                                     :params params
+                                     :declarations (%php-function-declarations
+                                                    param-types return-type param-attributes nil :function)
+                                     :body body-stmts)
                     rest known-vars)))))))
 ;; ─── Keyword aliases (underscore → dash) ─────────────────────────────────
 (setf (gethash :include-once *php-stmt-parsers*)

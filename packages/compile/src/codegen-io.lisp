@@ -174,10 +174,12 @@ Returns register holding the printed object (ANSI: print returns its argument)."
                                   (emit ctx (make-vm-const :dst nl-reg :value (string #\Newline)))
                                   (emit ctx (make-vm-concatenate :dst full-reg :str1 nl-reg :str2 raw-str-reg))
                                   full-reg)
-                                ;; :princ/:prin1: bare write-to-string repr
-                                (progn
-                                  (emit ctx (make-vm-write-to-string-inst :dst raw-str-reg :src obj-reg))
-                                  raw-str-reg))))
+                ;; :prin1: escaped representation; :princ: aesthetic representation
+                 (progn
+                                  (if (eq mode :princ)
+                                      (emit ctx (make-vm-princ-to-string-inst :dst raw-str-reg :src obj-reg))
+                                      (emit ctx (make-vm-write-to-string-inst :dst raw-str-reg :src obj-reg)))
+                                   raw-str-reg))))
           (emit ctx (make-vm-stream-write-string-inst :stream-reg stream-reg :src out-str-reg))
           obj-reg)   ; ANSI: print/prin1/princ return the object
         ;; 1-arg form: direct constructor dispatch; avoid funcall+keyword plist

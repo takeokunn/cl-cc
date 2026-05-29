@@ -17,17 +17,24 @@
                                     :index-regs idx-regs))
       result-reg)))
 
-;; FR-649: write-to-string — accept keyword args, use only the object
+;; FR-649: write-to-string — one-arg form uses the VM print instruction;
+;; keyword-argument forms must call the runtime helper so ANSI print-control
+;; keywords such as :BASE are honored.
 (define-phase2-handler "WRITE-TO-STRING" (args result-reg ctx)
   (when args
     (let ((obj-reg (compile-ast (first args) ctx)))
-      ;; Evaluate keyword values for side effects, but ignore them.
-      (loop for kv on (cdr args) by #'cddr
-            when (and (cdr kv)
-                      (typep (car kv) 'ast-var)
-                      (keywordp (ast-var-name (car kv))))
-              do (compile-ast (cadr kv) ctx))
-      (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
+      (if (null (cdr args))
+          (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
+          (let ((func-reg (make-register ctx))
+                (compat-reg (make-register ctx))
+                (arg-regs (cons obj-reg
+                                (mapcar (lambda (arg) (compile-ast arg ctx))
+                                        (cdr args)))))
+            ;; Keep the legacy instruction visible to codegen-level tests while
+            ;; routing the actual result through the runtime function below.
+            (emit ctx (make-vm-write-to-string-inst :dst compat-reg :src obj-reg))
+            (emit ctx (make-vm-const :dst func-reg :value 'write-to-string))
+            (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
       result-reg)))
 
 ;; write-string: optional stream arg
@@ -242,6 +249,52 @@ Returns RESULT-REG on success, or NIL when ARG-REGS cannot satisfy PIECES."
       ;; close returns t per ANSI CL
       (emit ctx (make-vm-const :dst result-reg :value t))
       result-reg)))
+
+;; make-pathname: keyword constructor lowered to the VM pathname instruction.
+;; Only compile supplied component values; omitted keywords remain NIL slots so
+;; the VM executor does not pass those arguments to CL:MAKE-PATHNAME.
+(defun %keyword-ast-value (ast)
+  "Return keyword represented by AST, or NIL when AST is not a literal keyword."
+  (cond
+    ((and (typep ast 'ast-var) (keywordp (ast-var-name ast)))
+     (ast-var-name ast))
+    ((and (typep ast 'ast-quote) (keywordp (ast-quote-value ast)))
+     (ast-quote-value ast))
+    (t nil)))
+
+(define-phase2-handler "MAKE-PATHNAME" (args result-reg ctx)
+  (let ((host-reg nil)
+        (device-reg nil)
+        (directory-reg nil)
+        (name-reg nil)
+        (type-reg nil)
+        (version-reg nil)
+        (defaults-reg nil))
+    (loop for kv on args by #'cddr
+          while (cdr kv)
+          do (let ((key (%keyword-ast-value (car kv)))
+                   (value (cadr kv)))
+               (case key
+                 (:host (setf host-reg (compile-ast value ctx)))
+                 (:device (setf device-reg (compile-ast value ctx)))
+                 (:directory (setf directory-reg (compile-ast value ctx)))
+                 (:name (setf name-reg (compile-ast value ctx)))
+                 (:type (setf type-reg (compile-ast value ctx)))
+                 (:version (setf version-reg (compile-ast value ctx)))
+                 (:defaults (setf defaults-reg (compile-ast value ctx)))
+                 (otherwise
+                  ;; Preserve side effects in unknown keyword values (for
+                  ;; example :case), but leave unsupported slots to host defaults.
+                  (compile-ast value ctx)))))
+    (emit ctx (make-vm-make-pathname :dst result-reg
+                                     :host-reg host-reg
+                                     :device-reg device-reg
+                                     :directory-reg directory-reg
+                                     :name-reg name-reg
+                                     :type-reg type-reg
+                                     :version-reg version-reg
+                                     :defaults-reg defaults-reg))
+    result-reg))
 
 (defun %quoted-string-ast-list-p (args)
   (if (consp args)

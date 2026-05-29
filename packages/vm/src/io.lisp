@@ -860,6 +860,87 @@ each test begins with a clean execution context."
 
 ;;; ─── Stream Helper Functions ─────────────────────────────────────────────────
 
+(defstruct (vm-string-input-stream
+            (:constructor %make-vm-string-input-stream (contents)))
+  "VM-owned string input stream with explicit position and one-character pushback."
+  (contents "" :type string)
+  (position 0 :type fixnum)
+  (unread-character nil))
+
+(defun make-vm-string-input-stream (contents)
+  "Create a VM-owned string input stream from CONTENTS."
+  (%make-vm-string-input-stream (or contents "")))
+
+(defun vm-string-input-stream-read-char (stream)
+  "Read one character from VM string input STREAM, respecting unread pushback."
+  (let ((unread (vm-string-input-stream-unread-character stream)))
+    (if unread
+        (progn
+          (setf (vm-string-input-stream-unread-character stream) nil)
+          unread)
+        (let ((position (vm-string-input-stream-position stream))
+              (contents (vm-string-input-stream-contents stream)))
+          (if (< position (length contents))
+              (prog1 (char contents position)
+                (setf (vm-string-input-stream-position stream) (1+ position)))
+              +eof-value+)))))
+
+(defun vm-string-input-stream-unread-char (character stream)
+  "Push CHARACTER back onto VM string input STREAM."
+  (when (vm-string-input-stream-unread-character stream)
+    (error "vm-unread-char: String input stream already has unread character"))
+  (setf (vm-string-input-stream-unread-character stream) character)
+  nil)
+
+(defun vm-string-input-stream-peek-char (stream)
+  "Return next character from VM string input STREAM without consuming it."
+  (let ((character (vm-string-input-stream-read-char stream)))
+    (unless (eq character +eof-value+)
+      (vm-string-input-stream-unread-char character stream))
+    character))
+
+(defun vm-string-input-stream-listen (stream)
+  "Return true when VM string input STREAM has available input."
+  (or (vm-string-input-stream-unread-character stream)
+      (< (vm-string-input-stream-position stream)
+         (length (vm-string-input-stream-contents stream)))))
+
+(defun vm-string-input-stream-read-line (stream)
+  "Read one line from VM string input STREAM."
+  (let ((chars '()))
+    (loop for character = (vm-string-input-stream-read-char stream)
+          do (cond
+               ((eq character +eof-value+)
+                (if chars
+                    (return (values (coerce (nreverse chars) 'string) t))
+                    (return (values +eof-value+ t))))
+               ((char= character #\Newline)
+                (return (values (coerce (nreverse chars) 'string) nil)))
+               (t
+                (push character chars))))))
+
+(defun vm-string-input-stream-file-position (stream &optional new-position-p new-position)
+  "Get or set VM string input STREAM position."
+  (if new-position-p
+      (let ((contents (vm-string-input-stream-contents stream)))
+        (if (and (integerp new-position)
+                 (<= 0 new-position (length contents)))
+            (progn
+              (setf (vm-string-input-stream-position stream) new-position
+                    (vm-string-input-stream-unread-character stream) nil)
+              t)
+            nil))
+      (vm-string-input-stream-position stream)))
+
+(defun vm-string-input-stream-file-length (stream)
+  "Return length of VM string input STREAM contents."
+  (length (vm-string-input-stream-contents stream)))
+
+(defun vm-string-input-stream-clear-input (stream)
+  "Clear unread input from VM string input STREAM."
+  (setf (vm-string-input-stream-unread-character stream) nil)
+  nil)
+
 (defun vm-get-stream (state handle)
   "Resolve HANDLE to a CL stream from STATE.
 Accepts: direct CL stream objects, +stdin-handle+ (0), +stdout-handle+ (1),

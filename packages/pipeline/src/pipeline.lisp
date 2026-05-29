@@ -510,6 +510,42 @@ value carries top-level source locations for later AST annotation.
     ((eq language :php)  (parse-php-source source))
     (t (error "Unknown language: ~S" language))))
 
+(defun %register-php-runtime-bridges ()
+  "Register PHP runtime helpers as VM host bridge functions."
+  (dolist (entry `((cl-cc/php::%php-array . ,#'cl-cc/php:%php-array)
+                   (cl-cc/php::%php-array-ref . ,#'cl-cc/php:%php-array-ref)
+                   (cl-cc/php::%php-array-set . ,#'cl-cc/php:%php-array-set)
+                   (cl-cc/php::%php-array-unset . ,#'cl-cc/php:%php-array-unset)
+                   (cl-cc/php::%php-count . ,#'cl-cc/php:%php-count)
+                    (cl-cc/php::%php-strlen . ,#'cl-cc/php:%php-strlen)
+                    (cl-cc/php::%php-strtolower . ,#'cl-cc/php:%php-strtolower)
+                    (cl-cc/php::%php-strtoupper . ,#'cl-cc/php:%php-strtoupper)
+                     (cl-cc/php::%php-stringify . ,#'cl-cc/php:%php-stringify)
+                     (cl-cc/php::%php-concat . ,#'cl-cc/php:%php-concat)
+                     (cl-cc/php::%php-modulo . ,#'cl-cc/php:%php-modulo)
+                     (cl-cc/php::%php-shift-left . ,#'cl-cc/php:%php-shift-left)
+                     (cl-cc/php::%php-shift-right . ,#'cl-cc/php:%php-shift-right)
+                     (cl-cc/php::%php-spaceship . ,#'cl-cc/php:%php-spaceship)
+                     (cl-cc/php::%php-bitwise-and . ,#'cl-cc/php:%php-bitwise-and)
+                     (cl-cc/php::%php-bitwise-or . ,#'cl-cc/php:%php-bitwise-or)
+                     (cl-cc/php::%php-bitwise-xor . ,#'cl-cc/php:%php-bitwise-xor)
+                     (cl-cc/php::%php-bitwise-not . ,#'cl-cc/php:%php-bitwise-not)
+                     (cl-cc/php::%php-isset . ,#'cl-cc/php:%php-isset)
+                   (cl-cc/php::%php-array-key-exists . ,#'cl-cc/php:%php-array-key-exists)
+                   (cl-cc/php::%php-yield . ,#'cl-cc/php:%php-yield)
+    (cl-cc/php::%php-yield-from . ,#'cl-cc/php:%php-yield-from)
+    (cl-cc/php::%php-throw . ,#'cl-cc/php:%php-throw)
+     (cl-cc/php::%php-make-exception . ,#'cl-cc/php:%php-make-exception)
+     (cl-cc/php::%php-exception-object-p . ,#'cl-cc/php:%php-exception-object-p)
+     (cl-cc/php::%php-exception-value . ,#'cl-cc/php:%php-exception-value)
+     (cl-cc/php::%php-exception-matches-p . ,#'cl-cc/php:%php-exception-matches-p)
+     (cl-cc/php::%php-enum-make-case . ,#'cl-cc/php:%php-enum-make-case)
+     (cl-cc/php::%php-enum-cases . ,#'cl-cc/php:%php-enum-cases)
+     (cl-cc/php::%php-enum-from . ,#'cl-cc/php:%php-enum-from)
+     (cl-cc/php::%php-enum-try-from . ,#'cl-cc/php:%php-enum-try-from)
+     (cl-cc/php::%php-enum-case-value . ,#'cl-cc/php:%php-enum-case-value)))
+    (cl-cc/vm:vm-register-host-bridge (car entry) (cdr entry))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Public compilation API
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -638,6 +674,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
   (multiple-value-bind (forms source-locations)
       (parse-source-for-language source language :source-file source-file)
     (when (eq language :php)
+      (%register-php-runtime-bridges)
       (php-check-supported-forms forms))
     (let* ((opts  (%make-pipeline-opts
                     :target target :type-check type-check :safety safety
@@ -712,6 +749,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
    (multiple-value-bind (forms source-locations)
        (parse-source-for-language source language :source-file source-file)
      (when (eq language :php)
+       (%register-php-runtime-bridges)
        (php-check-supported-forms forms))
      (let* ((opts  (%make-pipeline-opts
                      :target target :type-check type-check :safety safety

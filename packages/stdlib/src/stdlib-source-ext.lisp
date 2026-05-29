@@ -25,11 +25,11 @@
       (concatenate 'string
         *standard-library-source*
     ;; ── FR-386: Type predicates ────────────────────────────────────────────
-    "(defun rationalp (x) (or (integerp x) (typep x 'ratio)))"
+    "(defun rationalp (x) (typep x 'rational))"
     "(defun complexp (x) (typep x 'complex))"
-    "(defun realp (x) (or (integerp x) (typep x 'ratio) (numberp x)))"
+    "(defun realp (x) (typep x 'real))"
     "(defun bignump (x) (typep x 'bignum))"
-    "(defun floatp (x) (and (numberp x) (not (integerp x)) (not (typep x 'ratio))))"
+    "(defun floatp (x) (typep x 'float))"
 
     ;; ── FR-493: boole + boole-* constants ────────────────────────────────────
     "(defvar boole-clr 0)"

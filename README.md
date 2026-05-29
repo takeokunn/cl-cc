@@ -426,9 +426,9 @@ cl-cc check file.php --strict
 | `class C extends B { }` | `ast-defclass` |
 | `switch ($x) { case 1: … default: }` | `ast-let` + `ast-block` + `ast-tagbody` |
 | `break N;` / `continue N;` | `ast-go` within nested tagbodies |
-| `try { } catch (Ex $e) { } finally { }` | `ast-unwind-protect` wrapping `ast-handler-case` |
+| `try { } catch (Ex $e) { } finally { }` | `ast-unwind-protect` wrapping PHP exception dispatch |
 | `throw new Ex();` | `ast-throw` |
-| `namespace Foo\\Bar;` / `use Vendor\\X as Y;` | AST metadata (`ast-namespace`, `ast-imports`) |
+| `namespace Foo\\Bar;` / `use Vendor\\X as Y;` | parser-time qualified-name resolution + AST metadata |
 
 **Expressions**
 
@@ -442,6 +442,7 @@ cl-cc check file.php --strict
 | `$c ? $yes : $no` | `ast-if` |
 | `fn($x) => $x + 1` | capture-wrapped `ast-lambda` |
 | `match ($v) { 1 => 'one', default => 'x' }` | nested strict-equality conditional chain |
+| `yield $v` / `yield from $xs` | `%php-yield` / `%php-yield-from` runtime data representation |
 | `$a <=> $b` | `%php-spaceship` |
 | `$a >> $n` | `%php-shift-right` |
 | `$a instanceof C` | `%php-instanceof` |
@@ -478,23 +479,27 @@ PHP's semantics (ordered arrays, loose equality, truthiness, exceptions) are bri
 
 ### Unsupported
 
-- `yield` / `yield from` inside function bodies — the parser signals an error; runtime data representations exist but generator coroutine lowering is not yet implemented.
+- Full generator coroutine object/resumption semantics — `yield` / `yield from` parse to runtime data representations, but coroutine execution lowering is not yet implemented.
 - Named arguments, first-class callables (`strlen(...)` syntax), fibers.
 - PHP-specific standard library (`array_map`, `implode`, etc.) — calls are compiled as generic function calls; provide a prelude file with CL implementations as needed.
 
 ## Known Limitations
 
-ANSI CL conformance status: **8111 tests pass, 65 failures** — all pre-existing regressions, none caused by session changes. Categorized as: optimizer (~45), WASM trampoline (4), PHP parser (1), VM-CLOS (1), VM extensions (1), native emit (1), coverage unstable (1), other (~11).
+Fast test plan status: **8319 tests pass, 0 failures, 6 xfail (expected-fail for known native-backend gaps)**. The `nix run .#test` fast plan now includes the ANSI conformance suite. Previous 65 pre-existing regressions are all resolved.
 
-- **Package system**: 14 runtime functions + 8 VM instructions added (Wave 1). Internal registry metadata exists; host CL is a bootstrap fallback. Multi-package self-hosting is partial. See `tests/conformance/package-conformance-tests.lisp` (18 expected-fail tests).
-- **`format` directives**: Native `%vm-format-render` supports ~30 directives. `~_` (conditional newline) and `~I` (indent) added (Wave 2 — partial ANSI). Host SBCL fallback on error. Not available in native x86-64 binaries.
-- **Number tower**: `bignum`, `ratio`, `complex` work in the VM interpreter (host SBCL arithmetic + JIT-callable bridges in `runtime-io.lisp`). Not represented in the native x86-64 backend (fixnum only). See `tests/conformance/number-conformance-tests.lisp` (24 expected-fail tests).
+### ANSI CL Conformance Suite (included in fast plan)
+
+All ANSI CL conformance suites are now part of the `nix run .#test` fast plan. The only remaining expected-fail tests are the 6 native-backend gaps below.
+
+- **Package system** (Ch.11): 18 conformance tests pass as `deftest`. Package registry metadata, symbol operations (`intern`, `export`, `import`, `shadow`, `unintern`), `defpackage`, `make-package`/nicknames, `delete-package`, `rename-package`, `do-symbols`, `list-all-packages`, `gensym`, `make-symbol` are implemented.
+- **`format` directives** (Ch.22): 23/23 conformance tests pass as `deftest`. Self-host `%vm-format-render` handles `~A`, `~S`, `~D`, `~B`, `~O`, `~X`, `~R`, `~F`, `~%`, `~~`, `~&`, `~T`, `~C`, `~P`, `~*`, `~?`, `~[`, `~{`, `~^` with column tracking and section parsing. Native x86-64 binary FORMAT still depends on host SBCL fallback.
+- **Number tower** (Ch.12): 24/24 conformance tests pass as `deftest`. Bignum, ratio, complex type predicates and arithmetic VM helpers are implemented. Native x86-64 backend is fixnum-only (`*x86-64-bignum-calls-enabled*` default `nil`).
 - **Native backend parity**: `load`, host-backed FFI, host-backed `format`, and host stream bridges not yet available in native binaries. 21 pathname/file/compound-stream/LOAD runtime functions added (Wave 4).
+- **I/O and streams** (Ch.19-21): 23/29 conformance tests pass as `deftest` (string-stream, predicates, read/write-char/line, read/write-sequence, namestring, merge-pathnames, probe-file, delete-file, directory, ensure-directories-exist, broadcast-stream, concatenated-stream). 6 remain as `defexpected` (expected-fail): `unread-char`, `write-to-string`, `listen`, `make-pathname`, `load`, `echo-stream` — these require native backend or concrete implementation effort.
 - **Unicode normalization**: NFC/NFD is implemented for Latin-1 characters. Full Unicode 15 normalization (NFKC/NFKD, UCA collation) requires the complete Unicode Character Database.
 - **Concurrency**: Green threads, channels, actors, STM, lock-free structures, and EBR/RCU/QSBR are implemented as pure-CL primitives suitable for cooperative multitasking. Native OS thread scheduling and M:N threading are not yet integrated.
 - **Distributed systems**: Raft consensus and CRDTs have proof-of-concept implementations. They lack full RPC integration, log persistence, and network transport layers needed for production use.
 - **Standalone binary**: The `standalone` CLI option generates a native Mach-O/ELF binary with runtime linked, but full self-hosting (no host CL dependency at all) is not yet complete. Self-host pipeline exists in `packages/selfhost/src/pipeline-selfhost.lisp`.
-- **I/O and streams**: 94 conformance tests in `tests/conformance/native-io-conformance-tests.lisp` (expected-fail). String streams, basic file I/O work via host CL bridging.
 
 ## Building & Testing
 

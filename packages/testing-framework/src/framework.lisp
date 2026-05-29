@@ -170,7 +170,7 @@ those for ~99% silent passes was the dominant runtime cost."
 
 (defsuite cl-cc-conformance-suite
   :description "ANSI CL conformance tests (expected-fail for known gaps)"
-  :parent cl-cc-e2e-suite
+  :parent cl-cc-suite
   :parallel nil)
 
 (in-suite cl-cc-suite)

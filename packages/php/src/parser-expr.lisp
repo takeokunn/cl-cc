@@ -5,9 +5,9 @@
 ;;;;   php-parse-primary  — literals, variables, identifiers, parens, new
 ;;;;   php-parse-new      — 'new ClassName(args)'
 ;;;;   php-parse-postfix  — method calls, property access, ++ / --
-;;;;   php-parse-unary    — !, -, +
+;;;;   php-parse-unary    — !, -, +, ~
 ;;;;   php-parse-binop    — left-associative binary operator parsing
-;;;;   php-parse-mul/add/cmp/and/or — precedence chain
+;;;;   php-parse-power/mul/add/shift/concat/cmp/bitwise/and/or/coalesce — precedence chain
 ;;;;   php-parse-expr     — assignment detection + fallthrough to or-level
 ;;;;   php-parse-arglist  — (arg1, arg2, ...)
 ;;;;
@@ -32,17 +32,17 @@
          (values (make-ast-quote :value (php-tok-value tok)) rest known-vars)))
       ((eq type :T-STRING)
        (multiple-value-bind (tok rest) (php-consume stream)
-         (values (make-ast-quote :value (php-tok-value tok)) rest known-vars)))
+         (values (%php-string-token-ast (php-tok-value tok)) rest known-vars)))
       ((eq type :T-VAR)
        (multiple-value-bind (tok rest) (php-consume stream)
          (values (make-ast-var :name (php-var-sym (php-tok-value tok))) rest known-vars)))
       ((eq type :T-KEYWORD)
        (let ((kw (php-peek-value stream)))
          (cond
-           ((eq kw :null)
-            (multiple-value-bind (tok rest) (php-consume stream)
-              (declare (ignore tok))
-              (values (make-ast-quote :value nil) rest known-vars)))
+            ((eq kw :null)
+             (multiple-value-bind (tok rest) (php-consume stream)
+               (declare (ignore tok))
+              (values (make-ast-quote :value +php-null+) rest known-vars)))
            ((eq kw :true)
             (multiple-value-bind (tok rest) (php-consume stream)
               (declare (ignore tok))
@@ -65,16 +65,18 @@
            (multiple-value-bind (tok2 rest3) (php-expect :T-RPAREN rest2)
              (declare (ignore tok2))
              (values expr rest3 kv2)))))
-      ((eq type :T-IDENT)
-        ;; Could be a function call or identifier
+       ((member type '(:T-IDENT :T-BACKSLASH) :test #'eq)
+        ;; Could be a function call or identifier/constant.
         (multiple-value-bind (qualified-name rest) (php-parse-qualified-name stream)
-          (let ((name (php-ident-sym qualified-name)))
+          (let ((name (php-ident-sym (php-resolve-qualified-name qualified-name :const))))
             (if (eq (php-peek-type rest) :T-LPAREN)
-                ;; Function call
-                (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
-                 (values (make-ast-call :func (make-ast-var :name name) :args args)
-                         rest2 kv2))
-               (values (make-ast-var :name name) rest known-vars)))))
+                (multiple-value-bind (call rest2 kv2)
+                    (%php-parse-function-call qualified-name
+                                              (php-ident-sym
+                                               (php-resolve-qualified-name qualified-name :function))
+                                              rest known-vars)
+                  (values call rest2 kv2))
+                (values (make-ast-var :name name) rest known-vars)))))
       (t (error "PHP parse error: unexpected token ~S in expression" (php-peek stream))))))
 
 (defun php-parse-new (stream known-vars)
@@ -82,7 +84,7 @@
   (multiple-value-bind (tok rest) (php-consume stream) ; consume 'new'
     (declare (ignore tok))
     (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
-      (let ((class-name (php-ident-sym qualified-name)))
+      (let ((class-name (php-ident-sym (php-resolve-qualified-name qualified-name :class))))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
           (values (make-ast-make-instance
                    :class (make-ast-var :name class-name)
@@ -129,10 +131,33 @@
                                          :args args))
                              rest rest4
                              kv kv4))
-                     (setf obj (make-ast-if
-                                :cond null-check
-                                :then (make-ast-quote :value nil)
-                                :else (make-ast-slot-value :object obj :slot prop))
+                      (setf obj (make-ast-if
+                                 :cond null-check
+                                 :then (make-ast-quote :value nil)
+                                 :else (make-ast-slot-value :object obj :slot prop))
+                            rest rest3))))))
+          ;; :: static member/method access. Enum built-ins lower to PHP helpers.
+          ((eq type :T-DOUBLE-COLON)
+           (multiple-value-bind (tok rest2) (php-consume rest)
+             (declare (ignore tok))
+             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
+               (let ((member (php-ident-sym (php-tok-value name-tok))))
+                 (if (eq (php-peek-type rest3) :T-LPAREN)
+                     (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
+                       (setf obj (cond
+                                   ((string= (symbol-name member) "CASES")
+                                    (%php-call 'cl-cc/php::%php-enum-cases obj))
+                                   ((string= (symbol-name member) "FROM")
+                                    (%php-call 'cl-cc/php::%php-enum-from obj (first args)))
+                                   ((string= (symbol-name member) "TRYFROM")
+                                    (%php-call 'cl-cc/php::%php-enum-try-from obj (first args)))
+                                   (t
+                                    (make-ast-call
+                                     :func (make-ast-slot-value :object obj :slot member)
+                                     :args args)))
+                             rest rest4
+                             kv kv4))
+                     (setf obj (make-ast-slot-value :object obj :slot member)
                            rest rest3))))))
           ;; ++ postfix — produce ast-setq incrementing by 1
           ((and (eq type :T-OP) (equal "++" (php-peek-value rest)))
@@ -163,16 +188,58 @@
           (t (return)))))
     (values obj rest kv)))
 
+(defun %php-binary-op-ast (op lhs rhs)
+  "Lower PHP binary OP with LHS and RHS to the appropriate AST node."
+  (cond ((equal op ".")
+         (%php-call 'cl-cc/php::%php-concat lhs rhs))
+        ((equal op "%")
+         (%php-call 'cl-cc/php::%php-modulo lhs rhs))
+        ((equal op "<<")
+         (%php-call 'cl-cc/php::%php-shift-left lhs rhs))
+        ((equal op ">>")
+         (%php-call 'cl-cc/php::%php-shift-right lhs rhs))
+        ((equal op "<=>")
+         (%php-call 'cl-cc/php::%php-spaceship lhs rhs))
+        ((equal op "&")
+         (%php-call 'cl-cc/php::%php-bitwise-and lhs rhs))
+        ((equal op "^")
+         (%php-call 'cl-cc/php::%php-bitwise-xor lhs rhs))
+        ((equal op "|")
+         (%php-call 'cl-cc/php::%php-bitwise-or lhs rhs))
+        (t
+         (make-ast-binop :op (intern op) :lhs lhs :rhs rhs))))
+
+(defun php-parse-power (stream known-vars)
+  "Parse PHP exponentiation. ** is right-associative and binds above unary."
+  (multiple-value-bind (lhs rest kv) (php-parse-postfix stream known-vars)
+    (if (and (eq (php-peek-type rest) :T-OP)
+             (equal "**" (php-peek-value rest)))
+        (multiple-value-bind (op-tok rest2) (php-consume rest)
+          (declare (ignore op-tok))
+          (multiple-value-bind (rhs rest3 kv3) (php-parse-unary rest2 kv)
+            (values (%php-call 'expt lhs rhs) rest3 kv3)))
+        (values lhs rest kv))))
+
 (defun php-parse-unary (stream known-vars)
-  "Parse unary expressions: !, -, +."
-  (if (and (eq (php-peek-type stream) :T-OP)
-           (member (php-peek-value stream) '("!" "-" "+") :test #'equal))
+  "Parse unary expressions: !, -, +, ~."
+  (cond
+    ((%php-reference-token-p stream)
       (multiple-value-bind (tok rest) (php-consume stream)
-        (multiple-value-bind (expr rest2 kv2) (php-parse-postfix rest known-vars)
-          (values (make-ast-call :func (make-ast-var :name (intern (php-tok-value tok)))
-                                 :args (list expr))
-                  rest2 kv2)))
-      (php-parse-postfix stream known-vars)))
+        (declare (ignore tok))
+        (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
+          (values (%php-unsupported "PHP reference operator (&) is not yet supported" expr)
+                  rest2 kv2))))
+    ((and (eq (php-peek-type stream) :T-OP)
+           (member (php-peek-value stream) '("!" "-" "+" "~") :test #'equal))
+      (multiple-value-bind (tok rest) (php-consume stream)
+        (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
+          (values (if (equal "~" (php-tok-value tok))
+                      (%php-call 'cl-cc/php::%php-bitwise-not expr)
+                      (make-ast-call :func (make-ast-var :name (intern (php-tok-value tok)))
+                                     :args (list expr)))
+                  rest2 kv2))))
+     (t
+      (php-parse-power stream known-vars))))
 
 (defun php-parse-binop (stream known-vars ops next-parser)
   "Left-associative binary operator parsing."
@@ -182,40 +249,57 @@
                (member (php-peek-value rest) ops :test #'equal))
           (multiple-value-bind (op-tok rest2) (php-consume rest)
             (multiple-value-bind (rhs rest3 kv3) (funcall next-parser rest2 kv)
-              (setf lhs (make-ast-binop
-                         :op (intern (php-tok-value op-tok))
-                         :lhs lhs
-                         :rhs rhs)
-                    rest rest3
-                    kv kv3)))
+              (setf lhs (%php-binary-op-ast (php-tok-value op-tok) lhs rhs)
+                     rest rest3
+                     kv kv3)))
           (return)))
     (values lhs rest kv)))
 
 (defun php-parse-mul (stream known-vars)
-  (php-parse-binop stream known-vars '("*" "/") #'php-parse-unary))
+  (php-parse-binop stream known-vars '("*" "/" "%") #'php-parse-unary))
 
 (defun php-parse-add (stream known-vars)
-  (php-parse-binop stream known-vars '("+" "-" ".") #'php-parse-mul))
+  (php-parse-binop stream known-vars '("+" "-") #'php-parse-mul))
+
+(defun php-parse-shift (stream known-vars)
+  (php-parse-binop stream known-vars '("<<" ">>") #'php-parse-add))
+
+(defun php-parse-concat (stream known-vars)
+  (php-parse-binop stream known-vars '(".") #'php-parse-shift))
+
+(defun php-parse-relational (stream known-vars)
+  (php-parse-binop stream known-vars '("<" ">" "<=" ">=" "<=>")
+                   #'php-parse-concat))
 
 (defun php-parse-cmp (stream known-vars)
-  (php-parse-binop stream known-vars '("==" "===" "!=" "!==" "<" ">" "<=" ">=")
-                   #'php-parse-add))
+  (php-parse-binop stream known-vars '("==" "===" "!=" "!==")
+                   #'php-parse-relational))
+
+(defun php-parse-bit-and (stream known-vars)
+  (php-parse-binop stream known-vars '("&") #'php-parse-cmp))
+
+(defun php-parse-bit-xor (stream known-vars)
+  (php-parse-binop stream known-vars '("^") #'php-parse-bit-and))
+
+(defun php-parse-bit-or (stream known-vars)
+  (php-parse-binop stream known-vars '("|") #'php-parse-bit-xor))
+
+(defun php-parse-and (stream known-vars)
+  (php-parse-binop stream known-vars '("&&") #'php-parse-bit-or))
+
+(defun php-parse-or (stream known-vars)
+  (php-parse-binop stream known-vars '("||") #'php-parse-and))
 
 (defun php-parse-coalesce (stream known-vars)
-  "Parse null coalescing ?? without evaluating the left side twice."
-  (multiple-value-bind (lhs rest kv) (php-parse-cmp stream known-vars)
-    (loop
-      (let ((type (php-peek-type rest)))
-        (cond
-          ((and (eq type :T-OP) (equal "??" (php-peek-value rest)))
-           (multiple-value-bind (op-tok rest2) (php-consume rest)
-             (declare (ignore op-tok))
-             (multiple-value-bind (rhs rest3 kv3) (php-parse-cmp rest2 kv)
-               (setf lhs (%php-lower-null-coalesce lhs rhs)
-                     rest rest3
-                     kv kv3))))
-          (t (return)))))
-    (values lhs rest kv)))
+  "Parse right-associative null coalescing ?? without evaluating the left side twice."
+  (multiple-value-bind (lhs rest kv) (php-parse-or stream known-vars)
+    (if (and (eq (php-peek-type rest) :T-OP)
+             (equal "??" (php-peek-value rest)))
+        (multiple-value-bind (op-tok rest2) (php-consume rest)
+          (declare (ignore op-tok))
+          (multiple-value-bind (rhs rest3 kv3) (php-parse-coalesce rest2 kv)
+            (values (%php-lower-null-coalesce lhs rhs) rest3 kv3)))
+        (values lhs rest kv))))
 
 (defun php-parse-ternary (stream known-vars)
   "Parse PHP ternary and Elvis operators."
@@ -236,35 +320,52 @@
                             rest5 kv5))))))
         (values cond-expr rest kv))))
 
-(defun php-parse-and (stream known-vars)
-  (php-parse-binop stream known-vars '("&&") #'php-parse-ternary))
-
-(defun php-parse-or (stream known-vars)
-  (php-parse-binop stream known-vars '("||") #'php-parse-and))
-
 (defun php-parse-expr (stream known-vars)
   "Parse an expression. Handles variable and PHP array-element assignment."
-  (multiple-value-bind (lhs rest kv) (php-parse-or stream known-vars)
-    (if (%php-assignment-op-p rest)
-        (let ((rest2 (cdr rest)))
-          (multiple-value-bind (val rest3 kv3) (php-parse-or rest2 kv)
+  (multiple-value-bind (lhs rest kv) (php-parse-ternary stream known-vars)
+    (cond
+      ((%php-assignment-op rest)
+       (let ((op (%php-assignment-op rest))
+             (rest2 (cdr rest)))
+           (multiple-value-bind (val rest3 kv3) (php-parse-ternary rest2 kv)
             (cond
               ((ast-var-p lhs)
                (let* ((var-sym (ast-var-name lhs))
                       (already-known (member var-sym known-vars))
                       (new-kv (if already-known kv3 (cons var-sym kv3))))
                  (values
-                  (if already-known
-                      (make-ast-setq :var var-sym :value val)
-                      (make-ast-let :bindings (list (cons var-sym val)) :body nil))
+                  (if (equal op "=")
+                      (if already-known
+                          (make-ast-setq :var var-sym :value val)
+                          (make-ast-let :bindings (list (cons var-sym val)) :body nil))
+                      (%php-lower-compound-assign op lhs val :var))
                   rest3
                   new-kv)))
               ((%php-array-ref-call-p lhs)
                (destructuring-bind (arr key) (ast-call-args lhs)
-                 (values (%php-array-set-call arr key val) rest3 kv3)))
+                 (values (if (equal op "=")
+                             (%php-array-set-call arr key val)
+                             (%php-lower-compound-assign op lhs val :array))
+                         rest3 kv3)))
+              ((ast-slot-value-p lhs)
+               (values (if (equal op "=")
+                           (make-ast-set-slot-value
+                            :object (ast-slot-value-object lhs)
+                            :slot (ast-slot-value-slot lhs)
+                            :value val)
+                           (%php-lower-compound-assign op lhs val :property))
+                       rest3 kv3))
               (t
-               (error "PHP parse error: unsupported assignment target ~S" lhs)))))
-        (values lhs rest kv))))
+               (error "PHP parse error: unsupported assignment target ~S" lhs))))))
+      ((%php-reference-token-p rest)
+       (multiple-value-bind (tok rest2) (php-consume rest)
+         (declare (ignore tok))
+          (multiple-value-bind (rhs rest3 kv3) (php-parse-ternary rest2 kv)
+           (declare (ignore rhs))
+           (values (%php-unsupported "PHP bitwise AND operator (&) is not yet supported" lhs)
+                   rest3 kv3))))
+      (t
+       (values lhs rest kv)))))
 
 (defun php-parse-arglist (stream known-vars)
   "Parse (arg1, arg2, ...). Assumes stream starts with T-LPAREN."
@@ -310,12 +411,12 @@
       (:match
        (%php-parse-match-expression rest known-vars))
       (:yield
-       (%php-parse-yield-unsupported rest known-vars))
+        (%php-parse-yield-expression rest known-vars))
       (:throw
        (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
-         (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
-                                  :value expr)
-                 rest2 kv2)))
+          (values (make-ast-throw :tag (make-ast-quote :value 'php-exception)
+                                   :value (%php-exception-payload-call expr))
+                  rest2 kv2)))
       (:array
         (if (eq (php-peek-type rest) :T-LPAREN)
             (%php-parse-array-expr rest known-vars :open :T-LPAREN :close :T-RPAREN)
@@ -331,11 +432,82 @@
 
 (defun %php-null-quote ()
   "Return the AST representation of PHP null."
-  (make-ast-quote :value nil))
+  (make-ast-quote :value +php-null+))
 
 (defun %php-call (name &rest args)
   "Build an AST call to NAME with ARGS."
   (make-ast-call :func (make-ast-var :name name) :args args))
+
+(defun %php-truthy-call (expr)
+  "Build a PHP truthiness helper call for conditional contexts."
+  (%php-call 'cl-cc/php::%php-truthy expr))
+
+(defun %php-exception-class-from-expression (expr)
+  "Return the PHP class symbol visible in a throw expression, when known."
+  (when (and (ast-make-instance-p expr)
+             (ast-var-p (ast-make-instance-class expr)))
+    (ast-var-name (ast-make-instance-class expr))))
+
+(defun %php-exception-payload-call (expr)
+  "Wrap thrown PHP EXPR with class metadata for VM catch/throw lowering."
+  (%php-call 'cl-cc/php::%php-make-exception
+             (make-ast-quote :value (%php-exception-class-from-expression expr))
+             expr))
+
+(defun %php-string-token-ast (value)
+  "Lower a lexer string VALUE to AST, preserving simple interpolation."
+  (if (and (consp value) (eq (first value) :php-interpolated-string))
+      (let ((args (mapcar (lambda (segment)
+                            (ecase (first segment)
+                              (:string (make-ast-quote :value (second segment)))
+                              (:var (make-ast-var :name (php-var-sym (second segment))))))
+                          (second value))))
+        (if args
+            (make-ast-call :func (make-ast-var :name 'cl-cc/php::%php-concat)
+                           :args args)
+            (make-ast-quote :value "")))
+      (make-ast-quote :value value)))
+
+(defun %php-builtin-helper-symbol (qualified-name)
+  "Return the PHP runtime helper symbol for simple builtin QUALIFIED-NAME."
+  (let ((lower (string-downcase qualified-name)))
+    (unless (find (code-char 92) lower)
+      (cond ((string= lower "count") 'cl-cc/php::%php-count)
+            ((string= lower "strlen") 'cl-cc/php::%php-strlen)
+            ((string= lower "strtolower") 'cl-cc/php::%php-strtolower)
+            ((string= lower "strtoupper") 'cl-cc/php::%php-strtoupper)
+            ((string= lower "isset") 'cl-cc/php::%php-isset)
+            ((string= lower "array_key_exists") 'cl-cc/php::%php-array-key-exists)
+            (t nil)))))
+
+(defun %php-simple-function-spelling (qualified-name)
+  "Return QUALIFIED-NAME as a simple global function name, or NIL."
+  (let ((name (%php-strip-leading-namespace-separator qualified-name)))
+    (unless (find (code-char 92) name)
+      name)))
+
+(defun %php-global-builtin-function-p (qualified-name fallback-name)
+  "Return true when QUALIFIED-NAME can use PHP global builtin helper lowering."
+  (let ((simple-name (%php-simple-function-spelling qualified-name)))
+    (and simple-name
+         (or (%php-name-absolute-p qualified-name)
+             (not (and *php-current-namespace*
+                       (not (string= *php-current-namespace* "")))))
+         (string= (string-upcase simple-name)
+                  (symbol-name fallback-name)))))
+
+(defun %php-parse-function-call (qualified-name fallback-name stream known-vars)
+  "Parse a PHP function call and lower known builtins to runtime helpers."
+  (multiple-value-bind (args rest kv) (php-parse-arglist stream known-vars)
+    (values (make-ast-call
+             :func (make-ast-var
+                    :name (or (and (%php-global-builtin-function-p
+                                    qualified-name fallback-name)
+                                   (%php-builtin-helper-symbol
+                                    (%php-simple-function-spelling qualified-name)))
+                              fallback-name))
+             :args args)
+            rest kv)))
 
 (defun %php-not-null-cond (expr)
   "Build (not (eq EXPR null)) as an AST expression."
@@ -369,11 +541,9 @@
 
 (defun %php-capture-wrapper (captures value)
   "Wrap VALUE in explicit let-bindings that snapshot CAPTURES by value."
-  (if captures
-      (make-ast-let
-       :bindings (mapcar (lambda (name) (cons name (make-ast-var :name name))) captures)
-       :body (list value))
-      value))
+  (make-ast-let
+   :bindings (mapcar (lambda (name) (cons name (make-ast-var :name name))) captures)
+   :body (list value)))
 
 (defun %php-find-free-vars (body)
   "Return a list of free variable symbols referenced in BODY AST."
@@ -406,7 +576,7 @@
         (multiple-value-bind (body rest4 kv4) (php-parse-expr rest3 (append params known-vars))
           (let* ((captures (%php-arrow-captures body params known-vars))
                  (lambda (make-ast-lambda :params params :body (list body))))
-            (values (%php-capture-wrapper captures lambda) rest4 kv4))))))
+            (values (%php-capture-wrapper captures lambda) rest4 kv4)))))))
 
 (defun %php-parse-closure-use-list (stream)
   "Parse optional PHP closure use($x, $y) and return captures/rest."
@@ -418,7 +588,7 @@
           (loop
             (when (and (eq (php-peek-type current) :T-OP)
                        (equal "&" (php-peek-value current)))
-              (setf current (cdr current)))
+              (error "PHP parse error: PHP closure use-by-reference (&) is not yet supported"))
             (multiple-value-bind (var-token rest) (php-expect :T-VAR current)
               (push (php-var-sym (php-tok-value var-token)) captures)
               (setf current rest))
@@ -440,7 +610,7 @@
           (values (%php-capture-wrapper
                    captures
                    (make-ast-lambda :params params :body body-stmts))
-                  rest4 kv4))))))
+                   rest4 kv4))))))
 
 (defun %php-parse-yield-unsupported (stream known-vars)
   "Parse yield/yield from as an unsupported marker with the yielded expression attached."
@@ -453,9 +623,28 @@
                   rest2 kv2)))
       (if (member (php-peek-type stream) '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF) :test #'eq)
           (values (%php-unsupported "PHP yield is not yet supported") stream known-vars)
-          (multiple-value-bind (expr rest2 kv2) (php-parse-expr stream known-vars)
-            (values (%php-unsupported "PHP yield is not yet supported" expr)
-                    rest2 kv2)))))
+           (multiple-value-bind (expr rest2 kv2) (php-parse-expr stream known-vars)
+             (values (%php-unsupported "PHP yield is not yet supported" expr)
+                     rest2 kv2)))))
+
+(defun %php-parse-yield-expression (stream known-vars)
+  "Parse yield/yield from into PHP runtime helper calls.
+
+This is still a lightweight yield representation rather than a full coroutine
+engine, but it prevents yield syntax from being silently rejected and preserves
+the yielded value for later generator lowering passes."
+  (cond
+    ((and (eq (php-peek-type stream) :T-KEYWORD)
+          (eq (php-peek-value stream) :from))
+     (multiple-value-bind (from-token rest) (php-consume stream)
+       (declare (ignore from-token))
+       (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
+         (values (%php-call 'cl-cc/php::%php-yield-from expr) rest2 kv2))))
+    ((member (php-peek-type stream) '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF) :test #'eq)
+     (values (%php-call 'cl-cc/php::%php-yield) stream known-vars))
+    (t
+     (multiple-value-bind (expr rest2 kv2) (php-parse-expr stream known-vars)
+       (values (%php-call 'cl-cc/php::%php-yield expr) rest2 kv2)))))
 
 (defun %php-match-error-call ()
   "Return the fallback call used when no PHP match arm applies."
@@ -465,7 +654,9 @@
   "Build an OR of strict-equality tests for one match arm."
   (let ((comparisons
           (mapcar (lambda (test)
-                    (%php-call 'equal (make-ast-var :name subject-sym) test))
+                    (%php-call 'cl-cc/php::%php-eq-strict
+                               (make-ast-var :name subject-sym)
+                               test))
                   tests)))
     (reduce (lambda (lhs rhs)
               (make-ast-binop :op 'or :lhs lhs :rhs rhs))
@@ -544,10 +735,88 @@
   "Return an AST variable for a PHP runtime helper NAME."
   (make-ast-var :name name))
 
-(defun %php-assignment-op-p (stream)
-  "Return true when STREAM begins with PHP simple assignment '='."
-  (and (eq (php-peek-type stream) :T-OP)
-       (equal "=" (php-peek-value stream))))
+(defun %php-compound-value (op lhs rhs)
+  "Return the read-modify-write value for PHP compound assignment OP."
+  (cond ((equal op "+=") (make-ast-binop :op '+ :lhs lhs :rhs rhs))
+        ((equal op "-=") (make-ast-binop :op '- :lhs lhs :rhs rhs))
+        ((equal op "*=") (make-ast-binop :op '* :lhs lhs :rhs rhs))
+        ((equal op "/=") (make-ast-binop :op '/ :lhs lhs :rhs rhs))
+        ((equal op ".=") (%php-call 'cl-cc/php::%php-concat lhs rhs))
+        ((equal op "%=") (%php-call 'cl-cc/php::%php-modulo lhs rhs))
+        ((equal op "**=") (%php-call 'expt lhs rhs))
+        ((equal op "&=") (%php-call 'cl-cc/php::%php-bitwise-and lhs rhs))
+        ((equal op "|=") (%php-call 'cl-cc/php::%php-bitwise-or lhs rhs))
+        ((equal op "^=") (%php-call 'cl-cc/php::%php-bitwise-xor lhs rhs))
+        ((equal op "<<=") (%php-call 'cl-cc/php::%php-shift-left lhs rhs))
+        ((equal op ">>=") (%php-call 'cl-cc/php::%php-shift-right lhs rhs))
+        (t (error "PHP parse error: unsupported compound assignment operator ~S" op))))
+
+(defun %php-nullish-cond (value)
+  "Return a condition that is true when VALUE is Lisp NIL or PHP null."
+  (make-ast-binop :op 'or
+                  :lhs (%php-call 'null value)
+                  :rhs (%php-call 'cl-cc/php::%php-null-p value)))
+
+(defun %php-lower-compound-assign (op lhs-expr rhs-expr target-kind)
+  "Build the lowered AST for PHP compound assignment OP on LHS-EXPR."
+  (ecase target-kind
+    (:var
+     (let* ((var-sym (ast-var-name lhs-expr))
+            (tmp (gensym "PHP-COMPOUND-LHS-"))
+            (tmp-var (make-ast-var :name tmp)))
+       (make-ast-let
+        :bindings (list (cons tmp lhs-expr))
+        :body (list (if (equal op "??=")
+                        (make-ast-if
+                         :cond (%php-nullish-cond tmp-var)
+                         :then (make-ast-setq :var var-sym :value rhs-expr)
+                         :else tmp-var)
+                        (make-ast-setq
+                         :var var-sym
+                         :value (%php-compound-value op tmp-var rhs-expr)))))))
+    (:array
+     (destructuring-bind (array key) (ast-call-args lhs-expr)
+       (let* ((array-sym (gensym "PHP-COMPOUND-ARRAY-"))
+              (key-sym (gensym "PHP-COMPOUND-KEY-"))
+              (array-var (make-ast-var :name array-sym))
+              (key-var (make-ast-var :name key-sym))
+              (current (%php-array-ref-call array-var key-var)))
+         (make-ast-let
+          :bindings (list (cons array-sym array)
+                          (cons key-sym key))
+          :body (list (if (equal op "??=")
+                          (let* ((current-sym (gensym "PHP-COMPOUND-CURRENT-"))
+                                 (current-var (make-ast-var :name current-sym)))
+                            (make-ast-let
+                             :bindings (list (cons current-sym current))
+                             :body (list (make-ast-if
+                                          :cond (%php-nullish-cond current-var)
+                                          :then (%php-array-set-call array-var key-var rhs-expr)
+                                          :else current-var))))
+                          (%php-array-set-call
+                           array-var key-var
+                           (%php-compound-value op current rhs-expr))))))))
+    (:property
+     (let* ((object-sym (gensym "PHP-COMPOUND-OBJECT-"))
+            (object-var (make-ast-var :name object-sym))
+            (slot (ast-slot-value-slot lhs-expr))
+            (current (make-ast-slot-value :object object-var :slot slot)))
+       (make-ast-let
+        :bindings (list (cons object-sym (ast-slot-value-object lhs-expr)))
+        :body (list (if (equal op "??=")
+                        (let* ((current-sym (gensym "PHP-COMPOUND-CURRENT-"))
+                               (current-var (make-ast-var :name current-sym)))
+                          (make-ast-let
+                           :bindings (list (cons current-sym current))
+                           :body (list (make-ast-if
+                                        :cond (%php-nullish-cond current-var)
+                                        :then (make-ast-set-slot-value
+                                               :object object-var :slot slot :value rhs-expr)
+                                        :else current-var))))
+                        (make-ast-set-slot-value
+                         :object object-var
+                         :slot slot
+                         :value (%php-compound-value op current rhs-expr)))))))))
 
 (defun %php-double-arrow-p (stream)
   "Return true when STREAM begins with PHP double-arrow '=>'."
@@ -571,7 +840,12 @@
 (defun %php-array-set-call (array key value)
   "Lower ARRAY[KEY] = VALUE to the PHP ordered-array mutation helper."
   (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-set)
-                 :args (list array key value)))
+                  :args (list array key value)))
+
+(defun %php-array-unset-call (array key)
+  "Lower unset(ARRAY[KEY]) to the PHP ordered-array deletion helper."
+  (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-unset)
+                 :args (list array key)))
 
 (defun %php-array-entry (key-present-p key value)
   "Build a runtime entry descriptor for %php-array."
@@ -631,4 +905,3 @@
           ((:T-LPAREN :T-LBRACKET :T-LBRACE) (incf depth))
           ((:T-RPAREN :T-RBRACKET :T-RBRACE) (when (plusp depth) (decf depth)))))
       (setf current (cdr current)))))
-)

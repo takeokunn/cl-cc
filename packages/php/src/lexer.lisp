@@ -21,6 +21,7 @@
 ;;;;   :T-RPAREN         - )
 ;;;;   :T-LBRACE         - {
 ;;;;   :T-RBRACE         - }
+;;;;   :T-ATTRIBUTE-OPEN - #[
 ;;;;   :T-LBRACKET       - [
 ;;;;   :T-RBRACKET       - ]
 ;;;;   :T-SEMI           - ;
@@ -38,7 +39,7 @@
     "null" "true" "false" "readonly" "enum" "static" "abstract" "final"
     "public" "protected" "private" "do" "break" "continue" "switch" "case"
     "default" "try" "catch" "finally" "use" "namespace" "list" "as" "in"
-    "instanceof" "print" "yield" "from" "fn" "const"
+    "instanceof" "print" "yield" "from" "fn" "const" "unset"
     "include" "require" "include_once" "require_once"
     "declare" "goto" "clone" "array")
   "PHP reserved keywords (lowercased).")
@@ -120,7 +121,10 @@
             (char= (char source (1+ pos)) #\/))
        (setf pos (skip-line-comment source (+ pos 2))))
       ((char= (char source pos) #\#)
-       (setf pos (skip-line-comment source (1+ pos))))
+       (if (and (< (1+ pos) (length source))
+                (char= (char source (1+ pos)) #\[))
+           (return pos)
+           (setf pos (skip-line-comment source (1+ pos)))))
       ;; Block comment: /* ... */
       ((and (char= (char source pos) #\/)
             (< (1+ pos) (length source))
@@ -132,15 +136,35 @@
 ;;; String literal lexers
 
 (defun lex-double-quoted-string (source pos)
-  "Lex a double-quoted string starting AFTER the opening \". Returns (values string new-pos)."
-  (let ((buf (make-array 64 :element-type 'character :fill-pointer 0 :adjustable t)))
+  "Lex a double-quoted string starting AFTER the opening \".
+
+Returns either a plain string or (:PHP-INTERPOLATED-STRING SEGMENTS), where
+SEGMENTS contains (:STRING text) and (:VAR \"$name\") entries. This preserves
+simple PHP $variable interpolation for parser lowering without requiring a
+full string sub-lexer."
+  (let ((buf (make-array 64 :element-type 'character :fill-pointer 0 :adjustable t))
+        (segments nil)
+        (interpolated-p nil))
+    (labels ((flush-string ()
+               (when (plusp (length buf))
+                 (push (list :string (copy-seq buf)) segments)
+                 (setf (fill-pointer buf) 0)))
+             (push-interpolated-var (raw-name)
+               (push (list :var raw-name) segments)
+               (setf interpolated-p t))
+             (finish-string ()
+               (if interpolated-p
+                   (progn
+                     (flush-string)
+                     (list :php-interpolated-string (nreverse segments)))
+                   (copy-seq buf))))
     (loop
       (when (>= pos (length source))
         (error "PHP lex error: unterminated double-quoted string"))
       (let ((ch (char source pos)))
         (cond
           ((char= ch #\")
-           (return (values (copy-seq buf) (1+ pos))))
+           (return (values (finish-string) (1+ pos))))
           ((char= ch #\\)
            ;; Escape sequence
            (incf pos)
@@ -154,15 +178,46 @@
                 (#\r  #\Return)
                 (#\\  #\\)
                 (#\"  #\")
-                (#\$  #\$)
-                (otherwise esc))
-              buf)
+                 (#\$  #\$)
+                 (otherwise esc))
+                buf)
+               (incf pos)))
+          ((and (char= ch #\{)
+                (< (+ pos 2) (length source))
+                (char= (char source (1+ pos)) #\$)
+                (php-alpha-p (char source (+ pos 2))))
+           (flush-string)
+           (multiple-value-bind (tok new-pos) (lex-variable source (+ pos 2))
+             (unless (and (< new-pos (length source))
+                          (char= (char source new-pos) #\}))
+               (error "PHP lex error: expected } after interpolated variable"))
+             (push-interpolated-var (getf tok :value))
+             (setf pos (1+ new-pos))))
+          ((and (char= ch #\$)
+                (< (+ pos 2) (length source))
+                (char= (char source (1+ pos)) #\{)
+                (php-alpha-p (char source (+ pos 2))))
+           (flush-string)
+           (let ((start (+ pos 2)))
+             (setf pos start)
+             (loop while (and (< pos (length source))
+                              (php-alnum-p (char source pos)))
+                   do (incf pos))
+             (unless (and (< pos (length source))
+                          (char= (char source pos) #\}))
+               (error "PHP lex error: expected } after interpolated variable"))
+             (push-interpolated-var (concatenate 'string "$" (subseq source start pos)))
              (incf pos)))
-          ;; Simple variable interpolation: $var - just skip the $ for now and treat as literal
-          ;; (Full interpolation would require a sub-lexer; for correctness we treat $var as text)
+          ((and (char= ch #\$)
+                (< (1+ pos) (length source))
+                (php-alpha-p (char source (1+ pos))))
+           (flush-string)
+            (multiple-value-bind (tok new-pos) (lex-variable source (1+ pos))
+              (push-interpolated-var (getf tok :value))
+              (setf pos new-pos)))
           (t
            (vector-push-extend ch buf)
-           (incf pos)))))))
+            (incf pos))))))))
 
 (defun lex-single-quoted-string (source pos)
   "Lex a single-quoted string starting AFTER the opening '. Returns (values string new-pos)."

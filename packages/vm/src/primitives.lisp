@@ -108,10 +108,11 @@ TYPE-NAME is a symbol like INTEGER, STRING, SYMBOL, CONS, NULL, LIST, etc."
 The path value is diagnostic and keeps the runtime specialization testable."
   (cond
     ((and (typep lhs 'fixnum) (typep rhs 'fixnum))
-     (values (/ lhs rhs) :fixnum))
+      ;; Standard CL / already produces the correct ratio for fixnum division.
+      (values (/ lhs rhs) :fixnum))
     ((and (%vm-fixnum-rational-p lhs) (%vm-fixnum-rational-p rhs))
-     (values (/ (* (numerator lhs) (denominator rhs))
-                (* (denominator lhs) (numerator rhs)))
+      (values (/ (* (numerator lhs) (denominator rhs))
+                 (* (denominator lhs) (numerator rhs)))
              :fixnum-rational))
     ((and (typep lhs 'fixnum) (%vm-fixnum-rational-p rhs))
      (values (/ (* lhs (denominator rhs))

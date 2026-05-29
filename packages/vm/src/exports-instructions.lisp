@@ -144,10 +144,15 @@
    vm-ceiling-inst
    vm-round-inst
    vm-lognot
-   vm-rational
-   vm-rationalize
-   vm-numerator
-    vm-denominator
+    vm-rational
+    vm-rationalize
+    vm-numerator
+    vm-bignump
+    vm-floatp
+    vm-rationalp
+    vm-realp
+    vm-complexp
+     vm-denominator
      vm-make-array
      vm-make-specialized-array
      vm-specialized-array

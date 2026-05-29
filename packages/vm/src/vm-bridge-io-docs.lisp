@@ -321,7 +321,8 @@
                  (fboundp         . "RT-FBOUNDP")
                  (intern          . "RT-INTERN")
                  (gensym          . "RT-GENSYM")
-                 (symbol-value    . "RT-SYMBOL-VALUE")))
+                 (symbol-value    . "RT-SYMBOL-VALUE")
+                 (write-to-string . "RT-WRITE-TO-STRING")))
   (vm-register-host-bridge
    (car entry)
    (let ((runtime-name (cdr entry)))

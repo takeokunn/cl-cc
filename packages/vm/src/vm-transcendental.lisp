@@ -20,6 +20,25 @@
 (define-simple-instruction vm-exp-inst :unary  exp)
 (define-simple-instruction vm-log-inst :unary  log)
 
+(defmethod execute-instruction ((inst vm-expt) state pc labels)
+  (declare (ignore labels))
+  (let* ((base (vm-reg-get state (vm-lhs inst)))
+         (power (vm-reg-get state (vm-rhs inst)))
+         (result (if (and (integerp base) (integerp power) (not (minusp power)))
+                     (%vm-externalize-number (vm-bignum-expt base power))
+                     (expt base power))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
+(defmethod execute-instruction ((inst vm-sqrt) state pc labels)
+  (declare (ignore labels))
+  (let* ((value (vm-reg-get state (vm-src inst)))
+         (result (if (and (realp value) (minusp value))
+                     (%vm-externalize-number (vm-complex-sqrt value))
+                     (sqrt value))))
+    (vm-reg-set state (vm-dst inst) result)
+    (values (1+ pc) nil nil)))
+
 ;;; ─── Trigonometric ──────────────────────────────────────────────────────────
 
 (define-vm-unary-instruction  vm-sin-inst  :sin  "Sine (radians).")

@@ -42,8 +42,13 @@
    make-vm-not
    make-vm-nreverse
    make-vm-nth
-   make-vm-numerator
-   make-vm-identity
+    make-vm-numerator
+    make-vm-bignump
+    make-vm-floatp
+    make-vm-rationalp
+    make-vm-realp
+    make-vm-complexp
+    make-vm-identity
    make-vm-constantly
    make-vm-complement
    make-vm-next-method-p
@@ -190,6 +195,12 @@
     make-vm-open-stream-p
     make-vm-interactive-stream-p
     make-vm-stream-element-type-inst
+    make-vm-pathname
+    make-vm-make-pathname
+    make-vm-pathnamep
+    make-vm-pathname-name
+    make-vm-pathname-type
+    make-vm-namestring
     make-vm-read-byte
     make-vm-listen-inst
     make-vm-force-output

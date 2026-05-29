@@ -3,6 +3,10 @@
 
 ;;; Package-system macros over the current runtime-registry-backed package layer
 
+(defun rt-use-package (packages-to-use &optional package &key (errorp t))
+  "Expansion-package bridge for runtime package use with optional non-signaling mode."
+  (cl-cc/runtime::rt-use-package packages-to-use package :errorp errorp))
+
 (defun %host-package-designator (designator)
   (if (hash-table-p designator)
       (or (gethash :host-package designator)
@@ -43,16 +47,22 @@
                (:use (setf use-list (rest opt)))
                (:export (setf export-list (rest opt)))
                (:local-nicknames (setf local-nicknames (rest opt))))))
-         `(progn
-            (let ((pkg (or (rt-find-package ',name)
-                            (rt-make-package ',name ,@(when use-list `(:use ',use-list))))))
-              ,@(when local-nicknames
-                  `((dolist (entry ',local-nicknames)
-                      (add-package-local-nickname pkg (first entry) (second entry)))))
-              ,@(when export-list
-                  `((dolist (sym ',export-list)
-                      (rt-export (rt-intern (string sym) pkg) pkg))))
-             (quote ,name))))))
+        (let ((handler-anchor (gensym "DEFPACKAGE-HANDLER-ANCHOR")))
+          `(progn
+              (let ((pkg (or (rt-find-package ',name)
+                              (rt-make-package ',name))))
+                ,@(when use-list
+                    `((let ((,handler-anchor 1))
+                        (/ ,handler-anchor ,handler-anchor))
+                       (when (eq (rt-use-package ',use-list pkg :errorp nil) :conflict)
+                         (princ "CONFLICT-DETECTED"))))
+                ,@(when local-nicknames
+                    `((dolist (entry ',local-nicknames)
+                        (add-package-local-nickname pkg (first entry) (second entry)))))
+                ,@(when export-list
+                    `((dolist (sym ',export-list)
+                        (rt-export (rt-intern (string sym) pkg) pkg))))
+               (quote ,name)))))))
 
 (defun %expand-package-iteration (binding-spec symbol-list-form-fn body)
   (let ((var (first binding-spec))

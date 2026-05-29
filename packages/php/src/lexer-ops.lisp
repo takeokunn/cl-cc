@@ -36,6 +36,11 @@
         (#\}  (tok1 :T-RBRACE "}"))
         (#\[  (tok1 :T-LBRACKET "["))
         (#\]  (tok1 :T-RBRACKET "]"))
+        (#\#
+         (when (and ch2 (char= ch2 #\[))
+           (return-from lex-operator
+             (values (make-php-token :T-ATTRIBUTE-OPEN "#[") (+ pos 2))))
+         (error "PHP lex error: unexpected # at position ~D (standalone # outside comment)" pos))
         (#\;  (tok1 :T-SEMI ";"))
         (#\,  (tok1 :T-COMMA ","))
         (#\\  (tok1 :T-BACKSLASH "\\"))
@@ -125,6 +130,25 @@
        (skip-whitespace-and-comments source (+ pos 2)))
       (t pos))))
 
+(defun php-next-open-tag-position (source pos)
+  "Return the next PHP opening tag position after POS, or NIL."
+  (or (search "<?php" source :start2 pos)
+      (search "<?" source :start2 pos)))
+
+(defun skip-php-close-tag (source pos tokens)
+  "Skip ?> and collect following inline HTML until the next opening tag.
+Returns the updated position and token list."
+  (let* ((html-start (+ pos 2))
+         (next-open (php-next-open-tag-position source html-start))
+         (html-end (or next-open (length source)))
+         (html (subseq source html-start html-end)))
+    (when (plusp (length html))
+      (push (make-php-token :T-INLINE-HTML html) tokens))
+    (values (if next-open
+                (skip-php-open-tag source next-open)
+                html-end)
+            tokens)))
+
 ;;; Main tokenizer
 
 (defun tokenize-php-source (source)
@@ -148,6 +172,14 @@
         (return))
       (let ((ch (char source pos)))
         (cond
+          ;; PHP close tag: leave PHP mode; inline HTML becomes output text.
+          ((and (char= ch #\?)
+                (< (1+ pos) len)
+                (char= (char source (1+ pos)) #\>))
+           (multiple-value-bind (new-pos new-tokens)
+               (skip-php-close-tag source pos tokens)
+             (setf pos new-pos
+                   tokens new-tokens)))
           ;; Variable: $name
           ((char= ch #\$)
            (multiple-value-bind (tok new-pos) (lex-variable source (1+ pos))

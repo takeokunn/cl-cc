@@ -140,6 +140,75 @@
 (defvar *php-pending-top-level-forms* nil
   "Top-level forms spliced by statement parsers such as braced namespaces.")
 
+(defun %php-name-absolute-p (name)
+  "Return true when PHP qualified NAME starts from the global namespace."
+  (and (stringp name)
+       (plusp (length name))
+       (char= #\\ (char name 0))))
+
+(defun %php-strip-leading-namespace-separator (name)
+  "Return NAME without a leading PHP namespace separator."
+  (if (%php-name-absolute-p name)
+      (subseq name 1)
+      name))
+
+(defun %php-name-first-segment (name)
+  "Return the first segment of PHP qualified NAME."
+  (let* ((trimmed (%php-strip-leading-namespace-separator name))
+         (pos (position #\\ trimmed)))
+    (if pos (subseq trimmed 0 pos) trimmed)))
+
+(defun %php-name-rest-after-first-segment (name)
+  "Return NAME's suffix after the first segment, including the namespace separator."
+  (let* ((trimmed (%php-strip-leading-namespace-separator name))
+         (pos (position #\\ trimmed)))
+    (if pos (subseq trimmed pos) "")))
+
+(defun %php-qualified-name-contains-separator-p (name)
+  "Return true when NAME has an internal PHP namespace separator."
+  (let ((trimmed (%php-strip-leading-namespace-separator name)))
+    (not (null (position #\\ trimmed)))))
+
+(defun %php-name-last-segment (name)
+  "Return the final segment of PHP qualified NAME."
+  (let* ((trimmed (%php-strip-leading-namespace-separator name))
+         (pos (position #\\ trimmed :from-end t)))
+    (if pos (subseq trimmed (1+ pos)) trimmed)))
+
+(defun %php-import-alias (import)
+  "Return the effective alias for a PHP import descriptor."
+  (or (getf import :alias)
+      (%php-name-last-segment (getf import :name))))
+
+(defun %php-resolve-imported-name (name kind)
+  "Resolve NAME through current imports of KIND, or return NIL."
+  (let ((first (%php-name-first-segment name))
+        (rest (%php-name-rest-after-first-segment name)))
+    (loop for import in *php-current-imports*
+          when (and (eq (getf import :type) kind)
+                    (string-equal first (%php-import-alias import)))
+            return (concatenate 'string (getf import :name) rest))))
+
+(defun php-resolve-qualified-name (name kind)
+  "Resolve PHP qualified NAME for KIND (:class, :function, or :const).
+Absolute names keep their global spelling without the leading separator. Imported
+aliases replace the first segment. Classes are namespace-relative. Functions and
+constants keep unqualified names global-fallback-safe, while qualified relative
+names are namespace-relative."
+  (let ((trimmed (%php-strip-leading-namespace-separator name)))
+    (cond ((%php-name-absolute-p name) trimmed)
+          ((%php-resolve-imported-name trimmed kind))
+          ((and (eq kind :class)
+                *php-current-namespace*
+                (not (string= *php-current-namespace* "")))
+           (format nil "~A\\~A" *php-current-namespace* trimmed))
+          ((and (member kind '(:function :const) :test #'eq)
+                (%php-qualified-name-contains-separator-p trimmed)
+                *php-current-namespace*
+                (not (string= *php-current-namespace* "")))
+           (format nil "~A\\~A" *php-current-namespace* trimmed))
+          (t trimmed))))
+
 (defun %php-qualified-name-segment-p (stream)
   "Return true when STREAM starts with a token usable as a qualified-name segment."
   (member (php-peek-type stream) '(:T-IDENT :T-TYPE) :test #'eq))
@@ -176,14 +245,22 @@ syntax such as Foo\\{Bar, Baz}."
                (%php-qualified-name-segment-p (cdr current)))
           (setf current (cdr current))
           (return)))
-    (values (format nil "~@[\\~]~{~A~^\\~}" absolute-p (nreverse segments))
-            current)))
+    (let ((name (format nil "~{~A~^\\~}" (nreverse segments))))
+      (values (if absolute-p (concatenate 'string "\\" name) name)
+              current))))
 
 (defun php-annotate-top-level-node (node)
   "Attach current PHP namespace/import metadata to NODE and return it."
   (when (and node (ast-node-p node))
-    (setf (ast-namespace node) *php-current-namespace*
-          (ast-imports node) (copy-tree *php-current-imports*)))
+    (let ((node-metadata (ast-imports node)))
+      (setf (ast-namespace node) *php-current-namespace*
+            (ast-imports node)
+            (cond ((and node-metadata (keywordp (first node-metadata)))
+                   (if *php-current-imports*
+                       (append (list :php-imports (copy-tree *php-current-imports*))
+                               node-metadata)
+                       node-metadata))
+                  (t (copy-tree *php-current-imports*))))))
   node)
 
 (defun %php-consume-expected (token stream)

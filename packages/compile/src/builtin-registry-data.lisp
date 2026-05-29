@@ -20,10 +20,15 @@
     (nstring-downcase . make-vm-nstring-downcase)
     (nstring-capitalize . make-vm-nstring-capitalize)
     ;; Type predicates
-    (symbolp          . make-vm-symbol-p)
-    (numberp          . make-vm-number-p)
-    (integerp         . make-vm-integer-p)
-    (consp            . make-vm-cons-p)
+     (symbolp          . make-vm-symbol-p)
+     (numberp          . make-vm-number-p)
+     (integerp         . make-vm-integer-p)
+     (bignump          . make-vm-bignump)
+     (floatp           . make-vm-floatp)
+     (rationalp        . make-vm-rationalp)
+     (realp            . make-vm-realp)
+     (complexp         . make-vm-complexp)
+     (consp            . make-vm-cons-p)
     (null             . make-vm-null-p)
     (functionp        . make-vm-function-p)
     ;; List operations
@@ -112,6 +117,11 @@
     (open-stream-p     . make-vm-open-stream-p)
     (interactive-stream-p . make-vm-interactive-stream-p)
     (stream-element-type . make-vm-stream-element-type-inst)
+    ;; Pathnames
+    (pathnamep         . make-vm-pathnamep)
+    (pathname-name     . make-vm-pathname-name)
+    (pathname-type     . make-vm-pathname-type)
+    (namestring        . make-vm-namestring)
     ;; Array/vector
     (vectorp          . make-vm-vectorp)
     (simple-vector-p  . make-vm-simple-vector-p)

@@ -39,6 +39,7 @@
     (values (1+ pc) nil nil)))
 
 ;; Pathname accessors
+(define-vm-unary-instruction vm-pathnamep :pathnamep "Test whether value is a pathname.")
 (define-vm-unary-instruction vm-pathname-host :pathname-host "Get pathname host.")
 (define-vm-unary-instruction vm-pathname-device :pathname-device "Get pathname device.")
 (define-vm-unary-instruction vm-pathname-directory :pathname-directory "Get pathname directory.")
@@ -51,6 +52,11 @@
 (define-vm-unary-instruction vm-parse-namestring :parse-namestring "Parse a namestring.")
 (define-vm-unary-instruction vm-wild-pathname-p :wild-pathname-p "Return true when pathname contains wild components.")
 
+(defmethod execute-instruction ((inst vm-pathnamep) state pc labels)
+  (declare (ignore labels))
+  (vm-reg-set state (vm-dst inst)
+              (if (cl:pathnamep (vm-reg-get state (vm-src inst))) t nil))
+  (values (1+ pc) nil nil))
 (define-simple-instruction vm-pathname-host :unary cl:pathname-host)
 (define-simple-instruction vm-pathname-device :unary cl:pathname-device)
 (define-simple-instruction vm-pathname-directory :unary cl:pathname-directory)

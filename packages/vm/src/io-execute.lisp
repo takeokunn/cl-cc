@@ -86,7 +86,9 @@
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle))
-         (char (read-char stream nil +eof-value+)))
+         (char (if (vm-string-input-stream-p stream)
+                   (vm-string-input-stream-read-char stream)
+                   (read-char stream nil +eof-value+))))
     (vm-reg-set state (vm-dst inst) char)
     (values (1+ pc) nil nil)))
 
@@ -95,7 +97,9 @@
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle)))
     (multiple-value-bind (line missing-newline-p)
-        (read-line stream nil +eof-value+)
+        (if (vm-string-input-stream-p stream)
+            (vm-string-input-stream-read-line stream)
+            (read-line stream nil +eof-value+))
       (declare (ignore missing-newline-p))
       ;; read-line returns the line even when EOF terminates it.
       ;; Only return :eof when the stream was already at EOF (line = +eof-value+).
@@ -122,7 +126,9 @@
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle))
-         (char (peek-char nil stream nil +eof-value+)))
+         (char (if (vm-string-input-stream-p stream)
+                   (vm-string-input-stream-peek-char stream)
+                   (peek-char nil stream nil +eof-value+))))
     (vm-reg-set state (vm-dst inst) char)
     (values (1+ pc) nil nil)))
 
@@ -131,7 +137,9 @@
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (char (vm-reg-get state (vm-char-reg inst)))
          (stream (vm-get-stream state handle)))
-    (unread-char char stream)
+    (if (vm-string-input-stream-p stream)
+        (vm-string-input-stream-unread-char char stream)
+        (unread-char char stream))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-file-position) state pc labels)
@@ -139,7 +147,14 @@
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle))
          (position-reg (vm-position-reg inst)))
-    (if position-reg
+    (if (vm-string-input-stream-p stream)
+        (let ((position (and position-reg (vm-reg-get state position-reg))))
+          (vm-reg-set state (vm-dst inst)
+                      (if position-reg
+                          (if (vm-string-input-stream-file-position stream t position) t nil)
+                          (vm-string-input-stream-file-position stream)))
+          (values (1+ pc) nil nil))
+        (if position-reg
         ;; Set position
         (let ((new-pos (vm-reg-get state position-reg)))
           (vm-reg-set state (vm-dst inst)
@@ -148,13 +163,15 @@
         ;; Get position
         (let ((current-pos (file-position stream)))
           (vm-reg-set state (vm-dst inst) current-pos)
-          (values (1+ pc) nil nil)))))
+          (values (1+ pc) nil nil))))))
 
 (defmethod execute-instruction ((inst vm-file-length) state pc labels)
   (declare (ignore labels))
   (let* ((handle (vm-reg-get state (vm-file-handle inst)))
          (stream (vm-get-stream state handle))
-         (length (file-length stream)))
+         (length (if (vm-string-input-stream-p stream)
+                     (vm-string-input-stream-file-length stream)
+                     (file-length stream))))
     (vm-reg-set state (vm-dst inst) length)
     (values (1+ pc) nil nil)))
 
@@ -162,7 +179,14 @@
   (declare (ignore labels))
   (let* ((seq (%vm-cow-vector-ensure-writable (vm-reg-get state (vm-rseq-seq-reg inst))))
          (stream (vm-get-stream state (vm-reg-get state (vm-rseq-stream-reg inst)))))
-    (vm-reg-set state (vm-dst inst) (read-sequence seq stream))
+    (vm-reg-set state (vm-dst inst)
+                (if (vm-string-input-stream-p stream)
+                    (loop for index from 0 below (length seq)
+                          for character = (vm-string-input-stream-read-char stream)
+                          until (eq character +eof-value+)
+                          do (setf (aref seq index) character)
+                          finally (return index))
+                    (read-sequence seq stream)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-write-sequence) state pc labels)
@@ -186,7 +210,7 @@
                         (vm-reg-get state (vm-initial-string inst))))
          (handle (vm-allocate-file-handle state))
          (stream (if (eq direction :input)
-                     (make-string-input-stream (or initial-str ""))
+                     (make-vm-string-input-stream (or initial-str ""))
                      (make-string-output-stream))))
     (setf (gethash handle (vm-string-streams state)) stream)
     (vm-reg-set state (vm-dst inst) handle)
