@@ -868,3 +868,11 @@ precede a parameter's type in __construct."
   (let ((ast (%php-first "<?php $f = strlen(...);")))
     ;; assignment lowers to ast-let/ast-setq with a call value; just ensure it parsed.
     (assert-true ast)))
+
+(deftest php-parser-array-spread
+  "[...$b, ...$c] parses spread elements in an array literal."
+  (assert-true (%php-first "<?php $a = [...$b, ...$c];")))
+
+(deftest php-parser-array-spread-mixed
+  "[1, ...$b, 2] mixes a spread element with plain elements."
+  (assert-true (%php-first "<?php $a = [1, ...$b, 2];")))
