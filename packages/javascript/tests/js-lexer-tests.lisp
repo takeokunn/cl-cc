@@ -274,3 +274,37 @@
   (let ((types (%js-lex-types "const x = 42 + y;")))
     (assert-true (equal '(:T-CONST :T-IDENT :T-OP :T-NUMBER :T-OP :T-IDENT :T-SEMI :T-EOF)
                types))))
+
+;;; ─── Regex literals ─────────────────────────────────────────────────────────
+
+(deftest lex-regex-with-flags
+  "/ab+c/gi lexes to a :T-REGEX token with pattern \"ab+c\" and flags \"gi\"."
+  (let ((tok (%js-first-token "/ab+c/gi")))
+    (assert-eq :T-REGEX (getf tok :type))
+    (let ((val (getf tok :value)))
+      (assert-string= "ab+c" (second val))
+      (assert-string= "gi"   (third val)))))
+
+(deftest lex-regex-plain
+  "/hello/ lexes as a regex with empty flags."
+  (let ((tok (%js-first-token "/hello/")))
+    (assert-eq :T-REGEX (getf tok :type))
+    (assert-string= "hello" (second (getf tok :value)))))
+
+(deftest lex-regex-char-class
+  "/[a-z]+/ keeps the character class in the pattern."
+  (let ((tok (%js-first-token "/[a-z]+/")))
+    (assert-eq :T-REGEX (getf tok :type))
+    (assert-string= "[a-z]+" (second (getf tok :value)))))
+
+(deftest lex-regex-all-flags
+  "/x/dgimsuy accepts every ES2026 flag including u (Unicode)."
+  (let ((tok (%js-first-token "/x/dgimsuy")))
+    (assert-eq :T-REGEX (getf tok :type))
+    (assert-string= "dgimsuy" (third (getf tok :value)))))
+
+(deftest lex-division-not-regex
+  "After an identifier, / is division (:T-OP), not a regex."
+  (let ((types (%js-lex-types "a / b")))
+    (assert-true (member :T-OP types))
+    (assert-false (member :T-REGEX types))))
