@@ -27,8 +27,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defparameter *js-regex-valid-flags*
-  (coerce "dgimsvy" 'list)
-  "ES2026 regex flags: d g i m s u v y (as a list of characters).")
+  (coerce "dgimsuvy" 'list)
+  "ES2026 regex flags: d g i m s u v y (as a list of characters).
+The u (Unicode) flag was previously omitted from the literal, rejecting /.../u.")
 
 (defun js-validate-regex-flags (flags-string)
   "Signal an error for unknown or duplicate flags in FLAGS-STRING.
