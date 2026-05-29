@@ -198,7 +198,9 @@
          (prop  (first slots)))
     (assert-eq :trait (cl-cc:ast-defclass-php-kind ast))
     (assert-true (cl-cc:ast-slot-def-p prop))
-    (assert-string= "NAME" (symbol-name (cl-cc:ast-slot-name prop)))))
+    ;; PHP variables are case-sensitive, so property slot names preserve case
+    ;; ($name -> name), consistent with regular class properties — not upcased.
+    (assert-string= "name" (symbol-name (cl-cc:ast-slot-name prop)))))
 
 (deftest php-trait-multiple-methods
   "A trait with several methods produces one slot-def per method."
