@@ -741,10 +741,14 @@ identifiers, and hashbang comments at position 0."
              ;; Check if this slash starts a regex
              ((js-regex-follows-p prev-token-type)
               (cond
-                ;; If js-lex-regex is available (from lexer-regex.lisp), use it
+                ;; If js-lex-regex is available (from lexer-regex.lisp), use it.
+                ;; js-lex-regex expects POS to be AFTER the opening '/', so skip it
+                ;; with (1+ pos) — otherwise it sees the opening slash as an empty
+                ;; pattern's closing slash and reads the pattern body as flags
+                ;; ("/ab+c/gi" -> unknown flag 'a').
                 ((fboundp 'js-lex-regex)
                  (multiple-value-bind (tok new-pos)
-                     (js-lex-regex source pos)
+                     (js-lex-regex source (1+ pos))
                    (push tok tokens)
                    (setf prev-token-type :T-REGEX
                          pos new-pos)))
