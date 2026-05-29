@@ -397,9 +397,40 @@ T-TYPE.  Returns (values name-string rest)."
               (current rest)
               (kv known-vars))
           (loop
-            (multiple-value-bind (arg rest2 kv2) (php-parse-expr current kv)
-              (push arg args)
-              (setf current rest2 kv kv2))
+            (cond
+              ;; First-class callable syntax: f(...)  ->  marker arg the caller
+              ;; can turn into a callable reference. Detected as '...' then ')'.
+              ((and (eq (php-peek-type current) :T-ELLIPSIS)
+                    (eq (php-peek-type (cdr current)) :T-RPAREN))
+               (push (make-ast-call :func (make-ast-var :name '%php-first-class-callable)
+                                    :args nil)
+                     args)
+               (setf current (cdr current)))
+              ;; Spread argument: ...expr  ->  (%php-spread expr)
+              ((eq (php-peek-type current) :T-ELLIPSIS)
+               (multiple-value-bind (_tok rest-after) (php-consume current)
+                 (declare (ignore _tok))
+                 (multiple-value-bind (arg rest2 kv2) (php-parse-expr rest-after kv)
+                   (push (make-ast-call :func (make-ast-var :name '%php-spread)
+                                        :args (list arg))
+                         args)
+                   (setf current rest2 kv kv2))))
+              ;; Named argument: ident: expr  ->  (%php-named-arg "ident" expr)
+              ((%php-named-arg-p current)
+               (let* ((name-tok (php-peek current))
+                      (name-str (let ((v (php-tok-value name-tok)))
+                                  (if (stringp v) v (string-downcase (symbol-name v)))))
+                      (after-colon (cddr current)))   ; skip ident and ':'
+                 (multiple-value-bind (arg rest2 kv2) (php-parse-expr after-colon kv)
+                   (push (make-ast-call :func (make-ast-var :name '%php-named-arg)
+                                        :args (list (make-ast-quote :value name-str) arg))
+                         args)
+                   (setf current rest2 kv kv2))))
+              ;; Ordinary positional argument
+              (t
+               (multiple-value-bind (arg rest2 kv2) (php-parse-expr current kv)
+                 (push arg args)
+                 (setf current rest2 kv kv2))))
             (if (and current (eq (php-peek-type current) :T-COMMA))
                 (setf current (cdr current))
                 (return)))
