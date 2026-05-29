@@ -976,12 +976,12 @@
                            (make-ast-progn :forms ast-list))
                        rest2))
              (error "JS parse error: decorators must precede a class declaration"))))
-      ;; import declaration
+      ;; import declaration ('import' keyword consumed; parser expects next token)
       ((eq type :T-IMPORT)
-       (js-parse-import-decl stream))
-      ;; export declaration
+       (js-parse-import-decl (cdr stream)))
+      ;; export declaration ('export' keyword consumed)
       ((eq type :T-EXPORT)
-       (js-parse-export-decl stream))
+       (js-parse-export-decl (cdr stream)))
       ;; if
       ((eq type :T-IF)
        (js-parse-if-stmt (cdr stream)))

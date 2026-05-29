@@ -183,7 +183,7 @@ PRIVATE-P is T when the name was a #privateIdent."
   "Parse ( params ) { body } for a method. Returns (values params body rest).
 Params is a list of symbols; body is an ast-progn."
   ;; Parameter list
-  (let ((rest (cdr (js-expect :T-LPAREN stream)))
+  (let ((rest (nth-value 1 (js-expect :T-LPAREN stream)))
         (params nil))
     (loop until (or (js-at-eof-p rest) (eq (js-peek-type rest) :T-RPAREN))
           do (cond
