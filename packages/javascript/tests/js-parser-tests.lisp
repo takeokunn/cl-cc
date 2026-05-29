@@ -129,6 +129,18 @@
                   (or (search "COUNT" name) (search "PRIV" name))))
               slots))))
 
+(deftest js-parser-class-expression
+  "const C = class { m() {} }; — a class EXPRESSION parses without crashing
+(regression guard for the removed duplicate %js-parse-class-body)."
+  (let ((ast (%js-first "const C = class { m() { return 1; } };")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (not (null (cdr (first (cl-cc:ast-let-bindings ast))))))))
+
+(deftest js-parser-class-expression-extends
+  "const C = class extends Base { constructor() { super(); } }; parses."
+  (let ((ast (%js-first "const C = class extends Base { constructor() { super(); } };")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
 ;;; ─── If / else ────────────────────────────────────────────────────────────────
 
 (deftest js-parser-if-stmt
