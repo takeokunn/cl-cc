@@ -219,6 +219,12 @@ intersection type syntax as metadata only."
           (loop
             (multiple-value-bind (attributes rest-after-attributes) (%php-parse-attributes current)
               (setf current rest-after-attributes)
+              ;; PHP 8.0 constructor property promotion: visibility/readonly
+              ;; modifiers may precede the type, e.g. __construct(public int $x).
+              ;; Consume them so the type/$var that follows parses; record them.
+              (multiple-value-bind (promo-modifiers rest-after-mods)
+                  (%php-parse-visibility-modifiers current)
+                (setf current rest-after-mods)
               (multiple-value-bind (param-type rest-after-type) (php-parse-type-annotation current)
               (setf current (or rest-after-type current))
               (when (%php-reference-token-p current)
@@ -228,10 +234,14 @@ intersection type syntax as metadata only."
                   (push param params)
                   (when param-type
                     (push (cons param param-type) param-types))
-                  (when attributes
-                    (push (cons param (%php-attribute-metadata attributes :parameter))
+                  (when (or attributes promo-modifiers)
+                    (push (cons param
+                                (append (when attributes
+                                          (%php-attribute-metadata attributes :parameter))
+                                        (when promo-modifiers
+                                          (list :php-promote promo-modifiers))))
                           param-attributes)))
-                (setf current rest))))
+                (setf current rest)))))
             (when (and current (eq (php-peek-type current) :T-OP)
                        (equal "=" (php-peek-value current)))
               (setf current (cdr current))
