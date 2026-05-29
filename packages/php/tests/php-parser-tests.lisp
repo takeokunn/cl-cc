@@ -876,3 +876,14 @@ precede a parameter's type in __construct."
 (deftest php-parser-array-spread-mixed
   "[1, ...$b, 2] mixes a spread element with plain elements."
   (assert-true (%php-first "<?php $a = [1, ...$b, 2];")))
+
+(deftest php-parser-anonymous-class
+  "new class { ... } parses to a progn defining and instantiating an anon class."
+  (let ((ast (%php-first "<?php $o = new class { public $x = 1; };")))
+    (assert-true ast)))
+
+(deftest php-parser-anonymous-class-extends-ctor
+  "new class(5) extends Base { __construct(public int $n) {} } parses."
+  (let ((ast (%php-first
+              "<?php $o = new class(5) extends Base { public function __construct(public int $n) {} };")))
+    (assert-true ast)))
