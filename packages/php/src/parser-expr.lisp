@@ -97,10 +97,53 @@ T-TYPE.  Returns (values name-string rest)."
                 (values (make-ast-var :name name) rest known-vars)))))
       (t (error "PHP parse error: unexpected token ~S in expression" (php-peek stream))))))
 
+(defun %php-parse-anonymous-class (stream known-vars)
+  "Parse an anonymous class expression after `new class` (the `class` keyword is
+already consumed): optional (ctor args), optional extends/implements, then a
+class body. Returns (values ast rest kv) where ast is a progn that defines a
+gensym-named class and makes an instance of it."
+  (let ((current stream)
+        (ctor-args nil)
+        (kv known-vars)
+        (anon-name (php-ident-sym (symbol-name (gensym "PHP-ANON-CLASS-")))))
+    ;; Optional constructor argument list: new class (args) { ... }
+    (when (eq (php-peek-type current) :T-LPAREN)
+      (multiple-value-bind (args rest kv2) (php-parse-arglist current kv)
+        (setf ctor-args args current rest kv kv2)))
+    ;; Optional extends / implements
+    (multiple-value-bind (supers rest) (%php-parse-class-superclasses current)
+      (setf current rest)
+      ;; Class body { members... }
+      (let ((body (%php-consume-expected :T-LBRACE current))
+            (slots nil))
+        (loop
+          (setf body (php-skip-semis body))
+          (when (or (php-at-eof-p body) (eq (php-peek-type body) :T-RBRACE))
+            (return))
+          (multiple-value-bind (slot rest2) (%php-parse-class-body-member body known-vars)
+            (when slot (push slot slots))
+            (setf body rest2)))
+        (setf current (%php-consume-expected :T-RBRACE body))
+        (values
+         (make-ast-progn
+          :forms (list (make-ast-defclass :name anon-name
+                                          :superclasses supers
+                                          :slots (nreverse slots)
+                                          :php-kind :class)
+                       (make-ast-make-instance
+                        :class (make-ast-var :name anon-name)
+                        :initargs (loop for i from 0 for a in ctor-args
+                                        collect (cons (intern (format nil "ARG~D" i) :keyword) a)))))
+         current kv)))))
+
 (defun php-parse-new (stream known-vars)
-  "Parse 'new ClassName(args)'."
+  "Parse 'new ClassName(args)' or 'new class [(args)] [extends/implements] { ... }'."
   (multiple-value-bind (tok rest) (php-consume stream) ; consume 'new'
     (declare (ignore tok))
+    ;; Anonymous class: new class { ... }
+    (when (%php-keyword-p rest :class)
+      (return-from php-parse-new
+        (%php-parse-anonymous-class (cdr rest) known-vars)))
     (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
       (let ((class-name (php-ident-sym (php-resolve-qualified-name qualified-name :class))))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
