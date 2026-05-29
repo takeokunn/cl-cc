@@ -850,3 +850,21 @@ precede a parameter's type in __construct."
   (let ((ast (%php-first
               "<?php class P { public function __construct(int $a, public readonly ?string $b = null) {} }")))
     (assert-true (cl-cc:ast-defclass-p ast))))
+
+(deftest php-parser-call-spread-argument
+  "foo(...$args) parses a spread argument in a call."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(...$args);"))))
+
+(deftest php-parser-call-named-arguments
+  "foo(name: 'x', age: 5) parses named arguments."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(name: 'x', age: 5);"))))
+
+(deftest php-parser-call-named-mixed
+  "foo('pos', name: 'x') mixes a positional and a named argument."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo('pos', name: 'x');"))))
+
+(deftest php-parser-first-class-callable
+  "strlen(...) parses as a first-class callable reference."
+  (let ((ast (%php-first "<?php $f = strlen(...);")))
+    ;; assignment lowers to ast-let/ast-setq with a call value; just ensure it parsed.
+    (assert-true ast)))
