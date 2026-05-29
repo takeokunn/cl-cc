@@ -137,7 +137,8 @@
     :components
      ((:file "js-lexer-tests")
       (:file "js-parser-tests")
-      (:file "js-e2e-tests")))
+      (:file "js-e2e-tests")
+      (:file "js-runtime-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
