@@ -1,16 +1,16 @@
 ;;;; cli/src/main-dump.lisp — ANSI color codes, dump functions, compile-opts struct
-;;;
-;;; Extracted from main-utils.lisp.
-;;; Contains:
-;;;   - +ansi-*+ color code parameters
-;;;   - %dump-{ast,cps,vm,opt,ssa,asm}-phase — IR phase dump functions
-;;;   - %string-suffix-p, %dump-ir-phase, %trace-emit-stages
-;;;   - %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode
-;;;   - compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
-;;;
-;;; Depends on main-utils.lisp (%ensure-list, %source-location-comment,
-;;;   %print-source-comment, %ssa-block-name).
-;;; Load order: immediately after main-utils.lisp.
+;;;;
+;;;; Extracted from main-utils.lisp.
+;;;; Contains:
+;;;;   - +ansi-*+ color code parameters
+;;;;   - %dump-{ast,cps,vm,opt,ssa,asm}-phase — IR phase dump functions
+;;;;   - %string-suffix-p, %dump-ir-phase, %trace-emit-stages
+;;;;   - %arch-keyword, %compile-target-keyword, %parse-opt-remarks-mode
+;;;;   - compile-opts struct + %parse-compile-opts + %compile-opts-kwargs
+;;;;
+;;;; Depends on main-utils.lisp (%ensure-list, %source-location-comment,
+;;;;   %print-source-comment, %ssa-block-name).
+;;;; Load order: immediately after main-utils.lisp.
 
 (in-package :cl-cc/cli)
 
@@ -194,6 +194,14 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
 ;;; shared data so each command can call %parse-compile-opts once and then use
 ;;; %compile-opts-kwargs to spread the args onto compile-string.
 
+(defun %parse-coverage-flag (value)
+  "Parse the --coverage flag value.
+Returns T for plain coverage, :MCDC for MC/DC, NIL when unset."
+  (cond
+    ((null value) nil)
+    ((string-equal value "mcdc") :mcdc)
+    (t t)))
+
 (defstruct (compile-opts (:constructor make-compile-opts))
   "Pipeline control and diagnostic flags shared by run / compile / eval."
   (pass-pipeline      nil)
@@ -262,9 +270,9 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
     :tier               (flag parsed "--tier")
     :block-compile      (flag parsed "--block-compile")
     :print-pass-timings (or (flag parsed "--print-pass-timings")
-                           (flag parsed "--time-passes"))
+                            (flag parsed "--time-passes"))
    :trace-json-path    (flag parsed "--trace-json")
-   :coverage           (flag parsed "--coverage")
+   :coverage           (%parse-coverage-flag (flag parsed "--coverage"))
     :pgo-generate-path  (flag parsed "--pgo-generate")
      :pgo-use-path       (flag parsed "--pgo-use")
      :spectre-mitigations (flag parsed "--spectre-mitigations")
@@ -389,7 +397,7 @@ STREAM is the resolved trace-json output stream (may be nil)."
                            (compile-opts-tier opts)))
                     nil)
                 (if (compile-opts-coverage opts)
-                    (list :coverage t)
+                    (list :coverage (compile-opts-coverage opts))
                     nil)
                  (if (compile-opts-block-compile opts)
                      (list :block-compile t)

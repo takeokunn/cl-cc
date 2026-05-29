@@ -501,6 +501,32 @@ that was just unboxed from i31ref."
           (t (format nil "(ref.i31 (i32.wrap_i64 ~A))" i64-wat))))
       (format nil "(ref.i31 (i32.wrap_i64 ~A))" i64-wat)))
 
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-145: Integer Range Annotation — fixnum unboxed register tracking
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *wasm-fixnum-unboxed-regs* nil
+  "Dynamic binding: hash table mapping VM register keyword → integer constant value
+   when the register holds a known fixnum constant that can be used as raw i64.
+   Set by vm-const emit when the const value is an integer (FR-145).")
+
+(defun wasm-fixnum-unboxed-reg-p (reg-map reg)
+  "Return the integer constant REG holds, or NIL if not a known fixnum constant.
+FR-145: Checks *wasm-fixnum-unboxed-regs* table for the register."
+  (declare (ignore reg-map))
+  (and *wasm-fixnum-unboxed-regs*
+       (gethash reg *wasm-fixnum-unboxed-regs*)))
+
+(defun wasm-mark-reg-unboxed-fixnum (reg value)
+  "Mark REG as holding an unboxed i64 constant VALUE (FR-145)."
+  (when *wasm-fixnum-unboxed-regs*
+    (setf (gethash reg *wasm-fixnum-unboxed-regs*) value)))
+
+(defun wasm-clear-reg-unboxed-fixnum (reg)
+  "Clear the unboxed-fixnum mark for REG (FR-145)."
+  (when *wasm-fixnum-unboxed-regs*
+    (remhash reg *wasm-fixnum-unboxed-regs*)))
+
 (defun wasm-bool-to-i31 (cond-wat)
   "Convert a WASM i32 boolean (0/1) to i31ref (nil/t).
    0 -> ref.null eq (nil), 1 -> (ref.i31 (i32.const 1)) (truthy)."
@@ -567,7 +593,14 @@ that was just unboxed from i31ref."
    FR-142: Records the closure type on the destination register for ref.cast elimination.
    
 Captured values are materialized into a mutable $eqref_array_t with array.new and
-array.set before the closure struct is created."
+array.set before the closure struct is created.
+
+FR-142: Eliminate redundant ref.cast by using local.tee pattern.  When array.new
+returns (ref $eqref_array_t), we use local.tee to keep the typed ref available on
+the stack for immediate use, avoiding one ref.cast per closure construction.
+
+FR-144: Use typed closure environment array via array.new_fixed eqref for direct
+index access instead of the intermediate $env_t struct wrapper."
   (let ((prefix (make-string indent :initial-element #\Space)))
     (if captured
         (if *wasm-typed-closure-env-enabled*

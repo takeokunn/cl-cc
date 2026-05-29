@@ -20,15 +20,22 @@
                            opt-bindings rest-binding key-bindings
                            non-constant-defaults body
                            &optional supplied-p-entries type-bindings
-                           current-function-name current-function-label)
+                           current-function-name current-function-label
+                           no-allocation-source)
   "Emit the jump-over + label + body + end-label pattern common to lambda and defun."
   (emit ctx (make-vm-jump :label end-label))
   (emit ctx (make-vm-label :name func-label))
   (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
-    (compile-function-body ctx params param-regs opt-bindings rest-binding
-                            key-bindings non-constant-defaults body
-                            supplied-p-entries type-bindings
-                            current-function-name current-function-label))
+    (let ((prefix (ctx-instructions ctx)))
+      (compile-function-body ctx params param-regs opt-bindings rest-binding
+                             key-bindings non-constant-defaults body
+                             supplied-p-entries type-bindings
+                             current-function-name current-function-label)
+      (when no-allocation-source
+        (%assert-no-heap-allocation
+         no-allocation-source
+         (or current-function-name func-label)
+         (reverse (ldiff (ctx-instructions ctx) prefix))))))
   (emit ctx (make-vm-label :name end-label)))
 
 (defmethod compile-ast ((node ast-lambda) ctx)
@@ -89,7 +96,9 @@
           (%emit-closure-body ctx func-label end-label params param-regs
                               opt-bindings rest-binding key-bindings
                               non-constant-defaults body supplied-p-entries
-                              type-bindings)))
+                              type-bindings nil nil
+                              (and (no-allocation-declared-p (ast-lambda-declarations node))
+                                   node))))
        closure-reg)))
 
 (defun %static-values-arity-from-body (body)
@@ -177,7 +186,9 @@
            (%emit-closure-body ctx func-label end-label params param-regs
                                opt-bindings rest-binding key-bindings
                                non-constant-defaults body supplied-p-entries
-                               type-bindings name func-label))))
+                                type-bindings name func-label
+                                (and (no-allocation-declared-p (ast-defun-declarations node))
+                                     node)))))
       closure-reg)))
 
 ;;; ── defvar / defparameter ────────────────────────────────────────────────

@@ -77,6 +77,12 @@
    #:strip-typed-params
    #:lambda-list-info-environment
 
+   ;; --- FR-351 MC/DC coverage support ---------------------------------
+    #:*mcdc-coverage-enabled*
+    #:*mcdc-coverage-data*
+    #:%mcdc-eval-and
+    #:%mcdc-eval-or
+
    ;; --- macros used via run-string (need umbrella re-export) ---------
    #:defun/c
    #:copy-hash-table

@@ -186,8 +186,9 @@
    #:compilation-result-globals
    #:compilation-result-type
    #:compilation-result-type-env
-   #:compilation-result-cps
-   #:compilation-result-ast
+    #:compilation-result-cps
+    #:compilation-result-ast
+    #:compilation-result-coverage
     #:compilation-result-vm-instructions
      #:compilation-result-optimized-instructions
       #:compilation-result-pgo-counter-plan

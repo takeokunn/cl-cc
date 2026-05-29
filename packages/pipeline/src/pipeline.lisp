@@ -611,25 +611,28 @@ streams, and PGO counter plan."
     (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
     (multiple-value-bind (cps cps-result)
         (%maybe-compile-expression-via-cps ast opts)
-      (%pgo-apply-type-feedback-to-result
-       (if cps-result
-           (make-compilation-result
-            :program                (compilation-result-program cps-result)
-            :assembly               (compilation-result-assembly cps-result)
-            :type                   (or (and type-check inferred-type)
-                                         (compilation-result-type cps-result))
-            :type-env               (compilation-result-type-env cps-result)
-            :cps                    cps
-             :ast                    ast
-             :vm-instructions        (compilation-result-vm-instructions cps-result)
-             :optimized-instructions (compilation-result-optimized-instructions cps-result)
-             :warnings               (append (nreverse (ctx-diagnostics ctx))
-                                             (compilation-result-warnings cps-result))
-             :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
-                                      (compilation-result-vm-instructions cps-result)))
-           (let ((result-reg (compile-ast ast ctx)))
-             (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts)))
-       opts))))
+      (let ((result
+              (%pgo-apply-type-feedback-to-result
+               (if cps-result
+                   (make-compilation-result
+                    :program                (compilation-result-program cps-result)
+                    :assembly               (compilation-result-assembly cps-result)
+                    :type                   (or (and type-check inferred-type)
+                                                (compilation-result-type cps-result))
+                    :type-env               (compilation-result-type-env cps-result)
+                    :cps                    cps
+                    :ast                    ast
+                    :coverage               (compilation-result-coverage cps-result)
+                    :vm-instructions        (compilation-result-vm-instructions cps-result)
+                    :optimized-instructions (compilation-result-optimized-instructions cps-result)
+                    :warnings               (append (nreverse (ctx-diagnostics ctx))
+                                                    (compilation-result-warnings cps-result))
+                    :pgo-counter-plan       (%build-pgo-counter-plan-from-instructions
+                                             (compilation-result-vm-instructions cps-result)))
+                   (let ((result-reg (compile-ast ast ctx)))
+                     (%make-direct-compilation-result ctx result-reg inferred-type cps ast opts)))
+               opts)))
+        (%maybe-attach-mcdc-coverage result (list expr) opts)))))
 
 (defun %pipeline-ast-declarations-for-optimize-policy (ast)
   "Return declaration list associated with AST when available."

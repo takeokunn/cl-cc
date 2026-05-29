@@ -58,8 +58,52 @@
                        :documentation "Whether the current compilation position is a tail position.")
      (target :initarg :target :initform :vm :accessor ctx-target
              :documentation "Current code generation target (:vm, :x86_64, :wasm, ...).")
-      (diagnostics :initform nil :accessor ctx-diagnostics
+       (diagnostics :initform nil :accessor ctx-diagnostics
                    :documentation "Structured compiler diagnostics accumulated during code generation.")))
+
+(define-condition no-allocation-violation (ast-compilation-error)
+  ()
+  (:documentation "Signaled when `(declare (cl-cc:no-allocation))` code emits a heap allocation."))
+
+(defun %declaration-head-symbol-name= (head name)
+  "Return T when declaration HEAD names NAME, independent of package nickname."
+  (and (symbolp head)
+       (string= (symbol-name head) name)))
+
+(defun no-allocation-declared-p (declarations)
+  "Return T when DECLARATIONS contain `(cl-cc:no-allocation)`."
+  (some (lambda (decl)
+          (or (%declaration-head-symbol-name= decl "NO-ALLOCATION")
+              (and (consp decl)
+                   (%declaration-head-symbol-name= (car decl) "NO-ALLOCATION"))))
+        declarations))
+
+(defun %heap-allocation-instruction-p (inst)
+  "Return T for VM instructions that definitely allocate heap objects.
+
+Stack-allocated noescape objects do not emit these instructions and are allowed."
+  (typep inst '(or vm-cons
+                   vm-hash-cons
+                   vm-make-array
+                   vm-make-hash-table
+                   vm-make-list
+                   vm-make-string
+                   vm-make-closure
+                   vm-closure
+                   vm-class-def
+                   vm-make-obj)))
+
+(defun %heap-allocation-instruction-name (inst)
+  (string-downcase (symbol-name (type-of inst))))
+
+(defun %assert-no-heap-allocation (source-node function-name instructions)
+  "Signal a source-located compile error if INSTRUCTIONS contain heap allocation."
+  (let ((alloc (find-if #'%heap-allocation-instruction-p instructions)))
+    (when alloc
+      (error 'no-allocation-violation
+             :location (ast-location-string source-node)
+             :format-control "`~A` is declared cl-cc:no-allocation, but codegen emitted heap allocation instruction ~A"
+             :format-arguments (list function-name (%heap-allocation-instruction-name alloc))))))
 
 (defun %make-compile-warning (message &key source-file span error-code fix-it)
   "Create a structured compiler warning diagnostic."

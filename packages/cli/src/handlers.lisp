@@ -1047,8 +1047,11 @@ exits with status 0 on success."
                   (let ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib)))
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%record-hot-reload-source file source ret)
                       (%maybe-write-pgo-profile opts result vm-state)
-                      ret)))
+                      (if watch
+                          (%watch-file-poll file vm-state)
+                          ret))))
                 ((eq language :php)
                   (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
@@ -1060,7 +1063,9 @@ exits with status 0 on success."
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)
-                      ret))))
+                      (if watch
+                          (%watch-file-poll file vm-state)
+                          ret)))))
               (uiop:quit 0)))))
        "run"))))
 
@@ -1465,7 +1470,9 @@ balanced forms from *STANDARD-INPUT*, evaluates them through RUN-STRING-REPL,
 prints non-NIL results, and exits cleanly on EOF or quit commands."
   (let ((stdlib (flag parsed "--stdlib"))
         (no-stdlib (flag parsed "--no-stdlib"))
-        (timeout (%get-timeout parsed)))
+        (timeout (%get-timeout parsed))
+        (watch (flag parsed "--watch"))
+        (watch-file (car (parsed-args-positional parsed))))
     (cl-cc:reset-repl-state)
     (cl-cc:%ensure-repl-state)
     (%initialize-repl-completeness-globals)
@@ -1473,6 +1480,10 @@ prints non-NIL results, and exits cleanly on EOF or quit commands."
     (when stdlib
       (handler-case (cl-cc:run-string-repl cl-cc:*standard-library-source*)
         (error () nil)))
+    (when (and watch watch-file)
+      (let ((source (%read-command-source watch-file)))
+        (%record-hot-reload-source watch-file source nil)
+        (%start-watch-file-poll-thread watch-file cl-cc/repl::*repl-vm-state*)))
     (format t "CL-CC ~A  —  ANSI Common Lisp~%" *version*)
     (format t "Type a CL form and press Return. (exit) or Ctrl+D to quit.~%~%")
     (force-output)

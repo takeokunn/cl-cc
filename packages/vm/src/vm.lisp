@@ -234,6 +234,122 @@ serialized bytecode/tests that constructed closures with :CAPTURED-VALUES."
 (defvar *vm-recompile-function-hook* nil
   "Optional function called as (HOOK CLOSURE TARGET-TIER) for runtime tier upgrades.")
 
+(defvar *vm-current-state* nil
+  "Dynamically bound to the VM state while invoking host bridge callables.")
+
+(defvar *hot-reload-history* nil
+  "Newest-first list of hot reload events.
+Each entry is a plist containing at least :TIME, :PATH, :FUNCTIONS, and :RESULT.")
+
+(defvar *hot-reload-function-sources* (make-hash-table :test #'eq)
+  "Map function symbols to the last source file that defined them for HOT-RELOAD.")
+
+(defun %vm-copy-function-registry (registry &optional replacement-name replacement-value)
+  "Return a shallow copy of REGISTRY, optionally replacing one function entry."
+  (let ((copy (make-hash-table :test (hash-table-test registry)
+                               :size (+ (hash-table-count registry) 8))))
+    (maphash (lambda (key value)
+               (setf (gethash key copy) value))
+             registry)
+    (when replacement-name
+      (setf (gethash replacement-name copy) replacement-value))
+    copy))
+
+(defun vm-register-function-atomic (state name closure)
+  "Atomically publish NAME -> CLOSURE in STATE's function registry using CAS.
+The registry table is replaced rather than mutated, so calls that already hold
+an old closure continue on old code while later symbolic calls see the new code."
+  (check-type name symbol)
+  (loop
+    for old-registry = (slot-value state 'function-registry)
+    for new-registry = (%vm-copy-function-registry old-registry name closure)
+    do #+sbcl
+       (when (eq (sb-ext:compare-and-swap (slot-value state 'function-registry)
+                                          old-registry
+                                          new-registry)
+                 old-registry)
+         (return closure))
+       #-sbcl
+       (progn
+         (setf (slot-value state 'function-registry) new-registry)
+         (return closure))))
+
+(defun %hot-reload-program (compiled)
+  "Return a VM program from COMPILED, accepting either a program or compilation result."
+  (cond
+    ((let ((predicate (and (fboundp 'vm-program-p)
+                           (symbol-function 'vm-program-p))))
+       (and predicate (funcall predicate compiled)))
+     compiled)
+    (t
+     (let ((accessor (or (let ((package (find-package :cl-cc/compile)))
+                           (and package
+                                (multiple-value-bind (symbol status)
+                                    (find-symbol "COMPILATION-RESULT-PROGRAM" package)
+                                  (and status (fboundp symbol) (symbol-function symbol)))))
+                         (let ((package (find-package :cl-cc)))
+                           (and package
+                                (multiple-value-bind (symbol status)
+                                    (find-symbol "COMPILATION-RESULT-PROGRAM" package)
+                                  (and status (fboundp symbol) (symbol-function symbol))))))))
+       (if accessor
+           (funcall accessor compiled)
+           (error "Cannot extract VM program from hot reload result: ~S" compiled))))))
+
+(defun %hot-reload-read-forms (source)
+  "Read top-level forms from SOURCE for lightweight defun/source tracking."
+  (or (and *vm-parse-forms-hook*
+           (ignore-errors (funcall *vm-parse-forms-hook* source)))
+      (with-input-from-string (in source)
+        (loop for form = (read in nil :eof)
+              until (eq form :eof)
+              collect form))))
+
+(defun %hot-reload-function-names (source)
+  "Return DEFUN names found in SOURCE."
+  (let ((names nil))
+    (dolist (form (%hot-reload-read-forms source) (nreverse names))
+      (when (and (consp form)
+                 (symbolp (first form))
+                 (string= (symbol-name (first form)) "DEFUN")
+                 (symbolp (second form)))
+        (pushnew (second form) names :test #'eq)))))
+
+(defun %hot-reload-record (path functions result)
+  "Record a hot reload event and update function-to-source mappings."
+  (dolist (function functions)
+    (setf (gethash function *hot-reload-function-sources*) path))
+  (push (list :time (cl:get-universal-time)
+              :path path
+              :functions functions
+              :result result)
+        *hot-reload-history*)
+  result)
+
+(defun hot-reload-file (path &optional (state *vm-current-state*))
+  "Compile and load PATH into STATE, atomically replacing registered functions."
+  (unless state
+    (error "HOT-RELOAD-FILE requires an active VM state"))
+  (unless *vm-compile-string-hook*
+    (error "HOT-RELOAD-FILE requires *VM-COMPILE-STRING-HOOK*"))
+  (let* ((truename (namestring (truename path)))
+         (source (with-open-file (in truename :direction :input)
+                   (let ((text (make-string (file-length in))))
+                     (read-sequence text in)
+                     text)))
+         (functions (%hot-reload-function-names source))
+         (compiled (funcall *vm-compile-string-hook* source))
+         (program (%hot-reload-program compiled))
+         (result (run-compiled program :state state)))
+    (%hot-reload-record truename functions result)))
+
+(defun hot-reload (function-name &optional (state *vm-current-state*))
+  "Reload the source file that most recently defined FUNCTION-NAME."
+  (let ((path (gethash function-name *hot-reload-function-sources*)))
+    (unless path
+      (error "No hot reload source is known for function: ~S" function-name))
+    (hot-reload-file path state)))
+
 (defun vm-closure-note-invocation (closure)
   "Increment CLOSURE's invocation counter and return the new count."
   (incf (vm-closure-invocation-count closure)))

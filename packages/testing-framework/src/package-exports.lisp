@@ -9,9 +9,10 @@
           disable-coverage
           coverage-enabled-p
           with-coverage
-          generate-coverage-report
-          write-lcov-report
-          coverage-report-index-path
+           generate-coverage-report
+           write-lcov-report
+           write-mcdc-report
+           coverage-report-index-path
           coverage-report-exists-p
           coverage-report-empty-p
            cl-cc-suite

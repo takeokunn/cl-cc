@@ -17,7 +17,7 @@
              (format s "Argument error: ~A" (arg-parse-error-message c)))))
 
 ;;; --- Flag specification table ---
-;;; Associates flag name (string) → type (:bool or :string)
+;;; Associates flag name (string) → type (:bool, :string, or :optional-string)
 
 (defvar *flag-spec*
   '(("--output"  . :string)
@@ -51,6 +51,7 @@
      ("--optimization-report" . :bool)
      ("--verbose" . :bool)
     ("--strict"  . :bool)
+     ("--strict-no-alloc" . :bool)
      ("--pass-pipeline" . :string)
       ("--opt-bisect-limit" . :string)
        ("--debug-info" . :bool)
@@ -67,7 +68,7 @@
      ("--print-pass-timings" . :bool)
     ("--time-passes" . :bool)
     ("--trace-json" . :string)
-    ("--coverage" . :bool)
+    ("--coverage" . :optional-string)
     ("--pgo-generate" . :string)
     ("--pgo-use" . :string)
     ("--spectre-mitigations" . :bool)
@@ -107,10 +108,10 @@
       ("--Werror-category" . :string)
       ("--help"    . :bool)
     ("-h"        . :bool))
-  "Alist of (flag-string . type) where type is :bool or :string.")
+  "Alist of (flag-string . type) where type is :bool, :string, or :optional-string.")
 
 (defun %flag-type (name)
-  "Return :bool or :string for the given flag NAME, or nil if unrecognised."
+  "Return the declared flag type for NAME, or NIL if unrecognised."
   (let ((entry (assoc name *flag-spec* :test #'string=)))
     (when entry (cdr entry))))
 
@@ -191,9 +192,9 @@ keyed by their canonical string (e.g. \"--output\")."
                      (setf (gethash name ht) (pop rest)))
                     (t
                      (error 'arg-parse-error
-                            :message (format nil "Flag ~A requires a value" name)))))))))
-
-          ;; Short flag: -o value
+                            :message (format nil "Flag ~A requires a value" name)))))
+                 (:optional-string
+                  (setf (gethash name ht) (or inline-val t)))))))
           ((%short-flag-p arg)
            (let ((ftype (%flag-type arg)))
              (unless ftype
@@ -206,9 +207,9 @@ keyed by their canonical string (e.g. \"--output\")."
                 (if rest
                     (setf (gethash arg ht) (pop rest))
                     (error 'arg-parse-error
-                           :message (format nil "Flag ~A requires a value" arg)))))))
-
-          ;; Positional argument
+                           :message (format nil "Flag ~A requires a value" arg))))
+               (:optional-string
+                (setf (gethash arg ht) t)))))
           (t
            (if (null (parsed-args-command result))
                (setf (parsed-args-command result) arg)

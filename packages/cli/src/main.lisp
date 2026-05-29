@@ -85,6 +85,7 @@ Options:
    --print-pass-timings    Print per-pass optimizer timings
   --time-passes          Alias for --print-pass-timings
   --trace-json <file>     Write Chrome trace JSON for optimizer passes
+  --coverage[=mcdc]      Enable code coverage, or MC/DC coverage with =mcdc
   --pgo-generate <file>   Write lightweight optimizer profile data
   --pgo-use <file>        Load optimizer profile data (speed/policy hint)
   --bolt                  Enable BOLT-style native binary layout optimization

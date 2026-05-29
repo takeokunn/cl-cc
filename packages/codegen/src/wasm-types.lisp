@@ -320,6 +320,73 @@
 (defconstant +wasm-gc-extern-convert-any+ 34)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; FR-202: WASM SIMD128 opcodes (Wasm SIMD Proposal, all major browsers shipped)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+;; SIMD prefix byte (0xfd)
+(defconstant +wasm-simd-prefix+ #xfd)
+
+;; v128 value type
+(defconstant +wasm-v128+ #x7b)
+
+;; SIMD memory operations
+(defconstant +wasm-simd-v128-load+         0)   ; v128.load
+(defconstant +wasm-simd-v128-load8-splat+  1)   ; v128.load8_splat
+(defconstant +wasm-simd-v128-load16-splat+ 2)   ; v128.load16_splat
+(defconstant +wasm-simd-v128-load32-splat+ 3)   ; v128.load32_splat
+(defconstant +wasm-simd-v128-load64-splat+ 4)   ; v128.load64_splat
+(defconstant +wasm-simd-v128-store+        11)  ; v128.store
+(defconstant +wasm-simd-v128-load32-zero+  5)   ; v128.load32_zero FR-313
+(defconstant +wasm-simd-v128-load64-zero+  6)   ; v128.load64_zero FR-313
+
+;; SIMD i8x16 operations
+(defconstant +wasm-simd-i8x16-shuffle+    13)  ; i8x16.shuffle (FR-278)
+(defconstant +wasm-simd-i8x16-swizzle+    14)  ; i8x16.swizzle (FR-298)
+
+;; SIMD i32x4 arithmetic
+(defconstant +wasm-simd-i32x4-add+        26)  ; i32x4.add
+
+;; SIMD f64x2 arithmetic
+(defconstant +wasm-simd-f64x2-add+        157) ; f64x2.add
+(defconstant +wasm-simd-f64x2-mul+        162) ; f64x2.mul
+(defconstant +wasm-simd-f64x2-div+        163) ; f64x2.div
+
+;; SIMD bitwise operations
+(defconstant +wasm-simd-v128-and+         69)  ; v128.and
+(defconstant +wasm-simd-v128-or+          70)  ; v128.or
+(defconstant +wasm-simd-v128-xor+         71)  ; v128.xor
+(defconstant +wasm-simd-v128-not+         77)  ; v128.not
+
+;; SIMD boolean reduction (FR-304)
+(defconstant +wasm-simd-v128-any-true+    121) ; v128.any_true
+(defconstant +wasm-simd-i32x4-all-true+   117) ; i32x4.all_true
+
+;; SIMD lane operations (FR-303)
+(defconstant +wasm-simd-v128-load8-lane+  84)  ; v128.load8_lane
+(defconstant +wasm-simd-v128-store8-lane+ 85)  ; v128.store8_lane
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; FR-203: WASM Threads / Atomics opcodes
+;; ─────────────────────────────────────────────────────────────────────────────
+
+;; Atomic prefix byte (0xfe)
+(defconstant +wasm-atomic-prefix+ #xfe)
+
+;; Atomic RMW operations
+(defconstant +wasm-atomic-i32-rmw-add+    1)   ; i32.atomic.rmw.add
+(defconstant +wasm-atomic-i32-rmw-cmpxchg+ 8)  ; i32.atomic.rmw.cmpxchg
+(defconstant +wasm-atomic-i64-rmw-add+    17)  ; i64.atomic.rmw.add
+(defconstant +wasm-atomic-i64-rmw-cmpxchg+ 24) ; i64.atomic.rmw.cmpxchg
+
+;; Atomic wait/notify
+(defconstant +wasm-atomic-memory-wait32+  2)   ; memory.atomic.wait32
+(defconstant +wasm-atomic-memory-wait64+  3)   ; memory.atomic.wait64
+(defconstant +wasm-atomic-memory-notify+  0)   ; memory.atomic.notify
+
+;; Atomic fence (FR-256)
+(defconstant +wasm-atomic-fence+          3)   ; atomic.fence (standalone prefix opcode)
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Section 2: Named GC Type Indices
 ;;; These indices match the ORDER of type definitions emitted in the WASM type section.
 ;;; Every module emitted by cl-cc starts with these predefined types.

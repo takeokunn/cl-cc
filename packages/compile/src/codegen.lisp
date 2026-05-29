@@ -34,6 +34,84 @@
   (warnings nil :type list)
   (errors nil :type list))
 
+;;; ── FR-351 MC/DC coverage metadata ────────────────────────────────────────
+
+(defun %normalize-coverage-mode (coverage)
+  "Normalize COVERAGE option into NIL, T, or :MCDC."
+  (cond
+    ((null coverage) nil)
+    ((eq coverage :mcdc) :mcdc)
+    ((and (stringp coverage) (string-equal coverage "mcdc")) :mcdc)
+    (coverage t)))
+
+(defun mcdc-coverage-enabled-p (coverage)
+  "Return true when COVERAGE requests MC/DC condition-decision metadata."
+  (eq (%normalize-coverage-mode coverage) :mcdc))
+
+(defun %mcdc-boolean-op (form)
+  "Return :AND or :OR when FORM is an AND/OR decision with 2+ conditions."
+  (when (and (consp form) (symbolp (car form)) (>= (length (cdr form)) 2))
+    (let ((name (string-upcase (symbol-name (car form)))))
+      (cond ((string= name "AND") :and)
+            ((string= name "OR") :or)
+            (t nil)))))
+
+(defun %mcdc-decision-outcome (operator values)
+  "Evaluate boolean decision OPERATOR over VALUES without evaluating source forms."
+  (case operator
+    (:and (every #'identity values))
+    (:or  (some #'identity values))))
+
+(defun %mcdc-independent-effect-pair (operator conditions index)
+  "Build one non-masking MC/DC pair proving condition INDEX can affect decision."
+  (let* ((neutral (case operator (:and t) (:or nil)))
+         (false-row (loop for _ in conditions for i from 0
+                          collect (if (= i index) nil neutral)))
+         (true-row  (loop for _ in conditions for i from 0
+                          collect (if (= i index) t neutral)))
+         (false-outcome (%mcdc-decision-outcome operator false-row))
+         (true-outcome  (%mcdc-decision-outcome operator true-row)))
+    (list :condition (nth index conditions)
+          :condition-index index
+          :false-row false-row
+          :false-outcome false-outcome
+          :true-row true-row
+          :true-outcome true-outcome
+          :independent-effect (not (eql false-outcome true-outcome)))))
+
+(defun %make-mcdc-decision-entry (form path)
+  "Return MC/DC metadata for one AND/OR decision FORM."
+  (let* ((operator (%mcdc-boolean-op form))
+         (conditions (copy-list (cdr form))))
+    (when operator
+      (list :operator operator
+            :form form
+            :path path
+            :conditions conditions
+            :pairs (loop for i below (length conditions)
+                         collect (%mcdc-independent-effect-pair operator conditions i))))))
+
+(defun %collect-mcdc-decision-entries (form &optional (path nil))
+  "Collect MC/DC decision entries from FORM and nested subforms."
+  (let ((entries nil))
+    (labels ((walk (node current-path)
+               (when (consp node)
+                 (let ((entry (%make-mcdc-decision-entry node current-path)))
+                   (when entry (push entry entries)))
+                 (loop for child in node
+                       for index from 0
+                       do (walk child (append current-path (list index)))))))
+      (walk form path))
+    (nreverse entries)))
+
+(defun collect-mcdc-coverage (forms)
+  "Return MC/DC coverage metadata for AND/OR decisions in FORMS."
+  (let ((decisions (loop for form in forms
+                         for index from 0
+                         append (%collect-mcdc-decision-entries form (list index)))))
+    (when decisions
+      (list :mode :mcdc :decisions decisions))))
+
 ;;; ── FR-138 zero-cost exception table bookkeeping ───────────────────────────
 
 (defvar *pending-exception-table-entries* nil
@@ -709,8 +787,18 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
        (%compile-toplevel-ast-into-context ast ctx target type-check opts))
      (values last-reg last-type last-cps type-env compiled-asts)))
 
+(defun %strict-no-alloc-error-p (entry)
+  (typep (getf entry :condition) 'no-allocation-violation))
+
+(defun %maybe-signal-strict-no-alloc-error (errors opts)
+  (when (getf opts :strict-no-alloc)
+    (let ((entry (find-if #'%strict-no-alloc-error-p errors)))
+      (when entry
+        (error (getf entry :condition))))))
+
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier)
   "Finalize CTX after all top-level forms have been compiled."
+  (%maybe-signal-strict-no-alloc-error errors opts)
   (when last-reg
     (emit ctx (make-vm-halt :reg last-reg)))
   (when *repl-capture-label-counter*

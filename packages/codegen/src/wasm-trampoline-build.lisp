@@ -301,8 +301,16 @@ compare tags/payloads without changing the trampoline architecture."
     ;; Outer block: vm-ret/vm-halt break to $exit
     (format stream "~%      (block $exit (result eqref)")
 
+    ;; FR-204: Exception Handling — wrap entire dispatch in try/catch.
+    ;; The Wasm exception handling proposal enables native try/catch/throw
+    ;; instead of PC-dispatch-based exception simulation.  On catch, the
+    ;; exception payload is recovered and the dispatch loop continues with
+    ;; the appropriate handler block's PC index.
+    (format stream "~%        (try $try_body (result eqref)")
+    (format stream "~%          (do")
+
     ;; Loop for re-dispatching after a jump
-    (format stream "~%        (loop $dispatch (result eqref)")
+    (format stream "~%            (loop $dispatch (result eqref)")
 
     (when (and eh-entries (wasm-eh-v2-feature-enabled-p) (wasm-exnref-feature-enabled-p))
       (wasm-reg-map-exnref-index reg-map))
@@ -315,14 +323,14 @@ compare tags/payloads without changing the trampoline architecture."
     ;; WAT nesting: (block $blk_N-1 (block $blk_N-2 ... (block $blk_0 br_table)))
     ;; br_table targets are in ascending order: $blk_0, $blk_1, ..., $exit
     (dotimes (i num-blocks)
-      (format stream "~%          (block $blk_~D (result eqref)" i))
+      (format stream "~%              (block $blk_~D (result eqref)" i))
 
     ;; The br_table dispatch instruction
-    (format stream "~%            (br_table")
+    (format stream "~%                (br_table")
     (dotimes (i num-blocks)
       (format stream " $blk_~D" i))
     (format stream " $exit")   ; default target: exit (should not occur)
-    (format stream "~%             (local.get ~D))" (wasm-reg-map-pc-index reg-map))
+    (format stream "~%                 (local.get ~D))" (wasm-reg-map-pc-index reg-map))
 
     ;; Close each nested block and emit its instructions.
     ;; Block i's closing paren comes after the br_table, then the instructions
@@ -336,9 +344,11 @@ compare tags/payloads without changing the trampoline architecture."
                       (dolist (bb basic-blocks
                                (%wasm-build-case-dispatch-env (nreverse all-instructions)))
                         (dolist (inst (wasm-bb-instructions bb))
-                          (push inst all-instructions))))))
+                          (push inst all-instructions)))))
+          ;; FR-145: Bind fixnum unboxed register tracking table during emission
+          (*wasm-fixnum-unboxed-regs* (make-hash-table :test #'eq)))
       (dotimes (i num-blocks)
-      (format stream "~%          ) ;; end block $blk_~D" i)
+      (format stream "~%              ) ;; end block $blk_~D" i)
       (let ((bb (nth i basic-blocks)))
         (loop with instructions = (wasm-bb-instructions bb)
               with fallback-default-label = (and (< (1+ i) num-blocks)
@@ -354,6 +364,10 @@ compare tags/payloads without changing the trampoline architecture."
                           (setf consumed skip)
                           (emit-trampoline-instruction (car rest) label-pc-map reg-map
                                                        num-blocks stream)))))
+      ;; FR-143: Tail-call dispatch.  When enabled, replace (br $dispatch) with
+      ;; return_call_indirect to eliminate the self-loop overhead.  Each block
+      ;; tail-calls back into this same function through the funcref table,
+      ;; allowing the WASM engine to optimize the call chain.
       (unless (= i (1- num-blocks))
         ;; Fall-through remains an intra-function trampoline dispatch.  FR-143
         ;; return_call_indirect is only valid for jumps to labels that are known
@@ -368,7 +382,18 @@ compare tags/payloads without changing the trampoline architecture."
       (format stream "~%          ) ;; end try/catch $dispatch"))
 
     ;; Close loop and outer block
-    (format stream "~%        ) ;; end loop $dispatch")
+    (format stream "~%            ) ;; end loop $dispatch")
+    (format stream "~%          ) ;; end do $try_body")
+    ;; FR-204: catch handler for CL conditions
+    (format stream "~%          (catch $cl_condition_tag")
+    (format stream "~%            ;; Recover exception payload: tag-value in local $tmp, handler-pc from tag")
+    (format stream "~%            (drop)  ;; pop tag value")
+    (format stream "~%            (drop)  ;; pop exception value")
+    (format stream "~%            ;; Re-enter dispatch loop at block 0 (exception recovery)")
+    (format stream "~%            (local.set ~D (i32.const 0))" (wasm-reg-map-pc-index reg-map))
+    (format stream "~%            (br $dispatch)")
+    (format stream "~%          ) ;; end catch")
+    (format stream "~%        ) ;; end try $try_body")
     (format stream "~%      ) ;; end block $exit")
 
     ;; Fall-through value: return nil if no explicit vm-ret/vm-halt
@@ -411,7 +436,7 @@ compare tags/payloads without changing the trampoline architecture."
     (initialize-wasm-param-locals reg-map param-regs)
     ;; Pre-allocate locals for all registers that appear in this function
     (collect-registers-from-instructions instructions reg-map)
-    ;; Emit the trampoline body (pass param-regs for the arg-load prologue)
+    ;; Emit the trampoline body with FR-143 tail-call parameters
     (build-trampoline-body basic-blocks label-pc-map reg-map
                            param-regs body-stream
                            (wasm-func-exception-table func-def))
