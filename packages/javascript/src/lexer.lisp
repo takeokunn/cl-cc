@@ -425,7 +425,13 @@ and numeric separators (_). Returns (values token new-pos)."
                (values (make-js-token :T-BIGINT (parse-integer num-str))
                        pos2)))
            (let ((val (if is-float
-                          (let ((*read-eval* nil))
+                          ;; JS numbers are IEEE-754 doubles. Bind the reader's
+                          ;; default float format to double-float so e.g. "1.5e-3"
+                          ;; is read at full double precision instead of being read
+                          ;; as a single-float (losing ~1e-7 precision) and only
+                          ;; then widened.
+                          (let ((*read-eval* nil)
+                                (*read-default-float-format* 'double-float))
                             (let ((v (read-from-string num-str)))
                               (float v 1.0d0)))
                           (parse-integer num-str))))
