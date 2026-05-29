@@ -837,3 +837,16 @@
 function commented() { return 1; }")))
     (assert-true (cl-cc:ast-defun-p ast))
     (assert-string= "COMMENTED" (symbol-name (cl-cc:ast-defun-name ast)))))
+
+(deftest php-parser-constructor-promotion
+  "PHP 8.0 constructor property promotion: visibility/readonly modifiers may
+precede a parameter's type in __construct."
+  (let ((ast (%php-first
+              "<?php class P { public function __construct(public int $x, private string $y) {} }")))
+    (assert-true (cl-cc:ast-defclass-p ast))))
+
+(deftest php-parser-constructor-promotion-readonly
+  "Promoted constructor params accept readonly + nullable + default."
+  (let ((ast (%php-first
+              "<?php class P { public function __construct(int $a, public readonly ?string $b = null) {} }")))
+    (assert-true (cl-cc:ast-defclass-p ast))))
