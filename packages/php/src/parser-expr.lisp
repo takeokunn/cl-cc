@@ -416,6 +416,10 @@ gensym-named class and makes an instance of it."
                             :value val)
                            (%php-lower-compound-assign op lhs val :property))
                        rest3 kv3))
+              ;; List/array destructuring assignment: [$a, $b] = expr (and the
+              ;; legacy list($a, $b) = expr, which lowers to the same array LHS).
+              ((and (equal op "=") (%php-array-literal-call-p lhs))
+               (values (%php-lower-list-assign lhs val) rest3 kv3))
               (t
                (error "PHP parse error: unsupported assignment target ~S" lhs))))))
       ((%php-reference-token-p rest)
@@ -928,6 +932,33 @@ the yielded value for later generator lowering passes."
          (and (ast-var-p func)
               (eq (ast-var-name func) 'cl-cc/php::%php-array-ref)))
        (= (length (ast-call-args node)) 2)))
+
+(defun %php-array-literal-call-p (node)
+  "Return true when NODE is a %php-array constructor call (an array literal),
+i.e. a valid destructuring-assignment target like [$a, $b] or list($a, $b)."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-array)))))
+
+(defun %php-lower-list-assign (lhs val)
+  "Lower [$a, $b, ...] = VAL destructuring assignment. LHS is a %php-array
+constructor call whose entry values are the assignment targets. Each target
+binds to (%php-array-ref VAL index) in a single body-less let (consistent with
+how plain $x = v introduces a binding). NIL holes ([, $b]) are skipped.
+Re-references VAL per element, which is correct for the common variable RHS."
+  (let ((bindings nil)
+        (idx 0))
+    (dolist (entry (ast-call-args lhs))
+      ;; Each entry is (make-ast-list :elements (key-present-p key value)).
+      (let* ((elts (and (ast-list-p entry) (ast-list-elements entry)))
+             (target (third elts)))
+        (when (and target (ast-var-p target))
+          (push (cons (ast-var-name target)
+                      (%php-array-ref-call val (make-ast-int :value idx)))
+                bindings)))
+      (incf idx))
+    (make-ast-let :bindings (nreverse bindings) :body nil)))
 
 (defun %php-array-set-call (array key value)
   "Lower ARRAY[KEY] = VALUE to the PHP ordered-array mutation helper."
