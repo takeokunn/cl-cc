@@ -948,14 +948,24 @@ intersection type syntax as metadata only."
                     (php-resolve-qualified-name (php-tok-value name-tok) :function))))
       (multiple-value-bind (params rest param-types param-attributes) (php-parse-param-list rest)
         (multiple-value-bind (return-type rest) (php-parse-return-type rest)
-          (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
-            (declare (ignore _))
-            (values (make-ast-defun :name fn-name
-                                     :params params
-                                     :declarations (%php-function-declarations
-                                                    param-types return-type param-attributes nil :function)
-                                     :body body-stmts)
-                    rest known-vars)))))))
+          ;; Abstract / interface method signature: `function f(...): T;` with no
+          ;; body. Produce a body-less ast-defun (a signature) instead of
+          ;; requiring a brace block.
+          (if (eq (php-peek-type rest) :T-SEMI)
+              (values (make-ast-defun :name fn-name
+                                       :params params
+                                       :declarations (%php-function-declarations
+                                                      param-types return-type param-attributes nil :function)
+                                       :body nil)
+                      (php-skip-semis rest) known-vars)
+              (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
+                (declare (ignore _))
+                (values (make-ast-defun :name fn-name
+                                         :params params
+                                         :declarations (%php-function-declarations
+                                                        param-types return-type param-attributes nil :function)
+                                         :body body-stmts)
+                        rest known-vars))))))))
 ;; ─── Keyword aliases (underscore → dash) ─────────────────────────────────
 (setf (gethash :include-once *php-stmt-parsers*)
       (gethash :include *php-stmt-parsers*))

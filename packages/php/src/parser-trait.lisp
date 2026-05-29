@@ -91,9 +91,8 @@ Clause forms:
   (multiple-value-bind (lhs-name lhs-rest) (php-parse-qualified-name stream)
     (let ((current lhs-rest))
       (cond
-        ;; TraitA::method ...
-        ((and (eq (php-peek-type current) :T-OP)
-              (equal "::" (php-peek-value current)))
+        ;; TraitA::method ...  ('::' is lexed as :T-DOUBLE-COLON, not :T-OP)
+        ((eq (php-peek-type current) :T-DOUBLE-COLON)
          (setf current (cdr current))       ; consume ::
          (multiple-value-bind (method-tok method-rest) (php-expect :T-IDENT current)
            (setf current method-rest)

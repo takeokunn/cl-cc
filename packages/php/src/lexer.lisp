@@ -39,7 +39,7 @@
     "null" "true" "false" "readonly" "enum" "static" "abstract" "final"
     "public" "protected" "private" "do" "break" "continue" "switch" "case"
     "default" "try" "catch" "finally" "use" "namespace" "list" "as" "in"
-    "instanceof" "print" "yield" "from" "fn" "const" "unset"
+    "instanceof" "insteadof" "print" "yield" "from" "fn" "const" "unset"
     "include" "require" "include_once" "require_once"
     "declare" "goto" "clone" "array")
   "PHP reserved keywords (lowercased).")
