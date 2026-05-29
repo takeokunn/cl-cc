@@ -887,3 +887,15 @@ precede a parameter's type in __construct."
   (let ((ast (%php-first
               "<?php $o = new class(5) extends Base { public function __construct(public int $n) {} };")))
     (assert-true ast)))
+
+(deftest php-parser-list-destructuring-assignment
+  "[$a, $b] = $arr lowers to a let binding each target to %php-array-ref."
+  (let ((ast (%php-first "<?php [$a, $b] = $arr;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (= 2 (length (cl-cc:ast-let-bindings ast))))))
+
+(deftest php-parser-list-destructuring-three
+  "[$x, $y, $z] = $data binds three targets."
+  (let ((ast (%php-first "<?php [$x, $y, $z] = $data;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (= 3 (length (cl-cc:ast-let-bindings ast))))))
