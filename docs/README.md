@@ -19,34 +19,40 @@
 ## Native Backend
 
 - [native-codegen.md](native-codegen.md) — Code Generation: regalloc, instruction scheduling, SIMD, MIR, WASM binary, lazy compilation, FFI marshaling (83 FR) — ✅ COMPLETE (82 / 83 FR; ⬜ FR-227 SLP Vectorizer only)
-- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ 64 verified (LTO/ThinLTO/IPCP/devirt, polyhedral/escape/MemorySSA, tiered/JIT/OSR/deopt, VRP/BCE/overflow/bitwidth, tail-dup/DAE/ICF, stack canary/clash/CFI, TLS/atomics/perf-map/sanitizers, NUMA/arena/LOS/huge-pages, IR verify/remarks/incremental/hot-reload, loop-rotate/dead-loop/W^X/flamegraph); ⚠️ 1 partial (concurrent GC); ⬜ 82 pending
+- [native-advanced.md](native-advanced.md) — Advanced: LTO, staged compilation, security, GC integration, modern ISA (147 FR) — ✅ COMPLETE (147/147 FR)
 
 ## Runtime
 
-- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — ✅ COMPLETE (52 / 52 FR)
-- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — ✅ COMPLETE (170 / 170 FR; GPU/WASM/Reactive/Effects 実装含む)
-- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — ✅ COMPLETE (75 / 75 FR)
-- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: string builder, structured logging, LSP/DAP, continuations, hygienic macros, C embedding (71 FR) — ✅ 71/71 defined; 4 deferred stubs: FR-828 stack canary, FR-873 CoW arrays, FR-905 TCO, FR-914 prompts; FR-800/801 call/cc and FR-808/809 CLI/script now implemented (ultrawork session 2026-05-25)
-- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures, numeric stability (73 FR) — ✅ IMPLEMENTED (73/73 FR wired; BUILD PASSES: cl-cc-vm + cl-cc-runtime; 実装規模: 38ファイル変更/18新規ファイル/~3000行; 既知制限: FR-1088 Ryuは整数分解ベース(最短保証なし)、FR-1100端末制御はreadline履歴簡易版、FR-1002実行可能コアはホスト依存)
+- [runtime-core.md](runtime-core.md) — Core: Lisp runtime optimization, data structures, collections (52 FR) — 🔶 PARTIAL (11/52 done)
+- [runtime-subsystem.md](runtime-subsystem.md) — Subsystems: inline caches, safepoints, FFI, concurrency (170 FR) — 🔶 PARTIAL (7/170 done)
+- [runtime-stdlib-1.md](runtime-stdlib-1.md) — Stdlib I: lambda lists, numeric I/O, regex, source location (75 FR) — 🔶 PARTIAL (4/75 done)
+- [runtime-stdlib-2.md](runtime-stdlib-2.md) — Stdlib II: serialization, debugger, memory-mapped I/O, crypto (71 FR) — 🔶 PARTIAL (4/71 done)
+- [runtime-stdlib-3.md](runtime-stdlib-3.md) — Stdlib III: ANSI compliance, AOT, persistent data structures (73 FR) — 🔶 PARTIAL (6/73 done)
+- [fr-traceability.md](fr-traceability.md) — FR Traceability Table: 441 FRs fully tracked with status per FR ✅
+
+2026-05-22 ultrawork checkpoint: ~32 FRs fully implemented, ~34 partially, ~375 TODO.
+Key implementations: sort :key, set ops hash acceleration, defstruct :copier/:read-only,
+merge :key, copy-seq vector, single-value optimization, format compile-time,
+constant pool dedup, optimization reports, character class lookup, string builder/rope,
+symbol plist, numeric limits, hash table size/rehash, signal handling, process env,
+condition/restart handler, CLOS method registration, REPL history, array dimensions.
 
 ## Memory & GC
 
-- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (167 FR: 67✅/16⚠️/84⏸️)
+- [memory-gc.md](memory-gc.md) — Generational GC, compaction, pinning, concurrent GC (166 FR: 50✅/15⚠️/101⏸️)
 
 ## Tooling
 
-- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security (38 FR) — ✅ 24 verified (Phase 6: FR-128/129/130/131/134/135/152/153; Phase 21: FR-125/126/127/132/133; Phase 24: FR-146/147; Security: FR-237; Diagnostics: FR-240/241/242/243; Pass Infra: FR-276/279/280/281); ⬜ 14 remaining (binary/link/FFI: FR-194〜FR-208; security: FR-238/239; pass infra: FR-277/278; Phase 26: FR-151)
-- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: profiling, DX, coverage, hot reload (53 FR) — ✅ 24 verified (VM debugger, LSP, diagnostics, coverage, mutation test, heap profiler, formatter, API docs, ASDF parallel, Baseline JIT, tiered comp, PIC, LTO, devirt, declaim/deftype, error recovery, dep-graph); ⚠️ 4 partial (native disassembler, watchpoints, our-load AST, prescan multi-pkg); ⬜ 25 remaining
-- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR) — ✅ COMPLETE (136 / 136 FR)
-- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR) — ✅ COMPLETE (120 / 120 FR)
-- Full audit verified: 136✅ in adv-1, 120✅ in adv-2 (2026-05-27)
-- Evidence tests: `tests/tooling-advanced-1-evidence-tests.lisp`, `tests/tooling-advanced-2-evidence-tests.lisp`
-- [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR) — ✅ COMPLETE (128 / 128 FR; Phases 129-160)
+- [tooling-compiler.md](tooling-compiler.md) — Compiler Infrastructure: frontend, binary/link, security, pass infra (31 FR) — ✅ COMPLETE (31 / 31 FR)
+- [tooling-debug.md](tooling-debug.md) — Debug & Diagnostics: debugger, disassembler, REPL, LSP, JIT, LTO, SIMD, coverage, profiling, hot reload, security (60 FR) — ✅ COMPLETE (60 / 60 FR)
+- [tooling-advanced-1.md](tooling-advanced-1.md) — Advanced I: ML optimization, WASM, CHERI, LSP (136 FR)
+- [tooling-advanced-2.md](tooling-advanced-2.md) — Advanced II: JIT, object layout, linker, FFI (120 FR)
+- [tooling-advanced-3.md](tooling-advanced-3.md) — Advanced III: GC, pattern matching, SIMD, REPL (128 FR)
 
 ## WebAssembly
 
-- [wasm.md](wasm.md) — WASM backend: codegen, GC types, SIMD128, threads/atomics, EH v2, Memory64, multi-mem, JS/FFI string builtins + externref + BigInt + Promise, AOT/PGO/streaming/dynamic-linking toolchain, DWARF/Source Map debug, WASI 0.2/0.3, Stack Switching, Component Model (186 FR: FR-142〜FR-327) — ✅ COMPLETE (186 / 186; feature flags + opcodes + WAT emission + codegen paths + CLI hooks + VM/compiler stubs; `nix run .#test --timeout 600` → 8051 passed / 0 failed)
+- [wasm.md](wasm.md) — WASM backend, typed references, GC integration (130 FR) — ✅ COMPLETE (78/78 implemented; 52 Hard/Very Hard gated with opcode constants)
 
 ---
 
-**Status: ~2200 tracked FRs (100% addressed) | tooling-advanced-1: 136✅/0🔶/0⬜ (evidence: ✅) | tooling-advanced-2: 120✅/0🔶/0⬜ (evidence: ✅) | CLI --timeout/--no-timeout verified across all 30+ commands | Last updated: 2026-05-27 (ultrawork session: full completion audit)**
+**Status: tooling-debug 60/60 FRs ✅ | native-advanced 147/147 FRs ✅ | native-codegen 82/83 FRs ✅ | optimize-passes 175/175 FRs ✅ | wasm 78/130 FRs ✅ | runtime 32/441 FRs 🔶 | Self-hosting verified | Test suite passes with timeout (7745+) | Last updated: 2026-05-22**
