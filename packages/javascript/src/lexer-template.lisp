@@ -148,45 +148,57 @@
 
 ;;; ─── Inner expression tokenizer ──────────────────────────────────────────────
 
-(defun js-lex-template-inner-tokens (source pos)
-  "Tokenize inside template interpolation ${ ... } until the matching closing brace.
-  Tracks brace nesting depth so inner objects/blocks are handled correctly.
-  Returns (values token-list new-pos)."
-  ;; We need the JS main tokenizer — forward-reference via symbol-function
-  ;; so this file can be loaded before js-next-token is defined.
-  (let ((tokens '())
+(defun js-lex-template-interp-end (source pos)
+  "Scan from POS (just after the ${ ) to the matching closing brace, tracking
+brace depth and skipping over string and nested-template literals so braces
+inside them do not count. Returns the index OF the matching } ."
+  (let ((len (length source))
         (depth 1))
     (loop
-      (when (>= pos (length source))
+      (when (>= pos len)
         (error "JS template lex error: unterminated template interpolation"))
-      (multiple-value-bind (tok new-pos)
-          (funcall (symbol-function 'js-next-token) source pos)
-        (let ((type  (getf tok :type))
-              (value (getf tok :value)))
-          (cond
-            ;; EOF inside interpolation is an error
-            ((eq type :T-EOF)
-             (error "JS template lex error: unexpected EOF inside template interpolation"))
-            ;; Another opening brace increases depth
-            ((and (eq type :T-LBRACE) (string= value "{"))
-             (incf depth)
-             (push tok tokens)
-             (setf pos new-pos))
-            ;; Closing brace — decrement depth
-            ((and (eq type :T-RBRACE) (string= value "}"))
-             (decf depth)
-             (cond
-               ;; Matched the interpolation's closing brace — done
-               ((zerop depth)
-                (return (values (nreverse tokens) new-pos)))
-               ;; Inner closing brace — collect it
-               (t
-                (push tok tokens)
-                (setf pos new-pos))))
-            ;; All other tokens accumulated
-            (t
-             (push tok tokens)
-             (setf pos new-pos))))))))
+      (let ((ch (char source pos)))
+        (cond
+          ;; Skip a single- or double-quoted string literal wholesale.
+          ((or (char= ch #\') (char= ch #\"))
+           (let ((q ch))
+             (incf pos)
+             (loop
+               (when (>= pos len) (error "JS template lex error: unterminated string in interpolation"))
+               (let ((c (char source pos)))
+                 (cond ((char= c #\\) (incf pos 2))
+                       ((char= c q) (incf pos) (return))
+                       (t (incf pos)))))))
+          ;; Skip a nested template literal (no further interpolation scanning
+          ;; needed for end-finding: just balance backticks, honoring escapes).
+          ((char= ch #\`)
+           (incf pos)
+           (loop
+             (when (>= pos len) (error "JS template lex error: unterminated nested template"))
+             (let ((c (char source pos)))
+               (cond ((char= c #\\) (incf pos 2))
+                     ((char= c #\`) (incf pos) (return))
+                     (t (incf pos))))))
+          ((char= ch #\{) (incf depth) (incf pos))
+          ((char= ch #\})
+           (decf depth)
+           (when (zerop depth) (return pos))
+           (incf pos))
+          (t (incf pos)))))))
+
+(defun js-lex-template-inner-tokens (source pos)
+  "Tokenize inside template interpolation ${ ... } until the matching closing
+brace. POS is just after the ${ . Finds the matching } (respecting strings,
+nested templates, and nested braces), then tokenizes the expression substring
+with the main tokenizer (dropping its trailing :T-EOF). The monolithic
+tokenizer has no per-token entry point, so reuse it on the substring.
+Returns (values token-list pos-after-closing-brace)."
+  (let* ((end (js-lex-template-interp-end source pos))
+         (expr (subseq source pos end))
+         (toks (tokenize-js-source expr))
+         ;; Drop the trailing (:type :T-EOF ...) sentinel.
+         (inner (remove-if (lambda (tk) (eq (getf tk :type) :T-EOF)) toks)))
+    (values inner (1+ end))))
 
 ;;; ─── Top-level template literal lexer ───────────────────────────────────────
 
