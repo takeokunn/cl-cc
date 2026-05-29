@@ -352,7 +352,10 @@
                      (eq (js-peek-type current) :T-OP)
                      (equal (js-peek-value current) "="))
             (setf current (cdr current))
-            (multiple-value-bind (expr rest2) (js-parse-expr current)
+            ;; Use assignment-expr (NOT js-parse-expr) so the initializer stops at
+            ;; the comma separating declarators — otherwise `const a = 1, b = 2`
+            ;; parses `1, b = 2` as one comma-expression and drops the b binding.
+            (multiple-value-bind (expr rest2) (js-parse-assignment-expr current)
               (setf init-expr expr
                     current rest2)))
           ;; Expand binding into bindings list
