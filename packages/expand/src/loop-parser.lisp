@@ -155,9 +155,11 @@ This is the Prolog rule-derivation step: (keyword . type) fact → (keyword . ha
 (defvar *loop-top-clause-parsers*
   (append
    (list (cons "FOR"       #'%clause-for)
+         (cons "AS"        #'%clause-for)    ; AS is an ANSI alias for FOR
          (cons "WITH"      #'%clause-with)
          (cons "REPEAT"    #'%clause-repeat)
          (cons "DO"        #'%clause-do)
+         (cons "DOING"     #'%clause-do)    ; DOING is an ANSI alias for DO
          (cons "WHEN"      #'%clause-when)
          (cons "IF"        #'%clause-if)
          (cons "UNLESS"    #'%clause-unless)

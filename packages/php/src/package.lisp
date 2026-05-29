@@ -55,4 +55,18 @@
        #:%php-enum-case-value
        #:php-exception
     #:*php-builtin-map*
-   #:php-check-supported-forms))
+   #:php-check-supported-forms
+   #:*php-trait-registry*
+   #:%php-parse-trait-decl
+   #:%php-parse-use-trait-stmt
+   #:*php-interface-registry*
+   #:%php-parse-interface-decl
+   #:%php-fiber-make
+   #:%php-fiber-start
+   #:%php-fiber-resume
+   #:%php-fiber-suspend
+   #:%php-array-find
+   #:%php-array-find-key
+   #:%php-array-any
+   #:%php-array-all
+   #:%php-callable-ref))

@@ -27,8 +27,11 @@
 (defun %resolve-stream-val (state val)
   "Resolve VAL to a CL stream: if it's already a stream, return it;
 if it's an integer handle, look it up in STATE's stream tables."
-  (or (and (or (streamp val) (vm-string-input-stream-p val)) val)
-      (and (integerp val) (%resolve-integer-stream-handle val state))))
+  (cond
+    ((streamp val) val)
+    ((vm-string-input-stream-p val) val)
+    ((integerp val) (%resolve-integer-stream-handle val state))
+    (t nil)))
 
 (defun %vm-stream-predicate-result (stream pred-fn)
   "Apply stream predicate PRED-FN to STREAM, including VM string input streams."
@@ -100,11 +103,17 @@ PRED-FN nil means test stream existence only."
      (declare (ignore labels))
      (let* ((handle (vm-reg-get state (vm-file-handle inst)))
              (stream (vm-get-stream state handle)))
-       (if (vm-string-input-stream-p stream)
-           ,(if (eq cl-fn 'clear-input)
-                `(vm-string-input-stream-clear-input stream)
-                `(,cl-fn stream))
-           (,cl-fn stream))
+       (cond
+         ((vm-string-input-stream-p stream)
+          ;; VM string input streams only support clear-input; output control
+          ;; operations (force/finish/clear-output) are no-ops on them.
+          ,(if (eq cl-fn 'clear-input)
+               `(vm-string-input-stream-clear-input stream)
+               `nil))
+         ;; Guard the real-stream call with STREAMP so the derived argument type
+         ;; is STREAM, matching CL-FN's asserted (OR STREAM BOOLEAN).
+         ((streamp stream)
+          (,cl-fn stream)))
        (values (1+ pc) nil nil))))
 
 (define-stream-control-instruction vm-force-output  force-output)
