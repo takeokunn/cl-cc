@@ -264,6 +264,17 @@
     (let ((val (cdr (first (cl-cc:ast-let-bindings ast)))))
       (assert-true (not (null val))))))
 
+(deftest js-parser-template-interpolation
+  "Interpolated template `hi ${name}!` parses without error to a binding value."
+  (let ((ast (%js-first "const s = `hi ${name}!`;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (not (null (cdr (first (cl-cc:ast-let-bindings ast))))))))
+
+(deftest js-parser-template-interpolation-expr
+  "Template interpolation with an expression `${a + b * 2}` parses."
+  (let ((ast (%js-first "const s = `sum=${a + b * 2}`;")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
 ;;; ─── Import / export ──────────────────────────────────────────────────────────
 
 (deftest js-parser-import-statement
