@@ -837,3 +837,65 @@
 function commented() { return 1; }")))
     (assert-true (cl-cc:ast-defun-p ast))
     (assert-string= "COMMENTED" (symbol-name (cl-cc:ast-defun-name ast)))))
+
+(deftest php-parser-constructor-promotion
+  "PHP 8.0 constructor property promotion: visibility/readonly modifiers may
+precede a parameter's type in __construct."
+  (let ((ast (%php-first
+              "<?php class P { public function __construct(public int $x, private string $y) {} }")))
+    (assert-true (cl-cc:ast-defclass-p ast))))
+
+(deftest php-parser-constructor-promotion-readonly
+  "Promoted constructor params accept readonly + nullable + default."
+  (let ((ast (%php-first
+              "<?php class P { public function __construct(int $a, public readonly ?string $b = null) {} }")))
+    (assert-true (cl-cc:ast-defclass-p ast))))
+
+(deftest php-parser-call-spread-argument
+  "foo(...$args) parses a spread argument in a call."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(...$args);"))))
+
+(deftest php-parser-call-named-arguments
+  "foo(name: 'x', age: 5) parses named arguments."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(name: 'x', age: 5);"))))
+
+(deftest php-parser-call-named-mixed
+  "foo('pos', name: 'x') mixes a positional and a named argument."
+  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo('pos', name: 'x');"))))
+
+(deftest php-parser-first-class-callable
+  "strlen(...) parses as a first-class callable reference."
+  (let ((ast (%php-first "<?php $f = strlen(...);")))
+    ;; assignment lowers to ast-let/ast-setq with a call value; just ensure it parsed.
+    (assert-true ast)))
+
+(deftest php-parser-array-spread
+  "[...$b, ...$c] parses spread elements in an array literal."
+  (assert-true (%php-first "<?php $a = [...$b, ...$c];")))
+
+(deftest php-parser-array-spread-mixed
+  "[1, ...$b, 2] mixes a spread element with plain elements."
+  (assert-true (%php-first "<?php $a = [1, ...$b, 2];")))
+
+(deftest php-parser-anonymous-class
+  "new class { ... } parses to a progn defining and instantiating an anon class."
+  (let ((ast (%php-first "<?php $o = new class { public $x = 1; };")))
+    (assert-true ast)))
+
+(deftest php-parser-anonymous-class-extends-ctor
+  "new class(5) extends Base { __construct(public int $n) {} } parses."
+  (let ((ast (%php-first
+              "<?php $o = new class(5) extends Base { public function __construct(public int $n) {} };")))
+    (assert-true ast)))
+
+(deftest php-parser-list-destructuring-assignment
+  "[$a, $b] = $arr lowers to a let binding each target to %php-array-ref."
+  (let ((ast (%php-first "<?php [$a, $b] = $arr;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (= 2 (length (cl-cc:ast-let-bindings ast))))))
+
+(deftest php-parser-list-destructuring-three
+  "[$x, $y, $z] = $data binds three targets."
+  (let ((ast (%php-first "<?php [$x, $y, $z] = $data;")))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (= 3 (length (cl-cc:ast-let-bindings ast))))))

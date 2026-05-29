@@ -13,12 +13,25 @@
    (:file "lexer")
    (:file "lexer-ops")
     (:file "runtime-helpers")
+    ;; PHP runtime builtins (count, array_*, str*, math, type predicates, and the
+    ;; dispatch registry). Previously omitted, so their bodies were never compiled
+    ;; — runtime calls such as array_find -> %php-array-pairs / %php-callable-function
+    ;; hit undefined functions. register loads last (it references the others).
+    (:file "runtime-builtins-core")
+    (:file "runtime-builtins-array")
+    (:file "runtime-builtins-string")
+    (:file "runtime-builtins-math")
+    (:file "runtime-builtins-types")
+    (:file "runtime-builtins-register")
      (:file "parser")
      (:file "parser-support")
      (:file "parser-attributes")
      (:file "parser-expr")
    (:file "parser-stmt")
     (:file "parser-class")
+    (:file "parser-trait")
+    (:file "parser-interface")
+    (:file "php84-features")
     (:file "unsupported")
     (:file "grammar")
    (:file "grammar-stmt")))

@@ -46,14 +46,20 @@
         (#\\  (tok1 :T-BACKSLASH "\\"))
         (#\~  (tok1 :T-OP "~"))
         (#\@  (tok1 :T-OP "@"))
-        (#\%  (tok1 :T-OP "%"))
-        (#\^  (tok1 :T-OP "^"))
+        (#\%
+         (tok2 "%=" :T-OP "%=")
+         (tok1 :T-OP "%"))
+        (#\^
+         (tok2 "^=" :T-OP "^=")
+         (tok1 :T-OP "^"))
         (#\&
          (tok2 "&&" :T-OP "&&")
+         (tok2 "&=" :T-OP "&=")
          (tok1 :T-OP "&"))
         (#\|
          (tok2 "||" :T-OP "||")
          (tok2 "|>" :T-OP "|>")
+         (tok2 "|=" :T-OP "|=")
          (tok1 :T-OP "|"))
         (#\!
          (tok3 "!==" :T-OP "!==")
@@ -65,11 +71,13 @@
          (tok2 "=>" :T-OP "=>")
          (tok1 :T-OP "="))
         (#\<
+         (tok3 "<<=" :T-OP "<<=")
          (tok3 "<=>" :T-OP "<=>")
          (tok2 "<=" :T-OP "<=")
          (tok2 "<<" :T-OP "<<")
          (tok1 :T-OP "<"))
         (#\>
+         (tok3 ">>=" :T-OP ">>=")
          (tok2 ">=" :T-OP ">=")
          (tok2 ">>" :T-OP ">>")
          (tok1 :T-OP ">"))
@@ -84,6 +92,7 @@
          (tok2 "-=" :T-OP "-=")
          (tok1 :T-OP "-"))
         (#\*
+         (tok3 "**=" :T-OP "**=")
          (tok2 "**" :T-OP "**")
          (tok2 "*=" :T-OP "*=")
          (tok1 :T-OP "*"))
@@ -106,6 +115,8 @@
                     ch3 (char= ch3 #\>))
            (return-from lex-operator
              (values (make-php-token :T-NULLSAFE-ARROW "?->") (+ pos 3))))
+         ;; ??= null coalescing assignment (longest match first)
+         (tok3 "??=" :T-OP "??=")
          ;; ?? null coalescing
          (tok2 "??" :T-OP "??")
          ;; ? as nullable marker

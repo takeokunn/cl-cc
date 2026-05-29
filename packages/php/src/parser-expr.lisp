@@ -18,6 +18,24 @@
 ;;;; Load order: after parser.lisp, before parser-stmt.lisp.
 (in-package :cl-cc/php)
 
+;;; ─── Member-name helper ──────────────────────────────────────────────────────
+;;; PHP permits reserved keywords (from, list, class, print, default, ...) and
+;;; type words as method / property / constant names after -> ?-> and ::, e.g.
+;;; Status::from(1) or $obj->print().  The plain T-IDENT expectation rejected
+;;; them, leaving the enum from/tryFrom/cases lowering unreachable.  This helper
+;;; accepts identifiers, keywords, and type words and returns the member's name
+;;; as a string.
+
+(defun %php-member-name (stream)
+  "Consume a member name (after -> / ?-> / ::) accepting T-IDENT, T-KEYWORD, or
+T-TYPE.  Returns (values name-string rest)."
+  (let ((type (php-peek-type stream)))
+    (if (member type '(:T-IDENT :T-KEYWORD :T-TYPE) :test #'eq)
+        (multiple-value-bind (tok rest) (php-consume stream)
+          (let ((v (php-tok-value tok)))
+            (values (if (stringp v) v (string-downcase (symbol-name v))) rest)))
+        (error "PHP parse error: expected member name but got ~S" (php-peek stream)))))
+
 ;;; ─── Expression Parser ──────────────────────────────────────────────────────
 
 (defun php-parse-primary (stream known-vars)
@@ -79,10 +97,53 @@
                 (values (make-ast-var :name name) rest known-vars)))))
       (t (error "PHP parse error: unexpected token ~S in expression" (php-peek stream))))))
 
+(defun %php-parse-anonymous-class (stream known-vars)
+  "Parse an anonymous class expression after `new class` (the `class` keyword is
+already consumed): optional (ctor args), optional extends/implements, then a
+class body. Returns (values ast rest kv) where ast is a progn that defines a
+gensym-named class and makes an instance of it."
+  (let ((current stream)
+        (ctor-args nil)
+        (kv known-vars)
+        (anon-name (php-ident-sym (symbol-name (gensym "PHP-ANON-CLASS-")))))
+    ;; Optional constructor argument list: new class (args) { ... }
+    (when (eq (php-peek-type current) :T-LPAREN)
+      (multiple-value-bind (args rest kv2) (php-parse-arglist current kv)
+        (setf ctor-args args current rest kv kv2)))
+    ;; Optional extends / implements
+    (multiple-value-bind (supers rest) (%php-parse-class-superclasses current)
+      (setf current rest)
+      ;; Class body { members... }
+      (let ((body (%php-consume-expected :T-LBRACE current))
+            (slots nil))
+        (loop
+          (setf body (php-skip-semis body))
+          (when (or (php-at-eof-p body) (eq (php-peek-type body) :T-RBRACE))
+            (return))
+          (multiple-value-bind (slot rest2) (%php-parse-class-body-member body known-vars)
+            (when slot (push slot slots))
+            (setf body rest2)))
+        (setf current (%php-consume-expected :T-RBRACE body))
+        (values
+         (make-ast-progn
+          :forms (list (make-ast-defclass :name anon-name
+                                          :superclasses supers
+                                          :slots (nreverse slots)
+                                          :php-kind :class)
+                       (make-ast-make-instance
+                        :class (make-ast-var :name anon-name)
+                        :initargs (loop for i from 0 for a in ctor-args
+                                        collect (cons (intern (format nil "ARG~D" i) :keyword) a)))))
+         current kv)))))
+
 (defun php-parse-new (stream known-vars)
-  "Parse 'new ClassName(args)'."
+  "Parse 'new ClassName(args)' or 'new class [(args)] [extends/implements] { ... }'."
   (multiple-value-bind (tok rest) (php-consume stream) ; consume 'new'
     (declare (ignore tok))
+    ;; Anonymous class: new class { ... }
+    (when (%php-keyword-p rest :class)
+      (return-from php-parse-new
+        (%php-parse-anonymous-class (cdr rest) known-vars)))
     (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
       (let ((class-name (php-ident-sym (php-resolve-qualified-name qualified-name :class))))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
@@ -102,8 +163,8 @@
           ((eq type :T-ARROW)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let ((prop (php-ident-sym (php-tok-value name-tok))))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let ((prop (php-ident-sym name-str)))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
                        (setf obj (make-ast-call
@@ -117,8 +178,8 @@
           ((eq type :T-NULLSAFE-ARROW)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let* ((prop (php-ident-sym (php-tok-value name-tok)))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let* ((prop (php-ident-sym name-str))
                       (null-check (make-ast-binop :op '= :lhs obj
                                                   :rhs (make-ast-quote :value nil))))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
@@ -140,8 +201,8 @@
           ((eq type :T-DOUBLE-COLON)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let ((member (php-ident-sym (php-tok-value name-tok))))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let ((member (php-ident-sym name-str)))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
                        (setf obj (cond
@@ -355,6 +416,10 @@
                             :value val)
                            (%php-lower-compound-assign op lhs val :property))
                        rest3 kv3))
+              ;; List/array destructuring assignment: [$a, $b] = expr (and the
+              ;; legacy list($a, $b) = expr, which lowers to the same array LHS).
+              ((and (equal op "=") (%php-array-literal-call-p lhs))
+               (values (%php-lower-list-assign lhs val) rest3 kv3))
               (t
                (error "PHP parse error: unsupported assignment target ~S" lhs))))))
       ((%php-reference-token-p rest)
@@ -379,9 +444,40 @@
               (current rest)
               (kv known-vars))
           (loop
-            (multiple-value-bind (arg rest2 kv2) (php-parse-expr current kv)
-              (push arg args)
-              (setf current rest2 kv kv2))
+            (cond
+              ;; First-class callable syntax: f(...)  ->  marker arg the caller
+              ;; can turn into a callable reference. Detected as '...' then ')'.
+              ((and (eq (php-peek-type current) :T-ELLIPSIS)
+                    (eq (php-peek-type (cdr current)) :T-RPAREN))
+               (push (make-ast-call :func (make-ast-var :name '%php-first-class-callable)
+                                    :args nil)
+                     args)
+               (setf current (cdr current)))
+              ;; Spread argument: ...expr  ->  (%php-spread expr)
+              ((eq (php-peek-type current) :T-ELLIPSIS)
+               (multiple-value-bind (_tok rest-after) (php-consume current)
+                 (declare (ignore _tok))
+                 (multiple-value-bind (arg rest2 kv2) (php-parse-expr rest-after kv)
+                   (push (make-ast-call :func (make-ast-var :name '%php-spread)
+                                        :args (list arg))
+                         args)
+                   (setf current rest2 kv kv2))))
+              ;; Named argument: ident: expr  ->  (%php-named-arg "ident" expr)
+              ((%php-named-arg-p current)
+               (let* ((name-tok (php-peek current))
+                      (name-str (let ((v (php-tok-value name-tok)))
+                                  (if (stringp v) v (string-downcase (symbol-name v)))))
+                      (after-colon (cddr current)))   ; skip ident and ':'
+                 (multiple-value-bind (arg rest2 kv2) (php-parse-expr after-colon kv)
+                   (push (make-ast-call :func (make-ast-var :name '%php-named-arg)
+                                        :args (list (make-ast-quote :value name-str) arg))
+                         args)
+                   (setf current rest2 kv kv2))))
+              ;; Ordinary positional argument
+              (t
+               (multiple-value-bind (arg rest2 kv2) (php-parse-expr current kv)
+                 (push arg args)
+                 (setf current rest2 kv kv2))))
             (if (and current (eq (php-peek-type current) :T-COMMA))
                 (setf current (cdr current))
                 (return)))
@@ -837,6 +933,33 @@ the yielded value for later generator lowering passes."
               (eq (ast-var-name func) 'cl-cc/php::%php-array-ref)))
        (= (length (ast-call-args node)) 2)))
 
+(defun %php-array-literal-call-p (node)
+  "Return true when NODE is a %php-array constructor call (an array literal),
+i.e. a valid destructuring-assignment target like [$a, $b] or list($a, $b)."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-array)))))
+
+(defun %php-lower-list-assign (lhs val)
+  "Lower [$a, $b, ...] = VAL destructuring assignment. LHS is a %php-array
+constructor call whose entry values are the assignment targets. Each target
+binds to (%php-array-ref VAL index) in a single body-less let (consistent with
+how plain $x = v introduces a binding). NIL holes ([, $b]) are skipped.
+Re-references VAL per element, which is correct for the common variable RHS."
+  (let ((bindings nil)
+        (idx 0))
+    (dolist (entry (ast-call-args lhs))
+      ;; Each entry is (make-ast-list :elements (key-present-p key value)).
+      (let* ((elts (and (ast-list-p entry) (ast-list-elements entry)))
+             (target (third elts)))
+        (when (and target (ast-var-p target))
+          (push (cons (ast-var-name target)
+                      (%php-array-ref-call val (make-ast-int :value idx)))
+                bindings)))
+      (incf idx))
+    (make-ast-let :bindings (nreverse bindings) :body nil)))
+
 (defun %php-array-set-call (array key value)
   "Lower ARRAY[KEY] = VALUE to the PHP ordered-array mutation helper."
   (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-set)
@@ -870,6 +993,16 @@ the yielded value for later generator lowering passes."
               (current rest)
               (kv known-vars))
           (loop
+            ;; Spread element: [...$b] — splice another iterable's entries in.
+            (if (eq (php-peek-type current) :T-ELLIPSIS)
+                (multiple-value-bind (_tok rest-after) (php-consume current)
+                  (declare (ignore _tok))
+                  (multiple-value-bind (spread-expr rest2 kv2) (php-parse-expr rest-after kv)
+                    (push (%php-array-entry nil (make-ast-quote :value nil)
+                                            (make-ast-call :func (make-ast-var :name '%php-spread)
+                                                           :args (list spread-expr)))
+                          entries)
+                    (setf current rest2 kv kv2)))
             (multiple-value-bind (first-expr rest2 kv2) (php-parse-expr current kv)
               (if (%php-double-arrow-p rest2)
                   (multiple-value-bind (arrow-tok rest3) (php-consume rest2)
@@ -879,7 +1012,7 @@ the yielded value for later generator lowering passes."
                       (setf current rest4 kv kv4)))
                   (progn
                     (push (%php-array-entry nil (make-ast-quote :value nil) first-expr) entries)
-                    (setf current rest2 kv kv2))))
+                    (setf current rest2 kv kv2)))))
             (cond
               ((eq (php-peek-type current) :T-COMMA)
                (setf current (cdr current))

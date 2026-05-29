@@ -126,10 +126,18 @@ Returns (values slot-def-or-nil remaining-stream)."
        ((and (eq (php-peek-type stream) :T-KEYWORD)
                (eq (php-peek-value stream) :const))
         (%php-parse-class-constant stream modifiers known-vars attributes))
-       ;; use TraitName; — trait use metadata inside class-like bodies.
+       ;; use TraitName[, OtherTrait] [{ insteadof/as block }]; — trait use with
+       ;; optional conflict-resolution block, inside class-like bodies.
+       ;; Delegate to the full use-trait parser (defined in parser-trait.lisp)
+       ;; that handles { insteadof/as } blocks.  The `use` keyword was already
+       ;; consumed by the caller that found :use in the token stream, but here
+       ;; we are still at the `use` token — strip it before dispatching.
        ((and (eq (php-peek-type stream) :T-KEYWORD)
              (eq (php-peek-value stream) :use))
-        (%php-parse-trait-use-member stream))
+        (multiple-value-bind (slot rest kv)
+            (%php-parse-use-trait-stmt (cdr stream) known-vars)
+          (declare (ignore kv))
+          (values slot rest)))
       ;; function name(...) { }  — method
       ((and (eq (php-peek-type stream) :T-KEYWORD)
             (eq (php-peek-value stream) :function))
@@ -190,6 +198,13 @@ Returns (values superclass-list remaining-stream)."
                                       :php-kind :class)
                   (%php-consume-expected :T-RBRACE current)
                   known-vars))))))
+
+;;; ─── Interface Statement Parser (overrides parser-stmt entry) ───────────────
+
+(define-php-stmt-parser :interface (rest known-vars)
+  "%php-parse-interface-decl handles the full interface syntax including
+multiple-extends and abstract method signatures."
+  (%php-parse-interface-decl rest known-vars))
 
 ;;; ─── Statement Dispatcher ────────────────────────────────────────────────────
 

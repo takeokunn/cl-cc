@@ -18,10 +18,11 @@
          "PHP form is not yet supported in cl-cc")))
 
 (defun %php-unsupported-classlike-message (kind)
-  "Return a diagnostic for unsupported PHP class-like declaration KIND."
+  "Return a diagnostic for unsupported PHP class-like declaration KIND.
+Returns NIL when the kind is supported (:trait, :interface are both supported)."
   (case kind
-    (:trait "PHP traits are not yet supported")
-    (:interface "PHP interfaces are not yet supported")
+    (:trait     nil)                    ; traits are now supported via parser-trait.lisp
+    (:interface nil)                    ; interfaces are now supported
     (otherwise nil)))
 
 (defun php-check-supported-forms (forms)

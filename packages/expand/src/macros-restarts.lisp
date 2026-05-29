@@ -206,3 +206,15 @@
      (if r
          (invoke-restart 'store-value ,value)
          ,value)))
+
+;; WITH-SIMPLE-RESTART (ANSI CL 9.1) — establish a named restart for the duration of BODY.
+;; The restart, when invoked, returns NIL and T from the WITH-SIMPLE-RESTART form.
+;; FORMAT-CONTROL and FORMAT-ARGS describe the restart for interactive debuggers.
+(our-defmacro with-simple-restart (restart-spec &body body)
+  "Establish a named restart for the dynamic extent of BODY.
+RESTART-SPEC is (name format-control format-args*).
+Invoking the restart causes WITH-SIMPLE-RESTART to return (values nil t)."
+  (let ((name (first restart-spec)))
+    `(restart-case (progn ,@body)
+       (,name ()
+         (values nil t)))))

@@ -39,6 +39,7 @@
        (ensure-system-asd :cl-cc-sb-pcl "packages/sb-pcl/cl-cc-sb-pcl.asd" here)
        (ensure-system-asd :cl-cc-closer-mop "packages/closer-mop/cl-cc-closer-mop.asd" here)
        (ensure-system-asd :cl-cc-php "packages/php/cl-cc-php.asd" here)
+       (ensure-system-asd :cl-cc-javascript "packages/javascript/cl-cc-javascript.asd" here)
        (ensure-system-asd :cl-cc-pipeline "packages/pipeline/cl-cc-pipeline.asd" here)
        (ensure-system-asd :cl-cc-selfhost "packages/selfhost/cl-cc-selfhost.asd" here)
         (ensure-system-asd :cl-cc-repl "packages/repl/cl-cc-repl.asd" here))))
@@ -53,7 +54,7 @@
                 :cl-cc-type :cl-cc-optimize :cl-cc-regalloc :cl-cc-emit :cl-cc-expand
                 :cl-cc-compile :cl-cc-cps :cl-cc-codegen :cl-cc-vm :cl-cc-stdlib
                   :cl-cc-sb-mop :cl-cc-sb-pcl :cl-cc-closer-mop
-                 :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl :cl-cc-php)
+                 :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl :cl-cc-php :cl-cc-javascript)
   :components
   ((:module "src"
     :pathname "packages/umbrella-src"

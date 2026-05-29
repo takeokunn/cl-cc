@@ -105,6 +105,14 @@ let
         "cl-cc-parse"
       ];
     };
+    cl-cc-javascript = {
+      src = "packages/javascript";
+      deps = [
+        "cl-cc-ast"
+        "cl-cc-bootstrap"
+        "cl-cc-parse"
+      ];
+    };
     cl-cc-optimize = {
       src = "packages/optimize";
       deps = [

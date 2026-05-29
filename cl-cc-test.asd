@@ -9,7 +9,7 @@
   :author "CL-CC"
   :license "MIT"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php :cl-cc-tools)
+  :depends-on (:cl-cc :cl-cc-cli :cl-cc-testing-framework :cl-cc-php :cl-cc-javascript :cl-cc-tools)
   :serial t
   :components
   (;; Unit tests — each module now lives in its workspace's tests/ dir
@@ -127,7 +127,18 @@
       (:file "php-parser-tests")
       (:file "php-compile-tests")
       (:file "php-grammar-tests")
-      (:file "php-grammar-stmt-tests")))
+      (:file "php-grammar-stmt-tests")
+      (:file "php-traits-tests")
+      (:file "php-interfaces-tests")
+      (:file "php84-tests")))
+   (:module "javascript-tests"
+    :pathname "packages/javascript/tests"
+    :serial t
+    :components
+     ((:file "js-lexer-tests")
+      (:file "js-parser-tests")
+      (:file "js-e2e-tests")
+      (:file "js-runtime-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
