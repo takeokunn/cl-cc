@@ -919,6 +919,16 @@ the yielded value for later generator lowering passes."
               (current rest)
               (kv known-vars))
           (loop
+            ;; Spread element: [...$b] — splice another iterable's entries in.
+            (if (eq (php-peek-type current) :T-ELLIPSIS)
+                (multiple-value-bind (_tok rest-after) (php-consume current)
+                  (declare (ignore _tok))
+                  (multiple-value-bind (spread-expr rest2 kv2) (php-parse-expr rest-after kv)
+                    (push (%php-array-entry nil (make-ast-quote :value nil)
+                                            (make-ast-call :func (make-ast-var :name '%php-spread)
+                                                           :args (list spread-expr)))
+                          entries)
+                    (setf current rest2 kv kv2)))
             (multiple-value-bind (first-expr rest2 kv2) (php-parse-expr current kv)
               (if (%php-double-arrow-p rest2)
                   (multiple-value-bind (arrow-tok rest3) (php-consume rest2)
@@ -928,7 +938,7 @@ the yielded value for later generator lowering passes."
                       (setf current rest4 kv kv4)))
                   (progn
                     (push (%php-array-entry nil (make-ast-quote :value nil) first-expr) entries)
-                    (setf current rest2 kv kv2))))
+                    (setf current rest2 kv kv2)))))
             (cond
               ((eq (php-peek-type current) :T-COMMA)
                (setf current (cdr current))
