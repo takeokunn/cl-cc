@@ -949,13 +949,39 @@
        (js-parse-var-decl (cdr stream) :let))
       ((eq type :T-CONST)
        (js-parse-var-decl (cdr stream) :const))
-      ;; function declaration
+      ;; function declaration (function* generator handled inside js-parse-function-decl)
       ((eq type :T-FUNCTION)
        (js-parse-function-decl (cdr stream)))
       ;; async function / async arrow
       ((and (eq type :T-ASYNC)
             (eq (js-peek-type (cdr stream)) :T-FUNCTION))
        (js-parse-function-decl (cddr stream) :async-p t))
+      ;; class declaration
+      ((eq type :T-CLASS)
+       (multiple-value-bind (ast-list rest) (js-parse-class-decl (cdr stream))
+         ;; js-parse-class-decl returns a LIST of nodes; wrap >1 in a progn so the
+         ;; caller always receives a single statement node.
+         (values (if (and (consp ast-list) (= (length ast-list) 1))
+                     (first ast-list)
+                     (make-ast-progn :forms ast-list))
+                 rest)))
+      ;; decorated class declaration: @dec class { ... }
+      ((eq type :T-AT)
+       (multiple-value-bind (decorators rest) (%js-parse-decorators stream)
+         (if (eq (js-peek-type rest) :T-CLASS)
+             (multiple-value-bind (ast-list rest2)
+                 (js-parse-class-decl (cdr rest) :decorators decorators)
+               (values (if (and (consp ast-list) (= (length ast-list) 1))
+                           (first ast-list)
+                           (make-ast-progn :forms ast-list))
+                       rest2))
+             (error "JS parse error: decorators must precede a class declaration"))))
+      ;; import declaration
+      ((eq type :T-IMPORT)
+       (js-parse-import-decl stream))
+      ;; export declaration
+      ((eq type :T-EXPORT)
+       (js-parse-export-decl stream))
       ;; if
       ((eq type :T-IF)
        (js-parse-if-stmt (cdr stream)))
@@ -1020,6 +1046,10 @@
         (return))
       (multiple-value-bind (stmt rest) (js-parse-stmt current)
         (when stmt (push stmt stmts))
+        ;; Safety guard: a statement parser must consume at least one token.
+        ;; If REST did not advance past CURRENT, signal rather than spin forever.
+        (when (eq rest current)
+          (error "JS parse error: no progress at ~S" (js-peek current)))
         (setf current rest)))
     (values (nreverse stmts) current)))
 
