@@ -161,6 +161,7 @@
 (defun js-parse-block (stream)
   "Parse { stmt... } and return (values ast-progn rest).
   The returned AST is an ast-progn wrapping all collected statements."
+  (with-js-parse-depth
   (let ((current (%js-consume-expected :T-LBRACE stream))
         (stmts nil))
     (loop
@@ -172,7 +173,7 @@
         (when stmt (push stmt stmts))
         (setf current rest)))
     (values (make-ast-progn :forms (nreverse stmts))
-            (%js-consume-expected :T-RBRACE current))))
+            (%js-consume-expected :T-RBRACE current)))))
 
 (defun %js-parse-stmt-body (stream)
   "Parse either a braced block or a single statement.

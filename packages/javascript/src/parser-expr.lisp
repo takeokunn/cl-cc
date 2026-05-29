@@ -1289,6 +1289,7 @@ Returns (values ast rest)."
   "Main Pratt expression parser. Returns (values ast rest).
 Handles all infix operators at precedence >= MIN-PREC including
 assignment (right-assoc), ternary, binary ops, and comma."
+  (with-js-parse-depth
   (multiple-value-bind (lhs rest) (js-parse-unary stream)
     (loop
       (multiple-value-bind (prec right-assoc-p) (js-infix-prec rest)
@@ -1345,7 +1346,7 @@ assignment (right-assoc), ternary, binary ops, and comma."
                  (multiple-value-bind (rhs rest3) (js-parse-expr rest2 next-prec)
                    (setf lhs (%js-lower-binary op-val lhs rhs)
                          rest rest3)))))))))
-    (values lhs rest)))
+    (values lhs rest))))
 
 (defun %js-lower-assignment (op-val lhs rhs)
   "Lower an assignment expression LHS op RHS to the appropriate AST."

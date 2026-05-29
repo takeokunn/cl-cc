@@ -101,6 +101,28 @@ Automatically set to T in module mode and when a 'use strict' directive is seen.
 (defvar *js-module-mode* nil
   "Non-NIL when parsing an ES module (enables import/export, implies strict mode).")
 
+;;; ─── Recursion Depth Guard ───────────────────────────────────────────────────
+;;; The expression and statement parsers are mutually recursive with no inherent
+;;; bound, so pathologically nested input (e.g. "((((((…))))))" or "[[[[…]]]]")
+;;; could exhaust the control stack (CWE-674 DoS) when parsing untrusted source.
+;;; with-js-parse-depth bounds the recursion and errors gracefully instead.
+
+(defvar *js-parse-depth* 0
+  "Current expression/statement recursion depth during parsing.")
+
+(defparameter *js-max-parse-depth* 2500
+  "Maximum expression/statement nesting depth before a graceful parse error.")
+
+(defmacro with-js-parse-depth (&body body)
+  "Increment *js-parse-depth* for the dynamic extent of BODY (auto-restored on
+unwind) and signal a parse error past *js-max-parse-depth* rather than
+overflowing the control stack."
+  `(let ((*js-parse-depth* (1+ *js-parse-depth*)))
+     (when (> *js-parse-depth* *js-max-parse-depth*)
+       (error "JS parse error: nesting too deep (limit ~D) — refusing to overflow the stack"
+              *js-max-parse-depth*))
+     ,@body))
+
 ;;; ─── Name Helpers ───────────────────────────────────────────────────────────
 
 (defun js-ident-sym (str)
