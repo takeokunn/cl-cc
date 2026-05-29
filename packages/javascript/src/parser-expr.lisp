@@ -1073,10 +1073,13 @@ yield, await, import()."
          (declare (ignore tok))
          (multiple-value-bind (expr rest2) (js-parse-unary rest)
            (values (%js-call '%js-await expr) rest2))))
-      ;; Identifier
+      ;; Identifier — may begin a single-parameter arrow function: x => body
       ((eq type :T-IDENT)
        (multiple-value-bind (tok rest) (js-consume stream)
-         (values (make-ast-var :name (js-ident-sym val)) rest)))
+         (declare (ignore tok))
+         (if (eq (js-peek-type rest) :T-ARROW)
+             (%js-finish-arrow-function (list (js-ident-sym val)) rest)
+             (values (make-ast-var :name (js-ident-sym val)) rest))))
       ;; Contextual keywords used as identifiers (get, set, from, as, of, target, meta, using, static)
       ((member type '(:T-GET :T-SET :T-FROM :T-AS :T-OF
                       :T-TARGET :T-META :T-USING :T-STATIC :T-LET) :test #'eq)

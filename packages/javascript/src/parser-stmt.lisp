@@ -843,6 +843,7 @@
     (let ((try-body (ast-progn-forms try-ast))
           (catch-clauses nil)
           (finally-body nil)
+          (finally-present nil)
           (current rest))
       ;; Parse zero or more catch clauses
       (loop while (and current (eq (js-peek-type current) :T-CATCH))
@@ -859,13 +860,15 @@
                  (multiple-value-bind (catch-ast rest2) (js-parse-block current)
                    (push (list var-sym (ast-progn-forms catch-ast)) catch-clauses)
                    (setf current rest2))))
-      ;; Optional finally clause
+      ;; Optional finally clause. Track PRESENCE separately: an empty `finally {}`
+      ;; has a nil body but is still a valid finally clause.
       (when (and current (eq (js-peek-type current) :T-FINALLY))
-        (setf current (cdr current))
+        (setf current (cdr current)
+              finally-present t)
         (multiple-value-bind (finally-ast rest2) (js-parse-block current)
           (setf finally-body (ast-progn-forms finally-ast)
                 current rest2)))
-      (unless (or catch-clauses finally-body)
+      (unless (or catch-clauses finally-present)
         (error "JS parse error: try must have catch or finally"))
       ;; Lower to ast-unwind-protect with catch dispatch
       (let* ((err-sym (gensym "JS-ERR-"))

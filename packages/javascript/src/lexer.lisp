@@ -673,11 +673,13 @@ identifiers, and hashbang comments at position 0."
            (cond
              ;; If js-lex-template is available (defined in lexer-template.lisp), use it
              ((fboundp 'js-lex-template)
-              (multiple-value-bind (tok-list new-pos)
+              ;; js-lex-template returns a SINGLE token (:T-STRING for a simple
+              ;; template, or :T-TEMPLATE-PARTS for an interpolated one) — push it
+              ;; as one token, not as a list of its plist elements.
+              (multiple-value-bind (tok new-pos)
                   (js-lex-template source (1+ pos))
-                (dolist (tok tok-list)
-                  (push tok tokens))
-                (setf prev-token-type :T-TEMPLATE-START
+                (push tok tokens)
+                (setf prev-token-type (getf tok :type)
                       pos new-pos)))
              ;; Otherwise emit :T-TEMPLATE-START and scan inline to closing backtick
              (t
