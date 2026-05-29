@@ -1240,77 +1240,21 @@ Returns (values ast rest)."
 ;;; ─── Class Expression ────────────────────────────────────────────────────────
 
 (defun %js-parse-class-expr (stream)
-  "Parse class [name] [extends expr] { body }.
-Returns (values ast rest)."
+  "Parse a class EXPRESSION: class [name] [extends expr] { body }.
+Delegates to js-parse-class-decl (parser-class.lisp) — the single source of
+truth for class parsing — with :expression-p t. Returns (values ast rest).
+
+Previously this file carried duplicate %js-parse-class-body/%js-parse-class-member
+definitions that, under serial load, were shadowed by parser-class.lisp's
+arity-2 %js-parse-class-body, so the old 1-arg call here crashed every class
+expression. Routing through js-parse-class-decl removes the duplication."
   (multiple-value-bind (tok rest) (js-consume stream) ; consume 'class'
     (declare (ignore tok))
-    ;; Optional class name
-    (let ((class-name nil)
-          (current rest))
-      (when (eq (js-peek-type current) :T-IDENT)
-        (multiple-value-bind (name-tok rest2) (js-consume current)
-          (setf class-name (js-ident-sym (js-tok-value name-tok))
-                current rest2)))
-      ;; Optional extends
-      (let ((super-expr nil))
-        (when (eq (js-peek-type current) :T-EXTENDS)
-          (multiple-value-bind (tok2 rest2) (js-consume current)
-            (declare (ignore tok2))
-            (multiple-value-bind (expr rest3) (js-parse-assignment-expr rest2)
-              (setf super-expr expr
-                    current rest3))))
-        ;; Class body: { members... }
-        (multiple-value-bind (tok3 rest2) (js-expect :T-LBRACE current)
-          (declare (ignore tok3))
-          (multiple-value-bind (members rest3)
-              (%js-parse-class-body rest2)
-            (values (%js-call '%js-make-class
-                              (make-ast-quote :value class-name)
-                              (or super-expr (make-ast-quote :value nil))
-                              (make-ast-call :func (make-ast-var :name '%js-make-array)
-                                             :args members))
-                    rest3)))))))
-
-(defun %js-parse-class-body (stream)
-  "Parse class members until }. Returns (values member-list rest)."
-  (let ((members nil)
-        (current stream))
-    (loop
-      (when (or (js-at-eof-p current)
-                (eq (js-peek-type current) :T-RBRACE))
-        (return))
-      ;; Skip semicolons (used as empty class members)
-      (cond
-        ((eq (js-peek-type current) :T-SEMI)
-         (setf current (cdr current)))
-        (t
-         ;; Parse one class member
-         (multiple-value-bind (member rest2) (%js-parse-class-member current)
-           (push member members)
-           (setf current rest2)))))
-    (multiple-value-bind (tok rest) (js-expect :T-RBRACE current)
-      (declare (ignore tok))
-      (values (nreverse members) rest))))
-
-(defun %js-parse-class-member (stream)
-  "Parse one class member (field, method, static member).
-Returns (values member-ast rest)."
-  (let ((static-p nil)
-        (current stream))
-    ;; static keyword
-    (when (eq (js-peek-type current) :T-STATIC)
-      (setf static-p t)
-      (multiple-value-bind (tok rest) (js-consume current)
-        (declare (ignore tok))
-        (setf current rest)))
-    ;; Accessor or method
-    (multiple-value-bind (key val method-p computed-p rest)
-        (%js-parse-object-property current)
-      (declare (ignore method-p computed-p))
-      (values (%js-call '%js-class-member
-                        (make-ast-quote :value static-p)
-                        key val)
-              rest))))
+    (multiple-value-bind (ast-list rest2) (js-parse-class-decl rest :expression-p t)
+      (values (if (and (consp ast-list) (= (length ast-list) 1))
+                  (first ast-list)
+                  (make-ast-progn :forms ast-list))
+              rest2))))
 
 ;;; ─── import() Dynamic Import ─────────────────────────────────────────────────
 
