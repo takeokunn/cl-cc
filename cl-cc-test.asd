@@ -129,12 +129,8 @@
       (:file "php-grammar-tests")
       (:file "php-grammar-stmt-tests")
       (:file "php-traits-tests")
-      (:file "php-interfaces-tests")))
-   ;; NOTE: php84-tests is NOT wired yet — wiring it surfaced a suite hang from a
-   ;; php84 feature test (likely fibers or property hooks, a tight loop the 10s
-   ;; watchdog can't interrupt). The trait conflict-block/abstract-method bugs it
-   ;; also surfaced are now fixed (insteadof keyword, :: token type, body-less
-   ;; abstract methods), so php-traits-tests and php-interfaces-tests are wired.
+      (:file "php-interfaces-tests")
+      (:file "php84-tests")))
    (:module "javascript-tests"
     :pathname "packages/javascript/tests"
     :serial t
