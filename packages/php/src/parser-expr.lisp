@@ -18,6 +18,24 @@
 ;;;; Load order: after parser.lisp, before parser-stmt.lisp.
 (in-package :cl-cc/php)
 
+;;; ─── Member-name helper ──────────────────────────────────────────────────────
+;;; PHP permits reserved keywords (from, list, class, print, default, ...) and
+;;; type words as method / property / constant names after -> ?-> and ::, e.g.
+;;; Status::from(1) or $obj->print().  The plain T-IDENT expectation rejected
+;;; them, leaving the enum from/tryFrom/cases lowering unreachable.  This helper
+;;; accepts identifiers, keywords, and type words and returns the member's name
+;;; as a string.
+
+(defun %php-member-name (stream)
+  "Consume a member name (after -> / ?-> / ::) accepting T-IDENT, T-KEYWORD, or
+T-TYPE.  Returns (values name-string rest)."
+  (let ((type (php-peek-type stream)))
+    (if (member type '(:T-IDENT :T-KEYWORD :T-TYPE) :test #'eq)
+        (multiple-value-bind (tok rest) (php-consume stream)
+          (let ((v (php-tok-value tok)))
+            (values (if (stringp v) v (string-downcase (symbol-name v))) rest)))
+        (error "PHP parse error: expected member name but got ~S" (php-peek stream)))))
+
 ;;; ─── Expression Parser ──────────────────────────────────────────────────────
 
 (defun php-parse-primary (stream known-vars)
@@ -102,8 +120,8 @@
           ((eq type :T-ARROW)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let ((prop (php-ident-sym (php-tok-value name-tok))))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let ((prop (php-ident-sym name-str)))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
                        (setf obj (make-ast-call
@@ -117,8 +135,8 @@
           ((eq type :T-NULLSAFE-ARROW)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let* ((prop (php-ident-sym (php-tok-value name-tok)))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let* ((prop (php-ident-sym name-str))
                       (null-check (make-ast-binop :op '= :lhs obj
                                                   :rhs (make-ast-quote :value nil))))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
@@ -140,8 +158,8 @@
           ((eq type :T-DOUBLE-COLON)
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (multiple-value-bind (name-tok rest3) (php-expect :T-IDENT rest2)
-               (let ((member (php-ident-sym (php-tok-value name-tok))))
+             (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               (let ((member (php-ident-sym name-str)))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
                        (setf obj (cond
