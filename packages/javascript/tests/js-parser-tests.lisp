@@ -223,6 +223,26 @@
     (assert-true (cl-cc:ast-let-p ast))
     (assert-true (>= (length (cl-cc:ast-let-bindings ast)) 2))))
 
+(deftest js-parser-array-destructuring-default
+  "const [a = 1, b = 2] = arr; parses element defaults."
+  (let ((ast (%js-first "const [a = 1, b = 2] = arr;")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
+(deftest js-parser-object-destructuring-default
+  "const {a = 1} = obj; parses a shorthand property default."
+  (let ((ast (%js-first "const {a = 1} = obj;")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
+(deftest js-parser-object-destructuring-rename-default
+  "const {a: x = 5} = obj; parses a renamed property with a default."
+  (let ((ast (%js-first "const {a: x = 5} = obj;")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
+(deftest js-parser-array-destructuring-default-with-rest
+  "const [x, y = 10, ...rest] = arr; mixes default and rest elements."
+  (let ((ast (%js-first "const [x, y = 10, ...rest] = arr;")))
+    (assert-true (cl-cc:ast-let-p ast))))
+
 ;;; ─── Spread operator ──────────────────────────────────────────────────────────
 
 (deftest js-parser-spread-in-array
