@@ -795,7 +795,15 @@ Returns (values ast rest). Loops until no more postfix ops."
               (setf stream rest)
               (return)))))
         ;; Tagged template literal: fn`...`
-        ((eq type :T-TEMPLATE-START)
+        ;; The tag is whatever expression precedes the template, and the
+        ;; template immediately follows with no operator. A backtick template
+        ;; lexes to :T-TEMPLATE-START (legacy split form) or :T-TEMPLATE-PARTS
+        ;; (the normal form, including no-interpolation templates which carry a
+        ;; single-string parts list) — both are valid tag triggers. Note a plain
+        ;; string literal ("x"/'x') stays :T-STRING and is deliberately NOT a
+        ;; trigger, so `f "x"` is not mistaken for a tagged template.
+        ((or (eq type :T-TEMPLATE-START)
+             (eq type :T-TEMPLATE-PARTS))
          (multiple-value-bind (template-ast rest) (%js-parse-template-literal stream)
            (setf ast (make-ast-call :func ast :args (list template-ast))
                  stream rest)))

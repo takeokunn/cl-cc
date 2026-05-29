@@ -369,13 +369,23 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
               (when (and current (eq (js-peek-type current) :T-OP)
                          (equal "=" (js-peek-value current)))
                 (setf current (cdr current))   ; consume '='
-                ;; Skip field initialiser tokens until ';' or '}'
-                ;; A real parser would call js-parse-expr here
-                (let ((expr-toks nil))
+                ;; Collect field-initialiser tokens up to the top-level ';' or
+                ;; class-closing '}'. The span is brace-aware: an initialiser
+                ;; may itself contain (), [] and {} — e.g. an arrow function
+                ;; `() => {}` or an object literal `{a: 1}` — so we track nesting
+                ;; depth and only stop on a ';'/'}' seen at depth 0. A naive
+                ;; brace-blind scan stops at the arrow body's '}', truncating the
+                ;; initialiser and mis-reading that '}' as the end of the class.
+                (let ((expr-toks nil)
+                      (depth 0))
                   (loop while (and current
-                                   (not (member (js-peek-type current)
-                                                '(:T-SEMI :T-RBRACE))))
-                        do (push (car current) expr-toks)
+                                   (not (and (zerop depth)
+                                             (member (js-peek-type current)
+                                                     '(:T-SEMI :T-RBRACE)))))
+                        do (case (js-peek-type current)
+                             ((:T-LBRACE :T-LPAREN :T-LBRACKET) (incf depth))
+                             ((:T-RBRACE :T-RPAREN :T-RBRACKET) (decf depth)))
+                           (push (car current) expr-toks)
                            (setf current (cdr current)))
                   (setf initform
                         (make-ast-call

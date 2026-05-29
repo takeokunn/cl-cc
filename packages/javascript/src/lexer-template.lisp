@@ -219,10 +219,17 @@ Returns (values token-list pos-after-closing-brace)."
           ((eq end-reason :end-of-template)
            (push text parts)
            (let ((all-parts (nreverse parts)))
-             (if has-interp
-                 (return (values (list :type :T-TEMPLATE-PARTS :value all-parts) end-pos))
-                 ;; Simple string — single part with no expr segments
-                 (return (values (list :type :T-STRING :value (car all-parts)) end-pos)))))
+             (declare (ignorable has-interp))
+             ;; Always emit :T-TEMPLATE-PARTS, even for a no-interpolation
+             ;; template like `hi` (a single-string parts list). This preserves
+             ;; the fact that the literal was written with backticks, which the
+             ;; expression parser needs to (a) recognise a tagged template
+             ;; `tag`hi`` in postfix position and (b) keep template literals
+             ;; distinct from plain "x"/'x' string literals (which stay
+             ;; :T-STRING). The template primary handler collapses a single
+             ;; string part back to one ast-quote, so non-tagged use is
+             ;; unchanged.
+             (return (values (list :type :T-TEMPLATE-PARTS :value all-parts) end-pos))))
           ;; Start of interpolation: ${ ...tokens... }
           ((eq end-reason :start-interp)
            (setf has-interp t)

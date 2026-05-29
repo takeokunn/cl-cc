@@ -129,6 +129,46 @@
                   (or (search "COUNT" name) (search "PRIV" name))))
               slots))))
 
+(deftest js-parser-class-field-arrow-initializer
+  "class C { g = () => {}; } — a class field whose initialiser is an arrow
+function parses to ONE class declaration. Regression: the field-initialiser
+token scan was brace-blind and stopped at the arrow body's '}', truncating the
+initialiser and mis-reading that '}' as the end of the class body."
+  (let ((asts (%js-parse "class C { g = () => {}; }")))
+    (assert-true (= 1 (length asts)))
+    (assert-true (cl-cc:ast-defclass-p (first asts)))))
+
+(deftest js-parser-class-field-private-arrow-and-method
+  "class C { #m() {} #g = () => {}; } — a private method followed by a private
+field with an arrow initialiser parses to a single class with >= 2 slots."
+  (let* ((asts (%js-parse "class C { #m() {} #g = () => {}; }"))
+         (ast (first asts)))
+    (assert-true (= 1 (length asts)))
+    (assert-true (cl-cc:ast-defclass-p ast))
+    (assert-true (>= (length (cl-cc:ast-defclass-slots ast)) 2))))
+
+(deftest js-parser-class-field-object-literal-initializer
+  "class C { x = {a: 1}; } — an object-literal field initialiser (also brace-
+containing) parses to one class declaration."
+  (let ((asts (%js-parse "class C { x = {a: 1, b: 2}; }")))
+    (assert-true (= 1 (length asts)))
+    (assert-true (cl-cc:ast-defclass-p (first asts)))))
+
+(deftest js-parser-tagged-template-plain
+  "tag`hi`; — a no-interpolation tagged template is ONE call expression, not a
+bare identifier followed by a separate string. Regression: a plain backtick
+template lexed to :T-STRING, indistinguishable from a string literal, so the
+postfix parser never attached it to the tag."
+  (let ((asts (%js-parse "tag`hi`;")))
+    (assert-true (= 1 (length asts)))
+    (assert-true (cl-cc:ast-call-p (first asts)))))
+
+(deftest js-parser-tagged-template-interpolated
+  "tag`hi ${name}`; — an interpolated tagged template is ONE call expression."
+  (let ((asts (%js-parse "tag`hi ${name}`;")))
+    (assert-true (= 1 (length asts)))
+    (assert-true (cl-cc:ast-call-p (first asts)))))
+
 (deftest js-parser-class-expression
   "const C = class { m() {} }; — a class EXPRESSION parses without crashing
 (regression guard for the removed duplicate %js-parse-class-body)."
