@@ -189,6 +189,31 @@
   (intern (concatenate 'string "JS." (string-upcase name))
           :cl-cc/javascript))
 
+(defun %js-parse-pattern-default (stream)
+  "If STREAM begins with `= expr`, consume it and return (values default-ast rest);
+otherwise return (values nil stream). Used for destructuring defaults like
+[a = 1] and {a = 1}."
+  (if (and stream
+           (eq (js-peek-type stream) :T-OP)
+           (equal (js-peek-value stream) "="))
+      (multiple-value-bind (_tok rest) (js-consume stream)
+        (declare (ignore _tok))
+        (js-parse-assignment-expr rest))
+      (values nil stream)))
+
+(defun %js-default-access (access-expr default-ast)
+  "Wrap ACCESS-EXPR so it yields DEFAULT-AST when the access is undefined,
+matching JS destructuring-default semantics. Returns ACCESS-EXPR unchanged when
+DEFAULT-AST is nil."
+  (if default-ast
+      (make-ast-if
+       :cond (make-ast-call
+              :func (make-ast-var :name '%js-strict-eq)
+              :args (list access-expr (make-ast-quote :value :js-undefined)))
+       :then default-ast
+       :else access-expr)
+      access-expr))
+
 (defun %js-parse-binding-pattern (stream)
   "Parse a destructuring pattern or simple identifier.
   Returns (values sym/pattern rest).
@@ -225,11 +250,14 @@
                         (setf rest (cdr rest))
                         (multiple-value-bind (local-sym2 rest2)
                             (%js-parse-binding-pattern rest)
-                          (push (list key-name local-sym2) keys)
-                          (setf current rest2)))
-                      (progn
-                        (push (list key-name local-sym) keys)
-                        (setf current rest)))))))
+                          ;; key: pattern [= default]
+                          (multiple-value-bind (dflt rest3) (%js-parse-pattern-default rest2)
+                            (push (list key-name local-sym2 dflt) keys)
+                            (setf current rest3))))
+                      ;; shorthand {key [= default]}
+                      (multiple-value-bind (dflt rest2) (%js-parse-pattern-default rest)
+                        (push (list key-name local-sym dflt) keys)
+                        (setf current rest2)))))))
            (when (eq (js-peek-type current) :T-COMMA)
              (setf current (cdr current))))
          (setf current (%js-consume-expected :T-RBRACE current))
@@ -257,8 +285,10 @@
                 (setf current rest)))
              (t
               (multiple-value-bind (sym rest) (%js-parse-binding-pattern current)
-                (push sym elements)
-                (setf current rest))))
+                ;; element [= default]
+                (multiple-value-bind (dflt rest2) (%js-parse-pattern-default rest)
+                  (push (if dflt (list :default sym dflt) sym) elements)
+                  (setf current rest2)))))
            (when (eq (js-peek-type current) :T-COMMA)
              (setf current (cdr current))))
          (setf current (%js-consume-expected :T-RBRACKET current))
@@ -297,14 +327,17 @@
                                 :args (list (make-ast-var :name tmp)
                                             (make-ast-quote :value :rest))))
                          extras)
-                   ;; named property
+                   ;; named property, with optional default ((key local default))
                    (let ((key   (first field))
-                         (local (second field)))
+                         (local (second field))
+                         (dflt  (third field)))
                      (push (cons (%js-binding-to-sym local)
-                                 (make-ast-call
-                                  :func (make-ast-var :name '%js-get-prop)
-                                  :args (list (make-ast-var :name tmp)
-                                              (make-ast-quote :value key))))
+                                 (%js-default-access
+                                  (make-ast-call
+                                   :func (make-ast-var :name '%js-get-prop)
+                                   :args (list (make-ast-var :name tmp)
+                                               (make-ast-quote :value key)))
+                                  dflt))
                            extras))))
              (values (append bindings (nreverse extras)) nil)))
           ((eq kind :array-pattern)
@@ -323,6 +356,17 @@
                                            (make-ast-quote :value idx)
                                            (make-ast-quote :value :rest))))
                         bindings))
+                 ;; element with default: (:default sym default-ast)
+                 ((and (listp elem) (eq (car elem) :default))
+                  (push (cons (%js-binding-to-sym (second elem))
+                              (%js-default-access
+                               (make-ast-call
+                                :func (make-ast-var :name '%js-get-prop)
+                                :args (list (make-ast-var :name tmp)
+                                            (make-ast-quote :value idx)))
+                               (third elem)))
+                        bindings)
+                  (incf idx))
                  (t
                   (push (cons (%js-binding-to-sym elem)
                               (make-ast-call
