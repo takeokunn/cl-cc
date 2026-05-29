@@ -128,7 +128,17 @@
      (let* ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) x))
             (val (if (string= trimmed "")
                      0.0d0
-                     (handler-case (coerce (read-from-string trimmed) 'double-float)
+                     ;; SECURITY: bind *read-eval* to nil so a string such as
+                     ;; "#.(...)" cannot trigger read-time code execution, and
+                     ;; require the parsed datum to be a real number (read can
+                     ;; otherwise yield symbols/lists) — JS ToNumber must only
+                     ;; ever produce a number or NaN.
+                     (handler-case
+                         (let* ((*read-eval* nil)
+                                (datum (read-from-string trimmed)))
+                           (if (realp datum)
+                               (coerce datum 'double-float)
+                               *js-nan-float*))
                        (error () *js-nan-float*)))))
        val))
     (t *js-nan-float*)))

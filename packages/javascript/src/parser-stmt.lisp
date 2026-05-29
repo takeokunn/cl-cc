@@ -1053,6 +1053,30 @@
         (setf current rest)))
     (values (nreverse stmts) current)))
 
+(defun js-parse-stmt-list (stream)
+  "Parse statements until a closing } (which is consumed) or EOF.
+Returns (values stmt-list rest-after-rbrace). Used for function, method, and
+block bodies; STREAM is positioned just after the opening {. This is the real
+statement parser that js-parse-function-body (parser-expr.lisp) dispatches to
+via fboundp — previously absent, so bodies fell back to a token collector."
+  (let ((stmts nil)
+        (current stream))
+    (loop
+      (setf current (js-skip-semis current))
+      (when (or (js-at-eof-p current)
+                (eq (js-peek-type current) :T-RBRACE))
+        (return))
+      (multiple-value-bind (stmt rest) (js-parse-stmt current)
+        (when stmt (push stmt stmts))
+        ;; Same no-progress guard as %js-parse-all-stmts: never spin forever.
+        (when (eq rest current)
+          (error "JS parse error: no progress in statement list at ~S"
+                 (js-peek current)))
+        (setf current rest)))
+    (multiple-value-bind (_ rest) (js-expect :T-RBRACE current)
+      (declare (ignore _))
+      (values (nreverse stmts) rest))))
+
 ;;; ─── Public Entry Points ─────────────────────────────────────────────────────
 
 (defun parse-js-source (source &key strict-mode module-p)
