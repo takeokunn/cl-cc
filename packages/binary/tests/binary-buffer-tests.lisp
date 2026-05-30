@@ -140,24 +140,17 @@
 ;;; Utilities — align-up, string-to-ascii-bytes
 ;;; ------------------------------------------------------------
 
-(deftest align-up-noop-on-already-aligned
-  "align-up returns VALUE when already aligned."
-  (assert-equal 16 (cl-cc/binary::align-up 16 8))
-  (assert-equal 1024 (cl-cc/binary::align-up 1024 256)))
-
-(deftest align-up-rounds-up
-  "align-up rounds up to the next alignment boundary."
-  (assert-equal 16 (cl-cc/binary::align-up 9 8))
-  (assert-equal 16 (cl-cc/binary::align-up 15 8))
-  (assert-equal 256 (cl-cc/binary::align-up 129 128)))
-
-(deftest align-up-zero-is-zero
-  "align-up of 0 returns 0."
-  (assert-equal 0 (cl-cc/binary::align-up 0 8)))
-
-(deftest align-up-alignment-one
-  "align-up with alignment 1 returns VALUE."
-  (assert-equal 42 (cl-cc/binary::align-up 42 1)))
+(deftest-each align-up-cases
+  "align-up rounds VALUE up to the nearest multiple of ALIGNMENT."
+  :cases (("already-aligned-16-by-8"   16   8   16)
+          ("already-aligned-1024"      1024 256 1024)
+          ("9-rounds-to-16"            9    8   16)
+          ("15-rounds-to-16"           15   8   16)
+          ("129-rounds-to-256"         129  128 256)
+          ("zero-stays-zero"           0    8   0)
+          ("alignment-one-passthrough" 42   1   42))
+  (value alignment expected)
+  (assert-equal expected (cl-cc/binary::align-up value alignment)))
 
 (deftest string-to-ascii-bytes-converts-correctly
   "string-to-ascii-bytes converts each character to its ASCII code."

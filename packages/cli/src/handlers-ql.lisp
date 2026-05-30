@@ -158,17 +158,21 @@
       (error "SHA256 mismatch for ~A: expected ~A, got ~A" path expected actual))
     actual))
 
+(defparameter *download-timeout-seconds* 300
+  "Maximum wall-clock seconds allowed for a single file download.")
+
 (defun %download-file (url output &key sha256)
   "Download URL to OUTPUT using curl/fetch and verify optional SHA256."
   (ensure-directories-exist output)
-  (cond
-    ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "curl")))
-     (uiop:run-program (list "curl" "-L" "-f" "-o" (namestring output) url)
-                       :output :interactive :error-output :interactive))
-    ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "fetch")))
-     (uiop:run-program (list "fetch" "-o" (namestring output) url)
-                       :output :interactive :error-output :interactive))
-    (t (error "No HTTP downloader found (need curl or fetch)")))
+  (let ((timeout (write-to-string *download-timeout-seconds*)))
+    (cond
+      ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "curl")))
+       (uiop:run-program (list "curl" "--max-time" timeout "-L" "-f" "-o" (namestring output) url)
+                         :output :interactive :error-output :interactive))
+      ((let ((fe (find-symbol "FIND-EXECUTABLE" :uiop))) (and fe (funcall fe "fetch")))
+       (uiop:run-program (list "fetch" "-T" timeout "-o" (namestring output) url)
+                         :output :interactive :error-output :interactive))
+      (t (error "No HTTP downloader found (need curl or fetch)"))))
   (%verify-sha256 output sha256)
   output)
 
