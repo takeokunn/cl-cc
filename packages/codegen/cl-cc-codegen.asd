@@ -56,6 +56,7 @@
    (:file "wasm-trampoline-emit")
    (:file "wasm-trampoline-build")
       (:file "wasm")
+      (:file "wasm-feature-params")
       (:file "wasm-simd")
       (:file "wasm-emit-data")
      (:file "wasm-emit-sections")

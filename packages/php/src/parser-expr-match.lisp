@@ -1,7 +1,7 @@
 ;;;; frontend/php/parser-expr-match.lisp — PHP Match Expression Parser
 ;;;;
 ;;;; Contains match expression parsing and lowering.
-;;;; Loaded after parser-stmt.lisp because match lowering uses
+;;;; Loaded after parser-stmt-lowering.lisp because match lowering uses
 ;;;; %php-consume-expected and other statement-level helpers.
 (in-package :cl-cc/php)
 

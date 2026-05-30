@@ -1,6 +1,6 @@
 ;;;; tests/unit/parse/php/parser-tests.lisp — PHP Parser tests
 ;;;;
-;;;; Coverage for the dispatch-table statement parsers in parser-stmt.lisp.
+;;;; Coverage for the dispatch-table statement parsers in parser-stmt-decls.lisp.
 ;;;; Each test exercises one *php-stmt-parsers* handler via parse-php-source.
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
@@ -51,11 +51,19 @@
     (assert-true (typep ast 'cl-cc:ast-return-from))
     (assert-null (cl-cc:ast-return-from-name ast))))
 
-;;; ─── :if handler → ast-if ────────────────────────────────────────────────
+;;; ─── Simple statement → AST-type checks ─────────────────────────────────
 
-(deftest php-parser-if-produces-ast-if
-  "if ($cond) { ... } lowers to ast-if."
-  (assert-true (typep (%php-first "<?php if ($x) { echo 1; }") 'cl-cc:ast-if)))
+(deftest-each php-parser-stmt-ast-type
+  "Each statement construct lowers to the expected AST node type."
+  :cases (("if"          "<?php if ($x) { echo 1; }"                          cl-cc:ast-if-p)
+          ("while"       "<?php while ($x) { echo 1; }"                       cl-cc:ast-block-p)
+          ("foreach"     "<?php foreach ($items as $item) { echo $item; }"    cl-cc:ast-let-p)
+          ("foreach-kv"  "<?php foreach ($arr as $k => $v) { echo $v; }"      cl-cc:ast-let-p)
+          ("function"    "<?php function greet($name) { return $name; }"       cl-cc:ast-defun-p))
+  (src pred)
+  (assert-true (funcall pred (%php-first src))))
+
+;;; ─── :if handler → ast-if ────────────────────────────────────────────────
 
 (deftest php-parser-if-else-branch-is-ast-progn
   "if-else lowers to ast-if where the else slot is ast-progn."
@@ -69,12 +77,6 @@
     (assert-true (ast-if-p ast))
     (assert-true (typep (cl-cc:ast-if-else ast) 'cl-cc:ast-quote))))
 
-;;; ─── :while handler → ast-block ──────────────────────────────────────────
-
-(deftest php-parser-while-lowering
-  "while forms lower to a block-based loop AST."
-  (assert-true (typep (%php-first "<?php while ($x) { echo 1; }") 'cl-cc:ast-block)))
-
 ;;; ─── :for handler → ast-progn wrapping while ─────────────────────────────
 
 (deftest php-parser-for-produces-ast-progn
@@ -83,21 +85,7 @@
     (assert-true (typep ast 'cl-cc:ast-progn))
     (assert-= 2 (length (cl-cc:ast-progn-forms ast)))))
 
-;;; ─── :foreach handler → ast-let ──────────────────────────────────────────
-
-(deftest php-parser-foreach-simple-lowers-to-let
-  "foreach ($arr as $item) lowers to ast-let."
-  (assert-true (ast-let-p (%php-first "<?php foreach ($items as $item) { echo $item; }"))))
-
-(deftest php-parser-foreach-key-value-lowers-to-let
-  "foreach ($arr as $k => $v) lowers to ast-let."
-  (assert-true (ast-let-p (%php-first "<?php foreach ($arr as $k => $v) { echo $v; }"))))
-
 ;;; ─── :function handler → ast-defun ───────────────────────────────────────
-
-(deftest php-parser-function-produces-ast-defun
-  "function declaration lowers to ast-defun."
-  (assert-true (typep (%php-first "<?php function greet($name) { return $name; }") 'cl-cc:ast-defun)))
 
 (deftest php-parser-function-name-and-params-captured
   "function add($a, $b) captures upcased name ADD and 2 params."
@@ -264,11 +252,21 @@
   (let ((value (%php-first-binding-value "<?php $result = $cond ? $yes : $no;")))
     (assert-true (cl-cc:ast-if-p value))))
 
-(deftest php-parser-modulo-lowers-to-helper
-  "% lowers to the PHP modulo helper."
-  (let ((value (%php-first-binding-value "<?php $result = 7 % 4;")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-MODULO" (%php-call-name value))))
+;;; ─── Operator helper lowering ────────────────────────────────────────────
+
+(deftest-each php-parser-operator-helper-lowering
+  "Binary/unary operators lower to named PHP helper functions via %php-first-binding-value."
+  :cases (("modulo"         "<?php $r = 7 % 4;"         "%PHP-MODULO")
+          ("bitwise-not"    "<?php $r = ~1;"             "%PHP-BITWISE-NOT")
+          ("spaceship"      "<?php $r = $a <=> $b;"      "%PHP-SPACESHIP")
+          ("str-interp"     "<?php $s = \"Hello $name\";" "%PHP-CONCAT")
+          ("braced-interp"  "<?php $s = \"Hello {$name}\";" "%PHP-CONCAT")
+          ("array-ref"      "<?php $x = $a[0];"          "%PHP-ARRAY-REF")
+          ("bitwise-and"    "<?php $x = $a & $b;"        "%PHP-BITWISE-AND"))
+  (src expected-fn)
+  (let ((val (%php-first-binding-value src)))
+    (assert-true (cl-cc:ast-call-p val))
+    (assert-string= expected-fn (%php-call-name val))))
 
 (deftest php-parser-exponentiation-is-right-associative
   "** parses above unary and associates to the right."
@@ -277,12 +275,6 @@
     (assert-string= "EXPT" (%php-call-name value))
     (assert-true (cl-cc:ast-call-p (second (cl-cc:ast-call-args value))))
     (assert-string= "EXPT" (%php-call-name (second (cl-cc:ast-call-args value))))))
-
-(deftest php-parser-bitwise-not-lowers-to-helper
-  "Unary ~ lowers to the PHP bitwise-not helper."
-  (let ((value (%php-first-binding-value "<?php $result = ~1;")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-BITWISE-NOT" (%php-call-name value))))
 
 (deftest php-parser-shift-operators-lower-to-helpers
   "<< and >> lower to PHP shift helpers."
@@ -304,12 +296,6 @@
     (assert-string= "%PHP-CONCAT" (%php-call-name value))
     (assert-true (cl-cc:ast-binop-p (first (cl-cc:ast-call-args value))))
     (assert-eq '+ (cl-cc:ast-binop-op (first (cl-cc:ast-call-args value))))))
-
-(deftest php-parser-spaceship-lowers-to-helper
-  "<=> lowers to the PHP spaceship helper."
-  (let ((value (%php-first-binding-value "<?php $result = $a <=> $b;")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-SPACESHIP" (%php-call-name value))))
 
 (deftest php-parser-bitwise-operators-lower-to-helpers
   "&, ^, and | lower to PHP bitwise helpers."
@@ -444,7 +430,7 @@
     (assert-= 3 (length (cl-cc:ast-call-args value)))))
 
 (deftest php-parser-array-element-access
-  "$a[0] lowers to the ordered PHP array reference helper."
+  "$a[0] lowers to %PHP-ARRAY-REF with exactly 2 arguments (array + index)."
   (let ((value (%php-first-binding-value "<?php $x = $a[0];")))
     (assert-true (cl-cc:ast-call-p value))
     (assert-string= "%PHP-ARRAY-REF" (%php-call-name value))
@@ -523,18 +509,6 @@
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; ?>hello<?php echo 2;")))
     (assert-= 3 (length asts))
     (assert-true (every #'cl-cc:ast-print-p asts))))
-
-(deftest php-parser-string-interpolation-lowering
-  "Double-quoted $var interpolation lowers to the PHP concat helper."
-  (let ((value (%php-first-binding-value "<?php $s = \"Hello $name\";")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-CONCAT" (%php-call-name value))))
-
-(deftest php-parser-braced-string-interpolation-lowering
-  "Double-quoted {$var} interpolation lowers to the PHP concat helper."
-  (let ((value (%php-first-binding-value "<?php $s = \"Hello {$name}\";")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-CONCAT" (%php-call-name value))))
 
 (deftest php-parser-namespace-use-metadata-preservation
   "namespace/use declarations annotate subsequent top-level AST nodes."
@@ -687,12 +661,6 @@
   "A reference expression must not silently compile as a by-value expression."
   (%php-assert-full-source-unsupported "<?php $x = &$y;"))
 
-(deftest php-parser-bitwise-and-is-supported
-  "Single & in expression position lowers to the PHP bitwise-and helper."
-  (let ((value (%php-first-binding-value "<?php $x = $a & $b;")))
-    (assert-true (cl-cc:ast-call-p value))
-    (assert-string= "%PHP-BITWISE-AND" (%php-call-name value))))
-
 (deftest php-parser-trait-is-unsupported
   "Traits must not silently compile as ordinary CLOS classes."
   (let ((ast (%php-first "<?php trait T { public $x; }")))
@@ -755,18 +723,13 @@
     (assert-string= "%PHP-ENUM-TRY-FROM" (%php-call-name try-from-call))
     (assert-string= "%PHP-ENUM-CASES" (%php-call-name cases-call))))
 
-(deftest php-parser-closure-use-reference-signals
-  "Closure use-by-reference is rejected instead of becoming a by-value capture."
-  (assert-signals error
-    (%php-first "<?php $fn = function() use (&$x) { return $x; };")))
-
-(deftest php-parser-function-reference-param-signals
-  "Function by-reference parameters are rejected with a clear parse error."
-  (assert-signals error (%php-first "<?php function f(&$x) { return $x; }")))
-
-(deftest php-parser-foreach-reference-value-signals
-  "Foreach by-reference values are rejected with a clear parse error."
-  (assert-signals error (%php-first "<?php foreach ($items as &$item) { echo $item; }")))
+(deftest-each php-parser-reference-syntax-rejected
+  "All by-reference PHP syntax is rejected with a parse error."
+  :cases (("closure-use-ref"    "<?php $fn = function() use (&$x) { return $x; };")
+          ("function-ref-param" "<?php function f(&$x) { return $x; }")
+          ("foreach-ref-value"  "<?php foreach ($items as &$item) { echo $item; }"))
+  (src)
+  (assert-signals error (%php-first src)))
 
 (deftest php-parser-class-typed-properties
   "Characterization: class typed properties should preserve their declared PHP types on slot definitions."
@@ -851,17 +814,13 @@ precede a parameter's type in __construct."
               "<?php class P { public function __construct(int $a, public readonly ?string $b = null) {} }")))
     (assert-true (cl-cc:ast-defclass-p ast))))
 
-(deftest php-parser-call-spread-argument
-  "foo(...$args) parses a spread argument in a call."
-  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(...$args);"))))
-
-(deftest php-parser-call-named-arguments
-  "foo(name: 'x', age: 5) parses named arguments."
-  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo(name: 'x', age: 5);"))))
-
-(deftest php-parser-call-named-mixed
-  "foo('pos', name: 'x') mixes a positional and a named argument."
-  (assert-true (cl-cc:ast-call-p (%php-first "<?php foo('pos', name: 'x');"))))
+(deftest-each php-parser-call-syntax-variants
+  "Modern PHP call syntax variants parse without error."
+  :cases (("spread-arg"    "<?php foo(...$args);"                cl-cc:ast-call-p)
+          ("named-args"    "<?php foo(name: 'x', age: 5);"      cl-cc:ast-call-p)
+          ("named-mixed"   "<?php foo('pos', name: 'x');"       cl-cc:ast-call-p))
+  (src pred)
+  (assert-true (funcall pred (%php-first src))))
 
 (deftest php-parser-first-class-callable
   "strlen(...) parses as a first-class callable reference."
@@ -869,13 +828,12 @@ precede a parameter's type in __construct."
     ;; assignment lowers to ast-let/ast-setq with a call value; just ensure it parsed.
     (assert-true ast)))
 
-(deftest php-parser-array-spread
-  "[...$b, ...$c] parses spread elements in an array literal."
-  (assert-true (%php-first "<?php $a = [...$b, ...$c];")))
-
-(deftest php-parser-array-spread-mixed
-  "[1, ...$b, 2] mixes a spread element with plain elements."
-  (assert-true (%php-first "<?php $a = [1, ...$b, 2];")))
+(deftest-each php-parser-array-spread-syntax
+  "Array spread syntax parses without error."
+  :cases (("spread-only"  "<?php $a = [...$b, ...$c];")
+          ("spread-mixed" "<?php $a = [1, ...$b, 2];"))
+  (src)
+  (assert-true (%php-first src)))
 
 (deftest php-parser-anonymous-class
   "new class { ... } parses to a progn defining and instantiating an anon class."
@@ -888,14 +846,11 @@ precede a parameter's type in __construct."
               "<?php $o = new class(5) extends Base { public function __construct(public int $n) {} };")))
     (assert-true ast)))
 
-(deftest php-parser-list-destructuring-assignment
-  "[$a, $b] = $arr lowers to a let binding each target to %php-array-ref."
-  (let ((ast (%php-first "<?php [$a, $b] = $arr;")))
+(deftest-each php-parser-list-destructuring
+  "[$a, $b, ...] = $arr lowers to ast-let with the correct binding count."
+  :cases (("two-targets"   "<?php [$a, $b] = $arr;"        2)
+          ("three-targets" "<?php [$x, $y, $z] = $data;"   3))
+  (src expected-bindings)
+  (let ((ast (%php-first src)))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (= 2 (length (cl-cc:ast-let-bindings ast))))))
-
-(deftest php-parser-list-destructuring-three
-  "[$x, $y, $z] = $data binds three targets."
-  (let ((ast (%php-first "<?php [$x, $y, $z] = $data;")))
-    (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (= 3 (length (cl-cc:ast-let-bindings ast))))))
+    (assert-= expected-bindings (length (cl-cc:ast-let-bindings ast)))))

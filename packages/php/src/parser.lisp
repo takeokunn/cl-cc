@@ -275,4 +275,5 @@ syntax such as Foo\\{Bar, Baz}."
 ;;; Expression parser (php-parse-primary, php-parse-new, php-parse-postfix,
 ;;; php-parse-unary, php-parse-binop, php-parse-mul/add/cmp/and/or,
 ;;; php-parse-expr, php-parse-arglist) is in parser-expr.lisp (loads next).
-;;; Statement parser and top-level entry point are in parser-stmt.lisp.
+;;; Statement infrastructure/lowering is in parser-stmt-lowering.lisp;
+;;; declaration structures and registered parsers are in parser-stmt-decls.lisp.

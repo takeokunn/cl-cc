@@ -203,52 +203,41 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 (defun %test-count-type (type insts)
   (count-if (lambda (inst) (typep inst type)) insts))
 
-(deftest fr-099-fma-recognizes-mul-plus-accumulator
-  "FR-099: (+ (* 2.0 3.0) 4.0)-shape float VM code becomes one vm-fma."
-  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
-                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)))
-         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-fma out))
-    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-float-mul out))
-    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-float-add out))
-    (assert-equal '(:fma :r4 :r0 :r1 :r2) (cl-cc/vm:instruction->sexp (first out)))))
-
-(deftest fr-099-fma-recognizes-commuted-add
-  "FR-099: (+ 4.0 (* 2.0 3.0))-shape float VM code becomes one vm-fma."
-  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
-                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r2 :rhs :r3)))
-         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-fma out))
-    (assert-equal '(:fma :r4 :r0 :r1 :r2) (cl-cc/vm:instruction->sexp (first out)))))
-
-(deftest fr-099-fma-does-not-fuse-multiple-consumers
-  "FR-099: a multiply result used by two adds is not fused."
-  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
-                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)
-                      (cl-cc/vm::make-vm-float-add :dst :r5 :lhs :r3 :rhs :r6)))
-         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
-    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-mul out))
-    (assert-= 2 (%test-count-type 'cl-cc/vm::vm-float-add out))))
-
-(deftest fr-099-fma-does-not-fuse-integer-arithmetic
-  "FR-099: integer vm-mul/vm-add patterns are not converted to vm-fma."
-  (let* ((insts (list (make-vm-mul :dst :r3 :lhs :r0 :rhs :r1)
-                      (make-vm-add :dst :r4 :lhs :r3 :rhs :r2)))
-         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
-    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-mul out))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-add out))))
-
-(deftest fr-099-fma-does-not-cross-basic-block-boundary
-  "FR-099: FMA recognition does not fuse across labels/control-flow block boundaries."
-  (let* ((insts (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
-                      (make-vm-label :name "next")
-                      (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)))
-         (out (cl-cc/optimize::opt-pass-fma-recognition insts)))
-    (assert-= 0 (%test-count-type 'cl-cc/vm::vm-fma out))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-mul out))
-    (assert-= 1 (%test-count-type 'cl-cc/vm::vm-float-add out))))
+(deftest-each fr-099-fma-recognition-cases
+  "FR-099: opt-pass-fma-recognition fuses/rejects float mul+add patterns as expected."
+  :cases (("mul-plus-accumulator"
+           (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                 (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2))
+           1 0 0)
+          ("commuted-add"
+           (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                 (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r2 :rhs :r3))
+           1 0 0)
+          ("multiple-consumers-no-fuse"
+           (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                 (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2)
+                 (cl-cc/vm::make-vm-float-add :dst :r5 :lhs :r3 :rhs :r6))
+           0 1 2)
+          ("integer-arithmetic-no-fuse"
+           (list (make-vm-mul :dst :r3 :lhs :r0 :rhs :r1)
+                 (make-vm-add :dst :r4 :lhs :r3 :rhs :r2))
+           0 nil nil)
+          ("cross-block-boundary-no-fuse"
+           (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
+                 (make-vm-label :name "next")
+                 (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2))
+           0 1 1))
+  (insts expected-fma expected-float-mul-or-mul expected-float-add-or-add)
+  (let ((out (cl-cc/optimize::opt-pass-fma-recognition insts)))
+    (assert-= expected-fma (%test-count-type 'cl-cc/vm::vm-fma out))
+    (when expected-float-mul-or-mul
+      (let ((float-mul-count (%test-count-type 'cl-cc/vm::vm-float-mul out))
+            (int-mul-count   (%test-count-type 'cl-cc/vm::vm-mul out)))
+        (assert-= expected-float-mul-or-mul (+ float-mul-count int-mul-count))))
+    (when expected-float-add-or-add
+      (let ((float-add-count (%test-count-type 'cl-cc/vm::vm-float-add out))
+            (int-add-count   (%test-count-type 'cl-cc/vm::vm-add out)))
+        (assert-= expected-float-add-or-add (+ float-add-count int-add-count))))))
 
 ;;; ─── *verify-optimizer-instructions* integration ──────────────────────────
 

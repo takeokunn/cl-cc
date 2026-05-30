@@ -23,6 +23,7 @@
    (:file "exports-conditions")
    (:file "package")
     (:file "vm")
+    (:file "vm-readtable")
     (:file "vm-dsl")
     (:file "vm-tier")
     (:file "vm-state-init")

@@ -178,7 +178,7 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
       (vm-cdr         . ,#'cdr)
       (vm-string-upcase . ,#'string-upcase)
       (vm-string-downcase . ,#'string-downcase)
-      (vm-not         . ,(lambda (x) (if (null x) t nil)))))
+      (vm-not         . ,#'not)))
   "Maps unary VM instruction types to their CL fold functions.")
 
 (defparameter *opt-type-pred-fold-table*
@@ -188,7 +188,7 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
      (vm-symbol-p        . ,#'symbolp)
      (vm-number-p        . ,#'numberp)
       (vm-integer-p       . ,#'integerp)
-      (vm-function-p      . ,(lambda (x) (declare (ignore x)) nil))
+      (vm-function-p      . ,(constantly nil))
       (vm-stringp         . ,#'stringp)
       (vm-listp           . ,#'listp)
       (vm-vectorp         . ,#'vectorp)
@@ -341,6 +341,61 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 (defun %opt-commutative-inst-p (inst)
   "Return T if INST is a commutative binary instruction."
   (member (type-of inst) *opt-commutative-inst-types* :test #'eq))
+
+;;; ─── Control/Label Type Set ──────────────────────────────────────────────
+
+(deftype opt-control-or-label ()
+  "CL type specifier for instructions that break straight-line sequences."
+  '(or vm-label vm-jump vm-jump-zero vm-ret vm-call vm-tail-call vm-apply))
+
+;;; ─── Unary Fold Eligibility ──────────────────────────────────────────────
+
+(defparameter *opt-unary-fold-eligible-predicates*
+  (%alist->eq-hash-table
+   `((vm-string-length  . ,#'stringp)
+     (vm-string-upcase  . ,#'stringp)
+     (vm-string-downcase . ,#'stringp)
+     (vm-length         . ,(lambda (v) (or (vectorp v)
+                                           (and (listp v) (ignore-errors (length v) t)))))
+     (vm-car            . ,(lambda (v) (or (consp v) (null v))))
+     (vm-cdr            . ,(lambda (v) (or (consp v) (null v))))
+     (vm-not            . ,(constantly t))))
+  "Maps unary VM instruction types to their constant-eligibility predicates.
+   Types absent from this table use NUMBERP as the default eligibility check.")
+
+;;; ─── Auto-Vectorization SIMD Op Mapping ─────────────────────────────────
+
+;;; ─── Auto-Vectorization Comparison Clone Table ───────────────────────────
+
+(deftype opt-autovec-cmp ()
+  "CL type specifier for supported counted-loop comparison instructions."
+  '(or vm-lt vm-le))
+
+(defparameter *opt-autovec-cmp-clone-table*
+  (%alist->eq-hash-table
+   `((vm-lt . ,(lambda (dst lhs rhs) (make-vm-lt :dst dst :lhs lhs :rhs rhs)))
+     (vm-le . ,(lambda (dst lhs rhs) (make-vm-le :dst dst :lhs lhs :rhs rhs)))))
+  "Maps comparison instruction types to clone constructors.
+   Used by %opt-autovec-clone-cmp.")
+
+(defparameter *opt-autovec-scalar-to-simd-op*
+  (%alist->eq-hash-table
+   '((vm-add          . :add)
+     (vm-integer-add  . :add)
+     (vm-add-checked  . :add)
+     (vm-sub          . :sub)
+     (vm-integer-sub  . :sub)
+     (vm-sub-checked  . :sub)
+     (vm-mul          . :mul)
+     (vm-integer-mul  . :mul)
+     (vm-mul-checked  . :mul)
+     (vm-logand       . :logand)
+     (vm-logior       . :logior)
+     (vm-logxor       . :logxor)
+     (vm-min          . :min)
+     (vm-max          . :max)))
+  "Maps scalar binary VM instruction types to backend-neutral SIMD op keywords.
+   Used by %opt-autovec-op-kind and the SLP vectorizer.")
 
 ;;; *opt-algebraic-identity-rules*, classification predicates
 ;;; (opt-binary-lhs-rhs-p, opt-unary-src-p, opt-foldable-unary-arith-p,

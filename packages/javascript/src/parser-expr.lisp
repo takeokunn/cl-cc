@@ -11,109 +11,73 @@
 (in-package :cl-cc/javascript)
 
 ;;; ─── Pratt Precedence Table ──────────────────────────────────────────────────
+;;;
+;;; Data table for operator string → (prec right-assoc-p).
+;;; Type-keyed specials (comma, ternary, instanceof, in, member) remain in the
+;;; dispatch function since they match on token type, not string value.
+
+(defparameter *js-op-infix-prec*
+  (let ((ht (make-hash-table :test #'equal)))
+    ;; Assignment (right-associative, prec 2)
+    (dolist (op '("=" "+=" "-=" "*=" "/=" "%=" "**="
+                  "<<=" ">>=" ">>>=" "&=" "|=" "^="
+                  "&&=" "||=" "??="))
+      (setf (gethash op ht) '(2 t)))
+    ;; Remaining binary ops (left-associative unless noted)
+    (dolist (entry '(("??"  5 nil) ("||"  6 nil) ("&&"  7 nil)
+                     ("|"   8 nil) ("^"   9 nil) ("&"  10 nil)
+                     ("=="  11 nil) ("!="  11 nil) ("===" 11 nil) ("!==" 11 nil)
+                     ("<"   12 nil) (">"   12 nil) ("<="  12 nil) (">="  12 nil)
+                     ("<<"  13 nil) (">>"  13 nil) (">>>" 13 nil)
+                     ("+"   14 nil) ("-"   14 nil)
+                     ("*"   15 nil) ("/"   15 nil) ("%"   15 nil)
+                     ("**"  16 t)   ("?."  19 nil)))
+      (setf (gethash (first entry) ht) (rest entry)))
+    ht)
+  "Maps JS operator strings to (prec right-assoc-p). Used by js-infix-prec.")
 
 (defun js-infix-prec (stream)
   "Return (values prec right-assoc-p) for current token as infix op, or (values 0 nil).
 
-Precedence levels:
-  1  comma
-  2  assignment (right-assoc): = += -= etc.
-  4  ternary ?:
-  5  nullish ??
-  6  logical-or ||
-  7  logical-and &&
-  8  bitwise-or |
-  9  bitwise-xor ^
-  10 bitwise-and &
-  11 equality == != === !==
-  12 relational < > <= >= instanceof in
-  13 shift << >> >>>
-  14 additive + -
-  15 multiplicative * / %
-  16 exponentiation ** (right-assoc)
-  19 member . ?. [ ( (postfix)"
+Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
+  11=equality 12=relational 13=shift 14=additive 15=multiplicative 16=** 19=member"
   (let ((type (js-peek-type stream))
         (val  (js-peek-value stream)))
     (cond
-      ;; Comma — lowest
-      ((eq type :T-COMMA)
-       (values 1 nil))
-      ;; Assignment operators (right-associative)
-      ((and (eq type :T-OP)
-            (member val '("=" "+=" "-=" "*=" "/=" "%=" "**="
-                          "<<=" ">>=" ">>>=" "&=" "|=" "^="
-                          "&&=" "||=" "??=")
-                    :test #'string=))
-       (values 2 t))
-      ;; Ternary ? (handled specially in js-parse-expr, but give it a prec)
-      ((eq type :T-QUESTION)
-       (values 4 nil))
-      ;; Nullish coalescing ??
-      ((and (eq type :T-OP) (string= val "??"))
-       (values 5 nil))
-      ;; Logical OR ||
-      ((and (eq type :T-OP) (string= val "||"))
-       (values 6 nil))
-      ;; Logical AND &&
-      ((and (eq type :T-OP) (string= val "&&"))
-       (values 7 nil))
-      ;; Bitwise OR |
-      ((and (eq type :T-OP) (string= val "|"))
-       (values 8 nil))
-      ;; Bitwise XOR ^
-      ((and (eq type :T-OP) (string= val "^"))
-       (values 9 nil))
-      ;; Bitwise AND &
-      ((and (eq type :T-OP) (string= val "&"))
-       (values 10 nil))
-      ;; Equality
-      ((and (eq type :T-OP)
-            (member val '("==" "!=" "===" "!==") :test #'string=))
-       (values 11 nil))
-      ;; Relational / in / instanceof
-      ((or (and (eq type :T-OP)
-                (member val '("<" ">" "<=" ">=") :test #'string=))
-           (eq type :T-INSTANCEOF)
-           (eq type :T-IN))
-       (values 12 nil))
-      ;; Shift
-      ((and (eq type :T-OP)
-            (member val '("<<" ">>" ">>>") :test #'string=))
-       (values 13 nil))
-      ;; Additive
-      ((and (eq type :T-OP) (member val '("+" "-") :test #'string=))
-       (values 14 nil))
-      ;; Multiplicative
-      ((and (eq type :T-OP) (member val '("*" "/" "%") :test #'string=))
-       (values 15 nil))
-      ;; Exponentiation (right-associative)
-      ((and (eq type :T-OP) (string= val "**"))
-       (values 16 t))
-      ;; Member access / call (postfix — handled in js-parse-postfix)
-      ((or (eq type :T-DOT)
-           (eq type :T-LBRACKET)
-           (eq type :T-LPAREN)
-           (and (eq type :T-OP) (string= val "?.")))
-       (values 19 nil))
-      ;; Not an infix operator
-      (t
-       (values 0 nil)))))
+      ((eq type :T-COMMA)    (values 1 nil))
+      ((eq type :T-QUESTION) (values 4 nil))
+      ((or (eq type :T-INSTANCEOF) (eq type :T-IN)) (values 12 nil))
+      ((or (eq type :T-DOT) (eq type :T-LBRACKET) (eq type :T-LPAREN)) (values 19 nil))
+      ((eq type :T-OP)
+       (let ((entry (gethash val *js-op-infix-prec*)))
+         (if entry (values (first entry) (second entry)) (values 0 nil))))
+      (t (values 0 nil)))))
 
 ;;; ─── Operator Lowering ───────────────────────────────────────────────────────
 
+(defparameter *js-direct-binop-keywords*
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (entry '(("+" . :+) ("-" . :-) ("*" . :*) ("/" . :/) ("%" . :%)
+                     ("**" . :**) ("<" . :<) (">" . :>) ("<=" . :<=) (">=" . :>=)))
+      (setf (gethash (car entry) ht) (cdr entry)))
+    ht)
+  "Maps arithmetic/comparison operator strings to AST binop keywords.")
+
 (defun js-lower-binop-keyword (op-str)
-  "Map operator string to AST binop keyword or nil for runtime-dispatch ops."
-  (cond ((string= op-str "+")   :+)
-        ((string= op-str "-")   :-)
-        ((string= op-str "*")   :*)
-        ((string= op-str "/")   :/)
-        ((string= op-str "%")   :%)
-        ((string= op-str "**")  :**)
-        ((string= op-str "<")   :<)
-        ((string= op-str ">")   :>)
-        ((string= op-str "<=")  :<=)
-        ((string= op-str ">=")  :>=)
-        (t nil)))
+  "Map operator string to AST binop keyword, or NIL for runtime-dispatch ops."
+  (gethash op-str *js-direct-binop-keywords*))
+
+(defparameter *js-binop-runtime-helpers*
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (entry '(("===" . %js-strict-eq) ("==" . %js-loose-eq)
+                     ("|"   . %js-bitwise-or) ("^"  . %js-bitwise-xor)
+                     ("&"   . %js-bitwise-and)
+                     ("<<"  . %js-shift-left)  (">>" . %js-shift-right)
+                     (">>>" . %js-unsigned-shift-right)
+                     ("instanceof" . %js-instanceof) ("in" . %js-in)))
+      (setf (gethash (car entry) ht) (cdr entry)))
+    ht)
+  "Maps operator strings to their CPS runtime helper symbols.")
 
 (defun %js-call (name &rest args)
   "Build an AST call to a JS runtime helper NAME with ARGS."
@@ -121,57 +85,28 @@ Precedence levels:
                  :args args))
 
 (defun %js-lower-binary (op-str lhs rhs)
-  "Lower a binary operator string + lhs + rhs to the appropriate AST."
-  (let ((kw (js-lower-binop-keyword op-str)))
-    (cond
-      ;; Direct ast-binop for arithmetic/comparison ops
-      (kw
-       (make-ast-binop :op kw :lhs lhs :rhs rhs))
-      ;; Strict equality ===
-      ((string= op-str "===")
-       (%js-call '%js-strict-eq lhs rhs))
-      ;; Loose equality ==
-      ((string= op-str "==")
-       (%js-call '%js-loose-eq lhs rhs))
-      ;; Strict inequality !==
-      ((string= op-str "!==")
-       (make-ast-call :func (make-ast-var :name 'not)
-                      :args (list (%js-call '%js-strict-eq lhs rhs))))
-      ;; Loose inequality !=
-      ((string= op-str "!=")
-       (make-ast-call :func (make-ast-var :name 'not)
-                      :args (list (%js-call '%js-loose-eq lhs rhs))))
-      ;; Nullish coalescing ??
-      ((string= op-str "??")
-       (%js-lower-nullish-coalesce lhs rhs))
-      ;; Logical OR
-      ((string= op-str "||")
-       (make-ast-binop :op :or :lhs lhs :rhs rhs))
-      ;; Logical AND
-      ((string= op-str "&&")
-       (make-ast-binop :op :and :lhs lhs :rhs rhs))
-      ;; Bitwise ops → runtime helpers
-      ((string= op-str "|")
-       (%js-call '%js-bitwise-or lhs rhs))
-      ((string= op-str "^")
-       (%js-call '%js-bitwise-xor lhs rhs))
-      ((string= op-str "&")
-       (%js-call '%js-bitwise-and lhs rhs))
-      ((string= op-str "<<")
-       (%js-call '%js-shift-left lhs rhs))
-      ((string= op-str ">>")
-       (%js-call '%js-shift-right lhs rhs))
-      ((string= op-str ">>>")
-       (%js-call '%js-unsigned-shift-right lhs rhs))
-      ;; instanceof / in
-      ((string= op-str "instanceof")
-       (%js-call '%js-instanceof lhs rhs))
-      ((string= op-str "in")
-       (%js-call '%js-in lhs rhs))
-      ;; Fallback: call a runtime dispatch helper
-      (t
-       (%js-call '%js-binop (make-ast-quote :value (intern op-str :keyword))
-                 lhs rhs)))))
+  "Lower a binary operator string + lhs + rhs to the appropriate AST.
+   Dispatch is data-driven via *js-direct-binop-keywords* and *js-binop-runtime-helpers*."
+  (cond
+    ;; Direct AST binop (arithmetic, comparison) — O(1) table lookup
+    ((gethash op-str *js-direct-binop-keywords*)
+     (make-ast-binop :op (gethash op-str *js-direct-binop-keywords*) :lhs lhs :rhs rhs))
+    ;; Logical short-circuit operators — require special AST forms
+    ((string= op-str "||") (make-ast-binop :op :or  :lhs lhs :rhs rhs))
+    ((string= op-str "&&") (make-ast-binop :op :and :lhs lhs :rhs rhs))
+    ((string= op-str "??") (%js-lower-nullish-coalesce lhs rhs))
+    ;; Negated equality — wrap in NOT
+    ((string= op-str "!==")
+     (make-ast-call :func (make-ast-var :name 'not)
+                    :args (list (%js-call '%js-strict-eq lhs rhs))))
+    ((string= op-str "!=")
+     (make-ast-call :func (make-ast-var :name 'not)
+                    :args (list (%js-call '%js-loose-eq lhs rhs))))
+    ;; Runtime helpers — O(1) table lookup
+    ((gethash op-str *js-binop-runtime-helpers*)
+     (%js-call (gethash op-str *js-binop-runtime-helpers*) lhs rhs))
+    ;; Fallback: runtime dispatch
+    (t (%js-call '%js-binop (make-ast-quote :value (intern op-str :keyword)) lhs rhs))))
 
 (defun %js-lower-nullish-coalesce (lhs rhs)
   "Lower LHS ?? RHS without evaluating LHS twice."
@@ -183,26 +118,27 @@ Precedence levels:
                   :then (make-ast-var :name tmp)
                   :else rhs)))))
 
+(defun %js-logical-assign-short-circuit-p (op-str)
+  "Return :truthy for &&=, :falsy for ||=, :non-null for ??="
+  (cond ((string= op-str "&&=") :truthy)
+        ((string= op-str "||=") :falsy)
+        ((string= op-str "??=") :non-null)
+        (t (error "JS parse error: unknown logical assign op ~S" op-str))))
+
 (defun %js-lower-logical-assign (op-str lhs-sym rhs)
-  "Lower &&= ||= ??= compound logical assignment on a variable."
-  (let ((lhs-var (make-ast-var :name lhs-sym)))
-    (cond
-      ((string= op-str "&&=")
-       (make-ast-if
-        :cond (%js-call '%js-truthy lhs-var)
-        :then (make-ast-setq :var lhs-sym :value rhs)
-        :else lhs-var))
-      ((string= op-str "||=")
-       (make-ast-if
-        :cond (%js-call '%js-truthy lhs-var)
-        :then lhs-var
-        :else (make-ast-setq :var lhs-sym :value rhs)))
-      ((string= op-str "??=")
-       (make-ast-if
-        :cond (%js-call '%js-not-nullish lhs-var)
-        :then lhs-var
-        :else (make-ast-setq :var lhs-sym :value rhs)))
-      (t (error "JS parse error: unknown logical assign op ~S" op-str)))))
+  "Lower &&= ||= ??= compound logical assignment on a variable.
+   CPS-style: dispatches through %js-logical-assign-short-circuit-p to a uniform template."
+  (let* ((lhs-var (make-ast-var :name lhs-sym))
+         (kind    (%js-logical-assign-short-circuit-p op-str))
+         (test    (ecase kind
+                    (:truthy   (%js-call '%js-truthy lhs-var))
+                    (:falsy    (%js-call '%js-truthy lhs-var))
+                    (:non-null (%js-call '%js-not-nullish lhs-var))))
+         (setq    (make-ast-setq :var lhs-sym :value rhs)))
+    (ecase kind
+      (:truthy   (make-ast-if :cond test :then setq    :else lhs-var))
+      (:falsy    (make-ast-if :cond test :then lhs-var :else setq))
+      (:non-null (make-ast-if :cond test :then lhs-var :else setq)))))
 
 (defun %js-compound-rhs (op-str lhs-var rhs)
   "Compute the rhs value for compound assignment op like +=, -=, etc."

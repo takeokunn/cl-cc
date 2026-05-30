@@ -32,7 +32,8 @@
   (branch-probability-hints nil :type list)
   (code-placement-hints nil :type list)
   (warnings nil :type list)
-  (errors nil :type list))
+  (errors nil :type list)
+  (coverage nil))
 
 ;;; ── FR-351 MC/DC coverage metadata ────────────────────────────────────────
 
@@ -369,13 +370,6 @@ Signals UNRESOLVED-FORWARD-REFERENCE-ERROR when ERRORP and refs remain."
                       osr))))
     (values table (nreverse osr))))
 
-(defun %make-toplevel-recovery-error (form-index form condition)
-  "Return a plist describing a recovered top-level compilation CONDITION."
-  (list :form-index form-index
-        :form form
-        :condition condition
-        :message (princ-to-string condition)))
-
 (defun %copy-compiler-hash-table (table)
   "Return a shallow copy of compiler context hash TABLE."
   (let ((copy (make-hash-table :test (hash-table-test table)
@@ -422,76 +416,91 @@ Signals UNRESOLVED-FORWARD-REFERENCE-ERROR when ERRORP and refs remain."
   compile-time-function-env
   opts)
 
+;;; Each entry: (field-name copy-fn)
+;;;   field-name  — the short field name shared between ctx-<field> and
+;;;                 toplevel-compilation-snapshot-<field> accessors
+;;;   copy-fn     — unary copy function symbol, or NIL for scalars (no copy)
+;;;
+;;; %snapshot-toplevel-compilation-state and %restore-toplevel-compilation-state
+;;; iterate this table via *toplevel-snapshot-slot-fns* (resolved at load time),
+;;; avoiding 60+ lines of repetitive setf forms.
+(defparameter *toplevel-snapshot-slots*
+  '((instructions              copy-list)
+    (next-register             nil)
+    (next-label                nil)
+    (env                       copy-tree)
+    (type-env                  nil)
+    (safety                    nil)
+    (block-env                 copy-tree)
+    (tagbody-env               copy-tree)
+    (global-functions          %copy-compiler-hash-table)
+    (global-function-mv-arities %copy-compiler-hash-table)
+    (function-conventions      %copy-compiler-hash-table)
+    (global-variables          %copy-compiler-hash-table)
+    (global-var-cache          copy-list)
+    (global-classes            %copy-compiler-hash-table)
+    (global-generics           %copy-compiler-hash-table)
+    (global-generic-params     %copy-compiler-hash-table)
+    (current-function-name     nil)
+    (current-function-label    nil)
+    (current-function-params   copy-list)
+    (current-function-simple-p nil)
+    (pending-inline-policy     nil)
+    (top-level-p               nil)
+    (boxed-vars                copy-list)
+    (noescape-cons-bindings    copy-tree)
+    (noescape-array-bindings   copy-tree)
+    (noescape-instance-bindings copy-tree)
+    (noescape-closure-bindings  copy-tree)
+    (hash-table-test-bindings  copy-tree)
+    (tail-position             nil)
+    (diagnostics               copy-list))
+  "Fields shared between compiler-context and toplevel-compilation-snapshot.
+Each entry (field-name copy-fn): copy-fn NIL = scalar, else a unary copy function.")
+
+(defun %build-snapshot-slot-fns ()
+  "Resolve accessor/writer functions for *toplevel-snapshot-slots* once at load time.
+Returns a list of (ctx-reader snap-writer snap-reader ctx-writer copy-fn) tuples."
+  (mapcar (lambda (entry)
+            (destructuring-bind (field copy-fn) entry
+              (let* ((ctx-sym  (intern (format nil "CTX-~A" field) :cl-cc/compile))
+                     (snap-sym (intern (format nil "TOPLEVEL-COMPILATION-SNAPSHOT-~A" field) :cl-cc/compile)))
+                (list (fdefinition ctx-sym)
+                      (fdefinition (list 'setf snap-sym))
+                      (fdefinition snap-sym)
+                      (fdefinition (list 'setf ctx-sym))
+                      (and copy-fn (fdefinition copy-fn))))))
+          *toplevel-snapshot-slots*))
+
+;;; Resolved at load time to avoid per-call fdefinition lookups.
+(defvar *toplevel-snapshot-slot-fns* nil)
+
+(defun %ensure-snapshot-slot-fns ()
+  (or *toplevel-snapshot-slot-fns*
+      (setf *toplevel-snapshot-slot-fns* (%build-snapshot-slot-fns))))
+
 (defun %snapshot-toplevel-compilation-state (ctx opts)
   "Snapshot CTX and dynamic top-level compilation state before one FORM."
-  (make-toplevel-compilation-snapshot
-   :instructions (copy-list (ctx-instructions ctx))
-   :next-register (ctx-next-register ctx)
-   :next-label (ctx-next-label ctx)
-   :env (copy-tree (ctx-env ctx))
-   :type-env (ctx-type-env ctx)
-   :safety (ctx-safety ctx)
-   :block-env (copy-tree (ctx-block-env ctx))
-   :tagbody-env (copy-tree (ctx-tagbody-env ctx))
-    :global-functions (%copy-compiler-hash-table (ctx-global-functions ctx))
-    :global-function-mv-arities (%copy-compiler-hash-table (ctx-global-function-mv-arities ctx))
-    :function-conventions (%copy-compiler-hash-table (ctx-function-conventions ctx))
-    :global-variables (%copy-compiler-hash-table (ctx-global-variables ctx))
-    :global-var-cache (copy-list (ctx-global-var-cache ctx))
-    :global-classes (%copy-compiler-hash-table (ctx-global-classes ctx))
-   :global-generics (%copy-compiler-hash-table (ctx-global-generics ctx))
-   :global-generic-params (%copy-compiler-hash-table (ctx-global-generic-params ctx))
-   :current-function-name (ctx-current-function-name ctx)
-   :current-function-label (ctx-current-function-label ctx)
-   :current-function-params (copy-list (ctx-current-function-params ctx))
-   :current-function-simple-p (ctx-current-function-simple-p ctx)
-   :pending-inline-policy (ctx-pending-inline-policy ctx)
-   :top-level-p (ctx-top-level-p ctx)
-   :boxed-vars (copy-list (ctx-boxed-vars ctx))
-   :noescape-cons-bindings (copy-tree (ctx-noescape-cons-bindings ctx))
-   :noescape-array-bindings (copy-tree (ctx-noescape-array-bindings ctx))
-   :noescape-instance-bindings (copy-tree (ctx-noescape-instance-bindings ctx))
-   :noescape-closure-bindings (copy-tree (ctx-noescape-closure-bindings ctx))
-    :hash-table-test-bindings (copy-tree (ctx-hash-table-test-bindings ctx))
-    :tail-position (ctx-tail-position ctx)
-    :diagnostics (copy-list (ctx-diagnostics ctx))
-    :compile-time-value-env (copy-list *compile-time-value-env*)
-   :compile-time-function-env (copy-list *compile-time-function-env*)
-   :opts (copy-list opts)))
+  (let ((snap (make-toplevel-compilation-snapshot
+               :compile-time-value-env    (copy-list *compile-time-value-env*)
+               :compile-time-function-env (copy-list *compile-time-function-env*)
+               :opts                      (copy-list opts))))
+    (dolist (fns (%ensure-snapshot-slot-fns) snap)
+      (destructuring-bind (ctx-reader snap-writer snap-reader ctx-writer copy-fn) fns
+        (declare (ignore snap-reader ctx-writer))
+        (let* ((raw (funcall ctx-reader ctx))
+               (val (if copy-fn (funcall copy-fn raw) raw)))
+          (funcall snap-writer val snap))))))
 
 (defun %restore-toplevel-compilation-state (ctx snapshot)
   "Restore CTX and dynamic state from SNAPSHOT. Returns restored compile opts."
-  (setf (ctx-instructions ctx) (copy-list (toplevel-compilation-snapshot-instructions snapshot)))
-  (setf (ctx-next-register ctx) (toplevel-compilation-snapshot-next-register snapshot))
-  (setf (ctx-next-label ctx) (toplevel-compilation-snapshot-next-label snapshot))
-  (setf (ctx-env ctx) (copy-tree (toplevel-compilation-snapshot-env snapshot)))
-  (setf (ctx-type-env ctx) (toplevel-compilation-snapshot-type-env snapshot))
-  (setf (ctx-safety ctx) (toplevel-compilation-snapshot-safety snapshot))
-  (setf (ctx-block-env ctx) (copy-tree (toplevel-compilation-snapshot-block-env snapshot)))
-  (setf (ctx-tagbody-env ctx) (copy-tree (toplevel-compilation-snapshot-tagbody-env snapshot)))
-  (setf (ctx-global-functions ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-functions snapshot)))
-  (setf (ctx-global-function-mv-arities ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-function-mv-arities snapshot)))
-  (setf (ctx-function-conventions ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-function-conventions snapshot)))
-  (setf (ctx-global-variables ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-variables snapshot)))
-  (setf (ctx-global-var-cache ctx) (copy-list (toplevel-compilation-snapshot-global-var-cache snapshot)))
-  (setf (ctx-global-classes ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-classes snapshot)))
-  (setf (ctx-global-generics ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generics snapshot)))
-  (setf (ctx-global-generic-params ctx) (%copy-compiler-hash-table (toplevel-compilation-snapshot-global-generic-params snapshot)))
-  (setf (ctx-current-function-name ctx) (toplevel-compilation-snapshot-current-function-name snapshot))
-  (setf (ctx-current-function-label ctx) (toplevel-compilation-snapshot-current-function-label snapshot))
-  (setf (ctx-current-function-params ctx) (copy-list (toplevel-compilation-snapshot-current-function-params snapshot)))
-  (setf (ctx-current-function-simple-p ctx) (toplevel-compilation-snapshot-current-function-simple-p snapshot))
-  (setf (ctx-pending-inline-policy ctx) (toplevel-compilation-snapshot-pending-inline-policy snapshot))
-  (setf (ctx-top-level-p ctx) (toplevel-compilation-snapshot-top-level-p snapshot))
-  (setf (ctx-boxed-vars ctx) (copy-list (toplevel-compilation-snapshot-boxed-vars snapshot)))
-  (setf (ctx-noescape-cons-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-cons-bindings snapshot)))
-  (setf (ctx-noescape-array-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-array-bindings snapshot)))
-  (setf (ctx-noescape-instance-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-instance-bindings snapshot)))
-  (setf (ctx-noescape-closure-bindings ctx) (copy-tree (toplevel-compilation-snapshot-noescape-closure-bindings snapshot)))
-  (setf (ctx-hash-table-test-bindings ctx) (copy-tree (toplevel-compilation-snapshot-hash-table-test-bindings snapshot)))
-  (setf (ctx-tail-position ctx) (toplevel-compilation-snapshot-tail-position snapshot))
-  (setf (ctx-diagnostics ctx) (copy-list (toplevel-compilation-snapshot-diagnostics snapshot)))
-  (setf *compile-time-value-env* (copy-list (toplevel-compilation-snapshot-compile-time-value-env snapshot)))
+  (dolist (fns (%ensure-snapshot-slot-fns))
+    (destructuring-bind (ctx-reader snap-writer snap-reader ctx-writer copy-fn) fns
+      (declare (ignore ctx-reader snap-writer))
+      (let* ((raw (funcall snap-reader snapshot))
+             (val (if copy-fn (funcall copy-fn raw) raw)))
+        (funcall ctx-writer val ctx))))
+  (setf *compile-time-value-env*    (copy-list (toplevel-compilation-snapshot-compile-time-value-env snapshot)))
   (setf *compile-time-function-env* (copy-list (toplevel-compilation-snapshot-compile-time-function-env snapshot)))
   (copy-list (toplevel-compilation-snapshot-opts snapshot)))
 
@@ -666,11 +675,6 @@ Returns a compilation-result or NIL when AST should stay on the direct path."
                   (lower-sexp-to-ast expanded))))
     (optimize-ast ast)))
 
-(defun %record-toplevel-defun-for-ct-env (ast)
-  "Register top-level function ASTs for compile-time evaluation helpers."
-  (when (typep ast 'ast-defun)
-    (push (cons (ast-defun-name ast) ast) *compile-time-function-env*)))
-
 (defun %update-toplevel-type-state (ctx ast type-env type-check best-effort-type)
   "Return updated type metadata after visiting AST as a top-level form.
 Values: inferred-type, updated-type-env."
@@ -751,15 +755,6 @@ Returns two values: result register and CPS form used for the AST."
       (emit ctx (make-vm-label :name normal-exit-label)))
     result-reg))
 
-(defun %top-level-in-package-form-p (form)
-  "Return T when FORM is an in-package declaration skipped by top-level compilation."
-  (and (consp form)
-       (eq (car form) 'in-package)))
-
-(defun %best-effort-type-check (ast env)
-  "Return type of AST in ENV, or NIL when type-checking signals an error."
-  (ignore-errors (type-check-ast ast env)))
-
 (defun %process-toplevel-form (form ctx target type-env type-check safety opts compiled-asts)
   "Compile one top-level FORM and return updated compilation state.
 Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
@@ -777,22 +772,21 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
     (let ((forward-names (%ast-forward-reference-names ast)))
       (when forward-names
         (%declare-forward-references-in-context forward-names ctx)))
-    (%record-toplevel-defun-for-ct-env ast)
+    (when (typep ast 'ast-defun)
+      (push (cons (ast-defun-name ast) ast) *compile-time-function-env*))
     (push ast compiled-asts)
     (multiple-value-setq (last-type type-env)
-      (%update-toplevel-type-state ctx ast type-env type-check #'%best-effort-type-check))
+      (%update-toplevel-type-state ctx ast type-env type-check
+                                   (lambda (a e) (ignore-errors (type-check-ast a e)))))
     (setf (ctx-type-env ctx) type-env)
      (%maybe-extend-ct-value-env ast)
      (multiple-value-setq (last-reg last-cps)
        (%compile-toplevel-ast-into-context ast ctx target type-check opts))
      (values last-reg last-type last-cps type-env compiled-asts)))
 
-(defun %strict-no-alloc-error-p (entry)
-  (typep (getf entry :condition) 'no-allocation-violation))
-
 (defun %maybe-signal-strict-no-alloc-error (errors opts)
   (when (getf opts :strict-no-alloc)
-    (let ((entry (find-if #'%strict-no-alloc-error-p errors)))
+    (let ((entry (find-if (lambda (e) (typep (getf e :condition) 'no-allocation-violation)) errors)))
       (when entry
         (error (getf entry :condition))))))
 
@@ -914,7 +908,7 @@ Returns a compilation-result struct with program, assembly, and globals."
                        werror-categories)))
        (loop for form in forms
              for form-index from 0
-             do (unless (%top-level-in-package-form-p form)
+             do (unless (and (consp form) (eq (car form) 'in-package))
                    (let ((snapshot (%snapshot-toplevel-compilation-state ctx opts))
                          (string-literal-pool-snapshot
                            (%copy-string-literal-pool *string-literal-pool*)))
@@ -924,7 +918,11 @@ Returns a compilation-result struct with program, assembly, and globals."
                        (error (e)
                          (setf opts (%restore-toplevel-compilation-state ctx snapshot))
                           (setf *string-literal-pool* string-literal-pool-snapshot)
-                         (push (%make-toplevel-recovery-error form-index form e) errors))))))
+                         (push (list :form-index form-index
+                                     :form form
+                                     :condition e
+                                     :message (princ-to-string e))
+                               errors))))))
        (setf (ctx-type-env ctx) type-env)
         (resolve-forward-references (ctx-global-functions ctx) :errorp t)
           (%finalize-toplevel-compilation ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier))))

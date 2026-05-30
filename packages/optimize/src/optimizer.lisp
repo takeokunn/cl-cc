@@ -18,11 +18,6 @@
 (defvar *optimization-report-stream* nil
   "When non-NIL, optimizer passes emit one-line optimization reports here.")
 
-(defparameter *optimizer-tier* 1
-  "Optimizer tier selected by callers. Tier 0 callers bind
-*skip-optimizer-passes* so optimize-instructions returns the input unchanged;
-Tier 1 runs the full pass pipeline.")
-
 (defun %opt-report (kind control &rest args)
   "Emit one optimizer debugging report line when reporting is enabled."
   (when *optimization-report-stream*
@@ -310,18 +305,13 @@ their intermediate allocation has already been eliminated upstream."
                 (funcall emit inst))))))))))
 
 (defun %fold-unary-constant-eligible-p (inst value)
-  "Return T when unary INST can be safely folded for constant VALUE."
-  (case (type-of inst)
-    ((vm-string-length vm-string-upcase vm-string-downcase)
-     (stringp value))
-    (vm-length
-     (or (vectorp value)
-         (and (listp value)
-              (ignore-errors (length value) t))))
-    ((vm-car vm-cdr)
-     (or (consp value) (null value)))
-    (vm-not t)
-    (otherwise (numberp value))))
+  "Return T when unary INST can be safely folded for constant VALUE.
+   Dispatch is data-driven via *opt-unary-fold-eligible-predicates*;
+   absent types default to NUMBERP."
+  (let ((pred (gethash (type-of inst) *opt-unary-fold-eligible-predicates*)))
+    (if pred
+        (funcall pred value)
+        (numberp value))))
 
 (defun %fold-vm-char (inst env low-bit-facts producer-facts emit emit-const clear)
   "Fold VM-CHAR only when both string and index operands are known constants."
@@ -465,38 +455,12 @@ their intermediate allocation has already been eliminated upstream."
                       (string= prefix name :end2 (length prefix))))))
         instructions))
 
-(defun %opt-max-register-index (instructions)
-  "Return the largest numeric :R register index mentioned in INSTRUCTIONS."
-  (labels ((scan (x best)
-             (cond
-               ((and (keywordp x)
-                     (let ((name (symbol-name x)))
-                       (and (>= (length name) 2)
-                            (char= (char name 0) #\R)
-                            (every #'digit-char-p (subseq name 1)))))
-                (max best (parse-integer (subseq (symbol-name x) 1))))
-               ((consp x) (scan (cdr x) (scan (car x) best)))
-               (t best))))
-    (loop for inst in instructions
-          maximize (handler-case (scan (instruction->sexp inst) -1)
-                     (error () -1)))))
-
-(defun %opt-fresh-register-generator (instructions)
-  "Return a closure yielding fresh VM register keywords for INSTRUCTIONS."
-  (let ((next (1+ (%opt-max-register-index instructions))))
-    (lambda ()
-      (prog1 (intern (format nil "R~D" next) :keyword)
-        (incf next)))))
+;;; %opt-max-register-index and %opt-fresh-register-generator are defined in
+;;; optimizer-size.lisp (loaded before this file). No local copies needed.
 
 (defun %opt-control-or-label-p (inst)
   "Return T when INST should not be part of a straight-line outlined sequence."
-  (or (typep inst 'vm-label)
-      (typep inst 'vm-jump)
-      (typep inst 'vm-jump-zero)
-      (typep inst 'vm-ret)
-      (typep inst 'vm-call)
-      (typep inst 'vm-tail-call)
-      (typep inst 'vm-apply)))
+  (typep inst 'opt-control-or-label))
 
 (defun %opt-outlinable-subseq-p (seq)
   "Return T when SEQ can be outlined as a nullary helper returning one value."
@@ -648,33 +612,18 @@ their intermediate allocation has already been eliminated upstream."
 
 (defun %opt-autovec-cmp-inst-p (inst)
   "T when INST is a supported counted-loop comparison."
-  (typep inst '(or vm-lt vm-le)))
+  (typep inst 'opt-autovec-cmp))
 
 (defun %opt-autovec-clone-cmp (inst dst lhs rhs)
-  "Clone supported comparison INST with new DST/LHS/RHS registers."
-  (typecase inst
-    (vm-lt (make-vm-lt :dst dst :lhs lhs :rhs rhs))
-    (vm-le (make-vm-le :dst dst :lhs lhs :rhs rhs))))
+  "Clone supported comparison INST with new DST/LHS/RHS registers.
+   Dispatch is data-driven via *opt-autovec-cmp-clone-table*."
+  (let ((ctor (gethash (type-of inst) *opt-autovec-cmp-clone-table*)))
+    (when ctor (funcall ctor dst lhs rhs))))
 
 (defun %opt-autovec-op-kind (inst)
-  "Return a backend-neutral SIMD op keyword for scalar binary INST, or NIL."
-  (typecase inst
-    ((or vm-add vm-integer-add vm-add-checked) :add)
-    ((or vm-sub vm-integer-sub vm-sub-checked) :sub)
-    ((or vm-mul vm-integer-mul vm-mul-checked) :mul)
-    (vm-logand :logand)
-    (vm-logior :logior)
-    (vm-logxor :logxor)
-    (vm-min :min)
-    (vm-max :max)))
-
-(defun %opt-autovec-external-jump-to-label-p (vec label-name start end)
-  "Return T when LABEL-NAME has a jump target outside [START,END]."
-  (loop for i from 0 below (length vec)
-        thereis (and (not (and (<= start i) (<= i end)))
-                     (let ((inst (aref vec i)))
-                       (and (typep inst '(or vm-jump vm-jump-zero))
-                            (equal (vm-label-name inst) label-name))))))
+  "Return a backend-neutral SIMD op keyword for scalar binary INST, or NIL.
+   Dispatch is data-driven via *opt-autovec-scalar-to-simd-op*."
+  (gethash (type-of inst) *opt-autovec-scalar-to-simd-op*))
 
 (defun %opt-autovec-array-loads (body iv-reg)
   "Return a table mapping load destination registers to source array registers."
@@ -741,6 +690,65 @@ indices and do not carry values between iterations."
   (push (make-vm-jump :label remainder-label) result)
   result)
 
+(defun %opt-autovec-try-vectorize-at (vec i n fresh-reg result serial)
+  "Attempt to vectorize a counted loop starting at position I in VEC.
+
+Returns (values new-result new-i new-serial vectorized-p).  When the loop at
+position I matches the canonical autovec shape and has profitable SIMD ops,
+new-result contains the rewritten instructions and vectorized-p is T.
+Otherwise new-result is unchanged, new-i is (1+ I), and vectorized-p is NIL."
+  (let* ((cur (aref vec i))
+         (header cur)
+         (cmp-inst (aref vec (+ i 1)))
+         (jz-inst  (aref vec (+ i 2)))
+         (header-name (vm-name header)))
+    (flet ((fail ()
+             ;; Emit the current instruction as-is and advance by one position.
+             (push cur result)
+             (values result (1+ i) serial nil)))
+      (if (and (%opt-autovec-cmp-inst-p cmp-inst)
+               (typep jz-inst 'vm-jump-zero)
+               (eq (vm-reg jz-inst) (vm-dst cmp-inst)))
+          (let* ((exit-name (vm-label-name jz-inst))
+                 (exit-pos  (cfg-find-label-position vec n exit-name))
+                 (back-pos  (and exit-pos (1- exit-pos)))
+                 (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
+            (if (and exit-pos
+                     (> exit-pos (+ i 4))
+                     (typep back-inst 'vm-jump)
+                     (equal (vm-label-name back-inst) header-name)
+                     (not (%opt-has-external-jump-to-label-p vec header-name i exit-pos)))
+                (let* ((body      (loop for j from (+ i 3) below back-pos collect (aref vec j)))
+                       (step-inst (car (last body)))
+                       (const-env (%opt-build-const-env-up-to vec i)))
+                  (if (and (typep step-inst 'vm-add)
+                           (eq (vm-dst step-inst) (vm-lhs step-inst))
+                           (eq (vm-dst step-inst) (vm-lhs cmp-inst)))
+                      (let* ((iv-reg  (vm-lhs cmp-inst))
+                             (lim-reg (vm-rhs cmp-inst))
+                             (step-reg (vm-rhs step-inst))
+                             (init    (gethash iv-reg const-env))
+                             (limit   (gethash lim-reg const-env))
+                             (step    (gethash step-reg const-env))
+                             (vector-limit (%opt-autovec-vector-limit
+                                            init limit step *opt-simd-lane-count* cmp-inst))
+                             (simd-ops (%opt-autovec-find-map-op (butlast body) iv-reg)))
+                        (if (and vector-limit simd-ops)
+                            (let ((vec-limit-reg    (funcall fresh-reg))
+                                  (lane-reg         (funcall fresh-reg))
+                                  (remainder-label  (format nil "~A~D" *opt-autovec-label-prefix* serial)))
+                              (push (make-vm-const :dst vec-limit-reg :value vector-limit) result)
+                              (push (make-vm-const :dst lane-reg :value *opt-simd-lane-count*) result)
+                              (setf result (%opt-autovec-emit-vector-loop
+                                            header cmp-inst jz-inst body step-inst exit-name
+                                            vec-limit-reg lane-reg remainder-label simd-ops result))
+                              (push (aref vec exit-pos) result)
+                              (values result (1+ exit-pos) (1+ serial) t))
+                            (fail)))
+                      (fail)))
+                (fail)))
+          (fail)))))
+
 (defun opt-pass-auto-vectorization (instructions)
   "FR-226: vectorize independent scalar array ops in counted loops.
 
@@ -750,65 +758,22 @@ remainder loop for tail iterations.  Dynamic trip-count loops are left unchanged
 compile-time trip counts make the generated vector-limit constant explicit."
   (if (%opt-autovec-idempotent-p instructions)
       instructions
-      (let* ((vec (coerce instructions 'vector))
-             (n (length vec))
+      (let* ((vec       (coerce instructions 'vector))
+             (n         (length vec))
              (fresh-reg (%opt-fresh-register-generator instructions))
-             (result nil)
-             (i 0)
-             (changed nil)
-             (serial 0))
+             (result    nil)
+             (i         0)
+             (changed   nil)
+             (serial    0))
         (loop while (< i n)
               do (let ((cur (aref vec i)))
-                   (if (and (typep cur 'vm-label)
-                            (<= (+ i 5) (1- n)))
-                       (let* ((header cur)
-                              (cmp-inst (aref vec (+ i 1)))
-                              (jz-inst (aref vec (+ i 2)))
-                              (header-name (vm-name header)))
-                         (if (and (%opt-autovec-cmp-inst-p cmp-inst)
-                                  (typep jz-inst 'vm-jump-zero)
-                                  (eq (vm-reg jz-inst) (vm-dst cmp-inst)))
-                             (let* ((exit-name (vm-label-name jz-inst))
-                                    (exit-pos (cfg-find-label-position vec n exit-name))
-                                    (back-pos (and exit-pos (1- exit-pos)))
-                                    (back-inst (and back-pos (>= back-pos 0) (aref vec back-pos))))
-                               (if (and exit-pos
-                                        (> exit-pos (+ i 4))
-                                        (typep back-inst 'vm-jump)
-                                        (equal (vm-label-name back-inst) header-name)
-                                        (not (%opt-autovec-external-jump-to-label-p vec header-name i exit-pos)))
-                                   (let* ((body (loop for j from (+ i 3) below back-pos collect (aref vec j)))
-                                          (step-inst (car (last body)))
-                                          (const-env (%opt-build-const-env-up-to vec i)))
-                                     (if (and (typep step-inst 'vm-add)
-                                              (eq (vm-dst step-inst) (vm-lhs step-inst))
-                                              (eq (vm-dst step-inst) (vm-lhs cmp-inst)))
-                                         (let* ((iv-reg (vm-lhs cmp-inst))
-                                                (lim-reg (vm-rhs cmp-inst))
-                                                (step-reg (vm-rhs step-inst))
-                                                (init (gethash iv-reg const-env))
-                                                (limit (gethash lim-reg const-env))
-                                                (step (gethash step-reg const-env))
-                                                (vector-limit (%opt-autovec-vector-limit
-                                                               init limit step *opt-simd-lane-count* cmp-inst))
-                                                (simd-ops (%opt-autovec-find-map-op (butlast body) iv-reg)))
-                                           (if (and vector-limit simd-ops)
-                                               (let ((vec-limit-reg (funcall fresh-reg))
-                                                     (lane-reg (funcall fresh-reg))
-                                                     (remainder-label (format nil "~A~D" *opt-autovec-label-prefix* serial)))
-                                                 (push (make-vm-const :dst vec-limit-reg :value vector-limit) result)
-                                                 (push (make-vm-const :dst lane-reg :value *opt-simd-lane-count*) result)
-                                                 (setf result (%opt-autovec-emit-vector-loop
-                                                               header cmp-inst jz-inst body step-inst exit-name
-                                                               vec-limit-reg lane-reg remainder-label simd-ops result))
-                                                 (setf i exit-pos changed t)
-                                                 (push (aref vec i) result)
-                                                 (incf i)
-                                                 (incf serial))
-                                               (progn (push cur result) (incf i))))
-                                         (progn (push cur result) (incf i))))
-                                   (progn (push cur result) (incf i))))
-                             (progn (push cur result) (incf i))))
+                   (if (and (typep cur 'vm-label) (<= (+ i 5) (1- n)))
+                       (multiple-value-bind (new-result new-i new-serial vectorized-p)
+                           (%opt-autovec-try-vectorize-at vec i n fresh-reg result serial)
+                         (setf result new-result
+                               i      new-i
+                               serial new-serial)
+                         (when vectorized-p (setf changed t)))
                        (progn (push cur result) (incf i)))))
         (if changed (nreverse result) instructions))))
 
@@ -819,12 +784,10 @@ compile-time trip counts make the generated vector-limit constant explicit."
   (some (lambda (inst) (typep inst 'vm-simd-vector-op)) instructions))
 
 (defun %opt-slp-op-kind (inst)
-  "Return the SIMD op keyword for scalar SLP arithmetic INST, or NIL."
-  (or (%opt-autovec-op-kind inst)
-      (case (type-of inst)
-        (vm-logand :logand)
-        (vm-logior :logior)
-        (vm-logxor :logxor))))
+  "Return the SIMD op keyword for scalar SLP arithmetic INST, or NIL.
+   Delegates entirely to %opt-autovec-op-kind which covers vm-logand/logior/logxor
+   via *opt-autovec-scalar-to-simd-op*."
+  (%opt-autovec-op-kind inst))
 
 (defun %opt-slp-index-descriptor (reg values offsets)
   "Return a normalized descriptor for index register REG.
@@ -1457,6 +1420,36 @@ of pure argument computations."
       (make-vm-tail-call :dst (vm-dst inst) :func (vm-func-reg inst) :args new-args)
       (make-vm-call :dst (vm-dst inst) :func (vm-func-reg inst) :args new-args)))
 
+(defun %opt-demand-rewrite-call-site (inst summary params nil-const-regs fresh-nil-reg)
+  "Rewrite INST's argument list, replacing absent-param args with fresh NIL regs.
+
+Returns (values prefix-consts new-call changed-p).
+PREFIX-CONSTS is a list of vm-const instructions to emit before the call
+(in forward order).  NEW-CALL is the rewritten call instruction.
+CHANGED-P is T when at least one argument was replaced."
+  (let ((prefix nil)
+        (new-args nil)
+        (changed-p nil))
+    (loop for arg in (vm-args inst)
+          for i from 0
+          do (let ((absent-p (member (nth i params)
+                                     (opt-demand-summary-absent-params summary)
+                                     :test #'eq)))
+               (cond
+                 ((and absent-p (gethash arg nil-const-regs))
+                  (push arg new-args))
+                 (absent-p
+                  (let ((nil-reg (funcall fresh-nil-reg)))
+                    (setf (gethash nil-reg nil-const-regs) t)
+                    (push (make-vm-const :dst nil-reg :value nil) prefix)
+                    (push nil-reg new-args)
+                    (setf changed-p t)))
+                 (t
+                  (push arg new-args)))))
+    (values (nreverse prefix)
+            (%opt-demand-rewrite-call inst (nreverse new-args))
+            changed-p)))
+
 (defun opt-pass-demand-analysis (instructions)
   "Run FR-182 demand analysis and expose call-site cleanup for absent params.
 
@@ -1464,19 +1457,16 @@ The pass is conservative: it preserves arity, replacing only absent argument
 registers with a fresh NIL constant at known direct call sites. This lets later
 DCE remove pure computations that fed those now-unused registers, while effectful
 argument computations remain in the instruction stream."
-  (let* ((summaries (opt-analyze-program-demand instructions))
-         (reg->label (make-hash-table :test #'eq))
+  (let* ((summaries      (opt-analyze-program-demand instructions))
+         (reg->label     (make-hash-table :test #'eq))
          (nil-const-regs (make-hash-table :test #'eq))
-         (base (1+ (opt-max-reg-index instructions)))
-         (changed nil)
-         (out nil))
+         (base           (1+ (opt-max-reg-index instructions)))
+         (changed        nil)
+         (out            nil))
     (setf *opt-demand-summary-table* summaries)
     (flet ((fresh-nil-reg ()
              (prog1 (intern (format nil "R~A" base) :keyword)
                (incf base)))
-           (absent-position-p (index params summary)
-             (let ((param (nth index params)))
-               (member param (opt-demand-summary-absent-params summary) :test #'eq)))
            (clear-dst (inst)
              (let ((dst (opt-inst-dst inst)))
                (when dst
@@ -1495,32 +1485,18 @@ argument computations remain in the instruction stream."
                (remhash (vm-dst inst) nil-const-regs))
            (push inst out))
           ((typep inst '(or vm-call vm-tail-call))
-           (let* ((label (gethash (vm-func-reg inst) reg->label))
+           (let* ((label   (gethash (vm-func-reg inst) reg->label))
                   (summary (and label (gethash label summaries)))
-                  (params (and summary (opt-demand-summary-params summary)))
-                  (args (vm-args inst)))
-             (cond
-               ((and summary params args)
-                (let ((prefix nil)
-                      (new-args nil))
-                  (loop for arg in args
-                        for i from 0
-                        do (cond
-                             ((absent-position-p i params summary)
-                              (if (gethash arg nil-const-regs)
-                                  (push arg new-args)
-                                  (let ((nil-reg (fresh-nil-reg)))
-                                    (setf (gethash nil-reg nil-const-regs) t)
-                                    (push (make-vm-const :dst nil-reg :value nil) prefix)
-                                    (push nil-reg new-args)
-                                    (setf changed t))))
-                             (t
-                              (push arg new-args))))
-                  (dolist (const (nreverse prefix))
-                    (push const out))
-                  (push (%opt-demand-rewrite-call inst (nreverse new-args)) out)))
-               (t
-                (push inst out))))
+                  (params  (and summary (opt-demand-summary-params summary)))
+                  (args    (vm-args inst)))
+             (if (and summary params args)
+                 (multiple-value-bind (prefix new-call changed-p)
+                     (%opt-demand-rewrite-call-site
+                      inst summary params nil-const-regs #'fresh-nil-reg)
+                   (dolist (const prefix) (push const out))
+                   (push new-call out)
+                   (when changed-p (setf changed t)))
+                 (push inst out)))
            (clear-dst inst))
           (t
            (clear-dst inst)

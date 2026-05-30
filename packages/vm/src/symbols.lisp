@@ -78,7 +78,39 @@
   (:sexp-tag :keywordp)
   (:sexp-slots dst src))
 
+;;; Immediate-symbol fast paths: bypass the general execute-instruction method
+;;; when the source value is a packed immediate symbol (vm-immediate-symbol-p).
+
+(defmethod execute-instruction :around ((inst vm-intern-symbol) state pc labels)
+  (multiple-value-bind (next-pc value-1 value-2) (call-next-method)
+    (when (vm-immediate-intern-enabled-p)
+      (let ((value (vm-reg-get state (vm-dst inst))))
+        (when (symbolp value)
+          (vm-reg-set state (vm-dst inst) (vm-encode-common-symbol value)))))
+    (values next-pc value-1 value-2)))
+
+(defmethod execute-instruction :around ((inst vm-keywordp) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (if (vm-immediate-symbol-p value)
+        (progn
+          (vm-reg-set state (vm-dst inst)
+                      (if (keywordp (vm-decode-symbol value)) 1 0))
+          (values (1+ pc) nil nil))
+        (call-next-method))))
+
 (define-simple-instruction vm-symbol-name :unary symbol-name)
+
+;;; Fast path: immediate symbols don't need the general symbol-name path.
+(defmethod execute-instruction :around ((inst vm-symbol-name) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (if (vm-immediate-symbol-p value)
+        (progn
+          (vm-reg-set state (vm-dst inst)
+                      (rt-string-intern (symbol-name (vm-decode-symbol value))))
+          (values (1+ pc) nil nil))
+        (call-next-method))))
 
 (defmethod execute-instruction ((inst vm-symbol-name) state pc labels)
   (declare (ignore labels))

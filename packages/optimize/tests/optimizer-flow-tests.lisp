@@ -218,35 +218,26 @@
     (when jumps
       (assert-equal "end" (cl-cc/vm::vm-label-name (first jumps))))))
 
-(deftest opt-rewrite-terminator-vm-jump
-  "%opt-rewrite-block-terminator rewrites a vm-jump to the new label when the old label matches."
+(deftest-each opt-rewrite-block-terminator-cases
+  "%opt-rewrite-block-terminator rewrites matching jump labels or leaves non-matching blocks unchanged."
+  :cases (("vm-jump-rewrites-label"
+           (list (make-vm-const :dst :r0 :value 1) (make-vm-jump :label "old"))
+           cl-cc/vm::vm-jump "new" nil)
+          ("vm-jump-zero-rewrites-label-preserves-reg"
+           (list (make-vm-jump-zero :reg :r0 :label "old"))
+           cl-cc/vm::vm-jump-zero "new" :r0)
+          ("no-match-unchanged"
+           (list (make-vm-jump :label "other"))
+           cl-cc/vm::vm-jump "other" nil))
+  (instructions expected-type expected-label expected-reg)
   (let ((b (%make-test-basic-block)))
-    (setf (cl-cc/optimize:bb-instructions b)
-          (list (make-vm-const :dst :r0 :value 1)
-                (make-vm-jump :label "old")))
+    (setf (cl-cc/optimize:bb-instructions b) instructions)
     (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
     (let ((term (car (last (cl-cc/optimize:bb-instructions b)))))
-      (assert-true (typep term 'cl-cc/vm::vm-jump))
-      (assert-equal "new" (cl-cc/vm::vm-label-name term)))))
-
-(deftest opt-rewrite-terminator-vm-jump-zero
-  "%opt-rewrite-block-terminator rewrites a vm-jump-zero label while preserving the condition register."
-  (let ((b (%make-test-basic-block)))
-    (setf (cl-cc/optimize:bb-instructions b)
-          (list (make-vm-jump-zero :reg :r0 :label "old")))
-    (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
-    (let ((term (car (cl-cc/optimize:bb-instructions b))))
-      (assert-true (typep term 'cl-cc/vm::vm-jump-zero))
-      (assert-equal "new" (cl-cc/vm::vm-label-name term))
-      (assert-eq :r0 (cl-cc/vm::vm-reg term)))))
-
-(deftest opt-rewrite-terminator-no-match-unchanged
-  "%opt-rewrite-block-terminator leaves the block unchanged when the label does not match."
-  (let ((b    (%make-test-basic-block))
-        (orig (make-vm-jump :label "other")))
-    (setf (cl-cc/optimize:bb-instructions b) (list orig))
-    (cl-cc/optimize::%opt-rewrite-block-terminator b "old" "new")
-    (assert-eq orig (car (cl-cc/optimize:bb-instructions b)))))
+      (assert-true (typep term expected-type))
+      (assert-equal expected-label (cl-cc/vm::vm-label-name term))
+      (when expected-reg
+        (assert-eq expected-reg (cl-cc/vm::vm-reg term))))))
 
 (deftest opt-jump-thread-table-covers-both-jump-types
   "*opt-jump-thread-table* contains exactly 2 entries: vm-jump and vm-jump-zero."

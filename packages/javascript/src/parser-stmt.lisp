@@ -72,16 +72,44 @@
   "Dynamically bound: T when parsing a module (implies strict mode).")
 
 ;;; ─── Statement Dispatcher Table ──────────────────────────────────────────────
+;;;
+;;; Each define-js-stmt-parser call registers a handler for one token type.
+;;; The handler receives STREAM positioned AFTER the keyword token was consumed.
+;;; js-parse-stmt consults this table first before falling back to complex cases.
 
 (defvar *js-stmt-parsers* (make-hash-table)
-  "Maps token type keywords to statement parser functions.
-  Each entry is a function (stream) -> (values ast rest).")
+  "Maps token type keywords to (lambda (after-keyword-stream)) statement parsers.")
 
 (defmacro define-js-stmt-parser (token-type (stream) &body body)
   "Register a statement parser for TOKEN-TYPE in *js-stmt-parsers*.
-  The function receives STREAM positioned AFTER the keyword token was consumed."
+  STREAM is positioned AFTER the keyword token; BODY must return (values ast rest)."
   `(setf (gethash ,token-type *js-stmt-parsers*)
          (lambda (,stream) ,@body)))
+
+;;; Simple token-type → parser registrations (consume keyword, parse body)
+(define-js-stmt-parser :T-VAR      (s) (js-parse-var-decl s :var))
+(define-js-stmt-parser :T-LET      (s) (js-parse-var-decl s :let))
+(define-js-stmt-parser :T-CONST    (s) (js-parse-var-decl s :const))
+(define-js-stmt-parser :T-FUNCTION (s) (js-parse-function-decl s))
+(define-js-stmt-parser :T-CLASS    (s)
+  (multiple-value-bind (ast-list rest) (js-parse-class-decl s)
+    (values (if (and (consp ast-list) (= (length ast-list) 1))
+                (first ast-list)
+                (make-ast-progn :forms ast-list))
+            rest)))
+(define-js-stmt-parser :T-IMPORT   (s) (js-parse-import-decl s))
+(define-js-stmt-parser :T-EXPORT   (s) (js-parse-export-decl s))
+(define-js-stmt-parser :T-IF       (s) (js-parse-if-stmt s))
+(define-js-stmt-parser :T-WHILE    (s) (js-parse-while-stmt s))
+(define-js-stmt-parser :T-DO       (s) (js-parse-do-while-stmt s))
+(define-js-stmt-parser :T-FOR      (s) (js-parse-for-stmt s))
+(define-js-stmt-parser :T-SWITCH   (s) (js-parse-switch-stmt s))
+(define-js-stmt-parser :T-RETURN   (s) (js-parse-return-stmt s))
+(define-js-stmt-parser :T-BREAK    (s) (js-parse-break-stmt s))
+(define-js-stmt-parser :T-CONTINUE (s) (js-parse-continue-stmt s))
+(define-js-stmt-parser :T-THROW    (s) (js-parse-throw-stmt s))
+(define-js-stmt-parser :T-TRY      (s) (js-parse-try-stmt s))
+(define-js-stmt-parser :T-DEBUGGER (s) (js-parse-debugger-stmt s))
 
 ;;; ─── Loop Lowering Helpers ───────────────────────────────────────────────────
 
@@ -980,109 +1008,59 @@ DEFAULT-AST is nil."
            (js-skip-semis rest3)))))))
 
 ;;; ─── Main Statement Dispatcher ───────────────────────────────────────────────
+;;;
+;;; Consults *js-stmt-parsers* for simple token-type dispatch (all registered
+;;; above). Complex cases requiring lookahead or multi-step processing are handled
+;;; inline. Adding support for a new statement type requires only a new
+;;; define-js-stmt-parser call.
 
 (defun js-parse-stmt (stream)
-  "Main statement dispatcher.
-  Returns (values ast rest)."
+  "Main statement dispatcher. Returns (values ast rest)."
   (setf stream (js-skip-semis stream))
   (when (js-at-eof-p stream)
     (return-from js-parse-stmt (values nil stream)))
   (let ((type  (js-peek-type  stream))
         (value (js-peek-value stream)))
     (cond
-      ;; Braced block
+      ;; Braced block — not in table (no keyword to consume before block)
       ((eq type :T-LBRACE)
        (js-parse-block stream))
-      ;; var / let / const declarations
-      ((eq type :T-VAR)
-       (js-parse-var-decl (cdr stream) :var))
-      ((eq type :T-LET)
-       (js-parse-var-decl (cdr stream) :let))
-      ((eq type :T-CONST)
-       (js-parse-var-decl (cdr stream) :const))
-      ;; function declaration (function* generator handled inside js-parse-function-decl)
-      ((eq type :T-FUNCTION)
-       (js-parse-function-decl (cdr stream)))
-      ;; async function / async arrow
+      ;; async function / async arrow — requires 2-token lookahead
       ((and (eq type :T-ASYNC)
             (eq (js-peek-type (cdr stream)) :T-FUNCTION))
        (js-parse-function-decl (cddr stream) :async-p t))
-      ;; class declaration
-      ((eq type :T-CLASS)
-       (multiple-value-bind (ast-list rest) (js-parse-class-decl (cdr stream))
-         ;; js-parse-class-decl returns a LIST of nodes; wrap >1 in a progn so the
-         ;; caller always receives a single statement node.
-         (values (if (and (consp ast-list) (= (length ast-list) 1))
-                     (first ast-list)
-                     (make-ast-progn :forms ast-list))
-                 rest)))
-      ;; decorated class declaration: @dec class { ... }
+      ;; decorated class declaration — requires parsing decorators first
       ((eq type :T-AT)
        (multiple-value-bind (decorators rest) (%js-parse-decorators stream)
-         (if (eq (js-peek-type rest) :T-CLASS)
-             (multiple-value-bind (ast-list rest2)
-                 (js-parse-class-decl (cdr rest) :decorators decorators)
-               (values (if (and (consp ast-list) (= (length ast-list) 1))
-                           (first ast-list)
-                           (make-ast-progn :forms ast-list))
-                       rest2))
-             (error "JS parse error: decorators must precede a class declaration"))))
-      ;; import declaration ('import' keyword consumed; parser expects next token)
-      ((eq type :T-IMPORT)
-       (js-parse-import-decl (cdr stream)))
-      ;; export declaration ('export' keyword consumed)
-      ((eq type :T-EXPORT)
-       (js-parse-export-decl (cdr stream)))
-      ;; if
-      ((eq type :T-IF)
-       (js-parse-if-stmt (cdr stream)))
-      ;; while
-      ((eq type :T-WHILE)
-       (js-parse-while-stmt (cdr stream)))
-      ;; do-while
-      ((eq type :T-DO)
-       (js-parse-do-while-stmt (cdr stream)))
-      ;; for
-      ((eq type :T-FOR)
-       (js-parse-for-stmt (cdr stream)))
-      ;; switch
-      ((eq type :T-SWITCH)
-       (js-parse-switch-stmt (cdr stream)))
-      ;; return
-      ((eq type :T-RETURN)
-       (js-parse-return-stmt (cdr stream)))
-      ;; break
-      ((eq type :T-BREAK)
-       (js-parse-break-stmt (cdr stream)))
-      ;; continue
-      ((eq type :T-CONTINUE)
-       (js-parse-continue-stmt (cdr stream)))
-      ;; throw
-      ((eq type :T-THROW)
-       (js-parse-throw-stmt (cdr stream)))
-      ;; try
-      ((eq type :T-TRY)
-       (js-parse-try-stmt (cdr stream)))
-      ;; debugger
-      ((eq type :T-DEBUGGER)
-       (js-parse-debugger-stmt (cdr stream)))
-      ;; using x = expr (ES2025, contextual)
+         (unless (eq (js-peek-type rest) :T-CLASS)
+           (error "JS parse error: decorators must precede a class declaration"))
+         (multiple-value-bind (ast-list rest2)
+             (js-parse-class-decl (cdr rest) :decorators decorators)
+           (values (if (and (consp ast-list) (= (length ast-list) 1))
+                       (first ast-list)
+                       (make-ast-progn :forms ast-list))
+                   rest2))))
+      ;; using x = expr (ES2025 contextual keyword) — requires ident lookahead
       ((and (eq type :T-USING)
             (eq (js-peek-type (cdr stream)) :T-IDENT))
        (js-parse-using-decl (cdr stream)))
-      ;; Labelled statement: ident : stmt
+      ;; Labelled statement: ident : stmt — requires colon lookahead
       ((and (eq type :T-IDENT)
             (eq (js-peek-type (cdr stream)) :T-COLON))
        (let* ((label-sym (js-ident-sym value))
-              (rest (cddr stream)))           ; skip ident and colon
+              (rest (cddr stream)))
          (multiple-value-bind (stmt rest2) (js-parse-stmt rest)
            (values (make-ast-progn
                     :forms (list (%js-make-tagbody (list label-sym stmt))))
                    rest2))))
-      ;; Expression statement (including assignments, calls, etc.)
+      ;; Table-driven dispatch: token-type → registered parser
       (t
-       (multiple-value-bind (expr rest) (js-parse-expr stream)
-         (values expr (js-skip-semis rest)))))))
+       (let ((parser (gethash type *js-stmt-parsers*)))
+         (if parser
+             (funcall parser (cdr stream))    ; pass stream after keyword
+             ;; Expression statement (assignments, calls, etc.)
+             (multiple-value-bind (expr rest) (js-parse-expr stream)
+               (values expr (js-skip-semis rest)))))))))
 
 ;;; ─── Top-Level Statement List Parser ────────────────────────────────────────
 

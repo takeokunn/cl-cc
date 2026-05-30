@@ -334,5 +334,47 @@
                                (eq :r3 (cl-cc/vm::vm-dst i))))
                         out))))
 
+;;; ── Data-Table Coverage Tests ──────────────────────────────────────────────
+
+(deftest-each optimizer-autovec-op-kind-table
+  "opt-autovec-scalar-to-simd-op maps scalar binary types to SIMD op keywords."
+  :cases (("add"    (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2) :add)
+          ("sub"    (make-vm-sub  :dst :r0 :lhs :r1 :rhs :r2) :sub)
+          ("mul"    (make-vm-mul  :dst :r0 :lhs :r1 :rhs :r2) :mul)
+          ("logand" (make-vm-logand :dst :r0 :lhs :r1 :rhs :r2) :logand)
+          ("logior" (make-vm-logior :dst :r0 :lhs :r1 :rhs :r2) :logior)
+          ("logxor" (make-vm-logxor :dst :r0 :lhs :r1 :rhs :r2) :logxor)
+          ("min"    (make-vm-min  :dst :r0 :lhs :r1 :rhs :r2) :min)
+          ("max"    (make-vm-max  :dst :r0 :lhs :r1 :rhs :r2) :max))
+  (inst expected-op)
+  (assert-eq expected-op (cl-cc/optimize::%opt-autovec-op-kind inst)))
+
+(deftest-each optimizer-control-or-label-deftype
+  "opt-control-or-label type identifies control-flow and label instructions."
+  :cases (("label"     (make-vm-label :name "l") t)
+          ("jump"      (make-vm-jump :label "l") t)
+          ("jump-zero" (make-vm-jump-zero :reg :r0 :label "l") t)
+          ("ret"       (make-vm-ret :reg :r0) t)
+          ("call"      (make-vm-call :dst :r0 :func :r1 :args nil) t)
+          ("const"     (make-vm-const :dst :r0 :value 42) nil)
+          ("add"       (make-vm-add  :dst :r0 :lhs :r1 :rhs :r2) nil)
+          ("move"      (make-vm-move :dst :r0 :src :r1) nil))
+  (inst expected)
+  (assert-equal expected (typep inst 'cl-cc/optimize::opt-control-or-label)))
+
+(deftest-each optimizer-fold-eligible-predicates-table
+  "opt-unary-fold-eligible-predicates maps instruction types to eligibility predicates."
+  :cases (("string-length-string"   (make-vm-string-length  :dst :r0 :src :r1) "hello" t)
+          ("string-length-number"   (make-vm-string-length  :dst :r0 :src :r1) 42 nil)
+          ("vm-not-anything"        (make-vm-not :dst :r0 :src :r1) 99 t)
+          ("vm-not-nil"             (make-vm-not :dst :r0 :src :r1) nil t)
+          ("car-cons"               (make-vm-car :dst :r0 :src :r1) '(a . b) t)
+          ("car-nil"                (make-vm-car :dst :r0 :src :r1) nil t)
+          ("car-number"             (make-vm-car :dst :r0 :src :r1) 42 nil)
+          ("vm-neg-number"          (make-vm-neg :dst :r0 :src :r1) 7 t)
+          ("vm-neg-string"          (make-vm-neg :dst :r0 :src :r1) "x" nil))
+  (inst value expected)
+  (assert-equal expected (cl-cc/optimize::%fold-unary-constant-eligible-p inst value)))
+
 ;;; End-to-end, bitwise, unary folding, inlining, and prolog peephole tests are in
 ;;; optimizer-e2e-tests.lisp. Low-level pass tests are in optimizer-tests-lowlevel2.lisp.

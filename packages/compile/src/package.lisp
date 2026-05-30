@@ -197,6 +197,10 @@
       #:compilation-result-errors
       #:compilation-result-warnings
 
+   ;; ── FR-351 MC/DC coverage ──
+   #:mcdc-coverage-enabled-p
+   #:collect-mcdc-coverage
+
    ;; ── CPS transformation re-exports ──
    #:cps-transform
    #:cps-transform*

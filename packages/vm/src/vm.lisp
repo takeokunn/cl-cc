@@ -237,119 +237,6 @@ serialized bytecode/tests that constructed closures with :CAPTURED-VALUES."
 (defvar *vm-current-state* nil
   "Dynamically bound to the VM state while invoking host bridge callables.")
 
-(defvar *hot-reload-history* nil
-  "Newest-first list of hot reload events.
-Each entry is a plist containing at least :TIME, :PATH, :FUNCTIONS, and :RESULT.")
-
-(defvar *hot-reload-function-sources* (make-hash-table :test #'eq)
-  "Map function symbols to the last source file that defined them for HOT-RELOAD.")
-
-(defun %vm-copy-function-registry (registry &optional replacement-name replacement-value)
-  "Return a shallow copy of REGISTRY, optionally replacing one function entry."
-  (let ((copy (make-hash-table :test (hash-table-test registry)
-                               :size (+ (hash-table-count registry) 8))))
-    (maphash (lambda (key value)
-               (setf (gethash key copy) value))
-             registry)
-    (when replacement-name
-      (setf (gethash replacement-name copy) replacement-value))
-    copy))
-
-(defun vm-register-function-atomic (state name closure)
-  "Atomically publish NAME -> CLOSURE in STATE's function registry using CAS.
-The registry table is replaced rather than mutated, so calls that already hold
-an old closure continue on old code while later symbolic calls see the new code."
-  (check-type name symbol)
-  (loop
-    for old-registry = (slot-value state 'function-registry)
-    for new-registry = (%vm-copy-function-registry old-registry name closure)
-    do #+sbcl
-       (when (eq (sb-ext:compare-and-swap (slot-value state 'function-registry)
-                                          old-registry
-                                          new-registry)
-                 old-registry)
-         (return closure))
-       #-sbcl
-       (progn
-         (setf (slot-value state 'function-registry) new-registry)
-         (return closure))))
-
-(defun %hot-reload-program (compiled)
-  "Return a VM program from COMPILED, accepting either a program or compilation result."
-  (cond
-    ((let ((predicate (and (fboundp 'vm-program-p)
-                           (symbol-function 'vm-program-p))))
-       (and predicate (funcall predicate compiled)))
-     compiled)
-    (t
-     (let ((accessor (or (let ((package (find-package :cl-cc/compile)))
-                           (and package
-                                (multiple-value-bind (symbol status)
-                                    (find-symbol "COMPILATION-RESULT-PROGRAM" package)
-                                  (and status (fboundp symbol) (symbol-function symbol)))))
-                         (let ((package (find-package :cl-cc)))
-                           (and package
-                                (multiple-value-bind (symbol status)
-                                    (find-symbol "COMPILATION-RESULT-PROGRAM" package)
-                                  (and status (fboundp symbol) (symbol-function symbol))))))))
-       (if accessor
-           (funcall accessor compiled)
-           (error "Cannot extract VM program from hot reload result: ~S" compiled))))))
-
-(defun %hot-reload-read-forms (source)
-  "Read top-level forms from SOURCE for lightweight defun/source tracking."
-  (or (and *vm-parse-forms-hook*
-           (ignore-errors (funcall *vm-parse-forms-hook* source)))
-      (with-input-from-string (in source)
-        (loop for form = (read in nil :eof)
-              until (eq form :eof)
-              collect form))))
-
-(defun %hot-reload-function-names (source)
-  "Return DEFUN names found in SOURCE."
-  (let ((names nil))
-    (dolist (form (%hot-reload-read-forms source) (nreverse names))
-      (when (and (consp form)
-                 (symbolp (first form))
-                 (string= (symbol-name (first form)) "DEFUN")
-                 (symbolp (second form)))
-        (pushnew (second form) names :test #'eq)))))
-
-(defun %hot-reload-record (path functions result)
-  "Record a hot reload event and update function-to-source mappings."
-  (dolist (function functions)
-    (setf (gethash function *hot-reload-function-sources*) path))
-  (push (list :time (cl:get-universal-time)
-              :path path
-              :functions functions
-              :result result)
-        *hot-reload-history*)
-  result)
-
-(defun hot-reload-file (path &optional (state *vm-current-state*))
-  "Compile and load PATH into STATE, atomically replacing registered functions."
-  (unless state
-    (error "HOT-RELOAD-FILE requires an active VM state"))
-  (unless *vm-compile-string-hook*
-    (error "HOT-RELOAD-FILE requires *VM-COMPILE-STRING-HOOK*"))
-  (let* ((truename (namestring (truename path)))
-         (source (with-open-file (in truename :direction :input)
-                   (let ((text (make-string (file-length in))))
-                     (read-sequence text in)
-                     text)))
-         (functions (%hot-reload-function-names source))
-         (compiled (funcall *vm-compile-string-hook* source))
-         (program (%hot-reload-program compiled))
-         (result (run-compiled program :state state)))
-    (%hot-reload-record truename functions result)))
-
-(defun hot-reload (function-name &optional (state *vm-current-state*))
-  "Reload the source file that most recently defined FUNCTION-NAME."
-  (let ((path (gethash function-name *hot-reload-function-sources*)))
-    (unless path
-      (error "No hot reload source is known for function: ~S" function-name))
-    (hot-reload-file path state)))
-
 (defun vm-closure-note-invocation (closure)
   "Increment CLOSURE's invocation counter and return the new count."
   (incf (vm-closure-invocation-count closure)))
@@ -473,14 +360,6 @@ an old closure continue on old code while later symbolic calls see the new code.
   `(cl-cc/runtime:rt-with-lock ((vm-instance-lock ,state))
      ,@body))
 
-(defun %vm-copy-hash-table (source &key (test #'eq))
-  "Return a shallow copy of SOURCE using TEST."
-  (let ((copy (make-hash-table :test test)))
-    (when source
-      (maphash (lambda (key value)
-                 (setf (gethash key copy) value))
-               source))
-    copy))
 
 (defun %vm-parent-hash (parent-env reader)
   "Return one hash table from PARENT-ENV using READER, accepting raw tables too."
@@ -641,53 +520,14 @@ Options:
                                (append (list 'lambda '(sexp))
                                        (unless sexp-slots
                                          (list '(declare (ignore sexp))))
-                                       (list (cons (ctor) ctor-args))))))))
-                 (immediate-symbol-forms
-                   (case name
-                     (vm-intern-symbol
-                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
-                          (multiple-value-bind (next-pc value-1 value-2) (call-next-method)
-                            (when (vm-immediate-intern-enabled-p)
-                              (let ((value (vm-reg-get state (vm-dst inst))))
-                                (when (symbolp value)
-                                  (vm-reg-set state (vm-dst inst)
-                                              (vm-encode-common-symbol value)))))
-                            (values next-pc value-1 value-2)))))
-                     (vm-symbol-name
-                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
-                          (declare (ignore labels))
-                          (let ((value (vm-reg-get state (vm-src inst))))
-                            (if (vm-immediate-symbol-p value)
-                                (progn
-                                  (vm-reg-set state (vm-dst inst)
-                                              (rt-string-intern
-                                                (symbol-name (vm-decode-symbol value))))
-                                  (values (1+ pc) nil nil))
-                                (call-next-method))))))
-                     (vm-keywordp
-                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
-                          (declare (ignore labels))
-                          (let ((value (vm-reg-get state (vm-src inst))))
-                            (if (vm-immediate-symbol-p value)
-                                (progn
-                                  (vm-reg-set state (vm-dst inst)
-                                              (if (keywordp (vm-decode-symbol value)) 1 0))
-                                  (values (1+ pc) nil nil))
-                                (call-next-method))))))
-                     (vm-symbol-p
-                      `((defmethod execute-instruction :around ((inst ,name) state pc labels)
-                          (declare (ignore labels))
-                          (let ((value (vm-reg-get state (vm-src inst))))
-                            (if (vm-immediate-symbol-p value)
-                                (progn
-                                  (vm-reg-set state (vm-dst inst) 1)
-                                  (values (1+ pc) nil nil))
-                                (call-next-method)))))))))
+                                       (list (cons (ctor) ctor-args)))))))))
+            ;; Immediate-symbol :around methods for vm-intern-symbol,
+            ;; vm-symbol-name, vm-keywordp, vm-symbol-p live in symbols.lisp
+            ;; and primitives.lisp where those instructions are defined.
             (cons 'progn
                   (append (list struct-form)
                           reader-forms
-                          sexp-forms
-                          immediate-symbol-forms)))))))
+                          sexp-forms)))))))
 
 ;;; FR-155: Deoptimization / OSR metadata and checkpoint instructions.
 
@@ -807,121 +647,7 @@ Tests should dynamically bind this to T for OSR coverage.")
     (cl:format cl:t "~A~%" sym))
   (cl:values))
 
-;;; ─── FR-607: Multiple Readtables ─────────────────────────────────────────────
-
-(defun %make-vm-readtable (&key (case :upcase) host macro-chars dispatch-chars)
-  "Create the VM readtable representation used by reader bridges."
-  (let ((table (make-hash-table :test #'eq)))
-    (setf (gethash :readtable table) t
-          (gethash :case table) case
-          (gethash :host table) (or host (cl:copy-readtable nil))
-          (gethash :macro-chars table) (or macro-chars (make-hash-table :test #'eql))
-          (gethash :dispatch-chars table) (or dispatch-chars (make-hash-table :test #'equal)))
-    table))
-
-(defun %vm-readtable-p (object)
-  (and (hash-table-p object) (gethash :readtable object)))
-
-(defun %vm-readtable-host (readtable)
-  (cond
-    ((null readtable) (cl:copy-readtable nil))
-    ((%vm-readtable-p readtable) (gethash :host readtable))
-    (t readtable)))
-
-(defun %copy-hash-table (table &key (test #'eql))
-  (let ((copy (make-hash-table :test test)))
-    (maphash (lambda (key value) (setf (gethash key copy) value)) table)
-    copy))
-
-(defvar *readtable* (%make-vm-readtable)
-  "Current VM readtable.")
-
-(defun make-readtable (&key (case :upcase))
-  "Return a fresh VM readtable with READTABLE-CASE set to CASE."
-  (let ((readtable (%make-vm-readtable :case case)))
-    (setf (cl:readtable-case (gethash :host readtable)) case)
-    readtable))
-
-(defun copy-readtable (&optional (from-readtable *readtable*) to-readtable)
-  "Copy FROM-READTABLE into TO-READTABLE or a fresh VM readtable."
-  (let* ((source (or from-readtable *readtable*))
-         (source-host (%vm-readtable-host source))
-         (target (or to-readtable (%make-vm-readtable)))
-         (target-host (cl:copy-readtable source-host (%vm-readtable-host target))))
-    (when (%vm-readtable-p target)
-      (setf (gethash :host target) target-host
-            (gethash :case target) (cl:readtable-case target-host)
-            (gethash :macro-chars target)
-            (if (%vm-readtable-p source)
-                (%copy-hash-table (gethash :macro-chars source) :test #'eql)
-                (make-hash-table :test #'eql))
-            (gethash :dispatch-chars target)
-            (if (%vm-readtable-p source)
-                (%copy-hash-table (gethash :dispatch-chars source) :test #'equal)
-                (make-hash-table :test #'equal))))
-    target))
-
-(defun readtable-case (readtable)
-  "Return READTABLE's case conversion mode."
-  (if (%vm-readtable-p readtable)
-      (gethash :case readtable)
-      (cl:readtable-case readtable)))
-
-(defun (setf readtable-case) (case readtable)
-  "Set READTABLE's case conversion mode."
-  (check-type case (member :upcase :downcase :preserve :invert))
-  (if (%vm-readtable-p readtable)
-      (setf (gethash :case readtable) case
-            (cl:readtable-case (gethash :host readtable)) case)
-      (setf (cl:readtable-case readtable) case))
-  case)
-
-(defun set-macro-character (char function &optional non-terminating-p
-                                  (readtable *readtable*))
-  "Install FUNCTION as CHAR's reader macro in READTABLE."
-  (let ((char (character char)))
-    (when (%vm-readtable-p readtable)
-      (setf (gethash char (gethash :macro-chars readtable))
-            (cons function non-terminating-p)))
-    (when (functionp function)
-      (cl:set-macro-character char function non-terminating-p
-                              (%vm-readtable-host readtable))))
-  t)
-
-(defun get-macro-character (char &optional (readtable *readtable*))
-  "Return the reader macro function and non-terminating flag for CHAR."
-  (let ((char (character char)))
-    (if (%vm-readtable-p readtable)
-        (let ((entry (gethash char (gethash :macro-chars readtable))))
-          (if entry
-              (values (car entry) (cdr entry))
-              (cl:get-macro-character char (gethash :host readtable))))
-        (cl:get-macro-character char readtable))))
-
-(defun %dispatch-key (disp-char sub-char)
-  (cons (char-upcase (character disp-char))
-        (char-upcase (character sub-char))))
-
-(defun set-dispatch-macro-character (disp-char sub-char function
-                                     &optional (readtable *readtable*))
-  "Install FUNCTION for DISP-CHAR/SUB-CHAR in READTABLE."
-  (let ((key (%dispatch-key disp-char sub-char)))
-    (when (%vm-readtable-p readtable)
-      (setf (gethash key (gethash :dispatch-chars readtable)) function))
-    (when (functionp function)
-      (cl:set-dispatch-macro-character (car key) (cdr key) function
-                                       (%vm-readtable-host readtable))))
-  t)
-
-(defun get-dispatch-macro-character (disp-char sub-char
-                                     &optional (readtable *readtable*))
-  "Return the dispatch macro function for DISP-CHAR/SUB-CHAR."
-  (let ((key (%dispatch-key disp-char sub-char)))
-    (if (%vm-readtable-p readtable)
-        (or (gethash key (gethash :dispatch-chars readtable))
-            (cl:get-dispatch-macro-character (car key) (cdr key)
-                                             (gethash :host readtable)))
-        (cl:get-dispatch-macro-character (car key) (cdr key) readtable))))
+;;; Readtable API (FR-607) is in vm-readtable.lisp (loaded immediately after).
 
 ;; FR-622: Package locks (enhanced by FR-896)
 (defvar *vm-package-locks* (make-hash-table :test #'eq))
@@ -943,8 +669,6 @@ Tests should dynamically bind this to T for OSR coverage.")
 (define-condition vm-package-locked-error (error)
   ((package :initarg :package :reader vm-package-locked-error-package))
   (:report (lambda (c s) (format s "Package ~S is locked" (vm-package-locked-error-package c)))))
-
-;;; ─── FR-895: Symbol Table Compaction ─────────────────────────────────────────
 
 (defvar *symbol-table* (make-hash-table :test #'equal)
   "Dynamic symbol table mapping string-name -> symbol.
@@ -978,25 +702,24 @@ Returns the compact table.  While frozen, `(setf lookup-symbol)` signals an erro
   (setf *symbol-table-compact* nil)
   *symbol-table*)
 
+(defun %symbol-table-binary-search (pairs name)
+  "Binary-search PAIRS (sorted compact vector of (name . symbol)) for NAME."
+  (let ((low 0)
+        (high (1- (length pairs))))
+    (loop
+      (when (> low high) (return nil))
+      (let* ((mid (floor (+ low high) 2))
+             (pair (aref pairs mid))
+             (key (car pair)))
+        (cond ((string= key name) (return (cdr pair)))
+              ((string< key name) (setf low (1+ mid)))
+              (t (setf high (1- mid))))))))
+
 (defun lookup-symbol (name)
   "Look up a symbol by its NAME string.
 Uses binary search on the compact vector when frozen, otherwise the hash-table."
   (if *symbol-table-compact*
-      (let* ((pairs *symbol-table-compact*)
-             (len (length pairs))
-             (low 0)
-             (high (1- len)))
-        (loop
-          (when (> low high) (return nil))
-          (let* ((mid (floor (+ low high) 2))
-                 (pair (aref pairs mid))
-                 (key (car pair)))
-            (cond ((string= key name)
-                   (return (cdr pair)))
-                  ((string< key name)
-                   (setf low (1+ mid)))
-                  (t
-                   (setf high (1- mid)))))))
+      (%symbol-table-binary-search *symbol-table-compact* name)
       (gethash name *symbol-table*)))
 
 (defun (setf lookup-symbol) (sym name)

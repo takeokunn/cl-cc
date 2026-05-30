@@ -836,7 +836,7 @@ emission structurally aware without changing the VM instruction definition."
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-233: Non-trapping Float-to-int — safe floor/truncate/round codegen
 ;;; ─────────────────────────────────────────────────────────────────────────────
-(defmethod emit-instruction ((target wasm-target) (inst vm-floor) stream)
+(defmethod emit-instruction ((target wasm-target) (inst vm-floor-inst) stream)
   (let ((reg-map (wasm-target-reg-map target)))
     (format stream "~%    ~A"
             (reg-local-set reg-map (vm-dst inst)
@@ -847,15 +847,8 @@ emission structurally aware without changing the VM instruction definition."
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-323: MVP Bit Operations — integer-length uses i64.clz directly
-;;; FR-324: f64.copysign — float-sign operation
+;;; (FR-324 f64.copysign is handled by the cl-cc/vm::vm-float-sign method above)
 ;;; ─────────────────────────────────────────────────────────────────────────────
-(defmethod emit-instruction ((target wasm-target) (inst vm-float-sign) stream)
-  (let ((reg-map (wasm-target-reg-map target)))
-    (format stream "~%    ~A"
-            (reg-local-set reg-map (vm-dst inst)
-                           (format nil "(struct.new $float_t (f64.copysign ~A ~A))"
-                                   (reg-local-ref reg-map (vm-lhs inst))
-                                   (reg-local-ref reg-map (vm-rhs inst)))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; FR-212: Typed Function References — call_ref codegen (Chrome 113+)

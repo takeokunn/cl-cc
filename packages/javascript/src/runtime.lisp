@@ -60,21 +60,6 @@
   (or (eq x :js-nan)
       (%js-float-nan-p x)))
 
-(defun %js-infinite-p (x)
-  (or (eq x :js-infinity)
-      (eq x :js-neg-infinity)
-      (and (floatp x) (%js-float-infinity-p x))))
-
-;;; Convert JS number representation to CL real (for arithmetic).
-;;; :js-nan -> *js-nan-val*, :js-infinity -> most-positive-double-float, etc.
-(defun %cl-number (x)
-  (cond
-    ((eq x :js-nan)          *js-nan-float*)
-    ((eq x :js-infinity)     *js-inf-float*)
-    ((eq x :js-neg-infinity) *js-neg-inf-float*)
-    ((numberp x) (coerce x 'double-float))
-    (t (error "JS TypeError: ~A is not a number" x))))
-
 ;;; -----------------------------------------------------------------------
 ;;;  Type system
 ;;; -----------------------------------------------------------------------
@@ -662,9 +647,6 @@
     (loop for i below n do (setf (aref result i) i))
     result))
 
-(defun %js-array-values (arr)
-  "Return copy of arr values."
-  (%js-array-slice arr))
 
 (defun %js-array-from (iterable &optional map-fn)
   "JS Array.from."
@@ -682,9 +664,6 @@
         (%js-array-map result map-fn)
         result)))
 
-(defun %js-array-of (&rest items)
-  "Create array from arguments."
-  (apply #'%js-make-array items))
 
 (defun %js-array-is-array (x)
   "True if X is a JS array."
@@ -752,14 +731,6 @@
       (setf (gethash "__proto__" ht) proto))
     ht))
 
-(defun %js-object-freeze (obj)
-  "Mark object as frozen (no-op at CL level; returns obj)."
-  obj)
-
-(defun %js-object-seal (obj)
-  "Mark object as sealed (no-op at CL level; returns obj)."
-  obj)
-
 (defun %js-object-define-property (obj key descriptor)
   "Define property with descriptor."
   (let ((k (%js-to-string key)))
@@ -792,9 +763,6 @@
         (setf (gethash "__proto__" obj) proto)))
   obj)
 
-(defun %js-object-get-own-property-names (obj)
-  "Return all own property names including non-enumerable."
-  (%js-object-keys obj))
 
 (defun %js-object-get-own-property-descriptor (obj key)
   "Return property descriptor."
@@ -971,20 +939,22 @@
           (write-string rep out)
           (setf pos (+ found (max 1 patlen))))))))
 
-(defun %js-string-to-lower-case (s)
-  (string-downcase s))
+;;; Macro for JS string methods that are simple CL built-in wrappers.
+;;; Usage: (define-js-string-passthrough %js-string-X cl-fn &rest fixed-args)
+;;; generates (defun %js-string-X (s) (cl-fn fixed-args... s))
+(defmacro define-js-string-passthrough (name cl-fn &rest fixed-args)
+  `(defun ,name (s)
+     (,cl-fn ,@fixed-args s)))
 
-(defun %js-string-to-upper-case (s)
-  (string-upcase s))
+(define-js-string-passthrough %js-string-to-lower-case string-downcase)
+(define-js-string-passthrough %js-string-to-upper-case string-upcase)
 
-(defun %js-string-trim (s)
-  (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) s))
+(defparameter +js-whitespace-chars+ '(#\Space #\Tab #\Newline #\Return #\Page)
+  "Characters treated as whitespace by JS String.prototype.trim methods.")
 
-(defun %js-string-trim-start (s)
-  (string-left-trim '(#\Space #\Tab #\Newline #\Return #\Page) s))
-
-(defun %js-string-trim-end (s)
-  (string-right-trim '(#\Space #\Tab #\Newline #\Return #\Page) s))
+(define-js-string-passthrough %js-string-trim       string-trim      +js-whitespace-chars+)
+(define-js-string-passthrough %js-string-trim-start string-left-trim +js-whitespace-chars+)
+(define-js-string-passthrough %js-string-trim-end   string-right-trim +js-whitespace-chars+)
 
 (defun %js-string-pad-start (s len &optional (fill " "))
   (let* ((fl (if (eq fill +js-undefined+) " " fill))
@@ -1031,9 +1001,6 @@
       :js-nan
       (char-code (char s i))))
 
-(defun %js-string-code-point-at (s i)
-  "JS String.prototype.codePointAt."
-  (%js-string-char-code-at s i))
 
 (defun %js-string-concat (s &rest others)
   (apply #'concatenate 'string s (mapcar #'%js-to-string others)))
@@ -1062,18 +1029,12 @@
   (let ((found (search pattern s)))
     (if found found -1)))
 
-(defun %js-string-normalize (s &optional (form "NFC"))
-  "Return S (normalization not implemented at CL level)."
-  (declare (ignore form))
-  s)
-
 (defun %js-string-from-char-code (&rest codes)
-  "String.fromCharCode."
+  "String.fromCharCode / String.fromCodePoint — both map code-char over their args."
   (coerce (mapcar #'code-char codes) 'string))
 
 (defun %js-string-from-code-point (&rest codes)
-  "String.fromCodePoint."
-  (coerce (mapcar #'code-char codes) 'string))
+  (apply #'%js-string-from-char-code codes))
 
 (defun %js-string-raw (template &rest substitutions)
   "String.raw tag function."
@@ -1287,8 +1248,6 @@
             (js-exception (c) (%js-promise-reject (js-exception-value c))))
           promise)))
 
-(defun %js-promise-catch (promise on-rejected)
-  (%js-promise-then promise nil on-rejected))
 
 (defun %js-promise-finally (promise on-finally)
   "Run ON-FINALLY regardless of outcome."
@@ -1421,8 +1380,6 @@
     (maphash (lambda (k v) (declare (ignore v)) (vector-push-extend k result)) s)
     result))
 
-(defun %js-set-values (s)
-  (%js-set-keys s))
 
 (defun %js-set-entries (s)
   "Return array of [key, key] pairs (Set semantics)."
@@ -1492,9 +1449,6 @@
              a)
     t))
 
-(defun %js-set-is-superset-of (a b)
-  "True if every element of B is in A."
-  (%js-set-is-subset-of b a))
 
 (defun %js-set-is-disjoint-from (a b)
   "True if A and B share no elements."
@@ -1754,76 +1708,76 @@
 ;;;  Built-in dispatch table
 ;;; -----------------------------------------------------------------------
 
-(defvar *js-builtin-map*
-  (let ((ht (make-hash-table :test #'equal)))
-    ;; Type
-    (setf (gethash "typeof"         ht) #'%js-typeof)
-    (setf (gethash "instanceof"     ht) #'%js-instanceof)
+(defparameter *js-builtin-specs*
+  `(;; Type
+    ("typeof"                  . ,#'%js-typeof)
+    ("instanceof"              . ,#'%js-instanceof)
     ;; Math
-    (setf (gethash "Math.abs"       ht) #'%js-math-abs)
-    (setf (gethash "Math.floor"     ht) #'%js-math-floor)
-    (setf (gethash "Math.ceil"      ht) #'%js-math-ceil)
-    (setf (gethash "Math.round"     ht) #'%js-math-round)
-    (setf (gethash "Math.trunc"     ht) #'%js-math-trunc)
-    (setf (gethash "Math.sign"      ht) #'%js-math-sign)
-    (setf (gethash "Math.max"       ht) #'%js-math-max)
-    (setf (gethash "Math.min"       ht) #'%js-math-min)
-    (setf (gethash "Math.pow"       ht) #'%js-math-pow)
-    (setf (gethash "Math.sqrt"      ht) #'%js-math-sqrt)
-    (setf (gethash "Math.random"    ht) #'%js-math-random)
-    (setf (gethash "Math.log"       ht) #'%js-math-log)
-    (setf (gethash "Math.log2"      ht) #'%js-math-log2)
-    (setf (gethash "Math.log10"     ht) #'%js-math-log10)
-    (setf (gethash "Math.exp"       ht) #'%js-math-exp)
-    (setf (gethash "Math.sin"       ht) #'%js-math-sin)
-    (setf (gethash "Math.cos"       ht) #'%js-math-cos)
-    (setf (gethash "Math.tan"       ht) #'%js-math-tan)
-    (setf (gethash "Math.asin"      ht) #'%js-math-asin)
-    (setf (gethash "Math.acos"      ht) #'%js-math-acos)
-    (setf (gethash "Math.atan"      ht) #'%js-math-atan)
-    (setf (gethash "Math.atan2"     ht) #'%js-math-atan2)
-    (setf (gethash "Math.hypot"     ht) #'%js-math-hypot)
-    (setf (gethash "Math.clz32"     ht) #'%js-math-clz32)
-    (setf (gethash "Math.fround"    ht) #'%js-math-fround)
-    (setf (gethash "Math.imul"      ht) #'%js-math-imul)
+    ("Math.abs"                . ,#'%js-math-abs)
+    ("Math.floor"              . ,#'%js-math-floor)
+    ("Math.ceil"               . ,#'%js-math-ceil)
+    ("Math.round"              . ,#'%js-math-round)
+    ("Math.trunc"              . ,#'%js-math-trunc)
+    ("Math.sign"               . ,#'%js-math-sign)
+    ("Math.max"                . ,#'%js-math-max)
+    ("Math.min"                . ,#'%js-math-min)
+    ("Math.pow"                . ,#'%js-math-pow)
+    ("Math.sqrt"               . ,#'%js-math-sqrt)
+    ("Math.random"             . ,#'%js-math-random)
+    ("Math.log"                . ,#'%js-math-log)
+    ("Math.log2"               . ,#'%js-math-log2)
+    ("Math.log10"              . ,#'%js-math-log10)
+    ("Math.exp"                . ,#'%js-math-exp)
+    ("Math.sin"                . ,#'%js-math-sin)
+    ("Math.cos"                . ,#'%js-math-cos)
+    ("Math.tan"                . ,#'%js-math-tan)
+    ("Math.asin"               . ,#'%js-math-asin)
+    ("Math.acos"               . ,#'%js-math-acos)
+    ("Math.atan"               . ,#'%js-math-atan)
+    ("Math.atan2"              . ,#'%js-math-atan2)
+    ("Math.hypot"              . ,#'%js-math-hypot)
+    ("Math.clz32"              . ,#'%js-math-clz32)
+    ("Math.fround"             . ,#'%js-math-fround)
+    ("Math.imul"               . ,#'%js-math-imul)
     ;; Array
-    (setf (gethash "Array.isArray"  ht) #'%js-array-is-array)
-    (setf (gethash "Array.from"     ht) #'%js-array-from)
-    (setf (gethash "Array.of"       ht) #'%js-array-of)
+    ("Array.isArray"           . ,#'%js-array-is-array)
+    ("Array.from"              . ,#'%js-array-from)
+    ("Array.of"                . ,#'%js-make-array)
     ;; Object
-    (setf (gethash "Object.keys"    ht) #'%js-object-keys)
-    (setf (gethash "Object.values"  ht) #'%js-object-values)
-    (setf (gethash "Object.entries" ht) #'%js-object-entries)
-    (setf (gethash "Object.assign"  ht) #'%js-object-assign)
-    (setf (gethash "Object.create"  ht) #'%js-object-create)
-    (setf (gethash "Object.freeze"  ht) #'%js-object-freeze)
-    (setf (gethash "Object.fromEntries" ht) #'%js-object-from-entries)
-    (setf (gethash "Object.hasOwn"  ht) #'%js-object-has-own)
-    (setf (gethash "Object.is"      ht) #'%js-object-is)
-    (setf (gethash "Object.groupBy" ht) #'%js-object-group-by)
+    ("Object.keys"             . ,#'%js-object-keys)
+    ("Object.values"           . ,#'%js-object-values)
+    ("Object.entries"          . ,#'%js-object-entries)
+    ("Object.assign"           . ,#'%js-object-assign)
+    ("Object.create"           . ,#'%js-object-create)
+    ("Object.freeze"           . ,(lambda (obj) obj))
+    ("Object.fromEntries"      . ,#'%js-object-from-entries)
+    ("Object.hasOwn"           . ,#'%js-object-has-own)
+    ("Object.is"               . ,#'%js-object-is)
+    ("Object.groupBy"          . ,#'%js-object-group-by)
     ;; String
-    (setf (gethash "String.fromCharCode"  ht) #'%js-string-from-char-code)
-    (setf (gethash "String.fromCodePoint" ht) #'%js-string-from-code-point)
-    (setf (gethash "String.raw"     ht) #'%js-string-raw)
+    ("String.fromCharCode"     . ,#'%js-string-from-char-code)
+    ("String.fromCodePoint"    . ,#'%js-string-from-code-point)
+    ("String.raw"              . ,#'%js-string-raw)
     ;; Promise
-    (setf (gethash "Promise.resolve"      ht) #'%js-promise-resolve)
-    (setf (gethash "Promise.reject"       ht) #'%js-promise-reject)
-    (setf (gethash "Promise.all"          ht) #'%js-promise-all)
-    (setf (gethash "Promise.allSettled"   ht) #'%js-promise-all-settled)
-    (setf (gethash "Promise.any"          ht) #'%js-promise-any)
-    (setf (gethash "Promise.race"         ht) #'%js-promise-race)
-    (setf (gethash "Promise.withResolvers" ht) #'%js-promise-with-resolvers)
-    ;; console
-    (setf (gethash "console.log"    ht) #'%js-console-log)
-    (setf (gethash "console.error"  ht) #'%js-console-error)
-    (setf (gethash "console.warn"   ht) #'%js-console-warn)
-    ht)
+    ("Promise.resolve"         . ,#'%js-promise-resolve)
+    ("Promise.reject"          . ,#'%js-promise-reject)
+    ("Promise.all"             . ,#'%js-promise-all)
+    ("Promise.allSettled"      . ,#'%js-promise-all-settled)
+    ("Promise.any"             . ,#'%js-promise-any)
+    ("Promise.race"            . ,#'%js-promise-race)
+    ("Promise.withResolvers"   . ,#'%js-promise-with-resolvers)
+    ;; Console
+    ("console.log"             . ,#'%js-console-log)
+    ("console.error"           . ,#'%js-console-error)
+    ("console.warn"            . ,#'%js-console-warn))
+  "Alist of (name . function) specs used to build *js-builtin-map*.")
+
+(defun %build-js-builtin-map ()
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (spec *js-builtin-specs*)
+      (setf (gethash (car spec) ht) (cdr spec)))
+    ht))
+
+(defvar *js-builtin-map* (%build-js-builtin-map)
   "Dispatch table from JS built-in name to CL function.")
 
-;;; -----------------------------------------------------------------------
-;;;  Supported-form check
-;;; -----------------------------------------------------------------------
-
-(defun js-check-supported-forms (forms)
-  "Return FORMS unchanged (hook for future validation)."
-  forms)

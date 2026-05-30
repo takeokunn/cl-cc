@@ -13,6 +13,15 @@
 (define-vm-unary-instruction  vm-cons-p    :cons-p    "Type predicate for cons cells. Returns 1 if SRC is a cons cell, 0 otherwise.")
 (define-vm-unary-instruction  vm-null-p    :null-p    "Type predicate for nil. Returns 1 if SRC is nil, 0 otherwise.")
 (define-vm-unary-instruction  vm-symbol-p  :symbol-p  "Type predicate for symbols. Returns 1 if SRC is a symbol, 0 otherwise.")
+
+;;; Fast path for immediate symbols: no hash-table lookup needed.
+(defmethod execute-instruction :around ((inst vm-symbol-p) state pc labels)
+  (declare (ignore labels))
+  (let ((value (vm-reg-get state (vm-src inst))))
+    (if (vm-immediate-symbol-p value)
+        (progn (vm-reg-set state (vm-dst inst) 1) (values (1+ pc) nil nil))
+        (call-next-method))))
+
 (define-vm-unary-instruction  vm-number-p  :number-p  "Type predicate for numbers. Returns 1 if SRC is a number, 0 otherwise.")
 (define-vm-unary-instruction  vm-integer-p :integer-p "Type predicate for integers. Returns 1 if SRC is an integer, 0 otherwise.")
 (define-vm-unary-instruction  vm-function-p :function-p "Type predicate for functions/closures. Returns 1 if SRC is a function, 0 otherwise.")

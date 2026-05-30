@@ -40,6 +40,7 @@ compile-toplevel-forms."
   (append (list :target     (pipeline-opts-target opts)
                 :type-check (pipeline-opts-type-check opts)
                 :safety     (pipeline-opts-safety opts)
+                :coverage   (pipeline-opts-coverage opts)
                 :verify-transforms (pipeline-opts-verify-transforms opts)
                 :werror (pipeline-opts-werror opts)
                 :werror-categories (pipeline-opts-werror-categories opts))
@@ -550,6 +551,14 @@ value carries top-level source locations for later AST annotation.
 ;;; Public compilation API
 ;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %maybe-attach-mcdc-coverage (result forms opts)
+  "Attach MC/DC coverage metadata to RESULT when MC/DC coverage is enabled.
+   Returns RESULT unchanged when coverage is disabled."
+  (when (cl-cc/compile:mcdc-coverage-enabled-p (pipeline-opts-coverage opts))
+    (setf (cl-cc/compile:compilation-result-coverage result)
+          (cl-cc/compile:collect-mcdc-coverage forms)))
+  result)
+
 ;;; Stdlib sexp cache (*stdlib-expanded-cache*, %snapshot-macro-env-table,
 ;;; %restore-macro-env-table, %build-stdlib-expanded-cache, get-stdlib-forms)
 ;;; are in pipeline-stdlib.lisp (loaded before this file).
@@ -605,7 +614,6 @@ streams, and PGO counter plan."
                     :werror-categories werror-categories
                     :compilation-tier (normalize-compilation-tier compilation-tier)))
           (ctx           (make-instance 'compiler-context :safety safety))
-         (*constant-pool* (make-hash-table :test #'equal))
           (ast           (%pipeline-optimize-ast (%prepare-ast expr) opts))
          (inferred-type (%type-check-safe ctx ast type-check)))
     (%pipeline-maybe-bump-opts-speed-from-ast opts ast)
@@ -809,7 +817,6 @@ arguments are forwarded to the expression, top-level, and optimization stages."
       (if source-locations
           (%attach-source-locations-to-result
            result
-           (append (mapcar (lambda (_form) nil)
-                           (%non-in-package-forms stdlib-forms))
+           (append (make-list (length (%non-in-package-forms stdlib-forms)))
                    (%non-in-package-form-locations forms source-locations)))
           result))))

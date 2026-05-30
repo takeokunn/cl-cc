@@ -17,5 +17,7 @@
     (:file "main-utils")   ; Utilities, flamegraph, SSA block name helpers
     (:file "flamegraph")
      (:file "main-dump")    ; ANSI colors, dump-*-phase functions, compile-opts struct
+   (:file "handlers-ql")  ; Quicklisp/ASDF integration (FR-763)
+   (:file "handlers-wasm") ; Wasm AOT toolchain helpers
    (:file "handlers")   ; Subcommand handlers only
    (:file "dep-graph"))) ; FR-361: Dependency graph visualization

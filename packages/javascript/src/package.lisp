@@ -69,9 +69,8 @@
    #:%js-truthy
    #:%js-not-nullish
 
-   ;; Built-in dispatch table + supported-form check
+   ;; Built-in dispatch table
    #:*js-builtin-map*
-   #:js-check-supported-forms
 
    ;; Math built-ins
    #:%js-math-abs
@@ -129,9 +128,7 @@
    #:%js-array-copy-within
    #:%js-array-entries
    #:%js-array-keys
-   #:%js-array-values
    #:%js-array-from
-   #:%js-array-of
    #:%js-array-is-array
 
    ;; Object built-ins
@@ -140,13 +137,10 @@
    #:%js-object-entries
    #:%js-object-assign
    #:%js-object-create
-   #:%js-object-freeze
-   #:%js-object-seal
    #:%js-object-define-property
    #:%js-object-define-properties
    #:%js-object-get-prototype-of
    #:%js-object-set-prototype-of
-   #:%js-object-get-own-property-names
    #:%js-object-get-own-property-descriptor
    #:%js-object-has-own
    #:%js-object-from-entries
@@ -156,7 +150,6 @@
    #:%js-string-length
    #:%js-string-char-at
    #:%js-string-char-code-at
-   #:%js-string-code-point-at
    #:%js-string-concat
    #:%js-string-includes
    #:%js-string-starts-with
@@ -192,7 +185,6 @@
    #:%js-promise-any
    #:%js-promise-race
    #:%js-promise-then
-   #:%js-promise-catch
    #:%js-promise-finally
 
    ;; Set built-ins
@@ -203,7 +195,6 @@
    #:%js-set-size
    #:%js-set-entries
    #:%js-set-keys
-   #:%js-set-values
    #:%js-set-for-each
 
    ;; Iterator helpers (stage-3 / ES2025)
