@@ -1,5 +1,5 @@
 (defpackage :cl-cc
-  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/sb-mop :cl-cc/sb-pcl :closer-mop :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl)
+  (:use :cl :cl-cc/bootstrap :cl-cc/ast :cl-cc/prolog :cl-cc/parse :cl-cc/optimize :cl-cc/emit :cl-cc/expand :cl-cc/compile :cl-cc/vm :cl-cc/stdlib :cl-cc/pipeline :cl-cc/selfhost :cl-cc/repl)
   (:shadowing-import-from :cl-cc/expand
     #:define-syntax
 )
@@ -100,9 +100,6 @@ Stable public keys include :MINOR-GCS, :MAJOR-GCS,
     (export s :cl-cc))
   ;; Re-export stdlib symbols from :cl-cc.
   (do-external-symbols (s :cl-cc/stdlib)
-    (export s :cl-cc))
-  ;; Re-export SB-PCL compatibility symbols from :cl-cc.
-  (do-external-symbols (s :cl-cc/sb-pcl)
     (export s :cl-cc))
   ;; Re-export pipeline/selfhost/repl symbols from :cl-cc.
   (do-external-symbols (s :cl-cc/pipeline)

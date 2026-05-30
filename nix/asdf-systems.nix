@@ -81,18 +81,6 @@ let
       src = "packages/vm";
       deps = [ "cl-cc-bootstrap" "cl-cc-runtime" ];
     };
-    cl-cc-sb-mop = {
-      src = "packages/sb-mop";
-      deps = [ "cl-cc-vm" ];
-    };
-    cl-cc-sb-pcl = {
-      src = "packages/sb-pcl";
-      deps = [ "cl-cc-vm" ];
-    };
-    cl-cc-closer-mop = {
-      src = "packages/closer-mop";
-      deps = [ "cl-cc-sb-mop" ];
-    };
     cl-cc-docgen = {
       src = "packages/docgen";
       deps = [ ];
@@ -119,7 +107,6 @@ let
         "cl-cc-vm"
         "cl-cc-prolog"
         "cl-cc-type"
-        "cl-cc-sb-mop"
       ];
     };
     cl-cc-target = {

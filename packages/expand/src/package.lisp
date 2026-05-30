@@ -65,10 +65,8 @@
    #:case
     #:typecase
     #:loop
-    #:define-deprecated-function
     #:likely
     #:unlikely
-    #:*deprecated-function-registry*
 
    ;; --- expander-typed-params.lisp --- typed lambda-list helpers ----------
    #:*function-type-registry*

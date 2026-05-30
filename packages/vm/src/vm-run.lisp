@@ -30,12 +30,30 @@
 (defparameter *vm-safepoint-heap* nil
   "Optional runtime heap polled by the VM interpreter loop.")
 
+(defvar *vm-eval-deadline* nil
+  "Absolute internal-real-time value after which vm-safepoint-poll raises
+VM-EVAL-DEADLINE-EXCEEDED. Bind to (+ (get-internal-real-time)
+(* seconds internal-time-units-per-second)) before calling run-compiled.
+NIL (the default) means no deadline is enforced.")
+
+(define-condition vm-eval-deadline-exceeded (serious-condition)
+  ((deadline :reader vm-eval-deadline :initarg :deadline))
+  (:report (lambda (c s)
+             (format s "VM evaluation exceeded its deadline (set at internal-time ~A)"
+                     (vm-eval-deadline c)))))
+
 (defun vm-safepoint-poll (state pc instruction &key (kind :poll))
   "Poll cooperative safepoints from the VM interpreter.
 
 Function entries are represented by labels, loop back-edges by backward jumps,
-and every interpreter iteration is also a preemption poll."
+and every interpreter iteration is also a preemption poll.
+
+Also enforces *vm-eval-deadline*: when the deadline is set and exceeded,
+signals VM-EVAL-DEADLINE-EXCEEDED. This condition is NOT a subclass of CL:ERROR,
+so user-level (handler-case (error ...) ...) in VM programs cannot swallow it."
   (declare (ignore state))
+  (when (and *vm-eval-deadline* (> (get-internal-real-time) *vm-eval-deadline*))
+    (signal (make-condition 'vm-eval-deadline-exceeded :deadline *vm-eval-deadline*)))
   (let ((poll-kind (cond
                      ((typep instruction 'vm-label) :function-entry)
                      ((and (member (type-of instruction) '(vm-jump vm-jump-zero) :test #'eq)

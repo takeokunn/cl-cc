@@ -63,21 +63,45 @@ CONTAINS should be a quoted type symbol like 'vm-add."
                      :form     (list 'assert-compiles-to ,expr :contains ,contains)))
        t)))
 
+(defparameter *vm-eval-timeout-seconds* 8
+  "Per-call timeout for assert-evaluates-to VM evaluations.
+Uses the VM's cooperative deadline mechanism (*vm-eval-deadline* in cl-cc/vm)
+which is checked at every VM safepoint. This avoids relying on sb-ext:with-timeout
+interrupt delivery (which can be swallowed by error handlers inside run-string).
+NIL disables the timeout.")
+
 (defmacro assert-evaluates-to (expr expected &key stdlib)
   "Assert that running EXPR via run-string returns a value EQUAL to EXPECTED.
 
 When :STDLIB is true, evaluate through `(run-string EXPR :stdlib t)` so callers
-can share the same high-level assertion for both plain and stdlib-backed cases."
+can share the same high-level assertion for both plain and stdlib-backed cases.
+
+Every evaluation is bounded by *vm-eval-timeout-seconds* (default 8s) via the
+VM's cooperative safepoint deadline. VM evaluations that loop forever signal
+VM-EVAL-DEADLINE-EXCEEDED (a serious-condition, NOT a subclass of error) which
+cannot be swallowed by user-level (handler-case (error ...) ...) in VM programs."
   (let ((exp (gensym "EXP"))
         (act (gensym "ACT"))
-        (condition-var (gensym "CONDITION")))
-    `(let ((,exp ,expected)
-           (,act nil)
-           (,condition-var nil))
+        (condition-var (gensym "CONDITION"))
+        (deadline-var (gensym "DEADLINE")))
+    `(let* ((,exp ,expected)
+            (,act nil)
+            (,condition-var nil)
+            (,deadline-var (when *vm-eval-timeout-seconds*
+                             (+ (get-internal-real-time)
+                                (round (* *vm-eval-timeout-seconds*
+                                          internal-time-units-per-second))))))
        (handler-case
-           (setf ,act (run-string ,expr ,@(when stdlib '(:stdlib t))))
-         (error (e)
-           (setf ,condition-var e)))
+           (let ((cl-cc/vm:*vm-eval-deadline* ,deadline-var))
+             (handler-case
+                 (setf ,act (run-string ,expr ,@(when stdlib '(:stdlib t))))
+               (error (e)
+                 (setf ,condition-var e))))
+         (cl-cc/vm:vm-eval-deadline-exceeded (e)
+           (setf ,condition-var
+                 (make-condition 'simple-error
+                                 :format-control "assert-evaluates-to: VM deadline exceeded (~As) evaluating ~S"
+                                 :format-arguments (list *vm-eval-timeout-seconds* ,expr)))))
        (when ,condition-var
          (%fail-test (format nil "assert-evaluates-to: ~S signaled ~A"
                              ,expr ,condition-var)

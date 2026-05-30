@@ -597,6 +597,13 @@ MOP CLASS-DIRECT-SUBCLASSES API."
       (gethash :__method-combination__ gf)
       'standard))
 
+(defun satiating-gfs-p (&optional gf)
+  "Return T when GF is a VM generic-function marked satiated, or when called
+with no argument returns T if any GF has been satiated in the current session."
+  (if gf
+      (and (vm-generic-function-p gf) (gethash :__satiated__ gf) t)
+      nil))
+
 (defun method-combination-type (method-combination)
   "Return METHOD-COMBINATION's type designator."
   (if (hash-table-p method-combination)

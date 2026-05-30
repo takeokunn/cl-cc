@@ -165,40 +165,6 @@
                                (cons (%expand-list-args (cdr args)) nil))))))
       (%expand-list-args (cdr call-form)))))
 
-;;; Tooling directives and annotations (FR-539/540)
-
-(defvar *deprecated-function-registry* (make-hash-table :test 'eq)
-  "Metadata for functions defined with DEFINE-DEPRECATED-FUNCTION.")
-
-(defun %deprecated-metadata-plist-p (form)
-  (and (consp form)
-       (keywordp (car form))))
-
-(defun %deprecated-warning-message (name metadata)
-  (or (getf metadata :message)
-      (format nil "~S is deprecated~@[; use ~S instead~]"
-              name (getf metadata :replacement))))
-
-(register-macro 'define-deprecated-function
-  (lambda (form env)
-    (declare (ignore env))
-    (let* ((name (second form))
-           (lambda-list (third form))
-           (body/forms (cdddr form))
-           (metadata (if (%deprecated-metadata-plist-p (car body/forms))
-                         (car body/forms)
-                         nil))
-           (body (if metadata (cdr body/forms) body/forms))
-           (category (or (getf metadata :category) :deprecation))
-           (message (%deprecated-warning-message name metadata)))
-      (setf (gethash name *deprecated-function-registry*)
-            (list :category category
-                  :replacement (getf metadata :replacement)
-                  :message message))
-      `(defun ,name ,lambda-list
-         (warn "[~A] ~A" ,category ,message)
-         ,@body))))
-
 (register-macro 'likely
   (lambda (form env)
     (declare (ignore env))

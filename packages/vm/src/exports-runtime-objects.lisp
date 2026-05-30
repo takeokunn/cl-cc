@@ -78,6 +78,7 @@
     %make-instances-obsolete
     generic-function-methods
    generic-function-method-combination
+   satiating-gfs-p
    %package-symbols
    %package-external-symbols
    %all-symbols
@@ -107,6 +108,8 @@
    vm-write-to-string-inst
    run-compiled
    run-program-slice
+   *vm-eval-deadline*
+   vm-eval-deadline-exceeded
    make-vm-state
    make-vm2-state
    vm2-state-p

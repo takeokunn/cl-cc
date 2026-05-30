@@ -442,8 +442,11 @@
 
 (deftest vm-copy-instance-hash-table-backed-standard-instance
   "copy-instance creates a distinct hash-table-backed object with the same class and shallow-copied slots."
-  (assert-evaluates-to
-   "(progn
+  :timeout 10
+  (handler-case
+      (sb-ext:with-timeout 8
+        (assert-evaluates-to
+         "(progn
       (defclass vm-copy-hash-meta (standard-class) ())
       (defclass vm-copy-hash ()
         ((items :initarg :items) (flag :initarg :flag))
@@ -461,13 +464,20 @@
                  (eq (slot-value copy 'flag) :changed))
             :ok
             :bad)))"
-   :ok
-   :stdlib t))
+         :ok
+         :stdlib t))
+    (sb-ext:timeout ()
+      (%fail-test "vm-copy-instance-hash-table-backed-standard-instance: 8s timeout (custom metaclass may not be implemented)"
+                  :expected :ok :actual :timeout
+                  :form 'vm-copy-instance-hash-table-backed-standard-instance))))
 
 (deftest vm-copy-instance-hash-table-backed-preserves-unbound-slot
   "copy-instance preserves absent hash-table slot bindings for unbound slots."
-  (assert-evaluates-to
-   "(progn
+  :timeout 10
+  (handler-case
+      (sb-ext:with-timeout 8
+        (assert-evaluates-to
+         "(progn
       (defclass vm-copy-hash-unbound-meta (standard-class) ())
       (defclass vm-copy-hash-unbound ()
         ((x :initarg :x) (y :initarg :y))
@@ -480,8 +490,12 @@
                    (not (slot-boundp copy 'y)))
               :ok
               :bad))))"
-   :ok
-   :stdlib t))
+         :ok
+         :stdlib t))
+    (sb-ext:timeout ()
+      (%fail-test "vm-copy-instance-hash-table-backed-preserves-unbound-slot: 8s timeout (custom metaclass may not be implemented)"
+                  :expected :ok :actual :timeout
+                  :form 'vm-copy-instance-hash-table-backed-preserves-unbound-slot))))
 
 ;;; ─── vm-slot-exists-p / vm-class-name-fn / vm-class-of-fn / vm-find-class
 

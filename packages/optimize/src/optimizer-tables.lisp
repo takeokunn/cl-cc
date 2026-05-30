@@ -38,37 +38,42 @@ struct accessor, eliminating PCL dispatch-cache updates in worker threads.
 Handles defstruct inheritance: when vm-add inherits dst from vm-binop,
 vm-binop-dst works on vm-add instances, so all vm-binop subclasses are
 registered with vm-binop-dst unless they define a more-specific accessor."
-  (let ((ht (make-hash-table :test #'eq)))
-    (dolist (method (cl-cc/sb-mop:generic-function-methods #'vm-dst))
+  (let ((ht (make-hash-table :test #'eq))
+        (visited (make-hash-table :test #'eq)))
+    (dolist (method (sb-mop:generic-function-methods #'vm-dst))
       (handler-case
-          (let* ((spec  (car (cl-cc/sb-mop:method-specializers method)))
+          (let* ((spec  (car (sb-mop:method-specializers method)))
                  (cname (class-name spec))
                  (acc   (find-symbol
                          (concatenate 'string (symbol-name cname) "-DST")
                          :cl-cc/vm)))
             (when (and acc (fboundp acc))
               (let ((fn (symbol-function acc)))
-                ;; Register this class.  Avoid overriding a more-specific entry
-                ;; that may have been registered by an earlier (more specific) method.
                 (unless (gethash cname ht)
                   (setf (gethash cname ht) fn))
-                ;; Walk subclasses transitively: they inherit the same dst slot,
-                ;; so the parent accessor works correctly on them too.
                 (labels ((visit (class)
-                           (dolist (sub (cl-cc/sb-mop:class-direct-subclasses class))
-                             (let ((sub-name (class-name sub)))
-                               (unless (gethash sub-name ht)
-                                 (setf (gethash sub-name ht) fn))
-                               (visit sub)))))
+                           (unless (gethash class visited)
+                             (setf (gethash class visited) t)
+                             (dolist (sub (sb-mop:class-direct-subclasses class))
+                               (let ((sub-name (class-name sub)))
+                                 (unless (gethash sub-name ht)
+                                   (setf (gethash sub-name ht) fn))
+                                 (visit sub))))))
                   (visit spec)))))
         (error nil)))
     ht))
 
-(defvar *vm-dst-table*
-  (ignore-errors (%build-vm-dst-table))
-  "Pre-built struct-type → dst-accessor mapping built at load time in the main
-thread.  opt-inst-dst uses this table for thread-safe O(1) dispatch without
-acquiring any PCL mutex, avoiding GC-safepoint deadlocks in worker threads.")
+(defvar *vm-dst-table* nil
+  "Pre-built struct-type → dst-accessor mapping; NIL until %init-vm-dst-table! is called.
+When NIL, opt-inst-dst falls back to vm-dst CLOS dispatch (always correct).
+Call %init-vm-dst-table! from the main thread before spawning parallel workers
+to enable O(1) thread-safe dispatch without PCL dispatch-cache contention.")
+
+(defun %init-vm-dst-table! ()
+  "Initialize *vm-dst-table* from the live vm-dst CLOS methods.
+Must be called from the main thread before parallel workers are spawned.
+Safe to call multiple times; subsequent calls rebuild the table."
+  (setf *vm-dst-table* (ignore-errors (%build-vm-dst-table))))
 
 (defun opt-inst-dst (inst)
   "Return the single destination register written by INST, or NIL.
@@ -77,16 +82,6 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
   (let ((fn (and *vm-dst-table* (gethash (type-of inst) *vm-dst-table*))))
     (if fn
         (funcall fn inst)
-        ;; The table is an optimization, not the source of truth.  In some load
-        ;; contexts the MOP-backed table is built before vm-dst methods are
-        ;; visible, leaving it empty; fall back to the generic accessor so every
-        ;; optimizer pass still sees definitions and preserves destination slots.
-        ;; NOTE: This fallback is intentionally narrow.  Known safe cases: table
-        ;; unbuilt (no method), unbound dst slot for pure instructions (e.g.
-        ;; const, label).  A real accessor error (broken instruction object,
-        ;; undefined method on valid type) would indicate an IR bug that should
-        ;; be detected; for now, ignore-errors serves as the safe fallback
-        ;; keeping optimizer passes operational in all load contexts.
         (ignore-errors (vm-dst inst)))))
 
 ;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
