@@ -86,189 +86,230 @@
       (assert-equal '(1 2 3) transferred)
       (assert-false (eq transferred '(1 2 3))))))
 
-(deftest runtime-subsystem-sync-primitives-loaded
-  "FR-370-373: Verify sync primitives are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-mutex))
-  (assert-true (fboundp 'cl-cc/runtime:rt-mutex-lock))
-  (assert-true (fboundp 'cl-cc/runtime:rt-mutex-unlock))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-condition-variable))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-semaphore))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-barrier))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-once)))
 
-(deftest runtime-subsystem-scheduler-loaded
-  "FR-257, FR-258, FR-552: Verify green thread scheduler is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-scheduler))
-  (assert-true (fboundp 'cl-cc/runtime:rt-spawn))
-  (assert-true (fboundp 'cl-cc/runtime:rt-yield))
-  (assert-true (fboundp 'cl-cc/runtime:rt-scheduler-run)))
+;;; =================================================================
+;;; Existence macros — data/logic separation
+;;;
+;;; define-fr-loaded-test: Prolog-style clause that checks every listed
+;;; symbol is fboundp. Data = the symbol list; logic = the macro.
+;;;
+;;; define-fr-existence-test: more general form supporting
+;;; (:f sym) fboundp / (:b sym) boundp / (:s pkg name) find-symbol.
+;;; =================================================================
 
-(deftest runtime-subsystem-future-loaded
-  "FR-283: Verify future/promise is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-future))
-  (assert-true (fboundp 'cl-cc/runtime:rt-future-resolve))
-  (assert-true (fboundp 'cl-cc/runtime:rt-future-await))
-  (assert-true (fboundp 'cl-cc/runtime:rt-future-done-p)))
+(defmacro define-fr-loaded-test (name fr-doc &rest symbols)
+  "Existence test: assert every SYMBOL in the list is fboundp."
+  `(deftest ,name
+     ,fr-doc
+     ,@(mapcar (lambda (sym) `(assert-true (fboundp ',sym))) symbols)))
 
-(deftest runtime-subsystem-channel-loaded
-  "FR-282: Verify CSP channels are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-channel))
-  (assert-true (fboundp 'cl-cc/runtime:rt-channel-send))
-  (assert-true (fboundp 'cl-cc/runtime:rt-channel-recv))
-  (assert-true (fboundp 'cl-cc/runtime:rt-channel-close)))
+(defmacro define-fr-existence-test (name fr-doc &rest checks)
+  "Existence test supporting mixed check types.
+Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
+  `(deftest ,name
+     ,fr-doc
+     ,@(mapcar (lambda (check)
+                 (ecase (car check)
+                   (:f `(assert-true (fboundp  ',(second check))))
+                   (:b `(assert-true (boundp   ',(second check))))
+                   (:s `(assert-true (find-symbol ,(second check) ,(third check))))))
+               checks)))
 
-(deftest runtime-subsystem-actor-loaded
-  "FR-290: Verify actor model is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-actor))
-  (assert-true (fboundp 'cl-cc/runtime:rt-actor-send))
-  (assert-true (fboundp 'cl-cc/runtime:rt-actor-receive)))
+;;; =================================================================
+;;; Wave 2: Sync + concurrency subsystem
+;;; =================================================================
 
-(deftest runtime-subsystem-stm-loaded
-  "FR-300: Verify STM is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-atomically))
-  (assert-true (fboundp 'cl-cc/runtime:rt-retry)))
+(define-fr-loaded-test runtime-subsystem-sync-primitives-loaded
+  "FR-370-373: Sync primitives are loaded."
+  cl-cc/runtime:rt-make-mutex
+  cl-cc/runtime:rt-mutex-lock
+  cl-cc/runtime:rt-mutex-unlock
+  cl-cc/runtime:rt-make-condition-variable
+  cl-cc/runtime:rt-make-semaphore
+  cl-cc/runtime:rt-make-barrier
+  cl-cc/runtime:rt-make-once)
 
-(deftest runtime-subsystem-lockfree-loaded
-  "FR-322: Verify lock-free data structures are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-lfstack))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-lfqueue))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-lfhash-map)))
+(define-fr-loaded-test runtime-subsystem-scheduler-loaded
+  "FR-257, FR-258, FR-552: Green thread scheduler is loaded."
+  cl-cc/runtime:rt-make-scheduler
+  cl-cc/runtime:rt-spawn
+  cl-cc/runtime:rt-yield
+  cl-cc/runtime:rt-scheduler-run)
 
-(deftest runtime-subsystem-ebr-loaded
-  "FR-320: Verify EBR is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-ebr-init))
-  (assert-true (fboundp 'cl-cc/runtime:rt-ebr-register-thread))
-  (assert-true (fboundp 'cl-cc/runtime:rt-ebr-enter))
-  (assert-true (fboundp 'cl-cc/runtime:rt-ebr-leave)))
+(define-fr-loaded-test runtime-subsystem-future-loaded
+  "FR-283: Future/promise API is loaded."
+  cl-cc/runtime:rt-make-future
+  cl-cc/runtime:rt-future-resolve
+  cl-cc/runtime:rt-future-await
+  cl-cc/runtime:rt-future-done-p)
 
-(deftest runtime-subsystem-hazard-loaded
-  "FR-321: Verify hazard pointers are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-hp-register-thread))
-  (assert-true (fboundp 'cl-cc/runtime:rt-hp-protect))
-  (assert-true (fboundp 'cl-cc/runtime:rt-hp-retire)))
+(define-fr-loaded-test runtime-subsystem-channel-loaded
+  "FR-282: CSP channels are loaded."
+  cl-cc/runtime:rt-make-channel
+  cl-cc/runtime:rt-channel-send
+  cl-cc/runtime:rt-channel-recv
+  cl-cc/runtime:rt-channel-close)
 
-(deftest runtime-subsystem-rcu-loaded
-  "FR-380: Verify RCU is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-rcu-read-lock))
-  (assert-true (fboundp 'cl-cc/runtime:rt-rcu-synchronize)))
+(define-fr-loaded-test runtime-subsystem-actor-loaded
+  "FR-290: Actor model is loaded."
+  cl-cc/runtime:rt-make-actor
+  cl-cc/runtime:rt-actor-send
+  cl-cc/runtime:rt-actor-receive)
 
-(deftest runtime-subsystem-qsbr-loaded
-  "FR-452: Verify QSBR is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-qsbr-init))
-  (assert-true (fboundp 'cl-cc/runtime:rt-qsbr-register-thread))
-  (assert-true (fboundp 'cl-cc/runtime:rt-qsbr-synchronize)))
+(define-fr-loaded-test runtime-subsystem-stm-loaded
+  "FR-300: Software transactional memory is loaded."
+  cl-cc/runtime:rt-atomically
+  cl-cc/runtime:rt-retry)
 
-(deftest runtime-subsystem-os-loaded
-  "FR-570, FR-573: Verify OS abstraction layer is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-open))
-  (assert-true (fboundp 'cl-cc/runtime:rt-close))
-  (assert-true (fboundp 'cl-cc/runtime:rt-getenv))
-  (assert-true (fboundp 'cl-cc/runtime:rt-argv))
-  (assert-true (fboundp 'cl-cc/runtime:rt-exit)))
+(define-fr-loaded-test runtime-subsystem-lockfree-loaded
+  "FR-322: Lock-free data structures are loaded."
+  cl-cc/runtime:rt-make-lfstack
+  cl-cc/runtime:rt-make-lfqueue
+  cl-cc/runtime:rt-make-lfhash-map)
 
-(deftest runtime-subsystem-net-loaded
-  "FR-574: Verify network primitives are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-socket))
-  (assert-true (fboundp 'cl-cc/runtime:rt-bind))
-  (assert-true (fboundp 'cl-cc/runtime:rt-listen))
-  (assert-true (fboundp 'cl-cc/runtime:rt-connect)))
+(define-fr-loaded-test runtime-subsystem-ebr-loaded
+  "FR-320: Epoch-based reclamation is loaded."
+  cl-cc/runtime:rt-ebr-init
+  cl-cc/runtime:rt-ebr-register-thread
+  cl-cc/runtime:rt-ebr-enter
+  cl-cc/runtime:rt-ebr-leave)
 
-(deftest runtime-subsystem-image-loaded
-  "FR-350, FR-563: Verify image save/restore is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-save-image))
-  (assert-true (fboundp 'cl-cc/runtime:rt-load-image)))
+(define-fr-loaded-test runtime-subsystem-hazard-loaded
+  "FR-321: Hazard pointers are loaded."
+  cl-cc/runtime:rt-hp-register-thread
+  cl-cc/runtime:rt-hp-protect
+  cl-cc/runtime:rt-hp-retire)
 
-(deftest runtime-subsystem-safepoints-loaded
-  "FR-510: Verify GC safepoint infrastructure is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-gc-enter-safe-region))
-  (assert-true (fboundp 'cl-cc/runtime:rt-gc-leave-safe-region))
-  (assert-true (boundp 'cl-cc/runtime:*rt-gc-safe-region-depths*)))
+(define-fr-loaded-test runtime-subsystem-rcu-loaded
+  "FR-380: Read-copy-update (RCU) is loaded."
+  cl-cc/runtime:rt-rcu-read-lock
+  cl-cc/runtime:rt-rcu-synchronize)
 
-(deftest runtime-subsystem-tlab-loaded
-  "FR-550: Verify TLAB is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-tlab-alloc))
-  (assert-true (fboundp 'cl-cc/runtime:rt-tlab-retire)))
+(define-fr-loaded-test runtime-subsystem-qsbr-loaded
+  "FR-452: Quiescent-state-based reclamation (QSBR) is loaded."
+  cl-cc/runtime:rt-qsbr-init
+  cl-cc/runtime:rt-qsbr-register-thread
+  cl-cc/runtime:rt-qsbr-synchronize)
 
-(deftest runtime-subsystem-context-loaded
-  "FR-412: Verify context propagation is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-context-cancel))
-  (assert-true (fboundp 'cl-cc/runtime:rt-context-cancelled-p)))
+;;; =================================================================
+;;; Wave 5: OS + I/O subsystem
+;;; =================================================================
 
-(deftest runtime-subsystem-spsc-loaded
-  "FR-462: Verify SPSC ring buffer is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-spsc-queue))
-  (assert-true (fboundp 'cl-cc/runtime:rt-spsc-try-push))
-  (assert-true (fboundp 'cl-cc/runtime:rt-spsc-try-pop)))
+(define-fr-loaded-test runtime-subsystem-os-loaded
+  "FR-570, FR-573: OS abstraction layer is loaded."
+  cl-cc/runtime:rt-open
+  cl-cc/runtime:rt-close
+  cl-cc/runtime:rt-getenv
+  cl-cc/runtime:rt-argv
+  cl-cc/runtime:rt-exit)
 
-(deftest runtime-subsystem-perf-loaded
-  "FR-481: Verify performance counters are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-perf-init))
-  (assert-true (fboundp 'cl-cc/runtime:rt-perf-enable-counter)))
+(define-fr-loaded-test runtime-subsystem-net-loaded
+  "FR-574: Network primitives are loaded."
+  cl-cc/runtime:rt-socket
+  cl-cc/runtime:rt-bind
+  cl-cc/runtime:rt-listen
+  cl-cc/runtime:rt-connect)
 
-(deftest runtime-subsystem-otel-loaded
-  "FR-490: Verify OpenTelemetry is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-otel-start-span))
-  (assert-true (fboundp 'cl-cc/runtime:rt-otel-end-span)))
+(define-fr-loaded-test runtime-subsystem-image-loaded
+  "FR-350, FR-563: Image save/restore is loaded."
+  cl-cc/runtime:rt-save-image
+  cl-cc/runtime:rt-load-image)
 
-(deftest runtime-subsystem-consensus-loaded
-  "FR-432: Verify consensus (Raft) is loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-raft-node))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-raft-cluster))
-  (assert-true (fboundp 'cl-cc/runtime:rt-raft-propose)))
+;;; =================================================================
+;;; Wave 3: Runtime internals
+;;; =================================================================
 
-(deftest runtime-subsystem-crdt-loaded
-  "FR-431: Verify CRDTs are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-gcounter))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-pncounter))
-  (assert-true (fboundp 'cl-cc/runtime:rt-make-lwwregister)))
+(define-fr-existence-test runtime-subsystem-safepoints-loaded
+  "FR-510: GC safepoint infrastructure is loaded."
+  (:f cl-cc/runtime:rt-gc-enter-safe-region)
+  (:f cl-cc/runtime:rt-gc-leave-safe-region)
+  (:b cl-cc/runtime:*rt-gc-safe-region-depths*))
 
-(deftest runtime-subsystem-parallel-algo-loaded
-  "FR-470-472: Verify parallel algorithms are loaded."
-  (assert-true (fboundp 'cl-cc/runtime:rt-parallel-algo-init)))
+(define-fr-loaded-test runtime-subsystem-tlab-loaded
+  "FR-550: Thread-local allocation buffers (TLAB) are loaded."
+  cl-cc/runtime:rt-tlab-alloc
+  cl-cc/runtime:rt-tlab-retire)
+
+(define-fr-loaded-test runtime-subsystem-context-loaded
+  "FR-412: Context propagation is loaded."
+  cl-cc/runtime:rt-context-cancel
+  cl-cc/runtime:rt-context-cancelled-p)
+
+(define-fr-loaded-test runtime-subsystem-spsc-loaded
+  "FR-462: Single-producer/single-consumer ring buffer is loaded."
+  cl-cc/runtime:rt-make-spsc-queue
+  cl-cc/runtime:rt-spsc-try-push
+  cl-cc/runtime:rt-spsc-try-pop)
+
+(define-fr-loaded-test runtime-subsystem-perf-loaded
+  "FR-481: Hardware performance counters are loaded."
+  cl-cc/runtime:rt-perf-init
+  cl-cc/runtime:rt-perf-enable-counter)
+
+(define-fr-loaded-test runtime-subsystem-otel-loaded
+  "FR-490: OpenTelemetry tracing is loaded."
+  cl-cc/runtime:rt-otel-start-span
+  cl-cc/runtime:rt-otel-end-span)
+
+(define-fr-loaded-test runtime-subsystem-consensus-loaded
+  "FR-432: Raft consensus protocol is loaded."
+  cl-cc/runtime:rt-make-raft-node
+  cl-cc/runtime:rt-make-raft-cluster
+  cl-cc/runtime:rt-raft-propose)
+
+(define-fr-loaded-test runtime-subsystem-crdt-loaded
+  "FR-431: Conflict-free replicated data types (CRDTs) are loaded."
+  cl-cc/runtime:rt-make-gcounter
+  cl-cc/runtime:rt-make-pncounter
+  cl-cc/runtime:rt-make-lwwregister)
+
+(define-fr-loaded-test runtime-subsystem-parallel-algo-loaded
+  "FR-470-472: Parallel algorithms are loaded."
+  cl-cc/runtime:rt-parallel-algo-init)
 
 ;;; =================================================================
 ;;; Wave 1: VM ANSI Runtime Features
 ;;; =================================================================
 
-(deftest runtime-subsystem-unicode-loaded
-  "FR-590-593: Verify Unicode support is loaded in VM."
-  (assert-true (find-symbol "VM-CHAR-UPCASE" :cl-cc/vm))
-  (assert-true (find-symbol "VM-CHAR-DOWNCASE" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-unicode-loaded
+  "FR-590-593: Unicode support is loaded in VM."
+  (:s "VM-CHAR-UPCASE"   :cl-cc/vm)
+  (:s "VM-CHAR-DOWNCASE" :cl-cc/vm))
 
-(deftest runtime-subsystem-pathname-loaded
-  "FR-595-597: Verify pathname system is loaded in VM."
-  (assert-true (find-symbol "VM-MAKE-PATHNAME" :cl-cc/vm))
-  (assert-true (find-symbol "VM-PATHNAME-NAME" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-pathname-loaded
+  "FR-595-597: Pathname system is loaded in VM."
+  (:s "VM-MAKE-PATHNAME" :cl-cc/vm)
+  (:s "VM-PATHNAME-NAME" :cl-cc/vm))
 
-(deftest runtime-subsystem-stream-loaded
-  "FR-600-602: Verify stream types are loaded in VM."
-  (assert-true (find-symbol "VM-MAKE-STRING-OUTPUT-STREAM" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-stream-loaded
+  "FR-600-602: Stream types are loaded in VM."
+  (:s "VM-MAKE-STRING-OUTPUT-STREAM" :cl-cc/vm))
 
-(deftest runtime-subsystem-time-loaded
-  "FR-610: Verify time API is loaded in VM."
-  (assert-true (fboundp 'cl-cc/vm:get-universal-time))
-  (assert-true (fboundp 'cl-cc/vm:get-internal-real-time)))
+(define-fr-existence-test runtime-subsystem-time-loaded
+  "FR-610: Time API is loaded in VM."
+  (:f cl-cc/vm:get-universal-time)
+  (:f cl-cc/vm:get-internal-real-time))
 
-(deftest runtime-subsystem-random-loaded
-  "FR-611: Verify RNG is loaded in VM."
-  (assert-true (fboundp 'cl-cc/vm:vm-random))
-  (assert-true (find-symbol "VM-MAKE-RANDOM-STATE" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-random-loaded
+  "FR-611: RNG is loaded in VM."
+  (:f cl-cc/vm:vm-random)
+  (:s "VM-MAKE-RANDOM-STATE" :cl-cc/vm))
 
-(deftest runtime-subsystem-environment-loaded
-  "FR-612: Verify environment introspection is loaded in VM."
-  (assert-true (fboundp 'cl-cc/vm:lisp-implementation-type))
-  (assert-true (fboundp 'cl-cc/vm:lisp-implementation-version)))
+(define-fr-existence-test runtime-subsystem-environment-loaded
+  "FR-612: Environment introspection is loaded in VM."
+  (:f cl-cc/vm:lisp-implementation-type)
+  (:f cl-cc/vm:lisp-implementation-version))
 
-(deftest runtime-subsystem-conditions-loaded
-  "FR-643-646: Verify condition system is loaded in VM."
-  (assert-true (find-symbol "VM-DEFINE-CONDITION" :cl-cc/vm))
-  (assert-true (find-symbol "VM-HANDLER-CASE" :cl-cc/vm))
-  (assert-true (find-symbol "VM-SIGNAL" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-conditions-loaded
+  "FR-643-646: Condition system is loaded in VM."
+  (:s "VM-DEFINE-CONDITION" :cl-cc/vm)
+  (:s "VM-HANDLER-CASE"     :cl-cc/vm)
+  (:s "VM-SIGNAL"           :cl-cc/vm))
 
-(deftest runtime-subsystem-array-dimensions-loaded
-  "FR-634: Verify array dimension queries are loaded in VM."
-  (assert-true (find-symbol "VM-ARRAY-RANK" :cl-cc/vm))
-  (assert-true (find-symbol "VM-ARRAY-DIMENSIONS" :cl-cc/vm)))
+(define-fr-existence-test runtime-subsystem-array-dimensions-loaded
+  "FR-634: Array dimension queries are loaded in VM."
+  (:s "VM-ARRAY-RANK"       :cl-cc/vm)
+  (:s "VM-ARRAY-DIMENSIONS" :cl-cc/vm))
 
 ;;; =================================================================
 ;;; Wave 2-5: Integration Tests
