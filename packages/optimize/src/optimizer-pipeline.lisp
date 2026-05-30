@@ -68,140 +68,77 @@ enables it for SPEED >= 2.")
       (opt-pass-pure-call-optimization instructions)
       instructions))
 
-(defun %maybe-run-fr523-affine-loop-analysis (instructions)
-  (if (fboundp 'opt-pass-affine-loop-analysis)
-      (opt-pass-affine-loop-analysis instructions)
-      instructions))
-
-(defun %maybe-run-fr524-loop-interchange (instructions)
-  (if (fboundp 'opt-pass-loop-interchange)
-      (opt-pass-loop-interchange instructions)
-      instructions))
-
-(defun %maybe-run-fr525-polyhedral-schedule (instructions)
-  (if (fboundp 'opt-pass-polyhedral-schedule)
-      (opt-pass-polyhedral-schedule instructions)
-      instructions))
-
-(defun %maybe-run-fr526-loop-fusion-fission (instructions)
-  (if (fboundp 'opt-pass-loop-fusion-fission)
-      (opt-pass-loop-fusion-fission instructions)
-      instructions))
-
 (defun %opt-run-pass-if-fbound (pass-symbol instructions)
   "Run PASS-SYMBOL on INSTRUCTIONS when it is fbound, otherwise no-op."
   (if (fboundp pass-symbol)
       (funcall (symbol-function pass-symbol) instructions)
       instructions))
 
-(defun %maybe-run-superopt (instructions)
-  "Run FR-750 superoptimization when its pass file is loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-superopt instructions))
+(defmacro define-optional-pass (name &key pass doc)
+  "Define a %maybe-run-NAME wrapper that delegates to opt-pass-PASS (or opt-pass-NAME).
+Data: the pass name. Logic: fbound check and dispatch via %opt-run-pass-if-fbound."
+  (let* ((n         (symbol-name name))
+         (fn-name   (intern (format nil "%MAYBE-RUN-~A" n)))
+         (pass-sym  (if pass
+                        (intern (format nil "OPT-PASS-~A" (symbol-name pass)))
+                        (intern (format nil "OPT-PASS-~A" n)))))
+    `(defun ,fn-name (instructions)
+       ,@(when doc (list doc))
+       (%opt-run-pass-if-fbound ',pass-sym instructions))))
 
-(defun %maybe-run-speculative-inline (instructions)
-  "Run FR-523 speculative inlining when the optional pass is loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-speculative-inline instructions))
+;;; Optional pass wrappers — data-driven with define-optional-pass.
+;;; Each entry: (wrapper-name [:pass pass-name] [:doc "docstring"])
+;;; Logic (fbound check + dispatch) lives in the macro; only data varies.
 
-(defun %maybe-run-loop-rotate (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-rotate instructions))
+(define-optional-pass fr523-affine-loop-analysis :pass affine-loop-analysis)
+(define-optional-pass fr524-loop-interchange     :pass loop-interchange)
+(define-optional-pass fr525-polyhedral-schedule  :pass polyhedral-schedule)
+(define-optional-pass fr526-loop-fusion-fission  :pass loop-fusion-fission)
+(define-optional-pass superopt
+  :doc "Run FR-750 superoptimization when its pass file is loaded.")
+(define-optional-pass speculative-inline
+  :doc "Run FR-523 speculative inlining when the optional pass is loaded.")
 
-(defun %maybe-run-dead-loop-elimination (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-dead-loop-elimination instructions))
 
-(defun %maybe-run-loop-unroll (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-unroll instructions))
-
-(defun %maybe-run-loop-unswitch (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-unswitch instructions))
-
-(defun %maybe-run-dead-argument-elimination (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-dead-argument-elimination instructions))
-
-(defun %maybe-run-tail-duplication (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-tail-duplication instructions))
-
-(defun %maybe-run-iv-strength-reduce (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-iv-strength-reduce instructions))
-
-(defun %maybe-run-div-by-const (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-div-by-const instructions))
-
-(defun %maybe-run-loop-peel (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-peel instructions))
-
-(defun %maybe-run-idiom-recognition (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-idiom-recognition instructions))
-
-(defun %maybe-run-trmc (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-trmc instructions))
-
-(defun %maybe-run-value-range-propagation (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-value-range-propagation instructions))
-
-(defun %maybe-run-bounds-check-elimination (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-bounds-check-elimination instructions))
-
-(defun %maybe-run-overflow-check-elimination (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-overflow-check-elimination instructions))
-
-(defun %maybe-run-bitwidth-reduction (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-bitwidth-reduction instructions))
-
-(defun %maybe-run-cps-reduce (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-cps-reduce instructions))
-
-(defun %maybe-run-defunctionalize (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-defunctionalize instructions))
-
-(defun %maybe-run-delimited-continuations (instructions)
-  "Run FR-677 delimited-continuation lowering only when explicitly selected."
-  (%opt-run-pass-if-fbound 'opt-pass-delimited-continuations instructions))
-
-(defun %maybe-run-escape-analysis (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-escape-analysis instructions))
-
-(defun %maybe-run-path-profiling (instructions)
-  "Run FR-662 Basic Block Versioning / Path Profiling when loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-path-profiling instructions))
-
-(defun %maybe-run-load-store-coalescing (instructions)
-  "Run FR-723 Load Widening / Store Coalescing when loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-load-widening-store-coalescing instructions))
-
-(defun %maybe-run-optimization-remarks (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-optimization-remarks instructions))
-
-(defun %maybe-run-abstract-interpretation (instructions)
-  "Run FR-751 abstract interpretation when loaded and enabled."
-  (%opt-run-pass-if-fbound 'opt-pass-abstract-interpretation instructions))
-
-(defun %maybe-run-translation-validation (instructions)
-  "Register FR-752 translation validation; per-pass checks are pipeline-integrated."
-  (%opt-run-pass-if-fbound 'opt-pass-translation-validation instructions))
-
-(defun %maybe-run-loop-fusion (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-fusion instructions))
-
-(defun %maybe-run-loop-fission (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-fission instructions))
-
-(defun %maybe-run-loop-tile (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-loop-tile instructions))
-
-(defun %maybe-run-autotune-simd (instructions)
-  (%opt-run-pass-if-fbound 'opt-pass-autotune-simd instructions))
-
-(defun %maybe-run-polyhedral (instructions)
-  "Run explicit FR-513 polyhedral pass only when its implementation is loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-polyhedral instructions))
-
-(defun %maybe-run-mlgo-inline (instructions)
-  "Run explicit FR-580 MLGO inline pass only when its implementation is loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-mlgo-inline instructions))
-
-(defun %maybe-run-ml-regalloc (instructions)
-  "Run explicit ML register-allocation hint pass only when loaded."
-  (%opt-run-pass-if-fbound 'opt-pass-ml-regalloc instructions))
+(define-optional-pass loop-rotate)
+(define-optional-pass dead-loop-elimination)
+(define-optional-pass loop-unroll)
+(define-optional-pass loop-unswitch)
+(define-optional-pass dead-argument-elimination)
+(define-optional-pass tail-duplication)
+(define-optional-pass iv-strength-reduce)
+(define-optional-pass div-by-const)
+(define-optional-pass loop-peel)
+(define-optional-pass idiom-recognition)
+(define-optional-pass trmc)
+(define-optional-pass value-range-propagation)
+(define-optional-pass bounds-check-elimination)
+(define-optional-pass overflow-check-elimination)
+(define-optional-pass bitwidth-reduction)
+(define-optional-pass cps-reduce)
+(define-optional-pass defunctionalize)
+(define-optional-pass delimited-continuations
+  :doc "Run FR-677 delimited-continuation lowering only when explicitly selected.")
+(define-optional-pass escape-analysis)
+(define-optional-pass path-profiling
+  :doc "Run FR-662 Basic Block Versioning / Path Profiling when loaded.")
+(define-optional-pass load-store-coalescing :pass load-widening-store-coalescing
+  :doc "Run FR-723 Load Widening / Store Coalescing when loaded.")
+(define-optional-pass optimization-remarks)
+(define-optional-pass abstract-interpretation
+  :doc "Run FR-751 abstract interpretation when loaded and enabled.")
+(define-optional-pass translation-validation
+  :doc "Register FR-752 translation validation; per-pass checks are pipeline-integrated.")
+(define-optional-pass loop-fusion)
+(define-optional-pass loop-fission)
+(define-optional-pass loop-tile)
+(define-optional-pass autotune-simd)
+(define-optional-pass polyhedral
+  :doc "Run explicit FR-513 polyhedral pass only when its implementation is loaded.")
+(define-optional-pass mlgo-inline
+  :doc "Run explicit FR-580 MLGO inline pass only when its implementation is loaded.")
+(define-optional-pass ml-regalloc
+  :doc "Run explicit ML register-allocation hint pass only when loaded.")
 
 ;;; FR-069: Dependency-Aware Peephole Scheduling
 ;;;
