@@ -479,7 +479,8 @@
          (:file "macho-fat-tests")
          (:file "binary-fr-tests")
          (:file "binary-wxorx-tests")
-         (:file "binary-constpool-tests")))
+         (:file "binary-constpool-tests")
+         (:file "got-plt-tests")))
      (:module "pipeline-tests"
       :pathname "packages/pipeline/tests"
       :serial t

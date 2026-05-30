@@ -23,10 +23,9 @@
 ;;; add-plt-stubs  — generate .plt section bytes
 ;;; ------------------------------------------------------------
 
-(defun add-plt-stubs (builder symbol-names)
+(defun add-plt-stubs (symbol-names)
   "Generate PLT section bytes for SYMBOL-NAMES (list of strings).
 Returns a byte vector: 16-byte PLT[0] resolver + 16-byte per-symbol entries."
-  (declare (ignore builder))
   (let* ((n (length symbol-names))
          (buf (elf-make-buffer)))
     ;; PLT[0]: pushq GOT+8(%rip); jmpq *GOT+16(%rip); pad to 16
@@ -47,10 +46,9 @@ Returns a byte vector: 16-byte PLT[0] resolver + 16-byte per-symbol entries."
 ;;; add-got-entries  — generate .got.plt section bytes
 ;;; ------------------------------------------------------------
 
-(defun add-got-entries (builder symbol-count)
+(defun add-got-entries (symbol-count)
   "Generate GOT bytes: 3 reserved (GOT[0..2]) + SYMBOL-COUNT slots.
 All entries are zero; ld.so fills them at runtime."
-  (declare (ignore builder))
   (let ((buf (elf-make-buffer)))
     (loop repeat (+ 3 symbol-count)
           do (binary-buffer-write-u64le buf 0))
@@ -60,11 +58,10 @@ All entries are zero; ld.so fills them at runtime."
 ;;; add-dynamic-relocations  — build .rela.plt R_X86_64_JUMP_SLOT
 ;;; ------------------------------------------------------------
 
-(defun add-dynamic-relocations (builder symbol-names got-plt-addr)
+(defun add-dynamic-relocations (symbol-names got-plt-addr)
   "Build .rela.plt bytes: one Elf64_Rela per symbol.
 Each relocation targets GOT[3+i] at GOT-PLT-ADDR.
 Symbol indices start at 1 (STN_UNDEF is 0)."
-  (declare (ignore builder))
   (let ((buf (elf-make-buffer))
         (i 0))
     (dolist (name symbol-names)
@@ -81,20 +78,19 @@ Symbol indices start at 1 (STN_UNDEF is 0)."
 ;;; bind-now-mode  — DT_FLAGS with DF_BIND_NOW
 ;;; ------------------------------------------------------------
 
-(defun bind-now-mode (builder)
+(defun bind-now-mode ()
   "Return DF_BIND_NOW flag for DT_FLAGS in .dynamic section.
 Causes the dynamic linker to resolve all PLT symbols at load time."
-  (declare (ignore builder))
   +df-bind-now+)
 
 ;;; ------------------------------------------------------------
 ;;; setup-got-plt  — main entry point
 ;;; ------------------------------------------------------------
 
-(defun setup-got-plt (builder symbol-names &key (got-plt-addr 0))
+(defun setup-got-plt (symbol-names &key (got-plt-addr 0))
   "Generate all GOT/PLT data for SYMBOL-NAMES.
 Returns (values plt-bytes got-plt-bytes rela-plt-bytes bind-now-flag)."
-  (values (add-plt-stubs builder symbol-names)
-          (add-got-entries builder (length symbol-names))
-          (add-dynamic-relocations builder symbol-names got-plt-addr)
-          (bind-now-mode builder)))
+  (values (add-plt-stubs symbol-names)
+          (add-got-entries (length symbol-names))
+          (add-dynamic-relocations symbol-names got-plt-addr)
+          (bind-now-mode)))

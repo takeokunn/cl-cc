@@ -61,13 +61,19 @@
 (defconstant +stt-section+ 3)
 (defconstant +stt-file+    4)
 
-;;; Relocation types
-(defconstant +r-x86-64-none+   0)
-(defconstant +r-x86-64-64+     1)
-(defconstant +r-x86-64-pc32+   2)
-(defconstant +r-x86-64-plt32+  4)
-(defconstant +r-x86-64-32+    10)
-(defconstant +r-x86-64-32s+   11)
+;;; Relocation types (System V AMD64 ABI §4.4)
+(defconstant +r-x86-64-none+      0)
+(defconstant +r-x86-64-64+        1)
+(defconstant +r-x86-64-pc32+      2)
+(defconstant +r-x86-64-got32+     3)
+(defconstant +r-x86-64-plt32+     4)
+(defconstant +r-x86-64-copy+      5)
+(defconstant +r-x86-64-glob-dat+  6)
+(defconstant +r-x86-64-jump-slot+ 7)
+(defconstant +r-x86-64-relative+  8)
+(defconstant +r-x86-64-gotpcrel+  9)
+(defconstant +r-x86-64-32+       10)
+(defconstant +r-x86-64-32s+      11)
 
 ;;; Program header types (FR-291: ELF executable generation)
 (defconstant +pt-null+    0)    ; PT_NULL

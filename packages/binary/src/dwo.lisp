@@ -75,6 +75,15 @@ DEBUG-INFO is the structured debug data."
 (defconstant +DW-AT-GNU-DWO-ID+ #x2131
   "DWARF attribute: 64-bit DWO ID.")
 
+;;; ──── Stub macro ────
+(defmacro define-dwo-stub (name (&rest params) docstring)
+  "Declare an unimplemented FR-583 .dwo section emitter.
+All stubs accept their parameters and return no values."
+  `(defun ,name ,params
+     ,docstring
+     (declare (ignore ,@params))
+     (values)))
+
 ;;; ──── Helpers ────
 (defun compute-dwo-id (debug-info)
   "Compute a 64-bit DWO ID from DEBUG-INFO content hash.
@@ -97,42 +106,11 @@ Used to match skeleton CU with .dwo file."
   "Emit a DWARF 8-bit unsigned integer."
   (write-byte (logand value #xFF) stream))
 
-(defun emit-dwarf-attr-string (stream attr value)
-  "Emit a DWARF attribute with string value."
-  (declare (ignore stream attr value))
-  (values))
-
-(defun emit-dwarf-attr-uint64 (stream attr value)
-  "Emit a DWARF attribute with 64-bit value."
-  (declare (ignore stream attr value))
-  (values))
-
-(defun emit-dwo-debug-info (stream debug-info)
-  "Emit .debug_info.dwo section."
-  (declare (ignore stream debug-info))
-  (values))
-
-(defun emit-dwo-debug-abbrev (stream debug-info)
-  "Emit .debug_abbrev.dwo section."
-  (declare (ignore stream debug-info))
-  (values))
-
-(defun emit-dwo-debug-str (stream debug-info)
-  "Emit .debug_str.dwo section."
-  (declare (ignore stream debug-info))
-  (values))
-
-(defun emit-dwp-cu-index (stream dwo-files)
-  "Emit CU index table for .dwp."
-  (declare (ignore stream dwo-files))
-  (values))
-
-(defun emit-dwp-tu-index (stream tu-files)
-  "Emit TU index table for .dwp."
-  (declare (ignore stream tu-files))
-  (values))
-
-(defun emit-dwp-section-data (stream dwo-path)
-  "Emit section data from DWO-PATH into .dwp."
-  (declare (ignore stream dwo-path))
-  (values))
+(define-dwo-stub emit-dwarf-attr-string  (stream attr value)  "Emit a DWARF attribute with string value.")
+(define-dwo-stub emit-dwarf-attr-uint64  (stream attr value)  "Emit a DWARF attribute with 64-bit value.")
+(define-dwo-stub emit-dwo-debug-info     (stream debug-info)  "Emit .debug_info.dwo section.")
+(define-dwo-stub emit-dwo-debug-abbrev   (stream debug-info)  "Emit .debug_abbrev.dwo section.")
+(define-dwo-stub emit-dwo-debug-str      (stream debug-info)  "Emit .debug_str.dwo section.")
+(define-dwo-stub emit-dwp-cu-index       (stream dwo-files)   "Emit CU index table for .dwp.")
+(define-dwo-stub emit-dwp-tu-index       (stream tu-files)    "Emit TU index table for .dwp.")
+(define-dwo-stub emit-dwp-section-data   (stream dwo-path)    "Emit section data from DWO-PATH into .dwp.")
