@@ -23,4 +23,11 @@
    ;; JS-specific forms inline (e.g. %js-lower-assignment for &&=/||=/??=, %js-this
    ;; emitted directly), matching the PHP frontend's inline-lowering model. The
    ;; former ast-lower.lisp was dead, uncalled, and inconsistent — removed.
-   (:file "runtime")))
+   (:file "runtime")
+   (:file "runtime-array")
+   (:file "runtime-object")
+   (:file "runtime-string")
+   (:file "runtime-async")
+   (:file "runtime-collections")
+   (:file "runtime-class")
+   (:file "runtime-builtins")))
