@@ -220,15 +220,10 @@
         nil)))
 
 (defun %rt-core-class-slot-names (object)
-  (let ((class (class-of object)))
-    #+sbcl
-    (let* ((pkg (find-package "SB-MOP"))
-           (class-slots (and pkg (find-symbol "CLASS-SLOTS" pkg)))
-           (slot-name (and pkg (find-symbol "SLOT-DEFINITION-NAME" pkg))))
-      (when (and class-slots slot-name (fboundp class-slots) (fboundp slot-name))
-        (return-from %rt-core-class-slot-names
-          (mapcar (symbol-function slot-name) (funcall class-slots class)))))
-    nil))
+  #+sbcl
+  (mapcar #'sb-mop:slot-definition-name
+          (sb-mop:class-slots (class-of object)))
+  #-sbcl nil)
 
 (defun %rt-core-encode-graph (roots)
   "Copy reachable heap objects from ROOTS into a position-independent graph."

@@ -103,46 +103,24 @@ is created as needed."
                          :direction :output
                          :if-exists :supersede
                          :if-does-not-exist :create)
-      (format out "(:format :cl-cc-pgo-v1~%")
-      (format out " :total-instructions ~D~%" (length insts))
-      (format out " :op-counts (~%")
-      (maphash (lambda (k v)
-                 (format out "   (~S . ~D)~%" k v))
-               counts)
-      (format out " )~%")
-      (format out " :bb-counts (~%")
-      (when bb
-        (maphash (lambda (k v)
-                   (format out "   (~S . ~D)~%" k v))
-                 bb))
-      (format out " )~%")
-      (format out " :branch-counts (~%")
-      (when branches
-        (maphash (lambda (k v)
-                    (format out "   (~S . ~D)~%" k v))
-                  branches))
-      (format out " )~%")
-      (format out " :function-call-counts (~%")
-      (when calls
-        (maphash (lambda (k v)
-                   (format out "   (~S . ~D)~%" k v))
-                 calls))
-      (format out " )~%")
-      (format out " :type-feedback (~%")
-      (when type-feedback
-        (maphash (lambda (k v)
-                   (format out "   (~S . ~D)~%" k v))
-                 type-feedback))
-      (format out " )~%")
-      (when counter-plan
-        (format out " :counter-plan ~S~%" counter-plan))
-      (when counter-template
-        (format out " :counter-template ~S~%" counter-template))
-      (when counter-plan
-        (format out " :bb-counter-counts ~S~%" bb-counter-counts))
-      (when counter-plan
-        (format out " :edge-counter-counts ~S~%" edge-counter-counts))
-      (format out " )~%"))))
+      (flet ((write-ht-section (key ht)
+               (format out " ~A (~%" key)
+               (when ht
+                 (maphash (lambda (k v) (format out "   (~S . ~D)~%" k v)) ht))
+               (format out " )~%")))
+        (format out "(:format :cl-cc-pgo-v1~%")
+        (format out " :total-instructions ~D~%" (length insts))
+        (write-ht-section ":op-counts"            counts)
+        (write-ht-section ":bb-counts"            bb)
+        (write-ht-section ":branch-counts"        branches)
+        (write-ht-section ":function-call-counts" calls)
+        (write-ht-section ":type-feedback"        type-feedback)
+        (when counter-plan
+          (format out " :counter-plan ~S~%"         counter-plan)
+          (format out " :counter-template ~S~%"     counter-template)
+          (format out " :bb-counter-counts ~S~%"    bb-counter-counts)
+          (format out " :edge-counter-counts ~S~%"  edge-counter-counts))
+        (format out " )~%"))))
 
 (defun %print-jit-cache-stats (&optional (stream *standard-output*))
   "Print runtime JIT code-cache statistics when requested by the CLI."
