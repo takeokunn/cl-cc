@@ -35,9 +35,6 @@
       (ensure-system-asd :cl-cc-compile "packages/compile/cl-cc-compile.asd" here)
       (ensure-system-asd :cl-cc-vm "packages/vm/cl-cc-vm.asd" here)
        (ensure-system-asd :cl-cc-stdlib "packages/stdlib/cl-cc-stdlib.asd" here)
-       (ensure-system-asd :cl-cc-sb-mop "packages/sb-mop/cl-cc-sb-mop.asd" here)
-       (ensure-system-asd :cl-cc-sb-pcl "packages/sb-pcl/cl-cc-sb-pcl.asd" here)
-       (ensure-system-asd :cl-cc-closer-mop "packages/closer-mop/cl-cc-closer-mop.asd" here)
        (ensure-system-asd :cl-cc-php "packages/php/cl-cc-php.asd" here)
        (ensure-system-asd :cl-cc-javascript "packages/javascript/cl-cc-javascript.asd" here)
        (ensure-system-asd :cl-cc-pipeline "packages/pipeline/cl-cc-pipeline.asd" here)
@@ -53,7 +50,6 @@
                 :cl-cc-runtime :cl-cc-bytecode :cl-cc-ir :cl-cc-mir :cl-cc-target
                 :cl-cc-type :cl-cc-optimize :cl-cc-regalloc :cl-cc-emit :cl-cc-expand
                 :cl-cc-compile :cl-cc-cps :cl-cc-codegen :cl-cc-vm :cl-cc-stdlib
-                  :cl-cc-sb-mop :cl-cc-sb-pcl :cl-cc-closer-mop
                  :cl-cc-pipeline :cl-cc-selfhost :cl-cc-repl :cl-cc-php :cl-cc-javascript)
   :components
   ((:module "src"
@@ -81,8 +77,6 @@
       (maybe-load-asd :cl-cc-cli "packages/cli/cl-cc-cli.asd" here)
       (maybe-load-asd :cl-cc-testing-framework "packages/testing-framework/cl-cc-testing-framework.asd" here)
       (maybe-load-asd :cl-cc-docgen "packages/docgen/cl-cc-docgen.asd" here)
-      ;; Register optional packages needed by downstream systems
-      (maybe-load-asd :cl-cc-sb-mop "packages/sb-mop/cl-cc-sb-mop.asd" here)
       ;; Register the real FR-796/FR-797 protocol tool system when present.
       ;; VM no longer defines fallback packages; this optional ASDF reference is
       ;; the development/test bridge to packages/tools/cl-cc-tools.asd.
