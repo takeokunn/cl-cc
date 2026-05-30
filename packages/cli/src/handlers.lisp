@@ -120,7 +120,7 @@ is created as needed."
           (format out " :counter-template ~S~%"     counter-template)
           (format out " :bb-counter-counts ~S~%"    bb-counter-counts)
           (format out " :edge-counter-counts ~S~%"  edge-counter-counts))
-        (format out " )~%"))))
+        (format out " )~%")))))
 
 (defun %print-jit-cache-stats (&optional (stream *standard-output*))
   "Print runtime JIT code-cache statistics when requested by the CLI."
