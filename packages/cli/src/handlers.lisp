@@ -64,19 +64,6 @@
         (cl-cc/parse::*werror-p* (not (null (compile-opts-werror opts)))))
     (funcall thunk)))
 
-(defun %call-with-expander-flags (opts thunk)
-  "FR-241/153: Execute THUNK with expander tracing/memoization toggles from OPTS."
-  (let ((cl-cc/expand:*trace-macros* (not (null (compile-opts-trace-macros opts))))
-        (cl-cc/expand:*enable-macro-memoization*
-         (not (null (compile-opts-memoize-macros opts)))))
-    (funcall thunk)))
-
-(defun %call-with-optimizer-flags (opts thunk)
-  "FR-276: Execute THUNK with optimizer level pre-configured from OPTS."
-  (when (compile-opts-opt-level opts)
-    (cl-cc/optimize:apply-optimization-level (compile-opts-opt-level opts)))
-  (funcall thunk))
-
 (defun %pgo-profile-instructions (result)
   "Return instruction list to profile from RESULT, preferring optimized stream."
   (or (cl-cc/compile:compilation-result-optimized-instructions result)

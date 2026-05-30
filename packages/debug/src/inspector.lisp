@@ -17,12 +17,11 @@
       (prin1 object stream))))
 
 (defun %mop-symbol-function (name)
-  "Return an SB-MOP/CLOSER-MOP function named NAME when available."
-  (dolist (package-name '("SB-MOP" "CLOSER-MOP"))
-    (let* ((package (find-package package-name))
-           (symbol (and package (find-symbol name package))))
-      (when (and symbol (fboundp symbol))
-        (return (symbol-function symbol))))))
+  "Return the SB-MOP function named NAME, or NIL if unavailable."
+  (let* ((pkg (find-package "SB-MOP"))
+         (sym (and pkg (find-symbol name pkg))))
+    (when (and sym (fboundp sym))
+      (symbol-function sym))))
 
 (defun %clos-slot-names (object)
   "Best-effort list of CLOS slot names for OBJECT."
