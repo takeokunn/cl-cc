@@ -291,8 +291,13 @@
      (:file "cps-ast-semantic-tests")
      (:file "cps-ast-transform-tests")
      (:file "cps-ast-extended-tests")
-     (:file "cps-ast-functional-tests")
-       (:file "builtin-registry-tests")
+      (:file "cps-ast-functional-tests")
+      (:module "cps-package-tests"
+       :pathname "../../cps/tests"
+       :serial t
+       :components
+       ((:file "cps-coverage-matrix-tests")))
+        (:file "builtin-registry-tests")
        (:file "builtin-registry-data-tests")
        (:file "fr-586-set-tests")
        (:file "fr-316-benchmark-tests")

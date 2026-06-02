@@ -1,6 +1,5 @@
 (in-package :cl-cc/debug)
 
-#+sbcl
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :sb-bsd-sockets)
   (require :sb-posix))
@@ -111,7 +110,6 @@ plugged in."
       ((:operator-arglist operator-arglist) (apply #'operator-arglist args))
       (otherwise (list :ok nil :message (format nil "Unknown Swank operation: ~S" operation))))))
 
-#+sbcl
 (defun %accept-one-swank-client (socket)
   "Serve one tiny line-oriented Swank skeleton client."
   (multiple-value-bind (client _peer)
@@ -132,7 +130,6 @@ plugged in."
                       (finish-output stream))))
       (ignore-errors (sb-bsd-sockets:socket-close client)))))
 
-#+sbcl
 (defun %swank-accept-loop (server)
   "Accept clients while SERVER is marked running."
   (loop while (swank-server-running-p server)
@@ -149,7 +146,6 @@ plugged in."
 When BACKGROUND is true on SBCL, an accept loop is started in a background
 thread.  The wire format is intentionally tiny: one printed request form per
 line, returning one printed plist per line."
-  #+sbcl
   (let* ((socket (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp))
          (address (sb-bsd-sockets:make-inet-address host)))
     (setf (sb-bsd-sockets:sockopt-reuse-address socket) t)
@@ -160,16 +156,11 @@ line, returning one printed plist per line."
         (setf (swank-server-thread server)
               (sb-thread:make-thread (lambda () (%swank-accept-loop server))
                                      :name "cl-cc swank skeleton")))
-      server))
-  #-sbcl
-  (declare (ignore host port background))
-  #-sbcl
-  (error "CREATE-SERVER currently requires SBCL socket support."))
+      server)))
 
 (defun stop-server (server)
   "Stop SERVER and close its listening socket."
   (setf (swank-server-running-p server) nil)
-  #+sbcl
   (when (swank-server-socket server)
     (ignore-errors (sb-bsd-sockets:socket-close (swank-server-socket server))))
   server)

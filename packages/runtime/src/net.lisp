@@ -2,7 +2,7 @@
 (in-package :cl-cc/runtime)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (ignore-errors (require :sb-bsd-sockets)))
+  (ignore-errors (require :sb-bsd-sockets)))
 
 (defconstant +rt-af-inet+ 2)
 (defconstant +rt-af-inet6+ 10)
@@ -38,13 +38,11 @@
 (defun rt-resolve-address (host port &key (family +rt-af-inet+))
   (make-rt-socket-address :host (string host) :port port :family family))
 
-#+sbcl
 (defun %rt-socket-class (family)
   (if (= family +rt-af-inet6+)
       'sb-bsd-sockets:inet6-socket
       'sb-bsd-sockets:inet-socket))
 
-#+sbcl
 (defun %rt-host-address (host family)
   (if (= family +rt-af-inet6+)
       (sb-bsd-sockets:make-inet6-address (string host))
@@ -54,7 +52,6 @@
           (sb-bsd-sockets:host-ent-address
            (sb-bsd-sockets:get-host-by-name (string host)))))))
 
-#+sbcl
 (defun %rt-address-string (address)
   (cond
     ((and (vectorp address) (= (length address) 4))
@@ -66,7 +63,6 @@
                               (aref address (1+ i))))))
     (t (string address))))
 
-#+sbcl
 (defun %rt-make-backend-socket (type protocol family)
   (make-instance (%rt-socket-class family)
                  :type (if (= type +rt-sock-dgram+) :datagram :stream)
@@ -82,10 +78,8 @@
 (defun rt-socket (type &key (protocol (if (= type +rt-sock-dgram+) :udp :tcp)) (family +rt-af-inet+)
                          reuse-address tcp-nodelay keepalive)
   (let* ((fd (prog1 *rt-next-socket-fd* (incf *rt-next-socket-fd*)))
-         (backend #+sbcl (ignore-errors (%rt-make-backend-socket type protocol family))
-                  #-sbcl nil)
+         (backend (ignore-errors (%rt-make-backend-socket type protocol family)))
          (entry (make-rt-socket-entry :fd fd :type type :protocol protocol :backend backend)))
-    #+sbcl
     (when backend
       (when reuse-address
         (setf (sb-bsd-sockets:sockopt-reuse-address backend) t))
@@ -98,7 +92,6 @@
 
 (defun rt-bind (fd addr)
   (let ((entry (%rt-socket-entry fd)))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (sb-bsd-sockets:socket-bind (rt-socket-entry-backend entry)
                                   (%rt-host-address (rt-socket-address-host addr)
@@ -118,7 +111,6 @@
   (let ((entry (%rt-socket-entry fd)))
     (unless (rt-socket-entry-local-address entry)
       (error "Socket ~a must be bound before listen" fd))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (sb-bsd-sockets:socket-listen (rt-socket-entry-backend entry) backlog))
     (setf (rt-socket-entry-backlog entry) backlog
@@ -129,7 +121,6 @@
 (defun rt-connect (fd addr)
   (let* ((entry (%rt-socket-entry fd))
          (listener-fd (gethash (%rt-addr-key addr) *rt-listener-registry*)))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (sb-bsd-sockets:socket-connect (rt-socket-entry-backend entry)
                                      (%rt-host-address (rt-socket-address-host addr)
@@ -146,7 +137,6 @@
   (let ((entry (%rt-socket-entry fd)))
     (unless (eq (rt-socket-entry-state entry) :listening)
       (error "Socket ~a is not listening" fd))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (let* ((accepted-backend (sb-bsd-sockets:socket-accept (rt-socket-entry-backend entry)))
              (accepted (rt-socket (rt-socket-entry-type entry)
@@ -180,7 +170,6 @@
 
 (defun rt-close-socket (fd)
   (let ((entry (gethash fd *rt-socket-registry*)))
-    #+sbcl
     (when (and entry (rt-socket-entry-backend entry))
       (ignore-errors (sb-bsd-sockets:socket-close (rt-socket-entry-backend entry))))
     (when (and entry (rt-socket-entry-local-address entry))
@@ -200,7 +189,6 @@
   (let* ((entry (%rt-socket-entry fd))
          (peer (and (rt-socket-entry-peer entry) (%rt-socket-entry (rt-socket-entry-peer entry))))
          (limit (or end (length buf))))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (let ((payload (make-array (- limit start) :element-type '(unsigned-byte 8))))
         (loop for src from start below limit
@@ -221,7 +209,6 @@
          (rx (rt-socket-entry-rx-buffer entry))
          (limit (or end (length buf)))
          (count (min (- limit start) (fill-pointer rx))))
-    #+sbcl
     (when (rt-socket-entry-backend entry)
       (let ((tmp (make-array (- limit start) :element-type '(unsigned-byte 8))))
         (multiple-value-bind (data n)
@@ -245,7 +232,6 @@
 (defun rt-make-socket-stream (fd &key (element-type '(unsigned-byte 8)) (input t) (output t))
   "Return a CL stream for a runtime socket FD when host sockets are available."
   (let ((entry (%rt-socket-entry fd)))
-    #+sbcl
     (if (rt-socket-entry-backend entry)
         (or (rt-socket-entry-stream entry)
             (let ((stream (sb-bsd-sockets:socket-make-stream
@@ -254,15 +240,12 @@
                            :input input :output output :buffering :full)))
               (setf (rt-socket-entry-stream entry) stream)
               stream))
-        (error "Runtime socket ~a has no host backend" fd))
-    #-sbcl (declare (ignore entry element-type input output))
-    #-sbcl (error "Runtime socket streams unsupported on this host")))
+        (error "Runtime socket ~a has no host backend" fd))))
 
 (defun rt-socket-name (fd)
   "Return runtime socket FD local address descriptor."
   (let ((entry (%rt-socket-entry fd)))
     (or (rt-socket-entry-local-address entry)
-        #+sbcl
         (when (rt-socket-entry-backend entry)
           (multiple-value-bind (address port)
               (sb-bsd-sockets:socket-name (rt-socket-entry-backend entry))

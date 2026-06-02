@@ -6,7 +6,7 @@
 (defun rt-spsc-size (q) (let ((h (rt-spsc-queue-head q)) (tl (rt-spsc-queue-tail q))) (- h tl)))
 (defun rt-spsc-empty-p (q) (= (rt-spsc-queue-head q) (rt-spsc-queue-tail q)))
 (defun rt-spsc-full-p (q) (= (- (rt-spsc-queue-head q) (rt-spsc-queue-tail q)) (1+ (rt-spsc-queue-mask q))))
-(defun %rt-spsc-thread () #+sbcl sb-thread:*current-thread* #-sbcl :single-thread)
+(defun %rt-spsc-thread () sb-thread:*current-thread*)
 (defun %rt-spsc-claim-producer (q)
   (let ((me (%rt-spsc-thread)))
     (or (eq (rt-spsc-queue-producer q) me)

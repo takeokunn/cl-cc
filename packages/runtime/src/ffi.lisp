@@ -16,21 +16,17 @@
 
 (defun rt-ffi-load-library (path)
   "Load a shared library. Returns an opaque handle."
-  #+sbcl (sb-alien:load-shared-object path)
-  #-sbcl (progn
-           (setf (gethash path *rt-ffi-loaded-libs*) t)
-           path))
+  (sb-alien:load-shared-object path))
 
 (defun rt-ffi-close-library (handle)
   "Unload a shared library."
   (declare (ignore handle))
-  #+sbcl nil  ; SBCL doesn't support unloading
-  #-sbcl t)
+  nil)  ; SBCL doesn't support unloading
 
 (defun rt-ffi-find-symbol (handle name)
   "Find a symbol address in a loaded library. Returns a function pointer."
-  #+sbcl (sb-alien:extern-alien name (function sb-alien:void))
-  #-sbcl (cons handle name))
+  (declare (ignore handle))
+  (sb-alien:extern-alien name (function sb-alien:void)))
 
 ;; ── Foreign function calling ──
 (defvar *rt-ffi-registered-functions* (make-hash-table :test #'equal))
@@ -55,11 +51,10 @@
   "Call a registered foreign function."
   (let ((ff (gethash name *rt-ffi-registered-functions*)))
     (unless ff (error "Unknown foreign function: ~A" name))
-    #+sbcl (apply #'sb-alien:alien-funcall
-                  (sb-alien:extern-alien name
-                    (function sb-alien:void))
-                  args)
-    #-sbcl (list :ffi-call name args)))
+    (apply #'sb-alien:alien-funcall
+           (sb-alien:extern-alien name
+             (function sb-alien:void))
+           args)))
 
 ;; ── Callback support ──
 (defstruct rt-ffi-callback
@@ -74,14 +69,13 @@
 
 (defun rt-make-callback (fn arg-types return-type)
   "Create a C-callable function pointer from a Lisp function."
+  (declare (ignore arg-types return-type))
   (let ((id (incf *rt-ffi-next-callback-id*)))
-    #+(and sbcl sb-alien-callback) (sb-alien:alien-callback
-                                    (function sb-alien:void) fn)
-    #-(and sbcl sb-alien-callback) (let ((cb (make-rt-ffi-callback :id id :fn fn
-                                           :arg-types arg-types
-                                           :return-type return-type)))
-             (setf (gethash id *rt-ffi-callbacks*) cb)
-             cb)))
+    (declare (ignore id))
+    #+(and sbcl sb-alien-callback)
+    (sb-alien:alien-callback (function sb-alien:void) fn)
+    #-(and sbcl sb-alien-callback)
+    (error "sb-alien:alien-callback is not available in this SBCL build")))
 
 (defun rt-ffi-callback-invoke (cb-id &rest args)
   "Invoke a registered callback. Called from native code."
@@ -139,8 +133,7 @@
 (defmacro rt-asm ((&rest instrs))
   "Inline assembly placeholder. On native backend, emits actual instructions."
   (declare (ignore instrs))
-  #+sbcl '(error "Inline assembly not available on host CL")
-  #-sbcl `(progn ,@(mapcar (lambda (i) `(list :asm ,@i)) instrs)))
+  '(error "Inline assembly not available on host CL"))
 
 ;; ── Initialization ──
 (defun rt-ffi-init ()
@@ -339,8 +332,6 @@ Reconstructs interpreter state and transfers control."
   (declare (ignore deopt-id saved-regs))
   (incf *rt-deopt-frame-count*)
   ;; On host SBCL, signal a continuable error for development.
-  ;; Native binary will implement full state reconstruction.
-  #+sbcl
   (restart-case
       (error "Deoptimization trampoline invoked (id=~D, frame=~D). ~
               Full interpreter state reconstruction not yet implemented. ~
@@ -348,13 +339,7 @@ Reconstructs interpreter state and transfers control."
              deopt-id *rt-deopt-frame-count*)
     (continue ()
       :report "Return from deoptimization (no-op)"
-      nil))
-  #-sbcl
-  ;; Native binary: reconstruct interpreter state from deopt metadata
-  ;; and resume execution at the corresponding bytecode PC.
-  (progn
-    (format *error-output* "DEOPT id=~D frame=~D~%" deopt-id *rt-deopt-frame-count*)
-    nil))
+      nil)))
 
 ;; C ABI entry point for the deopt trampoline
 (setf (symbol-function '|_cl_cc_deopt_trampoline|)

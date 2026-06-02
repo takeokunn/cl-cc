@@ -25,8 +25,7 @@
 
 (defun rt-current-thread-token ()
   "Return a stable identifier for the current thread."
-  #+sbcl sb-thread:*current-thread*
-  #-sbcl :main)
+  sb-thread:*current-thread*)
 
 ;; ── Lock wrappers (map to sync.lisp API) ─────────────────────────────────
 
@@ -54,32 +53,25 @@
 
 (defun rt-thread-yield ()
   "Yield the current thread."
-  #+sbcl (sb-thread:thread-yield)
-  #-sbcl nil)
+  (sb-thread:thread-yield))
 
 ;; ── Atomic compare-and-swap ──────────────────────────────────────────────
 
 (defun rt-atomic-compare-and-swap-symbol (symbol old new)
   "Atomically CAS the value of SYMBOL."
-  #+sbcl (sb-ext:compare-and-swap (symbol-value symbol) old new)
-  #-sbcl (when (eq (symbol-value symbol) old)
-           (setf (symbol-value symbol) new)
-           old))
+  (sb-ext:compare-and-swap (symbol-value symbol) old new))
 
 ;; ── Process exit ──────────────────────────────────────────────────────────
 
 (defun rt-quit (&optional (code 0))
   "Exit the process with CODE."
-  #+sbcl (sb-ext:exit :code code)
-  #-sbcl (rt-unsupported "process exit"))
+  (sb-ext:exit :code code))
 
 ;; ── Timeout macro ─────────────────────────────────────────────────────────
 
 (defmacro rt-with-timeout ((seconds &body timeout-forms) &body body)
   "Execute BODY with a timeout of SECONDS."
-  #+sbcl `(handler-case
-              (sb-ext:with-timeout ,seconds ,@body)
-            (sb-ext:timeout ()
-              ,@timeout-forms))
-  #-sbcl (declare (ignore seconds timeout-forms))
-  #-sbcl `(progn ,@body))
+  `(handler-case
+       (sb-ext:with-timeout ,seconds ,@body)
+     (sb-ext:timeout ()
+       ,@timeout-forms)))

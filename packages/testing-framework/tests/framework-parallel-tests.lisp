@@ -136,7 +136,7 @@
                                       :before-each '()
                                       :after-each '())))
            (with-replaced-function (run-suite
-                                    (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites)
+                                    (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites &allow-other-keys)
                                       (setf captured (list :suite-name suite-name
                                                            :parallel parallel
                                                            :random random

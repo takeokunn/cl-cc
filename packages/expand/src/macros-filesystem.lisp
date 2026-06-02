@@ -22,13 +22,9 @@
 
 (our-defmacro room (&optional detail)
   "Print memory usage information via the host SBCL runtime."
-  #+sbcl
   (if detail
       `(sb-ext::room ,detail)
-      '(sb-ext::room))
-  #-sbcl
-  (declare (ignore detail))
-  nil)
+      '(sb-ext::room)))
 
 ;;; ─── dribble (FR-514) ─────────────────────────────────────────────────────────
 

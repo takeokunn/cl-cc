@@ -2,7 +2,7 @@
 (in-package :cl-cc/runtime)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (require :sb-posix))
+  (require :sb-posix))
 
 (defconstant +rt-o-rdonly+ 0)
 (defconstant +rt-o-wronly+ 1)
@@ -87,8 +87,7 @@ implementation/UIOP process handle used for portable process management."
                              :if-does-not-exist missing
                              :element-type element-type))
            (handle (make-rt-file-handle :stream stream :path path :mode direction
-                                        :fd #+sbcl (ignore-errors (sb-sys:fd-stream-fd stream))
-                                            #-sbcl nil)))
+                                        :fd (ignore-errors (sb-sys:fd-stream-fd stream)))))
       (setf (gethash handle *rt-open-files*) t)
       handle)))
 
@@ -117,50 +116,41 @@ implementation/UIOP process handle used for portable process management."
     (close stream)
     t))
 
-(defun rt-getenv (name) #+sbcl (sb-ext:posix-getenv name) #-sbcl (declare (ignore name)) #-sbcl nil)
+(defun rt-getenv (name) (sb-ext:posix-getenv name))
 (defun %rt-sb-posix-call (name &rest args)
-  #+sbcl
   (let ((symbol (find-symbol (string name) :sb-posix)))
     (when (and symbol (fboundp symbol))
-      (apply (symbol-function symbol) args)))
-  #-sbcl (declare (ignore name args))
-  #-sbcl nil)
+      (apply (symbol-function symbol) args))))
 
 (defun rt-setenv (name value &key overwrite)
   (%rt-sb-posix-call :setenv name value (if overwrite 1 0)))
 
 (defun rt-unsetenv (name)
   (%rt-sb-posix-call :unsetenv name))
-(defun rt-argv () (or *rt-saved-argv* #+sbcl sb-ext:*posix-argv* #-sbcl (list "cl-cc")))
-(defun rt-exit (&optional (code 0)) #+sbcl (sb-ext:exit :code code) #-sbcl (cl:quit code))
+(defun rt-argv () (or *rt-saved-argv* sb-ext:*posix-argv*))
+(defun rt-exit (&optional (code 0)) (sb-ext:exit :code code))
 
 (defun rt-getcwd () (namestring (truename ".")))
 (defun rt-chdir (path)
-  #+sbcl (%rt-sb-posix-call :chdir (namestring path))
+  (%rt-sb-posix-call :chdir (namestring path))
   (setf *default-pathname-defaults* (truename path))
   (namestring *default-pathname-defaults*))
 
 (defun rt-fork ()
   "Fork the current process on POSIX hosts. Returns child pid, 0 in child, or NIL if unsupported."
-  #+sbcl (%rt-sb-posix-call :fork)
-  #-sbcl nil)
+  (%rt-sb-posix-call :fork))
 
 (defun rt-exec (path argv &key env)
   "Replace current process image with PATH. Stubbed through SB-POSIX on SBCL."
   (declare (ignore env))
-  #+sbcl (%rt-sb-posix-call :execv path (coerce argv 'vector))
-  #-sbcl (declare (ignore path argv))
-  #-sbcl nil)
+  (%rt-sb-posix-call :execv path (coerce argv 'vector)))
 
 (defun rt-waitpid (pid &key nohang)
-  #+sbcl
   (let ((flags (if nohang (or (ignore-errors (symbol-value (find-symbol "WNOHANG" :sb-posix))) 0) 0)))
     (multiple-value-bind (wpid status)
         (%rt-sb-posix-call :waitpid pid flags)
       (make-rt-process-status :pid (or wpid -1) :status (or status 0)
-                              :exited-p (and wpid (not (zerop wpid))))))
-  #-sbcl (declare (ignore pid nohang))
-  #-sbcl (make-rt-process-status))
+                              :exited-p (and wpid (not (zerop wpid)))))))
 
 (defun %rt-uiop-process-stream-option (role option)
   "Translate runtime process stream OPTION for ROLE into a UIOP launch option."
@@ -182,13 +172,11 @@ implementation/UIOP process handle used for portable process management."
 
 (defun %rt-process-info-pid (process-info)
   (or (%rt-process-info-accessor :process-info-pid process-info)
-      #+sbcl (ignore-errors (sb-ext:process-pid process-info))
-      #-sbcl nil))
+      (ignore-errors (sb-ext:process-pid process-info))))
 
 (defun %rt-process-info-exit-code (process-info)
   (or (%rt-process-info-accessor :process-info-exit-code process-info)
-      #+sbcl (ignore-errors (sb-ext:process-exit-code process-info))
-      #-sbcl nil))
+      (ignore-errors (sb-ext:process-exit-code process-info))))
 
 (defun %rt-process-info-stream (process-info accessor fallback-slot)
   (or (%rt-process-info-accessor accessor process-info)
@@ -238,8 +226,8 @@ redirection on POSIX hosts and the platform process API elsewhere."
   (check-type signal integer)
   (let ((pid (rt-process-pid process)))
     (cond
-      ((and pid #+sbcl t #-sbcl nil)
-       #+sbcl (%rt-sb-posix-call :kill pid signal)
+      (pid
+       (%rt-sb-posix-call :kill pid signal)
        t)
       (t
        (let ((info (rt-process-host-process process)))

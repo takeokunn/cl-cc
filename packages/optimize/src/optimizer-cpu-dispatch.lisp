@@ -12,8 +12,7 @@
   "Detect CPU features via CPUID instruction.
 Returns a list of feature strings."
   ;; CPUID-based feature detection requires SBCL internals.
-  ;; On non-SBCL (or if sb-vm::%cpuid unavailable), fall back to a conservative set.
-  #+sbcl
+  ;; Falls back to a conservative set when sb-vm::%cpuid is unavailable.
   (let ((features nil)
         (cpuid-fn (find-symbol "%CPUID" "SB-VM")))
     (if cpuid-fn
@@ -34,9 +33,7 @@ Returns a list of feature strings."
             (when (logtest ebx (ash 1 5)) (push :avx2 features))
             (when (logtest ebx (ash 1 16)) (push :avx512f features)))
           (nreverse features))
-        '(:sse2)))
-  #-sbcl
-  '(:sse2))
+        '(:sse2))))
 
 ;;; ──── Feature-gated function versions ────
 (defvar *cpu-dispatched-functions* (make-hash-table :test #'eq)

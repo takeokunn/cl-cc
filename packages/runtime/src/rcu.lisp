@@ -3,7 +3,7 @@
 (defvar *rt-rcu-readers* (make-hash-table))
 (defvar *rt-rcu-mutex* (rt-make-mutex))
 (defvar *rt-rcu-cond* (rt-make-condition-variable))
-(defun %rt-rcu-thread () #+sbcl sb-thread:*current-thread* #-sbcl :single-thread)
+(defun %rt-rcu-thread () sb-thread:*current-thread*)
 (defun rt-rcu-read-lock ()
   (rt-with-mutex (*rt-rcu-mutex*)
     (incf (gethash (%rt-rcu-thread) *rt-rcu-readers* 0)))

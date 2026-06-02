@@ -81,33 +81,26 @@
   "Install FN as the runtime handler for OS signal number SIG.
 
 On SBCL this installs a real host signal interrupt handler with
-SB-SYS:ENABLE-INTERRUPT and invokes FN with SIG when the signal is delivered.
-On non-SBCL implementations this remains a documented portable stub and
-returns :PORTABLE-STUB; real signal delivery is SBCL-only for now."
-  #-sbcl (declare (ignore sig fn one-shot))
-  #+sbcl
-  (progn
-    (check-type sig integer)
-    (check-type fn function)
-    (let (handler)
-      (setf handler
-            (make-rt-signal-handler :signal sig
-                                    :function fn
-                                    :one-shot-p one-shot
-                                    :installed-at (get-internal-real-time)))
-      (sb-sys:enable-interrupt
-       sig
-       (lambda (&rest interrupt-args)
-         (declare (ignore interrupt-args))
-         (when one-shot
-           (sb-sys:enable-interrupt sig :default)
-           (rt-remove-signal-handler handler))
-         (funcall fn sig)))
-      (setf (gethash sig *rt-sigaction-installed*) :sbcl-installed)
-      (push handler (gethash sig *rt-signal-handlers* nil))
-      handler))
-  #-sbcl
-  :portable-stub)
+SB-SYS:ENABLE-INTERRUPT and invokes FN with SIG when the signal is delivered."
+  (check-type sig integer)
+  (check-type fn function)
+  (let (handler)
+    (setf handler
+          (make-rt-signal-handler :signal sig
+                                  :function fn
+                                  :one-shot-p one-shot
+                                  :installed-at (get-internal-real-time)))
+    (sb-sys:enable-interrupt
+     sig
+     (lambda (&rest interrupt-args)
+       (declare (ignore interrupt-args))
+       (when one-shot
+         (sb-sys:enable-interrupt sig :default)
+         (rt-remove-signal-handler handler))
+       (funcall fn sig)))
+    (setf (gethash sig *rt-sigaction-installed*) :sbcl-installed)
+    (push handler (gethash sig *rt-signal-handlers* nil))
+    handler))
 
 (defun rt-set-signal-handler (signal function)
   "Install FUNCTION as SIGNAL's handler through the native host signal API.
@@ -117,12 +110,12 @@ safepoints rather than directly inside the async OS signal context."
   (check-type signal integer)
   (cond
     ((eq function :default)
-     #+sbcl (sb-sys:enable-interrupt signal :default)
+     (sb-sys:enable-interrupt signal :default)
      (remhash signal *rt-signal-handlers*)
      (setf (gethash signal *rt-sigaction-installed*) :default)
      :default)
     ((eq function :ignore)
-     #+sbcl (sb-sys:enable-interrupt signal :ignore)
+     (sb-sys:enable-interrupt signal :ignore)
      (remhash signal *rt-signal-handlers*)
      (setf (gethash signal *rt-sigaction-installed*) :ignore)
      :ignore)
@@ -132,7 +125,6 @@ safepoints rather than directly inside the async OS signal context."
            (list (make-rt-signal-handler :signal signal
                                          :function function
                                          :installed-at (get-internal-real-time))))
-     #+sbcl
      (sb-sys:enable-interrupt signal
                               (lambda (&rest args)
                                 (declare (ignore args))

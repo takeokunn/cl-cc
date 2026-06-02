@@ -102,4 +102,4 @@ Uses mmap with PROT_READ | PROT_WRITE | PROT_EXEC."
   (sb-sys:sap-int (sb-sys:vector-sap
                    (sb-sys:make-array 1 :element-type '(unsigned-byte 8))))
   #-sbcl
-  0)
+  0

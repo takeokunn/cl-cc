@@ -63,14 +63,11 @@
       (typep object 'standard-object)))
 
 (defun %vm-circle-object-slots (object)
-  #+sbcl
   (handler-case
       (loop for slot in (class-slots (class-of object))
             for name = (slot-definition-name slot)
             when (slot-boundp object name) collect (cons name (slot-value object name)))
-    (error () nil))
-  #-sbcl (declare (ignore object))
-  #-sbcl nil)
+    (error () nil)))
 
 (defun %vm-circle-labeling-visit (object ctx seen)
   "Phase 1: DFS through compound objects and count repeated visits."
@@ -217,8 +214,8 @@
 (declaim (special *print-pprint-dispatch* *readtable*))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (ignore-errors (require :sb-bsd-sockets))
-  #+sbcl (ignore-errors (require :sb-posix)))
+  (ignore-errors (require :sb-bsd-sockets))
+  (ignore-errors (require :sb-posix)))
 
 ;;; ─── Host-backed sockets, DNS, TLS, and mmap FR helpers ─────────────────────
 
@@ -298,7 +295,6 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
       (:ascii (%vm-encode-latin/ascii string 127 error-mode))
       (:latin-1 (%vm-encode-latin/ascii string 255 error-mode))
       (otherwise
-       #+sbcl
        (handler-case
            (sb-ext:string-to-octets string :external-format (%vm-host-external-format format))
          (error (e)
@@ -312,11 +308,7 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
                        do (if (code-char (char-code ch))
                               (write-char ch out)
                               (unless (eq error-mode :ignore) (write-char (%vm-replacement-character) out)))))
-               :external-format (%vm-host-external-format format))))))
-       #-sbcl
-       (declare (ignore error-mode))
-       #-sbcl
-       (error "VM external-format encoding requires SBCL for ~S" format)))))
+               :external-format (%vm-host-external-format format))))))))))
 
 (defun %vm-coerce-octets (bytes)
   (cond
@@ -366,19 +358,13 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
           (:ascii (%vm-decode-latin/ascii payload 127 error-mode))
           (:latin-1 (%vm-decode-latin/ascii payload 255 error-mode))
           (otherwise
-           #+sbcl
            (handler-case
                (sb-ext:octets-to-string payload :external-format (%vm-host-external-format format))
              (error (e)
                (ecase error-mode
                  (:error (error e))
                  (:replace (string (%vm-replacement-character)))
-                 (:ignore ""))))
-           #-sbcl
-           (declare (ignore error-mode))
-           #-sbcl
-           (error "VM external-format decoding requires SBCL for ~S" format)))))))
-
+                 (:ignore ""))))))))))
 (defun vm-stream-external-format (stream)
   "Return STREAM's VM external format, defaulting to *DEFAULT-EXTERNAL-FORMAT*."
   (gethash stream *vm-stream-external-formats* *default-external-format*))
@@ -407,12 +393,9 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
     stream))
 
 (defun %socket-class (family)
-  #+sbcl
   (ecase family
     ((:ipv4 :inet 4) 'sb-bsd-sockets:inet-socket)
-    ((:ipv6 :inet6 6) 'sb-bsd-sockets:inet6-socket))
-  #-sbcl (declare (ignore family))
-  #-sbcl (%unsupported "sockets"))
+    ((:ipv6 :inet6 6) 'sb-bsd-sockets:inet6-socket)))
 
 (defun %socket-type (type)
   (ecase type
@@ -436,7 +419,6 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
                     :initial-contents octets))))
 
 (defun %host-address (host family)
-  #+sbcl
   (cond
     ((and (vectorp host) (not (stringp host))) host)
     ((member family '(:ipv6 :inet6 6))
@@ -447,9 +429,7 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
         (error ()
           (let ((entry (sb-bsd-sockets:get-host-by-name (string host))))
             (or (first (sb-bsd-sockets:host-ent-addresses entry))
-                (sb-bsd-sockets:host-ent-address entry)))))))
-  #-sbcl (declare (ignore host family))
-  #-sbcl (%unsupported "socket address conversion"))
+                (sb-bsd-sockets:host-ent-address entry))))))))
 
 (defun %ip-string (address)
   (cond
@@ -465,7 +445,6 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
 (defun make-tcp-socket (&key (family :ipv4)
                              reuse-address tcp-nodelay keepalive dual-stack)
   "Create a TCP socket object backed by SBCL sb-bsd-sockets."
-  #+sbcl
   (let ((socket (make-instance (%socket-class family)
                                :type :stream :protocol :tcp)))
     (declare (ignore dual-stack))
@@ -475,76 +454,56 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
       (ignore-errors (setf (sb-bsd-sockets:sockopt-tcp-nodelay socket) t)))
     (when keepalive
       (ignore-errors (setf (sb-bsd-sockets:sockopt-keep-alive socket) t)))
-    (make-vm-socket :backend socket :family family :type :tcp))
-  #-sbcl (declare (ignore family reuse-address tcp-nodelay keepalive dual-stack))
-  #-sbcl (%unsupported "TCP sockets"))
+    (make-vm-socket :backend socket :family family :type :tcp)))
 
 (defun make-udp-socket (&key (family :ipv4) reuse-address dual-stack)
   "Create a UDP socket object backed by SBCL sb-bsd-sockets."
-  #+sbcl
   (let ((socket (make-instance (%socket-class family)
                                :type :datagram :protocol :udp)))
     (declare (ignore dual-stack))
     (when reuse-address
       (setf (sb-bsd-sockets:sockopt-reuse-address socket) t))
-    (make-vm-socket :backend socket :family family :type :udp))
-  #-sbcl (declare (ignore family reuse-address dual-stack))
-  #-sbcl (%unsupported "UDP sockets"))
+    (make-vm-socket :backend socket :family family :type :udp)))
 
 (defun socket-bind (socket host port)
   "Bind SOCKET to HOST and PORT. Use port 0 for an ephemeral localhost port."
-  #+sbcl
   (progn
     (sb-bsd-sockets:socket-bind (vm-socket-backend socket)
                                 (%host-address host (vm-socket-family socket))
                                 port)
-    socket)
-  #-sbcl (declare (ignore socket host port))
-  #-sbcl (%unsupported "socket-bind"))
+    socket))
 
 (defun socket-listen (socket &optional (backlog 5))
   "Mark SOCKET as a TCP listener."
-  #+sbcl (progn (sb-bsd-sockets:socket-listen (vm-socket-backend socket) backlog) socket)
-  #-sbcl (declare (ignore socket backlog))
-  #-sbcl (%unsupported "socket-listen"))
+  (progn (sb-bsd-sockets:socket-listen (vm-socket-backend socket) backlog) socket))
 
 (defun socket-connect (socket host port)
   "Connect SOCKET to HOST and PORT."
-  #+sbcl
   (progn
     (sb-bsd-sockets:socket-connect (vm-socket-backend socket)
                                    (%host-address host (vm-socket-family socket))
                                    port)
-    socket)
-  #-sbcl (declare (ignore socket host port))
-  #-sbcl (%unsupported "socket-connect"))
+    socket))
 
 (defun socket-accept (socket)
   "Accept one TCP connection from listener SOCKET and return a socket object."
-  #+sbcl
   (make-vm-socket :backend (sb-bsd-sockets:socket-accept (vm-socket-backend socket))
                   :family (vm-socket-family socket)
-                  :type :tcp)
-  #-sbcl (declare (ignore socket))
-  #-sbcl (%unsupported "socket-accept"))
+                  :type :tcp))
 
 (defun make-socket-stream (socket &key (element-type '(unsigned-byte 8))
                                     (input t) (output t) buffering)
   "Create a bidirectional Gray/binary stream from SOCKET."
-  #+sbcl
   (or (vm-socket-stream socket)
       (setf (vm-socket-stream socket)
             (sb-bsd-sockets:socket-make-stream
              (vm-socket-backend socket)
              :element-type element-type
              :input input :output output
-             :buffering (or buffering :full))))
-  #-sbcl (declare (ignore socket element-type input output buffering))
-  #-sbcl (%unsupported "make-socket-stream"))
+             :buffering (or buffering :full)))))
 
 (defun socket-send (socket data &key (start 0) end host port)
   "Send octets or a string over SOCKET. UDP may pass HOST and PORT."
-  #+sbcl
   (let* ((end (or end (length data)))
          (payload (make-array (- end start) :element-type '(unsigned-byte 8))))
     (loop for src from start below end
@@ -556,13 +515,10 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
     (if (and host port)
         (sb-bsd-sockets:socket-send (vm-socket-backend socket) payload (length payload)
                                     :address (list (%host-address host (vm-socket-family socket)) port))
-        (sb-bsd-sockets:socket-send (vm-socket-backend socket) payload (length payload))))
-  #-sbcl (declare (ignore socket data start end host port))
-  #-sbcl (%unsupported "socket-send"))
+        (sb-bsd-sockets:socket-send (vm-socket-backend socket) payload (length payload)))))
 
 (defun socket-receive (socket &key (size 4096) stringp)
   "Receive up to SIZE bytes from SOCKET. Return data, count, peer address, and peer port."
-  #+sbcl
   (let ((buffer (make-array size :element-type '(unsigned-byte 8))))
     (multiple-value-bind (data count address port)
         (sb-bsd-sockets:socket-receive (vm-socket-backend socket) buffer size)
@@ -572,20 +528,15 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
         (values (if stringp (map 'string #'code-char payload) payload)
                 count
                 (and peer-address (%ip-string peer-address))
-                peer-port))))
-  #-sbcl (declare (ignore socket size stringp))
-  #-sbcl (%unsupported "socket-receive"))
+                peer-port)))))
 
 (defun socket-close (socket)
   "Close SOCKET and any stream created for it."
-  #+sbcl
   (progn
     (when (vm-socket-stream socket)
       (ignore-errors (close (vm-socket-stream socket))))
     (ignore-errors (sb-bsd-sockets:socket-close (vm-socket-backend socket)))
-    t)
-  #-sbcl (declare (ignore socket))
-  #-sbcl (%unsupported "socket-close"))
+    t))
 
 (defmacro with-socket ((var socket-form) &body body)
   "Bind VAR to SOCKET-FORM and always close it after BODY."
@@ -595,12 +546,9 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
 
 (defun socket-local-address (socket)
   "Return SOCKET's local address and port as two values."
-  #+sbcl
   (multiple-value-bind (address port)
       (sb-bsd-sockets:socket-name (vm-socket-backend socket))
-    (values (%ip-string address) port))
-  #-sbcl (declare (ignore socket))
-  #-sbcl (%unsupported "socket-local-address"))
+    (values (%ip-string address) port)))
 
 (defun %dns-cache-lookup (key)
   (let ((entry (gethash key *dns-cache*)))
@@ -615,7 +563,6 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
 
 (defun dns-resolve (host &key (ttl *dns-default-ttl*))
   "Resolve HOST to a cached list of A/AAAA textual addresses."
-  #+sbcl
   (let ((key (list :resolve (string host))))
     (or (%dns-cache-lookup key)
         (%dns-cache-store
@@ -625,22 +572,17 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
                   (sb-bsd-sockets:host-ent-addresses
                    (sb-bsd-sockets:get-host-by-name (string host))))
           :test #'string=)
-         ttl)))
-  #-sbcl (declare (ignore host ttl))
-  #-sbcl (%unsupported "dns-resolve"))
+         ttl))))
 
 (defun dns-reverse-resolve (ip &key (ttl *dns-default-ttl*))
   "Resolve IP to a cached PTR hostname."
-  #+sbcl
   (let ((key (list :reverse (string ip))))
     (or (%dns-cache-lookup key)
         (%dns-cache-store
          key
          (sb-bsd-sockets:host-ent-name
           (sb-bsd-sockets:get-host-by-address (%parse-ipv4 ip)))
-         ttl)))
-  #-sbcl (declare (ignore ip ttl))
-  #-sbcl (%unsupported "dns-reverse-resolve"))
+         ttl))))
 
 (defun getaddrinfo (host &key service (family :ipv4))
   "Small POSIX-like getaddrinfo wrapper returning plist entries."
@@ -649,7 +591,6 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
 
 (defun dns-resolve-async (host &key (ttl *dns-default-ttl*))
   "Resolve HOST on a background thread. Poll with DNS-ASYNC-RESULT-DONE-P."
-  #+sbcl
   (let ((result (make-dns-async-result)))
     (setf (dns-async-result-thread result)
           (sb-thread:make-thread
@@ -659,9 +600,7 @@ ERROR-MODE is :ERROR, :REPLACE, or :IGNORE."
                (error (e) (setf (dns-async-result-error result) e)))
              (setf (dns-async-result-done-p result) t))
            :name "cl-cc dns-resolve-async"))
-    result)
-  #-sbcl (declare (ignore host ttl))
-  #-sbcl (%unsupported "dns-resolve-async"))
+    result))
 
 (defun make-tls-context (&key verify-peer ca-bundle)
   "Create a client TLS context descriptor."

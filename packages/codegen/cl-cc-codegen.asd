@@ -44,10 +44,11 @@
     (:file "aarch64-emitters")
     (:file "aarch64-program")
     ;; RISC-V backend
-    (:file "riscv64-codegen")
-    ;; WASM backend
-   (:file "wasm-types")
-   (:file "wasm-ir")
+     (:file "riscv64-codegen")
+     ;; WASM backend
+    (:file "wasm-type-constants")
+    (:file "wasm-types")
+    (:file "wasm-ir")
     (:file "wasm-extract")
     (:file "wasm-features")
     (:file "wasm-string-builtins")
@@ -56,6 +57,10 @@
    (:file "wasm-trampoline-emit")
    (:file "wasm-trampoline-build")
       (:file "wasm")
+      (:file "wasm-sections")
+      (:file "wasm-functions")
+      (:file "wasm-imports")
+      (:file "wasm-output")
       (:file "wasm-feature-params")
       (:file "wasm-simd")
       (:file "wasm-emit-data")

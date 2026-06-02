@@ -25,13 +25,11 @@
 
 (defun %perf-map-pid ()
   "Return the current process id, falling back to 0 when unavailable."
-  (or #+sbcl
-      (ignore-errors
+  (or (ignore-errors
         (require :sb-posix)
         (let* ((pkg (find-package "SB-POSIX"))
                (sym (and pkg (find-symbol "GETPID" pkg))))
           (and sym (funcall sym))))
-      #-sbcl nil
       0))
 
 (defun perf-map-path (&optional (pid (%perf-map-pid)))

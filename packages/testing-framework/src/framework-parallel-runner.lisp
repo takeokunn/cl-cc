@@ -280,24 +280,34 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
       (when killer-sem (sb-thread:signal-semaphore killer-sem))))))
 
 (defun run-tests (&key
-                      (tags nil)
-                      (exclude-tags nil)
-                      (exclude-suites nil)
-                      (parallel t)
-                      (random nil))
+                       (tags nil)
+                       (exclude-tags nil)
+                       (exclude-suites nil)
+                       (parallel t)
+                       (random nil)
+                       (coverage nil))
   "Run the canonical fast CL-CC test plan.
 Integration and end-to-end tests are run explicitly by suite taxonomy, not by
-naming anything slow or auto-loading an auxiliary system."
-  (run-suite 'cl-cc-suite
-             :parallel parallel
-             :random random
-             :warm-stdlib t
-             :tags tags
-             :exclude-tags exclude-tags
-             :exclude-suites (remove-duplicates
-                              (append exclude-suites
-                                      '(cl-cc-integration-suite cl-cc-e2e-suite))
-                              :test #'eq)))
+naming anything slow or auto-loading an auxiliary system.
+When COVERAGE is true, sb-cover instrumentation is enabled and a coverage
+report is written to *coverage-report-directory* (default: ./coverage/)."
+  (when coverage
+    (enable-coverage))
+  (unwind-protect
+       (run-suite 'cl-cc-suite
+                  :parallel parallel
+                  :random random
+                  :warm-stdlib t
+                  :tags tags
+                  :exclude-tags exclude-tags
+                  :coverage coverage
+                  :exclude-suites (remove-duplicates
+                                   (append exclude-suites
+                                           '(cl-cc-integration-suite cl-cc-e2e-suite))
+                                   :test #'eq))
+    (when coverage
+      (disable-coverage)
+      (format t "~&Coverage report written to ~A~%" (or *coverage-report-directory* "./coverage/")))))
 
 (defun %resolve-suite (package-name symbol-name)
   (let* ((pkg (find-package package-name))

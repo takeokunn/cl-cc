@@ -132,33 +132,24 @@ All spawned tasks must complete before leaving the scope."
 ;;; ──── Helpers ────
 (defun make-worker (id deques)
   "Create and start a worker thread."
-  #+sbcl
   (sb-thread:make-thread
    (lambda ()
      (let ((*per-thread-deque* (aref deques id)))
        (worker-loop id deques)))
-   :name (format nil "cl-cc-worker-~D" id))
-  #-sbcl
-  nil)
+   :name (format nil "cl-cc-worker-~D" id)))
 
 (defun drain-all-workers ()
   "Wait for all worker deques to become empty."
   (setf *shutdown-p* t)
   (dolist (worker *worker-threads*)
     (ignore-errors
-      #+sbcl (sb-thread:join-thread worker)))
+      (sb-thread:join-thread worker)))
   (values))
 
 (defun yield-thread ()
   "Yield the current thread to let others run."
-  #+sbcl (sb-thread:thread-yield)
-  #-sbcl (sleep 0.001))
+  (sb-thread:thread-yield))
 
 (defun atomic-cas (place old new)
   "Atomic compare-and-swap."
-  #+sbcl
-  (sb-ext:compare-and-swap place old new)
-  #-sbcl
-  (prog1 (car place)
-    (when (eql (car place) old)
-      (setf (car place) new))))
+  (sb-ext:compare-and-swap place old new))

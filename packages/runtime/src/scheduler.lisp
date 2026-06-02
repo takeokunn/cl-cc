@@ -290,7 +290,6 @@ the implementation portable while preserving the CAS-style try/fail API shape."
     (rt-scheduler-run)))
 
 (defun rt-thread-pool-start (pool)
-  #+sbcl
   (dotimes (i (rt-thread-pool-size pool) pool)
     (push (sb-thread:make-thread
            (lambda ()
@@ -298,8 +297,7 @@ the implementation portable while preserving the CAS-style try/fail API shape."
                    do (rt-thread-pool-run pool)
                       (sleep 0.001)))
            :name (format nil "rt-pool-~D" i))
-          (rt-thread-pool-threads pool)))
-  #-sbcl pool)
+          (rt-thread-pool-threads pool))))
 
 (defun rt-thread-pool-shutdown (pool)
   (setf (rt-thread-pool-shutdown-p pool) t)
@@ -324,26 +322,18 @@ the implementation portable while preserving the CAS-style try/fail API shape."
   wrapper)
 
 (defun %rt-current-native-wrapper ()
-  #+sbcl
   (or (gethash sb-thread:*current-thread* *rt-native-thread-registry*)
       (let* ((name (ignore-errors (sb-thread:thread-name sb-thread:*current-thread*)))
              (wrapper (make-rt-native-thread :host-thread sb-thread:*current-thread*
                                              :name name
                                              :state :running)))
         (%rt-register-native-thread wrapper sb-thread:*current-thread*)
-        wrapper))
-  #-sbcl
-  (or (gethash :single-thread *rt-native-thread-registry*)
-      (setf (gethash :single-thread *rt-native-thread-registry*)
-            (make-rt-native-thread :host-thread :single-thread
-                                   :name "main"
-                                   :state :running))))
+        wrapper)))
 
 (defun rt-make-thread (function &key name)
   "Create an actual native OS thread and return an RT-NATIVE-THREAD wrapper."
   (check-type function function)
   (let ((wrapper (make-rt-native-thread :name name :state :starting)))
-    #+sbcl
     (flet ((run-thread ()
              (let ((*rt-current-green-thread* nil))
                (%rt-register-native-thread wrapper sb-thread:*current-thread*)
@@ -365,22 +355,14 @@ the implementation portable while preserving the CAS-style try/fail API shape."
       (%rt-register-native-thread
        wrapper
        (sb-thread:make-thread #'run-thread :name (or name "rt-native-thread"))))
-    #-sbcl
-    (progn
-      (setf (rt-native-thread-state wrapper) :running
-            (rt-native-thread-return-value wrapper) (funcall function)
-            (rt-native-thread-state wrapper) :finished)
-      (%rt-register-native-thread wrapper :single-thread))
     wrapper))
 
 (defun rt-thread-join (thread &optional timeout)
   "Join THREAD and return its function return value."
   (check-type thread rt-native-thread)
-  #+sbcl
   (if timeout
       (sb-thread:join-thread (rt-native-thread-host-thread thread) :timeout timeout :default nil)
       (sb-thread:join-thread (rt-native-thread-host-thread thread)))
-  #-sbcl (declare (ignore timeout))
   (when (rt-native-thread-error thread)
     (error (rt-native-thread-error thread)))
   (rt-native-thread-return-value thread))
@@ -388,20 +370,17 @@ the implementation portable while preserving the CAS-style try/fail API shape."
 (defun rt-thread-name (thread)
   (etypecase thread
     (rt-native-thread (or (rt-native-thread-name thread)
-                          #+sbcl (ignore-errors (sb-thread:thread-name (rt-native-thread-host-thread thread)))
-                          #-sbcl nil))
-    #+sbcl (sb-thread:thread (sb-thread:thread-name thread))))
+                          (ignore-errors (sb-thread:thread-name (rt-native-thread-host-thread thread)))))
+    (sb-thread:thread (sb-thread:thread-name thread))))
 
 (defun rt-current-thread ()
   (%rt-current-native-wrapper))
 
 (defun rt-thread-alive-p (thread)
   (check-type thread rt-native-thread)
-  #+sbcl (sb-thread:thread-alive-p (rt-native-thread-host-thread thread))
-  #-sbcl (eq (rt-native-thread-state thread) :running))
+  (sb-thread:thread-alive-p (rt-native-thread-host-thread thread)))
 
 (defun rt-all-threads ()
-  #+sbcl
   (mapcar (lambda (host-thread)
             (or (gethash host-thread *rt-native-thread-registry*)
                 (%rt-register-native-thread
@@ -409,27 +388,23 @@ the implementation portable while preserving the CAS-style try/fail API shape."
                                         :name (ignore-errors (sb-thread:thread-name host-thread))
                                         :state (if (sb-thread:thread-alive-p host-thread) :running :finished))
                  host-thread)))
-          (sb-thread:list-all-threads))
-  #-sbcl (list (%rt-current-native-wrapper)))
+          (sb-thread:list-all-threads)))
 
 (defun rt-interrupt-thread (thread function)
   "Interrupt THREAD and run FUNCTION in that thread when supported."
   (check-type thread rt-native-thread)
   (check-type function function)
-  #+sbcl (sb-thread:interrupt-thread (rt-native-thread-host-thread thread) function)
-  #-sbcl (funcall function))
+  (sb-thread:interrupt-thread (rt-native-thread-host-thread thread) function))
 
 (defun rt-destroy-thread (thread)
   "Forcefully terminate THREAD. Discouraged; prefer cooperative cancellation."
   (check-type thread rt-native-thread)
   (setf (rt-native-thread-state thread) :destroyed)
-  #+sbcl (sb-thread:terminate-thread (rt-native-thread-host-thread thread))
-  #-sbcl nil)
+  (sb-thread:terminate-thread (rt-native-thread-host-thread thread)))
 
 (defun rt-thread-yield ()
   "Yield the current native thread's CPU time slice."
-  #+sbcl (sb-thread:thread-yield)
-  #-sbcl (sleep 0)
+  (sb-thread:thread-yield)
   t)
 
 (eval-when (:load-toplevel :execute)

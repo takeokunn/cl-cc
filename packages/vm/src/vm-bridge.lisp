@@ -20,13 +20,13 @@
 ;;; `mapcar` to host CL (which would receive vm-closure-objects it can't handle).
 
 (defvar *vm-host-bridge-functions*
-  (make-hash-table :test #'eq #+sbcl :synchronized #+sbcl t)
+  (make-hash-table :test #'eq :synchronized t)
   "Map of bridgeable symbols to their callable implementation.
 All entries must store an explicit function object.
 Synchronized: parallel test workers populate this concurrently.")
 
 (defvar *vm-runtime-callables*
-  (make-hash-table :test #'equal #+sbcl :synchronized #+sbcl t)
+  (make-hash-table :test #'equal :synchronized t)
   "Runtime callable registry keyed by exported runtime helper name string.
 Synchronized: parallel test workers populate this concurrently.")
 
@@ -269,11 +269,7 @@ representations may use hash tables with structured metadata."
 (defun string-to-octets (string &key encoding external-format)
   "Encode STRING to octets using the requested host encoding."
   (let ((format-designator (%normalize-text-encoding encoding external-format)))
-    #+sbcl
-    (sb-ext:string-to-octets string :external-format format-designator)
-    #-sbcl
-    (error "STRING-TO-OCTETS is currently only implemented on SBCL (~S)."
-           format-designator)))
+    (sb-ext:string-to-octets string :external-format format-designator)))
 
 (defun %coerce-octets-vector (octets)
   "Return OCTETS as an (UNSIGNED-BYTE 8) vector."
@@ -295,11 +291,7 @@ representations may use hash tables with structured metadata."
   "Decode OCTETS to a string using the requested host encoding."
   (let ((format-designator (%normalize-text-encoding encoding external-format))
         (octet-vector (%coerce-octets-vector octets)))
-    #+sbcl
-    (sb-ext:octets-to-string octet-vector :external-format format-designator)
-    #-sbcl
-    (error "OCTETS-TO-STRING is currently only implemented on SBCL (~S)."
-           format-designator)))
+    (sb-ext:octets-to-string octet-vector :external-format format-designator)))
 
 (defun %utf-8-byte-length (string)
   "Return the UTF-8 byte length of STRING."

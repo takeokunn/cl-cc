@@ -3,14 +3,13 @@
 (in-package :cl-cc/pipeline)
 
 (defparameter *num-workers*
-  #+sbcl (max 1 (or (ignore-errors
-                      (let ((value (cl-cc/runtime:rt-getenv "CLCC_PARALLEL")))
-                        (and value (parse-integer value :junk-allowed nil))))
-                    (ignore-errors
-                      (let ((sym (find-symbol "CPU-COUNT" :uiop)))
-                        (and sym (fboundp sym) (funcall sym))))
-                    1))
-  #-sbcl 1
+  (max 1 (or (ignore-errors
+               (let ((value (cl-cc/runtime:rt-getenv "CLCC_PARALLEL")))
+                 (and value (parse-integer value :junk-allowed nil))))
+             (ignore-errors
+               (let ((sym (find-symbol "CPU-COUNT" :uiop)))
+                 (and sym (fboundp sym) (funcall sym))))
+             1))
   "Default number of native compilation workers.")
 
 (defun %parallel-file-namestring (file)
@@ -93,7 +92,7 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
          (completed (make-hash-table :test #'equal))
          (results nil)
          (errors nil)
-          (lock #+sbcl (cl-cc/runtime:rt-make-mutex :name "cl-cc parallel compiler") #-sbcl nil)
+          (lock (cl-cc/runtime:rt-make-mutex :name "cl-cc parallel compiler"))
          (worker-count (%parallel-worker-count workers files)))
     (labels ((file-path (name) (find name files :key #'%parallel-file-namestring :test #'string=))
              (output-path (file)
@@ -101,33 +100,19 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                  (merge-pathnames (make-pathname :name (pathname-name file) :type nil)
                                   output-directory)))
              (next-file ()
-               #+sbcl
-                (cl-cc/runtime::rt-with-mutex (lock)
+               (cl-cc/runtime::rt-with-mutex (lock)
                  (let ((ready (%parallel-ready-file pending completed graph)))
                    (when ready
                      (setf pending (remove ready pending :test #'string=))
-                     ready)))
-               #-sbcl
-               (let ((ready (%parallel-ready-file pending completed graph)))
-                 (when ready
-                   (setf pending (remove ready pending :test #'string=))
-                   ready)))
+                     ready))))
              (record-result (name output)
-               #+sbcl
-                (cl-cc/runtime::rt-with-mutex (lock)
+               (cl-cc/runtime::rt-with-mutex (lock)
                  (setf (gethash name completed) t)
-                 (push (cons name output) results))
-               #-sbcl
-               (progn (setf (gethash name completed) t)
-                      (push (cons name output) results)))
+                 (push (cons name output) results)))
              (record-error (name condition)
-               #+sbcl
-                (cl-cc/runtime::rt-with-mutex (lock)
+               (cl-cc/runtime::rt-with-mutex (lock)
                  (push (cons name condition) errors)
-                 (setf (gethash name completed) t))
-               #-sbcl
-               (progn (push (cons name condition) errors)
-                      (setf (gethash name completed) t)))
+                 (setf (gethash name completed) t)))
              (worker ()
                (loop for name = (next-file)
                      while name
@@ -146,13 +131,10 @@ read-only during the parallel phase. Returns an alist (FILE . OUTPUT)."
                                          :compilation-tier (or compilation-tier *compilation-tier*))))
                               (record-result name out))
                           (error (e) (record-error name e))))))
-      #+sbcl
       (let ((threads (loop for i below worker-count
                            collect (sb-thread:make-thread #'worker
                                                           :name (format nil "cl-cc-compile-worker-~D" i)))))
         (dolist (thread threads) (sb-thread:join-thread thread)))
-      #-sbcl
-      (worker)
       (when errors
         (error "Parallel compilation failed: ~S" errors))
       (nreverse results))))
