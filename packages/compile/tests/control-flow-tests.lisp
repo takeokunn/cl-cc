@@ -29,6 +29,7 @@
 ;; ----------------------------------------------------------------------------
 
 (deftest quote-integer
+  "quote with an integer literal compiles without error and evaluates to that integer."
   (assert-true (is-compile-string "(quote 42)" :target :x86_64))
   (let ((result (run-string "(quote 42)")))
     (assert-= result 42)))
@@ -79,6 +80,7 @@
 ;; ----------------------------------------------------------------------------
 
 (deftest tagbody-simple
+  "A tagbody with go and multiple tags compiles successfully on the VM target."
   (assert-true (is-compile-string "(tagbody start (print 1) (go end) middle (print 2) end (print 3))" :target :vm)))
 
 (deftest tagbody-preserves-following-body-forms

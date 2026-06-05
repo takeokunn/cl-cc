@@ -4,7 +4,6 @@
 
 (defsuite macros-control-flow-suite
   :description "Macro control-flow expansion tests"
-  :parallel nil
   :parent cl-cc-unit-suite)
 
 (in-suite macros-control-flow-suite)

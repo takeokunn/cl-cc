@@ -97,10 +97,10 @@
           (let ((found (search pat s :start2 pos)))
             (unless found
               (write-string (subseq s pos) out)
-              (return)))
-          (write-string (subseq s pos found) out)
-          (write-string rep out)
-          (setf pos (+ found (max 1 patlen))))))))
+              (return))
+            (write-string (subseq s pos found) out)
+            (write-string rep out)
+            (setf pos (+ found (max 1 patlen)))))))))
 
 ;;; Macro for JS string methods that are simple CL built-in wrappers.
 ;;; Usage: (define-js-string-passthrough %js-string-X cl-fn &rest fixed-args)

@@ -8,7 +8,7 @@
 ;;; defined in codegen-tests.lisp (same suite, loaded before this file).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 ;;; ─── Section 1: GETHASH ─────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-core-tests.lisp — Codegen core tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 (deftest codegen-if-compilation
   "Compiling a pure if-form emits a vm-jump-zero + labels sequence and returns

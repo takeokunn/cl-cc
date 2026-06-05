@@ -1,6 +1,12 @@
 ;;;; optimizer-memory-ranges.lisp — CFG value ranges, induction variables, alias reasoning
 (in-package :cl-cc/optimize)
 
+(defparameter +opt-range-negative-infinity+ most-negative-fixnum
+  "Finite sentinel used as the conservative lower bound for path facts.")
+
+(defparameter +opt-range-positive-infinity+ most-positive-fixnum
+  "Finite sentinel used as the conservative upper bound for path facts.")
+
 (defun %opt-compute-value-ranges-linear (instructions)
   "Compute conservative intervals for a straight-line instruction list."
   (let ((intervals (make-hash-table :test #'eq)))
@@ -79,12 +85,6 @@ returns the merged exit-state interval table for convenience callers."
   (if (%opt-control-flow-range-analysis-p instructions)
       (%opt-cfg-result-exit-state (opt-compute-cfg-value-ranges instructions))
       (%opt-compute-value-ranges-linear instructions)))
-
-(defparameter +opt-range-negative-infinity+ most-negative-fixnum
-  "Finite sentinel used as the conservative lower bound for path facts.")
-
-(defparameter +opt-range-positive-infinity+ most-positive-fixnum
-  "Finite sentinel used as the conservative upper bound for path facts.")
 
 (defun %opt-top-interval ()
   (opt-make-interval +opt-range-negative-infinity+

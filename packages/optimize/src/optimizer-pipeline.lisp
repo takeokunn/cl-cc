@@ -146,28 +146,32 @@ Data: the pass name. Logic: fbound check and dispatch via %opt-run-pass-if-fboun
 ;;; instruction with side effects or control flow, so calls/stores/signals and
 ;;; labels/terminators keep their original relative position.
 
+(defparameter *opt-vm-instruction-latency-alist*
+  '((vm-move . 1) (vm-const . 1)
+    (vm-add . 1) (vm-integer-add . 1) (vm-add-checked . 1) (vm-float-add . 1)
+    (vm-sub . 1) (vm-integer-sub . 1) (vm-sub-checked . 1) (vm-float-sub . 1)
+    (vm-neg . 1) (vm-abs . 1) (vm-inc . 1) (vm-dec . 1)
+    (vm-logand . 1) (vm-logior . 1) (vm-logxor . 1) (vm-logeqv . 1)
+    (vm-lognot . 1) (vm-ash . 1) (vm-rotate . 1) (vm-bswap . 1)
+    (vm-lt . 1) (vm-gt . 1) (vm-le . 1) (vm-ge . 1) (vm-eq . 1) (vm-num-eq . 1)
+    (vm-min . 1) (vm-max . 1) (vm-not . 1)
+    (vm-cons-p . 1) (vm-null-p . 1) (vm-symbol-p . 1) (vm-number-p . 1)
+    (vm-integer-p . 1) (vm-function-p . 1)
+    (vm-mul . 4) (vm-integer-mul . 4) (vm-mul-checked . 4) (vm-float-mul . 4)
+    (vm-fma . 4)
+    (vm-div . 40) (vm-cl-div . 40) (vm-float-div . 40)
+    (vm-mod . 30) (vm-rem . 30)
+    (vm-truncate . 40) (vm-floor-inst . 40) (vm-ceiling-inst . 40)
+    (vm-round-inst . 40) (vm-ffloor . 40) (vm-fceiling . 40)
+    (vm-ftruncate . 40) (vm-fround . 40)
+    (vm-car . 4) (vm-cdr . 4) (vm-slot-read . 5) (vm-closure-ref-idx . 4)
+    (vm-get-global . 5) (vm-func-ref . 4) (vm-values-to-list . 4))
+  "Raw alist of VM instruction type → estimated latency in cycles.")
+
 (defparameter *opt-vm-instruction-latencies*
-  (%alist->eq-hash-table
-   '((vm-move . 1) (vm-const . 1)
-     (vm-add . 1) (vm-integer-add . 1) (vm-add-checked . 1) (vm-float-add . 1)
-     (vm-sub . 1) (vm-integer-sub . 1) (vm-sub-checked . 1) (vm-float-sub . 1)
-     (vm-neg . 1) (vm-abs . 1) (vm-inc . 1) (vm-dec . 1)
-     (vm-logand . 1) (vm-logior . 1) (vm-logxor . 1) (vm-logeqv . 1)
-     (vm-lognot . 1) (vm-ash . 1) (vm-rotate . 1) (vm-bswap . 1)
-     (vm-lt . 1) (vm-gt . 1) (vm-le . 1) (vm-ge . 1) (vm-eq . 1) (vm-num-eq . 1)
-     (vm-min . 1) (vm-max . 1) (vm-not . 1)
-     (vm-cons-p . 1) (vm-null-p . 1) (vm-symbol-p . 1) (vm-number-p . 1)
-     (vm-integer-p . 1) (vm-function-p . 1)
-     (vm-mul . 4) (vm-integer-mul . 4) (vm-mul-checked . 4) (vm-float-mul . 4)
-     (vm-fma . 4)
-     (vm-div . 40) (vm-cl-div . 40) (vm-float-div . 40)
-     (vm-mod . 30) (vm-rem . 30)
-     (vm-truncate . 40) (vm-floor-inst . 40) (vm-ceiling-inst . 40)
-     (vm-round-inst . 40) (vm-ffloor . 40) (vm-fceiling . 40)
-     (vm-ftruncate . 40) (vm-fround . 40)
-     (vm-car . 4) (vm-cdr . 4) (vm-slot-read . 5) (vm-closure-ref-idx . 4)
-     (vm-get-global . 5) (vm-func-ref . 4) (vm-values-to-list . 4)))
-  "Estimated VM instruction latencies in cycles for local list scheduling.")
+  (%alist->eq-hash-table *opt-vm-instruction-latency-alist*)
+  "Estimated VM instruction latencies in cycles for local list scheduling.
+Derived from *opt-vm-instruction-latency-alist*.")
 
 (defun %opt-inst-latency (inst)
   "Return the estimated latency of INST in cycles."
@@ -320,54 +324,33 @@ then original order for deterministic output."
                   best)))
           ready))
 
-(defun %opt-schedule-run (insts)
-  "List-schedule a side-effect-free instruction run."
-  (if (< (length insts) 2)
-      insts
-      (multiple-value-bind (preds succs) (%opt-build-scheduler-graph insts)
-        (let* ((n (length insts))
-               (priorities (%opt-compute-scheduler-priorities insts succs))
-               (remaining-preds (make-array n))
-               (ready nil)
-               (emitted nil))
-          (loop for i from 0 below n do
-            (setf (aref remaining-preds i) (copy-list (aref preds i)))
-            (when (null (aref remaining-preds i))
-              (push i ready)))
-          (loop while ready do
-            (let ((node (%opt-best-ready-node ready priorities)))
-              (setf ready (remove node ready :test #'eql))
-              (push (nth node insts) emitted)
-              (dolist (succ (aref succs node))
-                (setf (aref remaining-preds succ)
-                      (remove node (aref remaining-preds succ) :test #'eql))
-                (when (null (aref remaining-preds succ))
-                  (pushnew succ ready :test #'eql)))))
-          (if (= (length emitted) n)
-               (nreverse emitted)
-               insts)))))
+(defun %opt-run-scheduler-toposort (insts &key node-selector counts-or-nil)
+  "Toposort-based list scheduler for a side-effect-free instruction run.
 
-(defun %opt-schedule-pre-ra-run (insts live-out)
-  "Pressure-aware list-schedule a side-effect-free pre-RA instruction run."
+NODE-SELECTOR is a function (ready insts priorities [counts]) -> node-index.
+COUNTS-OR-NIL is a pre-built read-count table for pre-RA pressure tracking,
+or NIL for post-RA scheduling (where pressure is ignored)."
   (if (< (length insts) 2)
       insts
       (multiple-value-bind (preds succs) (%opt-build-scheduler-graph insts)
-        (let* ((n (length insts))
-               (priorities (%opt-compute-scheduler-priorities insts succs))
+        (let* ((n              (length insts))
+               (priorities     (%opt-compute-scheduler-priorities insts succs))
                (remaining-preds (make-array n))
-               (counts (%opt-build-read-counts insts live-out))
-               (ready nil)
-               (emitted nil))
+               (ready          nil)
+               (emitted        nil))
           (loop for i from 0 below n do
             (setf (aref remaining-preds i) (copy-list (aref preds i)))
             (when (null (aref remaining-preds i))
               (push i ready)))
           (loop while ready do
-            (let* ((node (%opt-best-pre-ra-ready-node ready insts priorities counts))
+            (let* ((node (if counts-or-nil
+                             (funcall node-selector ready insts priorities counts-or-nil)
+                             (funcall node-selector ready priorities)))
                    (inst (nth node insts)))
               (setf ready (remove node ready :test #'eql))
               (push inst emitted)
-              (%opt-decrement-reg-counts (opt-inst-read-regs inst) counts)
+              (when counts-or-nil
+                (%opt-decrement-reg-counts (opt-inst-read-regs inst) counts-or-nil))
               (dolist (succ (aref succs node))
                 (setf (aref remaining-preds succ)
                       (remove node (aref remaining-preds succ) :test #'eql))
@@ -376,6 +359,16 @@ then original order for deterministic output."
           (if (= (length emitted) n)
               (nreverse emitted)
               insts)))))
+
+(defun %opt-schedule-run (insts)
+  "List-schedule a side-effect-free instruction run."
+  (%opt-run-scheduler-toposort insts :node-selector #'%opt-best-ready-node))
+
+(defun %opt-schedule-pre-ra-run (insts live-out)
+  "Pressure-aware list-schedule a side-effect-free pre-RA instruction run."
+  (%opt-run-scheduler-toposort insts
+                               :node-selector #'%opt-best-pre-ra-ready-node
+                               :counts-or-nil (%opt-build-read-counts insts live-out)))
 
 (defun %opt-schedule-basic-block (instructions)
   "Schedule each movable run inside one basic block INSTRUCTIONS."
@@ -466,10 +459,6 @@ entry point used before register allocation."
       (setf (bb-instructions block)
             (%opt-schedule-pre-ra-basic-block (bb-instructions block))))
     (%opt-flatten-cfg-block-order cfg)))
-
-(defun opt-pass-dep-peephole (instructions)
-  "Compatibility wrapper for FR-069 local scheduling."
-  (opt-pass-schedule-local instructions))
 
 ;;; FR-099: FMA (Fused Multiply-Add) Pattern Recognition
 ;;;
@@ -781,307 +770,3 @@ the e-graph engine.")
           *opt-default-convergence-pass-keys*)
   "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`.")
 
-;;; ─── Reporting / Trace State ─────────────────────────────────────────────
-
-(defstruct (opt-reporting-options (:conc-name opt-report-))
-  "Read-only bundle of side-channel reporting flags for the optimizer pipeline."
-  (print-pass-timings nil)
-  (timing-stream      nil)
-  (print-pass-stats   nil)
-  (stats-stream       nil)
-  (print-opt-remarks  nil)
-  (opt-remarks-stream nil)
-  (opt-remarks-mode   :all))
-
-(defstruct (opt-trace-state (:conc-name opt-trace-))
-  "Mutable accumulator for Chrome-trace-compatible events."
-  (enabled     nil)
-  (json-stream nil)
-  (events      nil)
-  (ts-us        0))
-
-(defun %opt-trim-whitespace (s)
-  (string-trim '(#\Space #\Tab #\Newline #\Return) s))
-
-(defun opt-parse-pass-pipeline-string (text)
-  "Parse a comma-separated optimizer pipeline string into keyword pass names."
-  (remove nil
-          (mapcar (lambda (part)
-                    (let ((name (%opt-trim-whitespace part)))
-                      (and (> (length name) 0)
-                           (intern (string-upcase name) :keyword))))
-                  (uiop:split-string text :separator '(#\,)))))
-
-(defun opt-resolve-pass-pipeline (pipeline)
-  "Resolve PIPELINE into a list of pass functions."
-  (cond
-    ((null pipeline) *opt-convergence-passes*)
-    ((stringp pipeline) (opt-resolve-pass-pipeline (opt-parse-pass-pipeline-string pipeline)))
-    ((every #'functionp pipeline) pipeline)
-    (t
-     (mapcar (lambda (entry)
-               (or (and (keywordp entry) (gethash entry *opt-pass-registry*))
-                   (error "Unknown optimizer pass ~S" entry)))
-             pipeline))))
-
-(defun %opt-pass-name-string (f)
-  (string-upcase (format nil "~A" f)))
-
-(defun %opt-bisect-limit-reached-p ()
-  "Return T when optimization bisection should skip further pass invocations."
-  (and (integerp *opt-bisect-limit*)
-       (<= 0 *opt-bisect-limit*)
-       (>= *opt-bisect-count* *opt-bisect-limit*)))
-
-(defun %opt-note-bisect-change (changed)
-  "Record one changed optimization pass for the bisection counter."
-  (when (and changed (integerp *opt-bisect-limit*) (<= 0 *opt-bisect-limit*))
-    (incf *opt-bisect-count*)))
-
-(defun %opt-write-trace-json (stream events)
-  "Write Chrome-trace-compatible JSON EVENTS to STREAM."
-  (format stream "{\"traceEvents\":[")
-  (loop for event in events
-        for i from 0
-        do (when (> i 0) (format stream ","))
-           (format stream
-                   "{\"name\":~S,\"ph\":\"X\",\"pid\":1,\"tid\":1,\"ts\":~D,\"dur\":~D}"
-                   (getf event :name)
-                   (getf event :ts-us)
-                   (getf event :dur-us)))
-  (format stream "]}~%"))
-
-(defun compiler-self-profiling-capabilities ()
-  "Return FR-703 Compiler Self-Profiling / Build Analytics capabilities."
-  '(:fr-id :fr-703
-    :time-passes t
-    :stats t
-    :trace-emit :chrome-trace-json
-    :build-analytics t))
-
-(defun build-analytics-summary (&key pass-count instruction-count elapsed-us changed-count)
-  "Build a compact FR-703 build analytics summary plist."
-  (list :fr-id :fr-703
-        :pass-count (or pass-count 0)
-        :instruction-count (or instruction-count 0)
-        :elapsed-us (or elapsed-us 0)
-        :changed-count (or changed-count 0)
-        :capabilities (compiler-self-profiling-capabilities)))
-
-(defun %opt-remarks-applies-p (changed mode)
-  "T when a remarks entry should be emitted given CHANGED status and MODE."
-  (or (eq mode :all)
-      (and changed      (eq mode :changed))
-      (and (not changed)(eq mode :missed))))
-
-(defun %opt-run-passes-once (prog passes reporting trace)
-  "Apply PASSES once, mutating TRACE in place and emitting via REPORTING.
-Returns the final instruction list."
-  (let ((current prog))
-    (dolist (f passes current)
-      (when (%opt-bisect-limit-reached-p)
-        (return current))
-      (let* ((before       current)
-             (before-count (length before))
-             (start        (get-internal-real-time))
-             (next         (funcall f current))
-             (elapsed-s    (/ (- (get-internal-real-time) start)
-                              internal-time-units-per-second))
-             (dur-us       (round (* elapsed-s 1000000)))
-             (after-count  (length next))
-             (changed      (not (opt-converged-p before next)))
-             (name         (%opt-pass-name-string f)))
-        (when (opt-report-print-pass-timings reporting)
-          (format (opt-report-timing-stream reporting) "~A: ~,6Fs~%" f elapsed-s))
-        (when (opt-report-print-pass-stats reporting)
-          (format (opt-report-stats-stream reporting)
-                  "~A: before=~D after=~D delta=~D changed=~A~%"
-                  f before-count after-count (- after-count before-count)
-                  (if changed "yes" "no")))
-        (when (and (opt-report-print-opt-remarks reporting)
-                   (%opt-remarks-applies-p changed (opt-report-opt-remarks-mode reporting)))
-          (format (opt-report-opt-remarks-stream reporting)
-                  "~A: ~A~%" f (if changed "changed" "missed")))
-        (when (opt-trace-enabled trace)
-          (push (list :name name :ts-us (opt-trace-ts-us trace) :dur-us dur-us)
-                (opt-trace-events trace))
-          (incf (opt-trace-ts-us trace) dur-us))
-        (when (and (boundp '*translation-validation-enabled*)
-                    *translation-validation-enabled*
-                    (fboundp 'validate-optimizer-translation))
-          (validate-optimizer-translation f before next))
-        (%opt-note-bisect-change changed)
-        (setf current next)))))
-
-(defun opt-converged-p (prev next)
-  "T if a pass-cycle produced no semantic change in the instruction stream.
-Fast-path: pointer equality (most passes return EQ input when nothing changed)
-short-circuits before the expensive sexp comparison."
-  (or (eq prev next)
-      (and (= (length prev) (length next))
-           (loop for lhs in prev
-                 for rhs in next
-                 always (or (eq lhs rhs)
-                            (equal (instruction->sexp lhs)
-                                   (instruction->sexp rhs)))))))
-
-(defparameter *opt-iteration-budget-thresholds*
-  '((50  . -12)
-    (150 . -6)
-    (400 . 0)
-    (800 . 8))
-  "Instruction-count thresholds used by opt-adaptive-max-iterations.")
-
-(defun opt-adaptive-max-iterations (instructions &key (base-iterations 20) (min-iterations 6) (max-iterations 50))
-  "Return a conservative adaptive convergence budget for INSTRUCTIONS."
-  (let* ((n (length instructions))
-         (delta (or (cdr (find-if (lambda (entry) (< n (car entry)))
-                                  *opt-iteration-budget-thresholds*))
-                    15)))
-    (min max-iterations
-         (max min-iterations
-              (+ base-iterations delta)))))
-
-(defun opt-verify-instructions (instructions &key pass-name)
-  "Conservative VM-level verifier for optimizer/debugging use."
-  (let ((labels (make-hash-table :test #'equal))
-        (defined (make-hash-table :test #'eq))
-        (pass-name (or pass-name "<unknown-pass>")))
-    (dolist (inst instructions)
-      (when (typep inst 'vm-label)
-        (let ((name (vm-name inst)))
-          (when (gethash name labels)
-            (error "~A verifier: duplicate label ~A" pass-name name))
-          (setf (gethash name labels) t))))
-    (dolist (inst instructions)
-      (typecase inst
-        ((or vm-jump vm-jump-zero)
-         (unless (gethash (vm-label-name inst) labels)
-           (error "~A verifier: unknown label target ~A" pass-name (vm-label-name inst)))))
-      (dolist (reg (opt-inst-read-regs inst))
-        (unless (gethash reg defined)
-          (error "~A verifier: register ~A used before definition in ~S"
-                 pass-name reg (instruction->sexp inst))))
-      (let ((dst (opt-inst-dst inst)))
-        (when dst
-          (setf (gethash dst defined) t))))
-    t))
-
-(defvar *skip-optimizer-passes* nil
-  "When non-NIL, optimize-instructions returns its input unchanged.")
-
-(defvar *opt-bisect-limit* nil
-  "Maximum number of optimization pass invocations allowed to change the instruction stream.
-NIL disables optimization bisection.")
-
-(defvar *opt-bisect-count* 0
-  "Number of optimization pass invocations that changed the instruction stream in the current dynamic scope.")
-
-(defvar *verify-optimizer-instructions* nil
-  "When non-NIL, run opt-verify-instructions after every convergence pass to
-catch ill-formed sequences (duplicate labels, unknown jump targets, use-before-define).")
-
-(defun opt-configure-optimization-policy (&key speed)
-  "Configure optimizer feature gates from a coarse optimization SPEED level.
-
-Current policy:
-- SPEED >= 2: enable sealed+satiated generic-function devirtualization
-- SPEED >= 3: enable pure-call optimization gate
-- SPEED <= 2: disable pure-call optimization gate
-
-Returns the resulting gate value for convenience."
-  (when speed
-    (setf *opt-enable-sealed-gf-devirtualization* (>= speed 2))
-    (setf *opt-enable-pure-call-optimization* (>= speed 3)))
-   *opt-enable-pure-call-optimization*)
-
-;;; ─── FR-276: Optimization Levels (-O0 to -O3) ─────────────────────────────
-;;;
-;;; Each level maps to a pre-configured set of optimizer parameters.
-;;; The level can be set via the CLI (-O0/-O1/-O2/-O3) or via
-;;; (declare (optimize ...)) in source code.
-
-(defparameter *optimization-level-params*
-  '((0 :inline-threshold-scale 0   :max-iterations 1  :pass-pipeline :o0
-       :speed 0 :enable-egraph nil :description "Fold + DCE only (fast debug build)")
-    (1 :inline-threshold-scale 0.5 :max-iterations 5  :pass-pipeline :o1
-       :speed 1 :enable-egraph nil :description "Fold + Jump + DCE + basic inline")
-    (2 :inline-threshold-scale 1.0 :max-iterations 20 :pass-pipeline :o2
-       :speed 2 :enable-egraph t   :description "Full pipeline (production default)")
-    (3 :inline-threshold-scale 2.0 :max-iterations 40 :pass-pipeline :o3
-       :speed 3 :enable-egraph t   :description "Aggressive: full pipeline + e-graph saturation"))
-  "FR-276: Pre-configured optimizer parameters for each -O level.")
-
-(defun opt-level-params (level)
-  "Return the parameter plist for optimization LEVEL (0-3).
-LEVEL is clamped to 0..3."
-  (let* ((lvl (max 0 (min 3 (or level 2))))
-         (entry (assoc lvl *optimization-level-params*)))
-    (cdr entry)))
-
-(defun apply-optimization-level (level)
-  "Configure the global optimizer state for optimization LEVEL (0-3).
-Returns the parameter plist that was applied."
-  (let ((params (opt-level-params level)))
-    (setf *opt-inline-threshold-scale* (getf params :inline-threshold-scale)
-          *opt-enable-pure-call-optimization* (>= (getf params :speed) 3)
-          *opt-enable-sealed-gf-devirtualization* (>= (getf params :speed) 2)
-          *enable-prolog-peephole* (getf params :enable-egraph))
-    params))
-
-(defun optimize-instructions (instructions &key (max-iterations 20) pass-pipeline
-                                                  print-pass-timings timing-stream
-                                                  print-pass-stats   stats-stream
-                                                  print-opt-remarks  opt-remarks-stream
-                                                  (opt-remarks-mode :all)
-                                                   speed
-                                                   opt-bisect-limit
-                                                   (inline-threshold-scale 1)
-                                                  trace-json-stream
-                                                  block-compile
-                                          retpoline spectre-mitigations
-                                                  stack-protector
-                                                  shadow-stack
-                                                  asan msan tsan ubsan hwasan
-                                                  &allow-other-keys)
-  "Run the full multi-pass optimization pipeline on a VM instruction sequence.
-Iterates until convergence or MAX-ITERATIONS. Returns optimized instructions.
-When *skip-optimizer-passes* is non-NIL, returns instructions unchanged."
-  (declare (ignore retpoline spectre-mitigations stack-protector shadow-stack
-                   asan msan tsan ubsan hwasan))
-  (when *skip-optimizer-passes*
-    (return-from optimize-instructions (values instructions nil)))
-  (let* ((*opt-inline-threshold-scale* inline-threshold-scale)
-         (*opt-bisect-limit* (or opt-bisect-limit *opt-bisect-limit*))
-         (*opt-bisect-count* 0)
-         (*block-compile* (or block-compile *block-compile*))
-         (*opt-enable-pure-call-optimization*
-          (if speed (>= speed 3) *opt-enable-pure-call-optimization*))
-         (*opt-enable-sealed-gf-devirtualization*
-          (if speed (>= speed 2) *opt-enable-sealed-gf-devirtualization*))
-         (reporting (make-opt-reporting-options
-                     :print-pass-timings print-pass-timings
-                     :timing-stream      (or timing-stream *standard-output*)
-                     :print-pass-stats   print-pass-stats
-                     :stats-stream       (or stats-stream *standard-output*)
-                     :print-opt-remarks  print-opt-remarks
-                     :opt-remarks-stream (or opt-remarks-stream *standard-output*)
-                     :opt-remarks-mode   opt-remarks-mode))
-         (trace     (make-opt-trace-state
-                     :enabled     (not (null trace-json-stream))
-                     :json-stream trace-json-stream))
-         (prog      instructions)
-         (max-iter  (if (eq max-iterations :adaptive)
-                        (opt-adaptive-max-iterations instructions)
-                        max-iterations))
-         (passes    (opt-resolve-pass-pipeline pass-pipeline)))
-    (loop repeat max-iter
-          for prev = prog
-          do (setf prog (%opt-run-passes-once prog passes reporting trace))
-             (when *verify-optimizer-instructions*
-               (opt-verify-instructions prog))
-          when (opt-converged-p prev prog)
-          return prog)
-    (when trace-json-stream
-      (%opt-write-trace-json trace-json-stream (nreverse (opt-trace-events trace))))
-    (opt-pass-leaf-detect prog)))

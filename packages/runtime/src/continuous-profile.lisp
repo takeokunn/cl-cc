@@ -45,19 +45,14 @@
   (trace-id nil :type (or null string))
   (span-id nil :type (or null string))
   (perf-map nil :type list)
-  (lock #+sbcl (sb-thread:make-mutex :name "cl-cc continuous-profile")
-        #-sbcl nil))
+  (lock (sb-thread:make-mutex :name "cl-cc continuous-profile")))
 
 (defvar *rt-continuous-profile-session* nil
   "Current FR-701 continuous profiling session, if one is active.")
 
 (defmacro %rt-profile-with-lock ((session) &body body)
-  `(let ((%session ,session))
-     #+sbcl
-     (sb-thread:with-mutex ((rt-continuous-profile-session-lock %session))
-       ,@body)
-     #-sbcl
-     (progn ,@body)))
+  `(sb-thread:with-mutex ((rt-continuous-profile-session-lock ,session))
+     ,@body))
 
 (defun %rt-profile-now-nanos ()
   "Return a monotonic-ish nanosecond timestamp for profile records."
@@ -71,23 +66,18 @@
 
 (defun %rt-profile-thread-id ()
   "Return a stable, JSON-safe identifier for the current host thread."
-  #+sbcl
   (let ((thread sb-thread:*current-thread*))
     (format nil "~A#~A"
             (or (ignore-errors (sb-thread:thread-name thread)) "thread")
-            (sxhash thread)))
-  #-sbcl
-  "main")
+            (sxhash thread))))
 
 (defun %rt-profile-default-perf-map-path ()
   "Return the conventional FR-553 perf map path for this process."
-  (let ((pid (or #+sbcl
-                 (ignore-errors
+  (let ((pid (or (ignore-errors
                    (require :sb-posix)
                    (let* ((pkg (find-package "SB-POSIX"))
                           (sym (and pkg (find-symbol "GETPID" pkg))))
                      (and sym (funcall sym))))
-                 #-sbcl nil
                  0)))
     (merge-pathnames (format nil "perf-~D.map" pid) #p"/tmp/")))
 
@@ -142,13 +132,11 @@
 (defun %rt-profile-collapsed-stack (stack)
   (format nil "~{~A~^;~}" (mapcar #'%rt-profile-frame-name stack)))
 
-#+sbcl
 (defun %rt-profile-code-source (code-location)
   (let ((source (ignore-errors (sb-di:code-location-debug-source code-location))))
     (values (ignore-errors (sb-di:debug-source-namestring source))
             (ignore-errors (sb-di:code-location-toplevel-form-offset code-location)))))
 
-#+sbcl
 (defun %rt-profile-capture-stack (&key (skip 0) (limit 64))
   "Capture the current SBCL stack as resolved frames."
   (let ((frames nil)
@@ -174,11 +162,6 @@
       (error ()
         (push (make-rt-profile-frame :function "<stack-unavailable>") frames)))
     (nreverse frames)))
-
-#-sbcl
-(defun %rt-profile-capture-stack (&key (skip 0) (limit 64))
-  (declare (ignore skip limit))
-  (list (make-rt-profile-frame :function "<stack-unavailable>")))
 
 (defun %rt-profile-trim-samples (session)
   "Keep SESSION's sample vector bounded to avoid unbounded profiler overhead."
@@ -247,12 +230,9 @@ OpenTelemetry Profiling JSON to OUTPUT (:STDOUT, pathname string, or NIL)."
                    :trace-id (or trace-id (%rt-otel-random-hex 16))
                    :span-id (or span-id (%rt-otel-random-hex 8))
                    :perf-map (%rt-profile-read-perf-map perf-map-file))))
-    #+sbcl
     (setf (rt-continuous-profile-session-sampler-thread session)
           (sb-thread:make-thread (lambda () (%rt-profile-sampler-loop session))
                                  :name (format nil "cl-cc profiler ~A" name)))
-    #-sbcl
-    (%rt-profile-sample-once session)
     (setf *rt-continuous-profile-session* session)))
 
 (defun rt-stop-continuous-profile (&optional (session *rt-continuous-profile-session*))
@@ -261,7 +241,6 @@ OpenTelemetry Profiling JSON to OUTPUT (:STDOUT, pathname string, or NIL)."
     (setf (rt-continuous-profile-session-running-p session) nil
           (rt-continuous-profile-session-stopped-at session) (get-universal-time)
           (rt-continuous-profile-session-stopped-at-nanos session) (%rt-profile-now-nanos))
-    #+sbcl
     (let ((thread (rt-continuous-profile-session-sampler-thread session)))
       (when (and thread (sb-thread:thread-alive-p thread))
         (ignore-errors (sb-thread:join-thread thread :timeout 1))))

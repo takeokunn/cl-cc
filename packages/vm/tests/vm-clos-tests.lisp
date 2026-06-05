@@ -204,22 +204,17 @@
 
 ;;; 6b. %vm-allow-other-keys-p / %vm-validate-initargs
 
-(deftest vm-allow-other-keys-p-truthy-register-returns-true
-  "%vm-allow-other-keys-p returns T when the :allow-other-keys register holds a truthy value."
+(deftest-each vm-allow-other-keys-p-cases
+  "%vm-allow-other-keys-p returns T for truthy register, NIL for nil register or absent key."
+  :cases (("truthy"  t   '((:allow-other-keys . :r0)))
+          ("nil-val" nil '((:allow-other-keys . :r0)))
+          ("absent"  nil '((:x . :r0))))
+  (reg-val alist)
   (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
-    (cl-cc:vm-reg-set s :r0 t)
-    (assert-true (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
-
-(deftest vm-allow-other-keys-p-nil-register-returns-false
-  "%vm-allow-other-keys-p returns NIL when the :allow-other-keys register holds nil."
-  (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
-    (cl-cc:vm-reg-set s :r0 nil)
-    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:allow-other-keys . :r0)) s))))
-
-(deftest vm-allow-other-keys-p-absent-key-returns-false
-  "%vm-allow-other-keys-p returns NIL when :allow-other-keys is absent from the alist."
-  (let ((s (make-instance 'cl-cc/vm::vm-io-state)))
-    (assert-false (cl-cc/vm::%vm-allow-other-keys-p '((:x . :r0)) s))))
+    (cl-cc:vm-reg-set s :r0 reg-val)
+    (if reg-val
+        (assert-true  (cl-cc/vm::%vm-allow-other-keys-p alist s))
+        (assert-false (cl-cc/vm::%vm-allow-other-keys-p alist s)))))
 
 (deftest vm-validate-initargs-known-key-accepts-without-signal
   "%vm-validate-initargs accepts a known initarg key without signaling."

@@ -11,9 +11,8 @@
 (in-package :cl-cc/test)
 
 (defsuite cl-cc-wasm-serial-suite
-  :description "Serial WASM backend tests that rely on fresh compile-string state"
-  :parent cl-cc-unit-suite
-  :parallel nil)
+  :description "WASM backend tests using fresh compile-string state (parallel-safe)"
+  :parent cl-cc-unit-suite)
 
 (in-suite cl-cc-wasm-serial-suite)
 

@@ -84,7 +84,7 @@
               (slot-makunbound obj 'y)
               (slot-boundp obj 'y))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; Defstruct Tests
 
@@ -108,7 +108,7 @@
           ("cddr"  '(3) "(cddr (list 1 2 3))")
           ("caddr" 3    "(caddr (list 1 2 3 4))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 ;;; Stdlib Find/Position Tests
 
@@ -128,9 +128,9 @@
           ("rassoc"          "(2 . b)"            "(rassoc 'b (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))")
           ("find-sharpsign-key" "(2 . b)"         "(find 2 (list (cons 1 'a) (cons 2 'b) (cons 3 'c)) :key #'car)"))
   (expected form)
-  (assert-true (string= expected
+  (assert-string= expected
                          (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                           (string-downcase (format nil "~S" (run-string form :stdlib t)))))))
+                           (string-downcase (format nil "~S" (run-string form :stdlib t))))))
 
 (deftest stdlib-identity
   "identity returns its argument"
@@ -156,7 +156,7 @@
           ("defpackage"        :test-pkg "(defpackage :test-pkg (:use :cl))")
           ("in-package-then-code" 42   "(progn (in-package :cl-cc) 42)"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 ;;; Macrolet Tests
 
@@ -178,7 +178,7 @@
   :cases (("cons-pair"  '(1 . 2) "(funcall #'cons 1 2)")
           ("car-mapcar" '(1 2 3) "(mapcar #'car (list (cons 1 'a) (cons 2 'b) (cons 3 'c)))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; Warn Test
 
@@ -200,7 +200,7 @@
   :cases (("passes"
            "(let ((x 42)) (check-type x integer))"
            (lambda (form)
-             (assert-true (eq nil (run-string form)))))
+             (assert-eq nil (run-string form))))
           ("errors"
            "(let ((x \"hello\")) (check-type x integer))"
            (lambda (form)
@@ -247,7 +247,7 @@
 (deftest compile-eval-when-skip
   "eval-when without :execute skips body"
   (handler-bind ((warning #'muffle-warning))
-    (assert-true (eq nil (run-string "(eval-when (:compile-toplevel) 42)")))))
+    (assert-eq nil (run-string "(eval-when (:compile-toplevel) 42)"))))
 
 ;;; Property List and Set Operations Tests
 

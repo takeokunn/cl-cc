@@ -23,7 +23,7 @@
           ("char-newline"   "#\\Newline"  #\Newline))
   (source expected)
   (let ((result (parse-one source)))
-    (assert-true (eql expected result))))
+    (assert-eql expected result)))
 
 (deftest parser-parse-dotted-pair-produces-cons
   "parse-source: dotted pair (a . b) produces a cons cell with A and B."

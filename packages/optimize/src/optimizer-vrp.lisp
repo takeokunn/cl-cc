@@ -16,7 +16,7 @@
 
 (defun opt-vrp-fixnum-interval ()
   "Return the host fixnum interval used to seed typed fixnum facts."
-  (opt-make-interval most-negative-fixnum most-positive-fixnum))
+  (opt-make-interval +opt-range-negative-infinity+ +opt-range-positive-infinity+))
 
 (defun opt-vrp-constant-interval (value)
   "Return VALUE's singleton interval when it is an integer, else top."

@@ -239,11 +239,9 @@ memory operand."
 
 (defun %libm-function-address (name)
   "Return the absolute address of C library function NAME as a 64-bit integer."
-  #+sbcl
   (sb-sys:sap-int
    (sb-alien:alien-sap
-    (sb-alien:extern-alien name (function double-float double-float))))
-  #-sbcl 0)
+    (sb-alien:extern-alien name (function double-float double-float)))))
 
 (defmacro define-float-libm-unary-emitter (fn-name libm-fn)
   "Define an XMM unary emitter that calls libm function LIBM-FN via indirect CALL.
@@ -271,11 +269,9 @@ memory operand."
 (defun %runtime-function-address (name)
   "Resolve the address of a runtime function NAME at load-time via FFI.
    Returns a raw address suitable for indirect CALL through R11."
-  #+sbcl
   (sb-sys:sap-int
    (sb-alien:alien-sap
-    (sb-alien:extern-alien name (function sb-alien:void))))
-  #-sbcl 0)
+    (sb-alien:extern-alien name (function sb-alien:void)))))
 
 (defun emit-vm-print (inst stream)
   "Emit code for VM PRINT instruction (FR-298).
@@ -383,46 +379,28 @@ LEA requires valid base+index registers (not RBP/R13/RSP/R12 with mod=00)."
 
 (defun %bignum-bridge-address (name)
   "Resolve the address of a bignum C-callable bridge function NAME at load-time."
-  #+sbcl
   (sb-sys:sap-int
    (sb-alien:alien-sap
     (sb-alien:extern-alien name (function sb-alien:long
                                           sb-alien:long
-                                          sb-alien:long))))
-  #-sbcl 0)
+                                          sb-alien:long)))))
 
-(defun emit-vm-add-bignum (inst stream)
-  "vm-add via bignum runtime call."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 +rdi+ lhs stream)
-    (emit-mov-rr64 +rsi+ rhs stream)
-    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_add")) stream)
-    (emit-call-r64 +r11+ stream)
-    (emit-mov-rr64 dst +rax+ stream)))
+(defmacro define-bignum-bridge-emitter (fn-name c-symbol description)
+  "Define an emitter that calls bignum C bridge C-SYMBOL(lhs, rhs) → dst."
+  `(defun ,fn-name (inst stream)
+     ,description
+     (let ((dst (vm-reg-to-x86 (vm-dst inst)))
+           (lhs (vm-reg-to-x86 (vm-lhs inst)))
+           (rhs (vm-reg-to-x86 (vm-rhs inst))))
+       (emit-mov-rr64 +rdi+ lhs stream)
+       (emit-mov-rr64 +rsi+ rhs stream)
+       (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address ,c-symbol)) stream)
+       (emit-call-r64 +r11+ stream)
+       (emit-mov-rr64 dst +rax+ stream))))
 
-(defun emit-vm-sub-bignum (inst stream)
-  "vm-sub via bignum runtime call."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 +rdi+ lhs stream)
-    (emit-mov-rr64 +rsi+ rhs stream)
-    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_sub")) stream)
-    (emit-call-r64 +r11+ stream)
-    (emit-mov-rr64 dst +rax+ stream)))
-
-(defun emit-vm-mul-bignum (inst stream)
-  "vm-mul via bignum runtime call."
-  (let ((dst (vm-reg-to-x86 (vm-dst inst)))
-        (lhs (vm-reg-to-x86 (vm-lhs inst)))
-        (rhs (vm-reg-to-x86 (vm-rhs inst))))
-    (emit-mov-rr64 +rdi+ lhs stream)
-    (emit-mov-rr64 +rsi+ rhs stream)
-    (emit-mov-ri64 +r11+ (load-time-value (%bignum-bridge-address "cl_cc_bignum_mul")) stream)
-    (emit-call-r64 +r11+ stream)
-    (emit-mov-rr64 dst +rax+ stream)))
+(define-bignum-bridge-emitter emit-vm-add-bignum "cl_cc_bignum_add" "vm-add via bignum runtime call.")
+(define-bignum-bridge-emitter emit-vm-sub-bignum "cl_cc_bignum_sub" "vm-sub via bignum runtime call.")
+(define-bignum-bridge-emitter emit-vm-mul-bignum "cl_cc_bignum_mul" "vm-mul via bignum runtime call.")
 
 (defun emit-vm-integer-mul-high-u (inst stream)
   "vm-integer-mul-high-u: dst = unsigned high 64 bits of lhs*rhs."

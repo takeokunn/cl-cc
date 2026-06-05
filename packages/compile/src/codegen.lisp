@@ -339,35 +339,36 @@ Signals UNRESOLVED-FORWARD-REFERENCE-ERROR when ERRORP and refs remain."
   "Build PC -> interpreter reconstruction metadata for FR-155 checkpoints."
   (let ((table (make-hash-table :test #'eql))
         (osr nil))
-    (loop for inst in instructions
-          for pc from 0
-          do (cond
-                ((and cl-cc/vm:*deopt-enabled*
-                      (typep inst 'cl-cc/vm::vm-type-check))
-                 (setf (gethash pc table)
-                       (cl-cc/vm::make-vm-deopt-info
-                        :pc pc
-                        :label (cl-cc/vm::vm-type-check-deopt-label inst)
-                        :live-regs (list (vm-src inst))
-                        :vreg->preg (list (cons (vm-src inst) :p0))
-                        :description (list :type-check (cl-cc/vm::vm-type-name inst)
-                                           :id (cl-cc/vm::vm-type-check-deopt-id inst)))))
-                ((and cl-cc/vm:*deopt-enabled*
-                      (typep inst 'cl-cc/vm::vm-deopt))
-                 (setf (gethash pc table)
-                       (cl-cc/vm::make-vm-deopt-info
-                        :pc pc
-                        :label (cl-cc/vm::vm-deopt-label inst)
-                        :vreg->preg nil
-                        :inline-stack nil
-                        :description (list :deopt (cl-cc/vm::vm-deopt-reason inst)
-                                           :id (cl-cc/vm::vm-deopt-id inst)))))
-                ((and cl-cc/vm:*osr-enabled*
-                      (typep inst 'cl-cc/vm::vm-osr-entry))
+    (when cl-cc/vm:*deopt-enabled*
+      (loop for inst in instructions
+            for pc from 0
+            do (cond
+                 ((typep inst 'cl-cc/vm::vm-type-check)
+                  (setf (gethash pc table)
+                        (cl-cc/vm::make-vm-deopt-info
+                         :pc pc
+                         :label (cl-cc/vm::vm-type-check-deopt-label inst)
+                         :live-regs (list (vm-src inst))
+                         :vreg->preg (list (cons (vm-src inst) :p0))
+                         :description (list :type-check (cl-cc/vm::vm-type-name inst)
+                                            :id (cl-cc/vm::vm-type-check-deopt-id inst)))))
+                 ((typep inst 'cl-cc/vm::vm-deopt)
+                  (setf (gethash pc table)
+                        (cl-cc/vm::make-vm-deopt-info
+                         :pc pc
+                         :label (cl-cc/vm::vm-deopt-label inst)
+                         :vreg->preg nil
+                         :inline-stack nil
+                         :description (list :deopt (cl-cc/vm::vm-deopt-reason inst)
+                                            :id (cl-cc/vm::vm-deopt-id inst))))))))
+    (when cl-cc/vm:*osr-enabled*
+      (loop for inst in instructions
+            for pc from 0
+            do (when (typep inst 'cl-cc/vm::vm-osr-entry)
                  (push (list :pc pc
                              :label (cl-cc/vm::vm-osr-label inst)
                              :id (cl-cc/vm::vm-osr-id inst))
-                      osr))))
+                       osr))))
     (values table (nreverse osr))))
 
 (defun %copy-compiler-hash-table (table)
@@ -790,6 +791,19 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
       (when entry
         (error (getf entry :condition))))))
 
+(defun %determine-program-convention (function-conventions)
+  "Scan FUNCTION-CONVENTIONS hash table and return the program calling convention.
+Returns :internal when all conventions are :internal; :external otherwise."
+  (let ((has-external-p nil)
+        (has-internal-p nil))
+    (maphash (lambda (_ convention)
+               (declare (ignore _))
+               (case convention
+                 (:external (setf has-external-p t))
+                 (:internal (setf has-internal-p t))))
+             function-conventions)
+    (if (and has-internal-p (not has-external-p)) :internal :external)))
+
 (defun %finalize-toplevel-compilation (ctx target last-reg last-type last-cps compiled-asts opts errors compilation-tier)
   "Finalize CTX after all top-level forms have been compiled."
   (%maybe-signal-strict-no-alloc-error errors opts)
@@ -798,16 +812,7 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
   (when *repl-capture-label-counter*
     (setf *repl-capture-label-counter* (ctx-next-label ctx)))
   (let* ((function-conventions (ctx-function-conventions ctx))
-         (program-convention
-           (let ((has-external-p nil)
-                 (has-internal-p nil))
-             (maphash (lambda (_ convention)
-                        (declare (ignore _))
-                        (case convention
-                          (:external (setf has-external-p t))
-                          (:internal (setf has-internal-p t))))
-                      function-conventions)
-             (if (and has-internal-p (not has-external-p)) :internal :external)))
+         (program-convention (%determine-program-convention function-conventions))
          (raw-instructions (nreverse (ctx-instructions ctx)))
          (instructions (if (eq target :vm)
                            (%insert-osr-entry-markers raw-instructions)
@@ -859,17 +864,17 @@ Values: last-reg, last-type, last-cps, updated-type-env, updated-compiled-asts."
 (defun compile-toplevel-forms (forms &key (target :x86_64) type-check (safety 1)
                                           speed (inline-threshold-scale 1)
                                           block-compile opt-bisect-limit
-                                         pass-pipeline print-pass-timings timing-stream coverage
-                                        print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
+                                          pass-pipeline print-pass-timings timing-stream coverage
+                                          print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                           print-pass-stats stats-stream trace-json-stream
-                                           retpoline spectre-mitigations stack-protector shadow-stack
-                                           asan msan tsan ubsan hwasan verify-transforms werror werror-categories (compilation-tier 1)
-                                           &allow-other-keys)
+                                          verify-transforms werror werror-categories (compilation-tier 1)
+                                          &allow-other-keys)
   "Compile a list of top-level forms (e.g., from a source file).
 Handles defun, defvar, and expression forms.
-Returns a compilation-result struct with program, assembly, and globals."
-  (declare (ignore coverage verify-transforms retpoline spectre-mitigations stack-protector shadow-stack
-                    asan msan tsan ubsan hwasan))
+Returns a compilation-result struct with program, assembly, and globals.
+Security-mitigation keywords (:retpoline :spectre-mitigations :stack-protector
+:shadow-stack :asan :msan :tsan :ubsan :hwasan) are accepted via &allow-other-keys and ignored."
+  (declare (ignore coverage verify-transforms))
   (let ((ctx           (make-instance 'compiler-context :safety safety :target target))
         (last-reg      nil)
         (last-type     nil)
@@ -929,130 +934,5 @@ Returns a compilation-result struct with program, assembly, and globals."
 
 ;;; Function call compilation (%resolve-func-sym-reg, %try-compile-*,
 ;;; %compile-normal-call, compile-ast (ast-call)) is in codegen-calls.lisp (loads next).
-
-;;; ─── FR-860 / FR-861 Numeric Compile-Time Helpers ─────────────────────────
-;;;
-;;; Append-only helpers for numeric contagion inference and inline arithmetic
-;;; dispatch planning.  The existing AST binop compiler remains untouched; these
-;;; functions give later lowering passes and tests a stable codegen-facing API
-;;; for selecting the VM dispatch-table entry introduced in primitives.lisp.
-
-(defparameter *codegen-inline-arith-dispatch-enabled* t
-  "When true, FR-861 planning helpers may choose VM-ARITH-DISPATCH for VM code.")
-
-(defun %codegen-normalize-contagion-type (type-designator)
-  "Map compiler/CL numeric type designators to FR-860 contagion symbols."
-  (cond
-    ((member type-designator '(fixnum bignum integer) :test #'eq) 'integer)
-    ((member type-designator '(ratio rational) :test #'eq) 'rational)
-    ((eq type-designator 'single-float) 'single-float)
-    ((member type-designator '(double-float float) :test #'eq) 'double-float)
-    ((eq type-designator 'complex) 'complex)
-    ((and (consp type-designator) (eq (first type-designator) 'complex)) 'complex)
-    (t nil)))
-
-(defun codegen-infer-numeric-contagion-type (left-type right-type)
-  "Return the FR-860 result type for LEFT-TYPE × RIGHT-TYPE, or NIL if unknown."
-  (let ((left (%codegen-normalize-contagion-type left-type))
-        (right (%codegen-normalize-contagion-type right-type)))
-    (and left right (cl-cc/vm:infer-numeric-result-type left right))))
-
-(defun %codegen-arith-type-tag-from-type (type-designator)
-  "Return the FR-861 inline dispatch type tag implied by TYPE-DESIGNATOR."
-  (cond
-    ((eq type-designator 'fixnum) 0)
-    ((member type-designator '(bignum integer) :test #'eq) 1)
-    ((member type-designator '(ratio rational) :test #'eq) 2)
-    ((member type-designator '(single-float double-float float) :test #'eq) 3)
-    ((or (eq type-designator 'complex)
-         (and (consp type-designator) (eq (first type-designator) 'complex))) 4)
-    (t nil)))
-
-(defun codegen-inline-arith-dispatch-index (op left-type right-type)
-  "Return the flattened FR-861 dispatch-table index for OP and operand types."
-  (let ((left-tag (%codegen-arith-type-tag-from-type left-type))
-        (right-tag (%codegen-arith-type-tag-from-type right-type)))
-    (and left-tag right-tag
-         (cl-cc/vm:arithmetic-dispatch-index
-          (cl-cc/vm:arithmetic-op-tag op) left-tag right-tag))))
-
-(defun codegen-inline-arith-dispatch-entry (op left-type right-type)
-  "Return the VM inline arithmetic dispatch entry selected at compile time."
-  (let ((index (codegen-inline-arith-dispatch-index op left-type right-type)))
-    (and index (aref cl-cc/vm:*arith-dispatch-table* index))))
-
-(defun codegen-inline-arith-dispatch-plan (op left-type right-type &key (target :vm))
-  "Return a plist describing the FR-861 codegen plan for OP.
-
-The plan records the flattened dispatch-table INDEX and selected ENTRY.  When a
-specialized entry is present, VM backends can lower to VM-ARITH-DISPATCH; when
-absent, callers should keep the existing generic arithmetic lowering."
-  (let* ((index (codegen-inline-arith-dispatch-index op left-type right-type))
-         (entry (and index (aref cl-cc/vm:*arith-dispatch-table* index)))
-         (result-type (codegen-infer-numeric-contagion-type left-type right-type)))
-    (list :op op
-          :target target
-          :left-type left-type
-          :right-type right-type
-          :result-type result-type
-          :index index
-          :entry entry
-          :instruction (and *codegen-inline-arith-dispatch-enabled*
-                            (eq target :vm)
-                            entry
-                            'cl-cc/vm:vm-arith-dispatch))))
-
-(defun emit-inline-arith-dispatch (ctx op dst lhs-reg rhs-reg)
-  "Emit a VM-ARITH-DISPATCH instruction for OP and return DST.
-This helper is intentionally explicit so existing binop lowering is not changed
-unless a caller opts into FR-861 dispatch lowering."
-  (emit ctx (cl-cc/vm:make-vm-arith-dispatch
-             :dst dst :lhs lhs-reg :rhs rhs-reg :op op))
-  dst)
-
-(export '(codegen-infer-numeric-contagion-type
-          codegen-inline-arith-dispatch-index
-          codegen-inline-arith-dispatch-entry
-          codegen-inline-arith-dispatch-plan
-           emit-inline-arith-dispatch
-            *forward-reference-patch-table*
-            record-forward-reference
-             resolve-forward-references
-             unresolved-forward-reference-error
-             *unresolved-forward-refs*
-             *codegen-inline-arith-dispatch-enabled*
-             ;; FR-542: hot/cold code annotations
-             declare-hot
-             declare-cold
-             cold-path))
-
-;;; ── FR-542: Hot/Cold Code Annotations ─────────────────────────────────
-
-(defvar *code-temperature-registry* (make-hash-table :test 'eq)
-  "Maps function names to :hot or :cold temperature hints for code placement.")
-
-(defun %declare-function-temperature (name temperature)
-  "Register NAME with TEMPERATURE (:hot or :cold) for code placement.
-Hot functions go to .text.hot section; cold functions to .text.cold."
-  (setf (gethash name *code-temperature-registry*) temperature))
-
-(defmacro declare-hot ()
-  "FR-542: Declare the current function as hot-path.
-Equivalent to GCC __attribute__((hot)). Hot functions are placed in
-the .text.hot section for I-cache locality."
-  `(push (cons :code-placement :hot) (compilation-result-code-placement-hints *compilation-result*)))
-
-(defmacro declare-cold ()
-  "FR-542: Declare the current function as cold-path.
-Equivalent to GCC __attribute__((cold)). Cold functions are placed in
-the .text.cold section, away from hot code to improve I-cache density."
-  `(push (cons :code-placement :cold) (compilation-result-code-placement-hints *compilation-result*)))
-
-(defmacro cold-path (&body body)
-  "FR-542: Mark BODY as a cold execution path.
-Used for error handlers and rarely-taken branches. The compiler
-may outline this code to .text.cold and place it away from the
-hot instruction stream."
-  `(progn
-     (push (cons :code-placement :cold) (compilation-result-code-placement-hints *compilation-result*))
-     ,@body))
+;;; FR-860/FR-861 numeric contagion helpers and FR-542 hot/cold annotations
+;;; are in codegen-numeric-hints.lisp (loads after codegen-calls).

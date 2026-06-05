@@ -2,9 +2,10 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-cli-serial-suite)
+(in-suite cl-cc-cli-pure-suite)
 
 (deftest cli-dump-phase-label-lowercases-keywords
+  "%dump-phase-label converts IR phase keywords to their lowercase string labels."
   (assert-string= "ast" (cl-cc/cli::%dump-phase-label :ast))
   (assert-string= "ssa" (cl-cc/cli::%dump-phase-label :SSA)))
 
@@ -21,11 +22,13 @@
   (assert-eq expected (cl-cc/cli::%parse-ir-phase input)))
 
 (deftest cli-ensure-list-normalizes-inputs
+  "%ensure-list returns nil for nil, wraps atoms in a list, and passes lists through unchanged."
   (assert-null (cl-cc/cli::%ensure-list nil))
   (assert-equal '(1 2) (cl-cc/cli::%ensure-list '(1 2)))
   (assert-equal '(x) (cl-cc/cli::%ensure-list 'x)))
 
 (deftest cli-call-with-optional-output-file-passes-nil-when-missing
+  "%call-with-optional-output-file calls the callback with nil when no output path is provided."
   (let ((seen :unset))
     (cl-cc/cli::%call-with-optional-output-file nil
                                                 (lambda (stream)
@@ -34,6 +37,7 @@
     (assert-null seen)))
 
 (deftest cli-call-with-optional-output-file-writes-file-when-path-present
+  "%call-with-optional-output-file opens the output file, passes the stream to the callback, and returns the callback result."
   (uiop:with-temporary-file (:pathname path :type "txt" :keep t)
     (let ((result (cl-cc/cli::%call-with-optional-output-file
                    path
@@ -66,6 +70,7 @@
       (cl-cc/cli::%get-timeout parsed))))
 
 (deftest cli-svg-escape-escapes-special-characters
+  "%svg-escape replaces <, >, \", and & with their XML entity equivalents."
   (assert-string= "&lt;tag attr=&quot;a&amp;b&quot;&gt;"
                   (cl-cc/cli::%svg-escape "<tag attr=\"a&b\">") ))
 
@@ -82,6 +87,7 @@
   (assert-true (search "hsl(" (cl-cc/cli::%flamegraph-color "ordinary-frame"))))
 
 (deftest cli-flamegraph-build-tree-aggregates-counts
+  "%flamegraph-build-tree aggregates sample counts and creates a named root node with children."
   (let ((samples (make-hash-table :test #'equal)))
     (setf (gethash "root;alpha" samples) 2)
     (setf (gethash "root;beta" samples) 3)
@@ -91,6 +97,7 @@
       (assert-true (gethash "root" (getf tree :children))))))
 
 (deftest cli-flamegraph-children-list-sorts-by-name
+  "%flamegraph-children-list returns a list of child nodes sorted alphabetically by name."
   (let* ((a (list :name "zeta" :count 1 :children (make-hash-table :test #'equal)))
          (b (list :name "alpha" :count 1 :children (make-hash-table :test #'equal)))
          (node (list :name "root" :count 2 :children (make-hash-table :test #'equal))))
@@ -101,6 +108,7 @@
                           (cl-cc/cli::%flamegraph-children-list node)))))
 
 (deftest cli-write-flamegraph-svg-emits-svg-document
+  "%write-flamegraph-svg writes a valid SVG document containing the sampled frame names."
   (uiop:with-temporary-file (:pathname path :type "svg" :keep t)
     (let ((samples (make-hash-table :test #'equal)))
       (setf (gethash "top;child" samples) 4)

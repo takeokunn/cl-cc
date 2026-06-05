@@ -4,7 +4,6 @@
 
 (defsuite match-suite
   :description "FR-779 structural pattern matching and FR-780 exhaustiveness checks"
-  :parallel nil
   :parent cl-cc-unit-suite)
 
 (in-suite match-suite)

@@ -7,7 +7,7 @@
 ;;;;   and compile-ast(ast-call) dispatch — tail call and GF paths.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 ;;; ─── helper functions extracted for readability ────────────────────────────
 

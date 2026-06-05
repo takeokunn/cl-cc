@@ -13,8 +13,7 @@
 (defvar *rt-dl-thread-waits* (make-hash-table :test #'eq))
 
 (defun %rt-dl-current-thread ()
-  #+sbcl sb-thread:*current-thread*
-  #-sbcl :single-thread)
+  sb-thread:*current-thread*)
 
 (defun %rt-dl-hash-keys (table)
   (let ((keys nil))

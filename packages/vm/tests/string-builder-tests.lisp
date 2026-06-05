@@ -72,8 +72,8 @@
          (joined (cl-cc/vm:rope-concat left right))
          (root (cl-cc/vm::rope-root joined)))
     (assert-true (cl-cc/vm::rope-node-p root))
-    (assert-true (eq left-text (cl-cc/vm::rope-node-left root)))
-    (assert-true (eq right-text (cl-cc/vm::rope-node-right root)))
+    (assert-eq left-text (cl-cc/vm::rope-node-left root))
+    (assert-eq right-text (cl-cc/vm::rope-node-right root))
     (assert-equal (* 2 cl-cc/vm::+rope-inline-threshold+)
                   (cl-cc/vm:rope-length joined))))
 

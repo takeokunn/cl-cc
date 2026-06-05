@@ -199,4 +199,4 @@
                     (odd? (n)
                       (if (= n 0) nil (even? (- n 1)))))
                     (even? 100000))")))
-    (assert-true (eq result t))))
+    (assert-eq result t)))

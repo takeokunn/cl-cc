@@ -80,7 +80,7 @@ Shrinking (3 -8 5) should converge to the singleton (-1)."
                    (some #'minusp list))
                  :max-rounds 50)))
     ;; The minimal failing list contains one negative number
-    (assert-true (= 1 (length result)))
+    (assert-= 1 (length result))
     (assert-true (minusp (first result)))
     ;; The negative number is minimal (closest to zero): -1
     (assert-eql -1 (first result))))

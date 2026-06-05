@@ -3,7 +3,6 @@
 
 (defun %foreign-funcall (name &rest arguments)
   "Minimal host-backed CFFI FOREIGN-FUNCALL implementation for the VM."
-  #+sbcl
   (multiple-value-bind (arg-types arg-values return-type)
       (%parse-foreign-funcall-arguments arguments)
     (let ((alien-arg-types (mapcar (lambda (type)
@@ -16,11 +15,7 @@
       (eval `(sb-alien:alien-funcall
               (sb-alien:extern-alien ,foreign-name
                 (function ,alien-return-type ,@alien-arg-types))
-              ,@arg-values))))
-  #-sbcl
-  (declare (ignore name arguments))
-  #-sbcl
-  (error "FOREIGN-FUNCALL is currently implemented only on SBCL."))
+              ,@arg-values)))))
 
 (defun %vm-safe-disassemble (object)
   "Disassemble function designators safely and always return NIL."

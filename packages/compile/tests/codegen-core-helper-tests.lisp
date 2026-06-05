@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-core-helper-tests.lisp — Codegen helper and CPS routing tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 ;;; ─── %case-of-case-collapse-node (extracted IF-collapse helper) ─────────────
 

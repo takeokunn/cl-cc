@@ -85,7 +85,7 @@
             cl:*gensym-counter* 0
             *random-state* (%vm-mt-seed seed)
             *vm-random-state* *random-state*)
-      #+sbcl (setf cl:*random-state* (sb-ext:seed-random-state seed))
+      (setf cl:*random-state* (sb-ext:seed-random-state seed))
       seed)))
 
 (defun build-fingerprint (&rest input-files)

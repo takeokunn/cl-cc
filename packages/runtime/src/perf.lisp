@@ -57,7 +57,7 @@
 
 (defun %perf-close (fd)
   (when (>= fd 0)
-    #+sbcl (ignore-errors (sb-posix:close fd)))
+    (ignore-errors (sb-posix:close fd)))
   t)
 
 (defun %perf-read (fd)

@@ -22,7 +22,7 @@
   (let ((ty (cl-cc/type:parse-type-specifier '(Pair fixnum string))))
     (assert-type cl-cc/type:type-constructor ty)
     (assert-eq 'Pair (cl-cc/type:type-constructor-name ty))
-    (assert-true (= 2 (length (cl-cc/type:type-constructor-args ty))))
+    (assert-= 2 (length (cl-cc/type:type-constructor-args ty)))
     (assert-true (cl-cc/type:type-equal-p (first (cl-cc/type:type-constructor-args ty))
                                   cl-cc/type:type-int))
     (assert-true (cl-cc/type:type-equal-p (second (cl-cc/type:type-constructor-args ty))

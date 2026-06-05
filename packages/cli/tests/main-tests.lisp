@@ -6,6 +6,10 @@
   :parent cl-cc-unit-suite
   :parallel nil)
 
+(defsuite cl-cc-cli-pure-suite
+  :description "Parallel CLI unit tests (pure helpers, no function replacement)"
+  :parent cl-cc-unit-suite)
+
 (in-suite cl-cc-cli-serial-suite)
 
 (defmacro %with-cli-function-overrides (bindings &body body)

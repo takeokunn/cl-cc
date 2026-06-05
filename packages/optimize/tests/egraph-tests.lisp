@@ -7,7 +7,11 @@
 
 (defsuite cl-cc-coverage-unstable-unit-suite
   :description "Unit tests that are known to be unstable under source instrumentation coverage runs"
-  :parent cl-cc-unit-suite
+  :parent cl-cc-unit-suite)
+
+(defsuite cl-cc-egraph-prolog-serial-suite
+  :description "Serial egraph tests requiring query-all replacement"
+  :parent cl-cc-coverage-unstable-unit-suite
   :parallel nil)
 
 (in-suite cl-cc-coverage-unstable-unit-suite)
@@ -89,7 +93,7 @@
   (let* ((eg  (make-test-egraph))
          (id  (cl-cc/optimize:egraph-add eg 'const))
          (matches (cl-cc/optimize:egraph-match-pattern eg '?x id)))
-    (assert-true (= 1 (length matches)))
+    (assert-= 1 (length matches))
     (assert-= id (cdr (assoc '?x (car matches))))))
 
 (deftest egraph-match-pattern-consistent-binding
@@ -115,8 +119,10 @@
     (assert-true (find rule-name rules
                         :key (lambda (r) (getf r :name))))))
 
+(in-suite cl-cc-egraph-prolog-serial-suite)
+
 (deftest egraph-builtin-rules-consults-prolog-facts
-  "egraph-builtin-rules consults the Prolog egraph-rule facts when they are available." 
+  "egraph-builtin-rules consults the Prolog egraph-rule facts when they are available."
   (let ((called nil))
     (with-replaced-function (cl-cc/prolog:query-all
                              (lambda (goal)
@@ -129,3 +135,5 @@
           (assert-true rule)
           (assert-equal '(add (const ?a) (const ?b)) (getf rule :lhs))
           (assert-equal '(const) (getf rule :rhs)))))))
+
+(in-suite cl-cc-coverage-unstable-unit-suite)

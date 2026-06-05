@@ -126,7 +126,7 @@
                      (nreverse log))")))
     (assert-true (consp result))
     (assert-= 4 (length result))
-    (assert-true (string= "INIT" (symbol-name (car result))))
+    (assert-string= "INIT" (symbol-name (car result)))
     (assert-equal '(1 2 3) (cdr result))))
 
 (check-loop-= loop-finally-runs-last

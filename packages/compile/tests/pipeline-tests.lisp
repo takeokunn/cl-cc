@@ -36,11 +36,11 @@
   (assert-true (member 'cl-cc/ast:ast-node cl-cc/compile:*cps-native-compile-unsupported-ast-types*))
   (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile:*cps-compile-unsupported-ast-types*))
   (assert-false (member 'cl-cc/ast:ast-setq cl-cc/compile:*cps-native-compile-unsupported-ast-types*))
-  (assert-true (equal '("PARSE-LAMBDA-LIST" . :cl-cc/expand)
+  (assert-equal '("PARSE-LAMBDA-LIST" . :cl-cc/expand)
                       (first '(("PARSE-LAMBDA-LIST"            . :cl-cc/expand)
                                ("DESTRUCTURE-LAMBDA-LIST"      . :cl-cc/expand)
                                ("GENERATE-LAMBDA-BINDINGS"     . :cl-cc/expand)
-                               ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand))))))
+                               ("LAMBDA-LIST-INFO-ENVIRONMENT" . :cl-cc/expand)))))
 
 (deftest pipeline-policy-data-host-eval-unsafe-forms-cover-control-and-definitions
   "The host-eval unsafe policy keeps definition and non-local-control AST nodes out of the fast CPS host path."
@@ -64,7 +64,7 @@
           (program-instrs (vm-program-instructions (compilation-result-program result)))
           (raw-instrs (cl-cc:compilation-result-vm-instructions result))
           (optimized-instrs (cl-cc:compilation-result-optimized-instructions result)))
-    (assert-true (equal program-instrs raw-instrs))
+    (assert-equal program-instrs raw-instrs)
     (assert-true (> (length raw-instrs) 0))
     (assert-true (listp optimized-instrs))))
 
@@ -177,7 +177,7 @@
           (program-instrs (vm-program-instructions (cl-cc/compile:compilation-result-program result)))
           (raw-instrs (cl-cc/compile:compilation-result-vm-instructions result))
           (optimized-instrs (cl-cc/compile:compilation-result-optimized-instructions result)))
-    (assert-true (equal program-instrs raw-instrs))
+    (assert-equal program-instrs raw-instrs)
     (assert-true (> (length raw-instrs) 0))
     (assert-true (listp optimized-instrs))))
 

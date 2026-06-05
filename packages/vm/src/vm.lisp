@@ -760,10 +760,10 @@ Also engages SBCL's native package lock so that CL:INTERN signals an error."
   (if lock
       (progn (pushnew package *locked-packages* :test #'eq)
              (vm-lock-package package)
-             #+sbcl (handler-case (sb-ext:lock-package package) (error () nil)))
+             (handler-case (sb-ext:lock-package package) (error () nil)))
       (progn (setf *locked-packages* (remove package *locked-packages* :test #'eq))
              (vm-unlock-package package)
-             #+sbcl (handler-case (sb-ext:unlock-package package) (error () nil))))
+             (handler-case (sb-ext:unlock-package package) (error () nil))))
   package)
 
 (defun unlock-package (package)
@@ -774,11 +774,9 @@ Also engages SBCL's native package lock so that CL:INTERN signals an error."
   "Return T when PACKAGE is locked."
   (vm-package-locked-p package))
 
-;;; Alias package-locked-error to SBCL's native type so that standard
-;;; Alias package-locked-error to SBCL's native type when available.
+;;; Alias package-locked-error to SBCL's native type.
 ;;; Under selfhost, package-locked-error is a standalone condition type.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl
   (setf (find-class 'package-locked-error)
         (find-class 'sb-ext:package-locked-error)))
 
@@ -803,11 +801,11 @@ Also temporarily disengages SBCL's native lock so CL:INTERN works inside."
                 ,@(mapcar (lambda (pv)
                             `(when (and ,pv (vm-package-locked-p ,pv))
                                (vm-unlock-package ,pv)
-                               #+sbcl (handler-case (sb-ext:unlock-package ,pv) (error () nil))))
+                               (handler-case (sb-ext:unlock-package ,pv) (error () nil))))
                           pkg-vars)
                 (,thunk))
            ,@(mapcar (lambda (pv)
                         `(when ,pv
                            (vm-lock-package ,pv)
-                           #+sbcl (handler-case (sb-ext:lock-package ,pv) (error () nil))))
+                           (handler-case (sb-ext:lock-package ,pv) (error () nil))))
                       pkg-vars))))))

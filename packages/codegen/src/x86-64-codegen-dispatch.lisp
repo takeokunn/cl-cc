@@ -336,20 +336,17 @@ materializes explicit CET SS instructions under the shadow-stack gate:
 ;;; runtime-call emitters (emit-vm-add-bignum etc.) instead of inline x86-64
 ;;; instructions.  When NIL (default), use the fast inline path.
 
-(defun emit-vm-add-wrapper (inst stream)
-  (if *x86-64-bignum-calls-enabled*
-      (emit-vm-add-bignum inst stream)
-      (emit-vm-add inst stream)))
+(defmacro define-bignum-aware-wrapper (fn-name bignum-fn inline-fn)
+  "Define a wrapper that dispatches to BIGNUM-FN when bignum calls are enabled,
+   otherwise uses INLINE-FN."
+  `(defun ,fn-name (inst stream)
+     (if *x86-64-bignum-calls-enabled*
+         (,bignum-fn inst stream)
+         (,inline-fn inst stream))))
 
-(defun emit-vm-sub-wrapper (inst stream)
-  (if *x86-64-bignum-calls-enabled*
-      (emit-vm-sub-bignum inst stream)
-      (emit-vm-sub inst stream)))
-
-(defun emit-vm-mul-wrapper (inst stream)
-  (if *x86-64-bignum-calls-enabled*
-      (emit-vm-mul-bignum inst stream)
-      (emit-vm-mul inst stream)))
+(define-bignum-aware-wrapper emit-vm-add-wrapper emit-vm-add-bignum emit-vm-add)
+(define-bignum-aware-wrapper emit-vm-sub-wrapper emit-vm-sub-bignum emit-vm-sub)
+(define-bignum-aware-wrapper emit-vm-mul-wrapper emit-vm-mul-bignum emit-vm-mul)
 
 (defparameter *x86-64-emitter-entries*
   '(;; Core instructions

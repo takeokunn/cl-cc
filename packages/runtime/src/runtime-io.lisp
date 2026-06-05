@@ -727,19 +727,16 @@ In runtime registry, search all package symbol tables."
 
 ;;; ─── JIT-Callable Bignum Bridges (for native codegen slow path) ────────────
 
-#+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_add
     sb-alien:long
     ((a sb-alien:long) (b sb-alien:long))
   (rt-native-bignum-add a b))
 
-#+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_sub
     sb-alien:long
     ((a sb-alien:long) (b sb-alien:long))
   (rt-native-bignum-sub a b))
 
-#+sbcl
 (sb-alien:define-alien-callable cl_cc_bignum_mul
     sb-alien:long
     ((a sb-alien:long) (b sb-alien:long))

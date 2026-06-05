@@ -37,6 +37,7 @@
    (:file "vm-execute")
     (:file "vm-execute-mv")
     (:file "vm-clos")
+    (:file "vm-clos-mop")
     (:file "vm-ic")
     (:file "vm-clos-execute")
    (:file "vm-run")
@@ -46,6 +47,7 @@
     (:file "vm-opcodes-run")
     (:file "primitives")
     (:file "primitives-typep")
+    (:file "primitives-numeric-fp-traps")
    (:file "vm-bitwise")
    (:file "vm-transcendental")
      (:file "vm-numeric")
@@ -58,6 +60,7 @@
     (:file "vm-numeric-ext")
    (:file "vm-extensions")
     (:file "io")
+    (:file "io-network")
     (:file "print-circle")
     (:file "io-instructions")
    (:file "io-execute")
@@ -166,7 +169,8 @@
       (:file "runtime-stdlib-3-tests")
       (:file "runtime-stdlib-3-numeric-tests")
       (:file "runtime-stdlib-3-debug-tests")
-      (:file "runtime-stdlib-3-io-tests"))
+      (:file "runtime-stdlib-3-io-tests")
+      (:file "crash-report-tests"))
   ;; NOTE: run-tests invokes the canonical cl-cc-suite (unit + integration + e2e),
   ;; not a VM-subset. There is intentionally one test entry point; suite filtering
   ;; is done via keyword args to run-tests, not via per-package ASDF systems.

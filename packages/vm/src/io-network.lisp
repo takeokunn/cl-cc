@@ -1,13 +1,56 @@
 ;;;; packages/vm/src/io-network.lisp — VM Network I/O: Sockets, DNS, TLS, mmap
 ;;;
-;;; Contains: TCP/UDP socket creation and operations, DNS resolution,
-;;; TLS context/wrapping helpers, and memory-mapped file operations.
+;;; Contains:
+;;;   - tls-unsupported condition
+;;;   - vm-socket, dns-cache-entry, dns-async-result, tls-context, vm-mmap-region structs
+;;;   - *dns-cache*, *dns-default-ttl* parameters
+;;;   - %unsupported helper
+;;;   - TCP/UDP socket creation and operations
+;;;   - DNS resolution (sync and async)
+;;;   - TLS context/wrapping helpers
+;;;   - Memory-mapped file operations
 ;;;
-;;; Load order: after io.lisp (core stream bridge).
+;;; Load order: after io.lisp (core stream bridge, encoding helpers, vm-open).
 
 (in-package :cl-cc/vm)
 
-;;; ─── Socket protocol helpers (moved from io.lisp) ────────────────────────────
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (ignore-errors (require :sb-bsd-sockets))
+  (ignore-errors (require :sb-posix)))
+
+;;; ─── Data types and variables for networking/mmap ────────────────────────────
+
+(define-condition tls-unsupported (error)
+  ((reason :initarg :reason :reader tls-unsupported-reason))
+  (:report (lambda (condition stream)
+             (format stream "TLS backend unsupported: ~a"
+                     (tls-unsupported-reason condition)))))
+
+(defstruct vm-socket
+  "Host-backed socket descriptor for FR-851."
+  backend
+  (family :ipv4)
+  (type :tcp)
+  stream)
+
+(defstruct dns-cache-entry value expires-at)
+(defstruct dns-async-result thread result error done-p)
+(defstruct (tls-context (:constructor %make-tls-context))
+  verify-peer ca-bundle cert-file key-file server-p)
+
+(defstruct vm-mmap-region
+  path protection flags length buffer array stream dirty-p closed-p)
+
+(defvar *dns-cache* (make-hash-table :test #'equal)
+  "DNS cache keyed by operation and input, with per-entry TTLs.")
+
+(defparameter *dns-default-ttl* 60
+  "Default DNS cache TTL in seconds.")
+
+(defun %unsupported (feature)
+  (error "~a is unsupported on this host Lisp" feature))
+
+;;; ─── Socket protocol helpers ─────────────────────────────────────────────────
 
 (defun %socket-class (family)
   (ecase family

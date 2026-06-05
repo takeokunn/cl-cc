@@ -396,9 +396,12 @@
 ;;; FR-373: Heap ASLR (⚠️ Pure CL interface)
 ;;; ------------------------------------------------------------
 
-(deftest fr-373-heap-randomize-function-exists
-  "FR-373: rt-heap-randomize-base is fbound (Pure CL fallback returns logical offset)."
-  (assert-true (fboundp 'cl-cc/runtime:rt-heap-randomize-base)))
+(deftest-each fr-gc-interface-function-exists
+  "FR-373/FR-376: Pure CL GC interface entry points are fbound."
+  :cases (("rt-heap-randomize-base"  'cl-cc/runtime:rt-heap-randomize-base)
+          ("rt-install-stack-guard"  'cl-cc/runtime:rt-install-stack-guard))
+  (sym)
+  (assert-true (fboundp sym)))
 
 (deftest fr-373-heap-randomize-returns-value
   "FR-373: rt-heap-randomize-base returns a non-negative integer offset."
@@ -409,10 +412,6 @@
 ;;; ------------------------------------------------------------
 ;;; FR-376: Guard Pages for Stack Overflow (⚠️ Pure CL interface)
 ;;; ------------------------------------------------------------
-
-(deftest fr-376-stack-guard-function-exists
-  "FR-376: rt-install-stack-guard is fbound (Pure CL fallback returns plist)."
-  (assert-true (fboundp 'cl-cc/runtime:rt-install-stack-guard)))
 
 (deftest fr-376-stack-guard-returns-plist
   "FR-376: rt-install-stack-guard returns a property list describing the guard region."

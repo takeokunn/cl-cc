@@ -76,36 +76,20 @@ EQL-PLIST is a list of (eql-value . method-fn) pairs."
 
 ;;; ─── %vm-resolve-single-dispatch ──────────────────────────────────────────
 
-(deftest gf-multi-single-dispatch-exact-integer-hit
-  "%vm-resolve-single-dispatch returns the method when the argument type matches 'integer."
+(deftest-each gf-multi-single-dispatch-cases
+  "%vm-resolve-single-dispatch resolves methods for exact-type hit, T fallback, and no-match."
+  :cases (("exact-integer-hit"   'integer #'identity    42      t)
+          ("exact-string-hit"    'string  #'string-upcase "hello" t)
+          ("t-fallback"          t        #'not          99      t)
+          ("no-match-returns-nil" 'string #'identity    42      nil))
+  (dispatch-type method-fn arg expect-match-p)
   (let* ((s (make-test-vm))
-         (my-fn #'identity)
-         (gf-ht (make-single-dispatch-gf-ht (list (cons 'integer my-fn))))
-         (methods-ht (gethash :__methods__ gf-ht)))
-    (assert-eq my-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42))))
-
-(deftest gf-multi-single-dispatch-exact-string-hit
-  "%vm-resolve-single-dispatch returns the method when the argument type matches 'string."
-  (let* ((s (make-test-vm))
-         (my-fn #'string-upcase)
-         (gf-ht (make-single-dispatch-gf-ht (list (cons 'string my-fn))))
-         (methods-ht (gethash :__methods__ gf-ht)))
-    (assert-eq my-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s "hello"))))
-
-(deftest gf-multi-single-dispatch-t-fallback
-  "%vm-resolve-single-dispatch returns the T-keyed fallback method when no exact type match exists."
-  (let* ((s (make-test-vm))
-         (fallback-fn #'not)
-         (gf-ht (make-single-dispatch-gf-ht (list (cons t fallback-fn))))
-         (methods-ht (gethash :__methods__ gf-ht)))
-    (assert-eq fallback-fn (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 99))))
-
-(deftest gf-multi-single-dispatch-no-match-returns-nil
-  "%vm-resolve-single-dispatch returns NIL when no method covers the argument type."
-  (let* ((s (make-test-vm))
-         (gf-ht (make-single-dispatch-gf-ht (list (cons 'string #'identity))))
-         (methods-ht (gethash :__methods__ gf-ht)))
-    (assert-null (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s 42))))
+         (gf-ht (make-single-dispatch-gf-ht (list (cons dispatch-type method-fn))))
+         (methods-ht (gethash :__methods__ gf-ht))
+         (result (cl-cc/vm::%vm-resolve-single-dispatch gf-ht methods-ht s arg)))
+    (if expect-match-p
+        (assert-eq method-fn result)
+        (assert-null result))))
 
 (deftest gf-multi-single-dispatch-eql-index-hit-precedes-class
   "%vm-resolve-single-dispatch uses the EQL index before class fallback."

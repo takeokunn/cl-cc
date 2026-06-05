@@ -495,9 +495,7 @@ mutable control-state containers."
 ;;; FR-880: User-defined hash table tests
 (defmacro define-hash-table-test (name test-fn hash-fn)
   "FR-880: Define a custom hash table test using TEST-FN and HASH-FN."
-  #+sbcl `(sb-ext:define-hash-table-test ,name ,test-fn ,hash-fn)
-  #-sbcl `(eval-when (:compile-toplevel :load-toplevel :execute)
-            (cl-cc/runtime:rt-unsupported "define-hash-table-test")))
+  `(sb-ext:define-hash-table-test ,name ,test-fn ,hash-fn))
 
 ;;; FR-847: Mutex/condition variable
 (defstruct (vm-mutex (:constructor make-mutex (&optional (name "mutex"))))

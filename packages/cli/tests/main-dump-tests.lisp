@@ -2,7 +2,7 @@
 
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-cli-serial-suite)
+(in-suite cl-cc-cli-pure-suite)
 
 (deftest-each cli-string-suffix-p-basic-cases
   "string-suffix-p returns t when the suffix matches, nil otherwise."
@@ -23,6 +23,7 @@
   (assert-eq expected (cl-cc/cli::%arch-keyword input)))
 
 (deftest cli-arch-keyword-invalid-exits-2
+  "An unrecognized architecture string prints an error to stderr and exits with code 2."
   (let ((stderr (make-string-output-stream)))
     (let ((code (with-fake-quit
                   (let ((*error-output* stderr))
@@ -41,6 +42,7 @@
   (assert-eq expected (cl-cc/cli::%compile-target-keyword input)))
 
 (deftest cli-compile-target-keyword-invalid-signals-error
+  "An unrecognized architecture string for compilation signals an error with a descriptive message."
   (handler-case
       (progn
         (cl-cc/cli::%compile-target-keyword "weird")
@@ -60,6 +62,7 @@
   (assert-eq expected (cl-cc/cli::%parse-opt-remarks-mode input)))
 
 (deftest cli-parse-opt-remarks-mode-invalid-exits-2
+  "An unrecognized opt-remarks mode string prints an error and exits with code 2."
   (let ((stderr (make-string-output-stream)))
     (let ((code (with-fake-quit
                   (let ((*error-output* stderr))
@@ -69,6 +72,7 @@
     (assert-true (search "Unknown opt-remarks mode" (get-output-stream-string stderr)))))
 
 (deftest cli-parse-opt-remarks-mode-invalid-shows-did-you-mean
+  "A near-match opt-remarks mode string produces a did-you-mean suggestion in the error output."
   (let ((stderr (make-string-output-stream)))
     (let ((code (with-fake-quit
                   (let ((*error-output* stderr))
@@ -80,6 +84,7 @@
       (assert-true (search "changed" out)))))
 
 (deftest cli-parse-compile-opts-reads-shared-flags
+  "%parse-compile-opts correctly reads all shared compiler option flags from parsed args."
   (let* ((parsed (make-cli-parsed
                   :command "compile"
                  :flags '(("--pass-pipeline" . t)
@@ -103,6 +108,7 @@
     (assert-eq :changed (cl-cc/cli::compile-opts-opt-remarks-mode opts))))
 
 (deftest cli-compile-opts-kwargs-expands-struct
+  "%compile-opts-kwargs expands a compile-opts struct into the expected keyword argument plist."
   (let* ((opts (cl-cc/cli::make-compile-opts
                 :pass-pipeline t
                 :print-pass-timings t
@@ -126,6 +132,7 @@
                   kwargs)))
 
 (deftest cli-dump-ir-phase-invalid-signals-error
+  "An unrecognized IR phase keyword passed to %dump-ir-phase signals an error."
   (handler-case
       (progn
         (cl-cc/cli::%dump-ir-phase :bogus nil *standard-output* nil)

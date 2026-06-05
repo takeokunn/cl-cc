@@ -147,7 +147,7 @@
 (deftest io-write-char-basic
   "write-char outputs a character and returns it (stdout discarded)."
   (let ((*standard-output* (make-broadcast-stream)))
-    (assert-true (equal #\A (run-string "(write-char #\\A)")))))
+    (assert-equal #\A (run-string "(write-char #\\A)"))))
 
 ;;; Higher-Order Function Tests (require stdlib)
 
@@ -253,7 +253,7 @@
 (deftest compile-coerce
   "coerce converts between chars/lists/strings/vectors."
   (assert-string= "abc" (run-string "(coerce (list #\\a #\\b #\\c) 'string)"))
-  (assert-true (equal '(#\h #\i) (run-string "(coerce \"hi\" 'list)")))
+  (assert-equal '(#\h #\i) (run-string "(coerce \"hi\" 'list)"))
   (assert-= 65 (run-string "(char-code (character \"A\"))"))
   (assert-= 66 (run-string "(char-code (coerce \"B\" 'character))"))
   (assert-= 90 (run-string "(let ((ty 'character)) (char-code (coerce \"Z\" ty)))" :stdlib t))

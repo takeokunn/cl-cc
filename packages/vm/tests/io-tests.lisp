@@ -397,11 +397,11 @@
 
 ;;; ─── FR-924: special streams ───────────────────────────────────────────────
 
-(deftest io-special-string-stream-bridge-alias
-  "String output streams can be read via both ANSI and compatibility aliases."
+(deftest io-special-string-stream-bridge
+  "String output streams can be read via the ANSI get-output-stream-string bridge."
   (let ((stream (make-string-output-stream)))
     (write-string "hello" stream)
-    (assert-equal "hello" (cl-cc/vm::get-output-string-stream stream))))
+    (assert-equal "hello" (cl-cc/vm::%vm-bridge-get-output-stream-string stream))))
 
 (deftest io-special-composite-streams
   "Broadcast, two-way, echo, concatenated, and synonym stream bridges are usable."

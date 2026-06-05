@@ -79,7 +79,10 @@ let
     };
     cl-cc-vm = {
       src = "packages/vm";
-      deps = [ "cl-cc-bootstrap" "cl-cc-runtime" ];
+      deps = [
+        "cl-cc-bootstrap"
+        "cl-cc-runtime"
+      ];
     };
     cl-cc-docgen = {
       src = "packages/docgen";
@@ -249,7 +252,10 @@ let
     };
     cl-cc-cli = {
       src = "packages/cli";
-      deps = [ "cl-cc" "cl-cc-docgen" ];
+      deps = [
+        "cl-cc"
+        "cl-cc-docgen"
+      ];
     };
     cl-cc-testing-framework = {
       src = "packages/testing-framework";

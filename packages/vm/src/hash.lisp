@@ -99,7 +99,6 @@ target SIMD instructions."
     (setf args (append args (list :rehash-size rehash-size))))
   (when rehash-threshold
     (setf args (append args (list :rehash-threshold rehash-threshold))))
-  #+sbcl
   (when weakness
     (setf args (append args (list :weakness weakness))))
   (apply #'make-hash-table args)))

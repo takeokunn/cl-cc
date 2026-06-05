@@ -333,25 +333,25 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (assert-true (cl-cc/runtime::rt-semaphore-try-wait s))
     (assert-true (cl-cc/runtime::rt-semaphore-try-wait s))
     (assert-true (not (cl-cc/runtime::rt-semaphore-try-wait s)))
-    (assert-true (= 2 (cl-cc/runtime:rt-semaphore-signal s 2)))
+    (assert-= 2 (cl-cc/runtime:rt-semaphore-signal s 2))
     (assert-true (cl-cc/runtime::rt-semaphore-try-wait s))
     (assert-true (cl-cc/runtime::rt-semaphore-try-wait s))))
 
 (deftest runtime-subsystem-sync-barrier-releases-waiters
   "FR-372: Barrier releases all waiters when the required count arrives."
   (let ((b (cl-cc/runtime:rt-make-barrier 1)))
-    (assert-true (= 0 (cl-cc/runtime::rt-barrier-gen b)))
+    (assert-= 0 (cl-cc/runtime::rt-barrier-gen b))
     (assert-true (cl-cc/runtime:rt-barrier-wait b :timeout 0.1))
-    (assert-true (= 0 (cl-cc/runtime::rt-barrier-count b)))
-    (assert-true (= 1 (cl-cc/runtime::rt-barrier-gen b)))))
+    (assert-= 0 (cl-cc/runtime::rt-barrier-count b))
+    (assert-= 1 (cl-cc/runtime::rt-barrier-gen b))))
 
 (deftest runtime-subsystem-sync-once-call-executes-once
   "FR-373: Once-call executes only the first thunk and reuses its result."
   (let ((o (cl-cc/runtime:rt-make-once))
         (calls '()))
-    (assert-true (eq :first (cl-cc/runtime:rt-once-call o (lambda () (push :first calls) :first))))
-    (assert-true (eq :first (cl-cc/runtime:rt-once-call o (lambda () (push :second calls) :second))))
-    (assert-true (equal '(:first) calls))))
+    (assert-eq :first (cl-cc/runtime:rt-once-call o (lambda () (push :first calls) :first)))
+    (assert-eq :first (cl-cc/runtime:rt-once-call o (lambda () (push :second calls) :second)))
+    (assert-equal '(:first) calls)))
 
 (deftest runtime-subsystem-scheduler-spawned-tasks-execute-in-order
   "FR-257: Spawned tasks execute in deterministic scheduler priority order."
@@ -361,7 +361,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
       (cl-cc/runtime:rt-spawn (lambda () (push :normal events)) :priority :normal)
       (cl-cc/runtime:rt-spawn (lambda () (push :high events)) :priority :high)
       (cl-cc/runtime:rt-scheduler-run)
-      (assert-true (equal '(:low :normal :high) events)))))
+      (assert-equal '(:low :normal :high) events)))))
 
 (deftest runtime-subsystem-scheduler-sleep-task-delays-execution
   "FR-257: Sleep-task records a future wake time for the current task."
@@ -384,9 +384,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-channel-send ch :a)
     (cl-cc/runtime:rt-channel-send ch :b)
     (cl-cc/runtime:rt-channel-send ch :c)
-    (assert-true (equal '(:a t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch))))
-    (assert-true (equal '(:b t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch))))
-    (assert-true (equal '(:c t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch))))))
+    (assert-equal '(:a t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch)))
+    (assert-equal '(:b t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch)))
+    (assert-equal '(:c t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch))))
 
 (deftest runtime-subsystem-channel-close-prevents-further-sends
   "FR-282: Closed channels reject sends."
@@ -404,8 +404,8 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (multiple-value-bind (value channel ok)
         (cl-cc/runtime::rt-channel-select (list empty ready) :timeout 0.01)
       (assert-true ok)
-      (assert-true (eq :ready value))
-      (assert-true (eq ready channel)))))
+      (assert-eq :ready value)
+      (assert-eq ready channel))))
 
 (deftest runtime-subsystem-actor-processes-messages-in-order
   "FR-290: Actor receive processes queued messages in mailbox order."
@@ -413,33 +413,33 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-actor-send a :first)
     (cl-cc/runtime:rt-actor-send a :second)
     (cl-cc/runtime:rt-actor-send a :third)
-    (assert-true (equal '(:third :second :first)
+    (assert-equal '(:third :second :first)
                (list (cl-cc/runtime:rt-actor-receive a :timeout 0.1)
                      (cl-cc/runtime:rt-actor-receive a :timeout 0.1)
-                     (cl-cc/runtime:rt-actor-receive a :timeout 0.1))))))
+                     (cl-cc/runtime:rt-actor-receive a :timeout 0.1)))))
 
 (deftest runtime-subsystem-stm-atomically-commits-transaction
   "FR-300: Atomically commits tvar writes."
   (let ((cell (cl-cc/runtime::rt-make-tvar 10)))
-    (assert-true (= 15 (cl-cc/runtime:rt-atomically
+    (assert-= 15 (cl-cc/runtime:rt-atomically
                 (let ((old (cl-cc/runtime::rt-read-tvar cell)))
-                  (cl-cc/runtime::rt-write-tvar cell (+ old 5))))))
-    (assert-true (= 15 (cl-cc/runtime::rt-tvar-value-unsafe cell)))))
+                  (cl-cc/runtime::rt-write-tvar cell (+ old 5)))))
+    (assert-= 15 (cl-cc/runtime::rt-tvar-value-unsafe cell))))
 
 (deftest runtime-subsystem-stm-retries-on-conflict
   "FR-300: Atomically retries when a read tvar version changes before commit."
   (let ((cell (cl-cc/runtime::rt-make-tvar 0))
         (attempts 0))
-    (assert-true (= 20 (cl-cc/runtime:rt-atomically
+    (assert-= 20 (cl-cc/runtime:rt-atomically
                 (incf attempts)
                 (cl-cc/runtime::rt-read-tvar cell)
                 (when (= attempts 1)
                   (setf (cl-cc/runtime::rt-tvar-value cell) 10
                         (cl-cc/runtime::rt-tvar-version cell)
                         (1+ (cl-cc/runtime::rt-tvar-version cell))))
-                (cl-cc/runtime::rt-write-tvar cell 20))))
-    (assert-true (= 2 attempts))
-    (assert-true (= 20 (cl-cc/runtime::rt-tvar-value-unsafe cell)))))
+                (cl-cc/runtime::rt-write-tvar cell 20)))
+    (assert-= 2 attempts)
+    (assert-= 20 (cl-cc/runtime::rt-tvar-value-unsafe cell))))
 
 (deftest runtime-subsystem-fr-740-stm-isolates-staged-writes-until-commit
   "FR-740: STM writes are staged in the transaction and become visible at commit."
@@ -505,9 +505,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-lfstack-push s :first)
     (cl-cc/runtime:rt-lfstack-push s :second)
     (cl-cc/runtime:rt-lfstack-push s :third)
-    (assert-true (equal '(:third t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s))))
-    (assert-true (equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s))))
-    (assert-true (equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s))))))
+    (assert-equal '(:third t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s)))
+    (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s)))
+    (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s))))
 
 (deftest runtime-subsystem-lockfree-queue-is-fifo
   "FR-322: Lock-free queue pops values in push order."
@@ -515,9 +515,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime::rt-lfqueue-push q :first)
     (cl-cc/runtime::rt-lfqueue-push q :second)
     (cl-cc/runtime::rt-lfqueue-push q :third)
-    (assert-true (equal '(:first t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q))))
-    (assert-true (equal '(:second t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q))))
-    (assert-true (equal '(:third t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q))))))
+    (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q)))
+    (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q)))
+    (assert-equal '(:third t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q))))
 
 (deftest runtime-subsystem-ebr-retire-reclaim-cycle
   "FR-320: EBR retire/collect advances epochs and reclaims safe retired objects."
@@ -525,9 +525,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-ebr-init (lambda (obj) (push obj freed)))
     (let ((local (cl-cc/runtime:rt-ebr-register-thread)))
       (cl-cc/runtime::rt-ebr-retire local :old-node)
-      (assert-true (= 0 (cl-cc/runtime::rt-ebr-collect local)))
-      (assert-true (= 1 (cl-cc/runtime::rt-ebr-collect local)))
-      (assert-true (equal '(:old-node) freed)))))
+      (assert-= 0 (cl-cc/runtime::rt-ebr-collect local))
+      (assert-= 1 (cl-cc/runtime::rt-ebr-collect local))
+      (assert-equal '(:old-node) freed))))
 
 (deftest runtime-subsystem-spsc-preserves-single-producer-consumer-semantics
   "FR-462: SPSC queue preserves ordered single-producer/single-consumer handoff."
@@ -536,9 +536,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (assert-true (cl-cc/runtime:rt-spsc-try-push q :second))
     (assert-true (cl-cc/runtime::rt-spsc-full-p q))
     (assert-true (not (cl-cc/runtime:rt-spsc-try-push q :third)))
-    (assert-true (equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q))))
-    (assert-true (equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q))))
-    (assert-true (equal '(nil nil) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q))))))
+    (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q)))
+    (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q)))
+    (assert-equal '(nil nil) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q))))
 
 (deftest runtime-subsystem-crdt-gcounter-merges-by-node-max
   "FR-431: GCounter merge keeps the per-node maximum and sums merged slots."
@@ -549,7 +549,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-gcounter-increment b :n1 3)
     (cl-cc/runtime:rt-gcounter-increment b :n3 7)
     (cl-cc/runtime::rt-gcounter-merge a b)
-    (assert-true (= 15 (cl-cc/runtime:rt-gcounter-value a)))))
+    (assert-= 15 (cl-cc/runtime:rt-gcounter-value a))))
 
 (deftest runtime-subsystem-crdt-pncounter-value-is-pos-minus-neg
   "FR-431: PNCounter value is positive count minus negative count."
@@ -558,22 +558,22 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime::rt-pncounter-increment c :n2 4)
     (cl-cc/runtime::rt-pncounter-decrement c :n1 3)
     (cl-cc/runtime::rt-pncounter-decrement c :n3 2)
-    (assert-true (= 9 (cl-cc/runtime::rt-pncounter-value c)))))
+    (assert-= 9 (cl-cc/runtime::rt-pncounter-value c))))
 
 (deftest runtime-subsystem-raft-leader-election-picks-leader
   "FR-432: Starting an election picks a majority-backed leader."
   (let* ((cluster (cl-cc/runtime:rt-make-raft-cluster '("n1" "n2" "n3")))
          (node (gethash "n1" (cl-cc/runtime:rt-raft-cluster-nodes cluster))))
     (assert-true (cl-cc/runtime::rt-raft-start-election node cluster))
-    (assert-true (string= "n1" (cl-cc/runtime::rt-raft-cluster-leader-id cluster)))
-    (assert-true (= cl-cc/runtime::+raft-leader+ (cl-cc/runtime::rt-raft-node-state node)))))
+    (assert-string= "n1" (cl-cc/runtime::rt-raft-cluster-leader-id cluster))
+    (assert-= cl-cc/runtime::+raft-leader+ (cl-cc/runtime::rt-raft-node-state node))))
 
 (deftest runtime-subsystem-raft-log-entries-are-replicated
   "FR-432: Proposed log entries are replicated to every in-memory cluster node."
   (let* ((cluster (cl-cc/runtime:rt-make-raft-cluster '("n1" "n2" "n3")))
          (leader (gethash "n1" (cl-cc/runtime:rt-raft-cluster-nodes cluster))))
     (assert-true (cl-cc/runtime::rt-raft-start-election leader cluster))
-    (assert-true (eq :set-x (cl-cc/runtime:rt-raft-propose cluster :set-x)))
+    (assert-eq :set-x (cl-cc/runtime:rt-raft-propose cluster :set-x))
     (maphash
      (lambda (id node)
        (declare (ignore id))
@@ -605,9 +605,9 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
   (let ((o (cl-cc/runtime:rt-make-once))
         (count 0))
     (cl-cc/runtime:rt-once-call o (lambda () (incf count)))
-    (assert-true (= 1 count))
+    (assert-= 1 count)
     (cl-cc/runtime:rt-once-call o (lambda () (incf count)))
-    (assert-true (= 1 count))))
+    (assert-= 1 count)))
 
 (deftest runtime-subsystem-scheduler-spawn-basic
   "FR-257: Basic spawn and run."
@@ -615,25 +615,25 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (let ((result nil))
       (cl-cc/runtime:rt-spawn (lambda () (setf result 42)))
       (cl-cc/runtime:rt-scheduler-run)
-      (assert-true (eql 42 result)))))
+      (assert-eql 42 result))))
 
 (deftest runtime-subsystem-future-basic
   "FR-283: Basic future resolve/await."
   (let ((f (cl-cc/runtime:rt-make-future)))
     (cl-cc/runtime:rt-future-resolve f 99)
-    (assert-true (eql 99 (cl-cc/runtime:rt-future-await f :timeout 0.1)))))
+    (assert-eql 99 (cl-cc/runtime:rt-future-await f :timeout 0.1))))
 
 (deftest runtime-subsystem-channel-basic
   "FR-282: Basic channel send/recv."
   (let ((ch (cl-cc/runtime:rt-make-channel :capacity 1)))
-    (assert-true (eql 7 (cl-cc/runtime:rt-channel-send ch 7)))
-    (assert-true (eql 7 (cl-cc/runtime:rt-channel-recv ch)))))
+    (assert-eql 7 (cl-cc/runtime:rt-channel-send ch 7))
+    (assert-eql 7 (cl-cc/runtime:rt-channel-recv ch))))
 
 (deftest runtime-subsystem-actor-basic
   "FR-290: Basic actor send/receive."
   (let ((a (cl-cc/runtime:rt-make-actor #'identity)))
     (cl-cc/runtime:rt-actor-send a :hello)
-    (assert-true (eq :hello (cl-cc/runtime:rt-actor-receive a :timeout 0.1)))))
+    (assert-eq :hello (cl-cc/runtime:rt-actor-receive a :timeout 0.1))))
 
 (deftest runtime-subsystem-lockfree-stack-basic
   "FR-322: Basic lock-free stack push/pop."
@@ -642,7 +642,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-lfstack-push s 2)
     (multiple-value-bind (val ok) (cl-cc/runtime:rt-lfstack-pop s)
       (assert-true ok)
-      (assert-true (eql 2 val)))))
+      (assert-eql 2 val))))
 
 (deftest runtime-subsystem-spsc-basic
   "FR-462: Basic SPSC push/pop."
@@ -650,13 +650,13 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (assert-true (cl-cc/runtime:rt-spsc-try-push q 10))
     (multiple-value-bind (val ok) (cl-cc/runtime:rt-spsc-try-pop q)
       (assert-true ok)
-      (assert-true (eql 10 val)))))
+      (assert-eql 10 val))))
 
 (deftest runtime-subsystem-crdt-gcounter-basic
   "FR-431: Basic GCounter increment."
   (let ((c (cl-cc/runtime:rt-make-gcounter)))
     (cl-cc/runtime:rt-gcounter-increment c 1 5)
-    (assert-true (= 5 (cl-cc/runtime:rt-gcounter-value c)))))
+    (assert-= 5 (cl-cc/runtime:rt-gcounter-value c))))
 
 (deftest runtime-subsystem-consensus-raft-basic
   "FR-432: Basic Raft cluster creation."
@@ -725,7 +725,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
 
 (deftest runtime-subsystem-fr-coverage-complete
   "Verify all runtime subsystem FR IDs are tracked."
-  (assert-true (= 170 (length *runtime-subsystem-fr-coverage*)))
+  (assert-= 170 (length *runtime-subsystem-fr-coverage*))
   (assert-true (member :fr-500 *runtime-subsystem-fr-coverage*))
   (assert-true (member :fr-654 *runtime-subsystem-fr-coverage*))
   (assert-true (member :fr-190 *runtime-subsystem-fr-coverage*))

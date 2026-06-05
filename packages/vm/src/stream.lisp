@@ -86,22 +86,22 @@
 ;; methods delegate into the cl-cc/vm generic functions below, so ordinary host
 ;; CL stream operators continue to work for VM fundamental streams.
 
-(defclass fundamental-stream (#+sbcl sb-gray:fundamental-stream) ())
+(defclass fundamental-stream (sb-gray:fundamental-stream) ())
 
 (defclass fundamental-character-input-stream
-    (fundamental-stream #+sbcl sb-gray:fundamental-character-input-stream)
+    (fundamental-stream sb-gray:fundamental-character-input-stream)
   ())
 
 (defclass fundamental-character-output-stream
-    (fundamental-stream #+sbcl sb-gray:fundamental-character-output-stream)
+    (fundamental-stream sb-gray:fundamental-character-output-stream)
   ())
 
 (defclass fundamental-binary-input-stream
-    (fundamental-stream #+sbcl sb-gray:fundamental-binary-input-stream)
+    (fundamental-stream sb-gray:fundamental-binary-input-stream)
   ())
 
 (defclass fundamental-binary-output-stream
-    (fundamental-stream #+sbcl sb-gray:fundamental-binary-output-stream)
+    (fundamental-stream sb-gray:fundamental-binary-output-stream)
   ())
 
 (defclass fundamental-character-stream
@@ -296,7 +296,6 @@
 (defmethod output-stream-p ((stream fundamental-character-output-stream)) t)
 (defmethod output-stream-p ((stream fundamental-binary-output-stream)) t)
 
-#+sbcl
 (progn
   (defmethod sb-gray:stream-read-char ((stream fundamental-character-input-stream))
     (stream-read-char stream))

@@ -233,43 +233,28 @@ these must be reimplemented with actual tag checks."
 ;;;   LDP X30, X31, [SP], #16 — restore LR
 ;;;   FMOV Ddst, D0          — move float result from D0
 
+(defun %a64-libm-resolve (name)
+  "Resolve NAME to its process address as an unsigned 64-bit integer."
+  (logand (sb-sys:sap-int
+           (sb-alien:alien-sap
+            (sb-alien:extern-alien name (function double-float double-float))))
+          #xFFFFFFFFFFFFFFFF))
+
+(defparameter *a64-libm-address-table*
+  (list (cons "sin"  (load-time-value (%a64-libm-resolve "sin")))
+        (cons "cos"  (load-time-value (%a64-libm-resolve "cos")))
+        (cons "exp"  (load-time-value (%a64-libm-resolve "exp")))
+        (cons "log"  (load-time-value (%a64-libm-resolve "log")))
+        (cons "tan"  (load-time-value (%a64-libm-resolve "tan")))
+        (cons "asin" (load-time-value (%a64-libm-resolve "asin")))
+        (cons "acos" (load-time-value (%a64-libm-resolve "acos")))
+        (cons "atan" (load-time-value (%a64-libm-resolve "atan"))))
+  "Alist mapping libm function name strings to their resolved process addresses.")
+
 (defun a64-libm-address (libm-fn)
   "Return the process address of LIBM-FN as an unsigned 64-bit value."
-  #+sbcl
-  (cond
-    ((string= libm-fn "sin")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "sin" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "cos")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "cos" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "exp")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "exp" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "log")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "log" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "tan")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "tan" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "asin")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "asin" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "acos")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "acos" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    ((string= libm-fn "atan")
-     (load-time-value (logand (sb-sys:sap-int (sb-alien:alien-sap
-                                               (sb-alien:extern-alien "atan" (function double-float double-float))))
-                              #xFFFFFFFFFFFFFFFF)))
-    (t (error "Unsupported AArch64 libm function: ~A" libm-fn))))
+  (or (cdr (assoc libm-fn *a64-libm-address-table* :test #'string=))
+      (error "Unsupported AArch64 libm function: ~A" libm-fn)))
 
 (defmacro define-a64-float-libm-unary-emitter (fn-name libm-fn)
   "Define an AArch64 emitter that calls libm function LIBM-FN via BLR for a VM unary float instruction."

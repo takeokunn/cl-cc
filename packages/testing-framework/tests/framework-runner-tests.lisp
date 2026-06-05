@@ -153,20 +153,20 @@
           (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
 
 (deftest default-test-timeout-env-applies-to-slow-test
-  "CLCC_TEST_TIMEOUT=1 is used as the per-test default and times out a slow sequential test."
+  "CLCC_TEST_TIMEOUT=0.05 is used as the per-test default and times out a slow sequential test."
   (let ((old (uiop:getenv "CLCC_TEST_TIMEOUT")))
     (unwind-protect
          (let* ((*test-runner-mode* :sequential)
                 (test-plist (list :name 'env-slow-demo
-                                  :fn (lambda () (sleep 2))
+                                  :fn (lambda () (sleep 0.2))
                                   :suite 'cl-cc-unit-suite
                                   :timeout nil
                                   :depends-on nil
                                   :tags nil)))
-           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "1" 1)
+           (sb-posix:setenv "CLCC_TEST_TIMEOUT" "0.05" 1)
            (let ((result (%run-single-test test-plist 1 '())))
              (assert-eq :fail (getf result :status))
-             (assert-true (search "timeout after 1 seconds" (getf result :detail)))))
+             (assert-true (search "timeout after 0.05 seconds" (getf result :detail)))))
       (if old
           (sb-posix:setenv "CLCC_TEST_TIMEOUT" old 1)
           (sb-posix:unsetenv "CLCC_TEST_TIMEOUT")))))
@@ -295,14 +295,14 @@
   ;; issues), but this test specifically exercises the sequential timeout path.
   (let* ((*test-runner-mode* :sequential)
          (test-plist (list :name 'slow-demo
-                           :fn (lambda () (sleep 2))
+                           :fn (lambda () (sleep 0.2))
                            :suite 'cl-cc-unit-suite
-                           :timeout 1
+                           :timeout 0.05
                            :depends-on nil
                            :tags nil))
          (result (%run-single-test test-plist 1 '())))
     (assert-eq :fail (getf result :status))
-    (assert-true (search "timeout after 1 seconds" (getf result :detail)))))
+    (assert-true (search "timeout after 0.05 seconds" (getf result :detail)))))
 
 (deftest run-tests-sequential-returns-ordered-results
   "%run-tests-sequential preserves input order and records pass statuses."

@@ -127,7 +127,7 @@
 
 (deftest compile-defmacro-returns-name
   "defmacro returns the macro name; symbol-name returns the name string."
-  (assert-true (string= "my-mac" (string-downcase (symbol-name (run-string "(defmacro my-mac (x) x)")))))
+  (assert-string= "my-mac" (string-downcase (symbol-name (run-string "(defmacro my-mac (x) x)"))))
   (assert-string= "FOO" (run-string "(symbol-name 'foo)")))
 
 ;;; Symbol Manipulation Tests

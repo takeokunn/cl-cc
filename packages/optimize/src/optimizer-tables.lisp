@@ -87,12 +87,7 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 ;;; opt-inst-pure-p is defined in effects.lisp (loaded first in the optimize module).
 ;;; It replaces the former 2-type whitelist with a 100+-type data-driven table.
 
-;;; ─── Fold Tables ─────────────────────────────────────────────────────────
-;;;
-;;; Each table maps a VM instruction struct-type symbol to a CL function
-;;; that performs the compile-time fold.  Adding a new foldable instruction
-;;; requires only ONE entry here — opt-fold-binop-value, opt-pass-fold,
-;;; and opt-pass-cse all derive their behavior from these tables.
+;;; ─── Pure Helper Utilities ───────────────────────────────────────────────
 
 (defun %alist->eq-hash-table (alist)
   "Build an EQ hash-table from ALIST of (key . value) pairs."
@@ -103,6 +98,13 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 (defun %hash-table-keys (ht)
   "Return all keys of HT as a list."
   (loop for k being the hash-keys of ht collect k))
+
+;;; ─── Fold Tables ─────────────────────────────────────────────────────────
+;;;
+;;; Each table maps a VM instruction struct-type symbol to a CL function
+;;; that performs the compile-time fold.  Adding a new foldable instruction
+;;; requires only ONE entry here — opt-fold-binop-value, opt-pass-fold,
+;;; and opt-pass-cse all derive their behavior from these tables.
 
 (defparameter *opt-binary-fold-table*
   (%alist->eq-hash-table
@@ -234,7 +236,60 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
    Used by opt-pass-cse to produce a canonical key for commutative expressions,
    enabling (+ a b) and (+ b a) to share the same CSE memo entry.")
 
-(defparameter *opt-read-regs-table*
+;;; ─── Unary Fold Eligibility ──────────────────────────────────────────────
+
+(defparameter *opt-unary-fold-eligible-predicates*
+  (%alist->eq-hash-table
+   `((vm-string-length  . ,#'stringp)
+     (vm-string-upcase  . ,#'stringp)
+     (vm-string-downcase . ,#'stringp)
+     (vm-length         . ,(lambda (v) (or (vectorp v)
+                                           (and (listp v) (ignore-errors (length v) t)))))
+     (vm-car            . ,(lambda (v) (or (consp v) (null v))))
+     (vm-cdr            . ,(lambda (v) (or (consp v) (null v))))
+     (vm-not            . ,(constantly t))))
+  "Maps unary VM instruction types to their constant-eligibility predicates.
+   Types absent from this table use NUMBERP as the default eligibility check.")
+
+;;; ─── Auto-Vectorization Comparison Clone Table ───────────────────────────
+
+(deftype opt-autovec-cmp ()
+  "CL type specifier for supported counted-loop comparison instructions."
+  '(or vm-lt vm-le))
+
+(defparameter *opt-autovec-cmp-clone-table*
+  (%alist->eq-hash-table
+   `((vm-lt . ,(lambda (dst lhs rhs) (make-vm-lt :dst dst :lhs lhs :rhs rhs)))
+     (vm-le . ,(lambda (dst lhs rhs) (make-vm-le :dst dst :lhs lhs :rhs rhs)))))
+  "Maps comparison instruction types to clone constructors.
+   Used by %opt-autovec-clone-cmp.")
+
+;;; ─── Auto-Vectorization SIMD Op Mapping ─────────────────────────────────
+
+(defparameter *opt-autovec-scalar-to-simd-op*
+  (%alist->eq-hash-table
+   '((vm-add          . :add)
+     (vm-integer-add  . :add)
+     (vm-add-checked  . :add)
+     (vm-sub          . :sub)
+     (vm-integer-sub  . :sub)
+     (vm-sub-checked  . :sub)
+     (vm-mul          . :mul)
+     (vm-integer-mul  . :mul)
+     (vm-mul-checked  . :mul)
+     (vm-logand       . :logand)
+     (vm-logior       . :logior)
+     (vm-logxor       . :logxor)
+     (vm-min          . :min)
+     (vm-max          . :max)))
+  "Maps scalar binary VM instruction types to backend-neutral SIMD op keywords.
+   Used by %opt-autovec-op-kind and the SLP vectorizer.")
+
+(defun %build-opt-read-regs-table ()
+  "Build the VM instruction type → read-reg extractor hash table.
+Must be called at load time (after all VM instruction types are defined).
+Returns an EQ hash table mapping each type symbol to a (lambda (inst) ...)
+that returns the list of register keywords read by that instruction."
   (let ((ht (make-hash-table :test #'eq)))
     ;; Single vm-reg accessor
     (dolist (tp '(vm-jump-zero vm-print vm-halt vm-ret))
@@ -292,7 +347,10 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
           (lambda (inst) (list (vm-dst-array-reg inst)
                                (vm-src-array-reg inst)
                                (vm-len-reg inst))))
-    ht)
+    ht))
+
+(defparameter *opt-read-regs-table*
+  (%build-opt-read-regs-table)
   "Maps VM instruction type symbols to (lambda (inst) ...) read-reg extractors.
    Used by opt-inst-read-regs for types not covered by the bulk tables.")
 
@@ -342,55 +400,6 @@ ret, set-global, slot-write, etc.) or for unrecognised types."
 (deftype opt-control-or-label ()
   "CL type specifier for instructions that break straight-line sequences."
   '(or vm-label vm-jump vm-jump-zero vm-ret vm-call vm-tail-call vm-apply))
-
-;;; ─── Unary Fold Eligibility ──────────────────────────────────────────────
-
-(defparameter *opt-unary-fold-eligible-predicates*
-  (%alist->eq-hash-table
-   `((vm-string-length  . ,#'stringp)
-     (vm-string-upcase  . ,#'stringp)
-     (vm-string-downcase . ,#'stringp)
-     (vm-length         . ,(lambda (v) (or (vectorp v)
-                                           (and (listp v) (ignore-errors (length v) t)))))
-     (vm-car            . ,(lambda (v) (or (consp v) (null v))))
-     (vm-cdr            . ,(lambda (v) (or (consp v) (null v))))
-     (vm-not            . ,(constantly t))))
-  "Maps unary VM instruction types to their constant-eligibility predicates.
-   Types absent from this table use NUMBERP as the default eligibility check.")
-
-;;; ─── Auto-Vectorization SIMD Op Mapping ─────────────────────────────────
-
-;;; ─── Auto-Vectorization Comparison Clone Table ───────────────────────────
-
-(deftype opt-autovec-cmp ()
-  "CL type specifier for supported counted-loop comparison instructions."
-  '(or vm-lt vm-le))
-
-(defparameter *opt-autovec-cmp-clone-table*
-  (%alist->eq-hash-table
-   `((vm-lt . ,(lambda (dst lhs rhs) (make-vm-lt :dst dst :lhs lhs :rhs rhs)))
-     (vm-le . ,(lambda (dst lhs rhs) (make-vm-le :dst dst :lhs lhs :rhs rhs)))))
-  "Maps comparison instruction types to clone constructors.
-   Used by %opt-autovec-clone-cmp.")
-
-(defparameter *opt-autovec-scalar-to-simd-op*
-  (%alist->eq-hash-table
-   '((vm-add          . :add)
-     (vm-integer-add  . :add)
-     (vm-add-checked  . :add)
-     (vm-sub          . :sub)
-     (vm-integer-sub  . :sub)
-     (vm-sub-checked  . :sub)
-     (vm-mul          . :mul)
-     (vm-integer-mul  . :mul)
-     (vm-mul-checked  . :mul)
-     (vm-logand       . :logand)
-     (vm-logior       . :logior)
-     (vm-logxor       . :logxor)
-     (vm-min          . :min)
-     (vm-max          . :max)))
-  "Maps scalar binary VM instruction types to backend-neutral SIMD op keywords.
-   Used by %opt-autovec-op-kind and the SLP vectorizer.")
 
 ;;; *opt-algebraic-identity-rules*, classification predicates
 ;;; (opt-binary-lhs-rhs-p, opt-unary-src-p, opt-foldable-unary-arith-p,

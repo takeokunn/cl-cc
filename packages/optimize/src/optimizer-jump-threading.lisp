@@ -41,20 +41,6 @@
                 (t (return-from opt-thread-label label)))))
   label)
 
-(defun %opt-rewrite-block-terminator (block old-label new-label)
-  "Rewrite the jump terminator of BLOCK from OLD-LABEL to NEW-LABEL when it matches.
-Handles both vm-jump (unconditional) and vm-jump-zero (conditional)."
-  (let ((cell (last (bb-instructions block))))
-    (when cell
-      (let ((term (car cell)))
-        (when (equal (vm-label-name term) old-label)
-          (setf (car cell)
-                (typecase term
-                  (vm-jump
-                   (make-vm-jump :label new-label))
-                  (vm-jump-zero
-                   (make-vm-jump-zero :reg (vm-reg term) :label new-label))
-                  (t (return-from %opt-rewrite-block-terminator)))))))))
 
 (defun opt-falls-through-to-p (vec i target)
   "T if scanning forward from position I+1 we reach TARGET before any non-label."

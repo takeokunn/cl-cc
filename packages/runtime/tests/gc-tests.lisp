@@ -257,3 +257,55 @@
     (cl-cc/runtime::%gc-scan-dirty-cards heap to-free-cell promoted in-source-p)
     ;; No dirty cards → to-free not advanced
     (assert-= initial-free (cdr to-free-cell))))
+
+;;; ------------------------------------------------------------
+;;; Test: rt-gc-auto-configure-heap
+;;; ------------------------------------------------------------
+
+(deftest gc-auto-configure-small-memory-within-clamp-bounds
+  "rt-gc-auto-configure-heap with a small memory-bytes clamps young/old to their minimums."
+  ;; Save and restore the global words so the test is side-effect-free.
+  (let ((saved-young cl-cc/runtime::*gc-young-size-words*)
+        (saved-old   cl-cc/runtime::*gc-old-size-words*))
+    (unwind-protect
+        (let ((result (cl-cc/runtime::rt-gc-auto-configure-heap :memory-bytes (* 4 1024 1024))))
+          ;; young clamp: [1MB/8 .. 4MB/8] words; small input should hit lower bound
+          (assert-true (>= cl-cc/runtime::*gc-young-size-words* (floor (* 1 1024 1024) 8)))
+          (assert-true (<= cl-cc/runtime::*gc-young-size-words* (floor (* 4 1024 1024) 8)))
+          ;; old clamp: [4MB/8 .. 16MB/8] words; small input should hit lower bound
+          (assert-true (>= cl-cc/runtime::*gc-old-size-words* (floor (* 4 1024 1024) 8)))
+          (assert-true (<= cl-cc/runtime::*gc-old-size-words* (floor (* 16 1024 1024) 8)))
+          ;; result plist includes the expected keys
+          (assert-true (getf result :young-size-words))
+          (assert-true (getf result :old-size-words)))
+      (setf cl-cc/runtime::*gc-young-size-words* saved-young
+            cl-cc/runtime::*gc-old-size-words*   saved-old))))
+
+(deftest gc-auto-configure-large-memory-capped-at-maximums
+  "rt-gc-auto-configure-heap with a large memory-bytes caps young/old at their maximums."
+  (let ((saved-young cl-cc/runtime::*gc-young-size-words*)
+        (saved-old   cl-cc/runtime::*gc-old-size-words*))
+    (unwind-protect
+        (let ((result (cl-cc/runtime::rt-gc-auto-configure-heap
+                       :memory-bytes (* 64 1024 1024 1024)))) ; 64 GB
+          ;; young cap: 4MB/8 = 524288 words
+          (assert-true (<= cl-cc/runtime::*gc-young-size-words* (floor (* 4 1024 1024) 8)))
+          ;; old cap: 16MB/8 = 2097152 words
+          (assert-true (<= cl-cc/runtime::*gc-old-size-words* (floor (* 16 1024 1024) 8)))
+          ;; result plist must report the capped values
+          (assert-= cl-cc/runtime::*gc-young-size-words* (getf result :young-size-words))
+          (assert-= cl-cc/runtime::*gc-old-size-words*   (getf result :old-size-words)))
+      (setf cl-cc/runtime::*gc-young-size-words* saved-young
+            cl-cc/runtime::*gc-old-size-words*   saved-old))))
+
+(deftest gc-auto-configure-result-plist-keys-present
+  "rt-gc-auto-configure-heap returns a plist with all expected keys."
+  (let ((saved-young cl-cc/runtime::*gc-young-size-words*)
+        (saved-old   cl-cc/runtime::*gc-old-size-words*))
+    (unwind-protect
+        (let ((result (cl-cc/runtime::rt-gc-auto-configure-heap :memory-bytes (* 256 1024 1024))))
+          (assert-true (member :memory-bytes result))
+          (assert-true (member :young-size-words result))
+          (assert-true (member :old-size-words result)))
+      (setf cl-cc/runtime::*gc-young-size-words* saved-young
+            cl-cc/runtime::*gc-old-size-words*   saved-old))))

@@ -61,13 +61,7 @@ Returns exactly the values produced by FORM."
           (values-list ,values)))))
 
 (defmacro with-timeout ((seconds &optional timeout-result) &body body)
-  "Evaluate BODY with a host-backed timeout where supported.
-On timeout, return TIMEOUT-RESULT.  This mirrors SBCL's WITH-TIMEOUT in the VM
-  surface while keeping a portable fallback for non-SBCL hosts."
-  #+sbcl
+  "Evaluate BODY with a host-backed timeout.
+On timeout, return TIMEOUT-RESULT."
   `(sb-ext:with-timeout (,seconds ,timeout-result)
-     ,@body)
-  #-sbcl
-  (declare (ignore seconds))
-  #-sbcl
-  `(progn ,@body))
+     ,@body))

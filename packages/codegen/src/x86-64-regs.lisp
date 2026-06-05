@@ -285,6 +285,35 @@ YMM physical names and the existing XMM allocation class used for SIMD values."
         (t 0)))
 
 (defun x86-64-double-float-bits (value)
-  "Return the IEEE754 bit pattern for VALUE as an unsigned 64-bit integer."
-  (logand #xFFFFFFFFFFFFFFFF
-          (sb-kernel:double-float-bits (float value 1.0d0))))
+  "Return the IEEE754 bit pattern for VALUE as an unsigned 64-bit integer.
+Uses portable CL operations (integer-decode-float) instead of SBCL internals."
+  (let* ((x (float value 1.0d0))
+         (sign-bit (if (minusp (float-sign x 1.0d0)) 1 0)))
+    (cond
+      ((zerop x)
+       (ash sign-bit 63))
+      ((not (= x x))
+       ;; Quiet NaN: set the quiet bit in the mantissa payload.
+       (logior (ash sign-bit 63)
+               (ash #x7ff 52)
+               #x0008000000000000))
+      ((and (= x (* x 2.0d0)) (not (zerop x)))
+       ;; Positive or negative infinity.
+       (logior (ash sign-bit 63)
+               (ash #x7ff 52)))
+      (t
+       (multiple-value-bind (significand exponent sign) (integer-decode-float x)
+         (declare (ignore sign))
+         (let* ((unbiased-exp (+ exponent 52))
+                (fraction
+                  (if (>= unbiased-exp -1022)
+                      (- (abs significand) (ash 1 52))
+                      (ash (abs significand) (+ exponent 1074))))
+                (exp-field
+                  (if (>= unbiased-exp -1022)
+                      (+ unbiased-exp 1023)
+                      0)))
+           (logior (ash sign-bit 63)
+                   (ash exp-field 52)
+                   (logand fraction #x000fffffffffffff))))))))
+

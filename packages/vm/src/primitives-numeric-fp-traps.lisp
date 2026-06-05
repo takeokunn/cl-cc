@@ -3,24 +3,20 @@
 ;;; ─── FR-843 Float Exception Control ──────────────────────────────────────────
 ;;;
 ;;; Query and control floating-point exception traps on the host SBCL.
-;;; All forms in this file are SBCL-specific; they are guarded with #+sbcl
-;;; so the file is portable to other Common Lisp implementations.
+;;; This is an SBCL-only codebase; no portability guards are needed.
 
-#+sbcl
 (defvar *floating-point-modes*
   (sb-int:get-floating-point-modes)
   "Current floating-point modes plist.  The plist is the one
 returned by SB-INT:GET-FLOATING-POINT-MODES and accepted by
 SB-INT:SET-FLOATING-POINT-MODES.")
 
-#+sbcl
 (defun get-float-traps ()
   "Return the list of currently enabled floating-point exception traps.
 Each element is a keyword: :DIVIDE-BY-ZERO, :OVERFLOW, :UNDERFLOW,
 :INEXACT, or :INVALID."
   (getf (sb-int:get-floating-point-modes) :traps))
 
-#+sbcl
 (defmacro with-float-traps-masked (traps &body body)
   "Execute BODY with the specified floating-point traps masked.
 TRAPS is a list of zero or more of: :DIVIDE-BY-ZERO, :OVERFLOW,

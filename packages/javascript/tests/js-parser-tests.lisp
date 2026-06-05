@@ -29,7 +29,7 @@
   "const x = 42; parses to ast-let with one numeric binding."
   (let ((ast (%js-first "const x = 42;")))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (= 1 (length (cl-cc:ast-let-bindings ast))))
+    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))
     (assert-true (cl-cc:ast-int-p (cdr (first (cl-cc:ast-let-bindings ast)))))))
 
 (deftest js-parser-let-decl
@@ -47,7 +47,7 @@
   "const a = 1, b = 2; parses to ast-let with 2 bindings."
   (let ((ast (%js-first "const a = 1, b = 2;")))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (= 2 (length (cl-cc:ast-let-bindings ast))))))
+    (assert-= 2 (length (cl-cc:ast-let-bindings ast)))))
 
 ;;; ─── Arrow functions ──────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@
          (val (cdr (first (cl-cc:ast-let-bindings ast)))))
     (assert-true (cl-cc:ast-let-p ast))
     (assert-true (cl-cc:ast-lambda-p val))
-    (assert-true (= 1 (length (cl-cc:ast-lambda-params val))))))
+    (assert-= 1 (length (cl-cc:ast-lambda-params val)))))
 
 (deftest js-parser-arrow-function-block-body
   "const double = (x) => { return x * 2; }; lambda body has a return."
@@ -88,7 +88,7 @@
   "class Dog {} produces ast-defclass."
   (let ((ast (%js-first "class Dog {}")))
     (assert-true (cl-cc:ast-defclass-p ast))
-    (assert-true (string= "DOG" (symbol-name (cl-cc:ast-defclass-name ast))))))
+    (assert-string= "DOG" (symbol-name (cl-cc:ast-defclass-name ast)))))
 
 (deftest js-parser-class-with-extends
   "class Cat extends Animal {} records superclass."
@@ -135,7 +135,7 @@ function parses to ONE class declaration. Regression: the field-initialiser
 token scan was brace-blind and stopped at the arrow body's '}', truncating the
 initialiser and mis-reading that '}' as the end of the class body."
   (let ((asts (%js-parse "class C { g = () => {}; }")))
-    (assert-true (= 1 (length asts)))
+    (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-defclass-p (first asts)))))
 
 (deftest js-parser-class-field-private-arrow-and-method
@@ -143,7 +143,7 @@ initialiser and mis-reading that '}' as the end of the class body."
 field with an arrow initialiser parses to a single class with >= 2 slots."
   (let* ((asts (%js-parse "class C { #m() {} #g = () => {}; }"))
          (ast (first asts)))
-    (assert-true (= 1 (length asts)))
+    (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-defclass-p ast))
     (assert-true (>= (length (cl-cc:ast-defclass-slots ast)) 2))))
 
@@ -151,7 +151,7 @@ field with an arrow initialiser parses to a single class with >= 2 slots."
   "class C { x = {a: 1}; } — an object-literal field initialiser (also brace-
 containing) parses to one class declaration."
   (let ((asts (%js-parse "class C { x = {a: 1, b: 2}; }")))
-    (assert-true (= 1 (length asts)))
+    (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-defclass-p (first asts)))))
 
 (deftest js-parser-tagged-template-plain
@@ -160,13 +160,13 @@ bare identifier followed by a separate string. Regression: a plain backtick
 template lexed to :T-STRING, indistinguishable from a string literal, so the
 postfix parser never attached it to the tag."
   (let ((asts (%js-parse "tag`hi`;")))
-    (assert-true (= 1 (length asts)))
+    (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-call-p (first asts)))))
 
 (deftest js-parser-tagged-template-interpolated
   "tag`hi ${name}`; — an interpolated tagged template is ONE call expression."
   (let ((asts (%js-parse "tag`hi ${name}`;")))
-    (assert-true (= 1 (length asts)))
+    (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-call-p (first asts)))))
 
 (deftest js-parser-class-expression
@@ -235,19 +235,19 @@ postfix parser never attached it to the tag."
   "try { } catch (e) { } produces a %js-try-catch-finally call."
   (let ((ast (%js-first "try { throw 1; } catch (e) { }")))
     (assert-true (cl-cc:ast-call-p ast))
-    (assert-true (string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast)))))
+    (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
 
 (deftest js-parser-try-finally
   "try { } finally { } produces a %js-try-catch-finally call."
   (let ((ast (%js-first "try { } finally { }")))
     (assert-true (cl-cc:ast-call-p ast))
-    (assert-true (string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast)))))
+    (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
 
 (deftest js-parser-try-catch-finally
   "try { } catch (e) { } finally { } also produces a %js-try-catch-finally call."
   (let ((ast (%js-first "try { throw 1; } catch (e) { } finally { }")))
     (assert-true (cl-cc:ast-call-p ast))
-    (assert-true (string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast)))))
+    (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
 
 ;;; ─── Destructuring ────────────────────────────────────────────────────────────
 
@@ -299,7 +299,7 @@ postfix parser never attached it to the tag."
   (let* ((ast (%js-first "const r = a?.b;"))
          (val (cdr (first (cl-cc:ast-let-bindings ast)))))
     (assert-true (cl-cc:ast-call-p val))
-    (assert-true (string= "%JS-OPTIONAL-CHAIN" (%js-call-name val)))))
+    (assert-string= "%JS-OPTIONAL-CHAIN" (%js-call-name val))))
 
 ;;; ─── Nullish coalescing ───────────────────────────────────────────────────────
 
@@ -315,17 +315,17 @@ postfix parser never attached it to the tag."
 (deftest js-parser-logical-and-assign
   "x &&= y; parses without error as an expression statement."
   (let ((asts (%js-parse "let x = 1; x &&= 0;")))
-    (assert-true (= 2 (length asts)))))
+    (assert-= 2 (length asts))))
 
 (deftest js-parser-logical-or-assign
   "x ||= y; parses without error."
   (let ((asts (%js-parse "let x = null; x ||= 42;")))
-    (assert-true (= 2 (length asts)))))
+    (assert-= 2 (length asts))))
 
 (deftest js-parser-nullish-assign
   "x ??= y; parses without error."
   (let ((asts (%js-parse "let x = null; x ??= 'default';")))
-    (assert-true (= 2 (length asts)))))
+    (assert-= 2 (length asts))))
 
 ;;; ─── Template literals ────────────────────────────────────────────────────────
 
@@ -373,7 +373,7 @@ postfix parser never attached it to the tag."
   "throw new Error('msg'); lowers to a %js-throw call."
   (let ((ast (%js-first "throw new Error('msg');")))
     (assert-true (cl-cc:ast-call-p ast))
-    (assert-true (string= "%JS-THROW" (%js-call-name ast)))))
+    (assert-string= "%JS-THROW" (%js-call-name ast))))
 
 ;;; ─── Return statement ─────────────────────────────────────────────────────────
 
@@ -396,4 +396,4 @@ postfix parser never attached it to the tag."
 (deftest js-parser-multi-statement-source
   "Three top-level statements produce a list of three AST nodes."
   (let ((asts (%js-parse "const a = 1; const b = 2; const c = 3;")))
-    (assert-true (= 3 (length asts)))))
+    (assert-= 3 (length asts))))

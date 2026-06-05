@@ -11,84 +11,43 @@
 (defvar *patchable-entry-after* 0
   "Number of NOP bytes to insert after the function entry (before body).")
 
+;;; ──── NOP byte sequences (Intel x86-64 multi-byte NOPs, SDM Vol. 2B table 4-12) ────
+;;; Keys are byte counts 1-9; values are the canonical NOP encodings.
+(defparameter *nop-sequences*
+  '((1 . #(#x90))
+    (2 . #(#x66 #x90))
+    (3 . #(#x0F #x1F #x00))
+    (4 . #(#x0F #x1F #x40 #x00))
+    (5 . #(#x0F #x1F #x44 #x00 #x00))
+    (6 . #(#x66 #x0F #x1F #x44 #x00 #x00))
+    (7 . #(#x0F #x1F #x80 #x00 #x00 #x00 #x00))
+    (8 . #(#x0F #x1F #x84 #x00 #x00 #x00 #x00 #x00))
+    (9 . #(#x66 #x0F #x1F #x84 #x00 #x00 #x00 #x00 #x00)))
+  "Alist mapping NOP byte-count (1-9) to the corresponding x86-64 multi-byte NOP vector.")
+
 ;;; ──── NOP emission ────
 (defun emit-nop-sequence (stream count)
   "Emit COUNT bytes of NOP instructions into STREAM.
-Uses multi-byte NOPs for efficiency:
-  1 byte:  90 (NOP)
-  2 bytes: 66 90 (NOP)
-  3 bytes: 0F 1F 00
-  4 bytes: 0F 1F 40 00
-  5 bytes: 0F 1F 44 00 00
-  ...
-  9 bytes: 66 0F 1F 84 00 00 00 00 00"
+Uses multi-byte NOPs for efficiency (up to 9 bytes per NOP instruction)."
   (loop while (> count 0)
         for n = (min count 9)
-        do (case n
-             (9 (progn
-                  (write-byte #x66 stream)
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x84 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)))
-             (8 (progn
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x84 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)))
-             (7 (progn
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x80 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)))
-             (6 (progn
-                  (write-byte #x66 stream)
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x44 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)))
-             (5 (progn
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x44 stream)
-                  (write-byte #x00 stream)
-                  (write-byte #x00 stream)))
-             (4 (progn
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x40 stream)
-                  (write-byte #x00 stream)))
-             (3 (progn
-                  (write-byte #x0F stream)
-                  (write-byte #x1F stream)
-                  (write-byte #x00 stream)))
-             (2 (progn
-                  (write-byte #x66 stream)
-                  (write-byte #x90 stream)))
-             (1 (write-byte #x90 stream)))
+        for bytes = (cdr (assoc n *nop-sequences*))
+        do (loop for byte across bytes do (write-byte byte stream))
         do (decf count n)))
 
 ;;; ──── Function entry patching ────
 (defun emit-patchable-function-entry (stream)
   "Emit NOP padding before and after the function entry point.
-BEFORE: N NOPs for hot-patching (e.g., ftrace, SystemTap, eBPF uprobes).
-AFTER: M NOPs for entry instrumentation."
+
+Emits *PATCHABLE-ENTRY-BEFORE* NOP bytes (for hot-patching: ftrace,
+SystemTap, eBPF uprobes) followed by *PATCHABLE-ENTRY-AFTER* NOP bytes
+(for entry instrumentation).  The caller is responsible for recording
+the current stream position as the function entry label between these two
+NOP regions."
   (when (> *patchable-entry-before* 0)
     (emit-nop-sequence stream *patchable-entry-before*))
-  ;; The actual function entry point is here
-  ;; (caller sets a label or marks the current position)
+  ;; The actual function entry point is here;
+  ;; caller sets a label or marks the current position.
   (when (> *patchable-entry-after* 0)
     (emit-nop-sequence stream *patchable-entry-after*)))
 
@@ -96,17 +55,15 @@ AFTER: M NOPs for entry instrumentation."
 (defun patch-function-entry (func-addr new-code-bytes)
   "Overwrite the NOP bytes at FUNC-ADDR with NEW-CODE-BYTES.
 Used for runtime hot-patching of functions.
-The patched bytes must not exceed *PATCHABLE-ENTRY-BEFORE*."
+The patched bytes must not exceed *PATCHABLE-ENTRY-BEFORE*.
+Uses sb-sys:sap-ref-8 for direct memory write."
   (let ((patch-size (length new-code-bytes)))
     (when (> patch-size *patchable-entry-before*)
       (error "Patch size ~D exceeds reserved ~D bytes"
              patch-size *patchable-entry-before*))
-    ;; Write new code bytes over the NOPs
     (loop for i from 0 below patch-size
           for byte across new-code-bytes
-          do (setf #+sbcl (sb-sys:sap-ref-8 (sb-sys:int-sap func-addr) i)
-                 #-sbcl (aref new-code-bytes i) ; selfhost: no in-place patching
-                 byte))
+          do (setf (sb-sys:sap-ref-8 (sb-sys:int-sap func-addr) i) byte))
     t))
 
 ;;; ──── Integration with codegen ────

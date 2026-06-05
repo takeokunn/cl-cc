@@ -468,47 +468,6 @@ for O(1) random access."
                     (+ (rec start mid) (rec mid end)))))))
       (rec 0 (length vec)))))
 
-;;; ─── FR-843 Float Exception Control ──────────────────────────────────────────
-;;;
-;;; Query and control floating-point exception traps on the host SBCL.
-;;; Non-SBCL hosts provide stub implementations.
-
-(defvar *floating-point-modes*
-  #+sbcl (sb-int:get-floating-point-modes)
-  #-sbcl '(:rounding-mode :nearest)
-  "Current floating-point modes plist.  For SBCL the plist is the one
-returned by SB-INT:GET-FLOATING-POINT-MODES and accepted by
-SB-INT:SET-FLOATING-POINT-MODES.")
-
-#+sbcl
-(defun get-float-traps ()
-  "Return the list of currently enabled floating-point exception traps.
-Each element is a keyword: :DIVIDE-BY-ZERO, :OVERFLOW, :UNDERFLOW,
-:INEXACT, or :INVALID."
-  (getf (sb-int:get-floating-point-modes) :traps))
-
-#-sbcl
-(defun get-float-traps ()
-  "Return the list of currently enabled floating-point exception traps.
-On non-SBCL hosts this returns NIL."
-  (declare (ignore state))
-  nil)
-
-#+sbcl
-(defmacro with-float-traps-masked (traps &body body)
-  "Execute BODY with the specified floating-point traps masked.
-TRAPS is a list of zero or more of: :DIVIDE-BY-ZERO, :OVERFLOW,
-:UNDERFLOW, :INEXACT, :INVALID.  Within BODY the listed exceptions
-will not signal but will still set the corresponding status flags."
-  `(sb-int:with-float-traps-masked ,traps ,@body))
-
-#-sbcl
-(defmacro with-float-traps-masked (traps &body body)
-  "Execute BODY with the specified floating-point traps masked.
-On non-SBCL hosts this is a no-op."
-  (declare (ignore traps))
-  `(progn ,@body))
-
 ;;; vm-numeric.lisp — Numeric tower (round, bit ops, transcendentals, float, rational, complex)
 ;;; vm-extensions.lisp — Char comparisons, symbol plist, PROGV, generic arith
 
@@ -676,19 +635,6 @@ LEFT and RIGHT may be either type symbols or literal numeric values."
 (defparameter +arith-operation-tags+ #(+ - * /))
 (defparameter +arith-type-tags+ #(fixnum integer rational float complex))
 
-(declaim (inline %ff+ %ff- %ff* %ff/ %fi+ %fi- %fi* %fi/ %dd+ %dd- %dd* %dd/))
-(defun %ff+ (a b) (+ a b))
-(defun %ff- (a b) (- a b))
-(defun %ff* (a b) (* a b))
-(defun %ff/ (a b) (/ a b))
-(defun %fi+ (a b) (+ a b))
-(defun %fi- (a b) (- a b))
-(defun %fi* (a b) (* a b))
-(defun %fi/ (a b) (/ a b))
-(defun %dd+ (a b) (+ a b))
-(defun %dd- (a b) (- a b))
-(defun %dd* (a b) (* a b))
-(defun %dd/ (a b) (/ a b))
 
 (defun arithmetic-op-tag (op)
   "Return the inline dispatch operation tag for OP."
@@ -719,15 +665,15 @@ LEFT and RIGHT may be either type symbols or literal numeric values."
 
 (defparameter *arith-dispatch-table*
   (let ((table (make-array +arith-dispatch-table-size+ :initial-element nil)))
-    (dolist (spec '((+ %ff+ %fi+ %dd+)
-                    (- %ff- %fi- %dd-)
-                    (* %ff* %fi* %dd*)
-                    (/ %ff/ %fi/ %dd/)))
+    (dolist (spec `((+ ,#'+ ,#'+ ,#'+)
+                    (- ,#'- ,#'- ,#'-)
+                    (* ,#'* ,#'* ,#'*)
+                    (/ ,#'/ ,#'/ ,#'/)))
       (destructuring-bind (op ff fi dd) spec
-        (%set-arith-dispatch table op 0 0 (symbol-function ff))
-        (%set-arith-dispatch table op 0 3 (symbol-function fi))
-        (%set-arith-dispatch table op 3 0 (symbol-function fi))
-        (%set-arith-dispatch table op 3 3 (symbol-function dd))))
+        (%set-arith-dispatch table op 0 0 ff)
+        (%set-arith-dispatch table op 0 3 fi)
+        (%set-arith-dispatch table op 3 0 fi)
+        (%set-arith-dispatch table op 3 3 dd)))
     table)
   "Flattened inline arithmetic dispatch table.  Each populated entry is
 ((LEFT-TYPE RIGHT-TYPE) . FUNCTION), so tag extraction plus index computation

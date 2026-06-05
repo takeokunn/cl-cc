@@ -54,7 +54,11 @@
    (:file "codegen-fold-optimize")
    (:file "codegen")
    (:file "codegen-calls")
+   ;; FR-860/FR-861 numeric contagion and inline dispatch planning
+   (:file "codegen-numeric-hints")
    ;; Local function bindings and assembly dispatch (uses machine code layer)
     (:file "codegen-locals")
     ;; ── Phase 139: ABI/Symbol Management ──
-    (:file "abi-symbol-139")))
+    (:file "abi-symbol-139")
+    ;; ── NaN-boxing value encoding ──
+    (:file "nan-boxing")))

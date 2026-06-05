@@ -20,7 +20,7 @@
           ("one-arg"    '(1 2 3)        "(append (list 1 2 3))")
           ("nconc"      '(1 2 3 4 5 6)  "(nconc (list 1 2) (list 3 4) (list 5 6))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 (deftest self-host-stack-compiler
   "Mini stack-machine compiler: parse -> compile -> run through VM"
@@ -48,8 +48,8 @@
 
 (deftest mini-compiler-self-host
   "Mini compiler can compile expression with pattern matching"
-  (assert-true (equal '(:ADD (:CONST 1) (:CONST 2))
-             (run-string "(defun my-compile (expr) (cond ((integerp expr) (list :const expr)) ((and (consp expr) (eq (car expr) (quote +))) (list :add (my-compile (second expr)) (my-compile (third expr)))) (t (list :unknown expr)))) (my-compile (quote (+ 1 2)))" :stdlib t))))
+  (assert-equal '(:ADD (:CONST 1) (:CONST 2))
+             (run-string "(defun my-compile (expr) (cond ((integerp expr) (list :const expr)) ((and (consp expr) (eq (car expr) (quote +))) (list :add (my-compile (second expr)) (my-compile (third expr)))) (t (list :unknown expr)))) (my-compile (quote (+ 1 2)))" :stdlib t)))
 
 ;;; Funcall/Apply with Quoted Symbols Tests
 
@@ -135,7 +135,7 @@
       (let ((c2 (read-char h2)))
         (close h2)
         (list c1 c2)))))" wr-path wr-path))))
-      (assert-true (equal result '(#\H #\i))))
+      (assert-equal result '(#\H #\i)))
     ;; explicit open/close again (stable backend path)
     (let ((result (run-string
                    (format nil "(let ((out (open ~S :direction :output :if-exists :supersede :if-does-not-exist :create)))
@@ -200,7 +200,7 @@
           ("three-fns" 6
            "(labels ((a (n) (if (= n 0) 0 (+ 1 (b (- n 1))))) (b (n) (if (= n 0) 0 (+ 1 (c (- n 1))))) (c (n) (if (= n 0) 0 (+ 1 (a (- n 1)))))) (a 6))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 ;;; Hash Table :test Parameter Tests
 
@@ -220,14 +220,14 @@
           ("string"  'string  "(type-of \"hello\")")
           ("cons"    'cons    "(type-of '(1 2))"))
   (expected form)
-  (assert-true (eq expected (run-string form))))
+  (assert-eq expected (run-string form)))
 
 (deftest-each builtin-make-list
   "make-list creates a list of the specified length filled with nil."
   :cases (("three" '(nil nil nil) "(make-list 3)")
           ("zero"  nil            "(make-list 0)"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 (deftest-each builtin-alphanumericp
   "alphanumericp returns truthy for alphanumeric chars and 0 for punctuation."

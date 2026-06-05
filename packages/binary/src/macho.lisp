@@ -97,6 +97,23 @@
 (defconstant +compact-unwind-x86-64-mode-stack-immd+ #x02000000
   "Frameless/RBP-less x86-64 compact unwind mode with immediate stack size.")
 
+;;; Structural size constants -- derived from the Mach-O ABI layout.
+;;; Using named constants prevents silent breakage if struct layout ever changes.
+(defconstant +macho-segment-command-size+ 72
+  "Byte size of a 64-bit LC_SEGMENT_64 command header (no sections).")
+(defconstant +macho-section-size+ 80
+  "Byte size of one 64-bit section record inside a segment command.")
+(defconstant +macho-nlist-size+ 18
+  "Byte size of one 64-bit nlist symbol table entry.")
+
+;;; Virtual memory base addresses used by the CL-CC Mach-O emitter.
+(defconstant +macho-text-base-addr+ #x100000000
+  "Default __TEXT segment virtual base address.")
+(defconstant +macho-data-base-addr+ #x100001000
+  "Default __DATA segment virtual base address.")
+(defconstant +macho-data-const-base-addr+ #x100002000
+  "Default __DATA_CONST segment virtual base address.")
+
 ;;; Structures
 
 (defstruct mach-header

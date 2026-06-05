@@ -24,11 +24,7 @@ Usage: (cl-cc:defpadded-var *counter* 0)"
 (defmacro thread-local (name initial-value)
   "Define a thread-local variable NAME.
 Thread-local variables eliminate false sharing entirely."
-  `(progn
-     #+sbcl
-     (sb-thread:define-thread-local ,name ,initial-value)
-     #-sbcl
-     (defvar ,name ,initial-value)))
+  `(sb-thread:define-thread-local ,name ,initial-value))
 
 ;;; ──── Class padding ────
 (defmacro define-padded-class (name superclasses slots &key (padding *cache-line-size*))
@@ -58,23 +54,11 @@ Returns a list of (var1 var2) pairs that share the same cache line."
 
 ;;; ──── Helpers ────
 (defun address-of-var (var)
-  "Return the memory address of VAR. SBCL-specific."
-  #+sbcl
-  (sb-kernel:get-lisp-obj-address var)
-  #-sbcl
-  (sxhash var))
+  "Return the memory address of VAR."
+  (sb-kernel:get-lisp-obj-address var))
 
 (defun detect-cache-line-size ()
-  "Detect the CPU cache line size using CPUID instruction.
-Returns the detected size or defaults to 64."
-  #+sbcl
-  (handler-case
-      (progn
-        ;; CPUID leaf 0x80000006: L2 cache line size in CL register
-        ;; Simplified: return 64 (standard for x86-64)
-        64)
-    (error () 64))
-  #-sbcl
+  "Return the CPU cache line size (64 on x86-64)."
   64)
 
 ;;; ──── Startup initialization ────

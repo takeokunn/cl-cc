@@ -217,12 +217,13 @@ let
         ''(load (merge-pathnames "cl-cc-test.asd" *default-pathname-defaults*))''
         "(asdf:load-system :cl-cc-test :force t)"
         ''(format t "# running all benchmarks~%")''
-        ''(handler-case
-             (cl-cc/test:run-all-benchmarks
-              :output-directory #p"benchmark-results/")
-           (error (e)
-             (format *error-output* "~&FATAL: ~A~%" e)
-             (uiop:quit 1)))''
+        ''
+          (handler-case
+                       (cl-cc/test:run-all-benchmarks
+                        :output-directory #p"benchmark-results/")
+                     (error (e)
+                       (format *error-output* "~&FATAL: ~A~%" e)
+                       (uiop:quit 1)))''
       ];
     };
 

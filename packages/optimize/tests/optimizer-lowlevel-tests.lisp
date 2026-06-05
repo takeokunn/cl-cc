@@ -90,7 +90,7 @@
     (cl-cc/optimize::%opt-copy-prop-kill :R0 copies reverse)
     (assert-false (gethash :R1 copies))
     (assert-false (gethash :R2 copies))
-    (assert-true (eql :R2 (gethash :R3 copies))))
+    (assert-eql :R2 (gethash :R3 copies))))
   (let* ((instrs (list (cl-cc:make-vm-move :dst :R1 :src :R0)
                        (cl-cc:make-vm-move :dst :R0 :src :R1)))
          (out (cl-cc/optimize::opt-pass-copy-prop instrs))

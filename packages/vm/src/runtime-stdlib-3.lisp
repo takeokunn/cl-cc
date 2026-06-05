@@ -40,8 +40,7 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
 (defun stream-external-format (stream)
   "Return STREAM's external format when known, otherwise NIL."
   (or (gethash stream *vm-stream-external-formats*)
-      #+sbcl (ignore-errors (sb-impl::fd-stream-external-format stream))
-      #-sbcl nil))
+      (ignore-errors (sb-impl::fd-stream-external-format stream))))
 
 (defun encode-external-format (string &key (external-format *default-external-format*))
   "Encode STRING to a vector of octets using EXTERNAL-FORMAT."
@@ -68,8 +67,7 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
 ;;; ── FR-1006: Environment variables and process exit helpers ───────────────
 
 (defparameter *command-line-args*
-  #+sbcl (copy-list (cdr sb-ext:*posix-argv*))
-  #-sbcl nil
+  (copy-list (cdr sb-ext:*posix-argv*))
   "Command-line arguments visible to VM stdlib code.")
 
 (defparameter *command-line-arguments* *command-line-args*

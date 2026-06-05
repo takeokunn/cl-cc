@@ -32,13 +32,10 @@ starts with parsed/expanded stdlib forms and the VM snapshot already resident."
       (ignore-errors (cl-cc:warm-stdlib-cache)))
     (format *error-output* "; cl-cc: dumping initialized image to ~A~%" path)
     (finish-output *error-output*)
-    #+sbcl
     (sb-ext:save-lisp-and-die path
                               :toplevel #'main
                               :executable t
-                              :compression t)
-    #-sbcl
-    (error "--dump-image is only supported on SBCL")))
+                              :compression t)))
 
 (defun %dump-ast-phase (result stream annotate-source)
   (let ((asts (%ensure-list (cl-cc:compilation-result-ast result))))

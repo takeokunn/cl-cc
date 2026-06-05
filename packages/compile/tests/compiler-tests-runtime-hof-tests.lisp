@@ -13,7 +13,7 @@
           ("reduce"    15       "(reduce #'+ '(1 2 3 4 5) :initial-value 0)")
           ("remove-if" '(2 4)   "(remove-if #'oddp '(1 2 3 4 5))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; Let Alias Fix and Prog1/Prog2 Tests
 
@@ -32,7 +32,7 @@
   :cases (("success" 3   "(ignore-errors (+ 1 2))")
           ("failure" nil "(ignore-errors (error \"boom\"))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 ;;; Unwind-Protect Integration Tests
 
@@ -63,7 +63,7 @@
   :cases (("default-eql"    'eql   "(hash-table-test (make-hash-table))")
           ("explicit-equal" 'equal "(hash-table-test (make-hash-table :test 'equal))"))
   (expected form)
-  (assert-true (eq expected (run-string form))))
+  (assert-eq expected (run-string form)))
 
 (deftest compile-copy-hash-table
   "copy-hash-table creates independent copy"
@@ -78,4 +78,4 @@
           ("caadr"  "x" "(string-downcase (symbol-name (caadr '(a (x y) c))))")
           ("caddar" 3   "(caddar '((1 2 3) b c))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))

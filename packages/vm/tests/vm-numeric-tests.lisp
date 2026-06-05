@@ -324,7 +324,6 @@ catastrophic cancellation."
 ;;; FR-843: Float Exception Control
 ;;; ═══════════════════════════════════════════════════════════════════════════
 
-#+sbcl
 (deftest get-float-traps-returns-list
   "get-float-traps returns a list (possibly empty) of keyword symbols."
   (let ((traps (cl-cc/vm::get-float-traps)))
@@ -332,7 +331,6 @@ catastrophic cancellation."
     (dolist (trap traps)
       (assert-true (keywordp trap)))))
 
-#+sbcl
 (deftest with-float-traps-masked-suppresses-divide-by-zero
   "with-float-traps-masked suppresses :divide-by-zero trap within the mask body."
   (let ((result :unset))
@@ -340,7 +338,6 @@ catastrophic cancellation."
       (setf result (/ 1.0d0 0.0d0)))
     (assert-true (sb-ext:float-infinity-p result))))
 
-#+sbcl
 (deftest with-float-traps-masked-multiple
   "with-float-traps-masked masks multiple trap types simultaneously."
   (let ((result :unset))

@@ -153,8 +153,7 @@
   "Return the runtime string interning table, creating it lazily."
   (or *runtime-string-table*
       (let ((table (make-hash-table :test 'equal
-                                    #+sbcl :weakness
-                                    #+sbcl :key-and-value)))
+                                    :weakness :key-and-value)))
         (setf *runtime-string-table* table
               *rt-string-dedup-table* table))))
 

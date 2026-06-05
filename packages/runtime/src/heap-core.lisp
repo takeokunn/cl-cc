@@ -96,11 +96,14 @@
                   (unless (> limit (expt 2 50))
                     limit)))))))))
 
-(defun %rt-detect-system-memory-bytes ()
-  "Return best-effort system memory in bytes using portable Common Lisp only."
+(defun %rt-system-memory-bytes-fallback ()
+  "Return the compile-time default system memory constant.
+This is a portable fallback stub; it does not query /proc/meminfo or sysctl.
+The name reflects that it is a fallback, not a real detection routine."
   +rt-default-system-memory-bytes+)
 
 (defun %rt-clamp (value min-value max-value)
+  "Return VALUE clamped to [MIN-VALUE, MAX-VALUE]."
   (min max-value (max min-value value)))
 
 (defun rt-gc-auto-configure-heap (&key memory-bytes)
@@ -112,7 +115,7 @@ allocations, and host implementation overhead.  Explicit MEMORY-BYTES remains
 an upper input but is also bounded by the container cap when present."
   (let* ((container-limit (rt-heap-detect-container-memory-limit))
          (container-budget (and container-limit (floor (* container-limit 3) 4)))
-         (detected-bytes (or memory-bytes (%rt-detect-system-memory-bytes)))
+         (detected-bytes (or memory-bytes (%rt-system-memory-bytes-fallback)))
          (available-bytes (if container-budget
                               (min detected-bytes container-budget)
                               detected-bytes))
@@ -427,63 +430,63 @@ AGE maps to the 4-bit GC-BITS field.  Optional SHAPE-ID embeds the FR-214 shape
 id when available; callers that do not know a shape retain shape id 0."
   (make-rt-header size type-tag :gc-bits age :shape-id shape-id))
 
-(defun rt-header-size (h)
-  "Extract the 32-bit object size field from compressed header H."
-  (logand h #xFFFFFFFF))
+(defun rt-header-size (header-word)
+  "Extract the 32-bit object size field from compressed header HEADER-WORD."
+  (logand header-word #xFFFFFFFF))
 
-(defun rt-header-type-tag (h)
-  "Extract the 8-bit runtime type tag from compressed header H."
-  (logand (ash h (- +header-tag-shift+)) #xFF))
+(defun rt-header-type-tag (header-word)
+  "Extract the 8-bit runtime type tag from compressed header HEADER-WORD."
+  (logand (ash header-word (- +header-tag-shift+)) #xFF))
 
-(defun rt-header-gc-bits (h)
-  "Extract the 4-bit GC field from compressed header H."
-  (logand (ash h (- +header-gc-bits-shift+)) #xF))
+(defun rt-header-gc-bits (header-word)
+  "Extract the 4-bit GC field from compressed header HEADER-WORD."
+  (logand (ash header-word (- +header-gc-bits-shift+)) #xF))
 
-(defun rt-header-shape-id (h)
-  "Extract the embedded 20-bit FR-214 shape id from compressed header H."
-  (logand (ash (logand h +header-shape-id-mask+) (- +header-shape-id-shift+))
+(defun rt-header-shape-id (header-word)
+  "Extract the embedded 20-bit FR-214 shape id from compressed header HEADER-WORD."
+  (logand (ash (logand header-word +header-shape-id-mask+) (- +header-shape-id-shift+))
           +header-shape-id-max+))
 
-(defun header-size (h)
-  "Extract the object size in words from header word H."
-  (rt-header-size h))
+(defun header-size (header-word)
+  "Extract the object size in words from header HEADER-WORD."
+  (rt-header-size header-word))
 
-(defun header-tag (h)
-  "Extract the type tag (0-7) from header word H."
-  (rt-header-type-tag h))
+(defun header-tag (header-word)
+  "Extract the type tag (0-7) from header HEADER-WORD."
+  (rt-header-type-tag header-word))
 
-(defun header-age (h)
-  "Extract the age (0-3) from header word H.
+(defun header-age (header-word)
+  "Extract the age (0-3) from header HEADER-WORD.
    Age occupies bits 53..52; mark (bit 55) and gray (bit 54) are masked out."
-  (logand (rt-header-gc-bits h) #x3))
+  (logand (rt-header-gc-bits header-word) #x3))
 
-(defun header-marked-p (h)
-  "Return true if the mark bit is set in header word H."
-  (not (zerop (logand h +header-mark-bit+))))
+(defun header-marked-p (header-word)
+  "Return true if the mark bit is set in header HEADER-WORD."
+  (not (zerop (logand header-word +header-mark-bit+))))
 
-(defun header-gray-p (h)
-  "Return true if the gray bit is set in header word H."
-  (not (zerop (logand h +header-gray-bit+))))
+(defun header-gray-p (header-word)
+  "Return true if the gray bit is set in header HEADER-WORD."
+  (not (zerop (logand header-word +header-gray-bit+))))
 
-(defun header-forwarding-p (h)
-  "Return true if H represents a forwarding pointer (i.e. is a cons :forwarded)."
-  (and (consp h) (eq (car h) :forwarded)))
+(defun header-forwarding-p (header-word)
+  "Return true if HEADER-WORD represents a forwarding pointer (i.e. is a cons :forwarded)."
+  (and (consp header-word) (eq (car header-word) :forwarded)))
 
-(defun header-set-mark (h)
+(defun header-set-mark (header-word)
   "Return a new header with the mark bit set."
-  (logior h +header-mark-bit+))
+  (logior header-word +header-mark-bit+))
 
-(defun header-clear-mark (h)
+(defun header-clear-mark (header-word)
   "Return a new header with the mark bit cleared."
-  (logand h (lognot +header-mark-bit+)))
+  (logand header-word (lognot +header-mark-bit+)))
 
-(defun header-set-gray (h)
+(defun header-set-gray (header-word)
   "Return a new header with the gray bit set."
-  (logior h +header-gray-bit+))
+  (logior header-word +header-gray-bit+))
 
-(defun header-clear-gray (h)
+(defun header-clear-gray (header-word)
   "Return a new header with the gray bit cleared."
-  (logand h (lognot +header-gray-bit+)))
+  (logand header-word (lognot +header-gray-bit+)))
 
 (defun header-make-forwarding-ptr (dest-addr)
   "Create a forwarding pointer value for DEST-ADDR.
@@ -491,16 +494,16 @@ id when available; callers that do not know a shape retain shape id 0."
    Use header-forwarding-p to detect it and header-forwarding-ptr to extract."
   (cons :forwarded dest-addr))
 
-(defun header-forwarding-ptr (h)
-  "Extract the forwarding destination address from a forwarding pointer H.
-   Only valid when (header-forwarding-p h) is true."
-  (cdr h))
+(defun header-forwarding-ptr (header-word)
+  "Extract the forwarding destination address from forwarding pointer HEADER-WORD.
+   Only valid when (header-forwarding-p header-word) is true."
+  (cdr header-word))
 
-(defun header-increment-age (h)
+(defun header-increment-age (header-word)
   "Return a new header with age incremented by 1, capped at 3."
-  (let* ((current-age (header-age h))
+  (let* ((current-age (header-age header-word))
          (new-age (min 3 (1+ current-age))))
-    (logior (logand h (lognot +header-age-mask+))
+    (logior (logand header-word (lognot +header-age-mask+))
             (ash new-age +header-age-shift+))))
 
 ;;; ------------------------------------------------------------
@@ -523,96 +526,105 @@ id when available; callers that do not know a shape retain shape id 0."
     (rt-gc-auto-configure-heap)
     (setf young-size *gc-young-size-words*
           old-size *gc-old-size-words*))
-   (let* ((semi-size  (floor young-size 2))
-           (large-obj-size old-size)
-           (managed-words (+ (* 2 semi-size) old-size large-obj-size))
-            (heap-base (if *rt-heap-randomize*
-                           (rt-heap-randomize-base managed-words)
-                           (rt-heap-randomize-base)))
-           (young-from-base heap-base)
-           (young-to-base (+ young-from-base semi-size))
-           (old-base   (+ young-to-base semi-size))
-           (large-obj-base (+ old-base old-size))
-           (total-size (+ heap-base managed-words))
-          (words      (make-array total-size :initial-element 0))
-          (num-cards  (ceiling old-size +gc-card-size-words+))
-         (card-table (make-array num-cards
-                                  :element-type '(unsigned-byte 8)
-                                  :initial-element 0))
-         (card-summary (make-array (ceiling num-cards +gc-card-summary-block-size+)
-                                   :initial-element nil))
-           (age-hist (make-array 16 :initial-element 0))
-           (free-bins (make-array +rt-free-list-bin-count+ :initial-element nil))
-           (slab-pools (make-hash-table :test #'eql))
-            (now (get-internal-real-time)))
-     (when (and *compressed-pointers-enabled*
-                (> managed-words +compressed-heap-region-words+))
-       (error "cl-cc/runtime: compressed pointers require heap <= 4GB (~D words requested, max ~D)"
-              managed-words +compressed-heap-region-words+))
-     (when *compressed-pointers-enabled*
-       (setf *heap-base-address* young-from-base))
-     (%make-rt-heap
-      :words           words
-      :young-from-base young-from-base
-      :young-to-base   young-to-base
-      :young-semi-size semi-size
-      :young-free      young-from-base
-      :old-base        old-base
-     :old-size        old-size
-     :old-free        old-base
-     :minor-gc-count  0
-     :major-gc-count  0
-     :words-collected 0
-      :words-promoted  0
-      :card-table      card-table
-      :card-summary    card-summary
-      :num-cards       num-cards
-      :roots           nil
-      :satb-queue      nil
-      :barrier-buffer  nil
-      :free-list       nil
-      :free-bins       free-bins
-      :slab-pools      slab-pools
-      :lazy-sweep-cursor old-base
-      :lazy-sweep-limit old-base
-      :incremental-work-budget 64
-      :pause-exceeded-count 0
-        :access-bits     (make-hash-table :test #'eql)
-       :recent-promotions (make-hash-table :test #'eql)
-       :gc-state        :normal
-      :total-alloc-words 0
-      :age-hist        age-hist
-      :large-obj-threshold 8192
-      :large-obj-base  large-obj-base
-      :large-obj-size  large-obj-size
-       :large-obj-free  large-obj-base
-       :gc-pause-total  0.0d0
-       :gc-pause-max    0.0d0
-       :gc-wall-start-tick now
-       :allocation-rate-words-per-sec 0.0d0
-       :allocation-rate-last-tick now
-       :allocation-rate-last-total 0
-       :pressure-hooks  nil
-       :pressure-threshold-high 80.0d0
-       :pressure-threshold-low 20.0d0
-        ;; FR-391: 0 means unlimited dynamic growth; positive
-        ;; *GC-MAX-HEAP-WORDS* caps RT-HEAP-MAYBE-GROW.
-        :max-heap-words  (if (plusp *gc-max-heap-words*)
-                             *gc-max-heap-words*
-                             0)
-       :initial-heap-words total-size
-       :initial-old-size old-size
-       :initial-large-obj-size large-obj-size
-        :shrink-threshold 0.25d0
-        :shrink-counter 0
-        :compaction-trigger-fraction 0.5d0
-        :forwarding-table (make-hash-table :test #'eql)
-        :numa-node-map (make-hash-table :test #'eql)
-        :numa-gc-schedule nil
-        :interleaved-regions nil
-        :co-location-hints (make-hash-table :test #'eql)
-        :gc-inhibit      nil
-        :gc-pending      nil)))
+  (let* (;; --- Layout arithmetic ---
+         (semi-size           (floor young-size 2))
+         (large-obj-size      old-size)
+         (managed-words       (+ (* 2 semi-size) old-size large-obj-size))
+         (heap-base           (if *rt-heap-randomize*
+                                  (rt-heap-randomize-base managed-words)
+                                  (rt-heap-randomize-base)))
+         (young-from-base     heap-base)
+         (young-to-base       (+ young-from-base semi-size))
+         (old-base            (+ young-to-base semi-size))
+         (large-obj-base      (+ old-base old-size))
+         (total-size          (+ heap-base managed-words))
+         ;; --- Storage allocation ---
+         (words               (make-array total-size :initial-element 0))
+         (num-cards           (ceiling old-size +gc-card-size-words+))
+         (card-table          (make-array num-cards
+                                         :element-type '(unsigned-byte 8)
+                                         :initial-element 0))
+         (card-summary        (make-array (ceiling num-cards +gc-card-summary-block-size+)
+                                          :initial-element nil))
+         (age-hist            (make-array 16 :initial-element 0))
+         (free-bins           (make-array +rt-free-list-bin-count+ :initial-element nil))
+         (slab-pools          (make-hash-table :test #'eql))
+         ;; --- Ancillary hash tables ---
+         (access-bits         (make-hash-table :test #'eql))
+         (recent-promotions   (make-hash-table :test #'eql))
+         (forwarding-table    (make-hash-table :test #'eql))
+         (numa-node-map       (make-hash-table :test #'eql))
+         (co-location-hints   (make-hash-table :test #'eql))
+         ;; --- Growth / cap policy ---
+         ;; FR-391: 0 means unlimited dynamic growth; positive *GC-MAX-HEAP-WORDS*
+         ;; caps RT-HEAP-MAYBE-GROW.
+         (max-heap-words      (if (plusp *gc-max-heap-words*) *gc-max-heap-words* 0))
+         ;; --- Wall-clock timestamp ---
+         (now                 (get-internal-real-time)))
+    (when (and *compressed-pointers-enabled*
+               (> managed-words +compressed-heap-region-words+))
+      (error "cl-cc/runtime: compressed pointers require heap <= 4GB (~D words requested, max ~D)"
+             managed-words +compressed-heap-region-words+))
+    (when *compressed-pointers-enabled*
+      (setf *heap-base-address* young-from-base))
+    (%make-rt-heap
+     :words                          words
+     :young-from-base                young-from-base
+     :young-to-base                  young-to-base
+     :young-semi-size                semi-size
+     :young-free                     young-from-base
+     :old-base                       old-base
+     :old-size                       old-size
+     :old-free                       old-base
+     :minor-gc-count                 0
+     :major-gc-count                 0
+     :words-collected                0
+     :words-promoted                 0
+     :card-table                     card-table
+     :card-summary                   card-summary
+     :num-cards                      num-cards
+     :roots                          nil
+     :satb-queue                     nil
+     :barrier-buffer                 nil
+     :free-list                      nil
+     :free-bins                      free-bins
+     :slab-pools                     slab-pools
+     :lazy-sweep-cursor              old-base
+     :lazy-sweep-limit               old-base
+     :incremental-work-budget        64
+     :pause-exceeded-count           0
+     :access-bits                    access-bits
+     :recent-promotions              recent-promotions
+     :gc-state                       :normal
+     :total-alloc-words              0
+     :age-hist                       age-hist
+     :large-obj-threshold            8192
+     :large-obj-base                 large-obj-base
+     :large-obj-size                 large-obj-size
+     :large-obj-free                 large-obj-base
+     :gc-pause-total                 0.0d0
+     :gc-pause-max                   0.0d0
+     :gc-wall-start-tick             now
+     :allocation-rate-words-per-sec  0.0d0
+     :allocation-rate-last-tick      now
+     :allocation-rate-last-total     0
+     :pressure-hooks                 nil
+     :pressure-threshold-high        80.0d0
+     :pressure-threshold-low         20.0d0
+     :max-heap-words                 max-heap-words
+     :initial-heap-words             total-size
+     :initial-old-size               old-size
+     :initial-large-obj-size         large-obj-size
+     :shrink-threshold               0.25d0
+     :shrink-counter                 0
+     :compaction-trigger-fraction    0.5d0
+     :forwarding-table               forwarding-table
+     :numa-node-map                  numa-node-map
+     :numa-gc-schedule               nil
+     :interleaved-regions            nil
+     :co-location-hints              co-location-hints
+     :gc-inhibit                     nil
+     :gc-pending                     nil)))
 
 ;;; ------------------------------------------------------------
 ;;; Heap Word Access

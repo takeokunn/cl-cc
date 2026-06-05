@@ -88,8 +88,8 @@
                         (make-vm-jump :label :l0)
                         (make-vm-label :name :l1)))
          (optimized (cl-cc/optimize::opt-pass-loop-interchange program)))
-    (assert-true (equal (mapcar #'instruction->sexp optimized)
-                        (mapcar #'instruction->sexp program)))))
+    (assert-equal (mapcar #'instruction->sexp optimized)
+                  (mapcar #'instruction->sexp program))))
 
 ;;; ─── FR-525 Polyhedral scheduling ───────────────────────────────────────────
 
@@ -191,8 +191,8 @@
                         (make-vm-jump :label :lb)
                         (make-vm-label :name :lbx)))
          (optimized (cl-cc/optimize::opt-pass-loop-fusion-fission program)))
-    (assert-true (equal (mapcar #'instruction->sexp optimized)
-                        (mapcar #'instruction->sexp program)))))
+    (assert-equal (mapcar #'instruction->sexp optimized)
+                  (mapcar #'instruction->sexp program))))
 
 (deftest optimize-pass-loop-fusion-fission-splits-oversized-loop
   "FR-526: oversized pure loops are split into two core regions with a split marker."

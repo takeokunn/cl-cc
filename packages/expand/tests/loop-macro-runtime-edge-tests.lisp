@@ -106,7 +106,7 @@
           ("when-append"    '(2 2 4 4)         "(loop for x in (list 1 2 3 4) when (evenp x) append (list x x))")
           ("collect-into-when" '((1 3 5 7 9) (2 4 6 8 10)) "(loop for i from 1 to 10 when (oddp i) collect i into odds when (evenp i) collect i into evens finally (return (list (nreverse odds) (nreverse evens))))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 (deftest-each loop-numeric
   "LOOP numeric accumulations — paths not covered individually."
@@ -120,9 +120,9 @@
 (deftest loop-edge-cases
   "LOOP: empty hash-keys returns nil; nconc concatenates sublists."
   (assert-null (run-string "(loop for k being the hash-keys of (make-hash-table) collect k)" :stdlib t))
-  (assert-true (string= "(a b c d)"
-                        (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(loop for x in (list (list 'a 'b) (list 'c 'd)) nconc (copy-list x))" :stdlib t)))))))
+  (assert-string= "(a b c d)"
+                  (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
+                    (string-downcase (format nil "~S" (run-string "(loop for x in (list (list 'a 'b) (list 'c 'd)) nconc (copy-list x))" :stdlib t))))))
 
 ;;; Floor/Truncate/Ceiling Multiple Values Tests
 

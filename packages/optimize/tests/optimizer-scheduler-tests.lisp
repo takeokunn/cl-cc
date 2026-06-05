@@ -195,7 +195,7 @@
   (let* ((c0     (make-vm-const :dst :r0 :value 42))
          (result (cl-cc/optimize::schedule-pre-ra (list c0))))
     (assert-= 1 (length result))
-    (assert-true (eq c0 (first result)))))
+    (assert-eq c0 (first result))))
 
 (deftest schedule-pre-ra-empty-input-returns-empty
   "schedule-pre-ra with empty input returns an empty list."

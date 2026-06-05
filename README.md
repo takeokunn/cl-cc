@@ -212,6 +212,7 @@ Goodbye.
 Definitions persist across expressions within a session (function registry, class registry, and heap are preserved).
 
 REPL history variables follow ANSI CL conventions:
+
 - `*`, `**`, `***` — last 3 primary return values
 - `+`, `++`, `+++` — last 3 input forms
 - `/`, `//`, `///` — last 3 return value lists
@@ -414,38 +415,38 @@ cl-cc check file.php --strict
 
 **Statements**
 
-| PHP | Lowering |
-| --- | --- |
-| `echo $x;` | `ast-print` |
-| `return $x;` / `return;` | `ast-return-from` |
-| `if ($c) { } else { }` | `ast-if` |
-| `while ($c) { }` | `ast-block` + tagbody loop |
-| `for ($i=0; $i<n; $i++) { }` | `ast-progn` (init + while loop) |
-| `foreach ($arr as $v)` / `foreach ($arr as $k => $v)` | `ast-let` |
-| `function f($a, $b) { }` | `ast-defun` |
-| `class C extends B { }` | `ast-defclass` |
-| `switch ($x) { case 1: … default: }` | `ast-let` + `ast-block` + `ast-tagbody` |
-| `break N;` / `continue N;` | `ast-go` within nested tagbodies |
-| `try { } catch (Ex $e) { } finally { }` | `ast-unwind-protect` wrapping PHP exception dispatch |
-| `throw new Ex();` | `ast-throw` |
-| `namespace Foo\\Bar;` / `use Vendor\\X as Y;` | parser-time qualified-name resolution + AST metadata |
+| PHP                                                   | Lowering                                             |
+| ----------------------------------------------------- | ---------------------------------------------------- |
+| `echo $x;`                                            | `ast-print`                                          |
+| `return $x;` / `return;`                              | `ast-return-from`                                    |
+| `if ($c) { } else { }`                                | `ast-if`                                             |
+| `while ($c) { }`                                      | `ast-block` + tagbody loop                           |
+| `for ($i=0; $i<n; $i++) { }`                          | `ast-progn` (init + while loop)                      |
+| `foreach ($arr as $v)` / `foreach ($arr as $k => $v)` | `ast-let`                                            |
+| `function f($a, $b) { }`                              | `ast-defun`                                          |
+| `class C extends B { }`                               | `ast-defclass`                                       |
+| `switch ($x) { case 1: … default: }`                  | `ast-let` + `ast-block` + `ast-tagbody`              |
+| `break N;` / `continue N;`                            | `ast-go` within nested tagbodies                     |
+| `try { } catch (Ex $e) { } finally { }`               | `ast-unwind-protect` wrapping PHP exception dispatch |
+| `throw new Ex();`                                     | `ast-throw`                                          |
+| `namespace Foo\\Bar;` / `use Vendor\\X as Y;`         | parser-time qualified-name resolution + AST metadata |
 
 **Expressions**
 
-| PHP | Lowering |
-| --- | --- |
-| `[1, 2, 3]` / `array(1, 2, 3)` | `%php-array` call |
-| `["a" => 1, "b" => 2]` | `%php-array` with key/value pairs |
-| `$a[0]` | `%php-array-ref` |
-| `$a[0] = $v` | `%php-array-set` |
-| `$a ?? $b` | temp `ast-let` + `ast-if` |
-| `$c ? $yes : $no` | `ast-if` |
-| `fn($x) => $x + 1` | capture-wrapped `ast-lambda` |
-| `match ($v) { 1 => 'one', default => 'x' }` | nested strict-equality conditional chain |
-| `yield $v` / `yield from $xs` | `%php-yield` / `%php-yield-from` runtime data representation |
-| `$a <=> $b` | `%php-spaceship` |
-| `$a >> $n` | `%php-shift-right` |
-| `$a instanceof C` | `%php-instanceof` |
+| PHP                                         | Lowering                                                     |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| `[1, 2, 3]` / `array(1, 2, 3)`              | `%php-array` call                                            |
+| `["a" => 1, "b" => 2]`                      | `%php-array` with key/value pairs                            |
+| `$a[0]`                                     | `%php-array-ref`                                             |
+| `$a[0] = $v`                                | `%php-array-set`                                             |
+| `$a ?? $b`                                  | temp `ast-let` + `ast-if`                                    |
+| `$c ? $yes : $no`                           | `ast-if`                                                     |
+| `fn($x) => $x + 1`                          | capture-wrapped `ast-lambda`                                 |
+| `match ($v) { 1 => 'one', default => 'x' }` | nested strict-equality conditional chain                     |
+| `yield $v` / `yield from $xs`               | `%php-yield` / `%php-yield-from` runtime data representation |
+| `$a <=> $b`                                 | `%php-spaceship`                                             |
+| `$a >> $n`                                  | `%php-shift-right`                                           |
+| `$a instanceof C`                           | `%php-instanceof`                                            |
 
 **Type annotations** — parameter and return type annotations (`int`, `?string`, `int\|string`, `void`, `never`, `mixed`, `static`, nullable/union/intersection types) are preserved as `:php-param-types` / `:php-return-type` in the `ast-defun` declarations. Class properties and constants preserve their declared PHP types on `ast-slot-def` nodes.
 

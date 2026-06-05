@@ -47,7 +47,6 @@
       (when (and value (plusp value)) value))))
 
 (defun %rt-run-program-output (program args)
-  #+sbcl
   (ignore-errors
     (let ((out (make-string-output-stream)))
       (let ((process (sb-ext:run-program program args
@@ -56,9 +55,7 @@
                                          :error nil
                                          :wait t)))
         (when (and process (zerop (sb-ext:process-exit-code process)))
-          (%rt-trim (get-output-stream-string out))))))
-  #-sbcl (declare (ignore program args))
-  #-sbcl nil)
+          (%rt-trim (get-output-stream-string out)))))))
 
 (defun %rt-parse-cpulist (text)
   (when text

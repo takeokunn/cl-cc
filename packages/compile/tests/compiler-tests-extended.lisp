@@ -12,15 +12,15 @@
 
 (deftest self-host-macro-system-full
   "Self-hosting: hash-table macro registry + recursive expansion + multiple macros"
-  (assert-true (string= "(if x (progn (if y (progn z) nil)) nil)"
+  (assert-string= "(if x (progn (if y (progn z) nil)) nil)"
              (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-               (string-downcase (format nil "~S" (run-string *self-host-macro-system-program* :stdlib t)))))))
+               (string-downcase (format nil "~S" (run-string *self-host-macro-system-program* :stdlib t))))))
 
 (deftest self-host-type-checker
   "Self-hosting: simple HM-style type checker with CLOS type nodes"
-  (assert-true (string= "ok"
+  (assert-string= "ok"
                         (string-downcase
-                         (symbol-name (run-string *self-host-type-checker-program*))))))
+                         (symbol-name (run-string *self-host-type-checker-program*)))))
 
 (deftest self-host-format-error-pipeline
   "Self-hosting: format for string building + error signaling + handler-case"

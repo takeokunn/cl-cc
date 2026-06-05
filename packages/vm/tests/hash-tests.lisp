@@ -55,7 +55,7 @@
     (vm-exec (cl-cc:make-vm-hash-table-rehash-threshold :dst :R3 :table :R0) state)
     (assert-true (>= (cl-cc/vm::vm-reg-get state :R1) 32))
     (assert-equal 2 (cl-cc/vm::vm-reg-get state :R2))
-    (assert-true (= 0.75 (cl-cc/vm::vm-reg-get state :R3)))))
+    (assert-= 0.75 (cl-cc/vm::vm-reg-get state :R3))))
 
 ;;; ─── Hash Table Set/Get Round-Trip ────────────────────────────────────────
 

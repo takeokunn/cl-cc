@@ -21,6 +21,7 @@
 ;;; ─── %collect-live-range-splits ───────────────────────────────────────────
 
 (deftest "%collect-live-range-splits no splits when hole is smaller than minimum"
+  "%collect-live-range-splits produces no boundaries when the gap between uses is smaller than the minimum hole size."
   ;; Gap of 5 between uses 2 and 7 is below minimum hole size of 8.
   (let* ((interval (make-spill-test-interval :v 0 10 :use-positions '(2 7)))
          (minimum-hole-size 8))
@@ -31,6 +32,7 @@
       (is (null boundaries)))))
 
 (deftest "%collect-live-range-splits produces boundary when hole exceeds minimum"
+  "%collect-live-range-splits emits a split boundary when the use gap exceeds the minimum hole size."
   ;; Gap of 15 between uses 2 and 17 exceeds minimum of 8.
   (let* ((interval (make-spill-test-interval :v 0 20 :use-positions '(2 17)))
          (minimum-hole-size 8))
@@ -43,6 +45,7 @@
       (is (= 17 (split-boundary-before-position (first boundaries)))))))
 
 (deftest "%collect-live-range-splits multiple intervals produce separate groups"
+  "%collect-live-range-splits produces one child group per input interval."
   (let* ((int-a (make-spill-test-interval :a 0 10 :use-positions '(1 2)))
          (int-b (make-spill-test-interval :b 5 20 :use-positions '(5 6)))
          (minimum-hole-size 8))
@@ -54,6 +57,7 @@
 ;;; ─── %assign-live-range-split-slots ──────────────────────────────────────
 
 (deftest "%assign-live-range-split-slots assigns sequential 1-indexed slots"
+  "%assign-live-range-split-slots assigns sequential 1-indexed slot numbers to split boundaries."
   (let* ((interval (make-spill-test-interval :v 0 30 :use-positions '(2 20)))
          (minimum-hole-size 8))
     (multiple-value-bind (child-groups boundaries)
@@ -66,12 +70,14 @@
           (is (= 1 slot-count)))))))
 
 (deftest "%assign-live-range-split-slots returns zero when no boundaries"
+  "%assign-live-range-split-slots returns zero when the boundary list is empty."
   (let ((slot-count (%assign-live-range-split-slots '())))
     (is (= 0 slot-count))))
 
 ;;; ─── %boundaries-by-position ──────────────────────────────────────────────
 
 (deftest "%boundaries-by-position indexes boundaries by keyfn result"
+  "%boundaries-by-position builds a hash table indexing each boundary by the value of the key function."
   (let* ((b1 (make-live-range-split-boundary :after-position 3 :before-position 10
                                               :from-vreg :a :to-vreg :a/split1
                                               :slot 1))
@@ -84,6 +90,7 @@
     (is (null (gethash 99 table)))))
 
 (deftest "%boundaries-by-position groups multiple boundaries at same position"
+  "%boundaries-by-position collects all boundaries that share the same key value into a single list."
   (let* ((b1 (make-live-range-split-boundary :after-position 5 :before-position 10
                                               :from-vreg :a :to-vreg :a/s1 :slot 1))
          (b2 (make-live-range-split-boundary :after-position 5 :before-position 15
@@ -94,6 +101,7 @@
 ;;; ─── split-live-ranges ────────────────────────────────────────────────────
 
 (deftest "split-live-ranges no-split path returns originals unchanged"
+  "split-live-ranges returns the original instructions and intervals unchanged when no holes are large enough to split."
   ;; All uses are adjacent; no holes exceed minimum.
   (let* ((interval (make-spill-test-interval :v 0 5 :use-positions '(1 2 3 4)))
          (instructions (list (make-vm-const :dst :v :value 42)))
@@ -106,6 +114,7 @@
       (is (null new-float)))))
 
 (deftest "split-live-ranges single-split path inserts spill load and store"
+  "split-live-ranges inserts vm-spill-load and vm-spill-store instructions when a live range is split."
   ;; Uses at 0 and 20 with a 20-unit gap trigger a split.
   ;; The split-live-ranges function should insert vm-spill-load before
   ;; position 20 and vm-spill-store after position 0.
@@ -127,47 +136,42 @@
 
 ;;; ─── %finalize-split-spill-registers ─────────────────────────────────────
 
-(deftest "%finalize-split-spill-registers rewrites vm-spill-store src to physical"
+(deftest-each %finalize-split-spill-registers-cases
+  "%finalize-split-spill-registers rewrites virtual regs to physical or passes non-spill through."
+  :cases (("store-rewrite"    :store :v0 :rax 1)
+          ("load-rewrite"     :load  :v1 :rbx 2)
+          ("passthrough"      :const nil nil   nil)
+          ("unassigned-store" :store :unassigned nil 3))
+  (kind vreg phys slot)
   (let* ((assignment (make-hash-table :test #'eq))
-         (store (make-vm-spill-store :src-reg :v0 :slot 1)))
-    (setf (gethash :v0 assignment) :rax)
-    (let ((result (%finalize-split-spill-registers (list store) assignment)))
-      (is (= 1 (length result)))
-      (is (eq :rax (vm-spill-src (first result))))
-      (is (= 1 (vm-spill-slot (first result)))))))
-
-(deftest "%finalize-split-spill-registers rewrites vm-spill-load dst to physical"
-  (let* ((assignment (make-hash-table :test #'eq))
-         (load (make-vm-spill-load :dst-reg :v1 :slot 2)))
-    (setf (gethash :v1 assignment) :rbx)
-    (let ((result (%finalize-split-spill-registers (list load) assignment)))
-      (is (= 1 (length result)))
-      (is (eq :rbx (vm-spill-dst (first result))))
-      (is (= 2 (vm-spill-slot (first result)))))))
-
-(deftest "%finalize-split-spill-registers passes through non-spill instructions"
-  (let* ((assignment (make-hash-table :test #'eq))
-         (const-inst (make-vm-const :dst :r0 :value 99)))
-    (let ((result (%finalize-split-spill-registers (list const-inst) assignment)))
-      (is (= 1 (length result)))
-      (is (eq const-inst (first result))))))
-
-(deftest "%finalize-split-spill-registers leaves instruction unchanged when vreg not assigned"
-  ;; When a spill instruction's vreg has no physical assignment, it is returned as-is.
-  (let* ((assignment (make-hash-table :test #'eq))
-         (store (make-vm-spill-store :src-reg :unassigned :slot 3)))
-    (let ((result (%finalize-split-spill-registers (list store) assignment)))
-      (is (eq store (first result))))))
+         (inst (cond
+                 ((eq kind :store) (make-vm-spill-store :src-reg vreg :slot slot))
+                 ((eq kind :load)  (make-vm-spill-load  :dst-reg vreg :slot slot))
+                 (t                (make-vm-const :dst :r0 :value 99)))))
+    (when phys (setf (gethash vreg assignment) phys))
+    (let ((result (%finalize-split-spill-registers (list inst) assignment)))
+      (assert-equal 1 (length result))
+      (cond
+        ((and (eq kind :store) phys)
+         (assert-true (eq phys  (vm-spill-src (first result))))
+         (assert-equal slot (vm-spill-slot (first result))))
+        ((and (eq kind :load) phys)
+         (assert-true (eq phys  (vm-spill-dst (first result))))
+         (assert-equal slot (vm-spill-slot (first result))))
+        (t
+         (assert-true (eq inst (first result))))))))
 
 ;;; ─── regalloc-loop-depths ─────────────────────────────────────────────────
 
 (deftest "regalloc-loop-depths returns empty table for straight-line code"
+  "regalloc-loop-depths returns an empty hash table when the instruction stream contains no backward branches."
   (let* ((instructions (list (make-vm-const :dst :r0 :value 1)
                               (make-vm-const :dst :r1 :value 2)))
          (depths (regalloc-loop-depths instructions)))
     (is (= 0 (hash-table-count depths)))))
 
 (deftest "regalloc-loop-depths increments depth for backward branch targets"
+  "regalloc-loop-depths assigns a loop depth of at least 1 to positions covered by a backward branch."
   ;; A backward branch from position 3 to label at position 1 should mark
   ;; positions 1, 2, 3 with depth >= 1.
   (let* ((instructions (list (make-vm-const :dst :r0 :value 0)         ; 0
@@ -182,11 +186,13 @@
 ;;; ─── regalloc-ml-spill-cost ───────────────────────────────────────────────
 
 (deftest "regalloc-ml-spill-cost returns positive score for non-trivial interval"
+  "regalloc-ml-spill-cost returns a positive score for an interval with multiple use positions."
   (let* ((*ml-regalloc-enabled* t)
          (interval (make-spill-test-interval :v 0 10 :use-positions '(1 3 7))))
     (is (> (regalloc-ml-spill-cost interval nil) 0))))
 
 (deftest "regalloc-ml-spill-cost adds bonus for call-crossing interval"
+  "regalloc-ml-spill-cost produces a higher cost for an interval that crosses a call than one that does not."
   (let* ((no-call  (make-live-interval :vreg :nc :start 0 :end 10
                                        :use-positions '(2) :crosses-call-p nil
                                        :return-value-p nil))
@@ -197,6 +203,7 @@
            (regalloc-ml-spill-cost no-call nil)))))
 
 (deftest "regalloc-ml-spill-cost adds bonus for return-value interval"
+  "regalloc-ml-spill-cost produces a higher cost for a return-value interval than a plain interval."
   (let* ((plain  (make-live-interval :vreg :p :start 0 :end 10
                                      :use-positions '(2) :crosses-call-p nil
                                      :return-value-p nil))
@@ -207,6 +214,7 @@
            (regalloc-ml-spill-cost plain nil)))))
 
 (deftest "regalloc-ml-spill-cost reduces cost for rematerializable const interval"
+  "regalloc-ml-spill-cost produces a lower cost for an interval with a remat-const than a plain interval."
   (let* ((plain (make-live-interval :vreg :p :start 0 :end 10
                                     :use-positions '(2) :remat-const nil))
          (remat (make-live-interval :vreg :r :start 0 :end 10
@@ -215,6 +223,7 @@
            (regalloc-ml-spill-cost plain nil)))))
 
 (deftest "regalloc-ml-spill-cost uses loop-depths to weight loop-body uses"
+  "regalloc-ml-spill-cost produces a higher cost for uses inside a loop than uses at depth 0."
   (let* ((interval (make-spill-test-interval :v 0 10 :use-positions '(5)))
          (depths (let ((ht (make-hash-table :test #'eql)))
                    (setf (gethash 5 ht) 2)

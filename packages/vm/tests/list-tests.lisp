@@ -141,8 +141,8 @@
     (cl-cc:vm-reg-set s 2 'b)
     (exec1 (cl-cc:make-vm-hash-cons :dst 0 :car-src 1 :cdr-src 2) s)
     (exec1 (cl-cc:make-vm-hash-cons :dst 3 :car-src 1 :cdr-src 2) s)
-    (assert-true (eq (cl-cc:vm-reg-get s 0)
-                     (cl-cc:vm-reg-get s 3)))
+    (assert-eq (cl-cc:vm-reg-get s 0)
+               (cl-cc:vm-reg-get s 3))
     (exec1 (cl-cc:make-vm-cons :dst 4 :car-src 1 :cdr-src 2) s)
     (assert-false (eq (cl-cc:vm-reg-get s 0)
                       (cl-cc:vm-reg-get s 4)))))
@@ -156,9 +156,9 @@
          (right-2 (list 'c 'd))
          (t1 (cl-cc/vm::vm-hash-cons left-1 right-1))
          (t2 (cl-cc/vm::vm-hash-cons left-2 right-2)))
-    (assert-true (eq t1 t2))
-    (assert-true (eq (car t1) (car t2)))
-    (assert-true (eq (cdr t1) (cdr t2)))))
+    (assert-eq t1 t2)
+    (assert-eq (car t1) (car t2))
+    (assert-eq (cdr t1) (cdr t2))))
 
 (deftest vm-hash-cons-cyclic-input-does-not-overflow
   "vm-hash-cons handles cyclic inputs without recursion overflow."

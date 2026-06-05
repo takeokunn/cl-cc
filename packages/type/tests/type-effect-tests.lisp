@@ -134,8 +134,8 @@ registration body per case."
   (assert-true (type-effect-row-p row))
     (assert-= expected-count (length (type-effect-row-effects row)))
     (when expected-name
-      (assert-true (string= expected-name
-                            (symbol-name (cl-cc/type:type-effect-op-name (first (type-effect-row-effects row))))))))
+      (assert-string= expected-name
+                      (symbol-name (cl-cc/type:type-effect-op-name (first (type-effect-row-effects row)))))))
 
 (deftest-each effect-row-to-string
   "type-to-string formats effect rows: pure → '{}'; io-row contains 'IO'."

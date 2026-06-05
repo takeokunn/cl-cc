@@ -1,6 +1,6 @@
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-cli-serial-suite)
+(in-suite cl-cc-cli-pure-suite)
 
 (deftest cli-flamegraph-reads-perf-map-lines
   "FR-702 perf map input is converted to JIT-colored flamegraph samples."

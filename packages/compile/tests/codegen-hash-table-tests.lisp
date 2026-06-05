@@ -1,7 +1,7 @@
 ;;;; tests/unit/compile/codegen-hash-table-tests.lisp — Hash-table codegen tests
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 (deftest-each codegen-make-hash-table-test-designators
   "make-hash-table statically accepts quoted and function test designators."

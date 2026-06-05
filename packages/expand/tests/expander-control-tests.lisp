@@ -4,7 +4,6 @@
 
 (defsuite expander-control-suite
   :description "Control-form expander unit tests"
-  :parallel nil
   :parent cl-cc-unit-suite)
 
 

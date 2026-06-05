@@ -358,6 +358,6 @@
             (with-reset-repl-state
               (run-string-repl (format nil "(load ~S)" tmpfile))
               (let ((result (run-string-repl "(load-test-fn-42 14)")))
-                (assert-true (eql result 42)))))
+                (assert-eql result 42))))
        (ignore-errors (delete-file tmpfile))
        (reset-repl-state))))

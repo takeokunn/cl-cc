@@ -291,7 +291,7 @@ when INTERVAL has no proven non-negative width bound."
     (when width
       (1- (ash 1 width)))))
 
-(defun opt-interval-fits-fixnum-width-p (interval &optional (limit-width (integer-length most-positive-fixnum)))
+(defun opt-interval-fits-fixnum-width-p (interval &optional (limit-width (integer-length +opt-range-positive-infinity+)))
   "Return T when INTERVAL's unsigned width is strictly below LIMIT-WIDTH."
   (let ((width (opt-interval-bit-width interval)))
     (and width (< width limit-width))))
@@ -299,8 +299,8 @@ when INTERVAL has no proven non-negative width bound."
 (defun opt-interval-fits-fixnum-p (interval)
   "Return T when INTERVAL is proven to stay within the host fixnum range."
   (and interval
-       (<= most-negative-fixnum (opt-interval-lo interval))
-       (<= (opt-interval-hi interval) most-positive-fixnum)))
+       (<= +opt-range-negative-infinity+ (opt-interval-lo interval))
+       (<= (opt-interval-hi interval) +opt-range-positive-infinity+)))
 
 (defun %opt-nonnegative-mask-value (interval)
   "Return INTERVAL's non-negative singleton value, or NIL."
@@ -384,8 +384,8 @@ shifted directly."
        (<= (opt-interval-hi inner) (opt-interval-hi outer))))
 
 (defun opt-interval-widen (old new &key
-                                 (negative-infinity most-negative-fixnum)
-                                 (positive-infinity most-positive-fixnum))
+                                 (negative-infinity +opt-range-negative-infinity+)
+                                 (positive-infinity +opt-range-positive-infinity+))
   "Widen OLD toward NEW for monotone interval fixpoint convergence.
 
 When NEW extends below OLD, the lower bound becomes NEGATIVE-INFINITY.  When

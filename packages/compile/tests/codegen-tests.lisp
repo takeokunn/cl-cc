@@ -6,12 +6,16 @@
 
 (in-package :cl-cc/test)
 
+(defsuite cl-cc-codegen-unit-suite
+  :description "Parallel codegen unit tests (pure ctx-scoped, no global mutation)"
+  :parent cl-cc-unit-suite)
+
 (defsuite cl-cc-codegen-unit-serial-suite
-  :description "Serial codegen-heavy unit tests that share mutable compiler state"
+  :description "Serial codegen tests requiring global function replacement"
   :parent cl-cc-unit-suite
   :parallel nil)
 
-(in-suite cl-cc-codegen-unit-serial-suite)
+(in-suite cl-cc-codegen-unit-suite)
 
 ;;; ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -115,7 +119,7 @@ stable, isolated context."
                                        (typep inst 'cl-cc/vm::vm-const))
                                      (codegen-instructions ctx))))
           (assert-= 1 (length consts))
-          (assert-true (string= "shared" (cl-cc::vm-const-value (first consts)))))))))
+          (assert-string= "shared" (cl-cc::vm-const-value (first consts)))))))))
 
 (deftest codegen-string-literal-pool-does-not-deduplicate-non-strings
   "FR-137 pools strings only; other quoted constants keep direct vm-const emission.
@@ -171,6 +175,8 @@ Note: identical non-string constants may coalesce to a single vm-const during co
          (l2 (cl-cc/compile:make-label ctx "TEST")))
     (assert-false (string= l1 l2))))
 
+(in-suite cl-cc-codegen-unit-serial-suite)
+
 (deftest codegen-make-compile-opts-uses-global-speed-policy-by-default
   "%make-compile-opts falls back to global declaim optimize speed when :speed is omitted."
   (let* ((old (gethash 'speed cl-cc/expand:*declaim-optimize-registry*))
@@ -182,6 +188,8 @@ Note: identical non-string constants may coalesce to a single vm-const during co
                   (speed (getf opts :speed)))
              (assert-= 3 speed)))
       (setf (gethash 'speed cl-cc/expand:*declaim-optimize-registry*) old))))
+
+(in-suite cl-cc-codegen-unit-suite)
 
 (deftest codegen-maybe-bump-opts-speed-from-ast-defun-declaration
   "%maybe-bump-opts-speed-from-ast picks up local defun optimize speed declaration."

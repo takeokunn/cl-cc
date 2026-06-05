@@ -4,7 +4,7 @@
 
 ;;; Load sb-cover contrib before the reader encounters sb-cover: symbols.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+sbcl (ignore-errors (require :sb-cover)))
+  (ignore-errors (require :sb-cover)))
 
 (in-package :cl-cc/test)
 

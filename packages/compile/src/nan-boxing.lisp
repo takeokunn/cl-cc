@@ -21,11 +21,17 @@
   "Tag: heap pointer encoded in payload.")
 
 (defun nan-box-float (float-val)
-  "Box a float value for NaN-boxed representation."
-  #+sbcl
-  (sb-kernel:double-float-bits float-val)
-  #-sbcl
-  (error "NAN-BOX-FLOAT requires SBCL double-float bit access: ~S" float-val))
+  "Box a float value for NaN-boxed representation.
+Uses portable IEEE 754 bit extraction via integer-decode-float arithmetic."
+  (multiple-value-bind (significand exponent sign)
+      (integer-decode-float (coerce float-val 'double-float))
+    (let* ((biased-exp (+ exponent 52 1023))
+           (sign-bit   (if (minusp sign) 1 0))
+           (exp-bits   (max 0 (min 2047 biased-exp)))
+           (frac-bits  (logand significand (1- (ash 1 52)))))
+      (logior (ash sign-bit 63)
+              (ash exp-bits 52)
+              frac-bits))))
 
 (defun nan-box-fixnum (fixnum-val)
   "Box a fixnum into NaN space."

@@ -166,6 +166,7 @@
 ;;; Integration: arithmetic expression grammar
 
 (deftest grammar-arithmetic-expression
+  "Multi-rule grammar parses a left-associative arithmetic expression with no remainder."
   (clear-grammar-rules)
   ;; atom = integer | identifier
   (def-grammar-rule :atom (alt (token :T-INT) (token :T-IDENT)))

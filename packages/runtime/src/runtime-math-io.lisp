@@ -167,18 +167,11 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
   "Create a strong host hash table for RT hash-table wrappers.
 
 Weakness is represented by RT-WEAK-HASH-TABLE metadata and GC cleanup rather
-than by host weak tables.  Keeping the backing table strong makes behavior
-portable and lets tests drive liveness through the runtime marked-set model."
-  #+sbcl
+than by host weak tables, so the backing table is always strong."
+  (declare (ignore weakness))
   (if size
       (cl:make-hash-table :test test :size size)
-      (cl:make-hash-table :test test))
-  #-sbcl
-  (progn
-    (declare (ignore weakness))
-    (if size
-        (cl:make-hash-table :test test :size size)
-        (cl:make-hash-table :test test))))
+      (cl:make-hash-table :test test)))
 
 (defun %rt-hash-table-backing (ht)
   (etypecase ht

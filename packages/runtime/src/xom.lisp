@@ -37,13 +37,11 @@ it.  Disabled by default; unsupported hardware falls back gracefully to RX.")
 
 (defun %rt-cpu-feature-text ()
   "Return best-effort CPU feature text for capability detection."
-  (or #+sbcl
-      (ignore-errors
+  (or (ignore-errors
         (when (and (find-package :uiop) (fboundp 'uiop:run-program))
           (uiop:run-program '("sysctl" "-a")
                             :output :string
                             :ignore-error-status t)))
-      #-sbcl nil
       (ignore-errors
         (with-open-file (in "/proc/cpuinfo" :direction :input)
           (let ((out (make-string-output-stream)))
@@ -67,11 +65,9 @@ Production native runtimes should back this with CPUID leaf 7/ECX bit 3.  The
 hosted Lisp runtime has no portable CPUID primitive, so it uses visible OS CPU
 feature strings plus CLCC_X86_PKU=1 as an explicit override."
   (and (rt-host-x86-64-p)
-       (or #+sbcl
-           (let ((env (sb-ext:posix-getenv "CLCC_X86_PKU")))
+       (or (let ((env (sb-ext:posix-getenv "CLCC_X86_PKU")))
              (and env (member (string-downcase env) '("1" "true" "yes" "on")
                               :test #'string=)))
-           #-sbcl nil
            (%rt-token-present-p (%rt-cpu-feature-text) "pku")
            (%rt-token-present-p (%rt-cpu-feature-text) "ospke"))))
 

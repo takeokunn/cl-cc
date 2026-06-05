@@ -23,15 +23,13 @@
 (defun install-crash-handler ()
   "Install the global crash handler for uncaught conditions."
   (unless *crash-handler-installed*
-    #+sbcl
-    (progn
-      ;; Hook for unhandled errors in non-debugger threads
-      (setf sb-ext:*invoke-debugger-hook*
-            (lambda (condition hook)
-              (declare (ignore hook))
-              (when (typep condition 'serious-condition)
-                (save-crash-dump condition))
-              (sb-debug:invoke-default-debugger condition))))
+    ;; Hook for unhandled errors in non-debugger threads
+    (setf sb-ext:*invoke-debugger-hook*
+          (lambda (condition hook)
+            (declare (ignore hook))
+            (when (typep condition 'serious-condition)
+              (save-crash-dump condition))
+            (sb-debug:invoke-default-debugger condition)))
     (setf *crash-handler-installed* t)))
 
 ;;; ──── Crash dump saving ────
@@ -72,14 +70,11 @@ File: crash-YYYYMMDD-HHMMSS.cl-cc-dump"
 ;;; ──── Data capture ────
 (defun capture-backtrace ()
   "Capture the current call stack as a backtrace."
-  #+sbcl
   (let ((frames nil))
     (ignore-errors
-      (sb-debug:backtrace-as-list
-       (lambda (frame)
-         (push frame frames)))))
-  #-sbcl
-  nil)
+      (dolist (frame (sb-debug:backtrace-as-list))
+        (push frame frames)))
+    frames))
 
 (defun capture-registers ()
   "Capture current register values.
@@ -98,11 +93,8 @@ x86-64: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8-R15, RIP."
 
 (defun capture-thread-context ()
   "Capture per-thread state."
-  #+sbcl
   (list (list :thread-name (sb-thread:thread-name sb-thread:*current-thread*)
-              :thread-id (sb-thread:thread-os-thread sb-thread:*current-thread*)))
-  #-sbcl
-  nil)
+              :thread-id (sb-thread:thread-os-thread sb-thread:*current-thread*))))
 
 ;;; ──── Serialization ────
 (defun write-crash-report (report stream)
@@ -121,7 +113,6 @@ x86-64: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8-R15, RIP."
   (format stream "~%Thread Context: ~S~%" (cr-thread-context report)))
 
 ;;; ──── Signal handler for C-level crashes ────
-#+sbcl
 (defun install-signal-handlers ()
   "Install signal handlers for SIGSEGV and SIGABRT."
   (sb-sys:enable-interrupt

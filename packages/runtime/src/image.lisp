@@ -220,10 +220,8 @@
         nil)))
 
 (defun %rt-core-class-slot-names (object)
-  #+sbcl
   (mapcar #'sb-mop:slot-definition-name
-          (sb-mop:class-slots (class-of object)))
-  #-sbcl nil)
+          (sb-mop:class-slots (class-of object))))
 
 (defun %rt-core-encode-graph (roots)
   "Copy reachable heap objects from ROOTS into a position-independent graph."

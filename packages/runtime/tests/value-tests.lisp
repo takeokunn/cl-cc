@@ -84,7 +84,7 @@
     (assert-true (> (aref payload 1) 0))
     (assert-= (expt 2 80) (cl-cc/runtime:rt-native-bignum-to-integer value))))
 
-#+sbcl (deftest native-bignum-checked-helpers-promote-and-coerce
+(deftest native-bignum-checked-helpers-promote-and-coerce
   "Native checked arithmetic helpers allocate bignums and coerce back to fixnum when possible."
   (let* ((max-fix (1- (ash 1 50)))
          (min-fix (- (ash 1 50)))

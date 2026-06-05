@@ -26,18 +26,18 @@
 
 (deftest mapcar-generic-function-reader
   "mapcar with #'reader-method on CLOS instances"
-  (assert-true (string= "(a b c)"
+  (assert-string= "(a b c)"
                         (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(progn (defclass item () ((name :initarg :name :reader item-name))) (let ((items (list (make-instance 'item :name 'a) (make-instance 'item :name 'b) (make-instance 'item :name 'c)))) (mapcar #'item-name items)))" :stdlib t)))))))
+                          (string-downcase (format nil "~S" (run-string "(progn (defclass item () ((name :initarg :name :reader item-name))) (let ((items (list (make-instance 'item :name 'a) (make-instance 'item :name 'b) (make-instance 'item :name 'c)))) (mapcar #'item-name items)))" :stdlib t))))))
 
 (deftest self-host-mapcar-inst-sexp
   "Self-hosting pattern: mapcar #'generic-function over instruction list"
   :timeout 180
-  (assert-true (string= "((:const r0 42) (:const r1 7) (:add r2 r0 r1))"
+  (assert-string= "((:const r0 42) (:const r1 7) (:add r2 r0 r1))"
     (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
       (string-downcase (format nil "~S"
                                (run-string *self-host-mapcar-inst-sexp-program*
-                                           :stdlib t)))))))
+                                           :stdlib t))))))
 
 ;;; Run Tests Function
 
@@ -50,7 +50,7 @@
           ("sequence" '(0 1 2)
            "(progn (defvar *n* 0) (defun next-n () (let ((val *n*)) (setq *n* (+ *n* 1)) val)) (list (next-n) (next-n) (next-n)))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 (deftest defvar-label-generation
   "defvar counter for label generation pattern"
@@ -71,7 +71,7 @@
 (deftest self-host-compiler-context-full
   "Self-hosting: full compiler context with make-register, make-label, emit"
   (let ((result (run-string *self-host-compiler-context-program* :stdlib t)))
-    (assert-true (equal '((:CONST :R0 42) (:CONST :R1 7) (:ADD :R2 :R0 :R1)) result))))
+    (assert-equal '((:CONST :R0 42) (:CONST :R1 7) (:ADD :R2 :R0 :R1)) result)))
 
 (deftest self-host-ast-compile-dispatch
   "Self-hosting: CLOS compile-ast dispatch compiles (+ (* 3 4) 5)"
@@ -82,9 +82,9 @@
 (deftest self-host-macro-expander
   "Self-hosting: macro expansion system with hash table registry"
   (let ((result (run-string *self-host-simple-macro-expander-program* :stdlib t)))
-    (assert-true (string= "(if x (progn (+ 1 2)) nil)"
+    (assert-string= "(if x (progn (+ 1 2)) nil)"
                          (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                           (string-downcase (format nil "~S" result)))))))
+                           (string-downcase (format nil "~S" result))))))
 
 ;;; Multiple-Value-List Tests
 
@@ -94,7 +94,7 @@
           ("values" '(1 2 3) "(multiple-value-list (values 1 2 3))")
           ("single" '(42)    "(multiple-value-list (values 42))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 ;;; Apply with Spread Arguments Tests
 
@@ -110,12 +110,11 @@
 
 (deftest apply-spread-quoted-nil-preserves-evaluation-order
   "Quoted NIL spread keeps APPLY equivalent to a direct call, including argument evaluation order."
-  (assert-true
-   (equal '(3 2)
+  (assert-equal '(3 2)
           (run-string
            "(let ((n 0))
                 (flet ((next () (setq n (+ n 1)) n))
-                  (list (apply #'+ (next) (next) nil) n)))"))))
+                  (list (apply #'+ (next) (next) nil) n)))")))
 
 (deftest apply-improper-quoted-list-signals-error
   "Improper quoted spread lists still signal at runtime instead of being direct-call lowered."
@@ -123,7 +122,7 @@
 
 (deftest apply-spread-args-append
   "apply #'append with list of lists"
-  (assert-true (equal '(1 2 3 4) (run-string "(apply #'append (list (list 1 2) (list 3 4)))"))))
+  (assert-equal '(1 2 3 4) (run-string "(apply #'append (list (list 1 2) (list 3 4)))")))
 
 
 ;;; Typed Defun/Lambda Tests
@@ -238,7 +237,7 @@
           ("remove-basic"       '(1 3 5)       "(remove 2 (list 1 2 3 2 5))")
           ("remove-duplicates"  '(1 2 3)       "(remove-duplicates (list 1 2 3 2 1))"))
   (expected form)
-  (assert-true (equal expected (run-string form))))
+  (assert-equal expected (run-string form)))
 
 (deftest-each hof-numeric-result
   "Higher-order functions that return numeric values."

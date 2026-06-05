@@ -7,8 +7,7 @@
 (defun vm-isatty (stream)
   "Return T if STREAM is connected to a terminal."
   (or (interactive-stream-p stream)
-      #+sbcl (ignore-errors (sb-unix:unix-isatty (sb-sys:fd-stream-fd stream)))
-      #-sbcl nil))
+      (ignore-errors (sb-unix:unix-isatty (sb-sys:fd-stream-fd stream)))))
 
 (defun vm-terminal-size (&optional (stream *standard-output*))
   "Return (values columns rows) for the terminal attached to STREAM.

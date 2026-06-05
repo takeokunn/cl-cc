@@ -38,7 +38,7 @@
   (let* ((values (list 1 2 3))
           (result (cl-cc/vm::vm-build-list nil values :stack-allocate-p t)))
     (assert-equal values result)
-    (assert-true (eq values result))))
+    (assert-eq values result)))
 
 (deftest-each vm-arg-slot-name-helper
   "vm-arg-slot-name maps integer indices to their :ARGn keyword."

@@ -283,7 +283,7 @@
            (let ((sri (cl-cc/codegen:wasm-file-sri-hash tmp)))
              (assert-type string sri)
              ;; Must begin with the algorithm prefix.
-             (assert-true (string= "sha384-" (subseq sri 0 7)))
+             (assert-string= "sha384-" (subseq sri 0 7))
              ;; The base64 body must be non-empty and consist of valid base64 chars.
              (let ((b64-body (subseq sri 7)))
                (assert-true (> (length b64-body) 0))

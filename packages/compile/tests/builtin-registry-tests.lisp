@@ -26,7 +26,7 @@
   (name-str expected-conv)
   (let ((entry (gethash name-str cl-cc/compile::*builtin-registry*)))
     (assert-true entry)
-    (assert-true (eq expected-conv (cl-cc/compile::be-convention entry)))))
+    (assert-eq expected-conv (cl-cc/compile::be-convention entry))))
 
 (deftest-each builtin-registry-constructor-symbols
   "Registry entries have correct constructor symbols."
@@ -43,7 +43,7 @@
           ("integer-decode-float" "INTEGER-DECODE-FLOAT" 'cl-cc::make-vm-integer-decode-float))
   (name-str expected-ctor)
   (let ((entry (gethash name-str cl-cc/compile::*builtin-registry*)))
-    (assert-true (eq expected-ctor (cl-cc/compile::be-ctor entry)))))
+    (assert-eq expected-ctor (cl-cc/compile::be-ctor entry))))
 
 (deftest builtin-registry-constructors-are-fbound
   "Every registered builtin constructor symbol resolves to a callable function."
@@ -67,7 +67,7 @@
 (deftest builtin-registry-binary-needs-2-args
   "Binary convention entries have :binary convention."
   (let ((entry (gethash "MOD" cl-cc/compile::*builtin-registry*)))
-    (assert-true (eq :binary (cl-cc/compile::be-convention entry)))))
+    (assert-eq :binary (cl-cc/compile::be-convention entry))))
 
 (deftest builtin-registry-known-function-properties
   "FR-183: builtin registry entries expose known function properties for optimizer consumers."
@@ -100,9 +100,9 @@
                             unary-rules)))
     (assert-true car-fact)
     (let ((head (cl-cc::rule-head car-fact)))
-      (assert-true (eq (first head) 'cl-cc/compile::builtin-unary))
-      (assert-true (eq (second head) 'car))
-      (assert-true (eq (third head) 'cl-cc/vm:make-vm-car)))))
+      (assert-eq (first head) 'cl-cc/compile::builtin-unary)
+      (assert-eq (second head) 'car)
+      (assert-eq (third head) 'cl-cc/vm:make-vm-car))))
 
 ;;; ─── Emitter Dispatch Tests ────────────────────────────────────────────────
 

@@ -276,43 +276,38 @@
         (assert-true result)
         (assert-true (typep result 'cl-cc/vm::vm-jump-zero))))))
 
-(deftest jump-pass-propagates-constant-comparison-to-fallthrough
-  "opt-pass-jump replaces a repeated comparison in the fallthrough successor with constant 1."
-  (let* ((insts (list (make-vm-const :dst :i :value 1)
-                      (make-vm-const :dst :lim :value 3)
-                      (make-vm-lt :dst :c :lhs :i :rhs :lim)
-                      (make-vm-jump-zero :reg :c :label "false")
-                      (make-vm-label :name "true")
-                      (make-vm-lt :dst :c2 :lhs :i :rhs :lim)
-                      (make-vm-ret :reg :c2)
-                      (make-vm-label :name "false")
-                      (make-vm-ret :reg :c)))
-         (out (cl-cc/optimize::opt-pass-jump insts)))
+(deftest-each jump-pass-comparison-constant-propagation-cases
+  "opt-pass-jump replaces a repeated comparison in the fallthrough or taken successor with the known constant."
+  :cases (("fallthrough-gets-1"
+           (list (make-vm-const :dst :i :value 1)
+                 (make-vm-const :dst :lim :value 3)
+                 (make-vm-lt :dst :c :lhs :i :rhs :lim)
+                 (make-vm-jump-zero :reg :c :label "false")
+                 (make-vm-label :name "true")
+                 (make-vm-lt :dst :c2 :lhs :i :rhs :lim)
+                 (make-vm-ret :reg :c2)
+                 (make-vm-label :name "false")
+                 (make-vm-ret :reg :c))
+           1)
+          ("taken-gets-0"
+           (list (make-vm-const :dst :i :value 5)
+                 (make-vm-const :dst :lim :value 3)
+                 (make-vm-lt :dst :c :lhs :i :rhs :lim)
+                 (make-vm-jump-zero :reg :c :label "false")
+                 (make-vm-label :name "true")
+                 (make-vm-ret :reg :c)
+                 (make-vm-label :name "false")
+                 (make-vm-lt :dst :c2 :lhs :i :rhs :lim)
+                 (make-vm-ret :reg :c2))
+           0))
+  (insts expected-value)
+  (let ((out (cl-cc/optimize::opt-pass-jump insts)))
     (assert-true
      (some (lambda (i)
              (and (typep i 'cl-cc/vm::vm-const)
                   (eq (cl-cc/vm::vm-dst i) :c2)
-                  (eql (cl-cc/vm::vm-value i) 1)))
+                  (eql (cl-cc/vm::vm-value i) expected-value)))
            out))))
-
-(deftest jump-pass-replaces-redundant-comparison-in-taken-successor
-  "opt-pass-jump replaces a repeated comparison in the taken successor with constant 0."
-  (let* ((insts (list (make-vm-const :dst :i :value 5)
-                      (make-vm-const :dst :lim :value 3)
-                      (make-vm-lt :dst :c :lhs :i :rhs :lim)
-                      (make-vm-jump-zero :reg :c :label "false")
-                      (make-vm-label :name "true")
-                      (make-vm-ret :reg :c)
-                      (make-vm-label :name "false")
-                      (make-vm-lt :dst :c2 :lhs :i :rhs :lim)
-                      (make-vm-ret :reg :c2)))
-         (out (cl-cc/optimize::opt-pass-jump insts)))
-    (assert-true
-     (some (lambda (i)
-             (and (typep i 'cl-cc/vm::vm-const)
-                   (eq (cl-cc/vm::vm-dst i) :c2)
-                   (eql (cl-cc/vm::vm-value i) 0)))
-            out))))
 
 (deftest if-conversion-simple-diamond-emits-vm-select
   "opt-pass-if-conversion converts a simple if diamond into one vm-select."
@@ -508,39 +503,17 @@
     (assert-= 0 jumps-to-lh)
     (assert-= 1 guard-jumps)))
 
-(deftest loop-rotation-noop-on-nonmatching-shape
-  "opt-pass-loop-rotation leaves non-matching code unchanged in length."
+(deftest-each loop-transforms-noop-on-nonmatching-shape
+  "Loop rotation and peeling are no-ops on non-matching control-flow shapes."
+  :cases (("rotation" #'cl-cc/optimize::opt-pass-loop-rotation)
+          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peeling))
+  (pass)
   (let* ((insts (list (make-vm-label :name "A")
                       (make-vm-const :dst :r0 :value 1)
                       (make-vm-jump :label "B")
                       (make-vm-label :name "B")
                       (make-vm-ret :reg :r0)))
-         (out (cl-cc/optimize::opt-pass-loop-rotation insts)))
-    (assert-= (length insts) (length out))))
-
-(deftest loop-peeling-duplicates-first-iteration-for-simple-while
-  "opt-pass-loop-peeling duplicates first iteration for simple while shape."
-  (let* ((insts (list (make-vm-label :name "Lh")
-                      (cl-cc:make-vm-integer-p :dst :r1 :src :r0)
-                      (make-vm-jump-zero :reg :r1 :label "Lexit")
-                      (make-vm-add :dst :r0 :lhs :r0 :rhs :r2)
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lexit")
-                      (make-vm-ret :reg :r0)))
-         (out (cl-cc/optimize::opt-pass-loop-peeling insts))
-         (jz-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))
-         (add-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out)))
-    (assert-= 2 jz-count)
-    (assert-= 2 add-count)))
-
-(deftest loop-peeling-noop-on-nonmatching-shape
-  "opt-pass-loop-peeling is a no-op on nonmatching control-flow shape."
-  (let* ((insts (list (make-vm-label :name "A")
-                      (make-vm-const :dst :r0 :value 1)
-                      (make-vm-jump :label "B")
-                      (make-vm-label :name "B")
-                      (make-vm-ret :reg :r0)))
-         (out (cl-cc/optimize::opt-pass-loop-peeling insts)))
+         (out (funcall pass insts)))
     (assert-= (length insts) (length out))))
 
 (deftest loop-unrolling-fully-unrolls-small-counted-loop
@@ -570,24 +543,24 @@
     (assert-= 0 lt-count)
     (assert-= 3 step-count)))
 
-(deftest-each loop-unrolling-supports-generalized-comparisons
+(deftest-each loop-unrolling-non-lt-comparisons
   "opt-pass-loop-unrolling fully unrolls small counted loops with non-vm-lt comparisons."
   :cases (("le" (make-vm-const :dst :i :value 0)
-            (make-vm-const :dst :lim :value 2)
-            (make-vm-const :dst :step :value 1)
-            (make-vm-le :dst :c :lhs :i :rhs :lim)
-            3)
-           ("ge" (make-vm-const :dst :i :value 3)
-            (make-vm-const :dst :lim :value 1)
-            (make-vm-const :dst :step :value -1)
-            (make-vm-ge :dst :c :lhs :i :rhs :lim)
-            3)
-           ("eq" (make-vm-const :dst :i :value 0)
-            (make-vm-const :dst :lim :value 0)
-            (make-vm-const :dst :step :value 1)
-            (make-vm-eq :dst :c :lhs :i :rhs :lim)
-            1))
-  (init-inst lim-inst step-inst cmp-inst expected-steps)
+                 (make-vm-const :dst :lim :value 2)
+                 (make-vm-const :dst :step :value 1)
+                 (make-vm-le :dst :c :lhs :i :rhs :lim)
+                 'cl-cc/vm::vm-le 3)
+          ("ge" (make-vm-const :dst :i :value 3)
+                 (make-vm-const :dst :lim :value 1)
+                 (make-vm-const :dst :step :value -1)
+                 (make-vm-ge :dst :c :lhs :i :rhs :lim)
+                 'cl-cc/vm::vm-ge 3)
+          ("eq" (make-vm-const :dst :i :value 0)
+                 (make-vm-const :dst :lim :value 0)
+                 (make-vm-const :dst :step :value 1)
+                 (make-vm-eq :dst :c :lhs :i :rhs :lim)
+                 'cl-cc/vm::vm-eq 1))
+  (init-inst lim-inst step-inst cmp-inst cmp-type expected-steps)
   (let* ((insts (list init-inst lim-inst step-inst
                       (make-vm-label :name "Lh")
                       cmp-inst
@@ -598,6 +571,7 @@
                       (make-vm-label :name "Lexit")
                       (make-vm-ret :reg :sum)))
          (out (cl-cc/optimize::opt-pass-loop-unrolling insts))
+         (cmp-count (count-if (lambda (x) (typep x cmp-type)) out))
          (step-count (count-if (lambda (x)
                                  (and (typep x 'cl-cc/vm::vm-add)
                                       (eq (cl-cc/vm::vm-dst x) :i)))
@@ -606,6 +580,7 @@
                                  (and (typep x 'cl-cc/vm::vm-jump)
                                       (equal (cl-cc/vm::vm-label-name x) "Lh")))
                                out)))
+    (assert-= 0 cmp-count)
     (assert-= expected-steps step-count)
     (assert-= 0 jump-to-lh)))
 
@@ -678,60 +653,7 @@
                                (equal (cl-cc/vm::vm-label-name x) "Lh")))
                         out))))
 
-(deftest loop-peeling-detects-cfg-natural-loop
-  "opt-pass-loop-peeling peels a CFG-detected natural loop."
-  (let* ((insts (list (make-vm-label :name "Entry")
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lh")
-                      (cl-cc:make-vm-integer-p :dst :r1 :src :r0)
-                      (make-vm-jump-zero :reg :r1 :label "Lexit")
-                      (make-vm-add :dst :r0 :lhs :r0 :rhs :r2)
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lexit")
-                      (make-vm-ret :reg :r0)))
-         (out (cl-cc/optimize::opt-pass-loop-peeling insts))
-         (jz-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))
-         (add-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out)))
-    (assert-= 2 jz-count)
-    (assert-= 2 add-count)))
 
-(deftest-each loop-unrolling-supports-additional-comparisons
-  "opt-pass-loop-unrolling fully unrolls small counted loops using le/ge/eq predicates."
-  :cases (("le" (make-vm-const :dst :i :value 0)
-                 (make-vm-const :dst :lim :value 2)
-                 (make-vm-const :dst :step :value 1)
-                 (make-vm-le :dst :c :lhs :i :rhs :lim)
-                 'cl-cc/vm::vm-le 3)
-          ("ge" (make-vm-const :dst :i :value 3)
-                 (make-vm-const :dst :lim :value 1)
-                 (make-vm-const :dst :step :value -1)
-                 (make-vm-ge :dst :c :lhs :i :rhs :lim)
-                 'cl-cc/vm::vm-ge 3)
-          ("eq" (make-vm-const :dst :i :value 4)
-                 (make-vm-const :dst :lim :value 4)
-                 (make-vm-const :dst :step :value 1)
-                 (make-vm-eq :dst :c :lhs :i :rhs :lim)
-                 'cl-cc/vm::vm-eq 1))
-  (init-inst limit-inst step-inst cmp-inst cmp-type expected-steps)
-  (let* ((insts (list init-inst
-                      limit-inst
-                      step-inst
-                      (make-vm-label :name "Lh")
-                      cmp-inst
-                      (make-vm-jump-zero :reg :c :label "Lexit")
-                      (make-vm-add :dst :sum :lhs :sum :rhs :i)
-                      (make-vm-add :dst :i :lhs :i :rhs :step)
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lexit")
-                      (make-vm-ret :reg :sum)))
-         (out (cl-cc/optimize::opt-pass-loop-unrolling insts))
-         (cmp-count (count-if (lambda (x) (typep x cmp-type)) out))
-         (step-count (count-if (lambda (x)
-                                 (and (typep x 'cl-cc/vm::vm-add)
-                                      (eq (cl-cc/vm::vm-dst x) :i)))
-                               out)))
-    (assert-= 0 cmp-count)
-    (assert-= expected-steps step-count)))
 
 (deftest loop-unrolling-partial-keeps-remainder-loop
   "opt-pass-loop-unrolling partially unrolls larger loops and keeps a back-edge remainder loop."
@@ -761,20 +683,43 @@
     (assert-= 1 jump-to-lh)))
 
 (deftest-each cfg-natural-loop-transforms-detected
-  "CFG-based loop rotation and peeling detect single-latch natural loops."
-  :cases (("rotation" #'cl-cc/optimize::opt-pass-loop-rotation 0 1)
-          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peeling  1 2))
-  (pass expected-jumps-to-lh expected-adds)
-  (let* ((insts (list (make-vm-const :dst :one :value 1)
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lh")
-                      (cl-cc:make-vm-integer-p :dst :c :src :i)
-                      (make-vm-jump-zero :reg :c :label "Lexit")
-                      (make-vm-add :dst :i :lhs :i :rhs :one)
-                      (make-vm-jump :label "Lh")
-                      (make-vm-label :name "Lexit")
-                      (make-vm-ret :reg :i)))
-         (out (funcall pass insts))
+  "CFG-based loop rotation and peeling detect single-latch natural loops, including plain while-shape."
+  :cases (("rotation"
+           #'cl-cc/optimize::opt-pass-loop-rotation
+           (list (make-vm-const :dst :one :value 1)
+                 (make-vm-jump :label "Lh")
+                 (make-vm-label :name "Lh")
+                 (cl-cc:make-vm-integer-p :dst :c :src :i)
+                 (make-vm-jump-zero :reg :c :label "Lexit")
+                 (make-vm-add :dst :i :lhs :i :rhs :one)
+                 (make-vm-jump :label "Lh")
+                 (make-vm-label :name "Lexit")
+                 (make-vm-ret :reg :i))
+           0 1)
+          ("peeling"
+           #'cl-cc/optimize::opt-pass-loop-peeling
+           (list (make-vm-const :dst :one :value 1)
+                 (make-vm-jump :label "Lh")
+                 (make-vm-label :name "Lh")
+                 (cl-cc:make-vm-integer-p :dst :c :src :i)
+                 (make-vm-jump-zero :reg :c :label "Lexit")
+                 (make-vm-add :dst :i :lhs :i :rhs :one)
+                 (make-vm-jump :label "Lh")
+                 (make-vm-label :name "Lexit")
+                 (make-vm-ret :reg :i))
+           1 2)
+          ("peeling-plain-while"
+           #'cl-cc/optimize::opt-pass-loop-peeling
+           (list (make-vm-label :name "Lh")
+                 (cl-cc:make-vm-integer-p :dst :r1 :src :r0)
+                 (make-vm-jump-zero :reg :r1 :label "Lexit")
+                 (make-vm-add :dst :r0 :lhs :r0 :rhs :r2)
+                 (make-vm-jump :label "Lh")
+                 (make-vm-label :name "Lexit")
+                 (make-vm-ret :reg :r0))
+           0 2))
+  (pass insts expected-jumps-to-lh expected-adds)
+  (let* ((out (funcall pass insts))
          (jumps-to-lh (count-if (lambda (x)
                                   (and (typep x 'cl-cc/vm::vm-jump)
                                        (equal (cl-cc/vm::vm-label-name x) "Lh")))

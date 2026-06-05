@@ -41,16 +41,16 @@
 
 (deftest multi-dispatch-inheritance-fallback
   "Multiple dispatch: dispatch falls back via class inheritance"
-  (assert-true (string= "base"
+  (assert-string= "base"
                         (let ((*package* (find-package :cl-cc)) (*print-pretty* nil))
-                          (string-downcase (format nil "~S" (run-string "(progn (defclass a () ()) (defclass b (a) ()) (defclass x () ()) (defclass y (x) ()) (defgeneric op (p q)) (defmethod op ((p a) (q x)) 'base) (op (make-instance 'b) (make-instance 'y)))" :stdlib t)))))))
+                          (string-downcase (format nil "~S" (run-string "(progn (defclass a () ()) (defclass b (a) ()) (defclass x () ()) (defclass y (x) ()) (defgeneric op (p q)) (defmethod op ((p a) (q x)) 'base) (op (make-instance 'b) (make-instance 'y)))" :stdlib t))))))
 
 (deftest-each multi-dispatch-type-equality
   "Multiple dispatch: double dispatch for type equality (self-hosting pattern)"
   :cases (("same-type" t   "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-int)))")
            ("diff-type" nil "(progn (defclass ty () ()) (defclass ty-int (ty) ()) (defclass ty-str (ty) ()) (defgeneric ty-eq (a b)) (defmethod ty-eq ((a ty-int) (b ty-int)) t) (defmethod ty-eq ((a ty-str) (b ty-str)) t) (defmethod ty-eq ((a ty) (b ty)) nil) (ty-eq (make-instance 'ty-int) (make-instance 'ty-str)))"))
   (expected form)
-  (assert-true (equal expected (run-string form :stdlib t))))
+  (assert-equal expected (run-string form :stdlib t)))
 
 ;;; CLOS Initform and Accessor Setf Tests
 
@@ -75,5 +75,5 @@
 (deftest self-host-clos-compiler-full
   "Test self-hosting: CLOS-based compiler with generic dispatch (full pipeline)."
   :timeout 180
-  (assert-true (equal '((:CONST :R0 3) (:CONST :R1 4) (:MUL :R2 :R0 :R1) (:CONST :R3 5) (:ADD :R4 :R2 :R3))
-    (run-string *self-host-clos-compiler-full-program* :stdlib t))))
+  (assert-equal '((:CONST :R0 3) (:CONST :R1 4) (:MUL :R2 :R0 :R1) (:CONST :R3 5) (:ADD :R4 :R2 :R3))
+    (run-string *self-host-clos-compiler-full-program* :stdlib t)))

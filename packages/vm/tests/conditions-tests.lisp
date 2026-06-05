@@ -183,7 +183,7 @@
     (let* ((entries (cl-cc/vm::vm-handler-stack state))
            (snapshot-a (cl-cc/vm::vm-handler-entry-saved-regs (first entries)))
            (snapshot-b (cl-cc/vm::vm-handler-entry-saved-regs (second entries))))
-      (assert-true (eq snapshot-a snapshot-b))
+      (assert-eq snapshot-a snapshot-b)
       (assert-= 42 (gethash :r1 snapshot-a)))))
 
 (deftest vm-sync-handler-regs-updates-catch-frame-saved-regs
@@ -210,9 +210,9 @@
      (cl-cc:make-vm-establish-handler :handler-label "h" :result-reg :r0 :error-type 'error)
      state 0 nil)
     (let ((entry (first (cl-cc/vm::vm-handler-stack state))))
-      (assert-true (eq (fourth entry) (cl-cc/vm::vm-call-stack state)))
-      (assert-true (eq (fifth entry) (cl-cc/vm::vm-handler-entry-saved-regs entry)))
-      (assert-true (eq (sixth entry) (cl-cc/vm::vm-method-call-stack state))))))
+      (assert-eq (fourth entry) (cl-cc/vm::vm-call-stack state))
+      (assert-eq (fifth entry) (cl-cc/vm::vm-handler-entry-saved-regs entry))
+      (assert-eq (sixth entry) (cl-cc/vm::vm-method-call-stack state)))))
 
 (deftest vm-establish-catch-retains-call-and-method-stacks
   "vm-establish-catch stores call-stack and method-call-stack by shared reference in the entry."
@@ -224,5 +224,5 @@
      (cl-cc:make-vm-establish-catch :tag-reg :tag :handler-label "c" :result-reg :r0)
      state 0 nil)
     (let ((entry (first (cl-cc/vm::vm-handler-stack state))))
-      (assert-true (eq (fifth entry) (cl-cc/vm::vm-call-stack state)))
-      (assert-true (eq (seventh entry) (cl-cc/vm::vm-method-call-stack state))))))
+      (assert-eq (fifth entry) (cl-cc/vm::vm-call-stack state))
+      (assert-eq (seventh entry) (cl-cc/vm::vm-method-call-stack state)))))

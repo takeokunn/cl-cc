@@ -296,7 +296,8 @@
        :pathname "../../cps/tests"
        :serial t
        :components
-       ((:file "cps-coverage-matrix-tests")))
+       ((:file "cps-coverage-matrix-tests")
+        (:file "cps-trmc-tests")))
         (:file "builtin-registry-tests")
        (:file "builtin-registry-data-tests")
        (:file "fr-586-set-tests")
@@ -326,6 +327,7 @@
       (:file "fr-009-pic-tests")
       (:file "codegen-toplevel-cps-tests")
      (:file "codegen-locals-tests")
+     (:file "codegen-numeric-hints-tests")
      (:file "codegen-io-tests")
      (:file "codegen-io-read-tests")
      (:file "codegen-hash-table-tests")
@@ -366,6 +368,7 @@
      (:file "pipeline-repl-tests")
      (:file "standalone-load-tests")
      (:file "closure-pipeline-tests")
+     (:file "nan-boxing-tests")
      (:module "pbt"
       :serial t
       :components
@@ -407,6 +410,8 @@
       (:file "optimizer-flow-tests")
      (:file "optimizer-flow-block-tests")
      (:file "optimizer-pipeline-tests")
+     (:file "optimizer-security-tests")
+     (:file "optimizer-concurrency-tests")
      (:file "optimizer-roadmap-tests")
      (:file "optimizer-roadmap-backend-tests")
      (:file "optimizer-inline-tests")
@@ -485,7 +490,8 @@
          (:file "binary-fr-tests")
          (:file "binary-wxorx-tests")
          (:file "binary-constpool-tests")
-         (:file "got-plt-tests")))
+         (:file "got-plt-tests")
+         (:file "patchable-entry-tests")))
      (:module "pipeline-tests"
       :pathname "packages/pipeline/tests"
       :serial t
@@ -521,6 +527,7 @@
          (:file "runtime-stdlib-3-os-tests")
          (:file "runtime-stdlib-3-image-tests")
         (:file "continuous-profile-tests")
+        (:file "deadlock-tests")
        (:file "value-tests")
        (:file "dynlib-tests")
        (:file "frame-tests")))

@@ -71,6 +71,7 @@
 ;;; ─── infer: ast-setq / ast-block / infer-with-constraints ───────────────
 
 (deftest infer-setq-returns-fixnum
+  "infer of (setq x 42) returns a fixnum type primitive."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(setq x 42))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -78,6 +79,7 @@
       (assert-eq 'fixnum (cl-cc/type:type-primitive-name ty)))))
 
 (deftest infer-block-returns-last-form
+  "infer of a block expression returns the type of its last form."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '(block b 1 2 3))))
     (multiple-value-bind (ty subst) (infer-with-env ast)
@@ -85,6 +87,7 @@
       (assert-type-equal ty cl-cc/type:type-int))))
 
 (deftest infer-application-resolves-constraint
+  "infer of a self-applying lambda resolves the constraint and returns a fixnum result type."
   (reset-type-vars!)
   (let ((ast (cl-cc:lower-sexp-to-ast '((lambda (x) x) 42))))
     (multiple-value-bind (ty subst residual)

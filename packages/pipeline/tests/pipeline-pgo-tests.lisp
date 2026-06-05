@@ -34,15 +34,12 @@
     (assert-= 0 (gethash :a table))
     (assert-= 2 (gethash :b table))))
 
-(deftest pgo-label-position-map-empty-list
-  "Empty instruction list produces an empty table."
-  (let ((table (cl-cc/pipeline::%pgo-label-position-map '())))
-    (assert-= 0 (hash-table-count table))))
-
-(deftest pgo-label-position-map-no-labels
-  "Instruction list with no labels produces an empty table."
-  (let* ((c (cl-cc:make-vm-const :dst :r0 :value 7))
-         (table (cl-cc/pipeline::%pgo-label-position-map (list c))))
+(deftest-each pgo-label-position-map-empty-table-cases
+  "Instruction lists with no labels produce an empty table."
+  :cases (("empty-list" nil)
+          ("no-labels"  (list (cl-cc:make-vm-const :dst :r0 :value 7))))
+  (insts)
+  (let ((table (cl-cc/pipeline::%pgo-label-position-map insts)))
     (assert-= 0 (hash-table-count table))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
@@ -143,18 +140,14 @@
 ;;; %pgo-type-feedback-rows
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(deftest pgo-type-feedback-rows-nil-profile
-  "%pgo-type-feedback-rows returns nil when profile-data is nil."
-  (assert-true (null (cl-cc/pipeline::%pgo-type-feedback-rows nil))))
-
-(deftest pgo-type-feedback-rows-non-plist
-  "%pgo-type-feedback-rows returns nil for a non-plist atom (not a cons)."
-  (assert-true (null (cl-cc/pipeline::%pgo-type-feedback-rows 42))))
-
-(deftest pgo-type-feedback-rows-plist-without-key
-  "%pgo-type-feedback-rows returns nil when :type-feedback key is absent."
-  (assert-true (null (cl-cc/pipeline::%pgo-type-feedback-rows
-                      '(:other-key (1 2 3))))))
+(deftest-each pgo-type-feedback-rows-nil-cases
+  "%pgo-type-feedback-rows returns nil for inputs that have no usable :type-feedback."
+  :cases (("nil"         nil)
+          ("atom"        42)
+          ("missing-key" '(:other-key (1 2 3)))
+          ("empty"       '(:type-feedback nil)))
+  (input)
+  (assert-true (null (cl-cc/pipeline::%pgo-type-feedback-rows input))))
 
 (deftest pgo-type-feedback-rows-plist-with-type-feedback-key
   "%pgo-type-feedback-rows returns the rows stored under :type-feedback."
@@ -162,11 +155,6 @@
                  (((:generic-call 1 :string) . 5))))
          (profile-data (list :type-feedback rows)))
     (assert-equal rows (cl-cc/pipeline::%pgo-type-feedback-rows profile-data))))
-
-(deftest pgo-type-feedback-rows-empty-rows
-  "%pgo-type-feedback-rows returns nil when :type-feedback maps to nil."
-  (assert-true (null (cl-cc/pipeline::%pgo-type-feedback-rows
-                      '(:type-feedback nil)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; %pgo-dominant-types-by-pc

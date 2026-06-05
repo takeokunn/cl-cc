@@ -12,6 +12,43 @@
 
 (in-package :cl-cc/optimize)
 
+;;; --- Devirtualization Fact Struct ---
+
+(defstruct opt-devirt-facts
+  "Bundle of 6 hash tables that track per-register compile-time facts for
+   sealed generic-function devirtualization.  Allocated once in opt-pass-devirtualize
+   and threaded as a single argument through all helper functions."
+  reg-name          ; reg → global-variable name symbol
+  reg-class         ; reg → class name symbol (from vm-class-def)
+  reg-object-class  ; reg → class name symbol (from vm-make-obj with sealed class)
+  reg-const         ; reg → constant value
+  reg-closure-label ; reg → closure entry-label string
+  reg-gf-literal)   ; reg → GF metadata plist from literal hash table
+
+(defun %make-devirt-facts ()
+  "Allocate a fresh opt-devirt-facts with one empty eq hash-table per slot."
+  (make-opt-devirt-facts
+   :reg-name          (make-hash-table :test #'eq)
+   :reg-class         (make-hash-table :test #'eq)
+   :reg-object-class  (make-hash-table :test #'eq)
+   :reg-const         (make-hash-table :test #'eq)
+   :reg-closure-label (make-hash-table :test #'eq)
+   :reg-gf-literal    (make-hash-table :test #'eq)))
+
+;;; Each entry is (reader writer) where reader extracts the slot HT from a facts
+;;; struct and writer sets a key in it.  Used in the vm-move arm of
+;;; %opt-track-sealed-gf-facts to propagate facts from src to dst without
+;;; building a runtime cons list at each invocation.
+(defparameter *devirt-fact-slot-accessors*
+  (list #'opt-devirt-facts-reg-name
+        #'opt-devirt-facts-reg-class
+        #'opt-devirt-facts-reg-object-class
+        #'opt-devirt-facts-reg-const
+        #'opt-devirt-facts-reg-closure-label
+        #'opt-devirt-facts-reg-gf-literal)
+  "List of reader closures for each slot of opt-devirt-facts, used to iterate
+   over all fact tables when propagating register facts across vm-move.")
+
 (defvar *opt-enable-sealed-gf-devirtualization* t
   "Policy gate for sealed+satiated generic-function static dispatch.")
 
@@ -410,10 +447,16 @@ The original join call remains available for fall-through and unknown preds."
             :combination (gethash :__method-combination__ gf-ht)
             :unsafe nil))))
 
-(defun %opt-track-sealed-gf-facts (inst class-sealed reg-name reg-class reg-object-class
-                                   reg-const reg-closure-label reg-gf-literal gf-infos)
-  "Update compile-time facts used by sealed generic-function devirtualization."
-  (let ((dst (opt-inst-dst inst)))
+(defun %opt-track-sealed-gf-facts (inst class-sealed facts gf-infos)
+  "Update compile-time facts used by sealed generic-function devirtualization.
+FACTS is an opt-devirt-facts struct bundling all 6 per-register hash tables."
+  (let ((dst (opt-inst-dst inst))
+        (reg-name          (opt-devirt-facts-reg-name facts))
+        (reg-class         (opt-devirt-facts-reg-class facts))
+        (reg-object-class  (opt-devirt-facts-reg-object-class facts))
+        (reg-const         (opt-devirt-facts-reg-const facts))
+        (reg-closure-label (opt-devirt-facts-reg-closure-label facts))
+        (reg-gf-literal    (opt-devirt-facts-reg-gf-literal facts)))
     (typecase inst
       (vm-class-def
        (%opt-set-reg-fact (vm-dst inst) reg-class (vm-class-name-sym inst)
@@ -431,25 +474,20 @@ The original join call remains available for fall-through and unknown preds."
        (%opt-set-reg-fact (vm-dst inst) reg-closure-label (vm-label-name inst)
                            reg-name reg-class reg-object-class reg-const reg-gf-literal))
       (vm-move
-       (let ((dst (vm-dst inst))
+       (let ((move-dst (vm-dst inst))
              (src (vm-move-src inst)))
-         (%opt-clear-reg-facts dst reg-name reg-class reg-object-class
-                                reg-const reg-closure-label reg-gf-literal)
-         (dolist (pair `((,reg-name . ,(gethash src reg-name))
-                         (,reg-class . ,(gethash src reg-class))
-                         (,reg-object-class . ,(gethash src reg-object-class))
-                         (,reg-const . ,(gethash src reg-const))
-                         (,reg-closure-label . ,(gethash src reg-closure-label))
-                         (,reg-gf-literal . ,(gethash src reg-gf-literal))))
-           (multiple-value-bind (value found-p) (gethash src (car pair))
-             (declare (ignore value))
-             (when found-p
-               (setf (gethash dst (car pair)) (cdr pair)))))))
+         (%opt-clear-reg-facts move-dst reg-name reg-class reg-object-class
+                               reg-const reg-closure-label reg-gf-literal)
+         (dolist (accessor *devirt-fact-slot-accessors*)
+           (let ((table (funcall accessor facts)))
+             (multiple-value-bind (value found-p) (gethash src table)
+               (when found-p
+                 (setf (gethash move-dst table) value)))))))
       (vm-make-obj
        (let ((class-name (or (gethash (vm-class-reg inst) reg-name)
                              (gethash (vm-class-reg inst) reg-class))))
          (%opt-clear-reg-facts dst reg-name reg-class reg-object-class
-                                 reg-const reg-closure-label reg-gf-literal)
+                               reg-const reg-closure-label reg-gf-literal)
          (when (and class-name (gethash class-name class-sealed))
            (setf (gethash dst reg-object-class) class-name))))
       (vm-register-method
@@ -489,14 +527,17 @@ The original join call remains available for fall-through and unknown preds."
        (%opt-clear-reg-facts dst reg-name reg-class reg-object-class
                              reg-const reg-closure-label reg-gf-literal)))))
 
-(defun %opt-single-sealed-primary-method-label (inst class-sealed reg-name reg-object-class
-                                                reg-gf-literal gf-infos)
-  "Return direct method label for safe sealed+satiated generic call INST, or NIL."
+(defun %opt-single-sealed-primary-method-label (inst class-sealed facts gf-infos)
+  "Return direct method label for safe sealed+satiated generic call INST, or NIL.
+FACTS is an opt-devirt-facts struct bundling all per-register fact tables."
   (when (= (length (vm-args inst)) 1)
-    (let* ((arg-class (gethash (first (vm-args inst)) reg-object-class))
-           (gf-name (gethash (vm-gf-reg inst) reg-name))
-           (info (or (and gf-name (gethash gf-name gf-infos))
-                     (gethash (vm-gf-reg inst) reg-gf-literal))))
+    (let* ((reg-name         (opt-devirt-facts-reg-name facts))
+           (reg-object-class (opt-devirt-facts-reg-object-class facts))
+           (reg-gf-literal   (opt-devirt-facts-reg-gf-literal facts))
+           (arg-class        (gethash (first (vm-args inst)) reg-object-class))
+           (gf-name          (gethash (vm-gf-reg inst) reg-name))
+           (info             (or (and gf-name (gethash gf-name gf-infos))
+                                 (gethash (vm-gf-reg inst) reg-gf-literal))))
       (when (and arg-class
                  (gethash arg-class class-sealed)
                  info
@@ -523,12 +564,10 @@ The original join call remains available for fall-through and unknown preds."
       (prog1 (intern (format nil "R~A" next) :keyword)
         (incf next)))))
 
-(defun %opt-devirt-generic-call (inst class-sealed reg-name reg-object-class
-                                 reg-gf-literal gf-infos fresh-reg result)
-  "Replace INST with direct vm-call when sealed GF dispatch is statically unique."
-  (let ((label (%opt-single-sealed-primary-method-label inst class-sealed reg-name
-                                                       reg-object-class reg-gf-literal
-                                                       gf-infos)))
+(defun %opt-devirt-generic-call (inst class-sealed facts gf-infos fresh-reg result)
+  "Replace INST with direct vm-call when sealed GF dispatch is statically unique.
+FACTS is an opt-devirt-facts struct bundling all per-register fact tables."
+  (let ((label (%opt-single-sealed-primary-method-label inst class-sealed facts gf-infos)))
     (if label
         (let ((func-reg (funcall fresh-reg)))
           (push (make-vm-func-ref :dst func-reg :label label) result)
@@ -553,17 +592,12 @@ object is known to be an instance of a sealed class is rewritten to a direct
 `vm-call` when the GF has exactly one applicable unqualified primary method,
 uses the standard method combination, and has no EQL-specializer ambiguity."
   (let ((name-to-label (opt-build-function-name-map instructions))
-        (reg-track (make-hash-table :test #'eq))
+        (reg-track    (make-hash-table :test #'eq))
         (class-sealed (make-hash-table :test #'equal))
-        (reg-name (make-hash-table :test #'eq))
-        (reg-class (make-hash-table :test #'eq))
-        (reg-object-class (make-hash-table :test #'eq))
-        (reg-const (make-hash-table :test #'eq))
-        (reg-closure-label (make-hash-table :test #'eq))
-        (reg-gf-literal (make-hash-table :test #'eq))
-        (gf-infos (make-hash-table :test #'equal))
-        (fresh-reg (%opt-fresh-register-generator instructions))
-        (result nil))
+        (facts        (%make-devirt-facts))
+        (gf-infos     (make-hash-table :test #'equal))
+        (fresh-reg    (%opt-fresh-register-generator instructions))
+        (result       nil))
     (dolist (inst instructions)
       (when (typep inst 'vm-class-def)
         (setf (gethash (vm-class-name-sym inst) class-sealed)
@@ -571,20 +605,22 @@ uses the standard method combination, and has no EQL-specializer ambiguity."
     (dolist (inst instructions (nreverse result))
       (typecase inst
         ((or vm-call vm-tail-call vm-apply)
-          (setf result (%opt-devirt-call inst reg-track result)))
+         (setf result (%opt-devirt-call inst reg-track result)))
         (vm-generic-call
          (when *opt-enable-sealed-gf-devirtualization*
-           (setf result (%opt-devirt-generic-call inst class-sealed reg-name
-                                                  reg-object-class reg-gf-literal
+           (setf result (%opt-devirt-generic-call inst class-sealed facts
                                                   gf-infos fresh-reg result)))
          (unless *opt-enable-sealed-gf-devirtualization*
            (push inst result))
-         (%opt-clear-reg-facts (opt-inst-dst inst) reg-track reg-name reg-class
-                               reg-object-class reg-const reg-closure-label
-                               reg-gf-literal))
+         (let ((dst (opt-inst-dst inst)))
+           (%opt-clear-reg-facts dst reg-track
+                                 (opt-devirt-facts-reg-name facts)
+                                 (opt-devirt-facts-reg-class facts)
+                                 (opt-devirt-facts-reg-object-class facts)
+                                 (opt-devirt-facts-reg-const facts)
+                                 (opt-devirt-facts-reg-closure-label facts)
+                                 (opt-devirt-facts-reg-gf-literal facts))))
         (t
-          (%opt-devirt-track-designator inst name-to-label reg-track)
-          (%opt-track-sealed-gf-facts inst class-sealed reg-name reg-class
-                                      reg-object-class reg-const reg-closure-label
-                                      reg-gf-literal gf-infos)
-          (push inst result))))))
+         (%opt-devirt-track-designator inst name-to-label reg-track)
+         (%opt-track-sealed-gf-facts inst class-sealed facts gf-infos)
+         (push inst result))))))

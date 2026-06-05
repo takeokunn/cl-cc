@@ -19,14 +19,11 @@
                                            `',(slot-value object name))))))
 
 (defun %vm-serialize-slot-names (object)
-  #+sbcl
   (handler-case
       (loop for slot in (class-slots (class-of object))
             for name = (slot-definition-name slot)
             when (slot-boundp object name) collect name)
-    (error () nil))
-  #-sbcl (declare (ignore object))
-  #-sbcl nil)
+    (error () nil)))
 
 (defvar *fasl-code-version* 1)
 (defvar +vm-fasl-magic+ "CLCC-FASL1")

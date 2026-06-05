@@ -129,13 +129,11 @@
 (defun %default-perf-map-path ()
   (parse-namestring
    (format nil "/tmp/perf-~D.map"
-           (or #+sbcl
-               (ignore-errors
+           (or (ignore-errors
                  (require :sb-posix)
                  (let* ((pkg (find-package "SB-POSIX"))
                         (sym (and pkg (find-symbol "GETPID" pkg))))
                    (and sym (funcall sym))))
-               #-sbcl nil
                0))))
 
 (defun %write-flamegraph-from-perf-data (output-path &key input-path)

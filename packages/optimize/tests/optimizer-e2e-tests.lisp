@@ -106,8 +106,8 @@
   "compile-string keeps raw instructions executable in the VM program and stores optimized output separately in the result metadata."
   (let* ((result (compile-string "(+ 1 2)" :target :vm))
          (program (compilation-result-program result)))
-    (assert-true (equal (vm-program-instructions program)
-                        (cl-cc:compilation-result-vm-instructions result)))
+    (assert-equal (vm-program-instructions program)
+                  (cl-cc:compilation-result-vm-instructions result))
     (assert-true (or (null (cl-cc:compilation-result-optimized-instructions result))
                      (listp (cl-cc:compilation-result-optimized-instructions result))))))
 

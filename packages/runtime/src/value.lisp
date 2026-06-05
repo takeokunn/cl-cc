@@ -374,16 +374,9 @@ characters with codes above #xFF must use the heap string representation."
   "Pin ARRAY (a SIMPLE-ARRAY of (UNSIGNED-BYTE 8)) for FFI access.
 Returns an RT-PINNED-UNBOXED-ARRAY-BUFFER holding a stable data pointer."
   (check-type array (simple-array (unsigned-byte 8) (*)))
-  #+sbcl
   (let ((buf (%make-pinned-buffer :array array
                                    :length (length array)
                                    :data-pointer (sb-sys:vector-sap array)
-                                   :released-p nil)))
-    buf)
-  #-sbcl
-  (let ((buf (%make-pinned-buffer :array array
-                                   :length (length array)
-                                   :data-pointer nil
                                    :released-p nil)))
     buf))
 

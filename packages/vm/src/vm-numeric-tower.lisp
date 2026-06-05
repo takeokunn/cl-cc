@@ -393,46 +393,6 @@ representation and applies signs after quotient/remainder construction."
   "Native VM bignum subtraction fallback, externalized as a host integer."
   (vm-bignum-to-integer (vm-bignum-sub lhs rhs)))
 
-(setf (fdefinition 'vm-bignum-multiply-integers)
-      (lambda (lhs rhs &key (base +vm-bignum-digit-base+) (threshold +vm-bignum-karatsuba-threshold+))
-        "Native VM bignum multiplication fallback, externalized as a host integer."
-        (declare (ignore base threshold))
-        (vm-bignum-to-integer (vm-bignum-mul lhs rhs))))
-
-(setf (fdefinition 'vm-bignum-burnikel-ziegler-divide)
-      (lambda (lhs rhs &key (base +vm-bignum-digit-base+) (block-size 16) (rounding :truncate))
-        "Native VM bignum division entry point returning host integer quotient/remainder."
-        (declare (ignore base block-size))
-        (labels ((trunc (a b)
-                   (multiple-value-bind (q r) (vm-bignum-div a b)
-                     (values (vm-bignum-to-integer q) (vm-bignum-to-integer r))))
-                 (floor2 (a b)
-                   (multiple-value-bind (q r) (trunc a b)
-                     (if (and (not (zerop r)) (minusp (* a b)))
-                         (values (1- q) (+ r b))
-                         (values q r))))
-                 (ceiling2 (a b)
-                   (multiple-value-bind (q r) (trunc a b)
-                     (if (and (not (zerop r)) (plusp (* a b)))
-                         (values (1+ q) (- r b))
-                         (values q r))))
-                 (round2 (a b)
-                   (multiple-value-bind (q r) (trunc a b)
-                     (let* ((abs-r (abs r))
-                            (abs-b (abs b))
-                            (cmp (- (* 2 abs-r) abs-b)))
-                       (cond
-                         ((minusp cmp) (values q r))
-                         ((or (plusp cmp) (oddp q))
-                          (let ((q2 (if (plusp (* a b)) (1+ q) (1- q))))
-                            (values q2 (- a (* q2 b)))))
-                         (t (values q r)))))))
-          (ecase rounding
-            (:truncate (trunc lhs rhs))
-            (:floor (floor2 lhs rhs))
-            (:ceiling (ceiling2 lhs rhs))
-            (:round (round2 lhs rhs))))))
-
 (defstruct (vm-ratio
             (:constructor %make-vm-ratio (numerator denominator))
             (:copier nil))

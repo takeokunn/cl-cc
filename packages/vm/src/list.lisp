@@ -3,12 +3,9 @@
 ;;; VM List Operations
 
 (defparameter *vm-hash-cons-table*
-  #+sbcl (make-hash-table :test #'equal :weakness :value)
-  #-sbcl (make-hash-table :test #'equal)
+  (make-hash-table :test #'equal :weakness :value)
   "Runtime hash-cons table keyed by (car cdr).
-
-On SBCL, values are weak so unreferenced interned cons cells can be reclaimed
-by GC. Other implementations fall back to a regular hash table.")
+Values are weak so unreferenced interned cons cells can be reclaimed by GC.")
 
 (defun vm-clear-hash-cons-table ()
   "Clear the runtime hash-cons table and return it."

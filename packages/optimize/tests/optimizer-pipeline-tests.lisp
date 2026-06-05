@@ -155,11 +155,8 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
 
 ;;; ─── *opt-convergence-passes* / *opt-pass-registry* data coverage ────────
 
-(deftest opt-pass-data-integrity
-  "*opt-convergence-passes* is a non-empty function list; registry includes early Prolog/egraph passes and core cleanup passes."
-  (assert-true (listp cl-cc/optimize::*opt-convergence-passes*))
-  (assert-true (> (length cl-cc/optimize::*opt-convergence-passes*) 10))
-  (assert-true (every #'functionp cl-cc/optimize::*opt-convergence-passes*))
+(deftest opt-pass-registry-key-presence
+  "*opt-pass-registry* includes all expected pass keywords."
   (assert-true (gethash :prolog-rewrite cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :egraph cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :fold cl-cc/optimize::*opt-pass-registry*))
@@ -167,28 +164,27 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-true (gethash :pure-call-optimization cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :dce  cl-cc/optimize::*opt-pass-registry*))
   (assert-true (gethash :cse  cl-cc/optimize::*opt-pass-registry*))
-  (assert-eq #'cl-cc/optimize::%maybe-apply-prolog-rewrite (first cl-cc/optimize::*opt-convergence-passes*))
-  (assert-false (member #'cl-cc/optimize:optimize-with-egraph cl-cc/optimize::*opt-convergence-passes*))
-  (assert-false (member #'cl-cc/optimize::opt-pass-fold cl-cc/optimize::*opt-convergence-passes*))
-  (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*))
+  (assert-eq #'cl-cc/optimize::opt-pass-if-conversion
+             (gethash :if-conversion cl-cc/optimize::*opt-pass-registry*))
+  (assert-eq #'cl-cc/optimize::opt-pass-fma-recognition
+             (gethash :fma-recognition cl-cc/optimize::*opt-pass-registry*)))
+
+(deftest opt-default-convergence-pass-keys-ordering
+  "*opt-default-convergence-pass-keys* has the expected prefix order and positional invariants."
   (assert-equal '(:prolog-rewrite :call-site-splitting :devirtualize :if-conversion
                   :closure-capture-dedup :closure-thunk-sharing)
                 (subseq cl-cc/optimize::*opt-default-convergence-pass-keys* 0 6))
-  (assert-eq #'cl-cc/optimize::opt-pass-if-conversion
-             (gethash :if-conversion cl-cc/optimize::*opt-pass-registry*))
-  (assert-true (< (position :devirtualize cl-cc/optimize::*opt-default-convergence-pass-keys*)
-                  (position :if-conversion cl-cc/optimize::*opt-default-convergence-pass-keys*)
-                  (position :inline cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-eq :inline (seventh cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-eq :overflow-check-elim (eighth cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-eq :sccp (ninth cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-eq :cons-slot-forward (tenth cl-cc/optimize::*opt-default-convergence-pass-keys*))
+  (assert-true (< (position :devirtualize cl-cc/optimize::*opt-default-convergence-pass-keys*)
+                  (position :if-conversion cl-cc/optimize::*opt-default-convergence-pass-keys*)
+                  (position :inline cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-true (member :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-true (member :fma-recognition cl-cc/optimize::*opt-default-convergence-pass-keys*))
   (assert-true (< (position :fma-recognition cl-cc/optimize::*opt-default-convergence-pass-keys*)
                   (position :schedule-local cl-cc/optimize::*opt-default-convergence-pass-keys*)))
-  (assert-eq #'cl-cc/optimize::opt-pass-fma-recognition
-             (gethash :fma-recognition cl-cc/optimize::*opt-pass-registry*))
   (assert-true (< (position :copy-prop cl-cc/optimize::*opt-default-convergence-pass-keys*)
                   (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-true (< (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)
@@ -197,6 +193,16 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                   (position :cse cl-cc/optimize::*opt-default-convergence-pass-keys*)))
   (assert-true (< (position :pure-call-optimization cl-cc/optimize::*opt-default-convergence-pass-keys*)
                   (position :dce cl-cc/optimize::*opt-default-convergence-pass-keys*))))
+
+(deftest opt-convergence-passes-type-invariants
+  "*opt-convergence-passes* is a non-empty function list with expected first element and exclusions."
+  (assert-true (listp cl-cc/optimize::*opt-convergence-passes*))
+  (assert-true (> (length cl-cc/optimize::*opt-convergence-passes*) 10))
+  (assert-true (every #'functionp cl-cc/optimize::*opt-convergence-passes*))
+  (assert-eq #'cl-cc/optimize::%maybe-apply-prolog-rewrite (first cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize:optimize-with-egraph cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::opt-pass-fold cl-cc/optimize::*opt-convergence-passes*))
+  (assert-false (member #'cl-cc/optimize::opt-pass-strength-reduce cl-cc/optimize::*opt-convergence-passes*)))
 
 ;;; ─── FR-099 FMA recognition ───────────────────────────────────────────────
 
@@ -442,24 +448,32 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
     (assert-false (cl-cc/optimize:opt-thinlto-should-import-p
                    candidate '(callee) :budget 20))))
 
-(deftest optimize-adaptive-compilation-threshold-reacts-to-warmup-pressure-and-failures
+(deftest-each adaptive-compilation-threshold-cases
   "opt-adaptive-compilation-threshold lowers for warmup and increases for pressure/failures."
-  (assert-= 300 (cl-cc/optimize::opt-adaptive-compilation-threshold :base 900 :warmup-p t))
-  (assert-= 1800 (cl-cc/optimize::opt-adaptive-compilation-threshold :base 900 :cache-pressure 0.8))
-  (assert-= 2700 (cl-cc/optimize::opt-adaptive-compilation-threshold :base 900 :failures 2))
-  (assert-= 1800 (cl-cc/optimize::opt-adaptive-compilation-threshold
-                  :base 900 :warmup-p t :cache-pressure 0.8 :failures 2)))
+  :cases (("warmup"    900 t   nil nil 300)
+          ("pressure"  900 nil 0.8 nil 1800)
+          ("failures"  900 nil nil 2   2700)
+          ("combined"  900 t   0.8 2   1800))
+  (base warmup-p pressure failures expected)
+  (assert-= expected
+            (cl-cc/optimize::opt-adaptive-compilation-threshold
+             :base base
+             :warmup-p warmup-p
+             :cache-pressure pressure
+             :failures failures)))
 
-(deftest optimize-tier-transition-promotes-through-runtime-tiers
+(deftest-each tier-transition-cases
   "Tier transition helper promotes interpreter to baseline and baseline to optimized."
-  (assert-eq :interpreter
-             (cl-cc/optimize:opt-tier-transition :interpreter 99 :baseline-threshold 100))
-  (assert-eq :baseline
-             (cl-cc/optimize:opt-tier-transition :interpreter 100 :baseline-threshold 100))
-  (assert-eq :baseline
-             (cl-cc/optimize:opt-tier-transition :baseline 999 :optimized-threshold 1000))
-  (assert-eq :optimized
-             (cl-cc/optimize:opt-tier-transition :baseline 1000 :optimized-threshold 1000)))
+  :cases (("interp-below"    :interpreter 99   100  nil  :interpreter)
+          ("interp-at"       :interpreter 100  100  nil  :baseline)
+          ("baseline-below"  :baseline    999  nil  1000 :baseline)
+          ("baseline-at"     :baseline    1000 nil  1000 :optimized))
+  (tier count bt ot expected)
+  (assert-eq expected
+             (cl-cc/optimize:opt-tier-transition
+              tier count
+              :baseline-threshold bt
+              :optimized-threshold ot)))
 
 (deftest optimize-materialize-deopt-state-maps-machine-registers-to-vm-registers
   "opt-materialize-deopt-state reconstructs VM register values from machine register snapshot."
@@ -531,194 +545,17 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
     (assert-eq :obj (getf (first chain) :receiver))
     (assert-eq :method-b (getf (second chain) :target))))
 
-(deftest optimize-build-async-state-machine-builds-linear-transitions
-  "opt-build-async-state-machine creates one transition per await point."
-  (let* ((sm (cl-cc/optimize::opt-build-async-state-machine '(:await-1 :await-2)))
-         (trans (cl-cc/optimize::opt-async-sm-transitions sm)))
-    (assert-= 3 (length (cl-cc/optimize::opt-async-sm-states sm)))
-    (assert-= 2 (length trans))
-    (assert-eq :await-1 (getf (first trans) :await))
-    (assert-= 2 (getf (second trans) :to))))
-
-(deftest optimize-choose-coroutine-lowering-strategy-prefers-stackful-when-needed
-  "Strategy chooser returns stackful for call/cc or deep yield, stackless otherwise."
-  (assert-eq :stackless
-             (cl-cc/optimize::opt-choose-coroutine-lowering-strategy
-              :supports-call/cc nil :deep-yield-p nil))
-  (assert-eq :stackful
-             (cl-cc/optimize::opt-choose-coroutine-lowering-strategy
-              :supports-call/cc t :deep-yield-p nil))
-  (assert-eq :stackful
-             (cl-cc/optimize::opt-choose-coroutine-lowering-strategy
-              :supports-call/cc nil :deep-yield-p t)))
-
-(deftest optimize-channel-select-path-classifies-buffered-sync-and-contended-cases
-  "Channel helper classifies fast buffered, synchronous, and contended paths."
-  (let ((buffered (cl-cc/optimize::make-opt-channel-site
-                   :buffer-size 8 :queue-depth 2 :contention 0 :select-arity 2))
-        (sync (cl-cc/optimize::make-opt-channel-site
-               :buffer-size 0 :queue-depth 0 :contention 0 :select-arity 2))
-        (contended (cl-cc/optimize::make-opt-channel-site
-                    :buffer-size 8 :queue-depth 2 :contention 9 :select-arity 2)))
-    (assert-eq :fast-buffered (cl-cc/optimize::opt-channel-select-path buffered))
-    (assert-eq :synchronous-rendezvous (cl-cc/optimize::opt-channel-select-path sync))
-    (assert-eq :contended-fallback (cl-cc/optimize::opt-channel-select-path contended))))
-
-(deftest optimize-channel-jump-table-select-threshold
-  "Jump-table select is enabled when select arity meets threshold."
-  (let ((small (cl-cc/optimize::make-opt-channel-site
-                :buffer-size 1 :queue-depth 0 :contention 0 :select-arity 2))
-        (large (cl-cc/optimize::make-opt-channel-site
-                :buffer-size 1 :queue-depth 0 :contention 0 :select-arity 6)))
-    (assert-false (cl-cc/optimize::opt-channel-should-jump-table-select-p small :threshold 4))
-    (assert-true (cl-cc/optimize::opt-channel-should-jump-table-select-p large :threshold 4))))
-
-(deftest optimize-stm-plan-skips-log-for-pure-block
-  "STM helper marks pure block as log-free."
-  (let ((plan (cl-cc/optimize::opt-stm-build-plan
-               :reads '(:x) :writes nil :pure-p t)))
-    (assert-false (cl-cc/optimize::opt-stm-needs-log-p plan))
-    (assert-false (cl-cc/optimize::opt-stm-plan-inline-log-p plan))))
-
-(deftest optimize-stm-plan-enables-log-for-impure-read-write
-  "STM helper enables logging for impure transactional access."
-  (let ((plan (cl-cc/optimize::opt-stm-build-plan
-               :reads '(:x) :writes '(:y) :pure-p nil)))
-    (assert-true (cl-cc/optimize::opt-stm-needs-log-p plan))
-    (assert-true (cl-cc/optimize::opt-stm-plan-inline-log-p plan))))
-
-(deftest optimize-lockfree-select-reclamation-chooses-policy-from-risk-and-contention
-  "Lock-free helper selects reclamation strategy based on ABA risk/contestion."
-  (assert-eq :none
-             (cl-cc/optimize::opt-lockfree-select-reclamation
-              :aba-risk-p nil :contention 10))
-  (assert-eq :hazard-pointer
-             (cl-cc/optimize::opt-lockfree-select-reclamation
-              :aba-risk-p t :contention 1))
-  (assert-eq :epoch
-             (cl-cc/optimize::opt-lockfree-select-reclamation
-              :aba-risk-p t :contention 6)))
-
-(deftest optimize-build-cfi-plan-selects-target-specific-guards
-  "CFI helper selects ENDBR64 for x86-64 and BTI for AArch64 when indirect calls exist."
-  (let ((x86 (cl-cc/optimize::opt-build-cfi-plan :target :x86-64 :has-indirect-calls-p t))
-        (arm (cl-cc/optimize::opt-build-cfi-plan :target :aarch64 :has-indirect-calls-p t)))
-    (assert-true (cl-cc/optimize::opt-cfi-plan-insert-endbr64-p x86))
-    (assert-false (cl-cc/optimize::opt-cfi-plan-insert-bti-p x86))
-    (assert-true (cl-cc/optimize::opt-cfi-plan-insert-bti-p arm))
-    (assert-false (cl-cc/optimize::opt-cfi-plan-insert-endbr64-p arm))))
-
-(deftest optimize-cfi-entry-opcode-materializes-selected-marker
-  "CFI entry opcode helper exposes the target marker selected by the CFI plan."
-  (assert-eq :endbr64
-             (cl-cc/optimize:opt-cfi-entry-opcode
-              (cl-cc/optimize:opt-build-cfi-plan
-               :target :x86-64 :has-indirect-calls-p t)))
-  (assert-eq :bti-c
-             (cl-cc/optimize:opt-cfi-entry-opcode
-              (cl-cc/optimize:opt-build-cfi-plan
-               :target :aarch64 :has-indirect-calls-p t)))
-  (assert-eq :none
-             (cl-cc/optimize:opt-cfi-entry-opcode
-              (cl-cc/optimize:opt-build-cfi-plan
-               :target :x86-64 :has-indirect-calls-p nil))))
-
-(deftest optimize-should-use-retpoline-p-depends-on-target-and-ibrs
-  "Retpoline helper enables mitigation only for x86-64 indirect branches without IBRS."
-  (assert-true (cl-cc/optimize::opt-should-use-retpoline-p
-                :target :x86-64 :has-indirect-branch-p t :supports-ibrs-p nil))
-  (assert-false (cl-cc/optimize::opt-should-use-retpoline-p
-                 :target :x86-64 :has-indirect-branch-p t :supports-ibrs-p t))
-  (assert-false (cl-cc/optimize::opt-should-use-retpoline-p
-                 :target :aarch64 :has-indirect-branch-p t :supports-ibrs-p nil)))
-
-(deftest optimize-retpoline-thunk-name-is-target-register-specific
-  "Retpoline thunk names are deterministic and register-specific."
-  (assert-equal "__clcc_retpoline_r11"
-                (cl-cc/optimize:opt-retpoline-thunk-name :r11))
-  (assert-equal "__clcc_retpoline_rax"
-                (cl-cc/optimize:opt-retpoline-thunk-name :rax)))
-
-(deftest optimize-needs-stack-canary-p-follows-stack-buffer-presence
-  "Stack canary helper is enabled when stack buffer is present."
-  (assert-true (cl-cc/optimize::opt-needs-stack-canary-p :has-stack-buffer-p t))
-  (assert-false (cl-cc/optimize::opt-needs-stack-canary-p :has-stack-buffer-p nil)))
-
-(deftest optimize-stack-canary-emit-plan-describes-prologue-and-epilogue
-  "Stack canary emission plan records guard slot and failure target only when enabled."
-  (let ((enabled (cl-cc/optimize:opt-stack-canary-emit-plan
-                  :has-stack-buffer-p t
-                  :guard-slot -8
-                  :failure-target 'panic))
-        (disabled (cl-cc/optimize:opt-stack-canary-emit-plan
-                   :has-stack-buffer-p nil)))
-    (assert-true (getf enabled :enabled-p))
-    (assert-= -8 (getf enabled :guard-slot))
-    (assert-eq :tls-canary (getf enabled :load-source))
-    (assert-eq 'panic (getf enabled :failure-target))
-    (assert-false (getf disabled :enabled-p))
-    (assert-null (getf disabled :guard-slot))))
-
-(deftest optimize-stack-canary-sequences-describe-prologue-and-epilogue-ops
-  "Stack canary sequence helpers expose backend-neutral prologue/epilogue ops."
-  (let ((plan (cl-cc/optimize:opt-stack-canary-emit-plan
-               :has-stack-buffer-p t
-               :guard-slot -8
-               :failure-target 'panic)))
-    (assert-equal '((:op :load-canary :source :tls-canary :dst :tmp)
-                    (:op :store-canary :src :tmp :slot -8))
-                  (cl-cc/optimize:opt-stack-canary-prologue-seq
-                   plan :temp-reg :tmp))
-    (assert-equal '((:op :load-canary :source -8 :dst :tmp)
-                    (:op :compare-canary :left :tmp :right :tls-canary)
-                    (:op :branch-if-canary-mismatch :target panic))
-                  (cl-cc/optimize:opt-stack-canary-epilogue-seq
-                   plan :temp-reg :tmp))))
-
-(deftest optimize-stack-canary-sequences-are-empty-when-disabled
-  "Stack canary sequence helpers return NIL for disabled plans."
-  (let ((plan (cl-cc/optimize:opt-stack-canary-emit-plan
-               :has-stack-buffer-p nil)))
-    (assert-null (cl-cc/optimize:opt-stack-canary-prologue-seq plan))
-    (assert-null (cl-cc/optimize:opt-stack-canary-epilogue-seq plan))))
-
-(deftest optimize-build-shadow-stack-plan-enables-only-for-x86-64-with-cet
-  "Shadow stack helper enables only for x86-64 targets with CET SS support."
-  (let ((enabled (cl-cc/optimize:opt-build-shadow-stack-plan
-                  :target :x86-64
-                  :supports-cet-ss-p t))
-        (no-cet (cl-cc/optimize:opt-build-shadow-stack-plan
-                 :target :x86-64
-                 :supports-cet-ss-p nil))
-        (wrong-arch (cl-cc/optimize:opt-build-shadow-stack-plan
-                     :target :aarch64
-                     :supports-cet-ss-p t)))
-    (assert-true (cl-cc/optimize:opt-shadow-stack-plan-enabled-p enabled))
-    (assert-eq :x86-64 (cl-cc/optimize:opt-shadow-stack-plan-target enabled))
-    (assert-true (cl-cc/optimize:opt-shadow-stack-plan-needs-incsssp-p enabled))
-    (assert-false (cl-cc/optimize:opt-shadow-stack-plan-needs-save-restore-p enabled))
-    (assert-false (cl-cc/optimize:opt-shadow-stack-plan-enabled-p no-cet))
-    (assert-false (cl-cc/optimize:opt-shadow-stack-plan-enabled-p wrong-arch))))
-
-(deftest optimize-shadow-stack-plan-requires-save-restore-for-nonlocal-control
-  "Shadow stack helper flags save/restore when continuations or setjmp-like flow exist."
-  (let ((plan (cl-cc/optimize:opt-build-shadow-stack-plan
-               :target :x86-64
-               :supports-cet-ss-p t
-               :has-nonlocal-control-p t)))
-    (assert-true (cl-cc/optimize:opt-shadow-stack-plan-needs-save-restore-p plan))))
-
-(deftest optimize-wasm-select-tailcall-opcode-uses-return-call-forms
+(deftest-each wasm-tailcall-opcode-cases
   "Wasm tail-call helper selects return-call opcodes when enabled at tail position."
-  (assert-eq :return-call
+  :cases (("direct-enabled"   t nil t :return-call)
+          ("indirect-enabled" t t   t :return-call-indirect)
+          ("disabled"         t nil nil :call))
+  (tail-p indirect-p enabled-p expected)
+  (assert-eq expected
              (cl-cc/optimize::opt-wasm-select-tailcall-opcode
-              :tail-position-p t :indirect-p nil :enabled-p t))
-  (assert-eq :return-call-indirect
-             (cl-cc/optimize::opt-wasm-select-tailcall-opcode
-              :tail-position-p t :indirect-p t :enabled-p t))
-  (assert-eq :call
-             (cl-cc/optimize::opt-wasm-select-tailcall-opcode
-              :tail-position-p t :indirect-p nil :enabled-p nil)))
+              :tail-position-p tail-p
+              :indirect-p indirect-p
+              :enabled-p enabled-p)))
 
 (deftest optimize-build-wasm-gc-layout-preserves-kind-and-fields
   "Wasm GC helper stores layout kind/fields/nullability deterministically."
@@ -1124,8 +961,8 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                         (make-vm-jump :label :l0)
                         (make-vm-label :name :l1)))
          (optimized (cl-cc/optimize::opt-pass-loop-interchange program)))
-    (assert-true (equal (mapcar #'instruction->sexp optimized)
-                        (mapcar #'instruction->sexp program)))))
+    (assert-equal (mapcar #'instruction->sexp optimized)
+                  (mapcar #'instruction->sexp program))))
 
 (deftest optimize-polyhedral-schedule-plan-preserves-objective
   "FR-525: polyhedral schedule helper keeps statement/constraint/objective payloads."
@@ -1274,8 +1111,8 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
                         (make-vm-jump :label :lb)
                         (make-vm-label :name :lbx)))
          (optimized (cl-cc/optimize::opt-pass-loop-fusion-fission program)))
-    (assert-true (equal (mapcar #'instruction->sexp optimized)
-                        (mapcar #'instruction->sexp program)))))
+    (assert-equal (mapcar #'instruction->sexp optimized)
+                  (mapcar #'instruction->sexp program))))
 
 (deftest optimize-pass-loop-fusion-fission-splits-oversized-loop
   "FR-526: oversized pure loops are split into two core regions with a split marker." 

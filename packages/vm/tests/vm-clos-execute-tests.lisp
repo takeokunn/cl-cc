@@ -69,28 +69,16 @@
 
 ;;; ─── vm-class-def / vm-make-obj ──────────────────────────────────────────
 
-(deftest vm-class-def-registers-in-class-registry
-  "vm-class-def adds the class name to the vm-class-registry."
-  (let ((s (make-clos-vm)))
-    (exec-class-def s :R0 'my-class :slots '(x y))
-    (assert-true (gethash 'my-class (cl-cc/vm::vm-class-registry s)))))
-
-(deftest vm-class-def-stores-name-in-ht
-  "vm-class-def stores :__name__ in the class hash-table written to DST."
-  (let ((s (make-clos-vm)))
-    (exec-class-def s :R0 'my-class :slots '(a b))
-    (let ((class-ht (cl-cc:vm-reg-get s :R0)))
-      (assert-true (hash-table-p class-ht))
-      (assert-eq 'my-class (gethash :__name__ class-ht)))))
-
-(deftest vm-class-def-stores-slots-in-ht
-  "vm-class-def stores declared slot names under :__slots__ in the class HT."
+(deftest vm-class-def-registers-and-stores-all-metadata
+  "A single exec-class-def call populates class-registry, :__name__, and :__slots__."
   (let ((s (make-clos-vm)))
     (exec-class-def s :R0 'pt :slots '(x y))
-    (let* ((class-ht (cl-cc:vm-reg-get s :R0))
-           (slots (gethash :__slots__ class-ht)))
-      (assert-true (member 'x slots))
-      (assert-true (member 'y slots)))))
+    (assert-true (gethash 'pt (cl-cc/vm::vm-class-registry s)))
+    (let ((class-ht (cl-cc:vm-reg-get s :R0)))
+      (assert-true (hash-table-p class-ht))
+      (assert-eq 'pt (gethash :__name__ class-ht))
+      (assert-true (member 'x (gethash :__slots__ class-ht)))
+      (assert-true (member 'y (gethash :__slots__ class-ht))))))
 
 (deftest vm-class-def-advances-pc
   "vm-class-def returns PC+1."

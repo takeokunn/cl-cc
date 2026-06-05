@@ -35,6 +35,7 @@
 ;;; ─── %color-build-interference-graph ─────────────────────────────────────
 
 (deftest "color-build-interference-graph-overlapping"
+  "Overlapping intervals appear in each other's neighbor set in the interference graph."
   (let* ((a (make-test-interval :a 0 10))
          (b (make-test-interval :b 5 15))
          (graph (%color-build-interference-graph (list a b))))
@@ -42,6 +43,7 @@
     (is (member :a (gethash :b graph) :test #'eq))))
 
 (deftest "color-build-interference-graph-disjoint"
+  "Disjoint intervals produce no entries in the interference graph."
   (let* ((a (make-test-interval :a 0 5))
          (b (make-test-interval :b 6 10))
          (graph (%color-build-interference-graph (list a b))))
@@ -49,6 +51,7 @@
     (is (null (gethash :b graph)))))
 
 (deftest "color-build-interference-graph-no-vreg-skipped"
+  "Intervals with a nil vreg are ignored when building the interference graph."
   ;; Intervals without a vreg must be ignored.
   (let* ((a (make-test-interval nil 0 10))
          (b (make-test-interval :b 0 10))
@@ -59,6 +62,7 @@
 ;;; ─── %color-simplify ──────────────────────────────────────────────────────
 
 (deftest "color-simplify-stack-ordering"
+  "color-simplify produces a stack of the correct length with no spill candidates when k is sufficient."
   ;; With two overlapping intervals and k=2 (enough registers), neither node
   ;; should be marked as a potential spill (cdr entry = NIL).
   (let* ((a (make-test-interval :a 0 10))
@@ -71,6 +75,7 @@
     (is (every (lambda (entry) (not (cdr entry))) stack))))
 
 (deftest "color-simplify-spill-candidate-when-pressure"
+  "color-simplify marks at least one interval as a spill candidate when register pressure exceeds k."
   ;; Three mutually interfering intervals but only k=2 colors forces a spill.
   (let* ((a (make-test-interval :a 0 20 :use-positions '(0 5 10 15)))
          (b (make-test-interval :b 0 20 :use-positions '(1 6 11 16)))
@@ -85,6 +90,7 @@
 ;;; ─── color-allocate ───────────────────────────────────────────────────────
 
 (deftest "color-allocate-assigns-registers"
+  "color-allocate assigns a physical register to each interval when registers are available."
   (let* ((a (make-test-interval :a 0 10))
          (b (make-test-interval :b 12 20))
          (available '(:r0 :r1)))
@@ -96,6 +102,7 @@
       (is (= 0 spill-count)))))
 
 (deftest "color-allocate-spills-when-k-exceeded"
+  "color-allocate spills at least one interval when mutually interfering intervals exceed available registers."
   ;; Three mutually interfering intervals, only 2 physical registers.
   (let* ((a (make-test-interval :a 0 20))
          (b (make-test-interval :b 0 20))
@@ -108,6 +115,7 @@
       (is (>= spill-count 1)))))
 
 (deftest "color-allocate-empty-intervals"
+  "color-allocate returns empty assignment and spill maps with zero spill count for an empty interval list."
   (multiple-value-bind (assignment spill-map spill-count)
       (color-allocate '() '(:r0 :r1))
     (is (= 0 (hash-table-count assignment)))
@@ -117,6 +125,7 @@
 ;;; ─── color-spill-slots ────────────────────────────────────────────────────
 
 (deftest "color-spill-slots-non-overlapping-share-slot"
+  "color-spill-slots assigns the same stack slot to two non-overlapping spilled intervals."
   ;; Two non-overlapping spilled intervals should share the same stack slot.
   (let* ((a (make-test-interval :a 0 5))
          (b (make-test-interval :b 6 10))
@@ -124,6 +133,7 @@
     (is (= (gethash :a color-map) (gethash :b color-map)))))
 
 (deftest "color-spill-slots-overlapping-use-distinct-slots"
+  "color-spill-slots assigns distinct stack slots to two overlapping spilled intervals."
   ;; Two overlapping spilled intervals must get distinct slots.
   (let* ((a (make-test-interval :a 0 10))
          (b (make-test-interval :b 5 15))
@@ -131,6 +141,7 @@
     (is (/= (gethash :a color-map) (gethash :b color-map)))))
 
 (deftest "color-spill-slots-offset-respected"
+  "color-spill-slots respects the slot offset so all assigned slot numbers are above the offset."
   ;; Slot offset of 3 means minimum slot number is 4 (1-origin within the offset).
   (let* ((a (make-test-interval :a 0 5))
          (color-map (color-spill-slots (list a) 3)))
@@ -139,6 +150,7 @@
 ;;; ─── regalloc-color-spill-slots ───────────────────────────────────────────
 
 (deftest "regalloc-color-spill-slots-passthrough-when-empty"
+  "regalloc-color-spill-slots returns the original spill-map unchanged when no intervals are spilled."
   ;; No spilled intervals: original spill-map returned unchanged.
   (let* ((a (make-test-interval :a 0 10))
          (original-map (make-hash-table :test #'eq))
@@ -146,6 +158,7 @@
     (is (eq original-map result))))
 
 (deftest "regalloc-color-spill-slots-applies-coloring"
+  "regalloc-color-spill-slots collapses non-overlapping spilled intervals to a shared slot."
   ;; Two spilled non-overlapping intervals: coloring should collapse them to
   ;; a single shared slot, so the resulting map has both vregs pointing to
   ;; the same slot number.
@@ -179,6 +192,7 @@
 ;;; ─── %color-spill-candidate ───────────────────────────────────────────────
 
 (deftest "%color-spill-candidate picks lowest-priority interval"
+  "%color-spill-candidate selects the interval with the lowest spill priority as the eviction candidate."
   ;; :low has more uses/length (higher score) so :high should be chosen as
   ;; the spill candidate (lower priority = cheaper to spill).
   (let* ((*ml-regalloc-enabled* nil)
@@ -192,6 +206,7 @@
     (is (eq :low-cost candidate))))
 
 (deftest "%color-spill-candidate tie-breaks by name order"
+  "%color-spill-candidate breaks priority ties by selecting the interval whose vreg name sorts first."
   ;; Equal priority: :aaa should come before :zzz alphabetically.
   (let* ((*ml-regalloc-enabled* nil)
          (a (make-test-interval :aaa 0 10 :use-positions '(0)))
@@ -204,6 +219,7 @@
 ;;; ─── %color-select-register ───────────────────────────────────────────────
 
 (deftest "%color-select-register picks first non-conflicting register"
+  "%color-select-register returns the first available register not already assigned to a neighbor."
   (let* ((a      (make-test-interval :a 0 10))
          (b      (make-test-interval :b 0 10))
          (graph  (%color-build-interference-graph (list a b)))
@@ -214,6 +230,7 @@
       (is (eq :r1 result)))))
 
 (deftest "%color-select-register returns nil when all registers used by neighbors"
+  "%color-select-register returns nil when every available register is already assigned to an interfering neighbor."
   (let* ((a      (make-test-interval :a 0 10))
          (b      (make-test-interval :b 0 10))
          (graph  (%color-build-interference-graph (list a b)))
@@ -226,6 +243,7 @@
 ;;; ─── %color-ordered-registers-for-interval ────────────────────────────────
 
 (deftest "%color-ordered-registers-for-interval no-cc returns list unchanged"
+  "%color-ordered-registers-for-interval returns the register list unchanged when no calling convention is provided."
   (let* ((interval (make-test-interval :v 0 10))
          (regs     '(:r0 :r1 :r2))
          (result   (%color-ordered-registers-for-interval interval nil regs)))
@@ -235,6 +253,7 @@
 ;;; ─── %color-assign-spill-slots ────────────────────────────────────────────
 
 (deftest "%color-assign-spill-slots assigns increasing slots for overlapping intervals"
+  "%color-assign-spill-slots assigns distinct increasing slot numbers to overlapping intervals."
   ;; Two overlapping intervals must not share a slot; both must receive
   ;; a slot >= offset+1, and the max returned must equal the highest slot.
   (let* ((a (make-test-interval :a 0 10))
@@ -247,6 +266,7 @@
       (is (= max-slot (max (gethash :a spill-map) (gethash :b spill-map)))))))
 
 (deftest "%color-assign-spill-slots non-overlapping intervals share a slot"
+  "%color-assign-spill-slots assigns the same slot number to non-overlapping intervals."
   ;; Non-overlapping intervals should collapse to one shared slot.
   (let* ((a (make-test-interval :a 0 5))
          (b (make-test-interval :b 6 10)))
@@ -256,6 +276,7 @@
       (is (= (gethash :a spill-map) (gethash :b spill-map))))))
 
 (deftest "%color-assign-spill-slots respects spill-slot-offset"
+  "%color-assign-spill-slots ensures all assigned slot numbers exceed the given spill-slot-offset."
   (let* ((a (make-test-interval :a 0 5)))
     (multiple-value-bind (spill-map max-slot)
         (%color-assign-spill-slots (list a) 4)
@@ -265,6 +286,7 @@
 ;;; ─── %interval-map ────────────────────────────────────────────────────────
 
 (deftest "%interval-map builds vreg->interval hash correctly"
+  "%interval-map builds a hash table mapping each vreg keyword to its live-interval struct."
   (let* ((a   (make-test-interval :a 0 10))
          (b   (make-test-interval :b 5 15))
          (imap (%interval-map (list a b))))
@@ -273,6 +295,7 @@
     (is (= 2 (hash-table-count imap)))))
 
 (deftest "%interval-map skips nil-vreg intervals"
+  "%interval-map excludes intervals whose vreg is nil from the resulting hash table."
   (let* ((no-vreg (make-test-interval nil 0 10))
          (named   (make-test-interval :v  0 10))
          (imap    (%interval-map (list no-vreg named))))
@@ -282,6 +305,7 @@
 ;;; ─── %copy-hash-into ──────────────────────────────────────────────────────
 
 (deftest "%copy-hash-into copies all entries from source to destination"
+  "%copy-hash-into transfers all key-value pairs from the source hash table into the destination."
   (let ((from (make-hash-table :test #'eq))
         (to   (make-hash-table :test #'eq)))
     (setf (gethash :a from) 1
@@ -291,6 +315,7 @@
     (is (= 2 (gethash :b to)))))
 
 (deftest "%copy-hash-into returns the destination table"
+  "%copy-hash-into returns the destination hash table as its result."
   (let ((from (make-hash-table :test #'eq))
         (to   (make-hash-table :test #'eq)))
     (setf (gethash :x from) :y)
@@ -298,6 +323,7 @@
       (is (eq to result)))))
 
 (deftest "%copy-hash-into does not mutate source"
+  "%copy-hash-into leaves the source hash table unmodified after the copy."
   (let ((from (make-hash-table :test #'eq))
         (to   (make-hash-table :test #'eq)))
     (setf (gethash :k from) 99)
@@ -323,6 +349,7 @@
 ;;; ─── %build-spill-interference-matrix ────────────────────────────────────
 
 (deftest "%build-spill-interference-matrix overlapping intervals interfere"
+  "%build-spill-interference-matrix records mutual interference for overlapping intervals."
   (let* ((a (make-test-interval :a 0 10))
          (b (make-test-interval :b 5 15))
          (matrix (%build-spill-interference-matrix (list a b))))
@@ -330,6 +357,7 @@
     (is (member :a (gethash :b matrix) :test #'eq))))
 
 (deftest "%build-spill-interference-matrix non-overlapping intervals do not interfere"
+  "%build-spill-interference-matrix produces no interference entries for non-overlapping intervals."
   (let* ((a (make-test-interval :a 0 5))
          (b (make-test-interval :b 6 10))
          (matrix (%build-spill-interference-matrix (list a b))))
@@ -337,6 +365,7 @@
     (is (null (gethash :b matrix)))))
 
 (deftest "%build-spill-interference-matrix symmetric edges"
+  "%build-spill-interference-matrix produces a symmetric undirected interference matrix."
   ;; The matrix must be undirected: if a→b then b→a.
   (let* ((a (make-test-interval :a 0 10))
          (b (make-test-interval :b 3  8))
@@ -349,6 +378,7 @@
 ;;; ─── color-allocate-for-target (GPR+FP class split) ──────────────────────
 
 (deftest "color-allocate-for-target separates gpr and fp classes"
+  "color-allocate-for-target assigns GPR and FP intervals to their respective register classes without spilling."
   ;; One GPR and one FP interval.  With enough registers for each class both
   ;; should be assigned a physical register with no spills.
   (let* ((gpr-int (make-live-interval :vreg :gpr :start 0 :end 10

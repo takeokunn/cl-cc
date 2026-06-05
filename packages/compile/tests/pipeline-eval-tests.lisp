@@ -94,7 +94,7 @@
           ("dolist-sum"    6         "(let ((acc 0)) (dolist (x (list 1 2 3) acc) (setq acc (+ acc x))))")
           ("labels-simple" 3         "(labels ((f (x) (if (= x 0) 0 (+ 1 (f (- x 1)))))) (f 3))"))
   (expected expr)
-  (assert-true (equal expected (run-string expr))))
+  (assert-equal expected (run-string expr)))
 
 (deftest pipeline-run-string-hash-cons-reuses-flat-pairs
   "hash-cons is an explicit VM primitive; cons keeps fresh-cell semantics."
@@ -113,7 +113,7 @@
           ("set-difference" '(1 3 5)   "(set-difference (list 1 2 3 4 5) (list 2 4))")
           ("position-miss" nil         "(position 9 (list 1 2 3))"))
   (expected expr)
-  (assert-true (equal expected (run-string expr :stdlib t))))
+  (assert-equal expected (run-string expr :stdlib t)))
 
 (deftest-each pipeline-run-string-function-cell-regressions
   "run-string resolves function-cell helpers needed by selfhost source loading."

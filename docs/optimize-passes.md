@@ -3,9 +3,10 @@
 VM optimizer, loop optimization, control flow, range analysis, interprocedural optimization, higher-order function optimization, code size, CPS transformation, SSA construction, speculative JIT compilation.
 
 **実装状況**: 全175FR ✅ 完了。65件のマーカーを 🔶 → ✅ に昇格。
+
 - `✅` = 実装済み（完全実装 または 設計証跡/helper層まで完了）
 - `🔶` = 部分実装（現在使用なし。全項目を ✅ に格上げ済み）
-`packages/optimize/src/optimizer-pipeline.lisp` の roadmap evidence registry は、この状態区分と公開API・テストアンカーの対応を検証する。
+  `packages/optimize/src/optimizer-pipeline.lisp` の roadmap evidence registry は、この状態区分と公開API・テストアンカーの対応を検証する。
 
 ---
 
@@ -103,7 +104,7 @@ VM optimizer, loop optimization, control flow, range analysis, interprocedural o
 
 - **関連実装**: `packages/optimize/src/optimizer-flow-loop.lisp` に `opt-pass-loop-unrolling`、`packages/optimize/src/optimizer-pipeline.lisp` に `opt-pass-loop-unrolling-adaptive`（hotness と call-count で閾値調整）を実装済み。`*opt-pass-table*` に `:loop-unrolling` として登録され、`*opt-default-convergence-pass-keys*` でデフォルトパイプラインに組み込み済み。
   - 対象: `vm-lt + vm-jump-zero + backedge jump` の単純 counted loop 形。
-  - 条件: ループ変数/上限/step がコンパイル時計算可能かつ小trip-count（上限あり）→ 完全展開（full unroll）。上限逾えても *opt-loop-unroll-factor* に基づき guarded partial copy を生成。
+  - 条件: ループ変数/上限/step がコンパイル時計算可能かつ小trip-count（上限あり）→ 完全展開（full unroll）。上限逾えても _opt-loop-unroll-factor_ に基づき guarded partial copy を生成。
   - 検証: `optimizer-flow-tests.lisp` に6テスト（full unroll、generalized comparisons、partial unroll、unknown-trip with remainder、additional comparison predicates、partial keeps remainder loop）。`optimizer-pipeline-tests.lisp` に adaptive factor テスト。
   - 制限: 一般CFG（複数header/ネストループ）、完全profile誘導 unrolling は将来の拡張予定。
 
