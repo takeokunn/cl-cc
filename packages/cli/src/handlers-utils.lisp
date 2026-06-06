@@ -239,6 +239,74 @@ around the execution. Returns the value produced by RUN-COMPILED."
         (error ()
           (apply #'cl-cc:compile-string-with-stdlib source :target :vm kwargs))))))
 
+;;; ─── Watch mode + hot-reload (FR-808 / FR-916/917) ──────────────────────────
+;;;
+;;; The run and repl handlers record the source of each executed file and, when
+;;; --watch is given, poll the file's write-date to recompile and re-run it on
+;;; every save. One VM state is reused across reloads so global definitions
+;;; persist — true hot-reload, not a fresh process per edit. Previously these
+;;; entry points were referenced by the handlers but never defined, so every
+;;; `cl-cc run` crashed with "%RECORD-HOT-RELOAD-SOURCE is undefined".
+
+(defvar *hot-reload-sources* (make-hash-table :test #'equal)
+  "Registry mapping a source file's namestring to the text last run from it.
+Lets watch mode detect edits and gives hot-reload the previous source to diff.")
+
+(defun %record-hot-reload-source (file source result)
+  "Record SOURCE as the latest text run from FILE for watch/hot-reload.
+RESULT (the run's return value) is accepted for call-site symmetry and ignored.
+Returns SOURCE."
+  (declare (ignore result))
+  (when file
+    (setf (gethash (namestring file) *hot-reload-sources*) source))
+  source)
+
+(defun %watch-recompile-and-run (file source vm-state)
+  "Recompile SOURCE (language detected from FILE) and run it in VM-STATE.
+Lisp sources use the auto-stdlib fallback; other languages compile directly."
+  (let* ((language (%detect-language file ""))
+         (result (if (eq language :lisp)
+                     (%compile-lisp-with-auto-stdlib source nil nil nil)
+                     (compile-string source :target :vm :language language))))
+    (run-compiled (compilation-result-program result) :state vm-state)))
+
+(defun %watch-file-poll (file vm-state &key (interval 0.3))
+  "Block, polling FILE's write-date; on each change recompile and re-run FILE in
+VM-STATE. Loops until interrupted with Ctrl-C, then returns NIL.
+
+Powers `cl-cc run FILE --watch`: edit-save-rerun without restarting the
+process, reusing one VM state so prior global definitions remain visible."
+  (let ((last-write (ignore-errors (file-write-date file))))
+    (format *error-output*
+            "~&; watching ~A — save to re-run, Ctrl-C to stop~%" (namestring file))
+    (force-output *error-output*)
+    (handler-case
+        (loop
+          (sleep interval)
+          (let ((now (ignore-errors (file-write-date file))))
+            (when (and now (not (eql now last-write)))
+              (setf last-write now)
+              (let ((source (%read-command-source file)))
+                (%record-hot-reload-source file source nil)
+                (handler-case
+                    (progn
+                      (%watch-recompile-and-run file source vm-state)
+                      (format *error-output* "~&; reloaded ~A~%" (namestring file)))
+                  (error (e)
+                    (format *error-output* "~&; reload error: ~A~%" e)))
+                (force-output *error-output*)))))
+      (sb-sys:interactive-interrupt ()
+        (format *error-output* "~&; watch stopped~%")
+        (force-output *error-output*)
+        nil))))
+
+(defun %start-watch-file-poll-thread (file vm-state)
+  "Run %watch-file-poll on FILE in a background thread so the REPL stays
+interactive while watching. Returns the new thread."
+  (sb-thread:make-thread
+   (lambda () (%watch-file-poll file vm-state))
+   :name "cl-cc-watch"))
+
 (defun %do-install (parsed)
   "Handle `cl-cc install' for local ASDF system files and Quicklisp packages.
 Accepts either a path to a .asd file or a system name for Quicklisp installation."

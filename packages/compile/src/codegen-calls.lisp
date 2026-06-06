@@ -54,8 +54,13 @@ first-class function values here."
     (and entry (not is-global-function) (not is-global-generic))))
 
 (defun %compile-call-arg-registers (args ctx)
-  "Compile ARGS left-to-right and return their result registers."
-  (mapcar (lambda (arg) (compile-ast arg ctx)) args))
+  "Compile ARGS left-to-right and return their result registers.
+Each already-computed argument register is protected (via *pending-call-arg-regs*)
+while the remaining arguments compile, so a nested call in a later argument
+saves/restores it instead of clobbering it."
+  (let ((regs nil))
+    (dolist (arg args (nreverse regs))
+      (push (%compile-operand-protecting arg ctx regs) regs))))
 
 (defun %emit-call-like-instruction (tail result-reg func-reg arg-regs ctx)
   "Emit either a normal call or a tail call and return RESULT-REG."
@@ -97,8 +102,13 @@ first-class function values here."
                         (and (keywordp reg)
                              (or (member reg env-regs :test #'eq)
                                  (member reg noescape-regs :test #'eq)
+                                 ;; Sibling sub-expression results whose consuming
+                                 ;; instruction is not yet emitted — invisible to
+                                 ;; interval liveness, must still be saved.
+                                 (member reg *pending-call-arg-regs* :test #'eq)
                                  (interval-live-p reg))))
-                      (append env-regs noescape-regs (list func-reg) arg-regs))
+                      (append env-regs noescape-regs (list func-reg) arg-regs
+                              *pending-call-arg-regs*))
        :test #'eq))))
 
 ;;; ── ast-call fast-path helpers ──────────────────────────────────────────────

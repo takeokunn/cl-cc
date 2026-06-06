@@ -81,3 +81,81 @@
 
 (defvar *js-builtin-map* (%build-js-builtin-map)
   "Dispatch table from JS built-in name to CL function.")
+
+(defun js-program-forms (source &key strict-mode module-p)
+  "Parse JS SOURCE and prepend the runtime-global prelude so compiled programs
+have the standard globals available. Returns a list of shared-AST top-level
+forms ready for the compiler backend — the JS analog of PARSE-ALL-FORMS.
+
+Currently seeds `console' as a defparameter'd global object built by the bridged
+host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
+%js-get-prop to a bridged host function. Add further globals (Math, JSON, …) here."
+  (cons (make-ast-defvar
+         :name (js-ident-sym "console")
+         :value (make-ast-call :func (make-ast-var :name '%js-make-console) :args nil)
+         :kind 'defparameter)
+        (parse-js-source source :strict-mode strict-mode :module-p module-p)))
+
+;;; -----------------------------------------------------------------------
+;;;  Method dispatch: obj.method resolved to a bound callable
+;;; -----------------------------------------------------------------------
+;;;
+;;; Loaded last (after every %js-array-*/%js-string-* helper is defined) so the
+;;; tables can name the functions directly. %js-get-prop delegates here via the
+;;; *js-method-resolver* hook installed at the bottom — `arr.push'/`nums.map(f)'/
+;;; `s.split(",")' then resolve to a closure that prepends the receiver, exactly
+;;; like console.log resolves to a function value the VM can invoke.
+
+(defparameter *js-array-method-table*
+  (list (cons "push" #'%js-array-push)         (cons "pop" #'%js-array-pop)
+        (cons "shift" #'%js-array-shift)        (cons "unshift" #'%js-array-unshift)
+        (cons "map" #'%js-array-map)            (cons "forEach" #'%js-array-for-each)
+        (cons "filter" #'%js-array-filter)      (cons "reduce" #'%js-array-reduce)
+        (cons "reduceRight" #'%js-array-reduce-right)
+        (cons "find" #'%js-array-find)          (cons "findIndex" #'%js-array-find-index)
+        (cons "some" #'%js-array-some)          (cons "every" #'%js-array-every)
+        (cons "includes" #'%js-array-includes)  (cons "indexOf" #'%js-array-index-of)
+        (cons "lastIndexOf" #'%js-array-last-index-of)
+        (cons "join" #'%js-array-join)          (cons "slice" #'%js-array-slice)
+        (cons "splice" #'%js-array-splice)      (cons "concat" #'%js-array-concat)
+        (cons "reverse" #'%js-array-reverse)    (cons "sort" #'%js-array-sort)
+        (cons "flat" #'%js-array-flat)          (cons "flatMap" #'%js-array-flat-map)
+        (cons "fill" #'%js-array-fill)          (cons "copyWithin" #'%js-array-copy-within)
+        (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys))
+  "Alist of JS Array.prototype method name -> host helper (receiver is ARR, first arg).")
+
+(defparameter *js-string-method-table*
+  (list (cons "slice" #'%js-string-slice)       (cons "indexOf" #'%js-string-index-of)
+        (cons "lastIndexOf" #'%js-string-last-index-of)
+        (cons "includes" #'%js-string-includes) (cons "startsWith" #'%js-string-starts-with)
+        (cons "endsWith" #'%js-string-ends-with)(cons "split" #'%js-string-split)
+        (cons "replace" #'%js-string-replace)   (cons "replaceAll" #'%js-string-replace-all)
+        (cons "padStart" #'%js-string-pad-start)(cons "padEnd" #'%js-string-pad-end)
+        (cons "at" #'%js-string-at)             (cons "repeat" #'%js-string-repeat)
+        (cons "charAt" #'%js-string-char-at)    (cons "charCodeAt" #'%js-string-char-code-at)
+        (cons "concat" #'%js-string-concat)     (cons "match" #'%js-string-match)
+        (cons "matchAll" #'%js-string-match-all)(cons "search" #'%js-string-search)
+        (cons "toUpperCase" #'%js-string-to-upper-case)
+        (cons "toLowerCase" #'%js-string-to-lower-case)
+        (cons "trim" #'%js-string-trim)         (cons "trimStart" #'%js-string-trim-start)
+        (cons "trimEnd" #'%js-string-trim-end))
+  "Alist of JS String.prototype method name -> host helper (receiver is S, first arg).")
+
+(defun %js-bound-method (table receiver name)
+  "Look NAME up in TABLE; return a closure that calls the helper with RECEIVER
+prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefined."
+  (let ((entry (assoc name table :test #'string=)))
+    (if entry
+        (let ((fn (cdr entry)))
+          (lambda (&rest args) (apply fn receiver args)))
+        +js-undefined+)))
+
+(defun %js-resolve-method (obj key)
+  "Resolve OBJ.KEY to a bound Array/String method closure, or +js-undefined+.
+Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
+  (cond
+    ((%js-vec-p obj) (%js-bound-method *js-array-method-table* obj key))
+    ((stringp obj)   (%js-bound-method *js-string-method-table* obj key))
+    (t +js-undefined+)))
+
+(setf *js-method-resolver* #'%js-resolve-method)

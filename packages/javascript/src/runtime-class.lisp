@@ -8,22 +8,69 @@
 ;;;  Class / OOP
 ;;; -----------------------------------------------------------------------
 
+(defun %js-make-class (&rest args)
+  "Build a JS class object. ARGS = (SUPER CTOR name1 fn1 name2 fn2 …): SUPER is
+the parent class object (or nil/undefined), CTOR the constructor fn taking
+(this . args) (or nil/undefined), and the rest alternating method-name strings
+and method fns. Methods live on the class's __prototype__; %js-new links each
+instance's __proto__ to it so method lookup walks the chain, and the prototype's
+own __proto__ is SUPER's prototype (inherited methods). The class lowering emits
+a call to this helper. NOTE: pure &rest (not `super ctor &rest`) — required args
+before &rest marshal incorrectly through the VM host bridge when the rest holds a
+vm-closure, so we mirror %js-make-object's pure-&rest shape.
+
+DORMANT: the class lowering currently emits ast-defclass, not a call to this
+helper (the prototype-model lowering hit an unresolved hang and was reverted).
+Kept as foundation for a future working JS class implementation."
+  (let* ((super (first args))
+         (ctor  (second args))
+         (method-pairs (cddr args))
+         (super* (and (%js-ht-p super) super))
+         (klass  (%js-make-ht))
+         (proto  (%js-make-ht)))
+    (when super*
+      (let ((super-proto (gethash "__prototype__" super*)))
+        (when super-proto (setf (gethash "__proto__" proto) super-proto))))
+    (loop for (name fn) on method-pairs by #'cddr
+          do (setf (gethash name proto) fn))
+    (setf (gethash "__prototype__" klass)   proto
+          (gethash "__constructor__" klass) (and ctor (not (eq ctor +js-undefined+)) ctor)
+          (gethash "__super__" klass)        super*)
+    klass))
+
+(defun %js-run-constructor (klass obj args)
+  "Run KLASS's constructor on OBJ (as `this') with ARGS. When KLASS defines no
+constructor, forward to its __super__ constructor — JS's implicit constructor
+calls super(...args). Calls go through %js-funcall so a compiled-JS constructor
+(a vm-closure) is dispatched back into the VM."
+  (let ((ctor (and (%js-ht-p klass) (gethash "__constructor__" klass))))
+    (cond
+      (ctor (apply #'%js-funcall ctor obj args))
+      ((and (%js-ht-p klass) (gethash "__super__" klass))
+       (%js-run-constructor (gethash "__super__" klass) obj args)))))
+
 (defun %js-new (constructor &optional (args nil))
-  "Instantiate JS class.  CONSTRUCTOR is a HT with __new__ or __prototype__."
-  (cond
-    ((and (%js-ht-p constructor) (gethash "__new__" constructor))
-     (apply (gethash "__new__" constructor) args))
-    ((functionp constructor)
-     (apply constructor args))
-    (t
-     (let ((obj (%js-make-ht)))
-       (when (%js-ht-p constructor)
-         (let ((proto (gethash "__prototype__" constructor)))
-           (when proto (setf (gethash "__proto__" obj) proto)))
-         (let ((ctor (gethash "__constructor__" constructor)))
-           (when ctor
-             (apply ctor obj args))))
-       obj))))
+  "Instantiate a JS class. CONSTRUCTOR is a class object from %js-make-class
+(with __prototype__/__constructor__/__super__), a HT carrying a host __new__, or
+a plain host function. Builds the instance, links its __proto__ to the class
+prototype so method lookup walks the chain, then runs the constructor with
+this = the new instance."
+  ;; ARGS arrives as a JS array (vector) from the `new X(a,b)' lowering; APPLY
+  ;; needs a list, so normalize once.
+  (let ((arglist (if (listp args) args (coerce args 'list))))
+    (cond
+      ((and (%js-ht-p constructor) (gethash "__new__" constructor))
+       (apply #'%js-funcall (gethash "__new__" constructor) arglist))
+      ((functionp constructor)
+       (apply constructor arglist))
+      (t
+       (let ((obj (%js-make-ht)))
+         (when (%js-ht-p constructor)
+           (let ((proto (gethash "__prototype__" constructor)))
+             (when proto (setf (gethash "__proto__" obj) proto)))
+           (setf (gethash "__class__" obj) constructor)
+           (%js-run-constructor constructor obj arglist))
+         obj)))))
 
 (defun %js-class-private-field-get (obj field-name)
   "Read a private field from OBJ."

@@ -122,7 +122,7 @@ Returns a list of ast-defun nodes."
         (push (make-ast-defun :name getter-name
                               :params (list this-sym)
                               :declarations nil
-                              :body body)
+                              :body (%php-callable-body body))
               result)))
     (when setter-ast
       (let ((body (if (listp setter-ast)
@@ -131,7 +131,7 @@ Returns a list of ast-defun nodes."
         (push (make-ast-defun :name setter-name
                               :params (list this-sym value-sym)
                               :declarations nil
-                              :body body)
+                              :body (%php-callable-body body))
               result)))
     (nreverse result)))
 

@@ -71,11 +71,12 @@ The heads are returned in source order."
         (walk form nil))))
 
 (defun %trmc-tail-cons-chain-p (form function-name)
-  "Return T when a tail-position FORM contains a cons chain ending in self call."
+  "Return T when a tail-position FORM contains a CONS-wrapped chain ending in self call.
+Pure tail calls with no cons heads are NOT TRMC candidates."
   (multiple-value-bind (args heads foundp)
       (%trmc-cons-chain-parts form function-name)
-    (declare (ignore args heads))
-    foundp))
+    (declare (ignore args))
+    (and foundp (not (null heads)))))
 
 (defun %trmc-tail-candidate-p (form function-name)
   "Return T when FORM has a TRMC cons-chain candidate in tail position."

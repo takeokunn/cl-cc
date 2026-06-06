@@ -20,6 +20,16 @@
   (format *error-output* "Warning: ~{~A~^ ~}~%" (mapcar #'%js-to-string args))
   +js-undefined+)
 
+(defun %js-make-console ()
+  "Construct the JS `console' global object whose methods are the host console
+helpers. Lets compiled JS `console.log(x)' resolve via %js-get-prop + call:
+console is a defvar'd global object, log/error/warn are bridged host functions."
+  (%js-make-object "log"   #'%js-console-log
+                   "info"  #'%js-console-log
+                   "debug" #'%js-console-log
+                   "error" #'%js-console-error
+                   "warn"  #'%js-console-warn))
+
 ;;; -----------------------------------------------------------------------
 ;;;  Promise (simplified synchronous model)
 ;;; -----------------------------------------------------------------------

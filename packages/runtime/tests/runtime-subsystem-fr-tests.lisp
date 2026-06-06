@@ -361,7 +361,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
       (cl-cc/runtime:rt-spawn (lambda () (push :normal events)) :priority :normal)
       (cl-cc/runtime:rt-spawn (lambda () (push :high events)) :priority :high)
       (cl-cc/runtime:rt-scheduler-run)
-      (assert-equal '(:low :normal :high) events)))))
+      (assert-equal '(:low :normal :high) events))))
 
 (deftest runtime-subsystem-scheduler-sleep-task-delays-execution
   "FR-257: Sleep-task records a future wake time for the current task."
@@ -386,7 +386,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-channel-send ch :c)
     (assert-equal '(:a t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch)))
     (assert-equal '(:b t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch)))
-    (assert-equal '(:c t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch))))
+    (assert-equal '(:c t) (multiple-value-list (cl-cc/runtime:rt-channel-recv ch)))))
 
 (deftest runtime-subsystem-channel-close-prevents-further-sends
   "FR-282: Closed channels reject sends."
@@ -507,7 +507,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime:rt-lfstack-push s :third)
     (assert-equal '(:third t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s)))
     (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s)))
-    (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s))))
+    (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-lfstack-pop s)))))
 
 (deftest runtime-subsystem-lockfree-queue-is-fifo
   "FR-322: Lock-free queue pops values in push order."
@@ -517,7 +517,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (cl-cc/runtime::rt-lfqueue-push q :third)
     (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q)))
     (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q)))
-    (assert-equal '(:third t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q))))
+    (assert-equal '(:third t) (multiple-value-list (cl-cc/runtime::rt-lfqueue-pop q)))))
 
 (deftest runtime-subsystem-ebr-retire-reclaim-cycle
   "FR-320: EBR retire/collect advances epochs and reclaims safe retired objects."
@@ -538,7 +538,7 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
     (assert-true (not (cl-cc/runtime:rt-spsc-try-push q :third)))
     (assert-equal '(:first t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q)))
     (assert-equal '(:second t) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q)))
-    (assert-equal '(nil nil) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q))))
+    (assert-equal '(nil nil) (multiple-value-list (cl-cc/runtime:rt-spsc-try-pop q)))))
 
 (deftest runtime-subsystem-crdt-gcounter-merges-by-node-max
   "FR-431: GCounter merge keeps the per-node maximum and sums merged slots."

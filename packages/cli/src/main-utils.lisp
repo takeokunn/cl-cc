@@ -54,16 +54,17 @@ Signals an error when the file does not exist."
         text)))
 
 (defparameter *lang-flag-map*
-  '(("php" . :php) ("lisp" . :lisp))
+  '(("php" . :php) ("lisp" . :lisp)
+    ("js" . :javascript) ("javascript" . :javascript))
   "Alist mapping --lang flag strings to language keywords.")
 
 (defparameter *lang-ext-map*
-  '(("php" . :php))
+  '(("php" . :php) ("js" . :javascript) ("mjs" . :javascript))
   "Alist mapping file extensions to non-default language keywords.")
 
 (defun %detect-language (file lang-flag)
   "Determine source language from LANG-FLAG string or FILE extension.
-Returns :lisp or :php."
+Returns :lisp, :php, or :javascript."
   (or (cdr (assoc lang-flag *lang-flag-map* :test #'string=))
       (let ((ext (and file (pathname-type file))))
         (and ext (cdr (assoc ext *lang-ext-map* :test #'string=))))
@@ -287,7 +288,10 @@ Returns a parsed-args structure."
         (declare (ignore status))
         (when symbol
           (set symbol value)
-          (when state-p
+          ;; STATE-P is true whenever a state argument was *passed*, even if it
+          ;; is NIL (callers forward a possibly-NIL profiled vm-state). Guard on
+          ;; the value too, or (vm-global-vars NIL) signals no-applicable-method.
+          (when (and state-p state)
             (setf (gethash symbol (cl-cc/vm:vm-global-vars state)) value)))))))
 
 (defun %bind-command-line-arguments (argv &optional vm-state)

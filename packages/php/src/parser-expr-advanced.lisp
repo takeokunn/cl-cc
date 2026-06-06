@@ -75,16 +75,17 @@
 ;;; ─── Function Call / Builtin Resolution ─────────────────────────────────────
 
 (defun %php-builtin-helper-symbol (qualified-name)
-  "Return the PHP runtime helper symbol for simple builtin QUALIFIED-NAME."
+  "Return the PHP runtime helper symbol for simple builtin QUALIFIED-NAME, or NIL.
+
+Consults the central builtin registry (populated by %php-register-builtin) so
+every registered builtin — array_*, str*, is_*, math, type predicates, … —
+lowers to its cl-cc/php::%php- helper. Previously a hand-coded cond covered only
+count/strlen/strtolower/strtoupper/isset/array_key_exists, so the other ~80
+registered builtins fell back to an unbridged user symbol and hit `Undefined
+function' at runtime (e.g. array_push)."
   (let ((lower (string-downcase qualified-name)))
     (unless (find (code-char 92) lower)
-      (cond ((string= lower "count") 'cl-cc/php::%php-count)
-            ((string= lower "strlen") 'cl-cc/php::%php-strlen)
-            ((string= lower "strtolower") 'cl-cc/php::%php-strtolower)
-            ((string= lower "strtoupper") 'cl-cc/php::%php-strtoupper)
-            ((string= lower "isset") 'cl-cc/php::%php-isset)
-            ((string= lower "array_key_exists") 'cl-cc/php::%php-array-key-exists)
-            (t nil)))))
+      (%php-lookup-builtin-symbol lower))))
 
 (defun %php-simple-function-spelling (qualified-name)
   "Return QUALIFIED-NAME as a simple global function name, or NIL."
@@ -213,7 +214,7 @@
             (php-parse-block rest3 (append params captures known-vars))
           (values (%php-capture-wrapper
                    captures
-                   (make-ast-lambda :params params :body body-stmts))
+                   (make-ast-lambda :params params :body (%php-callable-body body-stmts)))
                    rest4 kv4))))))
 
 ;;; ─── Yield Handlers ─────────────────────────────────────────────────────────

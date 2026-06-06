@@ -25,9 +25,12 @@ OUTPUT-STREAM and INPUT-STREAM can be specified to redirect I/O."
     ;; Set up standard streams
     (setf (vm-standard-input state) input-stream)
     (setf (vm-standard-output state) output-stream)
-    ;; Bind execution context for sub-invocations (custom method combination)
+    ;; Bind execution context for sub-invocations (custom method combination).
+    ;; *vm-state* lets host bridge functions (e.g. JS Array.map) call back into a
+    ;; VM closure via %vm-call-closure-sync during execution.
     (let ((*vm-exec-flat* flat)
-          (*vm-exec-labels* labels))
+          (*vm-exec-labels* labels)
+          (*vm-state* state))
       ;; Run the program
       (loop with pc = 0
             while (< pc (length instructions))

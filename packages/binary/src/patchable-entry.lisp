@@ -11,6 +11,17 @@
 (defvar *patchable-entry-after* 0
   "Number of NOP bytes to insert after the function entry (before body).")
 
+;;; ──── Vector output stream helper ────
+(defmacro with-output-to-vector ((stream-var) &body body)
+  "Execute BODY with STREAM-VAR bound to a byte-accumulator closure.
+Returns the collected bytes as a (simple-array (unsigned-byte 8) (*)).
+STREAM-VAR is a function accepting a single (unsigned-byte 8) argument."
+  (let ((bytes-sym (gensym "BYTES")))
+    `(let* ((,bytes-sym '())
+            (,stream-var (lambda (byte) (push byte ,bytes-sym))))
+       ,@body
+       (coerce (nreverse ,bytes-sym) '(simple-array (unsigned-byte 8) (*))))))
+
 ;;; ──── NOP byte sequences (Intel x86-64 multi-byte NOPs, SDM Vol. 2B table 4-12) ────
 ;;; Keys are byte counts 1-9; values are the canonical NOP encodings.
 (defparameter *nop-sequences*
@@ -28,11 +39,12 @@
 ;;; ──── NOP emission ────
 (defun emit-nop-sequence (stream count)
   "Emit COUNT bytes of NOP instructions into STREAM.
-Uses multi-byte NOPs for efficiency (up to 9 bytes per NOP instruction)."
+STREAM must be a function accepting a single (unsigned-byte 8) argument,
+as produced by with-output-to-vector. Uses multi-byte NOPs (up to 9 bytes)."
   (loop while (> count 0)
         for n = (min count 9)
         for bytes = (cdr (assoc n *nop-sequences*))
-        do (loop for byte across bytes do (write-byte byte stream))
+        do (loop for byte across bytes do (funcall stream byte))
         do (decf count n)))
 
 ;;; ──── Function entry patching ────

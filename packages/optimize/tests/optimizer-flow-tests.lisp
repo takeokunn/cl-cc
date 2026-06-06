@@ -222,13 +222,13 @@
   "%opt-rewrite-block-terminator rewrites matching jump labels or leaves non-matching blocks unchanged."
   :cases (("vm-jump-rewrites-label"
            (list (make-vm-const :dst :r0 :value 1) (make-vm-jump :label "old"))
-           cl-cc/vm::vm-jump "new" nil)
+           'cl-cc/vm::vm-jump "new" nil)
           ("vm-jump-zero-rewrites-label-preserves-reg"
            (list (make-vm-jump-zero :reg :r0 :label "old"))
-           cl-cc/vm::vm-jump-zero "new" :r0)
+           'cl-cc/vm::vm-jump-zero "new" :r0)
           ("no-match-unchanged"
            (list (make-vm-jump :label "other"))
-           cl-cc/vm::vm-jump "other" nil))
+           'cl-cc/vm::vm-jump "other" nil))
   (instructions expected-type expected-label expected-reg)
   (let ((b (%make-test-basic-block)))
     (setf (cl-cc/optimize:bb-instructions b) instructions)

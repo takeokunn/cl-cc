@@ -251,7 +251,10 @@ VM equality. Unknown types preserve each predicate's existing generic path."
   (let* ((lhs-ast (ast-binop-lhs node))
          (rhs-ast (ast-binop-rhs node))
          (lhs-reg (compile-ast lhs-ast ctx))
-         (rhs-reg (compile-ast rhs-ast ctx))
+         ;; Protect LHS-REG across RHS: if RHS contains a call (e.g.
+         ;; `(+ (* n n) (f x))'), the call must save/restore the LHS temp instead
+         ;; of clobbering it — incremental liveness can't see LHS's future use here.
+         (rhs-reg (%compile-operand-protecting rhs-ast ctx (list lhs-reg)))
          (dst (make-register ctx))
          (kind (%numeric-binop-specialization-kind lhs-ast rhs-ast ctx))
          (guard-type (%guard-type-for-numeric-kind kind))

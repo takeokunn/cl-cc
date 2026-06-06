@@ -33,6 +33,15 @@
   "Count top-level AST nodes for which PRED returns true."
   (count-if pred asts))
 
+(defun %js-e2e-defun-body-forms (fn)
+  "Return FN's effective body forms, unwrapping the single (block nil ...) that
+js-callable-body wraps function bodies in so JS `return' (→ return-from nil)
+resolves. Lets these AST-shape tests look past the block at the real statements."
+  (let ((body (cl-cc:ast-defun-body fn)))
+    (if (and (= (length body) 1) (cl-cc:ast-block-p (first body)))
+        (cl-cc:ast-block-body (first body))
+        body)))
+
 ;;; ─── 1. FizzBuzz ──────────────────────────────────────────────────────────────
 
 (deftest js-e2e-fizzbuzz
@@ -68,20 +77,23 @@ function fib(n) {
 "))
          (fn (%js-e2e-has-defun-named "FIB" asts)))
     (assert-true (not (null fn)))
-    (assert-true (some #'cl-cc:ast-if-p (cl-cc:ast-defun-body fn)))))
+    (assert-true (some #'cl-cc:ast-if-p (%js-e2e-defun-body-forms fn)))))
 
 ;;; ─── 3. Array map / filter / reduce ──────────────────────────────────────────
 
 (deftest js-e2e-array-higher-order
-  "Array map/filter/reduce chain parses to let bindings with call nodes."
+  "Array map/filter/reduce chain parses to NESTED let bindings: each const scopes
+over the following statements, so the four declarations collapse to a single
+outer ast-let whose body nests the rest (js-finish-let-bindings). Previously they
+were flat siblings, leaving each const invisible to later statements."
   (let ((asts (%js-e2e-parse "
 const nums = [1, 2, 3, 4, 5];
 const doubled = nums.map(x => x * 2);
 const evens = nums.filter(x => x % 2 === 0);
 const sum = nums.reduce((acc, x) => acc + x, 0);
 ")))
-    (assert-true (>= (length asts) 4))
-    (assert-true (every #'cl-cc:ast-let-p asts))))
+    (assert-true (>= (length asts) 1))
+    (assert-true (cl-cc:ast-let-p (first asts)))))
 
 ;;; ─── 4. Class with inheritance ────────────────────────────────────────────────
 
@@ -112,19 +124,20 @@ class Dog extends Animal {
 ;;; ─── 5. Object destructuring ──────────────────────────────────────────────────
 
 (deftest js-e2e-object-destructuring
-  "Object destructuring assignment produces ast-let bindings accessing properties."
+  "Object destructuring assignment produces ast-let bindings accessing properties.
+After %js-finish-let-bindings the 3 const declarations nest into 1 top-level let."
   (let ((asts (%js-e2e-parse "
 const person = { name: 'Alice', age: 30, city: 'NY' };
 const { name, age } = person;
 const { city: location } = person;
 ")))
-    (assert-true (>= (length asts) 3))
-    ;; Destructuring lets must have multiple bindings
-    (let ((dest-lets (remove-if-not (lambda (ast)
-                                      (and (cl-cc:ast-let-p ast)
-                                           (> (length (cl-cc:ast-let-bindings ast)) 1)))
-                                    asts)))
-      (assert-true (>= (length dest-lets) 1)))))
+    (assert-true (>= (length asts) 1))
+    ;; Search the nested let chain for a destructuring let (> 1 binding)
+    (labels ((has-multi-bind-let (node)
+               (when (cl-cc:ast-let-p node)
+                 (or (> (length (cl-cc:ast-let-bindings node)) 1)
+                     (some #'has-multi-bind-let (cl-cc:ast-let-body node))))))
+      (assert-true (some #'has-multi-bind-let asts)))))
 
 ;;; ─── 6. Generator sequence ────────────────────────────────────────────────────
 
@@ -160,7 +173,7 @@ function safeDiv(a, b) {
 }
 ")))
     (let* ((fn (%js-e2e-has-defun-named "SAFEDIV" asts))
-           (body (when fn (cl-cc:ast-defun-body fn))))
+           (body (when fn (%js-e2e-defun-body-forms fn))))
       (assert-true (not (null fn)))
       (assert-true (some (lambda (node)
                   (and (cl-cc:ast-call-p node)
@@ -211,7 +224,7 @@ const city = user?.profile?.address?.city;
 const zip = user?.profile?.address?.zip ?? 'N/A';
 const upper = user?.profile?.address?.city?.toUpperCase();
 ")))
-    (assert-true (>= (length asts) 4))
-    ;; The optional-chained assignments must be let forms
-    (let ((chained (remove-if-not #'cl-cc:ast-let-p asts)))
-      (assert-true (>= (length chained) 3)))))
+    (assert-true (>= (length asts) 1))
+    ;; The const declarations now nest into a single outer let (each scopes over
+    ;; the following statements), so the first top-level form is an ast-let.
+    (assert-true (cl-cc:ast-let-p (first asts)))))

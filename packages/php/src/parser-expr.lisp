@@ -220,22 +220,35 @@ gensym-named class and makes an instance of it."
                              kv kv4))
                      (setf obj (make-ast-slot-value :object obj :slot member)
                            rest rest3))))))
-          ;; ++ postfix — produce ast-setq incrementing by 1
+          ;; ++ postfix — yield the ORIGINAL value (PHP/C semantics), then increment.
+          ;; tmp captures the old value so $j = $i++ binds $j to the pre-increment $i.
           ((and (eq type :T-OP) (equal "++" (php-peek-value rest)))
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (setf obj (make-ast-setq :var (ast-var-name obj)
-                                      :value (make-ast-binop :op '+
-                                              :lhs obj :rhs (make-ast-int :value 1)))
-                   rest rest2)))
-          ;; -- postfix — produce ast-setq decrementing by 1
+             (let ((tmp (gensym "PHP-POSTFIX-")))
+               (setf obj (make-ast-let
+                          :bindings (list (cons tmp obj))
+                          :body (list (make-ast-setq
+                                       :var (ast-var-name obj)
+                                       :value (make-ast-binop :op '+
+                                               :lhs (make-ast-var :name tmp)
+                                               :rhs (make-ast-int :value 1)))
+                                      (make-ast-var :name tmp)))
+                     rest rest2))))
+          ;; -- postfix — yield the ORIGINAL value, then decrement.
           ((and (eq type :T-OP) (equal "--" (php-peek-value rest)))
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
-             (setf obj (make-ast-setq :var (ast-var-name obj)
-                                      :value (make-ast-binop :op '-
-                                              :lhs obj :rhs (make-ast-int :value 1)))
-                   rest rest2)))
+             (let ((tmp (gensym "PHP-POSTFIX-")))
+               (setf obj (make-ast-let
+                          :bindings (list (cons tmp obj))
+                          :body (list (make-ast-setq
+                                       :var (ast-var-name obj)
+                                       :value (make-ast-binop :op '-
+                                               :lhs (make-ast-var :name tmp)
+                                               :rhs (make-ast-int :value 1)))
+                                      (make-ast-var :name tmp)))
+                     rest rest2))))
           ;; Array access: $a[0] or $a[$i]
            ((eq type :T-LBRACKET)
             (multiple-value-bind (tok rest2) (php-consume rest)
@@ -283,14 +296,35 @@ gensym-named class and makes an instance of it."
             (values (%php-call 'expt lhs rhs) rest3 kv3)))
         (values lhs rest kv))))
 
+(defun php-lower-prefix-incdec (op operand)
+  "Lower PHP prefix ++/-- on OPERAND, yielding the NEW value (unlike postfix,
+which yields the original). OP is \"++\" or \"--\". Mirrors php-parse-postfix's
+variable handling: only a simple $var is incremented in place; other places are
+reported as unsupported rather than crashing in ast-var-name."
+  (if (ast-var-p operand)
+      (make-ast-setq :var (ast-var-name operand)
+                     :value (make-ast-binop :op (if (equal op "++") '+ '-)
+                                            :lhs operand
+                                            :rhs (make-ast-int :value 1)))
+      (%php-unsupported
+       (format nil "PHP prefix ~A is only supported on a simple $variable" op)
+       operand)))
+
 (defun php-parse-unary (stream known-vars)
-  "Parse unary expressions: !, -, +, ~."
+  "Parse unary expressions: prefix ++/--, !, -, +, ~."
   (cond
     ((%php-reference-token-p stream)
       (multiple-value-bind (tok rest) (php-consume stream)
         (declare (ignore tok))
         (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
           (values (%php-unsupported "PHP reference operator (&) is not yet supported" expr)
+                  rest2 kv2))))
+    ;; Prefix ++ / -- : increment/decrement the place, then yield the new value
+    ((and (eq (php-peek-type stream) :T-OP)
+          (member (php-peek-value stream) '("++" "--") :test #'equal))
+      (multiple-value-bind (op-tok rest) (php-consume stream)
+        (multiple-value-bind (operand rest2 kv2) (php-parse-postfix rest known-vars)
+          (values (php-lower-prefix-incdec (php-tok-value op-tok) operand)
                   rest2 kv2))))
     ((and (eq (php-peek-type stream) :T-OP)
            (member (php-peek-value stream) '("!" "-" "+" "~") :test #'equal))

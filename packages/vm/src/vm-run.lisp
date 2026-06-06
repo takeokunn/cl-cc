@@ -345,6 +345,9 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
     (let ((result
             (let ((*vm-exec-flat* flat)
                   (*vm-exec-labels* labels)
+                  ;; Expose the running state so host bridges (e.g. JS Array.map)
+                  ;; can call a VM closure back via %vm-call-closure-sync.
+                  (*vm-state* state)
                   (*vm-current-compilation-tier* (vm-program-compilation-tier program))
                   (*vm-current-program-deopt-info* (vm-program-deopt-info program))
                   (*vm-current-program-osr-entry-points* (vm-program-osr-entry-points program)))

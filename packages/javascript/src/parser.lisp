@@ -162,3 +162,27 @@ MODULE-P treats the source as an ES module (implies strict mode)."
   "Parse a JavaScript ES module SOURCE string.
 Equivalent to (parse-js-source source :strict-mode t :module-p t)."
   (parse-js-source source :strict-mode t :module-p t))
+
+(defun %js-finish-let-bindings (stmts)
+  "Nest each empty-bodied ast-let (from `let'/`const'/`var x = …') around the
+statements that follow it in STMTS, so the binding scopes over the rest of the
+block. Walks backwards; non-let statements and already-bodied lets pass through.
+The JS analog of the PHP frontend's php-finish-let-bindings — without it
+`let total = 0; … total …' leaves total unscoped and reads as undefined."
+  (let ((tail nil))
+    (dolist (stmt (reverse stmts) tail)
+      (if (and (ast-let-p stmt) (null (ast-let-body stmt)))
+          (progn
+            (setf (ast-let-body stmt) tail)
+            (setf tail (list stmt)))
+          (push stmt tail)))))
+
+(defun %js-callable-body (body-stmts)
+  "Wrap a JS function/method BODY-STMTS list in (block nil ...) so JS `return'
+(which lowers to (return-from nil …)) exits the function. A bare ast-defun
+establishes no block named NIL; without this the body fails to compile, the
+top-level handler-case silently drops the defun, and calls hit `Undefined
+function'. A NIL/empty body passes through unchanged."
+  (if body-stmts
+      (list (make-ast-block :name nil :body body-stmts))
+      body-stmts))

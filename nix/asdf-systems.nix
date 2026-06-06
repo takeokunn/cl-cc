@@ -190,6 +190,7 @@ let
         "cl-cc-prolog"
         "cl-cc-parse"
         "cl-cc-php"
+        "cl-cc-javascript"
         "cl-cc-type"
         "cl-cc-optimize"
         "cl-cc-vm"

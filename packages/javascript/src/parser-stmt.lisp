@@ -11,45 +11,18 @@
 (in-package :cl-cc/javascript)
 
 ;;; ─── Token Stream Helpers ────────────────────────────────────────────────────
-
-(defun js-tok-type  (tok) (getf tok :type))
-(defun js-tok-value (tok) (getf tok :value))
-
-(defun js-peek       (stream) (car stream))
-(defun js-peek-type  (stream) (when stream (js-tok-type  (car stream))))
-(defun js-peek-value (stream) (when stream (js-tok-value (car stream))))
-
-(defun js-consume (stream)
-  "Return (values token rest)."
-  (values (car stream) (cdr stream)))
-
-(defun js-expect (type stream &optional value)
-  "Consume one token of TYPE (optionally matching VALUE).
-  Signals an error on mismatch."
-  (if (and stream
-           (eq (js-peek-type stream) type)
-           (or (null value) (equal (js-peek-value stream) value)))
-      (js-consume stream)
-      (error "JS parse error: expected ~S~@[ ~S~] but got ~S"
-             type value (js-peek stream))))
+;;; js-tok-type, js-tok-value, js-peek*, js-consume, js-expect, js-at-eof-p,
+;;; js-ident-sym, and js-try-consume are defined in parser.lisp (loaded first).
 
 (defun %js-consume-expected (type stream)
   "Like js-expect but returns only the rest stream (discards the token)."
   (nth-value 1 (js-expect type stream)))
 
-(defun js-at-eof-p (stream)
-  "Return T when STREAM is exhausted or at :T-EOF."
-  (or (null stream) (eq (js-peek-type stream) :T-EOF)))
-
 (defun js-skip-semis (stream)
-  "Skip zero or more semicolons (including ASI — automatic semicolon insertion)."
+  "Skip zero or more semicolons in a loop (unlike js-skip-semi which skips one)."
   (loop while (and stream (eq (js-peek-type stream) :T-SEMI))
         do (setf stream (cdr stream)))
   stream)
-
-(defun js-ident-sym (name)
-  "Intern a JS identifier NAME as a symbol in :cl-cc/javascript."
-  (intern (string-upcase name) :cl-cc/javascript))
 
 ;;; ─── Dynamic Variables for Loop/Switch Control Flow ─────────────────────────
 
@@ -65,11 +38,7 @@
 (defvar *js-continue-targets* nil
   "Stack of continue targets for nested loops, innermost first.")
 
-(defvar *js-strict-mode* nil
-  "Dynamically bound: T when parsing in strict mode.")
-
-(defvar *js-module-mode* nil
-  "Dynamically bound: T when parsing a module (implies strict mode).")
+;;; *js-strict-mode* and *js-module-mode* are defined in parser.lisp (loaded first).
 
 ;;; ─── Statement Dispatcher Table ──────────────────────────────────────────────
 ;;;
@@ -200,7 +169,7 @@
       (multiple-value-bind (stmt rest) (js-parse-stmt current)
         (when stmt (push stmt stmts))
         (setf current rest)))
-    (values (make-ast-progn :forms (nreverse stmts))
+    (values (make-ast-progn :forms (%js-finish-let-bindings (nreverse stmts)))
             (%js-consume-expected :T-RBRACE current)))))
 
 (defun %js-parse-stmt-body (stream)
@@ -213,8 +182,17 @@
 ;;; ─── Variable / Binding Pattern Helpers ─────────────────────────────────────
 
 (defun %js-binding-sym (name)
-  "Intern JS binding name string as a symbol."
-  (intern (concatenate 'string "JS." (string-upcase name))
+  "Intern a JS binding name (param, let/const/var, destructured name) as a symbol
+in :cl-cc/javascript — using the SAME scheme as js-ident-sym so a binding and its
+references resolve to the identical symbol.
+
+Previously this prefixed names with `JS.', so a parameter or local bound the
+symbol JS.X while the body referenced X (via js-ident-sym). Every `return param'
+or `console.log(localVar)' then hit an unbound variable, the enclosing function
+body failed to compile, the top-level handler-case silently dropped the defun,
+and calls reported `Undefined function'. The package already namespaces JS
+symbols, so the prefix was redundant as well as desynchronized."
+  (intern (string-upcase (if (stringp name) name (symbol-name name)))
           :cl-cc/javascript))
 
 (defun %js-parse-pattern-default (stream)
@@ -505,7 +483,7 @@ DEFAULT-AST is nil."
             (values (make-ast-defun :name (or fn-name (gensym "JS-FN-"))
                                     :params params
                                     :declarations (nreverse decls)
-                                    :body body-stmts)
+                                    :body (%js-callable-body body-stmts))
                     rest2)))))))
 
 ;;; ─── If Statement ────────────────────────────────────────────────────────────

@@ -23,20 +23,20 @@
     result-reg))
 
 (defun emit-builtin-binary (entry args result-reg ctx)
-  (let ((lhs-reg (compile-ast (first args) ctx))
-        (rhs-reg (compile-ast (second args) ctx)))
+  (let* ((lhs-reg (compile-ast (first args) ctx))
+         (rhs-reg (%compile-operand-protecting (second args) ctx (list lhs-reg))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg :lhs lhs-reg :rhs rhs-reg))
     result-reg))
 
 (defun emit-builtin-string-cmp (entry args result-reg ctx)
-  (let ((arg1-reg (compile-ast (first args) ctx))
-        (arg2-reg (compile-ast (second args) ctx)))
+  (let* ((arg1-reg (compile-ast (first args) ctx))
+         (arg2-reg (%compile-operand-protecting (second args) ctx (list arg1-reg))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg :str1 arg1-reg :str2 arg2-reg))
     result-reg))
 
 (defun emit-builtin-char-cmp (entry args result-reg ctx)
-  (let ((c1-reg (compile-ast (first args) ctx))
-        (c2-reg (compile-ast (second args) ctx)))
+  (let* ((c1-reg (compile-ast (first args) ctx))
+         (c2-reg (%compile-operand-protecting (second args) ctx (list c1-reg))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg :char1 c1-reg :char2 c2-reg))
     result-reg))
 
@@ -68,8 +68,8 @@
   result-reg)
 
 (defun emit-builtin-string-trim (entry args result-reg ctx)
-  (let ((bag-reg (compile-ast (first args) ctx))
-        (str-reg (compile-ast (second args) ctx)))
+  (let* ((bag-reg (compile-ast (first args) ctx))
+         (str-reg (%compile-operand-protecting (second args) ctx (list bag-reg))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg :char-bag bag-reg :string str-reg))
     result-reg))
 
@@ -119,7 +119,7 @@
          (default-handle (second (be-slots entry)))
          (val-reg (compile-ast (first args) ctx))
          (handle-reg (if (>= (length args) 2)
-                         (compile-ast (second args) ctx)
+                         (%compile-operand-protecting (second args) ctx (list val-reg))
                          (let ((r (make-register ctx)))
                            (emit ctx (make-vm-const :dst r :value default-handle))
                            r))))
@@ -136,8 +136,8 @@
          (s1 (first slots)) (s2 (second slots)) (s3 (third slots))
          (ret (fourth slots))
          (a-reg (compile-ast (first args) ctx))
-         (b-reg (compile-ast (second args) ctx))
-         (c-reg (compile-ast (third args) ctx)))
+         (b-reg (%compile-operand-protecting (second args) ctx (list a-reg)))
+         (c-reg (%compile-operand-protecting (third args) ctx (list a-reg b-reg))))
     (if (eq ret :dst)
         (progn
           (emit ctx (funcall (be-ctor entry) :dst result-reg
@@ -152,9 +152,9 @@
 
 (defun emit-builtin-binary-custom (entry args result-reg ctx)
   "Parametric binary emitter: reads slot names from (be-slots entry)."
-  (let ((lhs-reg (compile-ast (first args) ctx))
-        (rhs-reg (compile-ast (second args) ctx))
-        (slots (be-slots entry)))
+  (let* ((lhs-reg (compile-ast (first args) ctx))
+         (rhs-reg (%compile-operand-protecting (second args) ctx (list lhs-reg)))
+         (slots (be-slots entry)))
     (emit ctx (funcall (be-ctor entry) :dst result-reg
                        (first slots) lhs-reg (second slots) rhs-reg))
     result-reg))
@@ -162,9 +162,9 @@
 (defun emit-builtin-binary-move-first (entry args result-reg ctx)
   "Binary emitter that emits a void instruction (no :dst), then moves arg1→result.
    Used for RPLACA/RPLACD which return the modified cons."
-  (let ((lhs-reg (compile-ast (first args) ctx))
-        (rhs-reg (compile-ast (second args) ctx))
-        (slots (be-slots entry)))
+  (let* ((lhs-reg (compile-ast (first args) ctx))
+         (rhs-reg (%compile-operand-protecting (second args) ctx (list lhs-reg)))
+         (slots (be-slots entry)))
     (emit ctx (funcall (be-ctor entry) (first slots) lhs-reg (second slots) rhs-reg))
     (emit ctx (make-vm-move :dst result-reg :src lhs-reg))
     result-reg))
@@ -172,9 +172,9 @@
 (defun emit-builtin-binary-void (entry args result-reg ctx)
   "Binary emitter that emits a void instruction (no :dst) and returns nil.
    Used for REMHASH, UNREAD-CHAR."
-  (let ((lhs-reg (compile-ast (first args) ctx))
-        (rhs-reg (compile-ast (second args) ctx))
-        (slots (be-slots entry)))
+  (let* ((lhs-reg (compile-ast (first args) ctx))
+         (rhs-reg (%compile-operand-protecting (second args) ctx (list lhs-reg)))
+         (slots (be-slots entry)))
     (emit ctx (funcall (be-ctor entry) (first slots) lhs-reg (second slots) rhs-reg))
     (emit ctx (make-vm-const :dst result-reg :value nil))
     result-reg))
@@ -193,7 +193,7 @@
    Used for SEARCH."
   (let* ((slots (be-slots entry))
          (a-reg (compile-ast (first args) ctx))
-         (b-reg (compile-ast (second args) ctx))
+         (b-reg (%compile-operand-protecting (second args) ctx (list a-reg)))
          (zero-reg (make-register ctx)))
     (emit ctx (make-vm-const :dst zero-reg :value 0))
     (emit ctx (funcall (be-ctor entry) :dst result-reg
@@ -205,7 +205,8 @@
    Used for INTERN."
   (let* ((slots (be-slots entry))
          (a-reg (compile-ast (first args) ctx))
-         (b-reg (when (second args) (compile-ast (second args) ctx))))
+         (b-reg (when (second args)
+                  (%compile-operand-protecting (second args) ctx (list a-reg)))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg
                        (first slots) a-reg (second slots) b-reg))
     result-reg))
@@ -215,9 +216,9 @@
    Used for GET, SUBSEQ."
   (let* ((slots (be-slots entry))
          (a-reg (compile-ast (first args) ctx))
-         (b-reg (compile-ast (second args) ctx))
+         (b-reg (%compile-operand-protecting (second args) ctx (list a-reg)))
          (c-reg (if (>= (length args) 3)
-                    (compile-ast (third args) ctx)
+                    (%compile-operand-protecting (third args) ctx (list a-reg b-reg))
                     (let ((r (make-register ctx)))
                       (emit ctx (make-vm-const :dst r :value nil)) r))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg
@@ -229,7 +230,7 @@
    Standard :dst :lhs :rhs slots.  Used for FFLOOR/FCEILING/FTRUNCATE/FROUND."
   (let* ((lhs-reg (compile-ast (first args) ctx))
          (rhs-reg (if (= (length args) 2)
-                      (compile-ast (second args) ctx)
+                      (%compile-operand-protecting (second args) ctx (list lhs-reg))
                       (let ((r (make-register ctx)))
                         (emit ctx (make-vm-const :dst r :value 1)) r))))
     (emit ctx (funcall (be-ctor entry) :dst result-reg :lhs lhs-reg :rhs rhs-reg))

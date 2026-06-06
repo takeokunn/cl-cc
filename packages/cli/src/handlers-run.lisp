@@ -18,7 +18,8 @@ exits with status 0 on success."
           (opts (%parse-compile-opts parsed))
            (core-path (flag parsed "--core"))
            (source (%read-command-source file))
-           (no-stdlib (flag parsed "--no-stdlib")))
+           (no-stdlib (flag parsed "--no-stdlib"))
+           (watch (flag parsed "--watch")))
     (when verbose
       (format *error-output* "; cl-cc run: ~A  lang=~A  stdlib=~A~%"
               file language (if stdlib "yes" "no")))
@@ -30,7 +31,8 @@ exits with status 0 on success."
           (%call-with-optional-output-file
           (compile-opts-trace-json-path opts)
           (lambda (stream)
-            (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+            (let* ((vm-state (or (%maybe-make-profiled-vm-state opts)
+                                 (cl-cc/vm:make-vm-state :output-stream *standard-output*)))
                    (kwargs (%compile-opts-kwargs opts stream)))
               (cond
                 ((eq language :lisp)
@@ -44,6 +46,12 @@ exits with status 0 on success."
                           ret))))
                 ((eq language :php)
                   (let ((result (apply #'compile-string source :target :vm :language :php kwargs)))
+                    (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
+                    (let ((ret (%run-compiled-result result vm-state opts)))
+                      (%maybe-write-pgo-profile opts result vm-state)
+                      ret)))
+                ((eq language :javascript)
+                  (let ((result (apply #'compile-string source :target :vm :language :javascript kwargs)))
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)

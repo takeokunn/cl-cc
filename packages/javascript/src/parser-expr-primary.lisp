@@ -219,16 +219,21 @@ Returns (values ast rest)."
   (multiple-value-bind (tok rest) (js-expect :T-ARROW stream)
     (declare (ignore tok))
     (if (eq (js-peek-type rest) :T-LBRACE)
-        ;; Block body: => { stmts }
+        ;; Block body: => { stmts }. Wrap in (block nil ...) via %js-callable-body
+        ;; so `return' (which lowers to return-from nil) works — a bare lambda
+        ;; establishes no block, so without this the body fails to compile and the
+        ;; enclosing form is silently dropped (same fix as regular functions).
         (multiple-value-bind (tok2 rest2) (js-consume rest)
           (declare (ignore tok2))
           (multiple-value-bind (body-forms rest3)
               (js-parse-function-body rest2)
-            (values (make-ast-lambda :params params :body body-forms) rest3)))
-        ;; Concise body: => expr
+            (values (make-ast-lambda :params params
+                                     :body (%js-callable-body body-forms))
+                    rest3)))
+        ;; Concise body: => expr. The lambda yields EXPR directly as its value;
+        ;; no return-from/block is needed (and a bare lambda binds no block nil).
         (multiple-value-bind (expr rest2) (js-parse-assignment-expr rest)
-          (values (make-ast-lambda :params params
-                                   :body (list (make-ast-return-from :name nil :value expr)))
+          (values (make-ast-lambda :params params :body (list expr))
                   rest2)))))
 
 ;;; ─── Async Expression ────────────────────────────────────────────────────────
@@ -283,9 +288,9 @@ Returns (values ast rest)."
                (multiple-value-bind (tok2 rest2) (js-consume rest)
                  (declare (ignore tok2))
                  (multiple-value-bind (body-forms rest3) (js-parse-function-body rest2)
-                   (list body-forms rest3)))
+                   (list (%js-callable-body body-forms) rest3)))
                (multiple-value-bind (expr rest2) (js-parse-assignment-expr rest)
-                 (list (list (make-ast-return-from :name nil :value expr)) rest2)))))
+                 (list (list expr) rest2)))))
       (values (%js-call '%js-make-async
                         (make-ast-lambda :params params :body (car body-and-rest)))
               (cadr body-and-rest)))))

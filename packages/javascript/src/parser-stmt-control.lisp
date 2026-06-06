@@ -82,6 +82,7 @@ for(var x of iter){}, for await(var x of asyncIter){}.
 Returns (values ast rest)."
   (let ((await-p nil)
         (current stream))
+    (declare (ignorable await-p)) ; for-await-of currently iterates synchronously
     (when (eq (js-peek-type current) :T-AWAIT)
       (setf await-p t
             current (cdr current)))
@@ -109,7 +110,7 @@ Returns (values ast rest)."
                         (let ((lower (funcall (%js-lower-for-of-in
                                                binding
                                                (make-ast-call
-                                                :func (make-ast-var :name '%js-for-in)
+                                                :func (make-ast-var :name '%js-iter-keys)
                                                 :args (list obj-expr))
                                                nil loop-tag end-tag)
                                               body-ast)))
@@ -119,7 +120,7 @@ Returns (values ast rest)."
                  ((eq iter-kw :T-OF)
                   (multiple-value-bind (iter-expr rest3) (js-parse-expr (cdr rest2))
                     (setf rest3 (%js-consume-expected :T-RPAREN rest3))
-                    (let* ((of-fn (if await-p '%js-for-await-of '%js-for-of))
+                    (let* ((of-fn '%js-iter-values)
                            (loop-tag (gensym "FOR-OF-"))
                            (end-tag  (gensym "FOR-OF-END-"))
                            (*js-loop-continue-target* loop-tag)
@@ -491,7 +492,7 @@ Returns (values ast rest)."
         (when (eq rest current)
           (error "JS parse error: no progress at ~S" (js-peek current)))
         (setf current rest)))
-    (values (nreverse stmts) current)))
+    (values (%js-finish-let-bindings (nreverse stmts)) current)))
 
 (defun js-parse-stmt-list (stream)
   "Parse statements until a closing } (which is consumed) or EOF.
@@ -515,22 +516,11 @@ via fboundp — previously absent, so bodies fell back to a token collector."
         (setf current rest)))
     (multiple-value-bind (_ rest) (js-expect :T-RBRACE current)
       (declare (ignore _))
-      (values (nreverse stmts) rest))))
+      (values (%js-finish-let-bindings (nreverse stmts)) rest))))
 
 ;;; ─── Public Entry Points ─────────────────────────────────────────────────────
 
-(defun parse-js-source (source &key strict-mode module-p)
-  "Parse JavaScript SOURCE string into a list of top-level AST nodes.
-  STRICT-MODE: enable strict mode parsing.
-  MODULE-P: treat as ES module (implies strict mode, enables import/export)."
-  (let ((*js-strict-mode* (or strict-mode module-p))
-        (*js-module-mode* module-p))
-    (let ((tokens (tokenize-js-source source)))
-      (multiple-value-bind (stmts _rest) (%js-parse-all-stmts tokens)
-        (declare (ignore _rest))
-        stmts))))
-
-(defun parse-js-module (source)
-  "Parse JavaScript SOURCE as an ES module.
-  Implies strict mode and module semantics (import/export allowed)."
-  (parse-js-source source :strict-mode t :module-p t))
+;; parse-js-source / parse-js-module are defined in parser.lisp (the "Top-Level
+;; Entry Points" section). They were previously duplicated here verbatim, which
+;; under :serial t silently shadowed the parser.lisp definitions and emitted a
+;; redefinition warning on every load. parser.lisp is the canonical home.

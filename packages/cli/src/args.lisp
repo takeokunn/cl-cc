@@ -43,6 +43,7 @@
     ("--stack-inspection" . :bool) ; FR-269 stack inspection helpers
     ("--memory-profiler" . :bool) ; FR-318 heap profiler helpers
     ("--hot-reload" . :bool) ; FR-317 table.set reload helpers
+    ("--watch" . :bool) ; FR-808 re-run FILE on every save (run/repl watch mode)
     ("--incremental-repl" . :bool) ; FR-288 browser Wasm REPL helpers
     ("--system" . :string)
     ("--annotate-source" . :bool)

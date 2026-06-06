@@ -119,7 +119,7 @@ stable, isolated context."
                                        (typep inst 'cl-cc/vm::vm-const))
                                      (codegen-instructions ctx))))
           (assert-= 1 (length consts))
-          (assert-string= "shared" (cl-cc::vm-const-value (first consts)))))))))
+          (assert-string= "shared" (cl-cc::vm-const-value (first consts))))))))
 
 (deftest codegen-string-literal-pool-does-not-deduplicate-non-strings
   "FR-137 pools strings only; other quoted constants keep direct vm-const emission.

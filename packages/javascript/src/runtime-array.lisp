@@ -59,14 +59,21 @@
          (result (%js-make-vec n)))
     (loop for i below n
           do (setf (aref result i)
-                   (funcall fn (aref arr i) i arr)))
+                   (%js-funcall fn (aref arr i) i arr)))
     result))
+
+(defun %js-array-for-each (arr fn)
+  "Call FN(element, index, arr) for each element of ARR; returns undefined
+(JS Array.prototype.forEach)."
+  (loop for i below (length arr)
+        do (%js-funcall fn (aref arr i) i arr))
+  +js-undefined+)
 
 (defun %js-array-filter (arr fn)
   "Filter ARR by predicate FN."
   (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
     (loop for i below (length arr)
-          when (%js-truthy (funcall fn (aref arr i) i arr))
+          when (%js-truthy (%js-funcall fn (aref arr i) i arr))
             do (vector-push-extend (aref arr i) result))
     result))
 
@@ -80,7 +87,7 @@
       (setf acc (aref arr 0)
             start 1))
     (loop for i from start below (length arr)
-          do (setf acc (funcall fn acc (aref arr i) i arr)))
+          do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
     acc))
 
 (defun %js-array-reduce-right (arr fn &optional (init +js-undefined+))
@@ -93,34 +100,34 @@
       (setf acc (aref arr end)
             end (- end 1)))
     (loop for i from end downto 0
-          do (setf acc (funcall fn acc (aref arr i) i arr)))
+          do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
     acc))
 
 (defun %js-array-find (arr fn)
   "Return first element matching FN, or undefined."
   (loop for i below (length arr)
-        when (%js-truthy (funcall fn (aref arr i) i arr))
+        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
           return (aref arr i)
         finally (return +js-undefined+)))
 
 (defun %js-array-find-index (arr fn)
   "Return index of first element matching FN, or -1."
   (loop for i below (length arr)
-        when (%js-truthy (funcall fn (aref arr i) i arr))
+        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
           return i
         finally (return -1)))
 
 (defun %js-array-some (arr fn)
   "True if any element satisfies FN."
   (loop for i below (length arr)
-        when (%js-truthy (funcall fn (aref arr i) i arr))
+        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
           return t
         finally (return nil)))
 
 (defun %js-array-every (arr fn)
   "True if all elements satisfy FN."
   (loop for i below (length arr)
-        unless (%js-truthy (funcall fn (aref arr i) i arr))
+        unless (%js-truthy (%js-funcall fn (aref arr i) i arr))
           return nil
         finally (return t)))
 
@@ -229,7 +236,7 @@
   (let ((vec (coerce arr 'list)))
     (let ((sorted (if compare-fn
                       (stable-sort vec (lambda (a b)
-                                         (< (funcall compare-fn a b) 0)))
+                                         (< (%js-funcall compare-fn a b) 0)))
                       (stable-sort vec (lambda (a b)
                                          (string< (%js-to-string a)
                                                   (%js-to-string b)))))))

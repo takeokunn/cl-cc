@@ -173,6 +173,58 @@
                 finally (return nil)))))))
 
 ;;; -----------------------------------------------------------------------
+;;;  Callback invocation + method resolution hooks
+;;; -----------------------------------------------------------------------
+
+(defvar *js-apply-fn* (lambda (fn args) (apply fn args))
+  "Invoker used to call a JS callback value (e.g. the FN passed to Array.map /
+filter / reduce / sort). Defaults to host APPLY so plain host lambdas work in
+unit tests; the pipeline rebinds it to a VM-closure-aware invoker so a callback
+that is a compiled-JS closure (vm-closure-object) is dispatched through the VM.")
+
+(defun %js-funcall (fn &rest args)
+  "Call JS callback FN with ARGS through the installed *js-apply-fn* invoker.
+Array higher-order methods use this instead of CL:FUNCALL so the same code path
+works whether FN is a host function (tests) or a compiled-JS closure (runtime)."
+  (funcall *js-apply-fn* fn args))
+
+(defvar *js-method-resolver* nil
+  "When set, a function (receiver method-name-string) -> a bound method closure,
+or +js-undefined+ when the name is not a method. Installed by a late runtime
+file once every %js-array-*/%js-string-* method is defined, so %js-get-prop can
+resolve obj.method without a load-order cycle. This is what lets `arr.push(x)',
+`nums.map(f)' and `s.toUpperCase()' resolve to a callable value the VM can
+invoke — mirroring how console.log resolves to a function value.")
+
+(defun %js-method-ref (obj key)
+  "Resolve OBJ.KEY to a bound method via *js-method-resolver*, else +js-undefined+."
+  (if *js-method-resolver*
+      (funcall *js-method-resolver* obj key)
+      +js-undefined+))
+
+(defvar *js-callable-p* #'functionp
+  "Predicate: is X a callable JS value? Defaults to host FUNCTIONP; the pipeline
+extends it to also recognize a compiled-JS closure (vm-closure-object), so
+prototype-chain method lookup can tell a method from an inherited data value.")
+
+(defun %js-proto-method-lookup (obj k)
+  "Walk OBJ's __proto__ chain for key K (JS prototype method resolution). A
+callable found on the chain is a METHOD: return it bound to OBJ as `this' — a
+closure that prepends OBJ when invoked — so `obj.m(args)' runs M with %js-this =
+OBJ. A non-callable inherited value is returned as-is; a miss yields undefined.
+Routes the eventual call through %js-funcall so a compiled-JS method (vm-closure)
+is dispatched back into the VM."
+  (loop with proto = (gethash "__proto__" obj)
+        while (%js-ht-p proto)
+        do (multiple-value-bind (val found) (gethash k proto)
+             (when found
+               (return (if (funcall *js-callable-p* val)
+                           (lambda (&rest args) (apply #'%js-funcall val obj args))
+                           val)))
+             (setf proto (gethash "__proto__" proto)))
+        finally (return +js-undefined+)))
+
+;;; -----------------------------------------------------------------------
 ;;;  Property access
 ;;; -----------------------------------------------------------------------
 
@@ -188,7 +240,7 @@
             (if (< idx (length obj))
                 (aref obj idx)
                 +js-undefined+)))
-         (t +js-undefined+)))
+         (t (%js-method-ref obj k))))
       ((stringp obj)
        (cond
          ((string= k "length") (length obj))
@@ -197,10 +249,10 @@
             (if (< idx (length obj))
                 (string (char obj idx))
                 +js-undefined+)))
-         (t +js-undefined+)))
+         (t (%js-method-ref obj k))))
       ((%js-ht-p obj)
        (multiple-value-bind (val found) (gethash k obj)
-         (if found val +js-undefined+)))
+         (if found val (%js-proto-method-lookup obj k))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
       (t +js-undefined+))))
@@ -259,6 +311,27 @@
 ;;; -----------------------------------------------------------------------
 ;;;  String / Template
 ;;; -----------------------------------------------------------------------
+
+(defun %js-add (a b)
+  "JS `+' operator: string concatenation when either operand is a string,
+otherwise numeric addition. Models the common ECMAScript number|string cases of
+ToPrimitive + — `1 + 2' => 3, `\"a\" + \"b\"' => \"ab\", `\"n=\" + 5' => \"n=5\".
+JS `+' is polymorphic, so it cannot lower to the numeric-only make-vm-add; it
+routes here via *js-binop-runtime-helpers*."
+  (if (or (stringp a) (stringp b))
+      (concatenate 'string (%js-to-string a) (%js-to-string b))
+      (+ a b)))
+
+(defun %js-mod (a b)
+  "JS `%' remainder operator. Like CL REM, the result takes the sign of the
+dividend (5 % 3 => 2, -5 % 3 => -2), matching ECMAScript; division by zero => NaN."
+  (if (and (numberp b) (zerop b))
+      :js-nan
+      (rem a b)))
+
+(defun %js-pow (a b)
+  "JS `**' exponentiation operator (Math.pow / a ** b)."
+  (expt a b))
 
 (defun %js-to-string (x)
   "JS ToString coercion."
@@ -356,4 +429,21 @@
                (funcall body-fn (gethash "value" result))))))))
     (t nil))
   +js-undefined+)
+
+(defun %js-iter-values (iterable)
+  "Collect ITERABLE's values into a fresh CL list, in order. This is the 1-arg
+companion to the 2-arg %js-for-of (which calls a body-fn): the for-of loop
+LOWERING walks the resulting list with car/cdr so that break/continue and the
+loop body's own scope work as ordinary statements. Reuses %js-for-of so every
+iterable kind (array, string, iterator-protocol object) is handled in one place."
+  (let ((acc nil))
+    (%js-for-of iterable (lambda (el) (push el acc)))
+    (nreverse acc)))
+
+(defun %js-iter-keys (obj)
+  "Collect OBJ's enumerable string keys into a fresh CL list — the 1-arg
+companion to %js-for-in, used by the for-in loop lowering (see %js-iter-values)."
+  (let ((acc nil))
+    (%js-for-in obj (lambda (k) (push k acc)))
+    (nreverse acc)))
 

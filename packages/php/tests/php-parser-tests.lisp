@@ -55,11 +55,11 @@
 
 (deftest-each php-parser-stmt-ast-type
   "Each statement construct lowers to the expected AST node type."
-  :cases (("if"          "<?php if ($x) { echo 1; }"                          cl-cc:ast-if-p)
-          ("while"       "<?php while ($x) { echo 1; }"                       cl-cc:ast-block-p)
-          ("foreach"     "<?php foreach ($items as $item) { echo $item; }"    cl-cc:ast-let-p)
-          ("foreach-kv"  "<?php foreach ($arr as $k => $v) { echo $v; }"      cl-cc:ast-let-p)
-          ("function"    "<?php function greet($name) { return $name; }"       cl-cc:ast-defun-p))
+  :cases (("if"          "<?php if ($x) { echo 1; }"                          #'cl-cc:ast-if-p)
+          ("while"       "<?php while ($x) { echo 1; }"                       #'cl-cc:ast-block-p)
+          ("foreach"     "<?php foreach ($items as $item) { echo $item; }"    #'cl-cc:ast-let-p)
+          ("foreach-kv"  "<?php foreach ($arr as $k => $v) { echo $v; }"      #'cl-cc:ast-let-p)
+          ("function"    "<?php function greet($name) { return $name; }"       #'cl-cc:ast-defun-p))
   (src pred)
   (assert-true (funcall pred (%php-first src))))
 
@@ -80,10 +80,16 @@
 ;;; ─── :for handler → ast-progn wrapping while ─────────────────────────────
 
 (deftest php-parser-for-produces-ast-progn
-  "for loop lowers to ast-progn(init, while-loop) with exactly 2 forms."
+  "for ($i=0;...) lowers to an ast-progn whose single form is the init's let,
+nesting the while-loop so the loop variable scopes over cond/body/increment.
+(Previously the init and while-loop were two sibling forms, leaving $i unscoped
+and the loop producing no output.)"
   (let ((ast (%php-first "<?php for ($i = 0; $i < 10; $i++) { echo $i; }")))
     (assert-true (typep ast 'cl-cc:ast-progn))
-    (assert-= 2 (length (cl-cc:ast-progn-forms ast)))))
+    ;; $i = 0 introduces a new variable, so php-finish-let-bindings nests the
+    ;; while-loop inside that let — one progn form (the let), not two siblings.
+    (assert-= 1 (length (cl-cc:ast-progn-forms ast)))
+    (assert-true (typep (first (cl-cc:ast-progn-forms ast)) 'cl-cc:ast-let))))
 
 ;;; ─── :function handler → ast-defun ───────────────────────────────────────
 
@@ -136,11 +142,18 @@
                       (typep ast 'cl-cc:ast-call)))))
 
 (deftest php-parser-variable-names-preserve-case
-  "PHP variables are case-sensitive: $foo, $FOO, and $Foo are distinct AST symbols."
+  "PHP variables are case-sensitive: $foo, $FOO, and $Foo are distinct AST symbols.
+After php-finish-let-bindings the 3 assignments nest into one top-level let chain."
   (let* ((asts (cl-cc/php:parse-php-source "<?php $foo = 1; $FOO = 2; $Foo = 3;"))
-         (names (mapcar (lambda (ast)
-                          (symbol-name (car (first (cl-cc:ast-let-bindings ast)))))
-                        asts)))
+         (names nil))
+    ;; Walk the nested let chain collecting each variable name
+    (labels ((collect (nodes)
+               (dolist (node nodes)
+                 (when (cl-cc:ast-let-p node)
+                   (push (symbol-name (car (first (cl-cc:ast-let-bindings node)))) names)
+                   (collect (cl-cc:ast-let-body node))))))
+      (collect asts))
+    (setf names (nreverse names))
     (assert-equal '("foo" "FOO" "Foo") names)
     (assert-= 3 (length (remove-duplicates names :test #'string=)))))
 
@@ -328,18 +341,22 @@
       (assert-equal '("x") (mapcar #'symbol-name (cl-cc:ast-lambda-params lambda))))))
 
 (deftest php-parser-yield-expression-lowering
-  "yield lowers to the PHP yield helper instead of an unsupported marker."
+  "yield lowers to the PHP yield helper. Body is wrapped in (block nil ...) by %php-callable-body."
   (let* ((ast (%php-first "<?php function g() { yield 1; }"))
-         (yield-call (first (cl-cc:ast-defun-body ast))))
+         (block (first (cl-cc:ast-defun-body ast)))
+         (yield-call (first (cl-cc:ast-block-body block))))
     (cl-cc/php:php-check-supported-forms (list ast))
+    (assert-true (cl-cc:ast-block-p block))
     (assert-true (cl-cc:ast-call-p yield-call))
     (assert-string= "%PHP-YIELD" (%php-call-name yield-call))))
 
 (deftest php-parser-yield-from-expression-lowering
-  "yield from lowers to the PHP yield-from helper instead of an unsupported marker."
+  "yield from lowers to the PHP yield-from helper. Body wrapped in (block nil ...) by %php-callable-body."
   (let* ((ast (%php-first "<?php function g() { yield from $items; }"))
-         (yield-call (first (cl-cc:ast-defun-body ast))))
+         (block (first (cl-cc:ast-defun-body ast)))
+         (yield-call (first (cl-cc:ast-block-body block))))
     (cl-cc/php:php-check-supported-forms (list ast))
+    (assert-true (cl-cc:ast-block-p block))
     (assert-true (cl-cc:ast-call-p yield-call))
     (assert-string= "%PHP-YIELD-FROM" (%php-call-name yield-call))))
 
@@ -444,9 +461,10 @@
     (assert-= 3 (length (cl-cc:ast-call-args ast)))))
 
 (deftest php-parser-compound-assignment-variable
-  "$x += 5 lowers to a read-modify-write setq with a binary addition value."
+  "$x += 5 — after php-finish-let-bindings, $x=0 wraps $x+=5 in its body."
   (let* ((asts (cl-cc/php:parse-php-source "<?php $x = 0; $x += 5;"))
-         (compound (second asts)))
+         ;; $x=0 let wraps $x+=5 in its body; $x+=5 is first in that body
+         (compound (first (cl-cc:ast-let-body (first asts)))))
     (assert-true (cl-cc:ast-let-p compound))
     (let ((setq (first (cl-cc:ast-let-body compound))))
       (assert-true (cl-cc:ast-setq-p setq))
@@ -567,11 +585,14 @@
     (assert-equal '("VENDOR\\BASE" "CONTRACTS\\IFACE") supers)))
 
 (deftest php-parser-function-import-alias-resolves-call-name
-  "Function imports resolve unqualified and aliased function call names."
+  "Function imports resolve unqualified and aliased function call names.
+After php-finish-let-bindings, $x let wraps $y let in its body."
   (let* ((asts (cl-cc/php:parse-php-source
                 "<?php namespace App\\Lib; use function Vendor\\Fns\\{foo, bar as baz}; $x = foo(); $y = baz();"))
-         (first-call (cdr (first (cl-cc:ast-let-bindings (first asts)))))
-         (second-call (cdr (first (cl-cc:ast-let-bindings (second asts))))))
+         (let-x       (first asts))
+         (let-y       (first (cl-cc:ast-let-body let-x)))
+         (first-call  (cdr (first (cl-cc:ast-let-bindings let-x))))
+         (second-call (cdr (first (cl-cc:ast-let-bindings let-y)))))
     (assert-string= "VENDOR\\FNS\\FOO"
                     (symbol-name (cl-cc:ast-var-name (cl-cc:ast-call-func first-call))))
     (assert-string= "VENDOR\\FNS\\BAR"
@@ -714,11 +735,16 @@
     (assert-true (member "DRAFT" slot-names :test #'string=))))
 
 (deftest php-parser-enum-static-builtins
-  "Enum static built-ins lower to runtime helper calls."
+  "Enum static built-ins lower to runtime helper calls.
+Enum defclass is first; $x/$y/$z assignments nest (php-finish-let-bindings)."
   (let* ((asts (cl-cc/php:parse-php-source "<?php enum Status: int { case Draft = 0; case Published = 1; } $x = Status::from(1); $y = Status::tryFrom(99); $z = Status::cases();"))
-         (from-call (cdr (first (cl-cc:ast-let-bindings (second asts)))))
-         (try-from-call (cdr (first (cl-cc:ast-let-bindings (third asts)))))
-         (cases-call (cdr (first (cl-cc:ast-let-bindings (fourth asts))))))
+         ;; enum defclass is first; let-x is second (wraps y and z in its body chain)
+         (let-x  (second asts))
+         (let-y  (first (cl-cc:ast-let-body let-x)))
+         (let-z  (first (cl-cc:ast-let-body let-y)))
+         (from-call     (cdr (first (cl-cc:ast-let-bindings let-x))))
+         (try-from-call (cdr (first (cl-cc:ast-let-bindings let-y))))
+         (cases-call    (cdr (first (cl-cc:ast-let-bindings let-z)))))
     (assert-string= "%PHP-ENUM-FROM" (%php-call-name from-call))
     (assert-string= "%PHP-ENUM-TRY-FROM" (%php-call-name try-from-call))
     (assert-string= "%PHP-ENUM-CASES" (%php-call-name cases-call))))
@@ -816,9 +842,9 @@ precede a parameter's type in __construct."
 
 (deftest-each php-parser-call-syntax-variants
   "Modern PHP call syntax variants parse without error."
-  :cases (("spread-arg"    "<?php foo(...$args);"                cl-cc:ast-call-p)
-          ("named-args"    "<?php foo(name: 'x', age: 5);"      cl-cc:ast-call-p)
-          ("named-mixed"   "<?php foo('pos', name: 'x');"       cl-cc:ast-call-p))
+  :cases (("spread-arg"    "<?php foo(...$args);"                #'cl-cc:ast-call-p)
+          ("named-args"    "<?php foo(name: 'x', age: 5);"      #'cl-cc:ast-call-p)
+          ("named-mixed"   "<?php foo('pos', name: 'x');"       #'cl-cc:ast-call-p))
   (src pred)
   (assert-true (funcall pred (%php-first src))))
 

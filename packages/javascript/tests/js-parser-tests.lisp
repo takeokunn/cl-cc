@@ -60,11 +60,16 @@
     (assert-= 1 (length (cl-cc:ast-lambda-params val)))))
 
 (deftest js-parser-arrow-function-block-body
-  "const double = (x) => { return x * 2; }; lambda body has a return."
+  "const double = (x) => { return x * 2; }; lambda body wraps a (block nil ...)
+that contains the return. The block is required so JS `return' (which lowers to
+return-from nil) exits the arrow — a bare lambda establishes no block named nil."
   (let* ((ast (%js-first "const double = (x) => { return x * 2; };"))
-         (val (cdr (first (cl-cc:ast-let-bindings ast)))))
+         (val (cdr (first (cl-cc:ast-let-bindings ast))))
+         (body (cl-cc:ast-lambda-body val)))
     (assert-true (cl-cc:ast-lambda-p val))
-    (assert-true (some #'cl-cc:ast-return-from-p (cl-cc:ast-lambda-body val)))))
+    (assert-true (cl-cc:ast-block-p (first body)))
+    (assert-true (some #'cl-cc:ast-return-from-p
+                       (cl-cc:ast-block-body (first body))))))
 
 ;;; ─── Async functions ──────────────────────────────────────────────────────────
 
@@ -111,13 +116,13 @@
     (assert-true (>= (length slots) 1))))
 
 (deftest js-parser-class-with-static-method
-  "class C { static create() {} } method slot carries :static metadata."
+  "class C { static create() {} } method slot carries :js-static t metadata."
   (let* ((ast (%js-first "class C { static create() {} }"))
          (slots (cl-cc:ast-defclass-slots ast)))
     (assert-true (cl-cc:ast-defclass-p ast))
     (assert-true (some (lambda (slot)
-                (member :static (getf (cl-cc:ast-imports slot) :js-modifiers)))
-              slots))))
+                          (getf (cl-cc:ast-imports slot) :js-static))
+                        slots))))
 
 (deftest js-parser-class-with-private-field
   "class C { #count = 0; } private field produces a :T-PRIVATE-IDENT-named slot."
@@ -313,19 +318,22 @@ postfix parser never attached it to the tag."
 ;;; ─── Logical assignment ───────────────────────────────────────────────────────
 
 (deftest js-parser-logical-and-assign
-  "x &&= y; parses without error as an expression statement."
+  "x &&= y; — let declaration nests around expression via %js-finish-let-bindings."
   (let ((asts (%js-parse "let x = 1; x &&= 0;")))
-    (assert-= 2 (length asts))))
+    (assert-= 1 (length asts))
+    (assert-true (cl-cc:ast-let-p (first asts)))))
 
 (deftest js-parser-logical-or-assign
-  "x ||= y; parses without error."
+  "x ||= y; — let declaration nests around expression via %js-finish-let-bindings."
   (let ((asts (%js-parse "let x = null; x ||= 42;")))
-    (assert-= 2 (length asts))))
+    (assert-= 1 (length asts))
+    (assert-true (cl-cc:ast-let-p (first asts)))))
 
 (deftest js-parser-nullish-assign
-  "x ??= y; parses without error."
+  "x ??= y; — let declaration nests around expression via %js-finish-let-bindings."
   (let ((asts (%js-parse "let x = null; x ??= 'default';")))
-    (assert-= 2 (length asts))))
+    (assert-= 1 (length asts))
+    (assert-true (cl-cc:ast-let-p (first asts)))))
 
 ;;; ─── Template literals ────────────────────────────────────────────────────────
 
@@ -378,22 +386,29 @@ postfix parser never attached it to the tag."
 ;;; ─── Return statement ─────────────────────────────────────────────────────────
 
 (deftest js-parser-return-with-value
-  "function f() { return 42; } body contains ast-return-from."
+  "function f() { return 42; } body contains ast-return-from inside the block wrapper."
   (let* ((ast (%js-first "function f() { return 42; }"))
-         (body (cl-cc:ast-defun-body ast)))
+         (body (cl-cc:ast-defun-body ast))
+         (block (first body))
+         (inner (when (cl-cc:ast-block-p block) (cl-cc:ast-block-body block))))
     (assert-true (cl-cc:ast-defun-p ast))
-    (assert-true (some #'cl-cc:ast-return-from-p body))))
+    (assert-true (some #'cl-cc:ast-return-from-p (or inner body)))))
 
 (deftest js-parser-return-bare
-  "function g() { return; } has return-from with nil-valued quote."
+  "function g() { return; } body is wrapped in (block nil ...) containing an ast-return-from."
   (let* ((ast (%js-first "function g() { return; }"))
-         (ret (first (cl-cc:ast-defun-body ast))))
+         (body (cl-cc:ast-defun-body ast))
+         (block (first body))
+         (ret (when (cl-cc:ast-block-p block)
+                (first (cl-cc:ast-block-body block)))))
+    (assert-true (cl-cc:ast-block-p block))
     (assert-true (cl-cc:ast-return-from-p ret))
     (assert-true (cl-cc:ast-quote-p (cl-cc:ast-return-from-value ret)))))
 
 ;;; ─── Multi-statement source ───────────────────────────────────────────────────
 
 (deftest js-parser-multi-statement-source
-  "Three top-level statements produce a list of three AST nodes."
+  "Three const declarations are nested by %js-finish-let-bindings into one top-level let."
   (let ((asts (%js-parse "const a = 1; const b = 2; const c = 3;")))
-    (assert-= 3 (length asts))))
+    (assert-= 1 (length asts))
+    (assert-true (cl-cc:ast-let-p (first asts)))))

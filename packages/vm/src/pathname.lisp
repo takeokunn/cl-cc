@@ -20,7 +20,9 @@
   (name-reg nil :reader vm-mkpn-name-reg)
   (type-reg nil :reader vm-mkpn-type-reg)
   (version-reg nil :reader vm-mkpn-version-reg)
-  (defaults-reg nil :reader vm-mkpn-defaults-reg))
+  (defaults-reg nil :reader vm-mkpn-defaults-reg)
+  (:sexp-tag :make-pathname)
+  (:sexp-slots dst host-reg device-reg directory-reg name-reg type-reg version-reg defaults-reg))
 
 (defun %vm-append-make-pathname-arg (args key reg state)
   (if reg (append args (list key (vm-reg-get state reg))) args))
@@ -71,7 +73,9 @@
 
 (define-vm-instruction vm-merge-pathnames (vm-instruction)
   (dst nil :reader vm-dst) (path-reg nil :reader vm-mpn-path-reg)
-  (defaults-reg nil :reader vm-mpn-defaults-reg))
+  (defaults-reg nil :reader vm-mpn-defaults-reg)
+  (:sexp-tag :merge-pathnames)
+  (:sexp-slots dst path-reg defaults-reg))
 
 (defmethod execute-instruction ((inst vm-merge-pathnames) state pc labels)
   (declare (ignore labels))
@@ -82,7 +86,9 @@
 
 (define-vm-instruction vm-enough-namestring (vm-instruction)
   (dst nil :reader vm-dst) (path-reg nil :reader vm-ens-path-reg)
-  (defaults-reg nil :reader vm-ens-defaults-reg))
+  (defaults-reg nil :reader vm-ens-defaults-reg)
+  (:sexp-tag :enough-namestring)
+  (:sexp-slots dst path-reg defaults-reg))
 
 (defmethod execute-instruction ((inst vm-enough-namestring) state pc labels)
   (declare (ignore labels))
@@ -116,7 +122,9 @@
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-logical-pathname-translations (vm-instruction)
-  (dst nil :reader vm-dst) (host-reg nil :reader vm-lpt-host-reg))
+  (dst nil :reader vm-dst) (host-reg nil :reader vm-lpt-host-reg)
+  (:sexp-tag :logical-pathname-translations)
+  (:sexp-slots dst host-reg))
 
 (defmethod execute-instruction ((inst vm-logical-pathname-translations) state pc labels)
   (declare (ignore labels))
@@ -125,7 +133,9 @@
   (values (1+ pc) nil nil))
 
 (define-vm-instruction vm-translate-logical-pathname (vm-instruction)
-  (dst nil :reader vm-dst) (src nil :reader vm-src))
+  (dst nil :reader vm-dst) (src nil :reader vm-src)
+  (:sexp-tag :translate-logical-pathname)
+  (:sexp-slots dst src))
 
 (defmethod execute-instruction ((inst vm-translate-logical-pathname) state pc labels)
   (declare (ignore labels))
@@ -163,7 +173,9 @@
 
 (define-vm-instruction vm-rename-file (vm-instruction)
   (dst nil :reader vm-dst) (old-reg nil :reader vm-rn-old-reg)
-  (new-reg nil :reader vm-rn-new-reg))
+  (new-reg nil :reader vm-rn-new-reg)
+  (:sexp-tag :rename-file)
+  (:sexp-slots dst old-reg new-reg))
 
 (defmethod execute-instruction ((inst vm-rename-file) state pc labels)
   (declare (ignore labels))

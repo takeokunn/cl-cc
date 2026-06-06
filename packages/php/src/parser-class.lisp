@@ -241,9 +241,25 @@ to %php-parse-expr-stmt for expression statements."
 ;;; ─── Top-Level Entry Point ───────────────────────────────────────────────────
 
 (defun php-finish-let-bindings (stmts)
-  "Post-process: wrap consecutive ast-let :body nil nodes into proper nested lets.
-Iterative CPS-style accumulator — walks backwards, building nesting from the end."
-  stmts)
+  "Wrap each `ast-let' with an empty body around the statements that follow it.
+
+PHP's first assignment to a variable lowers to (ast-let ((var . value)) :body nil)
+— a declaration whose scope must cover every later statement in the same block.
+Walking STMTS backwards, each empty-bodied let absorbs the already-nested tail as
+its body, so `$x = 10; echo $x;' becomes (let (($x 10)) (echo $x)) rather than two
+siblings where echo sees an unbound $x. Statements that are not empty-bodied lets
+(including lets that already carry a body) pass through as siblings.
+
+Previously a no-op stub, so every PHP variable was bound in a let with an empty
+body and was invisible to the rest of the block — `$x = 1; echo $x;' printed
+nothing. Applied at top level and in every braced block (see php-parse-block)."
+  (let ((tail nil))
+    (dolist (stmt (reverse stmts) tail)
+      (if (and (ast-let-p stmt) (null (ast-let-body stmt)))
+          (progn
+            (setf (ast-let-body stmt) tail)
+            (setf tail (list stmt)))
+          (push stmt tail)))))
 
 (defun parse-php-source (source)
   "Parse PHP SOURCE string and return a list of top-level AST nodes.

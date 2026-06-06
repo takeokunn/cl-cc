@@ -157,25 +157,31 @@ Returns (values name-ast rest).  name-ast is wrapped in a list with
 ;;; ─── Member name parser ──────────────────────────────────────────────────────
 
 (defun %js-parse-member-name (stream)
-  "Parse a class member name. Returns (values name private-p rest).
+  "Parse a class member name. Returns (values name private-p rest orig-name).
 NAME is a symbol for plain/private names or an AST node for computed names.
-PRIVATE-P is T when the name was a #privateIdent."
+PRIVATE-P is T when the name was a #privateIdent. ORIG-NAME is the member name's
+ORIGINAL-CASE string (js-ident-sym upcases the symbol, but JS property access is
+case-sensitive and keys on the source string, so the class lowering stores
+methods under ORIG-NAME); NIL for computed names."
   (cond
     ;; Computed name [expr]
     ((eq (js-peek-type stream) :T-LBRACKET)
      (multiple-value-bind (name-ast rest) (%js-parse-computed-name stream)
-       (values name-ast nil rest)))
+       (values name-ast nil rest nil)))
     ;; Private identifier #name
     ((eq (js-peek-type stream) :T-PRIVATE-IDENT)
      (multiple-value-bind (tok rest) (js-consume stream)
-       (values (js-private-ident-sym (js-tok-value tok)) t rest)))
+       (let ((v (js-tok-value tok)))
+         (values (js-private-ident-sym v) t rest
+                 (if (stringp v) v (symbol-name v))))))
     ;; Regular identifier — also accept keyword names used as method names
     ;; (e.g. class C { get() {} static() {} })
     (t
      (multiple-value-bind (tok rest) (js-consume stream)
        (let ((v (js-tok-value tok)))
          (values (js-ident-sym (if (stringp v) v (symbol-name v)))
-                 nil rest))))))
+                 nil rest
+                 (if (stringp v) v (symbol-name v))))))))
 
 ;;; ─── Class body member kinds ─────────────────────────────────────────────────
 
@@ -344,7 +350,7 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
               (return-from %js-parse-class-body-member
                 (values slot (js-skip-semis rest2)))))))
       ;; 8. Normal member: parse name, then decide method vs field
-      (multiple-value-bind (name private-p rest) (%js-parse-member-name current)
+      (multiple-value-bind (name private-p rest orig-name) (%js-parse-member-name current)
         ;; Method: name ( ...
         (if (and rest (eq (js-peek-type rest) :T-LPAREN))
             (multiple-value-bind (params body rest2) (%js-parse-method-params-body rest)
@@ -357,11 +363,15 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
                             :name sym
                             :initform defun-ast
                             :allocation (if static-p :class :instance)
-                            :imports (%js-member-kind-metadata
-                                      (if (equal (symbol-name sym) "CONSTRUCTOR")
-                                          :constructor
-                                          :method)
-                                      static-p private-p async-p generator-p decorators))))
+                            ;; :js-name carries the ORIGINAL-CASE method name so the
+                            ;; class lowering stores it under the key obj.m accesses.
+                            :imports (append
+                                      (%js-member-kind-metadata
+                                       (if (equal (symbol-name sym) "CONSTRUCTOR")
+                                           :constructor
+                                           :method)
+                                       static-p private-p async-p generator-p decorators)
+                                      (when orig-name (list :js-name orig-name))))))
                 (values slot (js-skip-semis rest2))))
             ;; Field declaration: name [= expr] ;
             (let ((initform nil)
@@ -441,7 +451,12 @@ a list of companion ast-defun nodes for methods (in :initform slots).
 NAME-SYM   — symbol or NIL for anonymous class expressions
 SUPER-EXPR — AST node for the superclass or NIL
 MEMBERS    — list of ast-slot-def nodes from %js-parse-class-body
-DECORATORS — list of AST nodes for class-level decorators"
+DECORATORS — list of AST nodes for class-level decorators
+
+NOTE: JS classes currently lower to ast-defclass but do NOT yet execute at
+runtime (instances/method dispatch are not wired). A prototype-model lowering was
+attempted (see %js-make-class/%js-proto-method-lookup, currently dormant) but hit
+an unresolved hang building method lambdas; reverted to keep the tree working."
   (let* ((effective-name (or name-sym (gensym "JS-CLASS-")))
          (superclasses (when super-expr (list super-expr)))
          ;; Separate field slots from method slots; both end up as slot-defs

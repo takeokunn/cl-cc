@@ -57,11 +57,21 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
 
 (defparameter *js-direct-binop-keywords*
   (let ((ht (make-hash-table :test #'equal)))
-    (dolist (entry '(("+" . :+) ("-" . :-) ("*" . :*) ("/" . :/) ("%" . :%)
-                     ("**" . :**) ("<" . :<) (">" . :>) ("<=" . :<=) (">=" . :>=)))
+    ;; Values are the operator SYMBOLS the codegen op→constructor table
+    ;; (*numeric-binop-ctor-specs*, keyed by symbol with :test #'eq) expects:
+    ;; CL +,-,*,/,<,>,<=,>=. They were keywords (:+, :-, …) which never matched,
+    ;; so `a + b' raised `Unknown binary operator :+', the enclosing form/function
+    ;; body failed to compile, and was silently dropped — every JS program using
+    ;; arithmetic broke. `%' and `**' have no direct VM constructor; they fall
+    ;; through %js-lower-binary to the %js-binop runtime helper.
+    ;; NOTE: `+' is intentionally NOT here — it is polymorphic in JS (numeric add
+    ;; OR string concat) and routes through %js-add via *js-binop-runtime-helpers*.
+    ;; `- * /' and comparisons are numeric-only and use the direct VM constructors.
+    (dolist (entry '(("-" . -) ("*" . *) ("/" . /)
+                     ("<" . <) (">" . >) ("<=" . <=) (">=" . >=)))
       (setf (gethash (car entry) ht) (cdr entry)))
     ht)
-  "Maps arithmetic/comparison operator strings to AST binop keywords.")
+  "Maps arithmetic/comparison operator strings to AST binop operator symbols.")
 
 (defun js-lower-binop-keyword (op-str)
   "Map operator string to AST binop keyword, or NIL for runtime-dispatch ops."
@@ -69,7 +79,9 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
 
 (defparameter *js-binop-runtime-helpers*
   (let ((ht (make-hash-table :test #'equal)))
-    (dolist (entry '(("===" . %js-strict-eq) ("==" . %js-loose-eq)
+    (dolist (entry '(("+"   . %js-add)
+                     ("%"   . %js-mod)  ("**" . %js-pow)
+                     ("===" . %js-strict-eq) ("==" . %js-loose-eq)
                      ("|"   . %js-bitwise-or) ("^"  . %js-bitwise-xor)
                      ("&"   . %js-bitwise-and)
                      ("<<"  . %js-shift-left)  (">>" . %js-shift-right)
@@ -620,6 +632,47 @@ Returns (values ast rest)."
           (t (return)))))
     (values ast rest)))
 
+;;; ─── Increment / decrement on places (obj.x / arr[i]) ────────────────────────
+
+(defun %js-place-get-prop-p (ast)
+  "True when AST is a (%js-get-prop OBJ KEY) call — the lowering shared by both
+member access obj.x and computed/element access arr[i]. Such a node is a valid
+++/-- target (an assignable place), unlike a plain value expression."
+  (and (ast-call-p ast)
+       (ast-var-p (ast-call-func ast))
+       (eq (ast-var-name (ast-call-func ast)) '%js-get-prop)
+       (= (length (ast-call-args ast)) 2)))
+
+(defun %js-lower-place-incdec (place op return-new-p)
+  "Lower ++/-- applied to a property/element PLACE (a %js-get-prop call).
+OP is the symbol '+ or '-. With RETURN-NEW-P true (prefix ++x/--x) the form
+yields the updated value; otherwise (postfix x++/x--) it yields the original.
+OBJ and KEY are captured in temps so the place expression is evaluated once,
+then read via %js-get-prop and written via %js-set-prop — a runtime helper
+cannot do this because it would receive only the value, not the place."
+  (let ((obj     (first  (ast-call-args place)))
+        (key     (second (ast-call-args place)))
+        (obj-tmp (gensym "JS-OBJ-"))
+        (key-tmp (gensym "JS-KEY-"))
+        (old-tmp (gensym "JS-OLD-")))
+    (flet ((bumped ()
+             (make-ast-binop :op op
+                             :lhs (make-ast-var :name old-tmp)
+                             :rhs (make-ast-int :value 1))))
+      (make-ast-let
+       :bindings (list (cons obj-tmp obj) (cons key-tmp key))
+       :body
+       (list
+        (make-ast-let
+         :bindings (list (cons old-tmp (%js-call '%js-get-prop
+                                                 (make-ast-var :name obj-tmp)
+                                                 (make-ast-var :name key-tmp))))
+         :body (list (%js-call '%js-set-prop
+                               (make-ast-var :name obj-tmp)
+                               (make-ast-var :name key-tmp)
+                               (bumped))
+                     (if return-new-p (bumped) (make-ast-var :name old-tmp)))))))))
+
 ;;; ─── Postfix ─────────────────────────────────────────────────────────────────
 
 (defun js-parse-postfix (ast stream)
@@ -633,41 +686,45 @@ Returns (values ast rest). Loops until no more postfix ops."
         ((and (eq type :T-OP) (string= val "++"))
          (multiple-value-bind (tok rest) (js-consume stream)
            (declare (ignore tok))
-           ;; Return current value, then increment (lower as: (let ((t ast)) (setq ast (+ t 1)) t))
-           (when (ast-var-p ast)
-             (let* ((var-sym (ast-var-name ast))
-                    (tmp (gensym "JS-POSTFIX-")))
-               (setf ast (make-ast-let
-                          :bindings (list (cons tmp (make-ast-var :name var-sym)))
-                          :body (list (make-ast-setq
-                                       :var var-sym
-                                       :value (make-ast-binop :op :+
-                                                              :lhs (make-ast-var :name var-sym)
-                                                              :rhs (make-ast-int :value 1)))
-                                      (make-ast-var :name tmp)))
-                     stream rest)))
-           (unless (ast-var-p ast) ; non-variable — just wrap
-             (setf ast (%js-call '%js-postfix-inc ast)
-                   stream rest))))
+           ;; Return current value, then increment (lower as: (let ((t ast)) (setq ast (+ t 1)) t)).
+           ;; Decide on the ORIGINAL ast — the var branch mutates ast to a let, so a
+           ;; subsequent (ast-var-p ast) check would wrongly fall through to the wrap.
+           (if (ast-var-p ast)
+               (let* ((var-sym (ast-var-name ast))
+                      (tmp (gensym "JS-POSTFIX-")))
+                 (setf ast (make-ast-let
+                            :bindings (list (cons tmp (make-ast-var :name var-sym)))
+                            :body (list (make-ast-setq
+                                         :var var-sym
+                                         :value (make-ast-binop :op '+
+                                                                :lhs (make-ast-var :name var-sym)
+                                                                :rhs (make-ast-int :value 1)))
+                                        (make-ast-var :name tmp)))
+                       stream rest))
+               (setf ast (if (%js-place-get-prop-p ast) ; obj.x++ / arr[i]++
+                             (%js-lower-place-incdec ast '+ nil)
+                             (%js-call '%js-postfix-inc ast))
+                     stream rest))))
         ;; Postfix --
         ((and (eq type :T-OP) (string= val "--"))
          (multiple-value-bind (tok rest) (js-consume stream)
            (declare (ignore tok))
-           (when (ast-var-p ast)
-             (let* ((var-sym (ast-var-name ast))
-                    (tmp (gensym "JS-POSTFIX-")))
-               (setf ast (make-ast-let
-                          :bindings (list (cons tmp (make-ast-var :name var-sym)))
-                          :body (list (make-ast-setq
-                                       :var var-sym
-                                       :value (make-ast-binop :op :-
-                                                              :lhs (make-ast-var :name var-sym)
-                                                              :rhs (make-ast-int :value 1)))
-                                      (make-ast-var :name tmp)))
-                     stream rest)))
-           (unless (ast-var-p ast)
-             (setf ast (%js-call '%js-postfix-dec ast)
-                   stream rest))))
+           (if (ast-var-p ast)
+               (let* ((var-sym (ast-var-name ast))
+                      (tmp (gensym "JS-POSTFIX-")))
+                 (setf ast (make-ast-let
+                            :bindings (list (cons tmp (make-ast-var :name var-sym)))
+                            :body (list (make-ast-setq
+                                         :var var-sym
+                                         :value (make-ast-binop :op '-
+                                                                :lhs (make-ast-var :name var-sym)
+                                                                :rhs (make-ast-int :value 1)))
+                                        (make-ast-var :name tmp)))
+                       stream rest))
+               (setf ast (if (%js-place-get-prop-p ast) ; obj.x-- / arr[i]--
+                             (%js-lower-place-incdec ast '- nil)
+                             (%js-call '%js-postfix-dec ast))
+                     stream rest))))
         ;; Property access: obj.prop
         ((eq type :T-DOT)
          (multiple-value-bind (tok rest) (js-consume stream)
@@ -807,11 +864,13 @@ Returns (values ast rest)."
            (if (ast-var-p expr)
                (let ((var-sym (ast-var-name expr)))
                  (values (make-ast-setq :var var-sym
-                                        :value (make-ast-binop :op :+
+                                        :value (make-ast-binop :op '+
                                                                :lhs expr
                                                                :rhs (make-ast-int :value 1)))
                          rest2))
-               (values (%js-call '%js-prefix-inc expr) rest2)))))
+               (if (%js-place-get-prop-p expr) ; ++obj.x / ++arr[i]
+                   (values (%js-lower-place-incdec expr '+ t) rest2)
+                   (values (%js-call '%js-prefix-inc expr) rest2))))))
       ;; Prefix --
       ((and (eq type :T-OP) (string= val "--"))
        (multiple-value-bind (tok rest) (js-consume stream)
@@ -820,11 +879,13 @@ Returns (values ast rest)."
            (if (ast-var-p expr)
                (let ((var-sym (ast-var-name expr)))
                  (values (make-ast-setq :var var-sym
-                                        :value (make-ast-binop :op :-
+                                        :value (make-ast-binop :op '-
                                                                :lhs expr
                                                                :rhs (make-ast-int :value 1)))
                          rest2))
-               (values (%js-call '%js-prefix-dec expr) rest2)))))
+               (if (%js-place-get-prop-p expr) ; --obj.x / --arr[i]
+                   (values (%js-lower-place-incdec expr '- t) rest2)
+                   (values (%js-call '%js-prefix-dec expr) rest2))))))
       ;; Logical NOT !
       ((and (eq type :T-OP) (string= val "!"))
        (multiple-value-bind (tok rest) (js-consume stream)

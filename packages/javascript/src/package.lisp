@@ -5,6 +5,8 @@
    #:tokenize-js-source
    #:parse-js-source
    #:parse-js-module
+   #:js-program-forms
+   #:%js-make-console
 
    ;; JS-specific unary / binary operators
    #:%js-typeof

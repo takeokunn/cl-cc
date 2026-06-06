@@ -126,7 +126,10 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
       (multiple-value-bind (stmt rest2 kv2) (php-parse-statement current kv)
         (when stmt (push stmt stmts))
         (setf current rest2 kv kv2)))
-    (values (nreverse stmts) (%php-consume-expected :T-RBRACE current) kv)))
+    ;; Nest empty-bodied variable lets over the rest of the block so locals are
+    ;; visible to later statements (function bodies, loop/if blocks all flow here).
+    (values (php-finish-let-bindings (nreverse stmts))
+            (%php-consume-expected :T-RBRACE current) kv)))
 
 (defun %php-parse-namespace-block-body (stream known-vars namespace-name)
   "Parse a braced namespace body and annotate each enclosed top-level form."
@@ -149,7 +152,8 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
           (stmt
            (push (php-annotate-top-level-node stmt) stmts)))
         (setf current rest2 kv kv2)))
-    (values (nreverse stmts) (%php-consume-expected :T-RBRACE current) kv)))
+    (values (php-finish-let-bindings (nreverse stmts))
+            (%php-consume-expected :T-RBRACE current) kv)))
 
 (defun %php-parse-statement-body (stream known-vars)
   "Parse either a braced block or one PHP statement. Return a statement list."

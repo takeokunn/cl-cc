@@ -13,7 +13,7 @@
   (%counts (make-hash-table :test #'eq))
   (%label-objects (make-hash-table :test #'eq))
   (%printed-labels (make-hash-table :test #'eq))
-  (%next-label 1 :type fixnum))
+  (%next-label 0 :type fixnum))
 
 (defun %circle-trackable-p (object)
   "Only objects with identity and inspectable children need circle labels."

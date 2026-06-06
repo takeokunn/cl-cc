@@ -86,10 +86,22 @@ return normalized OSR entry metadata without recompiling."
                                 (cl-cc/optimize::*optimizer-tier* 1))
                             (optimize-instructions instructions))
                         (declare (ignore leaf-p))
-                        (or optimized-instrs instructions))))
-      (setf (cl-cc/vm:vm-closure-program-flat closure) (coerce optimized 'vector)
-            (cl-cc/vm:vm-closure-label-table closure) (cl-cc/vm:build-label-table optimized)
-            (cl-cc/vm:vm-closure-compilation-tier closure) 1)))
+                        (or optimized-instrs instructions)))
+           (new-labels (cl-cc/vm:build-label-table optimized)))
+      ;; A function's ENTRY label is referenced externally (by the closure /
+      ;; sync-call dispatch), not by any internal jump, so the Tier-1 optimizer's
+      ;; label-flushing pass can treat it as dead and remove it. Adopting such an
+      ;; optimized program leaves vm-closure-entry-label unresolvable in the new
+      ;; label table — every later call past the 50-invocation JIT threshold then
+      ;; crashed with "Cannot resolve entry label" (e.g. fib(8+)). Only adopt the
+      ;; recompiled program when the entry label survived; otherwise keep the
+      ;; Tier-0 program (still correct) but mark tier 1 so we don't retry forever.
+      (if (cl-cc/vm:vm-label-table-lookup new-labels
+                                          (cl-cc/vm:vm-closure-entry-label closure))
+          (setf (cl-cc/vm:vm-closure-program-flat closure) (coerce optimized 'vector)
+                (cl-cc/vm:vm-closure-label-table closure) new-labels
+                (cl-cc/vm:vm-closure-compilation-tier closure) 1)
+          (setf (cl-cc/vm:vm-closure-compilation-tier closure) 1))))
   closure)
 
 (setf cl-cc/vm:*vm-recompile-function-hook* #'%tier1-recompile-closure)
@@ -501,7 +513,8 @@ The runtime keys map logical plan IDs onto VM profile keys:
   "Parse SOURCE according to LANGUAGE, returning top-level forms for compilation.
 :LISP always returns normal s-expressions; when SOURCE-FILE is provided, a second
 value carries top-level source locations for later AST annotation.
-:PHP calls parse-php-source which returns AST nodes directly."
+:PHP calls parse-php-source and :JAVASCRIPT calls js-program-forms, both of
+which return shared AST nodes directly (the latter prepends a runtime prelude)."
   (cond
     ((eq language :lisp)
      (let ((clean-source (%pipeline-strip-shebang-line source)))
@@ -509,6 +522,8 @@ value carries top-level source locations for later AST annotation.
            (%lisp-top-level-source-forms-and-locations clean-source source-file)
            (values (parse-all-forms clean-source) nil))))
     ((eq language :php)  (parse-php-source source))
+    ((eq language :javascript)
+     (values (cl-cc/javascript:js-program-forms source) nil))
     (t (error "Unknown language: ~S" language))))
 
 (defparameter *php-runtime-bridge-entries*
@@ -547,9 +562,63 @@ value carries top-level source locations for later AST annotation.
   "Alist of bridge-symbol -> implementation-symbol pairs for PHP runtime helpers.")
 
 (defun %register-php-runtime-bridges ()
-  "Register PHP runtime helpers as VM host bridge functions."
+  "Register PHP runtime helpers as VM host bridge functions.
+
+The PHP frontend lowers builtins to calls on cl-cc/php::%php-* helpers, but the
+VM host bridge is a whitelist — only registered symbols are callable from
+compiled code. The hand-maintained *php-runtime-bridge-entries* alist had
+drifted ~60 helpers behind the lowering (array_*, str*, is_*, truthy, math …),
+so every PHP program using them hit `Undefined function'. Derive the whitelist
+from the package itself: register every fbound, non-macro %PHP-* function whose
+home package is :cl-cc/php. The explicit alias entries still run first for any
+non-%php- aliases."
   (dolist (entry *php-runtime-bridge-entries*)
-    (cl-cc/vm:vm-register-host-bridge (car entry) (fdefinition (cdr entry)))))
+    (cl-cc/vm:vm-register-host-bridge (car entry) (fdefinition (cdr entry))))
+  (let ((pkg (find-package :cl-cc/php)))
+    (when pkg
+      (do-symbols (sym pkg)
+        (when (and (eq (symbol-package sym) pkg)
+                   (fboundp sym)
+                   (not (macro-function sym))
+                   (not (special-operator-p sym))
+                   (let ((name (symbol-name sym)))
+                     (and (>= (length name) 5)
+                          (string= "%PHP-" name :end2 5))))
+          (cl-cc/vm:vm-register-host-bridge sym (fdefinition sym)))))))
+
+(defun %register-js-runtime-bridges ()
+  "Register JavaScript runtime helpers as VM host bridge functions.
+
+The JS frontend lowers operators, member access, and builtins to calls on
+cl-cc/javascript::%js-* helpers (%js-get-prop, %js-make-array, %js-console-log,
+%js-make-console, …). Register every fbound, non-macro %JS-* function whose home
+package is :cl-cc/javascript so compiled JS can call them through the VM host
+bridge — the same package-derived whitelist used for PHP."
+  (let ((pkg (find-package :cl-cc/javascript)))
+    (when pkg
+      (do-symbols (sym pkg)
+        (when (and (eq (symbol-package sym) pkg)
+                   (fboundp sym)
+                   (not (macro-function sym))
+                   (not (special-operator-p sym))
+                   (let ((name (symbol-name sym)))
+                     (and (>= (length name) 4)
+                          (string= "%JS-" name :end2 4))))
+          (cl-cc/vm:vm-register-host-bridge sym (fdefinition sym))))
+      ;; Route JS callbacks (Array.map/filter/reduce/sort) back through the VM
+      ;; when the callback is a compiled-JS closure; host functions still go via
+      ;; APPLY. Host array methods call (%js-funcall fn ...) → *js-apply-fn*; this
+      ;; is the controlled inverse bridge (host runtime → VM closure) using the
+      ;; *vm-state* dynamically bound around VM execution.
+      (setf cl-cc/javascript::*js-apply-fn*
+            (lambda (fn args)
+              (if (cl-cc/vm::%vm-closure-object-p fn)
+                  (cl-cc/vm::%vm-call-closure-sync fn cl-cc/vm:*vm-state* args)
+                  (apply fn args))))
+      ;; Teach prototype method lookup to recognize a compiled-JS method (a
+      ;; vm-closure) as callable, so obj.method resolves to a bound method.
+      (setf cl-cc/javascript::*js-callable-p*
+            (lambda (x) (or (functionp x) (cl-cc/vm::%vm-closure-object-p x)))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Public compilation API
@@ -691,6 +760,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
     (when (eq language :php)
       (%register-php-runtime-bridges)
       (php-check-supported-forms forms))
+    (when (eq language :javascript)
+      (%register-js-runtime-bridges))
     (let* ((opts  (%make-pipeline-opts
                     :target target :type-check type-check :safety safety
                      :speed speed
@@ -766,6 +837,8 @@ arguments are forwarded to the expression, top-level, and optimization stages."
      (when (eq language :php)
        (%register-php-runtime-bridges)
        (php-check-supported-forms forms))
+     (when (eq language :javascript)
+       (%register-js-runtime-bridges))
      (let* ((opts  (%make-pipeline-opts
                      :target target :type-check type-check :safety safety
                       :speed speed

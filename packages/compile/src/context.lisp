@@ -402,6 +402,24 @@ Used by run-string-repl to persist the label counter across calls.")
 (defvar *local-tail-jump-fns* nil
   "Alist mapping non-escaping local tail functions to (label params param-regs).")
 
+(defvar *pending-call-arg-regs* nil
+  "Registers holding already-computed sibling sub-expressions (call arguments or
+binop/comparison operands) of an in-progress parent form. They are live across
+any nested call emitted while a LATER sibling compiles, but the incremental
+liveness analysis in %known-call-live-regs cannot see their future use (the
+consuming instruction is not emitted yet). Listing them here forces the nested
+call's vm-call :live-regs to save/restore them. Without this, `(+ (* n n) (f x))'
+let the call to f clobber the (* n n) temp — `(binop computed-temp call)` returned
+a WRONG value across ALL frontends (sumsq(5)=>5 not 55). Adding registers here is
+always correctness-safe; over-saving a dead register is merely wasteful.")
+
+(defun %compile-operand-protecting (arg ctx &optional protected-regs)
+  "Compile ARG, treating PROTECTED-REGS (registers of already-computed sibling
+operands) as live across any nested call so they survive instead of being
+clobbered. Returns ARG's result register."
+  (let ((*pending-call-arg-regs* (append protected-regs *pending-call-arg-regs*)))
+    (compile-ast arg ctx)))
+
 (defvar *compiling-typed-fn* nil
   "When non-NIL, the name (or T for anonymous lambdas) of the typed function currently
    being compiled. Activates strict compile-time type checking at ast-the nodes.")

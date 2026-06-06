@@ -22,17 +22,13 @@ compilation-result object used to produce it."
        (compile-and-run #'cl-cc:compile-string-with-stdlib))
       (no-stdlib
        (compile-and-run #'compile-string))
-                  (system-name
-                   (%call-with-optional-output-file
-                    (compile-opts-trace-json-path opts)
-                    (lambda (stream)
-                      (let* ((kwargs (%compile-opts-kwargs opts stream))
-                              (result (%compile-system-to-native system-name output arch compress kwargs
-                                                                 :bolt (compile-opts-bolt opts)
-                                                                 :bolt-profile (compile-opts-pgo-use-path opts))))
-                        (format t "~A~%" result)
-                        (uiop:quit 0)))))
-                  (t
+      (t
+       ;; Default: try the fast stdlib-free compile; only on a real compile
+       ;; error fall back to the (much slower) stdlib-aware compiler. The
+       ;; native `system-name` branch that used to sit here was a bad paste
+       ;; from the compile handler — system-name/output/arch/compress are
+       ;; unbound in this scope, so evaluating that cond test derailed every
+       ;; plain `cl-cc eval EXPR` invocation. eval never compiles systems.
        (handler-case
            (compile-and-run #'compile-string)
          (error ()
@@ -63,7 +59,8 @@ status 0 on success or 2 when the expression is missing."
            (%call-with-optional-output-file
             (compile-opts-trace-json-path opts)
             (lambda (stream)
-              (let* ((vm-state (%maybe-make-profiled-vm-state opts))
+              (let* ((vm-state (or (%maybe-make-profiled-vm-state opts)
+                                   (cl-cc/vm:make-vm-state :output-stream *standard-output*)))
                       (kwargs (%compile-opts-kwargs opts stream))
                       (result nil)
                       (compiled nil))

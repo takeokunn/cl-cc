@@ -118,14 +118,19 @@
             (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
               (when slot (push slot slots))
               (setf current rest2)))))
-      (values (make-ast-defclass :name class-name
-                                  :superclasses supers
-                                  :slots (nreverse slots)
-                                  :php-kind (or kind (and enum-p :enum))
-                                  :php-enum-type enum-type
-                                  :php-enum-cases (nreverse enum-cases))
-              (%php-consume-expected :T-RBRACE current)
-               known-vars))))
+      (let ((slots-rev (nreverse slots)))
+        ;; Register trait methods for compile-time application (mirrors parser-trait.lisp).
+        (when (eq kind :trait)
+          (setf (gethash (string-upcase (symbol-name class-name)) *php-trait-registry*)
+                slots-rev))
+        (values (make-ast-defclass :name class-name
+                                    :superclasses supers
+                                    :slots slots-rev
+                                    :php-kind (or kind (and enum-p :enum))
+                                    :php-enum-type enum-type
+                                    :php-enum-cases (nreverse enum-cases))
+                (%php-consume-expected :T-RBRACE current)
+                known-vars)))))
 
 ;;; ─── Use/import parsing helpers ──────────────────────────────────────────
 
@@ -274,12 +279,17 @@
                       (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
                 (multiple-value-bind (body-stmts rest _) (%php-parse-statement-body rest kv)
                   (declare (ignore _))
+                  ;; The init (e.g. $i = 1) lowers to an empty-bodied ast-let when
+                  ;; it introduces a new variable; nest the loop inside that let
+                  ;; (via php-finish-let-bindings) so the loop var is visible to
+                  ;; the condition, body and increment. Otherwise it stays a progn.
                   (values (make-ast-progn
-                           :forms (list init (%php-lower-while-with-label
+                           :forms (php-finish-let-bindings
+                                   (list init (%php-lower-while-with-label
                                                cond-expr
                                                (append body-stmts
                                                        (list incr))
-                                               *php-loop-continue-target*)))
+                                               *php-loop-continue-target*))))
                           rest kv))))))))))
 
 (define-php-stmt-parser :foreach (rest known-vars)
@@ -484,5 +494,5 @@
                                          :params params
                                          :declarations (%php-function-declarations
                                                         param-types return-type param-attributes nil :function)
-                                         :body body-stmts)
+                                         :body (%php-callable-body body-stmts))
                         rest known-vars))))))))
