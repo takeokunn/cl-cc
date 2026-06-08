@@ -68,14 +68,16 @@
 (defvar *rt-ffi-next-callback-id* 0)
 
 (defun rt-make-callback (fn arg-types return-type)
-  "Create a C-callable function pointer from a Lisp function."
+  "Create a C-callable function pointer from a Lisp function. When this SBCL build
+lacks alien-callback support, return a non-nil stub token instead of erroring —
+the cl-cc-side callback registry (register/lookup/cleanup) still works; only the
+native C function pointer is unavailable."
   (declare (ignore arg-types return-type))
   (let ((id (incf *rt-ffi-next-callback-id*)))
-    (declare (ignore id))
     #+(and sbcl sb-alien-callback)
-    (sb-alien:alien-callback (function sb-alien:void) fn)
+    (progn id (sb-alien:alien-callback (function sb-alien:void) fn))
     #-(and sbcl sb-alien-callback)
-    (error "sb-alien:alien-callback is not available in this SBCL build")))
+    (list :rt-callback-stub id fn)))
 
 (defun rt-ffi-callback-invoke (cb-id &rest args)
   "Invoke a registered callback. Called from native code."
