@@ -311,17 +311,14 @@
   "Return the string collected by a string output stream."
   `(cl:get-output-stream-string ,stream))
 
-(our-defmacro with-input-from-string ((var string &key (start 0) end index) &body body)
-  "Bind VAR to a string input stream reading from STRING, evaluate BODY."
-  `(cl:with-input-from-string (,var ,string :start ,start ,@(when end (list :end end))
-                                            ,@(when index (list :index index)))
-     ,@body))
-
-(our-defmacro with-output-to-string ((var &optional string) &body body)
-  "Bind VAR to a string output stream, evaluate BODY, return collected string."
-  (if string
-      `(cl:with-output-to-string (,var ,string) ,@body)
-      `(cl:with-output-to-string (,var) ,@body)))
+;;; NOTE: with-input-from-string and with-output-to-string are defined in
+;;; macros-stdlib-ansi.lisp (loads first) as LET-based forms that use cl-cc's
+;;; own make-string-{input,output}-stream / get-output-stream-string primitives.
+;;; The cl:-delegating versions that used to live here shadowed them and broke
+;;; both the macro-structure tests (expected LET, got WITH-OUTPUT-TO-STRING) and
+;;; the native IO conformance tests ("Unbound variable: S" — the host macro's
+;;; stream var did not bind through cl-cc's compiler). Removed; the ANSI
+;;; versions handle :start/:end/:index and the optional output string too.
 
 (our-defmacro open-stream-p (stream)
   "Return true if STREAM is open."
