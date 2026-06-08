@@ -43,7 +43,10 @@
 
    ;; Async / generator
    #:%js-yield
+   #:%js-yield-from
    #:%js-await
+   #:%js-make-async
+   #:%js-make-async-generator
    #:%js-make-generator
    #:%js-generator-next
 
@@ -61,6 +64,31 @@
    #:%js-import
    #:%js-export
    #:%js-debugger
+   #:%js-import-meta
+   #:%js-new-target
+
+   ;; Operator helpers (bitwise, shift, unary, increment)
+   #:%js-bitwise-not
+   #:%js-bitwise-or
+   #:%js-bitwise-and
+   #:%js-bitwise-xor
+   #:%js-shift-left
+   #:%js-shift-right
+   #:%js-unsigned-shift-right
+   #:%js-unary-plus
+   #:%js-postfix-inc
+   #:%js-postfix-dec
+   #:%js-prefix-inc
+   #:%js-prefix-dec
+
+   ;; Class / accessor helpers
+   #:%js-accessor
+   #:%js-make-regex
+   #:%js-field-init
+   #:%js-assign-pattern
+
+   ;; Resource management
+   #:%js-using-register
 
    ;; Console helpers
    #:%js-console-log
@@ -103,6 +131,7 @@
    #:%js-math-random
 
    ;; Array built-ins
+   #:%js-array-for-each
    #:%js-array-push
    #:%js-array-pop
    #:%js-array-shift
@@ -186,6 +215,7 @@
    #:%js-promise-all-settled
    #:%js-promise-any
    #:%js-promise-race
+   #:%js-promise-with-resolvers
    #:%js-promise-then
    #:%js-promise-finally
 
@@ -198,6 +228,71 @@
    #:%js-set-entries
    #:%js-set-keys
    #:%js-set-for-each
+   #:%js-set-union
+   #:%js-set-intersection
+   #:%js-set-difference
+   #:%js-set-symmetric-difference
+   #:%js-set-is-subset-of
+   #:%js-set-is-disjoint-from
+   #:%js-set-is-superset-of
+
+   ;; Map built-ins (ES2015+)
+   #:%js-map-p
+   #:%js-make-map
+   #:%js-map-set
+   #:%js-map-get
+   #:%js-map-has
+   #:%js-map-delete
+   #:%js-map-clear
+   #:%js-map-size
+   #:%js-map-keys
+   #:%js-map-values
+   #:%js-map-entries
+   #:%js-map-for-each
+
+   ;; WeakMap built-ins (ES2015+)
+   #:%js-weak-map-p
+   #:%js-make-weak-map
+   #:%js-weak-map-set
+   #:%js-weak-map-get
+   #:%js-weak-map-has
+   #:%js-weak-map-delete
+
+   ;; WeakSet built-ins (ES2015+)
+   #:%js-weak-set-p
+   #:%js-make-weak-set
+   #:%js-weak-set-add
+   #:%js-weak-set-has
+   #:%js-weak-set-delete
+
+   ;; WeakRef / FinalizationRegistry (ES2021)
+   #:%js-make-weak-ref
+   #:%js-weak-ref-deref
+   #:%js-make-finalization-registry
+   #:%js-finreg-register
+   #:%js-finreg-unregister
+
+   ;; Symbol (ES2015+)
+   #:%js-symbol-p
+   #:%js-make-symbol
+   #:%js-symbol-for
+   #:%js-symbol-key-for
+   #:%js-symbol-to-string
+   #:%js-symbol-description
+   #:%js-symbol-as-key
+   #:*js-symbol-registry*
+   #:*js-symbol-global*
+   ;; Well-known symbols
+   #:%js-symbol-iterator
+   #:%js-symbol-to-primitive
+   #:%js-symbol-to-string-tag
+   #:%js-symbol-has-instance
+   #:%js-symbol-species
+   #:%js-symbol-async-iterator
+
+   ;; Object extended built-ins
+   #:%js-object-without-keys
+   #:%js-object-group-by
 
    ;; Iterator helpers (stage-3 / ES2025)
    #:%js-iterator-map

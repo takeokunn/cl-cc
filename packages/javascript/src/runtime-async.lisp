@@ -59,7 +59,7 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
 (defun %js-for-await-of (iterable body-fn)
   "Synchronous for-await-of: resolves each element through %js-await eagerly."
   (%js-for-of iterable (lambda (item)
-                         (funcall body-fn (%js-await item)))))
+                         (%js-funcall body-fn (%js-await item)))))
 
 (defun %js-async (thunk)
   "Execute THUNK, wrapping result/exception in a promise."
@@ -73,54 +73,53 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
   (if (js-promise-rejected-p promise)
       (if on-rejected
           (handler-case
-              (%js-promise-resolve (funcall on-rejected (js-promise-value promise)))
+              (%js-promise-resolve (%js-funcall on-rejected (js-promise-value promise)))
             (js-exception (c) (%js-promise-reject (js-exception-value c))))
           promise)
       (if on-fulfilled
           (handler-case
-              (%js-promise-resolve (funcall on-fulfilled (js-promise-value promise)))
+              (%js-promise-resolve (%js-funcall on-fulfilled (js-promise-value promise)))
             (js-exception (c) (%js-promise-reject (js-exception-value c))))
           promise)))
 
 
 (defun %js-promise-finally (promise on-finally)
   "Run ON-FINALLY regardless of outcome."
-  (funcall on-finally)
+  (%js-funcall on-finally)
   promise)
+
+;;; Ensure PROMISES is a JS vector (convert from iterator/array-like if needed).
+(defun %js-promises-as-vec (promises)
+  (if (%js-vec-p promises) promises (%js-array-from promises)))
 
 (defun %js-promise-all (promises)
   "Resolve all promises; reject on first rejection."
   (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (if (%js-vec-p promises) promises (%js-array-from promises))))
+        (arr (%js-promises-as-vec promises)))
     (loop for i below (length arr)
-          for p = (aref arr i)
-          do (let ((resolved (%js-await p)))
-               (vector-push-extend resolved results)))
+          do (vector-push-extend (%js-await (aref arr i)) results))
     (%js-promise-resolve results)))
 
 (defun %js-promise-all-settled (promises)
-  "Return array of outcome objects for all promises."
+  "Return array of status objects for all promises."
   (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (if (%js-vec-p promises) promises (%js-array-from promises))))
-    (loop for i below (length arr)
-          for p = (aref arr i)
-          do (let ((outcome
-                    (if (and (js-promise-p p) (js-promise-rejected-p p))
-                        (%js-make-object "status" "rejected"
-                                         "reason" (js-promise-value p))
-                        (%js-make-object "status" "fulfilled"
-                                         "value"  (if (js-promise-p p)
-                                                      (js-promise-value p)
-                                                      p)))))
-               (vector-push-extend outcome results)))
+        (arr (%js-promises-as-vec promises)))
+    (loop for p across arr
+          for outcome = (if (and (js-promise-p p) (js-promise-rejected-p p))
+                            (%js-make-object "status" "rejected"
+                                             "reason" (js-promise-value p))
+                            (%js-make-object "status" "fulfilled"
+                                             "value"  (if (js-promise-p p)
+                                                          (js-promise-value p)
+                                                          p)))
+          do (vector-push-extend outcome results))
     (%js-promise-resolve results)))
 
 (defun %js-promise-any (promises)
   "Resolve with first fulfillment; reject if all reject."
   (let ((errors (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (if (%js-vec-p promises) promises (%js-array-from promises))))
-    (loop for i below (length arr)
-          for p = (aref arr i)
+        (arr (%js-promises-as-vec promises)))
+    (loop for p across arr
           do (if (and (js-promise-p p) (js-promise-rejected-p p))
                  (vector-push-extend (js-promise-value p) errors)
                  (return-from %js-promise-any
@@ -132,7 +131,7 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
 
 (defun %js-promise-race (promises)
   "Return the first settled promise."
-  (let ((arr (if (%js-vec-p promises) promises (%js-array-from promises))))
+  (let ((arr (%js-promises-as-vec promises)))
     (if (zerop (length arr))
         (make-js-promise :settled-p nil :rejected-p nil :value +js-undefined+)
         (aref arr 0))))
@@ -149,6 +148,26 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
                          (js-promise-settled-p p) t
                          (js-promise-rejected-p p) t))))
     (%js-make-object "promise" p "resolve" resolve "reject" reject)))
+
+;;; -----------------------------------------------------------------------
+;;;  Async / generator wrappers
+;;; -----------------------------------------------------------------------
+
+(defun %js-make-async (fn)
+  "Wrap FN as an async function: invoking it returns a resolved/rejected promise."
+  (lambda (&rest args)
+    (handler-case
+        (%js-promise-resolve (funcall *js-apply-fn* fn args))
+      (js-exception (c)
+        (%js-promise-reject (js-exception-value c))))))
+
+(defun %js-make-async-generator (fn)
+  "Simplified async generator: delegates to %js-make-async."
+  (%js-make-async fn))
+
+;;; yield*: delegate to ITERABLE (simplified — no full coroutine stack).
+(defun %js-yield-from (iterable)
+  (%js-make-object "value" iterable "done" nil))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Generator (simplified coroutine model via CL closures)

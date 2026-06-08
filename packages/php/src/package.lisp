@@ -76,4 +76,6 @@
    #:%php-make-ref
    #:%php-deref
    #:%php-ref-set!
-   #:*php-by-ref-param-registry*))
+   #:*php-by-ref-param-registry*
+   ;; foreach by-reference
+   #:%php-foreach-by-ref))

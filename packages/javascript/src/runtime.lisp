@@ -81,6 +81,9 @@
      (let ((callable (gethash "__call__" x)))
        (if callable "function" "object")))
     ((functionp x)           "function")
+    ;; Symbol — must come before the default "object" case
+    ;; js-symbol-p is defined in runtime-symbol.lisp (loaded later), so use typep
+    ((typep x 'js-symbol)    "symbol")
     (t                       "object")))
 
 (defun %js-truthy (x)
@@ -399,34 +402,82 @@ dividend (5 % 3 => 2, -5 % 3 => -2), matching ECMAScript; division by zero => Na
     result))
 
 (defun %js-for-in (obj body-fn)
-  "Execute BODY-FN for each enumerable string key in OBJ."
+  "Execute BODY-FN for each enumerable string key in OBJ.
+Skips internal double-underscore keys (__proto__, __class__, etc.)."
   (when (%js-ht-p obj)
     (maphash (lambda (k v)
                (declare (ignore v))
-               (funcall body-fn k))
+               ;; Skip internal/prototype-chain keys (double-underscore prefix+suffix)
+               ;; e.g. __proto__, __class__, __constructor__, __super__, __new__
+               (unless (let ((n (length k)))
+                         (and (> n 4)
+                              (string= k "__" :end1 2)
+                              (string= k "__" :start1 (- n 2))))
+                 (%js-funcall body-fn k)))
              obj))
   +js-undefined+)
 
+(defun %js-advance-iterator (iter body-fn)
+  "Drain a JS iterator object (with a \"next\" method), calling BODY-FN per value."
+  (let ((next-fn (gethash "next" iter)))
+    (when next-fn
+      (loop
+        (let ((result (%js-funcall next-fn)))
+          (when (or (not (%js-ht-p result))
+                    (%js-truthy (gethash "done" result)))
+            (return))
+          (%js-funcall body-fn (gethash "value" result)))))))
+
+(defun %js-advance-cl-iterator (iter body-fn)
+  "Drain a CL-iterator (closure returning (:value v :done p) or :done)."
+  (loop
+    (multiple-value-bind (val done) (%js-iter-next iter)
+      (when done (return))
+      (%js-funcall body-fn val))))
+
 (defun %js-for-of (iterable body-fn)
-  "Execute BODY-FN for each element of ITERABLE (array or string)."
+  "Execute BODY-FN for each element of ITERABLE.
+Supports: arrays, strings, Map (entries), Set (values),
+CL-iterator closures, JS iterator objects, generator objects."
   (cond
+    ;; Plain CL vector (JS Array)
     ((%js-vec-p iterable)
      (loop for i below (length iterable)
-           do (funcall body-fn (aref iterable i))))
+           do (%js-funcall body-fn (aref iterable i))))
+    ;; String — iterate characters
     ((stringp iterable)
      (loop for ch across iterable
-           do (funcall body-fn (string ch))))
+           do (%js-funcall body-fn (string ch))))
+    ;; JS Map → iterate [key, value] pairs in insertion order
+    ((typep iterable 'js-map)
+     (dolist (k (js-map-order iterable))
+       (let ((v (gethash k (js-map-ht iterable) +js-undefined+)))
+         (%js-funcall body-fn (%js-make-array k v)))))
+    ;; CL closure — treat as an iterator (used by %js-make-cl-iterator)
+    ((functionp iterable)
+     (%js-advance-cl-iterator iterable body-fn))
+    ;; JS object: check for iterator protocol (@@iterator or "next" method)
     ((%js-ht-p iterable)
-     ;; Check for iterator protocol: get @@iterator
-     (let ((iter-fn (gethash "@@iterator" iterable)))
-       (when iter-fn
-         (let ((iter (funcall iter-fn)))
-           (loop
-             (let ((result (funcall (gethash "next" iter))))
-               (when (or (not (%js-ht-p result))
-                         (%js-truthy (gethash "done" result)))
-                 (return))
-               (funcall body-fn (gethash "value" result))))))))
+     (let ((next-fn (gethash "next" iterable))
+           (iter-fn (gethash "@@iterator" iterable)))
+       (cond
+         ;; Already an iterator (has .next)
+         (next-fn (%js-advance-iterator iterable body-fn))
+         ;; Iterable (has @@iterator factory)
+         (iter-fn
+          (let ((iter (%js-funcall iter-fn)))
+            (%js-for-of iter body-fn)))
+         ;; Set-like hash-table (all values are t — Set representation)
+         ;; For now: if hash-table is not an Object (no string-key convention),
+         ;; iterate keys. We use the presence of +php-null+ sentinel to detect
+         ;; PHP arrays and skip those.
+         (t
+          ;; Iterate hash-table keys as a Set (best effort)
+          (maphash (lambda (k v)
+                     (declare (ignore v))
+                     (unless (and (stringp k) (%js-internal-key-p k))
+                       (%js-funcall body-fn k)))
+                   iterable)))))
     (t nil))
   +js-undefined+)
 

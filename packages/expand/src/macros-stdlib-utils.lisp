@@ -82,11 +82,48 @@
   "Destructive set-difference (delegates to set-difference)."
   `(set-difference ,list1 ,list2 :test ,test))
 
+;;; ─── set-exclusive-or (FR-496) ───────────────────────────────────────────────
+
+(our-defmacro set-exclusive-or (list1 list2 &key (test '#'eql))
+  "Return elements in LIST1 or LIST2 but not both (symmetric difference)."
+  (let ((l1 (gensym "L1")) (l2 (gensym "L2")))
+    `(let ((,l1 ,list1)
+           (,l2 ,list2))
+       (append
+        (remove-if (lambda (x) (member x ,l2 :test ,test)) ,l1)
+        (remove-if (lambda (x) (member x ,l1 :test ,test)) ,l2)))))
+
 (our-defmacro nset-exclusive-or (list1 list2 &key (test '#'eql))
   "Destructive set-exclusive-or (delegates to set-exclusive-or)."
   `(set-exclusive-or ,list1 ,list2 :test ,test))
 
-;;; ─── nsubst / nsubst-if / nsubst-if-not (FR-496) ────────────────────────────
+;;; ─── subst / subst-if / subst-if-not / nsubst* (FR-496, ANSI CL) ───────────
+
+(our-defmacro subst (new old tree &key (test '#'eql))
+  "Substitute NEW for occurrences of OLD anywhere in TREE (non-destructive)."
+  (let ((n (gensym "N")) (o (gensym "O")) (fn (gensym "FN")))
+    `(let ((,n ,new) (,o ,old) (,fn ,test))
+       (labels ((%sr (s)
+                  (cond ((funcall ,fn s ,o) ,n)
+                        ((consp s) (cons (%sr (car s)) (%sr (cdr s))))
+                        (t s))))
+         (%sr ,tree)))))
+
+(our-defmacro subst-if (new pred tree)
+  "Substitute NEW where PRED is true anywhere in TREE."
+  (let ((n (gensym "N")) (p (gensym "P")))
+    `(let ((,n ,new) (,p ,pred))
+       (labels ((%sif (s)
+                  (cond ((funcall ,p s) ,n)
+                        ((consp s) (cons (%sif (car s)) (%sif (cdr s))))
+                        (t s))))
+         (%sif ,tree)))))
+
+(our-defmacro subst-if-not (new pred tree)
+  "Substitute NEW where PRED is false anywhere in TREE."
+  (let ((p (gensym "P")))
+    `(let ((,p ,pred))
+       (subst-if ,new (lambda (x) (not (funcall ,p x))) ,tree))))
 
 (our-defmacro nsubst (new old tree &key test)
   "Destructively substitute NEW for OLD in TREE (delegates to subst in cl-cc)."
@@ -261,3 +298,47 @@
   `(progn ,type 't))
 
 ;;; equalp is defined in macros-introspection.lisp
+
+;;; ─── values-list / copy-tree / char-* (ANSI CL) ─────────────────────────────
+
+(our-defmacro values-list (list)
+  "Return the elements of LIST as multiple values."
+  `(apply #'values ,list))
+
+(our-defmacro copy-tree (tree)
+  "Return a copy of TREE with fresh cons cells but the same atoms."
+  (let ((x (gensym "X")))
+    `(labels ((%ct (,x)
+                (if (consp ,x)
+                    (cons (%ct (car ,x)) (%ct (cdr ,x)))
+                    ,x)))
+       (%ct ,tree))))
+
+(our-defmacro char-upcase (char)
+  "Return uppercase version of CHAR."
+  `(cl:char-upcase ,char))
+
+(our-defmacro char-downcase (char)
+  "Return lowercase version of CHAR."
+  `(cl:char-downcase ,char))
+
+(our-defmacro char-code (char)
+  "Return integer code of CHAR."
+  `(cl:char-code ,char))
+
+(our-defmacro code-char (code)
+  "Return character for integer CODE."
+  `(cl:code-char ,code))
+
+(our-defmacro digit-char-p (char &optional (radix 10))
+  "Return digit weight of CHAR in RADIX or nil."
+  `(cl:digit-char-p ,char ,radix))
+
+(our-defmacro alpha-char-p (char) `(cl:alpha-char-p ,char))
+(our-defmacro alphanumericp  (char) `(cl:alphanumericp ,char))
+(our-defmacro upper-case-p   (char) `(cl:upper-case-p ,char))
+(our-defmacro lower-case-p   (char) `(cl:lower-case-p ,char))
+(our-defmacro both-case-p    (char) `(cl:both-case-p ,char))
+(our-defmacro graphic-char-p (char) `(cl:graphic-char-p ,char))
+(our-defmacro char-int       (char) `(cl:char-code ,char))
+(our-defmacro char-name      (char) `(cl:char-name ,char))

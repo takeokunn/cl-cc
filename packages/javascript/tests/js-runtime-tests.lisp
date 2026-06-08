@@ -197,3 +197,235 @@
   (let ((a (%jr-arr 10 20 30)))
     (assert-= 3  (cl-cc/javascript::%js-get-prop a "length"))
     (assert-= 20 (cl-cc/javascript::%js-get-prop a 1))))
+
+;;; ─── Loose equality ──────────────────────────────────────────────────────────
+
+(deftest-each js-rt-loose-eq
+  "== applies type coercion: null==undefined, booleans as numbers, etc."
+  :cases (("identity"      1       1       t)
+          ("null-undef"    cl-cc/javascript::+js-null+      cl-cc/javascript::+js-undefined+ t)
+          ("undef-null"    cl-cc/javascript::+js-undefined+ cl-cc/javascript::+js-null+      t)
+          ("num-str"       3       "3"     t)
+          ("str-num"       "3"     3       t)
+          ("true-1"        t       1       t)
+          ("nan-nan"       :js-nan :js-nan nil)
+          ("mismatch"      1       2       nil))
+  (a b expected)
+  (assert-equal expected (cl-cc/javascript::%js-loose-eq a b)))
+
+;;; ─── Bitwise operators ───────────────────────────────────────────────────────
+
+(deftest-each js-rt-bitwise-or
+  "Bitwise OR: coerces to int32, ORs bits, sign-extends."
+  :cases (("simple"   #b1010  #b1100  #b1110)
+          ("neg"      -1      0       -1)
+          ("zero"     0       0       0))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-bitwise-or a b)))
+
+(deftest-each js-rt-bitwise-and
+  "Bitwise AND: coerces to int32, ANDs bits."
+  :cases (("simple"   #b1010  #b1100  #b1000)
+          ("zero"     5       0       0)
+          ("same"     7       7       7))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-bitwise-and a b)))
+
+(deftest-each js-rt-bitwise-xor
+  "Bitwise XOR: coerces to int32, XORs bits."
+  :cases (("simple"   #b1010  #b1100  #b0110)
+          ("same"     7       7       0)
+          ("zero"     0       5       5))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-bitwise-xor a b)))
+
+(deftest js-rt-bitwise-not
+  "Bitwise NOT (~x) inverts all 32 bits and sign-extends."
+  (assert-= -1 (cl-cc/javascript::%js-bitwise-not 0))
+  (assert-=  0 (cl-cc/javascript::%js-bitwise-not -1))
+  (assert-= -2 (cl-cc/javascript::%js-bitwise-not 1)))
+
+(deftest-each js-rt-shift-left
+  "Left shift << by various amounts."
+  :cases (("shl-2"   2  2  8)
+          ("shl-1"   1  4  16)
+          ("shl-0"   5  0  5))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-shift-left a b)))
+
+(deftest-each js-rt-shift-right
+  "Arithmetic right shift >>: sign bit is preserved."
+  :cases (("pos"  8  2   2)
+          ("neg" -8  2  -2))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-shift-right a b)))
+
+(deftest js-rt-unsigned-shift-right
+  "Unsigned right shift >>> always yields a non-negative result."
+  (assert-= 1073741822 (cl-cc/javascript::%js-unsigned-shift-right -8 2))
+  (assert-= 2          (cl-cc/javascript::%js-unsigned-shift-right  8 2)))
+
+;;; ─── Set built-ins ───────────────────────────────────────────────────────────
+
+(defun %jr-set (&rest vals)
+  "Build a JS Set (hash-table with t values) from VALS."
+  (let ((ht (cl-cc/javascript::%js-make-ht)))
+    (dolist (v vals ht)
+      (cl-cc/javascript::%js-set-add ht v))))
+
+(deftest js-rt-set-basic
+  "add/has/delete/size/clear on a set."
+  (let ((s (%jr-set 1 2 3)))
+    (assert-= 3 (cl-cc/javascript::%js-set-size s))
+    (assert-true  (cl-cc/javascript::%js-set-has s 2))
+    (assert-false (cl-cc/javascript::%js-set-has s 9))
+    (cl-cc/javascript::%js-set-delete s 2)
+    (assert-= 2 (cl-cc/javascript::%js-set-size s))
+    (cl-cc/javascript::%js-set-clear s)
+    (assert-= 0 (cl-cc/javascript::%js-set-size s))))
+
+(deftest js-rt-set-union
+  "union produces a set containing elements of both."
+  (let* ((a (%jr-set 1 2))
+         (b (%jr-set 2 3))
+         (u (cl-cc/javascript::%js-set-union a b)))
+    (assert-= 3 (cl-cc/javascript::%js-set-size u))
+    (assert-true (cl-cc/javascript::%js-set-has u 1))
+    (assert-true (cl-cc/javascript::%js-set-has u 3))))
+
+(deftest js-rt-set-intersection
+  "intersection contains only elements in both."
+  (let* ((a (%jr-set 1 2 3))
+         (b (%jr-set 2 3 4))
+         (i (cl-cc/javascript::%js-set-intersection a b)))
+    (assert-= 2 (cl-cc/javascript::%js-set-size i))
+    (assert-true  (cl-cc/javascript::%js-set-has i 2))
+    (assert-false (cl-cc/javascript::%js-set-has i 1))))
+
+(deftest js-rt-set-difference
+  "difference: elements in A but not B."
+  (let* ((a (%jr-set 1 2 3))
+         (b (%jr-set 2))
+         (d (cl-cc/javascript::%js-set-difference a b)))
+    (assert-= 2 (cl-cc/javascript::%js-set-size d))
+    (assert-false (cl-cc/javascript::%js-set-has d 2))))
+
+(deftest js-rt-set-subset-disjoint
+  "is-subset-of and is-disjoint-from."
+  (let ((a (%jr-set 1 2))
+        (b (%jr-set 1 2 3))
+        (c (%jr-set 4 5)))
+    (assert-true  (cl-cc/javascript::%js-set-is-subset-of   a b))
+    (assert-false (cl-cc/javascript::%js-set-is-subset-of   b a))
+    (assert-true  (cl-cc/javascript::%js-set-is-disjoint-from a c))
+    (assert-false (cl-cc/javascript::%js-set-is-disjoint-from a b))))
+
+;;; ─── Iterator helpers ────────────────────────────────────────────────────────
+
+(deftest js-rt-iterator-map-filter
+  "Iterator.map and Iterator.filter over a vector iterator."
+  (let* ((iter  (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 2 3 4)))
+         (evens (cl-cc/javascript::%js-iterator-filter
+                 iter (lambda (x &rest _) (declare (ignore _)) (evenp x))))
+         (doubled (cl-cc/javascript::%js-iterator-map
+                   (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 2 3))
+                   (lambda (x &rest _) (declare (ignore _)) (* x 2)))))
+    (assert-equal '(2 4)
+                  (%jr-list (cl-cc/javascript::%js-iterator-to-array evens)))
+    (assert-equal '(2 4 6)
+                  (%jr-list (cl-cc/javascript::%js-iterator-to-array doubled)))))
+
+(deftest js-rt-iterator-take-drop
+  "take and drop limit/skip elements."
+  (let* ((src (%jr-arr 10 20 30 40 50))
+         (taken (cl-cc/javascript::%js-iterator-to-array
+                 (cl-cc/javascript::%js-iterator-take
+                  (cl-cc/javascript::%js-vec-to-iter src) 3)))
+         (dropped (cl-cc/javascript::%js-iterator-to-array
+                   (cl-cc/javascript::%js-iterator-drop
+                    (cl-cc/javascript::%js-vec-to-iter src) 2))))
+    (assert-equal '(10 20 30) (%jr-list taken))
+    (assert-equal '(30 40 50) (%jr-list dropped))))
+
+(deftest js-rt-iterator-reduce
+  "Iterator.reduce folds to a single value."
+  (let* ((iter (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 2 3 4)))
+         (sum  (cl-cc/javascript::%js-iterator-reduce
+                iter (lambda (a b &rest _) (declare (ignore _)) (+ a b)) 0)))
+    (assert-= 10 sum)))
+
+;;; ─── Promise built-ins ───────────────────────────────────────────────────────
+
+(deftest js-rt-promise-resolve-await
+  "Resolved promise: await returns its value."
+  (let* ((p (cl-cc/javascript::%js-promise-resolve 42))
+         (v (cl-cc/javascript::%js-await p)))
+    (assert-= 42 v)))
+
+(deftest js-rt-promise-reject-await
+  "Rejected promise: await raises js-exception."
+  (let ((p (cl-cc/javascript::%js-promise-reject "oops")))
+    (assert-signals
+     'cl-cc/javascript::js-exception
+     (cl-cc/javascript::%js-await p))))
+
+(deftest js-rt-promise-then
+  "then chains fulfilled value through on-fulfilled callback."
+  (let* ((p (cl-cc/javascript::%js-promise-resolve 5))
+         (p2 (cl-cc/javascript::%js-promise-then
+              p (lambda (v &rest _) (declare (ignore _)) (* v 2)))))
+    (assert-= 10 (cl-cc/javascript::%js-await p2))))
+
+(deftest js-rt-promise-all
+  "all resolves with an array when every promise fulfills."
+  (let* ((promises (%jr-arr (cl-cc/javascript::%js-promise-resolve 1)
+                            (cl-cc/javascript::%js-promise-resolve 2)
+                            (cl-cc/javascript::%js-promise-resolve 3)))
+         (result (cl-cc/javascript::%js-await
+                  (cl-cc/javascript::%js-promise-all promises))))
+    (assert-equal '(1 2 3) (%jr-list result))))
+
+;;; ─── for-of / for-in ─────────────────────────────────────────────────────────
+
+(deftest js-rt-for-of-array
+  "for-of calls body-fn for each array element in order."
+  (let ((seen nil))
+    (cl-cc/javascript::%js-for-of
+     (%jr-arr 10 20 30)
+     (lambda (x &rest _) (declare (ignore _)) (push x seen)))
+    (assert-equal '(10 20 30) (nreverse seen))))
+
+(deftest js-rt-for-of-string
+  "for-of iterates a string character by character."
+  (let ((chars nil))
+    (cl-cc/javascript::%js-for-of
+     "hi"
+     (lambda (c &rest _) (declare (ignore _)) (push c chars)))
+    (assert-equal '("h" "i") (nreverse chars))))
+
+(deftest js-rt-for-in-object
+  "for-in yields enumerable own keys, skipping __proto__ etc."
+  (let ((o (cl-cc/javascript::%js-make-object "a" 1 "b" 2))
+        (keys nil))
+    (cl-cc/javascript::%js-for-in o (lambda (k &rest _) (declare (ignore _)) (push k keys)))
+    (assert-equal '("a" "b") (sort keys #'string<))))
+
+;;; ─── try-catch-finally ───────────────────────────────────────────────────────
+
+(deftest js-rt-try-catch
+  "try-catch: catch receives the thrown value."
+  (let ((caught nil))
+    (cl-cc/javascript::%js-try-catch-finally
+     (lambda () (cl-cc/javascript::%js-throw "err"))
+     (lambda (v) (setf caught v))
+     nil)
+    (assert-string= "err" caught)))
+
+(deftest js-rt-try-finally-runs
+  "finally runs even when no exception is thrown."
+  (let ((ran nil))
+    (cl-cc/javascript::%js-try-catch-finally
+     (lambda () 42)
+     nil
+     (lambda () (setf ran t)))
+    (assert-true ran)))

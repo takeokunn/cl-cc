@@ -292,35 +292,59 @@
                                                *php-loop-continue-target*))))
                           rest kv))))))))))
 
+(defun %php-lower-foreach-by-ref (arr-expr var-sym body-stmts loop-tag &optional key-sym)
+  "Lower 'foreach ($arr as &$val)' — BODY-FN receives a ref box; writes back."
+  (let ((box-sym (gensym "FOREACH-BOX-"))
+        (key-param (gensym "FOREACH-KEY-")))
+    (%php-call 'cl-cc/php::%php-foreach-by-ref
+               arr-expr
+               (make-ast-lambda
+                :params (list box-sym key-param)
+                :body (list (make-ast-let
+                             :bindings (append
+                                        (when key-sym (list (cons key-sym (make-ast-var :name key-param))))
+                                        (list (cons var-sym (make-ast-var :name box-sym))))
+                             :body (list (%php-lower-while-with-label
+                                          (make-ast-quote :value t)
+                                          body-stmts
+                                          loop-tag))))))))
+
 (define-php-stmt-parser :foreach (rest known-vars)
   (let ((rest2 (%php-consume-expected :T-LPAREN rest)))
     (multiple-value-bind (arr-expr rest3 kv3) (php-parse-expr rest2 known-vars)
       (let ((rest4 (if (%php-keyword-p rest3 :as) (cdr rest3) (error "foreach: expected 'as'"))))
-        (when (%php-reference-token-p rest4)
-          (error "PHP parse error: PHP foreach by-reference value (&$value) is not yet supported"))
-        (multiple-value-bind (var-tok rest5) (php-expect :T-VAR rest4)
-          (let ((key-sym nil)
-                (var-sym (php-var-sym (php-tok-value var-tok)))
-                (rest6 rest5))
-            (when (and rest6 (eq (php-peek-type rest6) :T-OP) (equal "=>" (php-peek-value rest6)))
-              (when (%php-reference-token-p (cdr rest6))
-                (error "PHP parse error: PHP foreach by-reference value (&$value) is not yet supported"))
-              (multiple-value-bind (val-tok rest7) (php-expect :T-VAR (cdr rest6))
-                (setf key-sym var-sym
-                      var-sym (php-var-sym (php-tok-value val-tok))
-                      rest6 rest7)))
-            (let* ((*php-loop-continue-target* (gensym "FOREACH-LOOP-"))
-                   (*php-loop-break-target* (gensym "FOREACH-END-"))
-                   (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
-                   (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
-              (multiple-value-bind (body-stmts rest8 kv8)
-                  (%php-parse-statement-body (%php-consume-expected :T-RPAREN rest6) kv3)
-                (values (%php-lower-foreach-with-label
-                          arr-expr var-sym
-                          body-stmts
-                          *php-loop-continue-target*
-                          key-sym)
-                        rest8 kv8)))))))))
+        ;; Detect by-reference on the value position: foreach ($arr as &$val)
+        (let* ((by-ref-p (%php-reference-token-p rest4))
+               (rest4b (if by-ref-p (cdr rest4) rest4)))
+          (multiple-value-bind (var-tok rest5) (php-expect :T-VAR rest4b)
+            (let ((key-sym nil)
+                  (var-sym (php-var-sym (php-tok-value var-tok)))
+                  (val-by-ref-p by-ref-p)
+                  (rest6 rest5))
+              ;; foreach ($arr as $key => &$val) or ($arr as $key => $val)
+              (when (and rest6 (eq (php-peek-type rest6) :T-OP) (equal "=>" (php-peek-value rest6)))
+                (let* ((after-arrow (cdr rest6))
+                       (val-ref-p (%php-reference-token-p after-arrow))
+                       (after-ref (if val-ref-p (cdr after-arrow) after-arrow)))
+                  (multiple-value-bind (val-tok rest7) (php-expect :T-VAR after-ref)
+                    (setf key-sym var-sym
+                          var-sym (php-var-sym (php-tok-value val-tok))
+                          val-by-ref-p val-ref-p
+                          rest6 rest7))))
+              (let* ((*php-loop-continue-target* (gensym "FOREACH-LOOP-"))
+                     (*php-loop-break-target* (gensym "FOREACH-END-"))
+                     (*php-break-targets* (cons *php-loop-break-target* *php-break-targets*))
+                     (*php-continue-targets* (cons *php-loop-continue-target* *php-continue-targets*)))
+                (multiple-value-bind (body-stmts rest8 kv8)
+                    (%php-parse-statement-body (%php-consume-expected :T-RPAREN rest6) kv3)
+                  (values (if val-by-ref-p
+                              (%php-lower-foreach-by-ref
+                               arr-expr var-sym body-stmts
+                               *php-loop-continue-target* key-sym)
+                              (%php-lower-foreach-with-label
+                               arr-expr var-sym body-stmts
+                               *php-loop-continue-target* key-sym))
+                          rest8 kv8))))))))))
 
 (define-php-stmt-parser :unset (rest known-vars)
   (let ((current (%php-consume-expected :T-LPAREN rest))

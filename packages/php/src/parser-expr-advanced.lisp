@@ -185,39 +185,56 @@ function' at runtime (e.g. array_push)."
             (values (%php-capture-wrapper captures lambda) rest4 kv4)))))))
 
 (defun %php-parse-closure-use-list (stream)
-  "Parse optional PHP closure use($x, $y) and return captures/rest."
+  "Parse optional PHP closure use($x, &$y) and return (captures by-ref-set rest).
+Captures is a list of variable symbols; by-ref-set is a hash-table of the by-ref ones."
   (if (and (eq (php-peek-type stream) :T-KEYWORD)
            (eq (php-peek-value stream) :use))
       (let ((current (%php-consume-expected :T-LPAREN (cdr stream)))
-            (captures nil))
+            (captures nil)
+            (by-ref (make-hash-table)))
         (unless (eq (php-peek-type current) :T-RPAREN)
           (loop
-            (when (and (eq (php-peek-type current) :T-OP)
-                       (equal "&" (php-peek-value current)))
-              (error "PHP parse error: PHP closure use-by-reference (&) is not yet supported"))
-            (multiple-value-bind (var-token rest) (php-expect :T-VAR current)
-              (push (php-var-sym (php-tok-value var-token)) captures)
-              (setf current rest))
+            ;; Detect &$var — by-reference capture
+            (let* ((is-ref (%php-reference-token-p current))
+                   (after-amp (if is-ref (cdr current) current)))
+              (multiple-value-bind (var-token rest) (php-expect :T-VAR after-amp)
+                (let ((var-sym (php-var-sym (php-tok-value var-token))))
+                  (push var-sym captures)
+                  (when is-ref
+                    (setf (gethash var-sym by-ref) t))
+                  (setf current rest))))
             (if (eq (php-peek-type current) :T-COMMA)
                 (setf current (cdr current))
                 (return))))
-        (values (nreverse captures) (%php-consume-expected :T-RPAREN current)))
-      (values nil stream)))
+        (values (nreverse captures) by-ref (%php-consume-expected :T-RPAREN current)))
+      (values nil (make-hash-table) stream)))
 
 (defun %php-parse-anonymous-function (stream known-vars)
-  "Parse function(params) use(vars) { body } as an ast-lambda with explicit captures."
+  "Parse function(params) use($x, &$y) { body } as an ast-lambda with captures.
+By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
   (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices)
       (php-parse-param-list stream)
     (declare (ignore param-types _param-attrs _by-ref-indices))
-    (multiple-value-bind (captures rest2) (%php-parse-closure-use-list rest)
+    (multiple-value-bind (captures by-ref rest2) (%php-parse-closure-use-list rest)
       (multiple-value-bind (return-type rest3) (php-parse-return-type rest2)
         (declare (ignore return-type))
         (multiple-value-bind (body-stmts rest4 kv4)
             (php-parse-block rest3 (append params captures known-vars))
-          (values (%php-capture-wrapper
-                   captures
-                   (make-ast-lambda :params params :body (%php-callable-body body-stmts)))
-                   rest4 kv4))))))
+          ;; For by-ref captures, wrap them in ref boxes so mutations propagate.
+          (let* ((ref-bindings
+                  (when (> (hash-table-count by-ref) 0)
+                    (remove nil
+                            (mapcar (lambda (sym)
+                                      (when (gethash sym by-ref)
+                                        (cons sym (%php-call 'cl-cc/php::%php-make-ref
+                                                             (make-ast-var :name sym)))))
+                                    captures))))
+                 (lambda-ast (make-ast-lambda :params params
+                                              :body (%php-callable-body body-stmts)))
+                 (wrapped (if ref-bindings
+                              (make-ast-let :bindings ref-bindings :body (list lambda-ast))
+                              lambda-ast)))
+            (values (%php-capture-wrapper captures wrapped) rest4 kv4)))))))
 
 ;;; ─── Yield Handlers ─────────────────────────────────────────────────────────
 

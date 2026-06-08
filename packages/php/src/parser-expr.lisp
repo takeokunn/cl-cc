@@ -153,6 +153,32 @@ gensym-named class and makes an instance of it."
                                    collect (cons (intern (format nil "ARG~D" i) :keyword) a)))
                   rest3 kv3))))))
 
+;;; ─── Postfix ++/-- lowering ──────────────────────────────────────────────────
+;;;
+;;; Data-driven: OP is "++" or "--"; the arithmetic op is derived from the table.
+;;; Yields the ORIGINAL value (captures it in a gensym) then mutates $var.
+
+(defparameter *php-postfix-incdec-ops*
+  '(("++" . +) ("--" . -))
+  "Maps postfix operator string to the CL arithmetic symbol.")
+
+(defun %php-lower-postfix-incdec (op obj)
+  "Lower PHP postfix OP on OBJ: capture old value, adjust, return old value.
+Non-variable targets are returned unchanged (mutation is not supported there)."
+  (if (ast-var-p obj)
+      (let* ((arith-op (cdr (assoc op *php-postfix-incdec-ops* :test #'equal)))
+             (tmp      (gensym "PHP-POSTFIX-"))
+             (var-sym  (ast-var-name obj)))
+        (make-ast-let
+         :bindings (list (cons tmp (make-ast-var :name var-sym)))
+         :body     (list (make-ast-setq
+                          :var   var-sym
+                          :value (make-ast-binop :op  arith-op
+                                                 :lhs (make-ast-var :name tmp)
+                                                 :rhs (make-ast-int  :value 1)))
+                         (make-ast-var :name tmp))))
+      obj))
+
 (defun php-parse-postfix (stream known-vars)
   "Parse postfix expressions: method calls, property access, array access."
   (multiple-value-bind (obj rest kv) (php-parse-primary stream known-vars)
@@ -220,35 +246,12 @@ gensym-named class and makes an instance of it."
                              kv kv4))
                      (setf obj (make-ast-slot-value :object obj :slot member)
                            rest rest3))))))
-          ;; ++ postfix — yield the ORIGINAL value (PHP/C semantics), then increment.
-          ;; tmp captures the old value so $j = $i++ binds $j to the pre-increment $i.
-          ((and (eq type :T-OP) (equal "++" (php-peek-value rest)))
+          ;; Postfix ++/-- — yield the ORIGINAL value, then adjust by ±1.
+          ;; Only simple $var targets are mutated; complex lvalues are left unchanged.
+          ((and (eq type :T-OP) (member (php-peek-value rest) '("++" "--") :test #'equal))
            (multiple-value-bind (tok rest2) (php-consume rest)
-             (declare (ignore tok))
-             (let ((tmp (gensym "PHP-POSTFIX-")))
-               (setf obj (make-ast-let
-                          :bindings (list (cons tmp obj))
-                          :body (list (make-ast-setq
-                                       :var (ast-var-name obj)
-                                       :value (make-ast-binop :op '+
-                                               :lhs (make-ast-var :name tmp)
-                                               :rhs (make-ast-int :value 1)))
-                                      (make-ast-var :name tmp)))
-                     rest rest2))))
-          ;; -- postfix — yield the ORIGINAL value, then decrement.
-          ((and (eq type :T-OP) (equal "--" (php-peek-value rest)))
-           (multiple-value-bind (tok rest2) (php-consume rest)
-             (declare (ignore tok))
-             (let ((tmp (gensym "PHP-POSTFIX-")))
-               (setf obj (make-ast-let
-                          :bindings (list (cons tmp obj))
-                          :body (list (make-ast-setq
-                                       :var (ast-var-name obj)
-                                       :value (make-ast-binop :op '-
-                                               :lhs (make-ast-var :name tmp)
-                                               :rhs (make-ast-int :value 1)))
-                                      (make-ast-var :name tmp)))
-                     rest rest2))))
+             (setf obj (%php-lower-postfix-incdec (php-tok-value tok) obj)
+                   rest rest2)))
           ;; Array access: $a[0] or $a[$i]
            ((eq type :T-LBRACKET)
             (multiple-value-bind (tok rest2) (php-consume rest)

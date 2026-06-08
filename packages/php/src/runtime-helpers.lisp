@@ -68,6 +68,25 @@
       (setf (php-ref-value ref) new-value)
       new-value))
 
+;;; -----------------------------------------------------------------------
+;;;  foreach by-reference iteration
+;;; -----------------------------------------------------------------------
+
+(defun %php-foreach-by-ref (arr body-fn)
+  "Iterate PHP ordered array ARR calling BODY-FN(box key) for each element.
+BODY-FN receives a ref box wrapping the current value and the key.
+After BODY-FN returns the box is written back to the array (mutations propagate)."
+  (when (hash-table-p arr)
+    (dolist (key (gethash +php-array-order-key+ arr))
+      (let* ((current-val (gethash key arr +php-null+))
+             (box (%php-make-ref current-val)))
+        (funcall body-fn box key)
+        ;; Write back mutations
+        (let ((new-val (%php-deref box)))
+          (unless (eq new-val current-val)
+            (setf (gethash key arr) new-val))))))
+  +php-null+)
+
 (defun %php-yield (&optional value)
   "Return a runtime representation for a PHP yield point."
   (list :yield value))

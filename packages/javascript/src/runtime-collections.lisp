@@ -9,7 +9,11 @@
 ;;;  Set built-ins (ES2025)
 ;;; -----------------------------------------------------------------------
 
-;;; We represent JS Set as a hash-table with values == t
+;;; JS Set is represented as a hash-table with values == t.
+
+;;; Internal helper: copy every key from SRC into TARGET (unconditionally).
+(defun %js-set-copy-all (target src)
+  (maphash (lambda (k v) (declare (ignore v)) (setf (gethash k target) t)) src))
 
 (defun %js-set-add (s val)
   (setf (gethash val s) t)
@@ -36,7 +40,6 @@
     (maphash (lambda (k v) (declare (ignore v)) (vector-push-extend k result)) s)
     result))
 
-
 (defun %js-set-entries (s)
   "Return array of [key, key] pairs (Set semantics)."
   (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
@@ -49,19 +52,19 @@
 (defun %js-set-for-each (s fn)
   (maphash (lambda (k v)
              (declare (ignore v))
-             (funcall fn k k s))
+             (%js-funcall fn k k s))
            s)
   +js-undefined+)
 
 (defun %js-set-union (a b)
-  "Return new set that is the union of A and B."
+  "New set: union of A and B."
   (let ((result (%js-make-ht)))
-    (maphash (lambda (k v) (declare (ignore v)) (setf (gethash k result) t)) a)
-    (maphash (lambda (k v) (declare (ignore v)) (setf (gethash k result) t)) b)
+    (%js-set-copy-all result a)
+    (%js-set-copy-all result b)
     result))
 
 (defun %js-set-intersection (a b)
-  "Return new set that is the intersection of A and B."
+  "New set: elements in both A and B."
   (let ((result (%js-make-ht)))
     (maphash (lambda (k v)
                (declare (ignore v))
@@ -71,7 +74,7 @@
     result))
 
 (defun %js-set-difference (a b)
-  "Return new set: elements in A but not in B."
+  "New set: elements in A but not in B."
   (let ((result (%js-make-ht)))
     (maphash (lambda (k v)
                (declare (ignore v))
@@ -81,7 +84,7 @@
     result))
 
 (defun %js-set-symmetric-difference (a b)
-  "Return new set: elements in A or B but not both."
+  "New set: elements in A or B but not both."
   (let ((result (%js-make-ht)))
     (maphash (lambda (k v)
                (declare (ignore v))
@@ -95,26 +98,26 @@
              b)
     result))
 
-(defun %js-set-is-subset-of (a b)
-  "True if every element of A is in B."
-  (block check
-    (maphash (lambda (k v)
-               (declare (ignore v))
-               (unless (nth-value 1 (gethash k b))
-                 (return-from check nil)))
-             a)
-    t))
+;;; Data-driven set predicates: short-circuit scan over A against B.
+;;; (define-js-set-predicate name stop-condition result-if-stopped default-result)
+(defmacro define-js-set-predicate (name stop-condition result-if-stopped default-result)
+  `(defun ,name (a b)
+     (block check
+       (maphash (lambda (k v)
+                  (declare (ignore v))
+                  (when ,stop-condition
+                    (return-from check ,result-if-stopped)))
+                a)
+       ,default-result)))
 
+(define-js-set-predicate %js-set-is-subset-of
+  (not (nth-value 1 (gethash k b))) nil t)
 
-(defun %js-set-is-disjoint-from (a b)
-  "True if A and B share no elements."
-  (block check
-    (maphash (lambda (k v)
-               (declare (ignore v))
-               (when (nth-value 1 (gethash k b))
-                 (return-from check nil)))
-             a)
-    t))
+(define-js-set-predicate %js-set-is-disjoint-from
+  (nth-value 1 (gethash k b)) nil t)
+
+(define-js-set-predicate %js-set-is-superset-of
+  (not (nth-value 1 (gethash k a))) nil t)
 
 ;;; -----------------------------------------------------------------------
 ;;;  Iterator helpers (ES2025)
@@ -157,113 +160,97 @@
              (incf i)
              (cons v nil)))))))
 
+;;; ─── Stateless transformers (no extra mutable state needed) ──────────────────
+
 (defun %js-iterator-map (iter fn)
-  "Map FN over ITER."
-  (let ((src iter))
-    (%js-make-cl-iterator
-     (lambda ()
-       (multiple-value-bind (val done) (%js-iter-next src)
-         (if done :done (cons (funcall fn val) nil)))))))
+  (%js-make-cl-iterator
+   (lambda ()
+     (multiple-value-bind (val done) (%js-iter-next iter)
+       (if done :done (cons (%js-funcall fn val) nil))))))
 
 (defun %js-iterator-filter (iter fn)
-  "Filter ITER by FN."
-  (let ((src iter))
-    (%js-make-cl-iterator
-     (lambda ()
-       (loop
-         (multiple-value-bind (val done) (%js-iter-next src)
-           (when done (return :done))
-           (when (%js-truthy (funcall fn val))
-             (return (cons val nil)))))))))
+  (%js-make-cl-iterator
+   (lambda ()
+     (loop
+       (multiple-value-bind (val done) (%js-iter-next iter)
+         (when done (return :done))
+         (when (%js-truthy (%js-funcall fn val))
+           (return (cons val nil))))))))
+
+;;; ─── Stateful transformers (carry extra mutable state in closure) ─────────────
 
 (defun %js-iterator-take (iter n)
-  "Take at most N elements from ITER."
-  (let ((src iter) (count 0))
+  (let ((count 0))
     (%js-make-cl-iterator
      (lambda ()
        (if (>= count n)
            :done
-           (multiple-value-bind (val done) (%js-iter-next src)
-             (if done
-                 :done
-                 (progn (incf count) (cons val nil)))))))))
+           (multiple-value-bind (val done) (%js-iter-next iter)
+             (if done :done (progn (incf count) (cons val nil)))))))))
 
 (defun %js-iterator-drop (iter n)
-  "Skip N elements from ITER, then continue."
-  (let ((src iter) (skipped 0))
+  (let ((skipped 0))
     (%js-make-cl-iterator
      (lambda ()
        (loop while (< skipped n)
-             do (multiple-value-bind (val done) (%js-iter-next src)
+             do (multiple-value-bind (val done) (%js-iter-next iter)
                   (declare (ignore val))
-                  (if done (return-from %js-iterator-drop
-                             (%js-make-cl-iterator (lambda () :done))))
+                  (when done
+                    (return-from %js-iterator-drop
+                      (%js-make-cl-iterator (lambda () :done))))
                   (incf skipped)))
-       (multiple-value-bind (val done) (%js-iter-next src)
+       (multiple-value-bind (val done) (%js-iter-next iter)
          (if done :done (cons val nil)))))))
 
 (defun %js-iterator-flat-map (iter fn)
-  "FlatMap ITER with FN (FN must return an iterable)."
-  (let ((src iter)
-        (inner nil))
+  (let ((inner nil))
     (%js-make-cl-iterator
      (lambda ()
        (loop
-         ;; drain inner iterator first
          (when inner
            (multiple-value-bind (val done) (%js-iter-next inner)
              (unless done (return (cons val nil)))
              (setf inner nil)))
-         ;; advance outer
-         (multiple-value-bind (val done) (%js-iter-next src)
+         (multiple-value-bind (val done) (%js-iter-next iter)
            (when done (return :done))
-           (let ((mapped (funcall fn val)))
+           (let ((mapped (%js-funcall fn val)))
              (setf inner (if (%js-vec-p mapped)
                              (%js-vec-to-iter mapped)
                              mapped)))))))))
 
+;;; ─── Terminal consumers (return a single value, not an iterator) ──────────────
+
 (defun %js-iterator-reduce (iter fn &optional (init +js-undefined+))
-  "Reduce ITER with FN."
-  (let ((acc init) (first (eq init +js-undefined+)))
+  (let ((acc init) (first-p (eq init +js-undefined+)))
     (loop
       (multiple-value-bind (val done) (%js-iter-next iter)
         (when done (return acc))
-        (if first
-            (setf acc val first nil)
-            (setf acc (funcall fn acc val)))))))
+        (if first-p
+            (setf acc val first-p nil)
+            (setf acc (%js-funcall fn acc val)))))))
 
 (defun %js-iterator-to-array (iter)
-  "Collect ITER into an array."
   (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-    (loop
-      (multiple-value-bind (val done) (%js-iter-next iter)
-        (when done (return result))
-        (vector-push-extend val result)))))
+    (loop (multiple-value-bind (val done) (%js-iter-next iter)
+            (when done (return result))
+            (vector-push-extend val result)))))
 
 (defun %js-iterator-for-each (iter fn)
-  "Execute FN for each element of ITER."
-  (loop
-    (multiple-value-bind (val done) (%js-iter-next iter)
-      (when done (return +js-undefined+))
-      (funcall fn val))))
+  (loop (multiple-value-bind (val done) (%js-iter-next iter)
+          (when done (return +js-undefined+))
+          (%js-funcall fn val))))
 
 (defun %js-iterator-some (iter fn)
-  "True if any element of ITER satisfies FN."
-  (loop
-    (multiple-value-bind (val done) (%js-iter-next iter)
-      (when done (return nil))
-      (when (%js-truthy (funcall fn val)) (return t)))))
+  (loop (multiple-value-bind (val done) (%js-iter-next iter)
+          (when done (return nil))
+          (when (%js-truthy (%js-funcall fn val)) (return t)))))
 
 (defun %js-iterator-every (iter fn)
-  "True if all elements of ITER satisfy FN."
-  (loop
-    (multiple-value-bind (val done) (%js-iter-next iter)
-      (when done (return t))
-      (unless (%js-truthy (funcall fn val)) (return nil)))))
+  (loop (multiple-value-bind (val done) (%js-iter-next iter)
+          (when done (return t))
+          (unless (%js-truthy (%js-funcall fn val)) (return nil)))))
 
 (defun %js-iterator-find (iter fn)
-  "Return first element of ITER satisfying FN, or undefined."
-  (loop
-    (multiple-value-bind (val done) (%js-iter-next iter)
-      (when done (return +js-undefined+))
-      (when (%js-truthy (funcall fn val)) (return val)))))
+  (loop (multiple-value-bind (val done) (%js-iter-next iter)
+          (when done (return +js-undefined+))
+          (when (%js-truthy (%js-funcall fn val)) (return val)))))

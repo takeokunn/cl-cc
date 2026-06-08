@@ -185,9 +185,32 @@ methods under ORIG-NAME); NIL for computed names."
 
 ;;; ─── Class body member kinds ─────────────────────────────────────────────────
 
+;;; Internal helper: build a slot-def for a get/set accessor.
+;;; KIND is :getter or :setter; STREAM points past the consumed 'get'/'set' token.
+;;; Getters take no parameters; setters take one.
+(defun %js-parse-accessor (kind static-p decorators stream)
+  (multiple-value-bind (name private-p rest) (%js-parse-member-name stream)
+    (multiple-value-bind (params body rest2) (%js-parse-method-params-body rest)
+      (let* ((sym (if (symbolp name)
+                      name
+                      (gensym (if (eq kind :getter) "JS-GETTER-" "JS-SETTER-"))))
+             (slot (make-ast-slot-def
+                    :name sym
+                    :initform (make-ast-defun :name sym
+                                              :params (if (eq kind :getter) nil params)
+                                              :body (list body))
+                    :allocation (if static-p :class :instance)
+                    :imports (%js-member-kind-metadata kind static-p private-p nil nil decorators))))
+        (values slot (js-skip-semis rest2))))))
+
 (defun %js-parse-method-params-body (stream)
   "Parse ( params ) { body } for a method. Returns (values params body rest).
-Params is a list of symbols; body is an ast-progn."
+Params is a list of symbols; body is an ast-progn of properly-parsed AST nodes.
+
+Previously this function collected method body tokens verbatim and stored them
+as (ast-progn (ast-quote raw-token-list)). That meant class method bodies were
+never compiled — every method silently became a no-op. Now the body is parsed
+via js-parse-stmt-list (the real statement parser) so methods execute normally."
   ;; Parameter list
   (let ((rest (nth-value 1 (js-expect :T-LPAREN stream)))
         (params nil))
@@ -222,24 +245,14 @@ Params is a list of symbols; body is an ast-progn."
     (multiple-value-bind (_ rest2) (js-expect :T-RPAREN rest)
       (declare (ignore _))
       ;; Method body { stmts... }
+      ;; js-parse-stmt-list consumes the opening { and closing } and returns
+      ;; (values stmt-list rest-after-rbrace) — the real statement parser used
+      ;; by js-parse-block and js-parse-function-body.
       (multiple-value-bind (_ rest3) (js-expect :T-LBRACE rest2)
         (declare (ignore _))
-        (let ((body-tokens nil)
-              (depth 1)
-              (current rest3))
-          (loop while (and current (not (and (eq (js-peek-type current) :T-RBRACE)
-                                             (= depth 1))))
-                do (cond
-                     ((eq (js-peek-type current) :T-LBRACE) (incf depth))
-                     ((eq (js-peek-type current) :T-RBRACE) (decf depth)))
-                   (push (car current) body-tokens)
-                   (setf current (cdr current)))
-          (multiple-value-bind (_ rest4) (js-expect :T-RBRACE current)
-            (declare (ignore _))
-            (let ((body-ast (make-ast-progn
-                             :forms (list (make-ast-quote
-                                          :value (nreverse body-tokens))))))
-              (values (nreverse params) body-ast rest4))))))))
+        (multiple-value-bind (body-stmts rest4) (js-parse-stmt-list rest3)
+          (let ((body-ast (make-ast-progn :forms (%js-callable-body body-stmts))))
+            (values (nreverse params) body-ast rest4)))))))
 
 (defun %js-member-kind-metadata (kind static-p private-p async-p generator-p decorators)
   "Build the :imports plist for a class member slot."
@@ -266,22 +279,12 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
         (setf static-p t
               current (cdr current)))
       ;; 3. Static initialisation block: static { ... }
+      ;; Parse the body via js-parse-stmt-list (real statement parser) so
+      ;; static initializer code actually executes, not a raw token dump.
       (when (and static-p current (eq (js-peek-type current) :T-LBRACE))
-        (let ((depth 1)
-              (block-tokens nil)
-              (rest (cdr current)))  ; consume '{'
-          (loop while (and rest (not (and (eq (js-peek-type rest) :T-RBRACE)
-                                          (= depth 1))))
-                do (cond
-                     ((eq (js-peek-type rest) :T-LBRACE) (incf depth))
-                     ((eq (js-peek-type rest) :T-RBRACE) (decf depth)))
-                   (push (car rest) block-tokens)
-                   (setf rest (cdr rest)))
-          (multiple-value-bind (_ rest2) (js-expect :T-RBRACE rest)
-            (declare (ignore _))
-            (let* ((body-ast (make-ast-progn
-                              :forms (list (make-ast-quote
-                                           :value (nreverse block-tokens)))))
+        (let ((rest (cdr current)))   ; consume '{'
+          (multiple-value-bind (body-stmts rest2) (js-parse-stmt-list rest)
+            (let* ((body-ast (make-ast-progn :forms body-stmts))
                    (slot (make-ast-slot-def
                           :name (gensym "JS-STATIC-INIT-")
                           :initform body-ast
@@ -308,47 +311,20 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
                  (equal "*" (js-peek-value current)))
         (setf generator-p t
               current (cdr current)))
-      ;; 6. Getter: get NAME ( ) { }
+      ;; 6. Getter: get NAME () { }
       (when (and current (eq (js-peek-type current) :T-GET)
                  (cdr current)
                  (not (member (js-peek-type (cdr current))
                               '(:T-LPAREN :T-SEMI :T-RBRACE) :test #'eq)))
-        (setf current (cdr current))  ; consume 'get'
-        (multiple-value-bind (name private-p rest) (%js-parse-member-name current)
-          (multiple-value-bind (params body rest2) (%js-parse-method-params-body rest)
-            (declare (ignore params))
-            (let* ((defun-ast (make-ast-defun
-                               :name (if (symbolp name) name (gensym "JS-GETTER-"))
-                               :params nil
-                               :body (list body)))
-                   (slot (make-ast-slot-def
-                          :name (if (symbolp name) name (gensym "JS-GETTER-"))
-                          :initform defun-ast
-                          :allocation (if static-p :class :instance)
-                          :imports (%js-member-kind-metadata
-                                    :getter static-p private-p nil nil decorators))))
-              (return-from %js-parse-class-body-member
-                (values slot (js-skip-semis rest2)))))))
-      ;; 7. Setter: set NAME ( param ) { }
+        (return-from %js-parse-class-body-member
+          (%js-parse-accessor :getter static-p decorators (cdr current))))
+      ;; 7. Setter: set NAME (param) { }
       (when (and current (eq (js-peek-type current) :T-SET)
                  (cdr current)
                  (not (member (js-peek-type (cdr current))
                               '(:T-LPAREN :T-SEMI :T-RBRACE) :test #'eq)))
-        (setf current (cdr current))  ; consume 'set'
-        (multiple-value-bind (name private-p rest) (%js-parse-member-name current)
-          (multiple-value-bind (params body rest2) (%js-parse-method-params-body rest)
-            (let* ((defun-ast (make-ast-defun
-                               :name (if (symbolp name) name (gensym "JS-SETTER-"))
-                               :params params
-                               :body (list body)))
-                   (slot (make-ast-slot-def
-                          :name (if (symbolp name) name (gensym "JS-SETTER-"))
-                          :initform defun-ast
-                          :allocation (if static-p :class :instance)
-                          :imports (%js-member-kind-metadata
-                                    :setter static-p private-p nil nil decorators))))
-              (return-from %js-parse-class-body-member
-                (values slot (js-skip-semis rest2)))))))
+        (return-from %js-parse-class-body-member
+          (%js-parse-accessor :setter static-p decorators (cdr current))))
       ;; 8. Normal member: parse name, then decide method vs field
       (multiple-value-bind (name private-p rest orig-name) (%js-parse-member-name current)
         ;; Method: name ( ...

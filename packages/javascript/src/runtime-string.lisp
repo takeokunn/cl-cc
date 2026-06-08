@@ -199,6 +199,21 @@
 (defun %js-string-from-code-point (&rest codes)
   (apply #'%js-string-from-char-code codes))
 
+(defun %js-string-normalize (s &optional (form "NFC"))
+  "JS String.prototype.normalize. Simplified: returns S unchanged (NFC is the
+common Lisp string encoding; full Unicode normalization is not yet implemented)."
+  (declare (ignore form))
+  s)
+
+(defun %js-string-code-point-at (s pos)
+  "JS String.prototype.codePointAt(pos) — returns Unicode code point at POS.
+For BMP characters (U+0000–U+FFFF) this is identical to charCodeAt."
+  (let ((i (truncate pos)))
+    (if (or (< i 0) (>= i (length s)))
+        +js-undefined+
+        (char-code (char s i)))))
+
+
 (defun %js-string-raw (template &rest substitutions)
   "String.raw tag function."
   (let ((raw (if (%js-ht-p template)
@@ -210,140 +225,4 @@
                (when (< i (length substitutions))
                  (write-string (%js-to-string (nth i substitutions)) out))))))
 
-;;; -----------------------------------------------------------------------
-;;;  Math
-;;; -----------------------------------------------------------------------
-
-(defun %js-math-abs (x)
-  (let ((n (%js-to-number x)))
-    (if (%js-float-nan-p n) n (abs n))))
-
-(defun %js-math-floor (x)
-  (let ((n (%js-to-number x)))
-    (if (or (%js-float-nan-p n) (%js-float-infinity-p n))
-        n
-        (coerce (floor n) 'double-float))))
-
-(defun %js-math-ceil (x)
-  (let ((n (%js-to-number x)))
-    (if (or (%js-float-nan-p n) (%js-float-infinity-p n))
-        n
-        (coerce (ceiling n) 'double-float))))
-
-(defun %js-math-round (x)
-  "JS Math.round — rounds half away from negative infinity."
-  (let ((n (%js-to-number x)))
-    (if (or (%js-float-nan-p n) (%js-float-infinity-p n))
-        n
-        (coerce (floor (+ n 0.5d0)) 'double-float))))
-
-(defun %js-math-trunc (x)
-  (let ((n (%js-to-number x)))
-    (if (or (%js-float-nan-p n) (%js-float-infinity-p n))
-        n
-        (coerce (truncate n) 'double-float))))
-
-(defun %js-math-sign (x)
-  (let ((n (%js-to-number x)))
-    (cond
-      ((%js-float-nan-p n) n)
-      ((> n 0)  1.0d0)
-      ((< n 0) -1.0d0)
-      (t         0.0d0))))
-
-(defun %js-math-max (&rest args)
-  (if (null args)
-      *js-neg-inf-float*
-      (reduce (lambda (a b)
-                (let ((na (%js-to-number a))
-                        (nb (%js-to-number b)))
-                  (if (or (%js-float-nan-p na)
-                          (%js-float-nan-p nb))
-                      *js-nan-float*
-                      (max na nb))))
-              args)))
-
-(defun %js-math-min (&rest args)
-  (if (null args)
-      *js-inf-float*
-      (reduce (lambda (a b)
-                (let ((na (%js-to-number a))
-                        (nb (%js-to-number b)))
-                  (if (or (%js-float-nan-p na)
-                          (%js-float-nan-p nb))
-                      *js-nan-float*
-                      (min na nb))))
-              args)))
-
-(defun %js-math-pow (base exp)
-  (expt (%js-to-number base) (%js-to-number exp)))
-
-(defun %js-math-sqrt (x)
-  (let ((n (%js-to-number x)))
-    (if (< n 0)
-        *js-nan-float*
-        (sqrt n))))
-
-(defun %js-math-random ()
-  (random 1.0d0))
-
-(defun %js-math-log (x)
-  (let ((n (%js-to-number x)))
-    (if (< n 0) *js-nan-float*
-        (log n))))
-
-(defun %js-math-log2 (x)
-  (let ((n (%js-to-number x)))
-    (if (< n 0) *js-nan-float*
-        (log n 2.0d0))))
-
-(defun %js-math-log10 (x)
-  (let ((n (%js-to-number x)))
-    (if (< n 0) *js-nan-float*
-        (log n 10.0d0))))
-
-(defun %js-math-exp (x)
-  (exp (%js-to-number x)))
-
-(defun %js-math-sin (x)  (sin  (%js-to-number x)))
-(defun %js-math-cos (x)  (cos  (%js-to-number x)))
-(defun %js-math-tan (x)  (tan  (%js-to-number x)))
-(defun %js-math-asin (x) (asin (%js-to-number x)))
-(defun %js-math-acos (x) (acos (%js-to-number x)))
-(defun %js-math-atan (x) (atan (%js-to-number x)))
-
-(defun %js-math-atan2 (y x)
-  (atan (%js-to-number y) (%js-to-number x)))
-
-(defun %js-math-hypot (&rest args)
-  (sqrt (reduce #'+ (mapcar (lambda (x)
-                               (let ((n (%js-to-number x)))
-                                 (* n n)))
-                             args)
-                :initial-value 0.0d0)))
-
-(defun %js-math-clz32 (x)
-  "Count leading zeros in 32-bit integer representation."
-  (let* ((n (logand (truncate (%js-to-number x)) #xFFFFFFFF))
-         (count 0))
-    (if (zerop n)
-        32
-        (progn
-          (loop for bit from 31 downto 0
-                while (zerop (logand n (ash 1 bit)))
-                do (incf count))
-          count))))
-
-(defun %js-math-fround (x)
-  "Round to nearest single-precision float."
-  (coerce (coerce (%js-to-number x) 'single-float) 'double-float))
-
-(defun %js-math-imul (a b)
-  "32-bit integer multiply."
-  (let* ((ia (logand (truncate (%js-to-number a)) #xFFFFFFFF))
-         (ib (logand (truncate (%js-to-number b)) #xFFFFFFFF))
-         (result (logand (* ia ib) #xFFFFFFFF)))
-    ;; sign-extend
-    (if (logbitp 31 result)
-        (- result #x100000000)
-        result)))
+;;; Math built-ins live in runtime-math.lisp (separated by SRP).

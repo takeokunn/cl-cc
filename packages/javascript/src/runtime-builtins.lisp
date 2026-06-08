@@ -105,7 +105,46 @@
                                     (%js-json-stringify val)))
     ("JSON.parse"              . ,(lambda (str &optional _reviver)
                                     (declare (ignore _reviver))
-                                    (%js-json-parse str))))
+                                    (%js-json-parse str)))
+    ;; Symbol global (callable object)
+    ("Symbol.for"              . ,#'%js-symbol-for)
+    ("Symbol.keyFor"           . ,#'%js-symbol-key-for)
+    ;; Set constructor — %js-make-ht creates a hash-table used as Set
+    ("Set"                     . ,(lambda (&optional (iter +js-undefined+))
+                                    (let ((s (%js-make-ht)))
+                                      (when (and (not (eq iter +js-undefined+))
+                                                 (not (eq iter +js-null+)))
+                                        (%js-for-of iter (lambda (v) (%js-set-add s v))))
+                                      s)))
+    ;; Map constructor
+    ("Map"                     . ,#'%js-make-map)
+    ;; WeakMap/WeakSet constructors
+    ("WeakMap"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-map)))
+    ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
+    ;; WeakRef constructor
+    ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; Number wrapper function / constructor
+    ("Number"                  . ,#'%js-to-number)
+    ;; String wrapper function
+    ("String"                  . ,#'%js-to-string)
+    ;; Boolean wrapper
+    ("Boolean"                 . ,#'%js-truthy)
+    ;; Error constructors (simplified)
+    ("Error"                   . ,(lambda (&optional (msg "") &rest _)
+                                    (declare (ignore _))
+                                    (%js-make-object "message" msg "name" "Error")))
+    ("TypeError"               . ,(lambda (&optional (msg "") &rest _)
+                                    (declare (ignore _))
+                                    (%js-make-object "message" msg "name" "TypeError")))
+    ("RangeError"              . ,(lambda (&optional (msg "") &rest _)
+                                    (declare (ignore _))
+                                    (%js-make-object "message" msg "name" "RangeError")))
+    ("ReferenceError"          . ,(lambda (&optional (msg "") &rest _)
+                                    (declare (ignore _))
+                                    (%js-make-object "message" msg "name" "ReferenceError")))
+    ("SyntaxError"             . ,(lambda (&optional (msg "") &rest _)
+                                    (declare (ignore _))
+                                    (%js-make-object "message" msg "name" "SyntaxError"))))
   "Alist of (name . function) specs used to build *js-builtin-map*.")
 
 (defun %build-js-builtin-map ()
@@ -125,11 +164,27 @@ forms ready for the compiler backend — the JS analog of PARSE-ALL-FORMS.
 Currently seeds `console' as a defparameter'd global object built by the bridged
 host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
 %js-get-prop to a bridged host function. Add further globals (Math, JSON, …) here."
-  (cons (make-ast-defvar
-         :name (js-ident-sym "console")
-         :value (make-ast-call :func (make-ast-var :name '%js-make-console) :args nil)
-         :kind 'defparameter)
-        (parse-js-source source :strict-mode strict-mode :module-p module-p)))
+  (list* (make-ast-defvar
+          :name (js-ident-sym "console")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-console) :args nil)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Symbol")
+          :value (make-ast-var :name '*js-symbol-global*)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "undefined")
+          :value (make-ast-quote :value +js-undefined+)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Infinity")
+          :value (make-ast-var :name '*js-inf-float*)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "NaN")
+          :value (make-ast-var :name '*js-nan-float*)
+          :kind 'defparameter)
+         (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Method dispatch: obj.method resolved to a bound callable
@@ -173,7 +228,18 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
         (cons "toUpperCase" #'%js-string-to-upper-case)
         (cons "toLowerCase" #'%js-string-to-lower-case)
         (cons "trim" #'%js-string-trim)         (cons "trimStart" #'%js-string-trim-start)
-        (cons "trimEnd" #'%js-string-trim-end))
+        (cons "trimEnd" #'%js-string-trim-end)
+        (cons "codePointAt" #'%js-string-code-point-at)
+        (cons "normalize" #'%js-string-normalize)
+        (cons "substr" #'%js-string-slice)       ; deprecated alias
+        (cons "substring" (lambda (s start &optional end)
+                            (let* ((n (length s))
+                                   (a (max 0 (min (truncate start) n)))
+                                   (b (if (eq end +js-undefined+) n (max 0 (min (truncate end) n))))
+                                   (lo (min a b)) (hi (max a b)))
+                              (subseq s lo hi))))
+        (cons "valueOf" (lambda (s) s))
+        (cons "toString" (lambda (s) s)))
   "Alist of JS String.prototype method name -> host helper (receiver is S, first arg).")
 
 (defparameter *js-set-method-table*
@@ -210,11 +276,37 @@ prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefine
           (lambda (&rest args) (apply fn receiver args)))
         +js-undefined+)))
 
+(defparameter *js-number-method-table*
+  (list (cons "toFixed"
+              (lambda (n digits)
+                (let ((d (if (eq digits +js-undefined+) 0 (truncate (%js-to-number digits)))))
+                  (format nil "~,vF" d (%js-to-number n)))))
+        (cons "toString"
+              (lambda (n &optional (radix 10))
+                (let ((r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))
+                      (ni (truncate (%js-to-number n))))
+                  (if (= r 10) (format nil "~A" (%js-to-number n))
+                      (format nil "~vR" r ni)))))
+        (cons "toPrecision"
+              (lambda (n prec)
+                (if (eq prec +js-undefined+)
+                    (format nil "~A" (%js-to-number n))
+                    (format nil "~,vG" (truncate (%js-to-number prec)) (%js-to-number n)))))
+        (cons "valueOf" (lambda (n) (%js-to-number n)))
+        (cons "toLocaleString" (lambda (n &rest _) (declare (ignore _)) (format nil "~A" (%js-to-number n)))))
+  "Alist of Number.prototype method name -> (lambda (num args…)) helpers.")
+
+(defparameter *js-symbol-method-table*
+  (list (cons "toString"    #'%js-symbol-to-string)
+        (cons "description" #'%js-symbol-description)
+        (cons "valueOf"     (lambda (s) s)))
+  "Alist of Symbol.prototype method name -> helpers.")
+
 (defun %js-resolve-method (obj key)
   "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.
 Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
   (cond
-    ;; Array prototype methods
+    ;; Array prototype methods + length
     ((%js-vec-p obj)
      (cond ((string= key "length") (coerce (length obj) 'double-float))
            (t (%js-bound-method *js-array-method-table* obj key))))
@@ -222,14 +314,29 @@ Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
     ((stringp obj)
      (cond ((string= key "length") (coerce (length obj) 'double-float))
            (t (%js-bound-method *js-string-method-table* obj key))))
-    ;; Set prototype methods + size
-    ((hash-table-p obj)
-     (cond ((string= key "size") (coerce (hash-table-count obj) 'double-float))
-           (t (%js-bound-method *js-set-method-table* obj key))))
     ;; Map prototype methods + size
     ((js-map-p obj)
      (cond ((string= key "size") (coerce (%js-map-size obj) 'double-float))
            (t (%js-bound-method *js-map-method-table* obj key))))
+    ;; Set (hash-table) prototype methods + size
+    ((hash-table-p obj)
+     (cond ((string= key "size") (coerce (hash-table-count obj) 'double-float))
+           (t (%js-bound-method *js-set-method-table* obj key))))
+    ;; Number.prototype — numbers have methods too
+    ((numberp obj)
+     (let ((entry (assoc key *js-number-method-table* :test #'string=)))
+       (if entry
+           (let ((fn (cdr entry)))
+             (lambda (&rest args) (apply fn obj args)))
+           +js-undefined+)))
+    ;; Symbol.prototype
+    ((js-symbol-p obj)
+     (let ((entry (assoc key *js-symbol-method-table* :test #'string=)))
+       (if entry
+           (let ((fn (cdr entry)))
+             (lambda (&rest args) (apply fn obj args)))
+           (cond ((string= key "description") (%js-symbol-description obj))
+                 (t +js-undefined+)))))
     (t +js-undefined+)))
 
 (setf *js-method-resolver* #'%js-resolve-method)
