@@ -123,6 +123,16 @@
     ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
     ;; WeakRef constructor
     ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; TypedArray constructors
+    ("Int8Array"           . ,(lambda (&optional arg) (%js-make-typed-array "Int8Array" arg)))
+    ("Uint8Array"          . ,(lambda (&optional arg) (%js-make-typed-array "Uint8Array" arg)))
+    ("Uint8ClampedArray"   . ,(lambda (&optional arg) (%js-make-typed-array "Uint8ClampedArray" arg)))
+    ("Int16Array"          . ,(lambda (&optional arg) (%js-make-typed-array "Int16Array" arg)))
+    ("Uint16Array"         . ,(lambda (&optional arg) (%js-make-typed-array "Uint16Array" arg)))
+    ("Int32Array"          . ,(lambda (&optional arg) (%js-make-typed-array "Int32Array" arg)))
+    ("Uint32Array"         . ,(lambda (&optional arg) (%js-make-typed-array "Uint32Array" arg)))
+    ("Float32Array"        . ,(lambda (&optional arg) (%js-make-typed-array "Float32Array" arg)))
+    ("Float64Array"        . ,(lambda (&optional arg) (%js-make-typed-array "Float64Array" arg)))
     ;; Proxy constructor — simplified: returns a wrapped object
     ;; Full Proxy requires all get/set/has traps integrated into %js-get-prop
     ("Proxy"                   . ,(lambda (target handler)
@@ -390,6 +400,13 @@ Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
     ;; Date prototype methods
     ((js-date-p obj)
      (%js-bound-method *js-date-method-table* obj key))
+    ;; TypedArray prototype methods + length/byteLength/byteOffset
+    ((js-typed-array-p obj)
+     (cond ((string= key "length")     (coerce (js-ta-length obj) 'double-float))
+           ((string= key "byteLength") (coerce (* (js-ta-length obj) (js-ta-element-size obj)) 'double-float))
+           ((string= key "byteOffset") (coerce (js-ta-byte-offset obj) 'double-float))
+           ((string= key "buffer")     (%js-make-object "byteLength" (* (js-ta-length obj) (js-ta-element-size obj))))
+           (t (%js-bound-method *js-typed-array-method-table* obj key))))
     ;; RegExp prototype methods
     ((js-regexp-p obj)
      (cond ((string= key "source")    (js-regexp-source obj))

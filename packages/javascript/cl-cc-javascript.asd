@@ -36,6 +36,7 @@
    (:file "runtime-symbol")
    (:file "runtime-date")
    (:file "runtime-regex")
+   (:file "runtime-typed-arrays")
    (:file "runtime-class")
    (:file "runtime-ops")
    (:file "runtime-builtins")))

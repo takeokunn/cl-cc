@@ -282,6 +282,14 @@
    #:%js-symbol-as-key
    #:*js-symbol-registry*
    #:*js-symbol-global*
+   ;; TypedArray (ES2015+)
+   #:%js-typed-array-p
+   #:%js-make-typed-array
+   #:%js-ta-get
+   #:%js-ta-set
+   #:%js-ta-to-array
+   #:*js-typed-array-method-table*
+
    ;; RegExp (ES2015+ native engine)
    #:%js-regexp-p
    #:%js-make-regex
