@@ -203,6 +203,7 @@
    #:%js-object-is
 
    ;; String built-ins (ES2015+, ES2024)
+   #:%js-string-substring
    #:%js-string-to-well-formed
    #:%js-string-is-well-formed
    #:%js-string-to-locale-lower-case

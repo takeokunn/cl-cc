@@ -366,7 +366,7 @@
   "Rejected promise: await raises js-exception."
   (let ((p (cl-cc/javascript::%js-promise-reject "oops")))
     (assert-signals
-     'cl-cc/javascript::js-exception
+     cl-cc/javascript:js-exception
      (cl-cc/javascript::%js-await p))))
 
 (deftest js-rt-promise-then

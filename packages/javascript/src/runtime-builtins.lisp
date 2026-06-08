@@ -755,12 +755,7 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
         (cons "codePointAt" #'%js-string-code-point-at)
         (cons "normalize" #'%js-string-normalize)
         (cons "substr" #'%js-string-slice)       ; deprecated alias
-        (cons "substring" (lambda (s start &optional end)
-                            (let* ((n (length s))
-                                   (a (max 0 (min (truncate start) n)))
-                                   (b (if (eq end +js-undefined+) n (max 0 (min (truncate end) n))))
-                                   (lo (min a b)) (hi (max a b)))
-                              (subseq s lo hi))))
+        (cons "substring" #'%js-string-substring)
         (cons "valueOf" (lambda (s) s))
         (cons "toString" (lambda (s) s))
         ;; ES2015 iterator protocol on strings

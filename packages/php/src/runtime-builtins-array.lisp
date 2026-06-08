@@ -580,3 +580,54 @@ PHP 8.4: array_all(). Returns true for an empty array."
         (not (hash-table-p arr))
         (every (lambda (pair) (%php-truthy (funcall fn (cdr pair))))
                (%php-array-pairs arr)))))
+
+;;; ─── array_map with multiple arrays ────────────────────────────────────────
+
+(defun %php-array-map-multi (callback &rest arrays)
+  "PHP array_map with multiple arrays: maps CALLBACK over parallel elements."
+  (if (null callback)
+      ;; null callback: zip arrays into sub-arrays
+      (let ((result (%php-make-array))
+            (lists (mapcar #'%php-array-values-list arrays)))
+        (loop for i from 0 below (apply #'min (mapcar #'length lists))
+              do (let ((row (%php-make-array)))
+                   (dolist (lst lists)
+                     (%php-array-set row (%php-array-next-auto-index row) (nth i lst)))
+                   (%php-array-set result i row)))
+        result)
+      ;; normal multi-array map
+      (let ((result (%php-make-array))
+            (fn (%php-callable-function callback))
+            (lists (mapcar #'%php-array-values-list arrays)))
+        (when fn
+          (loop for i from 0 below (apply #'min (mapcar #'length lists))
+                do (%php-array-set result i (apply fn (mapcar (lambda (lst) (nth i lst)) lists)))))
+        result)))
+
+;;; ─── array_multisort (simplified) ──────────────────────────────────────────
+
+(defun %php-array-multisort (array &rest rest)
+  "PHP array_multisort: sort array (simplified, ignores extra flags)."
+  (declare (ignore rest))
+  (%php-sort array))
+
+;;; ─── array_key_exists alias + in_array strict ──────────────────────────────
+
+(defun %php-in-array-strict (needle haystack)
+  "PHP in_array with strict=true: uses === comparison."
+  (when (hash-table-p haystack)
+    (some (lambda (pair) (equal (cdr pair) needle)) (%php-array-pairs haystack))))
+
+(defun %php-array-search-strict (needle haystack)
+  "PHP array_search with strict=true."
+  (when (hash-table-p haystack)
+    (let ((pair (find-if (lambda (p) (equal (cdr p) needle)) (%php-array-pairs haystack))))
+      (if pair (car pair) nil))))
+
+;;; ─── Miscellaneous PHP 8.x array helpers ────────────────────────────────────
+
+(defun %php-array-is-list (array)
+  "PHP array_is_list: check if array has sequential integer keys from 0."
+  (when (hash-table-p array)
+    (loop for i from 0 for k in (%php-array-ordered-keys array)
+          always (eql k i))))

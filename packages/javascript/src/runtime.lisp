@@ -143,6 +143,10 @@
 (defun %js-loose-eq (a b)
   "JS == with type coercion."
   (cond
+    ;; NaN never equals anything — must be checked BEFORE (equal a b)
+    ;; because (equal :js-nan :js-nan) is t for keyword sentinels.
+    ((%js-nan-p a) nil)
+    ((%js-nan-p b) nil)
     ;; strict identity first
     ((equal a b) t)
     ;; null == undefined
@@ -158,9 +162,6 @@
     ((eq a nil) (%js-loose-eq 0.0d0 b))
     ((eq b t)  (%js-loose-eq a 1.0d0))
     ((eq b nil) (%js-loose-eq a 0.0d0))
-    ;; NaN never equals anything
-    ((%js-nan-p a) nil)
-    ((%js-nan-p b) nil)
     ;; numeric comparison
     ((and (numberp a) (numberp b)) (= a b))
     (t nil)))

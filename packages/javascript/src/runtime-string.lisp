@@ -256,3 +256,13 @@ For BMP characters (U+0000–U+FFFF) this is identical to charCodeAt."
                  (write-string (%js-to-string (nth i substitutions)) out))))))
 
 ;;; Math built-ins live in runtime-math.lisp (separated by SRP).
+
+;;; ─── ES2015+ String extras ───────────────────────────────────────────────────
+
+(defun %js-string-substring (s start &optional end)
+  "JS String.prototype.substring (clamps, swaps start>end, differs from slice)."
+  (let* ((n (length s))
+         (a (max 0 (min n (truncate (%js-to-number start)))))
+         (b (if (eq end +js-undefined+) n (max 0 (min n (truncate (%js-to-number end))))))
+         (lo (min a b)) (hi (max a b)))
+    (subseq s lo hi)))
