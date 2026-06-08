@@ -143,6 +143,21 @@ discarded the default tokens, so omitted args were left unset / 0)."
   (assert-string= "5"  (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m();"))
   (assert-string= "20" (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m(20);")))
 
+(deftest php-e2e-array-append
+  "$a[] = v appends to an array (regression: $a[] hit a parse error on the empty
+subscript). Pushing onto the referenced hash-table is the whole effect."
+  (assert-string= "3"  (%php-run-capture "<?php $a=[1,2]; $a[]=3; echo count($a);"))
+  (assert-string= "3"  (%php-run-capture "<?php $a=[1,2]; $a[]=3; echo $a[2];"))
+  (assert-string= "xy" (%php-run-capture "<?php $a=[]; $a[]='x'; $a[]='y'; echo $a[0].$a[1];"))
+  (assert-string= "01020"
+                  (%php-run-capture "<?php $a=[]; for($i=0;$i<3;$i++){ $a[]=$i*10; } echo $a[0].$a[1].$a[2];"))
+  (assert-string= "12" (%php-run-capture "<?php $a=['k'=>1]; $a[]=2; echo $a['k'].$a[0];")))
+
+(deftest php-e2e-array-subscript-set-still-works
+  "Keyed and indexed subscript assignment are unaffected by the [] append path."
+  (assert-string= "9" (%php-run-capture "<?php $a=[1]; $a[0]=9; echo $a[0];"))
+  (assert-string= "5" (%php-run-capture "<?php $a=[]; $a['x']=5; echo $a['x'];")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

@@ -256,12 +256,18 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
            ((eq type :T-LBRACKET)
             (multiple-value-bind (tok rest2) (php-consume rest)
               (declare (ignore tok))
-              (multiple-value-bind (idx rest3 kv3) (php-parse-expr rest2 kv)
-                (multiple-value-bind (tok2 rest4) (php-expect :T-RBRACKET rest3)
-                  (declare (ignore tok2))
-                  (setf obj (%php-array-ref-call obj idx)
-                        rest rest4
-                        kv kv3)))))
+              (if (eq (php-peek-type rest2) :T-RBRACKET)
+                  ;; Empty subscript $a[] — array append target (assignment LHS).
+                  (multiple-value-bind (tok2 rest3) (php-consume rest2)
+                    (declare (ignore tok2))
+                    (setf obj (%php-array-append-call obj)
+                          rest rest3))
+                  (multiple-value-bind (idx rest3 kv3) (php-parse-expr rest2 kv)
+                    (multiple-value-bind (tok2 rest4) (php-expect :T-RBRACKET rest3)
+                      (declare (ignore tok2))
+                      (setf obj (%php-array-ref-call obj idx)
+                            rest rest4
+                            kv kv3))))))
            ;; Dynamic / variable call: $f(args), or a chained call such as
            ;; getCallback()(args). A named call foo(...) is already consumed in
            ;; php-parse-primary, so an LPAREN here always means "call the value of
@@ -492,6 +498,13 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
                       (%php-lower-compound-assign op lhs val :var))
                   rest3
                   new-kv)))
+              ;; $a[] = v  — append. The array is a mutable hash-table held by
+              ;; reference, so pushing onto it is the whole effect (no reassign).
+              ((%php-array-append-call-p lhs)
+               (let ((arr (first (ast-call-args lhs))))
+                 (unless (equal op "=")
+                   (error "PHP parse error: ~A not allowed on [] append target" op))
+                 (values (%php-call 'cl-cc/php::%php-array-push arr val) rest3 kv3)))
               ((%php-array-ref-call-p lhs)
                (destructuring-bind (arr key) (ast-call-args lhs)
                  (values (if (equal op "=")

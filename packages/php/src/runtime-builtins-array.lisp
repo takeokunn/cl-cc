@@ -54,6 +54,13 @@ usort with a closure callback silently no-op (the resolver returned NIL)."
   (dolist (value values (%php-count array))
     (%php-array-set array (%php-array-next-auto-index array) value)))
 
+(defun %php-array-append-target (&rest _)
+  "Stub for the $a[] append marker reached in read context, which is a PHP fatal
+error (\"Cannot use [] for reading\"). Valid code consumes the marker at assignment
+time, so this only fires on misuse."
+  (declare (ignore _))
+  (error "PHP fatal error: Cannot use [] for reading"))
+
 (defun %php-array-pop (array)
   "Remove and return ARRAY's last value, or PHP null for an empty array."
   (check-type array hash-table)

@@ -499,6 +499,20 @@ Re-references VAL per element, which is correct for the common variable RHS."
   (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-set)
                   :args (list array key value)))
 
+(defun %php-array-append-call (array)
+  "Lower ARRAY[] (empty subscript) to an append-target marker. This is only a
+valid assignment LHS; the assignment parser turns `$a[] = v' into a push. Using []
+to read is a PHP fatal error, modelled by the %php-array-append-target stub."
+  (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-append-target)
+                 :args (list array)))
+
+(defun %php-array-append-call-p (node)
+  "Return true when NODE is an ARRAY[] append-target marker."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-array-append-target)))))
+
 (defun %php-array-unset-call (array key)
   "Lower unset(ARRAY[KEY]) to the PHP ordered-array deletion helper."
   (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-unset)
