@@ -532,7 +532,7 @@ don't accept as keyword arguments."
                                     print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                     print-pass-stats stats-stream trace-json-stream
                                     retpoline spectre-mitigations stack-protector shadow-stack
-                                     compress asan msan tsan ubsan hwasan
+                                     compress asan msan tsan ubsan hwasan strict-no-alloc
                                       target-os mir-isel bolt bolt-profile)
   "Compile SOURCE to a native executable.
 SOURCE can be a string (single expression) or a list of forms.
@@ -690,7 +690,7 @@ Returns the output file path on success."
                                              print-opt-remarks opt-remarks-stream (opt-remarks-mode :all)
                                              print-pass-stats stats-stream trace-json-stream
                                                retpoline spectre-mitigations stack-protector shadow-stack
-                                               compress asan msan tsan ubsan hwasan
+                                               compress asan msan tsan ubsan hwasan strict-no-alloc
                                                 target-os mir-isel bolt bolt-profile (compilation-tier *compilation-tier*))
   "Compile a CL-CC source file to a native executable.
 INPUT-FILE is the path to the source file.
