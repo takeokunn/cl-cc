@@ -262,6 +262,16 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
                   (setf obj (%php-array-ref-call obj idx)
                         rest rest4
                         kv kv3)))))
+           ;; Dynamic / variable call: $f(args), or a chained call such as
+           ;; getCallback()(args). A named call foo(...) is already consumed in
+           ;; php-parse-primary, so an LPAREN here always means "call the value of
+           ;; OBJ". Lower to (call OBJ args); codegen calls the closure value (same
+           ;; path JS uses for fn(args)).
+           ((eq type :T-LPAREN)
+            (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest kv)
+              (setf obj (make-ast-call :func obj :args args)
+                    rest rest2
+                    kv kv2)))
           (t (return)))))
     (values obj rest kv)))
 

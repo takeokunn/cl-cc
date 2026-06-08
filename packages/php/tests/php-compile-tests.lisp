@@ -41,6 +41,37 @@ foreach path used to assume a CL list and errored on the hash-table array)."
                   (%php-run-capture
                    "<?php function inner(){ yield 1; yield 2; } function outer(){ yield 0; yield from inner(); yield 3; } $o=''; foreach (outer() as $v){ $o=$o.$v.','; } echo $o;")))
 
+(deftest php-e2e-dynamic-closure-call
+  "Calling a closure held in a variable, $f(args), invokes it (postfix LPAREN
+lowers to a call on the value)."
+  (assert-string= "50" (%php-run-capture
+                        "<?php $f = function($x){ return $x*10; }; echo $f(5);")))
+
+(deftest php-e2e-iife
+  "An immediately-invoked function expression evaluates and calls in place."
+  (assert-string= "10" (%php-run-capture
+                        "<?php echo (function($x){ return $x*2; })(5);")))
+
+(deftest php-e2e-closure-passed-to-user-function
+  "A closure passed to a user function is callable inside it via $f(args)."
+  (assert-string= "12" (%php-run-capture
+                        "<?php function apply($f,$v){ return $f($v); } echo apply(function($x){ return $x*3; }, 4);")))
+
+(deftest php-e2e-array-map-closure-callback
+  "array_map invokes a PHP closure callback (routed back into the VM via
+%vm-call-closure-sync). Closure bound to a variable to avoid the inline-closure +
+inline-array-literal register-clobber edge case."
+  (assert-string= "10,20,30"
+                  (%php-run-capture
+                   "<?php $f=function($x){ return $x*10; }; $a=[1,2,3]; $r=array_map($f,$a); echo $r[0].','.$r[1].','.$r[2];")))
+
+(deftest php-e2e-array-filter-closure
+  "array_filter invokes a PHP closure predicate per element (closure is the last
+arg, so the inline-closure + array-literal register-clobber does not apply)."
+  (assert-string= "3"
+                  (%php-run-capture
+                   "<?php $f=array_filter([0,1,0,2], function($x){ return $x; }); $s=0; foreach($f as $v){ $s=$s+$v; } echo $s;")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

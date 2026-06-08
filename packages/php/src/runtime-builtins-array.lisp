@@ -9,8 +9,18 @@
       (%php-array-set copy (car pair) (cdr pair)))))
 
 (defun %php-callable-function (callback)
-  "Resolve CALLBACK to a Common Lisp function, or NIL."
+  "Resolve CALLBACK to a Common Lisp function, or NIL.
+
+A compiled-PHP closure (Closure object / arrow fn) is a vm-closure-object, which
+host CL:FUNCALL cannot call. Wrap it in a trampoline that routes back into the VM
+via %vm-call-closure-sync, using *vm-state* (dynamically bound around VM
+execution for exactly this host-runtime -> VM-closure inverse bridge). Mirrors the
+JS *js-apply-fn* installer. Without this, array_map/array_filter/array_reduce/
+usort with a closure callback silently no-op (the resolver returned NIL)."
   (cond ((functionp callback) callback)
+        ((cl-cc/vm::%vm-closure-object-p callback)
+         (lambda (&rest args)
+           (cl-cc/vm::%vm-call-closure-sync callback cl-cc/vm:*vm-state* args)))
         ((and (symbolp callback) (fboundp callback)) (symbol-function callback))
         ((and (stringp callback) (fboundp '%php-lookup-builtin))
          (funcall (symbol-function '%php-lookup-builtin) callback))
