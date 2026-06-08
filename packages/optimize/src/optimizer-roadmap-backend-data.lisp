@@ -229,7 +229,7 @@
       ("packages/optimize/src/optimizer-speculative-ic.lisp"
        "packages/optimize/tests/optimizer-pipeline-tests.lisp")
       (make-opt-lockfree-plan opt-lockfree-select-reclamation opt-lockfree-build-plan)
-      (optimize-lockfree-select-reclamation-chooses-policy-from-risk-and-contention))
+      (lockfree-reclamation-cases))
       (315 315
        ("packages/optimize/src/optimizer-speculative-ic.lisp"
         "packages/codegen/src/x86-64-codegen-core.lisp"
@@ -244,7 +244,6 @@
         ("CL-CC/CODEGEN" . "AARCH64-CFI-PLAN")
         ("CL-CC/CODEGEN" . "EMIT-AARCH64-CFI-ENTRY"))
        (optimize-build-cfi-plan-selects-target-specific-guards
-        optimize-cfi-entry-opcode-materializes-selected-marker
         x86-64-cfi-entry-emits-endbr64-bytes
         x86-64-program-with-indirect-call-starts-with-endbr64
         x86-64-call-cfi-guard-avoids-clobbering-rax-target
@@ -262,8 +261,7 @@
         ("CL-CC/CODEGEN" . "EMIT-VM-CALL-LIKE-INST")
         ("CL-CC/CODEGEN" . "EMIT-VM-TAIL-CALL-INST")
         ("CL-CC/CODEGEN" . "*X86-64-USE-RETPOLINE*"))
-       (optimize-should-use-retpoline-p-depends-on-target-and-ibrs
-        optimize-retpoline-thunk-name-is-target-register-specific
+       (optimize-retpoline-thunk-name-is-target-register-specific
         x86-64-call-encoding-retpoline
         x86-64-tail-call-encoding-retpoline))
       (317 317
@@ -309,8 +307,7 @@
        opt-wasm-select-direct-tailcall-opcode
        make-opt-wasm-tailcall-plan
        opt-build-wasm-tailcall-plan)
-      (optimize-wasm-select-tailcall-opcode-uses-return-call-forms
-       wasm-tail-call-dispatch-uses-return-call-indirect
+      (wasm-tail-call-dispatch-uses-return-call-indirect
        wasm-tail-call-direct-path-uses-return-call-when-callee-known))
      (321 321
       ("packages/optimize/src/optimizer-speculative-ic.lisp"
