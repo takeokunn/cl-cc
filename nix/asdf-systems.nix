@@ -94,6 +94,7 @@ let
         "cl-cc-ast"
         "cl-cc-bootstrap"
         "cl-cc-parse"
+        "cl-cc-vm"
       ];
     };
     cl-cc-javascript = {

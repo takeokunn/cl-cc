@@ -2,6 +2,45 @@
 
 (in-suite cl-cc-unit-suite)
 
+(defun %php-run-capture (source)
+  "Compile PHP SOURCE to VM and run it, returning everything it echoed as a
+string. compile-string with :language :php registers the PHP host bridges, so a
+fresh VM state runs the program end-to-end."
+  (let* ((result  (cl-cc:compile-string source :target :vm :language :php))
+         (program (cl-cc/compile:compilation-result-program result))
+         (out     (make-string-output-stream)))
+    (cl-cc/vm:run-compiled program :output-stream out)
+    ;; Trim a trailing newline the VM appends when flushing program output.
+    (string-right-trim '(#\Newline) (get-output-stream-string out))))
+
+(deftest php-e2e-foreach-over-array-literal
+  "foreach over a PHP array literal iterates its values (regression: the non-key
+foreach path used to assume a CL list and errored on the hash-table array)."
+  (assert-string= "6" (%php-run-capture
+                       "<?php $s=0; foreach ([1,2,3] as $v) { $s=$s+$v; } echo $s;")))
+
+(deftest php-e2e-foreach-assoc-key-value
+  "foreach ($arr as $k => $v) yields associative keys and values in order."
+  (assert-string= "a=1;b=2;c=3;"
+                  (%php-run-capture
+                   "<?php $o=''; foreach (['a'=>1,'b'=>2,'c'=>3] as $k=>$v){ $o=$o.$k.'='.$v.';'; } echo $o;")))
+
+(deftest php-e2e-generator-yield-foreach
+  "A function containing yield becomes a generator; foreach drains its values."
+  (assert-string= "6" (%php-run-capture
+                       "<?php function g(){ yield 1; yield 2; yield 3; } $s=0; foreach (g() as $v){ $s=$s+$v; } echo $s;")))
+
+(deftest php-e2e-generator-parametrized
+  "A parametrized generator with a loop body yields the expected sequence."
+  (assert-string= "15" (%php-run-capture
+                        "<?php function c($n){ for($i=1;$i<=$n;$i++){ yield $i; } } $s=0; foreach (c(5) as $v){ $s=$s+$v; } echo $s;")))
+
+(deftest php-e2e-generator-yield-from
+  "yield from delegates to a nested generator, splicing its values in place."
+  (assert-string= "0,1,2,3,"
+                  (%php-run-capture
+                   "<?php function inner(){ yield 1; yield 2; } function outer(){ yield 0; yield from inner(); yield 3; } $o=''; foreach (outer() as $v){ $o=$o.$v.','; } echo $o;")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

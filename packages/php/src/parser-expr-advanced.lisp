@@ -8,7 +8,7 @@
 ;;;;   %php-parse-function-call / builtin resolution
 ;;;;   %php-lower-null-coalesce, %php-lower-elvis  — short-circuit lowering
 ;;;;   %php-parse-arrow-function, %php-parse-anonymous-function
-;;;;   %php-parse-yield-expression, %php-parse-yield-unsupported  (dead)
+;;;;   %php-parse-yield-expression
 ;;;;   %php-parse-match-expression / arm parsing / lowering
 ;;;;   %php-compound-value, %php-lower-compound-assign  — compound-assign lowering
 ;;;;   %php-array-* helpers, %php-parse-array-expr
@@ -237,21 +237,6 @@ By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
             (values (%php-capture-wrapper captures wrapped) rest4 kv4)))))))
 
 ;;; ─── Yield Handlers ─────────────────────────────────────────────────────────
-
-(defun %php-parse-yield-unsupported (stream known-vars)
-  "Parse yield/yield from as an unsupported marker with the yielded expression attached."
-  (if (and (eq (php-peek-type stream) :T-KEYWORD)
-           (eq (php-peek-value stream) :from))
-      (multiple-value-bind (from-token rest) (php-consume stream)
-        (declare (ignore from-token))
-        (multiple-value-bind (expr rest2 kv2) (php-parse-expr rest known-vars)
-          (values (%php-unsupported "PHP yield from is not yet supported" expr)
-                  rest2 kv2)))
-      (if (member (php-peek-type stream) '(:T-SEMI :T-COMMA :T-RPAREN :T-RBRACE :T-EOF) :test #'eq)
-          (values (%php-unsupported "PHP yield is not yet supported") stream known-vars)
-           (multiple-value-bind (expr rest2 kv2) (php-parse-expr stream known-vars)
-             (values (%php-unsupported "PHP yield is not yet supported" expr)
-                     rest2 kv2)))))
 
 (defun %php-parse-yield-expression (stream known-vars)
   "Parse yield/yield from into PHP runtime helper calls.

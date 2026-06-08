@@ -340,20 +340,36 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
       (assert-true (cl-cc:ast-lambda-p lambda))
       (assert-equal '("x") (mapcar #'symbol-name (cl-cc:ast-lambda-params lambda))))))
 
+(defun %php-generator-body-block (ast)
+  "For a yield-containing function AST, return the inner (block nil ...) that
+%php-callable-body wraps. The generator lowering is:
+  (let ((gen (%php-generator-enter)))
+    (%php-generator-exit gen <block>)
+    gen)
+so the block is the second arg of the %php-generator-exit call."
+  (let* ((let-form  (first (cl-cc:ast-defun-body ast)))
+         (exit-call (first (cl-cc:ast-let-body let-form))))
+    (second (cl-cc:ast-call-args exit-call))))
+
 (deftest php-parser-yield-expression-lowering
-  "yield lowers to the PHP yield helper. Body is wrapped in (block nil ...) by %php-callable-body."
+  "A function with yield becomes a generator: its body is threaded through
+%php-generator-enter / -exit, and yield lowers to the %php-yield helper."
   (let* ((ast (%php-first "<?php function g() { yield 1; }"))
-         (block (first (cl-cc:ast-defun-body ast)))
+         (let-form (first (cl-cc:ast-defun-body ast)))
+         (enter-call (cdr (first (cl-cc:ast-let-bindings let-form))))
+         (block (%php-generator-body-block ast))
          (yield-call (first (cl-cc:ast-block-body block))))
     (cl-cc/php:php-check-supported-forms (list ast))
+    (assert-true (cl-cc:ast-let-p let-form))
+    (assert-string= "%PHP-GENERATOR-ENTER" (%php-call-name enter-call))
     (assert-true (cl-cc:ast-block-p block))
     (assert-true (cl-cc:ast-call-p yield-call))
     (assert-string= "%PHP-YIELD" (%php-call-name yield-call))))
 
 (deftest php-parser-yield-from-expression-lowering
-  "yield from lowers to the PHP yield-from helper. Body wrapped in (block nil ...) by %php-callable-body."
+  "yield from lowers to the %php-yield-from helper inside the generator body."
   (let* ((ast (%php-first "<?php function g() { yield from $items; }"))
-         (block (first (cl-cc:ast-defun-body ast)))
+         (block (%php-generator-body-block ast))
          (yield-call (first (cl-cc:ast-block-body block))))
     (cl-cc/php:php-check-supported-forms (list ast))
     (assert-true (cl-cc:ast-block-p block))

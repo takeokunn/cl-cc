@@ -168,6 +168,7 @@
      vm-value-profile-snapshot
      with-vm-state-dispatch
      vm-current-state
+    *vm-current-state*
      vm-dispatch-lock-free
     *vm-parse-forms-hook*
     *vm-load-global-sync-hook*

@@ -447,7 +447,7 @@ Return (values params rest param-types param-attributes by-ref-indices)."
         (let ((pair-sym (gensym "FOREACH-PAIR-")))
           (make-ast-let
            :bindings (list (cons list-sym
-                                 (make-ast-call :func (make-ast-var :name '%php-array-pairs)
+                                 (make-ast-call :func (make-ast-var :name '%php-foreach-pairs)
                                                 :args (list arr-expr)))
                            (cons pair-sym (make-ast-quote :value nil)))
            :body (list (%php-lower-while-with-label
@@ -470,7 +470,9 @@ Return (values params rest param-types param-attributes by-ref-indices)."
                                              (list (%php-make-list-advance list-sym)))))
                         loop-tag))))
         (make-ast-let
-         :bindings (list (cons list-sym arr-expr))
+         :bindings (list (cons list-sym
+                               (make-ast-call :func (make-ast-var :name '%php-foreach-values)
+                                              :args (list arr-expr))))
          :body (list (%php-lower-while-with-label
                       (make-ast-var :name list-sym)
                       (list (make-ast-let
