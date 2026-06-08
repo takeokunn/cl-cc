@@ -424,12 +424,11 @@
 
 ;;; ─── Missing ANSI list / string operations ────────────────────────────────────
 
-(our-defmacro copy-list (lst)
-  `(let ((l ,lst))
-     (loop for x in l collect x)))
-
-(our-defmacro list-length (lst)
-  `(length ,lst))
+;;; NOTE: copy-list and list-length are ANSI FUNCTIONS, not macros. They are
+;;; defined as functions in stdlib-source-ext.lisp. Defining them as macros here
+;;; shadowed the function bindings and broke FR-908 (the quasiquote expander
+;;; emits a literal (copy-list xs) for `(,@xs) and our-macroexpand-all must NOT
+;;; expand it further) and #'copy-list / #'list-length funcall sites.
 
 (our-defmacro string-left-trim (bag string)
   `(cl:string-left-trim ,bag ,string))
