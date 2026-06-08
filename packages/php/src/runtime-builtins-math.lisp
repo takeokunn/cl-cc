@@ -113,3 +113,54 @@
   (let ((n (if (stringp operand) (read-from-string operand) operand))
         (s (or scale 0)))
     (format nil (format nil "~~,~DF" s) (sqrt (coerce n 'double-float)))))
+
+;;; ─── random_int (CSPRNG) ───────────────────────────────────────────────────
+
+(defun %php-random-int (min max)
+  "PHP random_int: cryptographically-secure-ish random integer in [MIN, MAX]."
+  (let ((lo (truncate min)) (hi (truncate max)))
+    (if (> lo hi) (error "random_int: min > max")
+        (+ lo (random (1+ (- hi lo)))))))
+
+(defun %php-random-bytes (length)
+  "PHP random_bytes: return LENGTH random bytes as a binary string."
+  (let ((n (truncate length)))
+    (with-output-to-string (out)
+      (dotimes (_ n) (write-char (code-char (random 256)) out)))))
+
+;;; ─── gmp_* arbitrary precision (maps directly to CL bignums) ────────────────
+
+(defun %php-gmp-num (x)
+  "Coerce X (int, numeric string, or gmp value) to a CL integer."
+  (cond ((integerp x) x)
+        ((stringp x) (or (parse-integer x :junk-allowed t) 0))
+        ((floatp x) (truncate x))
+        (t 0)))
+
+(defun %php-gmp-init (number &optional base)
+  "PHP gmp_init: create a GMP number from an integer or string."
+  (if (and base (stringp number))
+      (or (parse-integer number :radix (truncate base) :junk-allowed t) 0)
+      (%php-gmp-num number)))
+
+(defun %php-gmp-add (a b) (+ (%php-gmp-num a) (%php-gmp-num b)))
+(defun %php-gmp-sub (a b) (- (%php-gmp-num a) (%php-gmp-num b)))
+(defun %php-gmp-mul (a b) (* (%php-gmp-num a) (%php-gmp-num b)))
+(defun %php-gmp-div-q (a b &optional round)
+  (declare (ignore round))
+  (let ((bv (%php-gmp-num b))) (if (zerop bv) 0 (truncate (%php-gmp-num a) bv))))
+(defun %php-gmp-mod (a b)
+  (let ((bv (%php-gmp-num b))) (if (zerop bv) 0 (mod (%php-gmp-num a) bv))))
+(defun %php-gmp-pow (a b) (expt (%php-gmp-num a) (truncate (%php-gmp-num b))))
+(defun %php-gmp-abs (a) (abs (%php-gmp-num a)))
+(defun %php-gmp-neg (a) (- (%php-gmp-num a)))
+(defun %php-gmp-gcd (a b) (gcd (%php-gmp-num a) (%php-gmp-num b)))
+(defun %php-gmp-cmp (a b)
+  (let ((av (%php-gmp-num a)) (bv (%php-gmp-num b)))
+    (cond ((< av bv) -1) ((> av bv) 1) (t 0))))
+(defun %php-gmp-intval (a) (%php-gmp-num a))
+(defun %php-gmp-strval (a &optional (base 10)) (format nil "~vR" (truncate base) (%php-gmp-num a)))
+(defun %php-gmp-sqrt (a) (isqrt (%php-gmp-num a)))
+(defun %php-gmp-fact (n)
+  (let ((nv (truncate (%php-gmp-num n))) (acc 1))
+    (loop for i from 2 to nv do (setf acc (* acc i))) acc))
