@@ -158,6 +158,15 @@
   (%php-register-builtin "mb_ereg_replace" '%php-mb-ereg-replace)
   (%php-register-builtin "mb_eregi_replace" '%php-mb-eregi-replace)
   (%php-register-builtin "mb_split" '%php-mb-split)
+  ;; Additional string functions
+  (%php-register-builtin "strtr" '%php-strtr)
+  (%php-register-builtin "strpbrk" '%php-strpbrk)
+  (%php-register-builtin "strspn" '%php-strspn)
+  (%php-register-builtin "strcspn" '%php-strcspn)
+  (%php-register-builtin "quotemeta" '%php-quotemeta)
+  (%php-register-builtin "htmlentities" '%php-htmlentities)
+  (%php-register-builtin "metaphone" '%php-metaphone)
+  (%php-register-builtin "nl_langinfo" '%php-nl-langinfo)
   ;; HTML/encoding
   (%php-register-builtin "htmlspecialchars_decode" '%php-htmlspecialchars-decode)
   (%php-register-builtin "html_entity_decode" '%php-html-entity-decode)

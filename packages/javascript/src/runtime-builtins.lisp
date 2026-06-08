@@ -327,6 +327,8 @@
                                                            obj))
                                                 result)))
     ("Object.seal"       . ,(lambda (obj) obj))
+    ("Object.preventExtensions" . ,(lambda (obj) obj))
+    ("Object.isExtensible" . ,(lambda (_obj) (declare (ignore _obj)) t))
     ("Object.isFrozen"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
     ("Object.isSealed"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
     ("Object.setPrototypeOf" . ,(lambda (obj _proto) (declare (ignore _proto)) obj))
