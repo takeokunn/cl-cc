@@ -123,6 +123,10 @@
     ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
     ;; WeakRef constructor
     ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; Date constructor
+    ("Date"                    . ,#'%js-make-date)
+    ("Date.now"                . ,(lambda () (coerce (%js-date-now) 'double-float)))
+    ("Date.parse"              . ,#'%js-date-parse-string)
     ;; Number wrapper function / constructor
     ("Number"                  . ,#'%js-to-number)
     ;; String wrapper function
@@ -183,6 +187,10 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar
           :name (js-ident-sym "NaN")
           :value (make-ast-var :name '*js-nan-float*)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Date")
+          :value (make-ast-var :name '%js-make-date)
           :kind 'defparameter)
          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 
@@ -318,6 +326,9 @@ Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
     ((js-map-p obj)
      (cond ((string= key "size") (coerce (%js-map-size obj) 'double-float))
            (t (%js-bound-method *js-map-method-table* obj key))))
+    ;; Date prototype methods
+    ((js-date-p obj)
+     (%js-bound-method *js-date-method-table* obj key))
     ;; Set (hash-table) prototype methods + size
     ((hash-table-p obj)
      (cond ((string= key "size") (coerce (hash-table-count obj) 'double-float))

@@ -282,6 +282,22 @@
    #:%js-symbol-as-key
    #:*js-symbol-registry*
    #:*js-symbol-global*
+   ;; Date (ES2015+)
+   #:%js-date-p
+   #:%js-make-date
+   #:%js-date-now
+   #:%js-date-get-time
+   #:%js-date-get-full-year
+   #:%js-date-get-month
+   #:%js-date-get-date
+   #:%js-date-get-hours
+   #:%js-date-get-minutes
+   #:%js-date-get-seconds
+   #:%js-date-get-day
+   #:%js-date-to-iso-string
+   #:%js-date-to-string
+   #:*js-date-method-table*
+
    ;; Well-known symbols
    #:%js-symbol-iterator
    #:%js-symbol-to-primitive

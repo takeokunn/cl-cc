@@ -254,9 +254,12 @@ via js-parse-stmt-list (the real statement parser) so methods execute normally."
           (let ((body-ast (make-ast-progn :forms (%js-callable-body body-stmts))))
             (values (nreverse params) body-ast rest4)))))))
 
-(defun %js-member-kind-metadata (kind static-p private-p async-p generator-p decorators)
-  "Build the :imports plist for a class member slot."
+(defun %js-member-kind-metadata (kind static-p private-p async-p generator-p decorators
+                                  &optional orig-name)
+  "Build the :imports plist for a class member slot.
+ORIG-NAME is the original-case method name string (case-sensitive key for prototype)."
   (append (list :js-member-kind kind)
+          (when orig-name   (list :js-orig-name orig-name))
           (when static-p    (list :js-static    t))
           (when private-p   (list :js-private   t))
           (when async-p     (list :js-async     t))
@@ -341,13 +344,12 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
                             :allocation (if static-p :class :instance)
                             ;; :js-name carries the ORIGINAL-CASE method name so the
                             ;; class lowering stores it under the key obj.m accesses.
-                            :imports (append
-                                      (%js-member-kind-metadata
-                                       (if (equal (symbol-name sym) "CONSTRUCTOR")
-                                           :constructor
-                                           :method)
-                                       static-p private-p async-p generator-p decorators)
-                                      (when orig-name (list :js-name orig-name))))))
+                            :imports (%js-member-kind-metadata
+                                      (if (equal (symbol-name sym) "CONSTRUCTOR")
+                                          :constructor
+                                          :method)
+                                      static-p private-p async-p generator-p decorators
+                                      orig-name))))
                 (values slot (js-skip-semis rest2))))
             ;; Field declaration: name [= expr] ;
             (let ((initform nil)
@@ -419,40 +421,97 @@ Each member is an ast-slot-def whose :imports plist carries:
 
 ;;; ─── %js-lower-class-to-ast ──────────────────────────────────────────────────
 
+;;; Accessor shorthands — ast-slot-def uses (:conc-name ast-slot-) so slots
+;;; are read as ast-slot-NAME, but :imports is inherited from ast-node which
+;;; uses (:conc-name ast-) and is therefore read as ast-imports.
+
+(defun %js-slot-method-p (slot)
+  "True when SLOT is an instance method (initform is ast-defun/lambda, not a field)."
+  (and slot
+       (ast-slot-def-p slot)
+       (or (ast-defun-p  (ast-slot-initform slot))
+           (ast-lambda-p (ast-slot-initform slot)))
+       (not (member :field (ast-imports slot)))))
+
+(defun %js-slot-to-method-lambda (slot)
+  "Convert a method slot's initform to an ast-lambda for %js-make-class."
+  (let ((fn (ast-slot-initform slot)))
+    (cond
+      ((ast-lambda-p fn) fn)
+      ((ast-defun-p fn)
+       (make-ast-lambda :params (ast-defun-params fn)
+                        :body   (ast-defun-body  fn)))
+      (t nil))))
+
 (defun %js-lower-class-to-ast (name-sym super-expr members decorators)
-  "Lower a parsed class to cl-cc AST nodes.
-Returns a list of AST nodes: one ast-defclass for the class itself, plus
-a list of companion ast-defun nodes for methods (in :initform slots).
+  "Lower a parsed class to a prototype-based JS class using %js-make-class.
+Emits: (defvar ClassName (%js-make-class SuperOrNil CtorOrNil 'method1 fn1 ...))
 
 NAME-SYM   — symbol or NIL for anonymous class expressions
 SUPER-EXPR — AST node for the superclass or NIL
 MEMBERS    — list of ast-slot-def nodes from %js-parse-class-body
-DECORATORS — list of AST nodes for class-level decorators
-
-NOTE: JS classes currently lower to ast-defclass but do NOT yet execute at
-runtime (instances/method dispatch are not wired). A prototype-model lowering was
-attempted (see %js-make-class/%js-proto-method-lookup, currently dormant) but hit
-an unresolved hang building method lambdas; reverted to keep the tree working."
+DECORATORS — list of AST nodes for class-level decorators"
+  (declare (ignore decorators))
   (let* ((effective-name (or name-sym (gensym "JS-CLASS-")))
-         (superclasses (when super-expr (list super-expr)))
-         ;; Separate field slots from method slots; both end up as slot-defs
-         ;; but we annotate the class with the full member list.
-         (defclass-node
-          (make-ast-defclass
+         ;; Find constructor (slot whose orig-name is \"constructor\")
+         (ctor-slot (find-if (lambda (s)
+                               (and (ast-slot-def-p s)
+                                    (let ((n (ast-slot-name s)))
+                                      (and n (string-equal (symbol-name n) "CONSTRUCTOR")))))
+                             members))
+         ;; Instance methods (non-constructor, non-static, non-field)
+         (method-slots (remove-if (lambda (s)
+                                    (or (not (%js-slot-method-p s))
+                                        (getf (ast-imports s) :js-static)
+                                        (and (ast-slot-name s)
+                                             (string-equal (symbol-name (ast-slot-name s))
+                                                           "CONSTRUCTOR"))))
+                                  members))
+         ;; Static methods
+         (static-slots (remove-if-not (lambda (s)
+                                        (and (%js-slot-method-p s)
+                                             (getf (ast-imports s) :js-static)))
+                                      members))
+         ;; Constructor lambda (nil if no explicit constructor)
+         (ctor-lambda (if ctor-slot
+                          (%js-slot-to-method-lambda ctor-slot)
+                          (make-ast-quote :value nil)))
+         ;; Method args: ("name1" fn1 "name2" fn2 ...)
+         (method-args
+          (loop for slot in method-slots
+                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                                    (let ((n (ast-slot-name slot)))
+                                      (if n (string-downcase (symbol-name n)) "")))
+                for fn = (%js-slot-to-method-lambda slot)
+                when fn
+                  append (list (make-ast-quote :value orig-name) fn)))
+         ;; %js-make-class call
+         (make-class-call
+          (make-ast-call
+           :func (make-ast-var :name '%js-make-class)
+           :args (list* (or super-expr (make-ast-quote :value nil))
+                        ctor-lambda
+                        method-args)))
+         ;; defvar/defparameter node
+         (defvar-node
+          (make-ast-defvar
            :name effective-name
-           :superclasses (mapcar (lambda (s)
-                                   (if (symbolp s) s
-                                       ;; super-expr is an AST var
-                                       (ast-var-name s)))
-                                 superclasses)
-           :slots members
-           :default-initargs nil
-           :metaclass nil
-           :imports (append (when decorators
-                              (list :js-decorators decorators))
-                            (when (null name-sym)
-                              (list :js-class-expression t))))))
-    (list defclass-node)))
+           :value make-class-call
+           :kind 'defparameter))
+         ;; Static method bindings (set-prop on the class object)
+         (static-bindings
+          (loop for slot in static-slots
+                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                                    (let ((n (ast-slot-name slot)))
+                                      (if n (string-downcase (symbol-name n)) "")))
+                for fn = (%js-slot-to-method-lambda slot)
+                when fn
+                  collect (make-ast-call
+                           :func (make-ast-var :name '%js-set-prop)
+                           :args (list (make-ast-var :name effective-name)
+                                       (make-ast-quote :value orig-name)
+                                       fn)))))
+    (list* defvar-node static-bindings)))
 
 ;;; ─── js-parse-class-decl (public entry point) ───────────────────────────────
 

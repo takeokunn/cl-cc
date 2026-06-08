@@ -179,6 +179,11 @@
 ;;;  Callback invocation + method resolution hooks
 ;;; -----------------------------------------------------------------------
 
+(defvar %js-this +js-undefined+
+  "Dynamically bound to the receiver when a JS method is called.
+JS source `this.x' compiles to (%js-get-prop %js-this \"x\").
+Methods are called via %js-funcall-with-this which establishes this binding.")
+
 (defvar *js-apply-fn* (lambda (fn args) (apply fn args))
   "Invoker used to call a JS callback value (e.g. the FN passed to Array.map /
 filter / reduce / sort). Defaults to host APPLY so plain host lambdas work in
@@ -212,17 +217,22 @@ prototype-chain method lookup can tell a method from an inherited data value.")
 
 (defun %js-proto-method-lookup (obj k)
   "Walk OBJ's __proto__ chain for key K (JS prototype method resolution). A
-callable found on the chain is a METHOD: return it bound to OBJ as `this' — a
-closure that prepends OBJ when invoked — so `obj.m(args)' runs M with %js-this =
-OBJ. A non-callable inherited value is returned as-is; a miss yields undefined.
-Routes the eventual call through %js-funcall so a compiled-JS method (vm-closure)
-is dispatched back into the VM."
+callable found on the chain is a METHOD: return a closure that binds %js-this
+to OBJ and then calls the method. A non-callable inherited value is returned
+as-is; a miss yields undefined.
+The dynamic binding of %js-this is what makes `this.x' in method bodies work."
   (loop with proto = (gethash "__proto__" obj)
         while (%js-ht-p proto)
         do (multiple-value-bind (val found) (gethash k proto)
              (when found
                (return (if (funcall *js-callable-p* val)
-                           (lambda (&rest args) (apply #'%js-funcall val obj args))
+                           ;; Bind %js-this dynamically so `this' in the method
+                           ;; body resolves to OBJ, then dispatch through
+                           ;; %js-funcall for VM-closure compatibility.
+                           (let ((method val) (receiver obj))
+                             (lambda (&rest args)
+                               (let ((%js-this receiver))
+                                 (funcall *js-apply-fn* method args))))
                            val)))
              (setf proto (gethash "__proto__" proto)))
         finally (return +js-undefined+)))
