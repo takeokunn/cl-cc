@@ -125,6 +125,48 @@
     (setf (js-date-ms date) (* 1000 (- ut +js-epoch-offset+)))
     (coerce (js-date-ms date) 'double-float)))
 
+(defun %js-date-rebuild (date &key sec min hour day month year)
+  "Re-encode DATE's ms with the given decoded components overridden (preserving
+sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
+  (let* ((decoded (%js-date-to-decoded date))
+         (frac-ms (mod (js-date-ms date) 1000))
+         (s  (or sec   (nth 0 decoded)))
+         (mn (or min   (nth 1 decoded)))
+         (h  (or hour  (nth 2 decoded)))
+         (d  (or day   (nth 3 decoded)))
+         (m  (if month (+ month 1) (nth 4 decoded)))
+         (y  (or year  (nth 5 decoded)))
+         (ut (encode-universal-time s mn h d m y 0)))
+    (setf (js-date-ms date) (+ (* 1000 (- ut +js-epoch-offset+)) frac-ms))
+    (coerce (js-date-ms date) 'double-float)))
+
+(defun %js-date-set-month (date month &optional day)
+  "Date.prototype.setMonth(month[, day]) — MONTH is 0-based."
+  (%js-date-rebuild date :month (truncate (%js-to-number month))
+                         :day (and day (not (eq day +js-undefined+)) (truncate (%js-to-number day)))))
+
+(defun %js-date-set-date (date day)
+  "Date.prototype.setDate(day) — day of month, 1-based."
+  (%js-date-rebuild date :day (truncate (%js-to-number day))))
+
+(defun %js-date-set-hours (date hours &optional min sec ms)
+  "Date.prototype.setHours(hours[, min, sec, ms])."
+  (declare (ignore ms))
+  (%js-date-rebuild date :hour (truncate (%js-to-number hours))
+                         :min (and min (not (eq min +js-undefined+)) (truncate (%js-to-number min)))
+                         :sec (and sec (not (eq sec +js-undefined+)) (truncate (%js-to-number sec)))))
+
+(defun %js-date-set-minutes (date minutes &optional sec ms)
+  "Date.prototype.setMinutes(minutes[, sec, ms])."
+  (declare (ignore ms))
+  (%js-date-rebuild date :min (truncate (%js-to-number minutes))
+                         :sec (and sec (not (eq sec +js-undefined+)) (truncate (%js-to-number sec)))))
+
+(defun %js-date-set-seconds (date seconds &optional ms)
+  "Date.prototype.setSeconds(seconds[, ms])."
+  (declare (ignore ms))
+  (%js-date-rebuild date :sec (truncate (%js-to-number seconds))))
+
 ;;; -----------------------------------------------------------------------
 ;;;  Date.prototype string representations
 ;;; -----------------------------------------------------------------------
@@ -149,6 +191,35 @@
     (format nil "~4,'0D/~2,'0D/~2,'0D" year month day)))
 
 (defun %js-date-to-utc-string (date)
+  (%js-date-to-iso-string date))
+
+(defparameter +js-date-weekday-names+
+  #("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun")
+  "CL decode-universal-time day-of-week is 0=Monday..6=Sunday.")
+
+(defparameter +js-date-month-names+
+  #("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
+
+(defun %js-date-to-date-string (date)
+  "Date.prototype.toDateString() → 'Www Mmm DD YYYY'."
+  (let* ((decoded (%js-date-to-decoded date))
+         (day (nth 3 decoded)) (month (nth 4 decoded)) (year (nth 5 decoded))
+         (dow (nth 6 decoded)))
+    (format nil "~A ~A ~2,'0D ~D"
+            (aref +js-date-weekday-names+ dow)
+            (aref +js-date-month-names+ (1- month))
+            day year)))
+
+(defun %js-date-to-time-string (date)
+  "Date.prototype.toTimeString() → 'HH:MM:SS GMT+0000 (UTC)'."
+  (let* ((decoded (%js-date-to-decoded date))
+         (sec (nth 0 decoded)) (min (nth 1 decoded)) (hour (nth 2 decoded)))
+    (format nil "~2,'0D:~2,'0D:~2,'0D GMT+0000 (Coordinated Universal Time)"
+            hour min sec)))
+
+(defun %js-date-to-json (date &optional key)
+  "Date.prototype.toJSON() → ISO string (ignores KEY, per spec)."
+  (declare (ignore key))
   (%js-date-to-iso-string date))
 
 (defun %js-date-value-of (date)
@@ -179,9 +250,19 @@
    (cons "getTimezoneOffset"   #'%js-date-get-timezone-offset)
    (cons "setTime"             #'%js-date-set-time)
    (cons "setFullYear"         #'%js-date-set-full-year)
+   (cons "setMonth"            #'%js-date-set-month)
+   (cons "setDate"             #'%js-date-set-date)
+   (cons "setHours"            #'%js-date-set-hours)
+   (cons "setMinutes"          #'%js-date-set-minutes)
+   (cons "setSeconds"          #'%js-date-set-seconds)
    (cons "toISOString"         #'%js-date-to-iso-string)
    (cons "toLocaleDateString"  #'%js-date-to-local-date-string)
+   (cons "toLocaleTimeString"  #'%js-date-to-time-string)
+   (cons "toLocaleString"      #'%js-date-to-string)
    (cons "toUTCString"         #'%js-date-to-utc-string)
+   (cons "toDateString"        #'%js-date-to-date-string)
+   (cons "toTimeString"        #'%js-date-to-time-string)
+   (cons "toJSON"              #'%js-date-to-json)
    (cons "toString"            #'%js-date-to-string)
    (cons "valueOf"             #'%js-date-value-of))
   "Alist of Date.prototype method name -> host function.")
