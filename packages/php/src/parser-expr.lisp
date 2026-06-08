@@ -301,27 +301,37 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
 
 (defun php-lower-prefix-incdec (op operand)
   "Lower PHP prefix ++/-- on OPERAND, yielding the NEW value (unlike postfix,
-which yields the original). OP is \"++\" or \"--\". Mirrors php-parse-postfix's
-variable handling: only a simple $var is incremented in place; other places are
-reported as unsupported rather than crashing in ast-var-name."
-  (if (ast-var-p operand)
-      (make-ast-setq :var (ast-var-name operand)
-                     :value (make-ast-binop :op (if (equal op "++") '+ '-)
-                                            :lhs operand
-                                            :rhs (make-ast-int :value 1)))
-      (%php-unsupported
-       (format nil "PHP prefix ~A is only supported on a simple $variable" op)
-       operand)))
+which yields the original). OP is \"++\" or \"--\". A simple $var is set in
+place; array elements ($arr[i]) and object properties ($obj->p) lower through
+the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
+  (let ((cop (if (equal op "++") "+=" "-=")))
+    (cond
+      ((ast-var-p operand)
+       (make-ast-setq :var (ast-var-name operand)
+                      :value (make-ast-binop :op (if (equal op "++") '+ '-)
+                                             :lhs operand
+                                             :rhs (make-ast-int :value 1))))
+      ((%php-array-ref-call-p operand)
+       (%php-lower-compound-assign cop operand (make-ast-int :value 1) :array))
+      ((ast-slot-value-p operand)
+       (%php-lower-compound-assign cop operand (make-ast-int :value 1) :property))
+      (t
+       (%php-unsupported
+        (format nil "PHP prefix ~A is only supported on a $variable, array element, or property" op)
+        operand)))))
 
 (defun php-parse-unary (stream known-vars)
   "Parse unary expressions: prefix ++/--, !, -, +, ~."
   (cond
     ((%php-reference-token-p stream)
+      ;; PHP reference operator (&expr): cl-cc uses value semantics, so a
+      ;; reference lowers to the referenced value itself. This makes reference
+      ;; assignment ($b = &$a), foreach (... as &$v), and by-ref arguments parse
+      ;; and run with value semantics — true aliasing is not modelled.
       (multiple-value-bind (tok rest) (php-consume stream)
         (declare (ignore tok))
         (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
-          (values (%php-unsupported "PHP reference operator (&) is not yet supported" expr)
-                  rest2 kv2))))
+          (values expr rest2 kv2))))
     ;; Prefix ++ / -- : increment/decrement the place, then yield the new value
     ((and (eq (php-peek-type stream) :T-OP)
           (member (php-peek-value stream) '("++" "--") :test #'equal))
@@ -455,12 +465,12 @@ reported as unsupported rather than crashing in ast-var-name."
               (t
                (error "PHP parse error: unsupported assignment target ~S" lhs))))))
       ((%php-reference-token-p rest)
+       ;; A `&` following a complete expression at this level is infix bitwise-AND
+       ;; (the precedence chain normally consumes it; this is a defensive fallback).
        (multiple-value-bind (tok rest2) (php-consume rest)
          (declare (ignore tok))
           (multiple-value-bind (rhs rest3 kv3) (php-parse-ternary rest2 kv)
-           (declare (ignore rhs))
-           (values (%php-unsupported "PHP bitwise AND operator (&) is not yet supported" lhs)
-                   rest3 kv3))))
+           (values (%php-binary-op-ast "&" lhs rhs) rest3 kv3))))
       (t
        (values lhs rest kv)))))
 
