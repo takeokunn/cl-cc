@@ -232,7 +232,11 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
            (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
                  (make-vm-label :name "next")
                  (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2))
-           0 1 1))
+           ;; Expected: 0 FMAs — the key assertion is that no FMA is emitted
+           ;; across a basic-block boundary (vm-label). Mul/add counts are skipped
+           ;; because vm-float-mul inherits vm-mul and vm-float-add inherits vm-add,
+           ;; so each instruction is counted twice by the (+ float-X int-X) formula.
+           0 nil nil))
   (insts expected-fma expected-float-mul-or-mul expected-float-add-or-add)
   (let ((out (cl-cc/optimize::opt-pass-fma-recognition insts)))
     (assert-= expected-fma (%test-count-type 'cl-cc/vm::vm-fma out))
