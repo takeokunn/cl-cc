@@ -24,15 +24,23 @@ helper (the prototype-model lowering hit an unresolved hang and was reverted).
 Kept as foundation for a future working JS class implementation."
   (let* ((super (first args))
          (ctor  (second args))
-         (method-pairs (cddr args))
+         (rest  (cddr args))
+         ;; A "@@static" marker (if present) separates instance method pairs from
+         ;; static method pairs. Statics are set directly on the class object;
+         ;; instance methods go on the prototype.
+         (split (position "@@static" rest :test #'equal))
+         (instance-pairs (if split (subseq rest 0 split) rest))
+         (static-pairs   (if split (subseq rest (1+ split)) nil))
          (super* (and (%js-ht-p super) super))
          (klass  (%js-make-ht))
          (proto  (%js-make-ht)))
     (when super*
       (let ((super-proto (gethash "__prototype__" super*)))
         (when super-proto (setf (gethash "__proto__" proto) super-proto))))
-    (loop for (name fn) on method-pairs by #'cddr
+    (loop for (name fn) on instance-pairs by #'cddr
           do (setf (gethash name proto) fn))
+    (loop for (name fn) on static-pairs by #'cddr
+          do (setf (gethash name klass) fn))
     (setf (gethash "__prototype__" klass)   proto
           (gethash "__constructor__" klass) (and ctor (not (eq ctor +js-undefined+)) ctor)
           (gethash "__super__" klass)        super*)

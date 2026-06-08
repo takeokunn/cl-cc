@@ -476,7 +476,7 @@ DECORATORS — list of AST nodes for class-level decorators"
          (ctor-lambda (if ctor-slot
                           (%js-slot-to-method-lambda ctor-slot)
                           (make-ast-quote :value nil)))
-         ;; Method args: ("name1" fn1 "name2" fn2 ...)
+         ;; Instance method args: ("name1" fn1 "name2" fn2 ...)
          (method-args
           (loop for slot in method-slots
                 for orig-name = (or (getf (ast-imports slot) :js-orig-name)
@@ -485,17 +485,30 @@ DECORATORS — list of AST nodes for class-level decorators"
                 for fn = (%js-slot-to-method-lambda slot)
                 when fn
                   append (list (make-ast-quote :value orig-name) fn)))
-         ;; %js-make-class call
+         ;; Static method args, preceded by the "@@static" marker that
+         ;; %js-make-class splits on to set them on the class object itself.
+         (static-args
+          (loop for slot in static-slots
+                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                                    (let ((n (ast-slot-name slot)))
+                                      (if n (string-downcase (symbol-name n)) "")))
+                for fn = (%js-slot-to-method-lambda slot)
+                when fn
+                  append (list (make-ast-quote :value orig-name) fn)))
+         ;; %js-make-class call: super ctor inst-methods... [@@static static-methods...]
          (make-class-call
           (make-ast-call
            :func (make-ast-var :name '%js-make-class)
            :args (list* (or super-expr (make-ast-quote :value nil))
                         ctor-lambda
-                        method-args)))
-         ;; Primary ast-defclass node — carries full semantic info for tools/tests
-         ;; AND encodes the runtime implementation.
-         ;; :php-kind :javascript tells codegen-clos to compile as %js-make-class.
-         ;; The :metaclass slot stores the make-class-call AST for codegen use.
+                        (append method-args
+                                (when static-args
+                                  (cons (make-ast-quote :value "@@static") static-args))))))
+         ;; Single primary ast-defclass node — carries full semantic info for
+         ;; tools/tests AND encodes the runtime implementation. :php-kind
+         ;; :javascript tells codegen-clos to compile the :metaclass make-class-call
+         ;; (which now includes statics, so no separate set-prop bindings are
+         ;; needed and the lowering yields exactly one top-level node).
          (class-node
           (make-ast-defclass
            :name effective-name
@@ -503,21 +516,8 @@ DECORATORS — list of AST nodes for class-level decorators"
                            (list (ast-var-name super-expr)))
            :slots members
            :php-kind :javascript
-           :metaclass make-class-call))
-         ;; Static method bindings (set-prop on the class object)
-         (static-bindings
-          (loop for slot in static-slots
-                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
-                                    (let ((n (ast-slot-name slot)))
-                                      (if n (string-downcase (symbol-name n)) "")))
-                for fn = (%js-slot-to-method-lambda slot)
-                when fn
-                  collect (make-ast-call
-                           :func (make-ast-var :name '%js-set-prop)
-                           :args (list (make-ast-var :name effective-name)
-                                       (make-ast-quote :value orig-name)
-                                       fn)))))
-    (list* class-node static-bindings)))
+           :metaclass make-class-call)))
+    (list class-node)))
 
 ;;; ─── js-parse-class-decl (public entry point) ───────────────────────────────
 
