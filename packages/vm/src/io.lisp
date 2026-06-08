@@ -478,8 +478,21 @@ the VM bridge resolves the current VM symbol value to its underlying stream."
   (make-echo-stream (%vm-bridge-stream-arg input-stream)
                     (%vm-bridge-stream-arg output-stream)))
 
+(defun %vm-input-stream-to-host (value)
+  "Coerce a VM string-input-stream to a host string-input-stream (reading from
+its current position) so host stream constructors accept it. Other values pass
+through after the usual bridge handle resolution."
+  (let ((resolved (%vm-bridge-stream-arg value)))
+    (if (vm-string-input-stream-p resolved)
+        (make-string-input-stream
+         (subseq (vm-string-input-stream-contents resolved)
+                 (vm-string-input-stream-position resolved)))
+        resolved)))
+
 (defun %vm-bridge-make-concatenated-stream (&rest streams)
-  (apply #'make-concatenated-stream (mapcar #'%vm-bridge-stream-arg streams)))
+  ;; make-concatenated-stream is read-only, so converting each VM string-input
+  ;; stream to an equivalent host string-input-stream is sufficient.
+  (apply #'make-concatenated-stream (mapcar #'%vm-input-stream-to-host streams)))
 
 (defun %vm-bridge-file-position (stream &optional (position nil position-p))
   "Host bridge for ANSI FILE-POSITION that accepts VM stream handles."
