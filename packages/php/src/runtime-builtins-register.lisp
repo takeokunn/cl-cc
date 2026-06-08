@@ -237,6 +237,11 @@
   (%php-register-builtin "natsort" '%php-natsort)
   (%php-register-builtin "natcasesort" '%php-natcasesort)
 
+  ;; Array sorts and extras.
+  (%php-register-builtin "array_multisort" '%php-array-multisort)
+  ;; list() — returns array for destructuring
+  (%php-register-builtin "list" '%php-list-assign)
+
   ;; PHP 8.4 array functions.
   (%php-register-builtin "array_find"     '%php-array-find)
   (%php-register-builtin "array_find_key" '%php-array-find-key)

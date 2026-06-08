@@ -24,11 +24,26 @@
   "Construct the JS `console' global object whose methods are the host console
 helpers. Lets compiled JS `console.log(x)' resolve via %js-get-prop + call:
 console is a defvar'd global object, log/error/warn are bridged host functions."
-  (%js-make-object "log"   #'%js-console-log
-                   "info"  #'%js-console-log
-                   "debug" #'%js-console-log
-                   "error" #'%js-console-error
-                   "warn"  #'%js-console-warn))
+  (%js-make-object
+   "log"          #'%js-console-log
+   "info"         #'%js-console-log
+   "debug"        #'%js-console-log
+   "error"        #'%js-console-error
+   "warn"         #'%js-console-warn
+   "dir"          (lambda (obj &rest _) (declare (ignore _)) (format t "~A~%" (%js-to-string obj)) +js-undefined+)
+   "table"        (lambda (&rest args) (format t "~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
+   "trace"        (lambda (&rest args) (format t "Trace: ~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
+   "assert"       (lambda (cond &rest args)
+                    (unless (%js-truthy cond)
+                      (format *error-output* "Assertion failed: ~{~A~^ ~}~%" (mapcar #'%js-to-string args)))
+                    +js-undefined+)
+   "group"        (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+   "groupEnd"     (lambda () +js-undefined+)
+   "time"         (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+   "timeEnd"      (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+   "count"        (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+   "countReset"   (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+   "clear"        (lambda () +js-undefined+)))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Promise (simplified synchronous model)

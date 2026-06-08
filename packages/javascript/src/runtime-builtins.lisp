@@ -100,6 +100,8 @@
     ("console.log"             . ,#'%js-console-log)
     ("console.error"           . ,#'%js-console-error)
     ("console.warn"            . ,#'%js-console-warn)
+    ("console.info"            . ,#'%js-console-log)
+    ("console.debug"           . ,#'%js-console-log)
     ;; Number globals
     ("parseInt"                . ,#'%js-parse-int)
     ("parseFloat"              . ,#'%js-parse-float)
@@ -931,6 +933,33 @@ Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
     ;; WeakRef — deref method
     ((typep obj 'js-weak-ref)
      (cond ((string= key "deref") (lambda () (%js-weak-ref-deref obj)))
+           (t +js-undefined+)))
+    ;; Function.prototype — bind/call/apply/name/length on closures/functions
+    ((functionp obj)
+     (cond
+       ((string= key "bind")
+        (lambda (this-arg &rest partial-args)
+          (lambda (&rest args)
+            (apply #'%js-funcall obj (list* this-arg (append partial-args args))))))
+       ((string= key "call")
+        (lambda (this-arg &rest args)
+          (apply #'%js-funcall obj (list* this-arg args))))
+       ((string= key "apply")
+        (lambda (this-arg args-array)
+          (apply #'%js-funcall obj
+                 (list* this-arg (if (%js-vec-p args-array) (coerce args-array 'list) nil)))))
+       ((string= key "name")   "")
+       ((string= key "length") 0.0d0)
+       ((string= key "toString") (lambda () "function() { [native code] }"))
+       ((string= key "call")   (lambda (this &rest args) (apply #'%js-funcall obj (list* this args))))
+       (t +js-undefined+)))
+    ;; BigInt.prototype — basic methods
+    ((js-bigint-p obj)
+     (cond ((string= key "toString")
+            (lambda (&optional radix)
+              (%js-bigint-to-string obj (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))))
+           ((string= key "valueOf") (lambda () obj))
+           ((string= key "toLocaleString") (lambda (&rest _) (declare (ignore _)) (%js-bigint-to-string obj)))
            (t +js-undefined+)))
     (t +js-undefined+)))
 

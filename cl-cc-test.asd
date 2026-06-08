@@ -408,7 +408,6 @@
       (:file "optimizer-memory-pass-tests")
       (:file "optimizer-fr-tests")
       (:file "optimizer-flow-tests")
-      (:file "optimizer-loop-transforms-tests")
      (:file "optimizer-flow-block-tests")
      (:file "optimizer-pipeline-tests")
      (:file "optimizer-security-tests")

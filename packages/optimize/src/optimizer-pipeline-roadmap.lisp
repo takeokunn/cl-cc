@@ -365,12 +365,11 @@ Evidence anchors include functions and special variables."
       ssa-eliminate-trivial-phis
       opt-pass-closure-capture-dedup opt-pass-closure-thunk-sharing)
      (optimizer-roadmap-flow-and-ssa-evidence
-      ;; FR-022 loop-unrolling specific tests
+      ;; FR-022 loop-unrolling specific tests (names match optimizer-flow-tests.lisp)
       loop-unrolling-fully-unrolls-small-counted-loop
-      loop-unrolling-supports-generalized-comparisons
+      loop-unrolling-non-lt-comparisons
       loop-unrolling-partially-unrolls-when-trip-count-too-large
       loop-unrolling-partially-unrolls-unknown-trip-with-remainder
-      loop-unrolling-supports-additional-comparisons
       loop-unrolling-partial-keeps-remainder-loop
       ;; FR-079 closure-thunk-sharing specific tests
       closure-thunk-sharing-deduplicates-safe-siblings
