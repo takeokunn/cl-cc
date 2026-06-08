@@ -170,4 +170,5 @@
      vm-current-state
      vm-dispatch-lock-free
     *vm-parse-forms-hook*
+    *vm-load-global-sync-hook*
    refine))

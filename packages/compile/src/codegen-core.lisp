@@ -221,6 +221,17 @@ VM equality. Unknown types preserve each predicate's existing generic path."
   (declare (ignore ctx))
   (ast-error node "Typed hole '_' must be filled before compilation."))
 
+(defun %earmuffed-special-name-p (name)
+  "T when NAME is a symbol whose name is earmuffed (e.g. *FOO*) — the universal
+CL convention for a special (dynamic) variable. Used to decide whether an
+otherwise-unknown reference may be deferred to a runtime global read instead of
+failing at compile time."
+  (and (symbolp name)
+       (let ((s (symbol-name name)))
+         (and (>= (length s) 3)
+              (char= (char s 0) #\*)
+              (char= (char s (1- (length s))) #\*)))))
+
 (defmethod compile-ast ((node ast-var) ctx)
   (let ((name (ast-var-name node)))
     (when (or (eq name t) (eq name nil) (keywordp name))
@@ -243,7 +254,18 @@ VM equality. Unknown types preserve each predicate's existing generic path."
         (let ((dst (make-register ctx)))
           (emit ctx (make-vm-get-global :dst dst :name name))
           (return-from compile-ast dst))))
-    (error "Unbound variable: ~S" name)))
+    ;; Earmuffed (*foo*) names are special/dynamic by CL convention. A reference
+    ;; to one that is not yet known at compile time is the classic deferred-binding
+    ;; case — the value arrives at runtime from a (load ...) or an earlier-executed
+    ;; top-level form in the same compilation unit. Emit a deferred global read:
+    ;; vm-get-global signals a clean "Unbound global variable" at RUNTIME if it is
+    ;; genuinely never set (correct CL semantics for an unbound special). Non-
+    ;; earmuffed unknowns still fail fast here so lexical typos are caught.
+    (if (%earmuffed-special-name-p name)
+        (let ((dst (make-register ctx)))
+          (emit ctx (make-vm-get-global :dst dst :name name))
+          dst)
+        (error "Unbound variable: ~S" name))))
 
 (defmethod compile-ast ((node ast-binop) ctx)
   ;; binop is never in tail position itself; clear to prevent sub-expression leakage

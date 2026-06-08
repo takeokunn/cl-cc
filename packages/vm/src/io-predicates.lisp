@@ -148,10 +148,20 @@ PRED-FN nil means test stream existence only."
 ;;; Use find-symbol + symbol-function to avoid forward reference and
 ;;; to resolve the canonical symbol from :cl-cc/compile.
 
+(defvar *vm-load-global-sync-hook* nil
+  "Hook invoked by vm-load-file after our-load, with the executing VM STATE as
+its sole argument. our-load evaluates the loaded file's top-level forms in the
+REPL's own persistent state, so a (defparameter ...) there does not reach the VM
+that issued the (load ...). The REPL layer (which loads after this file) installs
+a function here that copies globals newly defined by the load into STATE, so a
+reference appearing after (load ...) in the same unit resolves. NIL = no-op.")
+
 (defmethod execute-instruction ((inst vm-load-file) state pc labels)
   (declare (ignore labels))
   (let* ((path (vm-reg-get state (vm-src inst)))
          (result (cl-cc/bootstrap:our-load path)))
+    (when *vm-load-global-sync-hook*
+      (funcall *vm-load-global-sync-hook* state))
     (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 

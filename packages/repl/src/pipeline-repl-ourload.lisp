@@ -106,6 +106,22 @@
                    (when print
                     (format *standard-output* "~S~%" last-result)))))))))))
 
+(defun %sync-repl-globals-into-vm-state (target-state)
+  "Copy globals defined in the persistent REPL state into TARGET-STATE, but only
+names TARGET-STATE does not already bind. Installed as cl-cc/vm:*vm-load-global-
+sync-hook* so that after (load f) — whose top-level (defparameter ...) forms
+our-load evaluates into *repl-vm-state* — a reference following the load in the
+same run-string unit resolves. \"Only missing names\" guarantees the loading
+VM's own pre-load globals are never clobbered."
+  (when (and *repl-vm-state*
+             target-state
+             (not (eq target-state *repl-vm-state*)))
+    (maphash (lambda (name value)
+               (unless (nth-value 1 (gethash name (vm-global-vars target-state)))
+                 (setf (gethash name (vm-global-vars target-state)) value)))
+             (vm-global-vars *repl-vm-state*))))
+
 (eval-when (:load-toplevel :execute)
   (vm-register-host-bridge 'run-string-repl #'run-string-repl)
-  (vm-register-host-bridge 'our-load #'our-load))
+  (vm-register-host-bridge 'our-load #'our-load)
+  (setf cl-cc/vm:*vm-load-global-sync-hook* #'%sync-repl-globals-into-vm-state))
