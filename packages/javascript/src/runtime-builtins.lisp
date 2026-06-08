@@ -123,6 +123,50 @@
     ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
     ;; WeakRef constructor
     ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; Proxy constructor — simplified: returns a wrapped object
+    ;; Full Proxy requires all get/set/has traps integrated into %js-get-prop
+    ("Proxy"                   . ,(lambda (target handler)
+                                    (let ((ht (%js-make-ht)))
+                                      (setf (gethash "__proxy-target__" ht) target
+                                            (gethash "__proxy-handler__" ht) handler)
+                                      ht)))
+    ;; Reflect — static methods mirroring Object/Function operations
+    ("Reflect.get"             . ,(lambda (target key &optional _receiver)
+                                    (declare (ignore _receiver))
+                                    (%js-get-prop target key)))
+    ("Reflect.set"             . ,(lambda (target key value &optional _receiver)
+                                    (declare (ignore _receiver))
+                                    (%js-set-prop target key value)
+                                    t))
+    ("Reflect.has"             . ,(lambda (target key)
+                                    (when (%js-ht-p target)
+                                      (nth-value 1 (gethash (%js-to-string key) target)))))
+    ("Reflect.deleteProperty"  . ,(lambda (target key)
+                                    (when (%js-ht-p target)
+                                      (remhash (%js-to-string key) target))
+                                    t))
+    ("Reflect.ownKeys"         . ,#'%js-object-keys)
+    ("Reflect.apply"           . ,(lambda (fn this-arg args)
+                                    (apply #'%js-funcall fn this-arg (coerce args 'list))))
+    ("Reflect.construct"       . ,(lambda (target args &optional new-target)
+                                    (declare (ignore new-target))
+                                    (%js-new target (coerce args 'list))))
+    ;; structuredClone
+    ("structuredClone"         . ,(lambda (val &optional _opts)
+                                    (declare (ignore _opts))
+                                    (%js-deep-clone val)))
+    ;; queueMicrotask / setTimeout stubs (synchronous in our model)
+    ("queueMicrotask"          . ,(lambda (fn) (%js-funcall fn) +js-undefined+))
+    ("setTimeout"              . ,(lambda (fn &optional _delay &rest _args)
+                                    (declare (ignore _delay _args))
+                                    (%js-funcall fn) 0))
+    ("clearTimeout"            . ,(lambda (&rest _) (declare (ignore _)) +js-undefined+))
+    ("setInterval"             . ,(lambda (fn &optional _delay &rest _args)
+                                    (declare (ignore _delay _args))
+                                    (%js-funcall fn) 0))
+    ("clearInterval"           . ,(lambda (&rest _) (declare (ignore _)) +js-undefined+))
+    ;; Performance API stub
+    ("performance.now"         . ,(lambda () (coerce (- (get-universal-time) 2208988800) 'double-float)))
     ;; RegExp constructor
     ("RegExp"                  . ,(lambda (pattern &optional flags)
                                     (%js-make-regex (%js-to-string pattern)
@@ -195,6 +239,11 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar
           :name (js-ident-sym "Date")
           :value (make-ast-var :name '%js-make-date)
+          :kind 'defparameter)
+         ;; globalThis — reference to the global object (stub: empty object)
+         (make-ast-defvar
+          :name (js-ident-sym "globalThis")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-object) :args nil)
           :kind 'defparameter)
          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 

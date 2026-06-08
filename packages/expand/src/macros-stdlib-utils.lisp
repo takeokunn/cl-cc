@@ -297,6 +297,74 @@
   "Return the upgraded array element type (cl-cc uses T for all types)."
   `(progn ,type 't))
 
+;;; ─── String stream operations (ANSI CL) ──────────────────────────────────────
+
+(our-defmacro make-string-input-stream (string &optional (start 0) (end nil))
+  "Create an input stream that reads characters from STRING."
+  `(cl:make-string-input-stream ,string ,start ,@(when end (list end))))
+
+(our-defmacro make-string-output-stream ()
+  "Create an output stream that collects characters."
+  `(cl:make-string-output-stream))
+
+(our-defmacro get-output-stream-string (stream)
+  "Return the string collected by a string output stream."
+  `(cl:get-output-stream-string ,stream))
+
+(our-defmacro with-input-from-string ((var string &key (start 0) end index) &body body)
+  "Bind VAR to a string input stream reading from STRING, evaluate BODY."
+  `(cl:with-input-from-string (,var ,string :start ,start ,@(when end (list :end end))
+                                            ,@(when index (list :index index)))
+     ,@body))
+
+(our-defmacro with-output-to-string ((var &optional string) &body body)
+  "Bind VAR to a string output stream, evaluate BODY, return collected string."
+  (if string
+      `(cl:with-output-to-string (,var ,string) ,@body)
+      `(cl:with-output-to-string (,var) ,@body)))
+
+(our-defmacro open-stream-p (stream)
+  "Return true if STREAM is open."
+  `(cl:open-stream-p ,stream))
+
+(our-defmacro close (stream &key abort)
+  "Close STREAM."
+  `(cl:close ,stream ,@(when abort (list :abort abort))))
+
+(our-defmacro stream-element-type (stream)
+  "Return the element type of STREAM."
+  `(cl:stream-element-type ,stream))
+
+(our-defmacro input-stream-p (stream) `(cl:input-stream-p ,stream))
+(our-defmacro output-stream-p (stream) `(cl:output-stream-p ,stream))
+
+(our-defmacro read-char-no-hang (&optional stream (eof-error-p t) eof-value recursive-p)
+  "Read a character without blocking, or return EOF-VALUE if none available."
+  `(cl:read-char-no-hang ,@(when stream (list stream))
+                          ,@(when (not eof-error-p) (list nil eof-value))
+                          ,@(when recursive-p (list recursive-p))))
+
+(our-defmacro peek-char (&optional peek-type stream (eof-error-p t) eof-value recursive-p)
+  "Peek at the next character."
+  `(cl:peek-char ,@(when peek-type (list peek-type))
+                  ,@(when stream (list stream))
+                  ,@(when (not eof-error-p) (list nil eof-value))
+                  ,@(when recursive-p (list recursive-p))))
+
+(our-defmacro unread-char (char &optional stream)
+  "Unread CHAR back to STREAM."
+  `(cl:unread-char ,char ,@(when stream (list stream))))
+
+(our-defmacro listen (&optional stream)
+  "Return true if input is available."
+  `(cl:listen ,@(when stream (list stream))))
+
+(our-defmacro read-line (&optional stream (eof-error-p t) eof-value recursive-p)
+  "Read a line from STREAM."
+  `(cl:read-line ,@(when stream (list stream))
+                  ,@(when (not eof-error-p) (list nil eof-value))
+                  ,@(when recursive-p (list recursive-p))))
+
 ;;; equalp is defined in macros-introspection.lisp
 
 ;;; ─── values-list / copy-tree / char-* (ANSI CL) ─────────────────────────────

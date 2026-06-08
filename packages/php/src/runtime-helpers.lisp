@@ -267,6 +267,13 @@ After BODY-FN returns the box is written back to the array (mutations propagate)
                (%php-eq-strict a b)))
           (t (%php-eq-strict a b)))))
 
+(defun %php-make-array ()
+  "Create an empty PHP ordered array."
+  (let ((ht (make-hash-table :test #'equal)))
+    (setf (gethash +php-array-order-key+ ht) nil
+          (gethash +php-array-next-index-key+ ht) 0)
+    ht))
+
 (defun %php-array-key-present-p (array key)
   "Return true when ARRAY already contains PHP array KEY."
   (nth-value 1 (gethash key array)))

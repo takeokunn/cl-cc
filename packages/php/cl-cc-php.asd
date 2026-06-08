@@ -20,6 +20,7 @@
     (:file "runtime-builtins-core")
     (:file "runtime-builtins-array")
     (:file "runtime-builtins-string")
+    (:file "runtime-builtins-regex")
     (:file "runtime-builtins-math")
     (:file "runtime-builtins-types")
     (:file "runtime-builtins-register")

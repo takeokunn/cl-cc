@@ -149,6 +149,53 @@ should not be exposed to user-visible Object.keys() / for-in enumeration."
     ht))
 
 ;;; -----------------------------------------------------------------------
+;;;  structuredClone — deep copy of a JS value
+;;; -----------------------------------------------------------------------
+
+(defun %js-deep-clone (val &optional (seen (make-hash-table)))
+  "Deep clone VAL (structuredClone semantics). Handles objects, arrays, Maps, Sets."
+  (cond
+    ((eq val +js-undefined+) +js-undefined+)
+    ((eq val +js-null+)      +js-null+)
+    ((eq val +js-nan+)       +js-nan+)
+    ((numberp val)           val)
+    ((stringp val)           (copy-seq val))
+    ((or (eq val t) (eq val nil)) val)  ; boolean values
+    ;; Cycle detection
+    ((gethash val seen)      (gethash val seen))
+    ;; Array
+    ((%js-vec-p val)
+     (let ((clone (make-array (length val) :element-type t :adjustable t :fill-pointer (length val))))
+       (setf (gethash val seen) clone)
+       (loop for i below (length val)
+             do (setf (aref clone i) (%js-deep-clone (aref val i) seen)))
+       clone))
+    ;; Map
+    ((js-map-p val)
+     (let ((clone (%js-make-map)))
+       (setf (gethash val seen) clone)
+       (dolist (k (js-map-order val))
+         (%js-map-set clone (%js-deep-clone k seen)
+                           (%js-deep-clone (gethash k (js-map-ht val) +js-undefined+) seen)))
+       clone))
+    ;; Plain object
+    ((%js-ht-p val)
+     (let ((clone (%js-make-ht)))
+       (setf (gethash val seen) clone)
+       (maphash (lambda (k v)
+                  (setf (gethash k clone) (%js-deep-clone v seen)))
+                val)
+       clone))
+    ;; Date
+    ((typep val 'js-date)
+     (make-js-date :ms (js-date-ms val)))
+    ;; RegExp
+    ((js-regexp-p val)
+     (%js-make-regex (js-regexp-source val) (js-regexp-flags val)))
+    ;; Everything else — return as-is (functions, symbols, etc.)
+    (t val)))
+
+;;; -----------------------------------------------------------------------
 ;;;  JSON serialization / deserialization
 ;;; -----------------------------------------------------------------------
 

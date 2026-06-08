@@ -128,6 +128,33 @@
   (%php-register-builtin "sqrt" '%php-sqrt)
   (%php-register-builtin "pow" '%php-pow)
   (%php-register-builtin "pi" '%php-pi)
+  (%php-register-builtin "sin" (lambda (x) (sin (coerce x 'double-float))))
+  (%php-register-builtin "cos" (lambda (x) (cos (coerce x 'double-float))))
+  (%php-register-builtin "tan" (lambda (x) (tan (coerce x 'double-float))))
+  (%php-register-builtin "log" (lambda (x &optional (base nil))
+                                 (if base (/ (log (coerce x 'double-float)) (log (coerce base 'double-float)))
+                                     (log (coerce x 'double-float)))))
+  (%php-register-builtin "exp" (lambda (x) (exp (coerce x 'double-float))))
+  (%php-register-builtin "fmod" (lambda (x y) (mod (coerce x 'double-float) (coerce y 'double-float))))
+  (%php-register-builtin "intdiv" (lambda (x y) (truncate x y)))
+  (%php-register-builtin "number_format" '%php-number-format)
+  (%php-register-builtin "base_convert" (lambda (num from-base to-base)
+                                          (format nil "~vR" to-base (parse-integer (%php-stringify num) :radix from-base :junk-allowed t))))
+
+  ;; Regex
+  (%php-register-builtin "preg_match" '%php-preg-match)
+  (%php-register-builtin "preg_match_all" '%php-preg-match-all)
+  (%php-register-builtin "preg_replace" '%php-preg-replace)
+  (%php-register-builtin "preg_split" '%php-preg-split)
+  (%php-register-builtin "preg_quote" '%php-preg-quote)
+
+  ;; Date/Time
+  (%php-register-builtin "time" '%php-time)
+  (%php-register-builtin "microtime" '%php-microtime)
+  (%php-register-builtin "mktime" '%php-mktime)
+  (%php-register-builtin "strtotime" '%php-strtotime)
+  (%php-register-builtin "date" '%php-date)
+  (%php-register-builtin "checkdate" '%php-checkdate)
 
   ;; Types and conversions.
   (%php-register-builtin "is_int" '%php-is-int)
