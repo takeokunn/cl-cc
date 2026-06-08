@@ -396,3 +396,35 @@
     (loop for el in elements for i from 0
           do (setf (aref result i) el))
     result))
+
+;;; -----------------------------------------------------------------------
+;;;  ES2024 grouping methods
+;;; -----------------------------------------------------------------------
+
+(defun %js-array-group (arr key-fn)
+  "Array.prototype.group(keyFn) → {key: [values...]} object (ES2024)."
+  (let ((result (%js-make-ht)))
+    (loop for i below (length arr)
+          for el = (aref arr i)
+          for key = (%js-to-string (%js-funcall key-fn el i arr))
+          do (multiple-value-bind (bucket found) (gethash key result)
+               (if found
+                   (vector-push-extend el bucket)
+                   (let ((new-bucket (make-array 1 :element-type t :adjustable t :fill-pointer 1
+                                                   :initial-element el)))
+                     (setf (gethash key result) new-bucket)))))
+    result))
+
+(defun %js-array-group-to-map (arr key-fn)
+  "Array.prototype.groupToMap(keyFn) → Map<key, [values...]> (ES2024)."
+  (let ((result (%js-make-map)))
+    (loop for i below (length arr)
+          for el = (aref arr i)
+          for key = (%js-funcall key-fn el i arr)
+          do (let ((bucket (%js-map-get result key)))
+               (if (eq bucket +js-undefined+)
+                   (%js-map-set result key (make-array 1 :element-type t :adjustable t
+                                                         :fill-pointer 1 :initial-element el))
+                   (vector-push-extend el bucket))))
+    result))
+

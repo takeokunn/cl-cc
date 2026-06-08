@@ -209,3 +209,149 @@
                     do (%php-array-set result (%php-array-next-auto-index result)
                                        (string (code-char code)))))))
     result))
+
+;;; ─── User-defined comparison sorts ───────────────────────────────────────────
+
+(defun %php-usort (array compare-fn)
+  "PHP usort: sort ARRAY by user-defined COMPARE-FN, re-indexing keys."
+  (let* ((fn (%php-callable-function compare-fn))
+         (pairs (%php-array-pairs array))
+         (sorted (if fn
+                     (sort pairs (lambda (a b)
+                                   (< (funcall fn (cdr a) (cdr b)) 0)))
+                     pairs))
+         (result (%php-make-array)))
+    (loop for i from 0 for pair in sorted
+          do (%php-array-set result i (cdr pair)))
+    result))
+
+(defun %php-uasort (array compare-fn)
+  "PHP uasort: sort by user compare, preserving key associations."
+  (let* ((fn (%php-callable-function compare-fn))
+         (pairs (%php-array-pairs array))
+         (sorted (if fn
+                     (sort pairs (lambda (a b)
+                                   (< (funcall fn (cdr a) (cdr b)) 0)))
+                     pairs))
+         (result (%php-make-array)))
+    (dolist (pair sorted)
+      (%php-array-set result (car pair) (cdr pair)))
+    result))
+
+(defun %php-uksort (array compare-fn)
+  "PHP uksort: sort by key using user compare."
+  (let* ((fn (%php-callable-function compare-fn))
+         (pairs (%php-array-pairs array))
+         (sorted (if fn
+                     (sort pairs (lambda (a b)
+                                   (< (funcall fn (car a) (car b)) 0)))
+                     pairs))
+         (result (%php-make-array)))
+    (dolist (pair sorted)
+      (%php-array-set result (car pair) (cdr pair)))
+    result))
+
+;;; ─── array_walk / array_chunk / array_pad ────────────────────────────────────
+
+(defun %php-array-walk (array callback &optional extra-data)
+  "PHP array_walk: call CALLBACK(value, key, extra?) for each element."
+  (let ((fn (%php-callable-function callback)))
+    (when fn
+      (dolist (pair (%php-array-pairs array))
+        (if extra-data
+            (funcall fn (cdr pair) (car pair) extra-data)
+            (funcall fn (cdr pair) (car pair))))))
+  t)
+
+(defun %php-array-chunk (array size &optional preserve-keys)
+  "PHP array_chunk: split ARRAY into chunks of SIZE."
+  (let* ((pairs (%php-array-pairs array))
+         (result (%php-make-array))
+         (chunk nil)
+         (chunk-idx 0)
+         (key-idx 0))
+    (dolist (pair pairs)
+      (when (and chunk (= (length chunk) size))
+        (let ((c (%php-make-array)))
+          (loop for i from 0 for p in (nreverse chunk)
+                do (%php-array-set c (if preserve-keys (car p) i) (cdr p)))
+          (%php-array-set result chunk-idx c)
+          (incf chunk-idx)
+          (setf chunk nil key-idx 0)))
+      (push pair chunk)
+      (incf key-idx))
+    (when chunk
+      (let ((c (%php-make-array)))
+        (loop for i from 0 for p in (nreverse chunk)
+              do (%php-array-set c (if preserve-keys (car p) i) (cdr p)))
+        (%php-array-set result chunk-idx c)))
+    result))
+
+(defun %php-array-pad (array size value)
+  "PHP array_pad: pad array to SIZE with VALUE."
+  (let* ((pairs (%php-array-pairs array))
+         (current-size (length pairs))
+         (target (abs size))
+         (result (%php-make-array)))
+    (if (>= current-size target)
+        ;; No padding needed — copy as-is
+        (dolist (pair pairs result)
+          (%php-array-set result (car pair) (cdr pair)))
+        (let ((pad-count (- target current-size)))
+          (if (< size 0)
+              ;; Pad at beginning
+              (progn
+                (dotimes (i pad-count)
+                  (%php-array-set result i value))
+                (loop for i from pad-count for pair in pairs
+                      do (%php-array-set result i (cdr pair))))
+              ;; Pad at end
+              (progn
+                (loop for i from 0 for pair in pairs
+                      do (%php-array-set result i (cdr pair)))
+                (dotimes (i pad-count)
+                  (%php-array-set result (+ current-size i) value))))
+          result))))
+
+(defun %php-array-count-values (array)
+  "PHP array_count_values: count occurrences of each value."
+  (let ((result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (let* ((v (%php-stringify (cdr pair)))
+             (current (%php-array-ref result v)))
+        (%php-array-set result v (if (%php-null-p current) 1 (1+ current)))))
+    result))
+
+(defun %php-array-sum (array)
+  "PHP array_sum: sum all numeric values."
+  (let ((sum 0))
+    (dolist (pair (%php-array-pairs array))
+      (let ((v (cdr pair)))
+        (when (numberp v) (incf sum v))))
+    sum))
+
+(defun %php-array-product (array)
+  "PHP array_product: multiply all numeric values."
+  (let ((product 1))
+    (dolist (pair (%php-array-pairs array))
+      (let ((v (cdr pair)))
+        (when (numberp v) (setf product (* product v)))))
+    product))
+
+(defun %php-array-diff (array &rest arrays)
+  "PHP array_diff: elements in first not in others (by value)."
+  (let* ((others (loop for a in arrays append (mapcar #'cdr (%php-array-pairs a))))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (unless (member (cdr pair) others :test #'equal)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-intersect (array &rest arrays)
+  "PHP array_intersect: elements in first also in all others."
+  (let* ((others (loop for a in arrays collect (mapcar #'cdr (%php-array-pairs a))))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (when (every (lambda (other) (member (cdr pair) other :test #'equal)) others)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))

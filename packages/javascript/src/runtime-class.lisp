@@ -39,13 +39,15 @@ Kept as foundation for a future working JS class implementation."
     klass))
 
 (defun %js-run-constructor (klass obj args)
-  "Run KLASS's constructor on OBJ (as `this') with ARGS. When KLASS defines no
-constructor, forward to its __super__ constructor — JS's implicit constructor
-calls super(...args). Calls go through %js-funcall so a compiled-JS constructor
-(a vm-closure) is dispatched back into the VM."
+  "Run KLASS's constructor on OBJ (as `this') with ARGS.
+Binds %js-this to OBJ so constructors can use `this.x = ...'.
+When KLASS defines no constructor, forward to __super__."
   (let ((ctor (and (%js-ht-p klass) (gethash "__constructor__" klass))))
     (cond
-      (ctor (apply #'%js-funcall ctor obj args))
+      (ctor
+       ;; Bind %js-this to the new instance so the constructor can access it
+       (let ((%js-this obj))
+         (funcall *js-apply-fn* ctor args)))
       ((and (%js-ht-p klass) (gethash "__super__" klass))
        (%js-run-constructor (gethash "__super__" klass) obj args)))))
 
@@ -96,6 +98,86 @@ this = the new instance."
     (if (and privates (%js-ht-p privates))
         (nth-value 1 (gethash field-name privates))
         nil)))
+
+;;; -----------------------------------------------------------------------
+;;;  Error class hierarchy (ES2015+)
+;;; -----------------------------------------------------------------------
+;;;
+;;; JS Error instances are hash-tables with __proto__ pointing to the
+;;; class's __prototype__ hash-table. This makes instanceof work correctly.
+
+(defun %js-make-error-class (name parent-class)
+  "Create an Error subclass with NAME inheriting from PARENT-CLASS."
+  (let ((klass (%js-make-ht))
+        (proto (%js-make-ht)))
+    ;; Set up prototype chain: Error.prototype -> Object.prototype (nil)
+    (when (and (%js-ht-p parent-class) (gethash "__prototype__" parent-class))
+      (setf (gethash "__proto__" proto) (gethash "__prototype__" parent-class)))
+    ;; Add toString to the prototype
+    (setf (gethash "name" proto) name
+          (gethash "toString" proto)
+          (lambda (&rest _) (declare (ignore _))
+            (let ((this %js-this))
+              (let ((n (if (%js-ht-p this)
+                           (multiple-value-bind (v f) (gethash "name" this)
+                             (if f v name))
+                           name))
+                    (m (if (%js-ht-p this)
+                           (multiple-value-bind (v f) (gethash "message" this)
+                             (if f v ""))
+                           "")))
+                (if (string= m "") n (format nil "~A: ~A" n m))))))
+    ;; Wire class object
+    (setf (gethash "__prototype__" klass) proto
+          (gethash "__constructor__" klass)
+          (let ((class-name name))
+            (lambda (&rest args)
+              (let ((msg (if args (%js-to-string (first args)) "")))
+                (let ((%js-this %js-this))
+                  (when (%js-ht-p %js-this)
+                    (setf (gethash "message" %js-this) msg
+                          (gethash "name"    %js-this) class-name
+                          (gethash "stack"   %js-this) (format nil "~A: ~A" class-name msg)))))))
+          (gethash "__super__" klass) parent-class
+          (gethash "name" klass) name)
+    klass))
+
+(defparameter *js-error-class*
+  (let ((klass (%js-make-ht))
+        (proto (%js-make-ht)))
+    (setf (gethash "name" proto) "Error"
+          (gethash "message" proto) ""
+          (gethash "stack" proto) ""
+          (gethash "toString" proto)
+          (lambda (&rest _) (declare (ignore _))
+            (let ((this %js-this))
+              (if (%js-ht-p this)
+                  (let ((n (gethash "name" this "Error"))
+                        (m (gethash "message" this "")))
+                    (if (string= m "") n (format nil "~A: ~A" n m)))
+                  "Error")))
+          (gethash "__prototype__" klass) proto
+          (gethash "__constructor__" klass)
+          (lambda (&rest args)
+            (let ((msg (if args (%js-to-string (first args)) "")))
+              (when (%js-ht-p %js-this)
+                (setf (gethash "message" %js-this) msg
+                      (gethash "name"    %js-this) "Error"
+                      (gethash "stack"   %js-this) (format nil "Error: ~A" msg)))))
+          (gethash "name" klass) "Error")
+    klass)
+  "The Error class object.")
+
+(defparameter *js-type-error-class*    (%js-make-error-class "TypeError"    *js-error-class*))
+(defparameter *js-range-error-class*   (%js-make-error-class "RangeError"   *js-error-class*))
+(defparameter *js-reference-error-class* (%js-make-error-class "ReferenceError" *js-error-class*))
+(defparameter *js-syntax-error-class*  (%js-make-error-class "SyntaxError"  *js-error-class*))
+(defparameter *js-eval-error-class*    (%js-make-error-class "EvalError"    *js-error-class*))
+(defparameter *js-uri-error-class*     (%js-make-error-class "URIError"     *js-error-class*))
+
+(defun %js-make-error-instance (class msg)
+  "Create an Error instance with the given CLASS and message MSG."
+  (%js-new class (list msg)))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Nullish coalesce

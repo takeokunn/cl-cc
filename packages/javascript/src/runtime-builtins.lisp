@@ -123,6 +123,49 @@
     ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
     ;; WeakRef constructor
     ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; Intl API stubs (simplified locale-aware formatting)
+    ("Intl.NumberFormat"   . ,(lambda (&optional _locale options)
+                                (declare (ignore _locale options))
+                                (%js-make-object
+                                 "__call__" (lambda (&rest _) (declare (ignore _)) +js-undefined+)
+                                 "format"   (lambda (n) (format nil "~,2F" (%js-to-number n)))
+                                 "formatToParts" (lambda (n)
+                                                   (%js-make-array
+                                                    (%js-make-object "type" "integer" "value"
+                                                                      (format nil "~D" (truncate (%js-to-number n)))))))))
+    ("Intl.DateTimeFormat" . ,(lambda (&optional _locale options)
+                                (declare (ignore _locale options))
+                                (%js-make-object
+                                 "format" (lambda (date)
+                                            (if (js-date-p date)
+                                                (%js-date-to-iso-string date)
+                                                (format nil "~A" date))))))
+    ("Intl.Collator"       . ,(lambda (&optional _locale options)
+                                (declare (ignore _locale options))
+                                (%js-make-object
+                                 "compare" (lambda (a b)
+                                             (cond ((string< (%js-to-string a) (%js-to-string b)) -1.0d0)
+                                                   ((string> (%js-to-string a) (%js-to-string b))  1.0d0)
+                                                   (t 0.0d0))))))
+    ("Intl.ListFormat"     . ,(lambda (&optional _locale options)
+                                (declare (ignore _locale options))
+                                (%js-make-object
+                                 "format" (lambda (list)
+                                            (let ((items (loop for i below (length list)
+                                                               collect (%js-to-string (aref list i)))))
+                                              (cond ((null items) "")
+                                                    ((= (length items) 1) (first items))
+                                                    (t (format nil "~{~A~^, ~}" items))))))))
+    ("Intl.PluralRules"    . ,(lambda (&optional _locale options)
+                                (declare (ignore _locale options))
+                                (%js-make-object
+                                 "select" (lambda (n) (if (= (%js-to-number n) 1) "one" "other")))))
+
+    ;; Array.prototype.group / groupToMap (ES2024) — static-ish
+    ("Array.from"          . ,#'%js-array-from)
+    ("Array.isArray"       . ,#'%js-array-is-array)
+    ("Array.of"            . ,#'%js-array-of)
+
     ;; TypedArray constructors
     ("Int8Array"           . ,(lambda (&optional arg) (%js-make-typed-array "Int8Array" arg)))
     ("Uint8Array"          . ,(lambda (&optional arg) (%js-make-typed-array "Uint8Array" arg)))
@@ -191,22 +234,14 @@
     ("String"                  . ,#'%js-to-string)
     ;; Boolean wrapper
     ("Boolean"                 . ,#'%js-truthy)
-    ;; Error constructors (simplified)
-    ("Error"                   . ,(lambda (&optional (msg "") &rest _)
-                                    (declare (ignore _))
-                                    (%js-make-object "message" msg "name" "Error")))
-    ("TypeError"               . ,(lambda (&optional (msg "") &rest _)
-                                    (declare (ignore _))
-                                    (%js-make-object "message" msg "name" "TypeError")))
-    ("RangeError"              . ,(lambda (&optional (msg "") &rest _)
-                                    (declare (ignore _))
-                                    (%js-make-object "message" msg "name" "RangeError")))
-    ("ReferenceError"          . ,(lambda (&optional (msg "") &rest _)
-                                    (declare (ignore _))
-                                    (%js-make-object "message" msg "name" "ReferenceError")))
-    ("SyntaxError"             . ,(lambda (&optional (msg "") &rest _)
-                                    (declare (ignore _))
-                                    (%js-make-object "message" msg "name" "SyntaxError"))))
+    ;; Error constructors — prototype-based (instanceof works)
+    ("Error"                   . ,*js-error-class*)
+    ("TypeError"               . ,*js-type-error-class*)
+    ("RangeError"              . ,*js-range-error-class*)
+    ("ReferenceError"          . ,*js-reference-error-class*)
+    ("SyntaxError"             . ,*js-syntax-error-class*)
+    ("EvalError"               . ,*js-eval-error-class*)
+    ("URIError"                . ,*js-uri-error-class*))
   "Alist of (name . function) specs used to build *js-builtin-map*.")
 
 (defun %build-js-builtin-map ()
@@ -255,6 +290,12 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
           :name (js-ident-sym "globalThis")
           :value (make-ast-call :func (make-ast-var :name '%js-make-object) :args nil)
           :kind 'defparameter)
+         ;; Error class hierarchy
+         (make-ast-defvar :name (js-ident-sym "Error")          :value (make-ast-var :name '*js-error-class*)             :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "TypeError")      :value (make-ast-var :name '*js-type-error-class*)        :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "RangeError")     :value (make-ast-var :name '*js-range-error-class*)       :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "ReferenceError") :value (make-ast-var :name '*js-reference-error-class*)   :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "SyntaxError")    :value (make-ast-var :name '*js-syntax-error-class*)      :kind 'defparameter)
          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 
 ;;; -----------------------------------------------------------------------
@@ -283,6 +324,9 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
         (cons "flat" #'%js-array-flat)          (cons "flatMap" #'%js-array-flat-map)
         (cons "fill" #'%js-array-fill)          (cons "copyWithin" #'%js-array-copy-within)
         (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys)
+        ;; ES2024
+        (cons "group"          #'%js-array-group)
+        (cons "groupToMap"     #'%js-array-group-to-map)
         ;; ES2023
         (cons "toReversed"      #'%js-array-to-reversed)
         (cons "toSorted"        #'%js-array-to-sorted)
