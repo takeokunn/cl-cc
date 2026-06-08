@@ -62,14 +62,9 @@
 (defun %js-prefix-dec  (val) (- (%js-to-number val) 1))
 
 ;;; ─── Regex literals ───────────────────────────────────────────────────────────
-
-(defun %js-make-regex (pattern)
-  "Create a JS RegExp placeholder (full regex not yet implemented)."
-  (let ((ht (%js-make-ht)))
-    (setf (gethash "source"   ht) (if (stringp pattern) pattern (format nil "~A" pattern))
-          (gethash "flags"    ht) ""
-          (gethash "__type__" ht) "RegExp")
-    ht))
+;;; Full RegExp implementation is in runtime-regex.lisp (loaded before this file).
+;;; %js-make-regex is defined there as a native NFA-based engine.
+;;; This file previously had a stub — removed to avoid shadowing the real impl.
 
 ;;; ─── Getter / setter accessor marker ─────────────────────────────────────────
 

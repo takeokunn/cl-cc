@@ -123,6 +123,10 @@
     ("WeakSet"                 . ,(lambda (&rest _) (declare (ignore _)) (%js-make-weak-set)))
     ;; WeakRef constructor
     ("WeakRef"                 . ,(lambda (target) (%js-make-weak-ref target)))
+    ;; RegExp constructor
+    ("RegExp"                  . ,(lambda (pattern &optional flags)
+                                    (%js-make-regex (%js-to-string pattern)
+                                                    (if (eq flags +js-undefined+) "" (%js-to-string flags)))))
     ;; Date constructor
     ("Date"                    . ,#'%js-make-date)
     ("Date.now"                . ,(lambda () (coerce (%js-date-now) 'double-float)))
@@ -219,7 +223,15 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
         (cons "reverse" #'%js-array-reverse)    (cons "sort" #'%js-array-sort)
         (cons "flat" #'%js-array-flat)          (cons "flatMap" #'%js-array-flat-map)
         (cons "fill" #'%js-array-fill)          (cons "copyWithin" #'%js-array-copy-within)
-        (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys))
+        (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys)
+        ;; ES2023
+        (cons "toReversed"      #'%js-array-to-reversed)
+        (cons "toSorted"        #'%js-array-to-sorted)
+        (cons "toSpliced"       #'%js-array-to-spliced)
+        (cons "with"            #'%js-array-with)
+        (cons "findLast"        #'%js-array-find-last)
+        (cons "findLastIndex"   #'%js-array-find-last-index)
+        (cons "at"              #'%js-array-at))
   "Alist of JS Array.prototype method name -> host helper (receiver is ARR, first arg).")
 
 (defparameter *js-string-method-table*
@@ -329,6 +341,17 @@ Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
     ;; Date prototype methods
     ((js-date-p obj)
      (%js-bound-method *js-date-method-table* obj key))
+    ;; RegExp prototype methods
+    ((js-regexp-p obj)
+     (cond ((string= key "source")    (js-regexp-source obj))
+           ((string= key "flags")     (js-regexp-flags obj))
+           ((string= key "global")    (js-regexp-global-p obj))
+           ((string= key "ignoreCase") (js-regexp-ignore-case-p obj))
+           ((string= key "multiline") (js-regexp-multiline-p obj))
+           ((string= key "lastIndex") (coerce (js-regexp-last-index obj) 'double-float))
+           ((string= key "test")      (let ((re obj)) (lambda (str) (%js-regex-test re str))))
+           ((string= key "exec")      (let ((re obj)) (lambda (str) (%js-regex-exec re str 0))))
+           (t +js-undefined+)))
     ;; Set (hash-table) prototype methods + size
     ((hash-table-p obj)
      (cond ((string= key "size") (coerce (hash-table-count obj) 'double-float))

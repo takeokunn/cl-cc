@@ -282,6 +282,27 @@
    #:%js-symbol-as-key
    #:*js-symbol-registry*
    #:*js-symbol-global*
+   ;; RegExp (ES2015+ native engine)
+   #:%js-regexp-p
+   #:%js-make-regex
+   #:%js-regex-exec
+   #:%js-regex-test
+   #:%js-string-match-regex
+   #:%js-string-search-regex
+   #:%js-string-replace-regex
+   #:%js-string-replace-all-regex
+   #:%js-string-split-regex
+
+   ;; ES2023 Array methods
+   #:%js-array-to-reversed
+   #:%js-array-to-sorted
+   #:%js-array-to-spliced
+   #:%js-array-with
+   #:%js-array-find-last
+   #:%js-array-find-last-index
+   #:%js-array-at
+   #:%js-array-of
+
    ;; Date (ES2015+)
    #:%js-date-p
    #:%js-make-date

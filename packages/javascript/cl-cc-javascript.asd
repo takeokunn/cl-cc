@@ -35,6 +35,7 @@
    (:file "runtime-map")
    (:file "runtime-symbol")
    (:file "runtime-date")
+   (:file "runtime-regex")
    (:file "runtime-class")
    (:file "runtime-ops")
    (:file "runtime-builtins")))

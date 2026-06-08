@@ -317,3 +317,82 @@
 (defun %js-array-is-array (x)
   "True if X is a JS array."
   (%js-vec-p x))
+
+;;; -----------------------------------------------------------------------
+;;;  ES2023 non-mutating array methods (return copies)
+;;; -----------------------------------------------------------------------
+
+(defun %js-array-to-reversed (arr)
+  "Array.prototype.toReversed() — return reversed copy."
+  (let* ((n (length arr))
+         (result (%js-make-vec n)))
+    (loop for i below n
+          do (setf (aref result i) (aref arr (- n 1 i))))
+    result))
+
+(defun %js-array-to-sorted (arr &optional compare-fn)
+  "Array.prototype.toSorted([compareFn]) — return sorted copy."
+  (let ((result (copy-seq arr)))
+    (if (and compare-fn (not (eq compare-fn +js-undefined+)))
+        (sort result (lambda (a b) (%js-truthy (%js-funcall compare-fn a b))))
+        (sort result (lambda (a b) (string< (%js-to-string a) (%js-to-string b)))))
+    result))
+
+(defun %js-array-to-spliced (arr start delete-count &rest items)
+  "Array.prototype.toSpliced(start, deleteCount, ...items) — return modified copy."
+  (let* ((n (length arr))
+         (st (if (< start 0) (max 0 (+ n start)) (min start n)))
+         (dc (max 0 (min (or delete-count n) (- n st))))
+         (before (subseq arr 0 st))
+         (after  (subseq arr (+ st dc)))
+         (result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+    (loop for x across before do (vector-push-extend x result))
+    (dolist (item items) (vector-push-extend item result))
+    (loop for x across after  do (vector-push-extend x result))
+    result))
+
+(defun %js-array-with (arr index value)
+  "Array.prototype.with(index, value) — return copy with element replaced."
+  (let* ((n (length arr))
+         (idx (if (< index 0) (+ n index) index))
+         (result (copy-seq arr)))
+    (when (and (>= idx 0) (< idx n))
+      (setf (aref result idx) value))
+    result))
+
+(defun %js-array-find-last (arr pred)
+  "Array.prototype.findLast(pred) — find last matching element."
+  (loop for i from (1- (length arr)) downto 0
+        when (%js-truthy (%js-funcall pred (aref arr i) i arr))
+          return (aref arr i)
+        finally (return +js-undefined+)))
+
+(defun %js-array-find-last-index (arr pred)
+  "Array.prototype.findLastIndex(pred) — index of last matching element."
+  (loop for i from (1- (length arr)) downto 0
+        when (%js-truthy (%js-funcall pred (aref arr i) i arr))
+          return i
+        finally (return -1)))
+
+(defun %js-array-at (arr index)
+  "Array.prototype.at(index) — supports negative indices."
+  (let* ((n (length arr))
+         (i (if (< index 0) (+ n index) index)))
+    (if (and (>= i 0) (< i n))
+        (aref arr i)
+        +js-undefined+)))
+
+(defun %js-array-flat-nested (arr &optional (depth 1))
+  "Flatten ARR up to DEPTH levels (alias-safe version for toSorted)."
+  (%js-array-flat arr depth))
+
+;;; -----------------------------------------------------------------------
+;;;  Array.from with length hint (ES2015)
+;;; -----------------------------------------------------------------------
+
+(defun %js-array-of (&rest elements)
+  "Array.of(...elements) — create array from arguments."
+  (let ((result (%js-make-vec (length elements))))
+    (loop for el in elements for i from 0
+          do (setf (aref result i) el))
+    result))
