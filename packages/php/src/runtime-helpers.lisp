@@ -87,13 +87,89 @@ After BODY-FN returns the box is written back to the array (mutations propagate)
             (setf (gethash key arr) new-val))))))
   +php-null+)
 
-(defun %php-yield (&optional value)
-  "Return a runtime representation for a PHP yield point."
-  (list :yield value))
+;;; -----------------------------------------------------------------------
+;;;  PHP Generator — eager evaluation with pre-collected value queue
+;;; -----------------------------------------------------------------------
+;;;
+;;; PHP generators (yield/yield from) collect all yielded values by running
+;;; the body thunk with *current-generator* set to a collector object.
+;;; This is simpler than thread-based coroutines and correct for finite generators.
+;;; Infinite generators would exhaust memory, but they're rare in practice.
+
+(defstruct (php-generator (:conc-name php-gen-))
+  values        ; queue (list) of yielded values, innermost first
+  return-value  ; the generator's final return value
+  done-p)       ; true when all values have been consumed
+
+(defun %php-generator-p (x) (php-generator-p x))
+
+(defvar *current-generator* nil
+  "Dynamically bound to the collecting generator during evaluation.")
+
+(defun %php-make-generator (body-thunk)
+  "Create a PHP generator by eagerly running BODY-THUNK and collecting yields."
+  (let* ((gen (make-php-generator :values nil :return-value +php-null+ :done-p nil)))
+    ;; Run the body, collecting all yielded values
+    (let ((*current-generator* gen))
+      (handler-case
+          (let ((result (funcall body-thunk)))
+            (setf (php-gen-return-value gen) result))
+        (error (e) (declare (ignore e)))))
+    ;; Reverse so we can pop from the front (nreverse gives FIFO order)
+    (setf (php-gen-values gen) (nreverse (php-gen-values gen)))
+    gen))
+
+(defun %php-yield (&optional (value +php-null+))
+  "Collect VALUE into the current generator's value queue."
+  (let ((gen *current-generator*))
+    (if gen
+        (progn
+          (push value (php-gen-values gen))
+          +php-null+)  ; yield returns null (send value) in eager model
+        (list :yield value))))
 
 (defun %php-yield-from (iterable)
-  "Return a runtime representation for PHP yield-from delegation."
-  (list :yield-from iterable))
+  "PHP yield from — delegate to another generator/iterable."
+  (let ((gen *current-generator*))
+    (if gen
+        (if (php-generator-p iterable)
+            ;; Collect remaining values from inner generator
+            (loop (let ((next (%php-generator-next iterable)))
+                    (when (eq next +php-null+) (return (php-gen-return-value iterable)))
+                    (%php-yield next)))
+            ;; Yield each element of an iterable
+            (progn
+              (when (hash-table-p iterable)
+                (dolist (pair (%php-array-pairs iterable))
+                  (%php-yield (cdr pair))))
+              +php-null+))
+        (list :yield-from iterable))))
+
+(defun %php-generator-next (gen &optional (send-value +php-null+))
+  "Pop the next value from GEN's queue. Returns null when done."
+  (declare (ignore send-value))
+  (cond
+    ((php-gen-done-p gen) +php-null+)
+    ((null (php-gen-values gen))
+     (setf (php-gen-done-p gen) t)
+     +php-null+)
+    (t (pop (php-gen-values gen)))))
+
+(defun %php-generator-send (gen value)
+  "In eager model, send is equivalent to next (values are pre-computed)."
+  (%php-generator-next gen value))
+
+(defun %php-generator-valid (gen)
+  "True if generator GEN has more values."
+  (and (not (php-gen-done-p gen)) (not (null (php-gen-values gen)))))
+
+(defun %php-generator-current (gen)
+  "Return the next value without consuming it."
+  (car (php-gen-values gen)))
+
+(defun %php-generator-get-return (gen)
+  "Return the generator's final return value."
+  (php-gen-return-value gen))
 
 (defun %php-throw (class-name value)
   "Signal VALUE as a PHP exception with CLASS-NAME metadata."

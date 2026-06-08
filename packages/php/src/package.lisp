@@ -78,4 +78,14 @@
    #:%php-ref-set!
    #:*php-by-ref-param-registry*
    ;; foreach by-reference
-   #:%php-foreach-by-ref))
+   #:%php-foreach-by-ref
+   ;; Generator (yield/yield-from/send)
+   #:php-generator-p
+   #:%php-generator-p
+   #:%php-make-generator
+   #:%php-generator-next
+   #:%php-generator-send
+   #:%php-generator-valid
+   #:%php-generator-current
+   #:%php-generator-get-return
+   #:*current-generator*))
