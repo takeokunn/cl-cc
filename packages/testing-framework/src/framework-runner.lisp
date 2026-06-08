@@ -60,9 +60,30 @@ via sb-thread:join-thread :timeout instead.")
 
 ;;; ── Test body execution ───────────────────────────────────────────────────
 ;;; Runs FN with skip/pending/timeout/error condition handling.
-;;; NOTE: sb-ext:with-timeout relies on SIGALRM which is unreliable inside
-;;; sb-thread worker threads — parallel runs enforce timeouts via watchdog;
-;;; this branch is the sequential-only fallback and is always safe.
+
+(defun %run-with-sequential-timeout (fn timeout-seconds)
+  "Run FN with a per-test timeout enforced by a watchdog thread that interrupts
+the CURRENT thread (preserving its dynamic bindings — unlike running FN in a
+sub-thread). Reliable even inside parallel worker threads, where sb-ext:with-
+timeout's SIGALRM is undelivered on macOS ARM64. The watchdog exits without
+interrupting when FN completes first; on timeout it signals SB-EXT:TIMEOUT in the
+running thread, which %run-test-body's handler-case turns into a :fail."
+  (let* ((runner   sb-thread:*current-thread*)
+         (done     (sb-thread:make-semaphore))
+         (watchdog (sb-thread:make-thread
+                    (lambda ()
+                      (unless (sb-thread:wait-on-semaphore done :timeout timeout-seconds)
+                        (ignore-errors
+                         (sb-thread:interrupt-thread
+                          runner (lambda () (error 'sb-ext:timeout))))))
+                    :name "test-timeout-watchdog")))
+    (unwind-protect (funcall fn)
+      (sb-thread:signal-semaphore done)
+      (ignore-errors (sb-thread:join-thread watchdog)))))
+
+;;; NOTE: the sequential timeout uses %run-with-sequential-timeout (thread-
+;;; interrupt watchdog) rather than sb-ext:with-timeout, whose SIGALRM is
+;;; unreliable inside sb-thread worker threads on macOS ARM64.
 
 (defun %run-test-body (fn name number suite timeout after-fns)
   (block %run-body
@@ -86,8 +107,7 @@ via sb-thread:join-thread :timeout instead.")
                 (muffle-warning))))
            (if (eq *test-runner-mode* :parallel)
                 (funcall fn)
-                (sb-ext:with-timeout (or timeout (%default-test-timeout))
-                  (funcall fn)))
+                (%run-with-sequential-timeout fn (or timeout (%default-test-timeout))))
           (dolist (af after-fns) (funcall af))
           (%run-invariants)
           (%make-test-result name number suite :pass nil))

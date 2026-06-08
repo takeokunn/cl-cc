@@ -10,14 +10,19 @@
        (plusp timeout)
        timeout))
 
+(defun %parse-timeout-real (raw)
+  "Parse RAW (a string) as a positive real timeout in seconds, or NIL. Accepts
+both integers and decimals like \"0.05\" — parse-integer alone rejected the
+latter, silently dropping sub-second per-test timeouts to the 10s default."
+  (and (stringp raw)
+       (let ((*read-eval* nil))
+         (let ((val (ignore-errors (read-from-string raw nil nil))))
+           (%normalize-positive-timeout val)))))
+
 (defun %default-test-timeout ()
   "Return the default per-test timeout in seconds."
-  (let ((raw (uiop:getenv "CLCC_TEST_TIMEOUT")))
-    (or (and raw
-             (ignore-errors
-               (%normalize-positive-timeout
-                (parse-integer raw))))
-        10)))
+  (or (%parse-timeout-real (uiop:getenv "CLCC_TEST_TIMEOUT"))
+      10))
 
 (defun %effective-test-timeout (test-plist)
   "Return the effective timeout for TEST-PLIST.
