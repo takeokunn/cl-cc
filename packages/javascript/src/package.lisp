@@ -41,6 +41,11 @@
    #:%js-class-private-field-set
    #:%js-has-private-field
 
+   ;; Promise type
+   #:js-promise-p
+   #:js-promise-value
+   #:js-promise-rejected-p
+
    ;; Async / generator
    #:%js-yield
    #:%js-yield-from

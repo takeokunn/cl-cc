@@ -569,6 +569,16 @@
   (%php-register-builtin "pow" '%php-pow)
   (%php-register-builtin "fmod" (lambda (x y) (mod (coerce x 'double-float) (coerce y 'double-float))))
   (%php-register-builtin "abs" '%php-abs)
+  ;; bcmath extension
+  (%php-register-builtin "bcadd"  '%php-bcadd)
+  (%php-register-builtin "bcsub"  '%php-bcsub)
+  (%php-register-builtin "bcmul"  '%php-bcmul)
+  (%php-register-builtin "bcdiv"  '%php-bcdiv)
+  (%php-register-builtin "bcpow"  '%php-bcpow)
+  (%php-register-builtin "bcmod"  '%php-bcmod)
+  (%php-register-builtin "bccomp" '%php-bccomp)
+  (%php-register-builtin "bcscale" '%php-bcscale)
+  (%php-register-builtin "bcsqrt" '%php-bcsqrt)
 
   (%php-sync-legacy-builtin-map)
   *php-builtin-registry*)

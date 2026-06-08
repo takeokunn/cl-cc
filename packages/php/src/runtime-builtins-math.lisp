@@ -51,3 +51,65 @@
   "Return pi as a double-float."
   ;; (%php-pi) => 3.141592653589793d0
   pi)
+
+;;; ─── bcmath extension (arbitrary precision) ────────────────────────────────
+
+(defun %php-bcadd (left right &optional (scale 0))
+  "PHP bcadd: add two arbitrary precision numbers."
+  (let ((l (if (stringp left) (read-from-string left) left))
+        (r (if (stringp right) (read-from-string right) right))
+        (s (or scale 0)))
+    (format nil (format nil "~~,~DF" s) (+ l r))))
+
+(defun %php-bcsub (left right &optional (scale 0))
+  "PHP bcsub: subtract."
+  (let ((l (if (stringp left) (read-from-string left) left))
+        (r (if (stringp right) (read-from-string right) right))
+        (s (or scale 0)))
+    (format nil (format nil "~~,~DF" s) (- l r))))
+
+(defun %php-bcmul (left right &optional (scale 0))
+  "PHP bcmul: multiply."
+  (let ((l (if (stringp left) (read-from-string left) left))
+        (r (if (stringp right) (read-from-string right) right))
+        (s (or scale 0)))
+    (format nil (format nil "~~,~DF" s) (* l r))))
+
+(defun %php-bcdiv (left right &optional (scale 0))
+  "PHP bcdiv: divide."
+  (let ((l (if (stringp left) (read-from-string left) left))
+        (r (if (stringp right) (read-from-string right) right))
+        (s (or scale 0)))
+    (if (zerop r) (error "Division by zero")
+        (format nil (format nil "~~,~DF" s) (/ l r)))))
+
+(defun %php-bcpow (base exp &optional (scale 0))
+  "PHP bcpow: power."
+  (let ((b (if (stringp base) (read-from-string base) base))
+        (e (if (stringp exp) (read-from-string exp) exp))
+        (s (or scale 0)))
+    (format nil (format nil "~~,~DF" s) (expt b e))))
+
+(defun %php-bcmod (left right)
+  "PHP bcmod: modulo."
+  (let ((l (if (stringp left) (truncate (read-from-string left)) (truncate left)))
+        (r (if (stringp right) (truncate (read-from-string right)) (truncate right))))
+    (if (zerop r) (error "Division by zero") (format nil "~D" (mod l r)))))
+
+(defun %php-bccomp (left right &optional (scale 0))
+  "PHP bccomp: compare two numbers. Returns -1, 0, or 1."
+  (declare (ignore scale))
+  (let ((l (if (stringp left) (read-from-string left) left))
+        (r (if (stringp right) (read-from-string right) right)))
+    (cond ((< l r) -1) ((> l r) 1) (t 0))))
+
+(defun %php-bcscale (&optional scale)
+  "PHP bcscale: set/get global scale."
+  (declare (ignore scale))
+  t)
+
+(defun %php-bcsqrt (operand &optional (scale 0))
+  "PHP bcsqrt: square root."
+  (let ((n (if (stringp operand) (read-from-string operand) operand))
+        (s (or scale 0)))
+    (format nil (format nil "~~,~DF" s) (sqrt (coerce n 'double-float)))))

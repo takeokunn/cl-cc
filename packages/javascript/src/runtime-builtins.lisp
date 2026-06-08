@@ -841,6 +841,18 @@ prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefine
   "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.
 Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
   (cond
+    ;; Promise prototype methods (.then, .catch, .finally)
+    ((js-promise-p obj)
+     (cond ((string= key "then")
+            (lambda (on-fulfilled &optional on-rejected) (%js-promise-then obj on-fulfilled on-rejected)))
+           ((string= key "catch")
+            (lambda (on-rejected) (%js-promise-then obj +js-undefined+ on-rejected)))
+           ((string= key "finally")
+            (lambda (fn)
+              (%js-promise-then obj
+               (lambda (v) (%js-funcall fn) (%js-promise-resolve v))
+               (lambda (r) (%js-funcall fn) (%js-promise-reject r)))))
+           (t +js-undefined+)))
     ;; Array prototype methods + length
     ((%js-vec-p obj)
      (cond ((string= key "length") (coerce (length obj) 'double-float))
