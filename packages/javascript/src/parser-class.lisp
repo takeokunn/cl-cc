@@ -492,12 +492,18 @@ DECORATORS — list of AST nodes for class-level decorators"
            :args (list* (or super-expr (make-ast-quote :value nil))
                         ctor-lambda
                         method-args)))
-         ;; defvar/defparameter node
-         (defvar-node
-          (make-ast-defvar
+         ;; Primary ast-defclass node — carries full semantic info for tools/tests
+         ;; AND encodes the runtime implementation.
+         ;; :php-kind :javascript tells codegen-clos to compile as %js-make-class.
+         ;; The :metaclass slot stores the make-class-call AST for codegen use.
+         (class-node
+          (make-ast-defclass
            :name effective-name
-           :value make-class-call
-           :kind 'defparameter))
+           :superclasses (when (and super-expr (ast-var-p super-expr))
+                           (list (ast-var-name super-expr)))
+           :slots members
+           :php-kind :javascript
+           :metaclass make-class-call))
          ;; Static method bindings (set-prop on the class object)
          (static-bindings
           (loop for slot in static-slots
@@ -511,7 +517,7 @@ DECORATORS — list of AST nodes for class-level decorators"
                            :args (list (make-ast-var :name effective-name)
                                        (make-ast-quote :value orig-name)
                                        fn)))))
-    (list* defvar-node static-bindings)))
+    (list* class-node static-bindings)))
 
 ;;; ─── js-parse-class-decl (public entry point) ───────────────────────────────
 

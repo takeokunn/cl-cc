@@ -68,6 +68,8 @@
    #:%js-uint8-to-base64
 
    ;; Exception handling
+   #:js-exception
+   #:js-exception-value
    #:%js-throw
    #:%js-try-catch-finally
 
@@ -115,6 +117,12 @@
    ;; Truthiness / nullish helpers
    #:%js-truthy
    #:%js-not-nullish
+
+   ;; Global number-parsing helpers (referenced in js-program-forms)
+   #:%js-parse-int
+   #:%js-parse-float
+   #:%js-is-nan
+   #:%js-is-finite
 
    ;; Built-in dispatch table
    #:*js-builtin-map*

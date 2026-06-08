@@ -6,6 +6,35 @@
 (in-package :cl-cc/javascript)
 
 ;;; -----------------------------------------------------------------------
+;;;  Global function helpers (referenced in *js-builtin-specs* and js-program-forms)
+;;; -----------------------------------------------------------------------
+
+(defun %js-parse-int (s &optional (radix 10))
+  "Parse integer from string S in the given RADIX (default 10)."
+  (handler-case
+    (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
+           (r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix)))))
+      (or (parse-integer str :radix r :junk-allowed t) *js-nan-float*))
+    (error () *js-nan-float*)))
+
+(defun %js-parse-float (s)
+  "Parse a floating-point number from string S."
+  (handler-case
+    (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
+           (val (read-from-string str nil *js-nan-float*)))
+      (if (realp val) (coerce val 'double-float) *js-nan-float*))
+    (error () *js-nan-float*)))
+
+(defun %js-is-nan (x)
+  "Return true if X converts to NaN."
+  (%js-nan-p (%js-to-number x)))
+
+(defun %js-is-finite (x)
+  "Return true if X is finite (not NaN, not Infinity)."
+  (let ((n (%js-to-number x)))
+    (and (not (%js-float-nan-p n)) (not (%js-float-infinity-p n)))))
+
+;;; -----------------------------------------------------------------------
 ;;;  Built-in dispatch table
 ;;; -----------------------------------------------------------------------
 
@@ -72,22 +101,10 @@
     ("console.error"           . ,#'%js-console-error)
     ("console.warn"            . ,#'%js-console-warn)
     ;; Number globals
-    ("parseInt"                . ,(lambda (s &optional (radix 10))
-                                    (handler-case
-                                        (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
-                                               (r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix)))))
-                                          (parse-integer str :radix r :junk-allowed t))
-                                      (error () *js-nan-float*))))
-    ("parseFloat"              . ,(lambda (s)
-                                    (handler-case
-                                        (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
-                                               (val (read-from-string str nil *js-nan-float*)))
-                                          (if (realp val) (coerce val 'double-float) *js-nan-float*))
-                                      (error () *js-nan-float*))))
-    ("isNaN"                   . ,(lambda (x) (%js-nan-p (%js-to-number x))))
-    ("isFinite"                . ,(lambda (x)
-                                    (let ((n (%js-to-number x)))
-                                      (and (not (%js-float-nan-p n)) (not (%js-float-infinity-p n))))))
+    ("parseInt"                . ,#'%js-parse-int)
+    ("parseFloat"              . ,#'%js-parse-float)
+    ("isNaN"                   . ,#'%js-is-nan)
+    ("isFinite"                . ,#'%js-is-finite)
     ("Number.isNaN"            . ,(lambda (x) (%js-float-nan-p x)))
     ("Number.isFinite"         . ,(lambda (x)
                                     (and (numberp x) (not (%js-float-nan-p x)) (not (%js-float-infinity-p x)))))
@@ -264,6 +281,18 @@
                                                  +js-undefined+)))
     ("Object.getOwnPropertyNames"      . ,#'%js-object-keys)
     ("Object.getOwnPropertySymbols"    . ,(lambda (_obj) (declare (ignore _obj)) (%js-make-array)))
+    ;; ES2017: Object.getOwnPropertyDescriptors (plural)
+    ("Object.getOwnPropertyDescriptors" . ,(lambda (obj)
+                                              (let ((result (%js-make-ht)))
+                                                (when (%js-ht-p obj)
+                                                  (maphash (lambda (k v)
+                                                             (unless (and (stringp k) (>= (length k) 2)
+                                                                          (string= k "__" :end1 2))
+                                                               (setf (gethash k result)
+                                                                     (%js-make-object "value" v "writable" t
+                                                                                       "enumerable" t "configurable" t))))
+                                                           obj))
+                                                result)))
     ("Object.seal"       . ,(lambda (obj) obj))
     ("Object.isFrozen"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
     ("Object.isSealed"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
@@ -639,6 +668,15 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar :name (js-ident-sym "RangeError")     :value (make-ast-var :name '*js-range-error-class*)       :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "ReferenceError") :value (make-ast-var :name '*js-reference-error-class*)   :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "SyntaxError")    :value (make-ast-var :name '*js-syntax-error-class*)      :kind 'defparameter)
+         ;; Well-known constructors as top-level identifiers
+         (make-ast-defvar :name (js-ident-sym "Map")          :value (make-ast-var :name '%js-make-map)        :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "WeakMap")      :value (make-ast-var :name '%js-make-weak-map)   :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "WeakSet")      :value (make-ast-var :name '%js-make-weak-set)   :kind 'defparameter)
+         ;; Global number-parsing functions
+         (make-ast-defvar :name (js-ident-sym "parseInt")     :value (make-ast-var :name '%js-parse-int)       :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "parseFloat")   :value (make-ast-var :name '%js-parse-float)     :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "isNaN")        :value (make-ast-var :name '%js-is-nan)          :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "isFinite")     :value (make-ast-var :name '%js-is-finite)       :kind 'defparameter)
          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 
 ;;; -----------------------------------------------------------------------

@@ -13,6 +13,21 @@
 
 (defmethod compile-ast ((node ast-defclass) ctx)
   "Compile a class definition."
+  ;; JS classes: ast-defclass carries semantic metadata AND a pre-built
+  ;; %js-make-class call in :metaclass. Compile that call and bind as global.
+  (when (eq (ast-defclass-php-kind node) :javascript)
+    (let ((name (ast-defclass-name node))
+          (dst  (make-register ctx)))
+      (setf (ctx-tail-position ctx) nil)
+      (let ((call-reg (compile-ast (ast-defclass-metaclass node) ctx)))
+        (emit ctx (make-vm-move :dst dst :src call-reg))
+        (emit ctx (make-vm-set-global :name name :src dst))
+        (setf (ctx-env ctx) (cons (cons name dst) (ctx-env ctx)))
+        (setf (gethash name (ctx-global-variables ctx)) dst))
+      (return-from compile-ast dst)))
+  ;; JS annotation-only nodes carry metadata for tooling; skip code generation.
+  (when (eq (ast-defclass-php-kind node) :js-annotation)
+    (return-from compile-ast (make-register ctx)))
   (setf (ctx-tail-position ctx) nil)
   (let ((name (ast-defclass-name node))
         (supers (ast-defclass-superclasses node))

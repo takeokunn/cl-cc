@@ -1022,3 +1022,255 @@
     (write-string out)
     (length out)))
 
+
+;;; ─── ctype_* character classification (PHP ext/ctype) ────────────────────────
+
+(defun %php-ctype-alpha (text)
+  "PHP ctype_alpha: check if all chars are alphabetic."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every #'alpha-char-p s))))
+
+(defun %php-ctype-digit (text)
+  "PHP ctype_digit: check if all chars are decimal digits."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every #'digit-char-p s))))
+
+(defun %php-ctype-alnum (text)
+  "PHP ctype_alnum: check if all chars are alphanumeric."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every #'alphanumericp s))))
+
+(defun %php-ctype-space (text)
+  "PHP ctype_space: check if all chars are whitespace."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return #\Page #\Null))) s))))
+
+(defun %php-ctype-upper (text)
+  "PHP ctype_upper: check if all chars are uppercase."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (and (alpha-char-p c) (upper-case-p c))) s))))
+
+(defun %php-ctype-lower (text)
+  "PHP ctype_lower: check if all chars are lowercase."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (and (alpha-char-p c) (lower-case-p c))) s))))
+
+(defun %php-ctype-punct (text)
+  "PHP ctype_punct: check if all chars are punctuation (visible non-alphanumeric)."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (and (graphic-char-p c) (not (alphanumericp c)) (not (char= c #\Space)))) s))))
+
+(defun %php-ctype-graph (text)
+  "PHP ctype_graph: check if all chars are visible (non-space graphic)."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (and (graphic-char-p c) (not (char= c #\Space)))) s))))
+
+(defun %php-ctype-print (text)
+  "PHP ctype_print: check if all chars are printable (including space)."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every #'graphic-char-p s))))
+
+(defun %php-ctype-xdigit (text)
+  "PHP ctype_xdigit: check if all chars are valid hexadecimal."
+  (let ((s (%php-stringify text)))
+    (and (> (length s) 0)
+         (every (lambda (c) (digit-char-p c 16)) s))))
+
+;;; ─── htmlspecialchars / html_entity_decode additions ────────────────────────
+
+(defun %php-htmlspecialchars-decode (str &optional (flags 11))
+  "PHP htmlspecialchars_decode: convert HTML entities to characters."
+  (declare (ignore flags))
+  (let ((s (%php-stringify str)))
+    (cl:with-output-to-string (out)
+      (let ((i 0) (n (length s)))
+        (loop while (< i n)
+              do (cond
+                   ((and (< (+ i 3) n) (string= (subseq s i (+ i 4)) "&lt;"))
+                    (write-char #\< out) (incf i 4))
+                   ((and (< (+ i 3) n) (string= (subseq s i (+ i 4)) "&gt;"))
+                    (write-char #\> out) (incf i 4))
+                   ((and (< (+ i 4) n) (string= (subseq s i (+ i 5)) "&amp;"))
+                    (write-char #\& out) (incf i 5))
+                   ((and (< (+ i 5) n) (string= (subseq s i (+ i 6)) "&quot;"))
+                    (write-char #\" out) (incf i 6))
+                   ((and (< (+ i 5) n) (string= (subseq s i (+ i 6)) "&#039;"))
+                    (write-char #\' out) (incf i 6))
+                   (t
+                    (write-char (char s i) out) (incf i))))))))
+
+;;; ─── JSON validation (PHP 8.3) ───────────────────────────────────────────────
+
+(defun %php-json-validate (json &optional (depth 512) (flags 0))
+  "PHP 8.3 json_validate: check if string is valid JSON."
+  (declare (ignore depth flags))
+  (handler-case
+      (progn (%php-json-decode json) t)
+    (error () nil)))
+
+;;; ─── mb_chr / mb_ord / mb_strimwidth / mb_ereg family ────────────────────────
+
+(defun %php-mb-chr (code &optional encoding)
+  "PHP mb_chr: get character by Unicode code point."
+  (declare (ignore encoding))
+  (handler-case (string (code-char (truncate code))) (error () nil)))
+
+(defun %php-mb-ord (str &optional encoding)
+  "PHP mb_ord: get Unicode code point of first character."
+  (declare (ignore encoding))
+  (let ((s (%php-stringify str)))
+    (if (> (length s) 0) (char-code (char s 0)) nil)))
+
+(defun %php-mb-strimwidth (str start width &optional (trim-marker "") encoding)
+  "PHP mb_strimwidth: get truncated string to width."
+  (declare (ignore encoding))
+  (let* ((s (%php-stringify str))
+         (n (length s))
+         (b (min start n))
+         (end (min n (+ b width))))
+    (if (< end n)
+        (concatenate 'string (subseq s b end) (%php-stringify trim-marker))
+        (subseq s b end))))
+
+(defun %php-mb-ereg (pattern str &optional regs)
+  "PHP mb_ereg: multibyte extended regex match."
+  (declare (ignore regs))
+  (handler-case
+      (let* ((pat (%php-stringify pattern))
+             (s   (%php-stringify str))
+             (fn  (%php-compile-regex pat)))
+        (when fn
+          (loop for i from 0 to (length s)
+                for e = (funcall fn s i nil)
+                when e do (return t)
+                finally (return nil))))
+    (error () nil)))
+
+(defun %php-mb-eregi (pattern str &optional regs)
+  "PHP mb_eregi: case-insensitive mb_ereg."
+  (declare (ignore regs))
+  (handler-case
+      (let* ((pat (%php-stringify pattern))
+             (s   (%php-stringify str))
+             (fn  (%php-compile-regex pat :ic t)))
+        (when fn
+          (loop for i from 0 to (length s)
+                for e = (funcall fn s i nil)
+                when e do (return t)
+                finally (return nil))))
+    (error () nil)))
+
+(defun %php-mb-ereg-replace (pattern replacement str &optional option)
+  "PHP mb_ereg_replace: multibyte regex replace."
+  (declare (ignore option))
+  (handler-case
+      (let* ((pat  (%php-stringify pattern))
+             (repl (%php-stringify replacement))
+             (s    (%php-stringify str))
+             (fn   (%php-compile-regex pat)))
+        (if fn
+            (with-output-to-string (out)
+              (let ((pos 0))
+                (loop while (<= pos (length s))
+                      do (let ((ms nil) (me nil))
+                           (loop for i from pos to (length s)
+                                 for e = (funcall fn s i nil)
+                                 when e do (setf ms i me e) (return))
+                           (if ms
+                               (progn (write-string (subseq s pos ms) out)
+                                      (write-string repl out)
+                                      (setf pos (max (1+ ms) me)))
+                               (progn (write-string (subseq s pos) out) (return)))))))
+            s))
+    (error () nil)))
+
+(defun %php-mb-eregi-replace (pattern replacement str &optional option)
+  "PHP mb_eregi_replace: case-insensitive mb_ereg_replace."
+  (declare (ignore option))
+  (handler-case
+      (let* ((pat  (%php-stringify pattern))
+             (repl (%php-stringify replacement))
+             (s    (%php-stringify str))
+             (fn   (%php-compile-regex pat :ic t)))
+        (if fn
+            (with-output-to-string (out)
+              (let ((pos 0))
+                (loop while (<= pos (length s))
+                      do (let ((ms nil) (me nil))
+                           (loop for i from pos to (length s)
+                                 for e = (funcall fn s i nil)
+                                 when e do (setf ms i me e) (return))
+                           (if ms
+                               (progn (write-string (subseq s pos ms) out)
+                                      (write-string repl out)
+                                      (setf pos (max (1+ ms) me)))
+                               (progn (write-string (subseq s pos) out) (return)))))))
+            s))
+    (error () nil)))
+
+(defun %php-mb-split (pattern str &optional limit)
+  "PHP mb_split: split string by regex."
+  (declare (ignore limit))
+  (handler-case
+      (let* ((pat (%php-stringify pattern))
+             (s   (%php-stringify str))
+             (fn  (%php-compile-regex pat))
+             (result nil)
+             (pos 0))
+        (if fn
+            (progn
+              (loop while (<= pos (length s))
+                    do (let ((ms nil) (me nil))
+                         (loop for i from pos to (length s)
+                               for e = (funcall fn s i nil)
+                               when e do (setf ms i me e) (return))
+                         (if ms
+                             (progn (push (subseq s pos ms) result)
+                                    (setf pos (max (1+ ms) me)))
+                             (progn (push (subseq s pos) result) (return)))))
+              (%php-list-to-array (nreverse result)))
+            (%php-list-to-array (list s))))
+    (error () (%php-list-to-array (list (%php-stringify str))))))
+
+;;; ─── is_countable (PHP 7.3) ──────────────────────────────────────────────────
+
+(defun %php-is-countable (value)
+  "PHP is_countable: check if value can be counted."
+  (or (hash-table-p value)
+      (and (%php-null-p value) nil)))
+
+;;; ─── quoted_printable functions ──────────────────────────────────────────────
+
+(defun %php-quoted-printable-encode (str)
+  "PHP quoted_printable_encode: encode string as quoted-printable."
+  (with-output-to-string (out)
+    (loop for ch across (%php-stringify str)
+          do (let ((code (char-code ch)))
+               (if (or (= code 9)
+                       (and (>= code 32) (<= code 126) (/= code 61)))
+                   (write-char ch out)
+                   (format out "=~2,'0X" code))))))
+
+(defun %php-quoted-printable-decode (str)
+  "PHP quoted_printable_decode: decode quoted-printable string."
+  (let ((s (%php-stringify str))
+        (i 0))
+    (with-output-to-string (out)
+      (loop while (< i (length s))
+            do (cond
+                 ((and (char= (char s i) #\=)
+                       (< (+ i 2) (length s))
+                       (digit-char-p (char s (+ i 1)) 16)
+                       (digit-char-p (char s (+ i 2)) 16))
+                  (write-char (code-char (parse-integer s :start (1+ i) :end (+ i 3) :radix 16)) out)
+                  (incf i 3))
+                 (t (write-char (char s i) out) (incf i)))))))
