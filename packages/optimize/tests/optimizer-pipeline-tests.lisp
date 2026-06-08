@@ -232,22 +232,20 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
            (list (cl-cc/vm::make-vm-float-mul :dst :r3 :lhs :r0 :rhs :r1)
                  (make-vm-label :name "next")
                  (cl-cc/vm::make-vm-float-add :dst :r4 :lhs :r3 :rhs :r2))
-           ;; Expected: 0 FMAs — the key assertion is that no FMA is emitted
-           ;; across a basic-block boundary (vm-label). Mul/add counts are skipped
-           ;; because vm-float-mul inherits vm-mul and vm-float-add inherits vm-add,
-           ;; so each instruction is counted twice by the (+ float-X int-X) formula.
-           0 nil nil))
+           ;; No fusion across a basic-block boundary (vm-label): the float-mul
+           ;; (counts as 1 vm-mul) and float-add (1 vm-add) are both preserved.
+           0 1 1))
   (insts expected-fma expected-float-mul-or-mul expected-float-add-or-add)
   (let ((out (cl-cc/optimize::opt-pass-fma-recognition insts)))
     (assert-= expected-fma (%test-count-type 'cl-cc/vm::vm-fma out))
+    ;; vm-float-mul inherits vm-mul (and vm-float-add inherits vm-add), so a
+    ;; single typep against the parent already counts both float and integer
+    ;; multiplies/adds. Counting the parent type is the correct total — summing
+    ;; parent + child would double-count every float instruction.
     (when expected-float-mul-or-mul
-      (let ((float-mul-count (%test-count-type 'cl-cc/vm::vm-float-mul out))
-            (int-mul-count   (%test-count-type 'cl-cc/vm::vm-mul out)))
-        (assert-= expected-float-mul-or-mul (+ float-mul-count int-mul-count))))
+      (assert-= expected-float-mul-or-mul (%test-count-type 'cl-cc/vm::vm-mul out)))
     (when expected-float-add-or-add
-      (let ((float-add-count (%test-count-type 'cl-cc/vm::vm-float-add out))
-            (int-add-count   (%test-count-type 'cl-cc/vm::vm-add out)))
-        (assert-= expected-float-add-or-add (+ float-add-count int-add-count))))))
+      (assert-= expected-float-add-or-add (%test-count-type 'cl-cc/vm::vm-add out)))))
 
 ;;; ─── *verify-optimizer-instructions* integration ──────────────────────────
 
