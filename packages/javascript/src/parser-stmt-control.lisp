@@ -271,33 +271,49 @@ Returns (values ast rest)."
 ;;; ─── Break / Continue ────────────────────────────────────────────────────────
 
 (defun js-parse-break-stmt (stream)
-  "Parse break [label];. Returns (values ast rest)."
-  ;; Check for labelled break (not yet supported — go to innermost break target)
+  "Parse break [label]; — emits (return-from label-block) for labeled, (go end) for plain."
   (let ((current stream)
-        (target nil))
-    ;; Optional label on same line
+        (label-name nil))
+    ;; Optional label on same line (no intervening newline — simplified)
     (when (and current (eq (js-peek-type current) :T-IDENT))
-      ;; Labelled break: skip label, use break target (simplified)
-      (setf current (cdr current)))
+      (setf label-name (let ((v (js-peek-value current)))
+                         (if (stringp v) v (string-downcase (symbol-name v))))
+            current (cdr current)))
     (setf current (js-skip-semis current))
-    (setf target (or (first *js-break-targets*) *js-loop-break-target*))
-    (unless target
-      (error "JS parse error: break has no matching loop or switch"))
-    (values (make-ast-go :tag target) current)))
+    (cond
+      ;; Labeled break: (return-from LABEL-BLOCK)
+      ((and label-name (gethash label-name *js-label-break-targets*))
+       (values (make-ast-return-from :name (gethash label-name *js-label-break-targets*)
+                                     :value (make-ast-quote :value nil))
+               current))
+      ;; Unlabeled break (or unknown label): go to innermost break target
+      (t
+       (let ((target (or (first *js-break-targets*) *js-loop-break-target*)))
+         (unless target
+           (error "JS parse error: break has no matching loop or switch"))
+         (values (make-ast-go :tag target) current))))))
 
 (defun js-parse-continue-stmt (stream)
-  "Parse continue [label];. Returns (values ast rest)."
+  "Parse continue [label]; — emits (go continue-tag) for both labeled and unlabeled."
   (let ((current stream)
-        (target nil))
+        (label-name nil))
     ;; Optional label on same line
     (when (and current (eq (js-peek-type current) :T-IDENT))
-      ;; Labelled continue: skip label, use continue target (simplified)
-      (setf current (cdr current)))
+      (setf label-name (let ((v (js-peek-value current)))
+                         (if (stringp v) v (string-downcase (symbol-name v))))
+            current (cdr current)))
     (setf current (js-skip-semis current))
-    (setf target (or (first *js-continue-targets*) *js-loop-continue-target*))
-    (unless target
-      (error "JS parse error: continue has no matching loop"))
-    (values (make-ast-go :tag target) current)))
+    (cond
+      ;; Labeled continue: go to the label's registered continue target
+      ((and label-name (gethash label-name *js-label-continue-targets*))
+       (values (make-ast-go :tag (gethash label-name *js-label-continue-targets*))
+               current))
+      ;; Unlabeled continue: go to innermost loop's continue target
+      (t
+       (let ((target (or (first *js-continue-targets*) *js-loop-continue-target*)))
+         (unless target
+           (error "JS parse error: continue has no matching loop"))
+         (values (make-ast-go :tag target) current))))))
 
 ;;; ─── Return Statement ────────────────────────────────────────────────────────
 
@@ -457,14 +473,26 @@ Returns (values ast rest)."
             (eq (js-peek-type (cdr stream)) :T-IDENT))
        (js-parse-using-decl (cdr stream)))
       ;; Labelled statement: ident : stmt — requires colon lookahead
+      ;; break LABEL → (return-from label-block); continue LABEL → (go continue-tag)
       ((and (eq type :T-IDENT)
             (eq (js-peek-type (cdr stream)) :T-COLON))
-       (let* ((label-sym (js-ident-sym value))
+       (let* ((label-name (if (stringp value) value (string-downcase (symbol-name value))))
+              (label-block (intern (concatenate 'string "JS-LABEL-" label-name) :keyword))
+              (label-continue-tag (gensym (concatenate 'string "LABEL-" label-name "-CONTINUE-")))
               (rest (cddr stream)))
-         (multiple-value-bind (stmt rest2) (js-parse-stmt rest)
-           (values (make-ast-progn
-                    :forms (list (%js-make-tagbody (list label-sym stmt))))
-                   rest2))))
+         ;; Register this label's break target (the block exit) so `break LABEL`
+         ;; can emit (return-from label-block). Register a continue tag too for
+         ;; `continue LABEL` inside nested loops.
+         (setf (gethash label-name *js-label-break-targets*) label-block
+               (gethash label-name *js-label-continue-targets*) label-continue-tag)
+         (unwind-protect
+             (multiple-value-bind (stmt rest2) (js-parse-stmt rest)
+               (values (make-ast-block
+                        :name label-block
+                        :body (list stmt))
+                       rest2))
+           (remhash label-name *js-label-break-targets*)
+           (remhash label-name *js-label-continue-targets*))))
       ;; Table-driven dispatch: token-type → registered parser
       (t
        (let ((parser (gethash type *js-stmt-parsers*)))

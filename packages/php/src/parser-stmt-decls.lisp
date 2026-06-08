@@ -476,8 +476,13 @@
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym
                     (php-resolve-qualified-name (php-tok-value name-tok) :function))))
-      (multiple-value-bind (params rest param-types param-attributes) (php-parse-param-list rest)
+      (multiple-value-bind (params rest param-types param-attributes by-ref-indices)
+          (php-parse-param-list rest)
         (multiple-value-bind (return-type rest) (php-parse-return-type rest)
+          ;; Register by-reference parameter info for call-site lowering
+          (when by-ref-indices
+            (setf (gethash (symbol-name fn-name) *php-by-ref-param-registry*)
+                  by-ref-indices))
           ;; Abstract / interface method signature: `function f(...): T;` with no
           ;; body. Produce a body-less ast-defun (a signature) instead of
           ;; requiring a brace block.

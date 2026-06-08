@@ -70,7 +70,42 @@
     ;; Console
     ("console.log"             . ,#'%js-console-log)
     ("console.error"           . ,#'%js-console-error)
-    ("console.warn"            . ,#'%js-console-warn))
+    ("console.warn"            . ,#'%js-console-warn)
+    ;; Number globals
+    ("parseInt"                . ,(lambda (s &optional (radix 10))
+                                    (handler-case
+                                        (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
+                                               (r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix)))))
+                                          (parse-integer str :radix r :junk-allowed t))
+                                      (error () *js-nan-float*))))
+    ("parseFloat"              . ,(lambda (s)
+                                    (handler-case
+                                        (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
+                                               (val (read-from-string str nil *js-nan-float*)))
+                                          (if (realp val) (coerce val 'double-float) *js-nan-float*))
+                                      (error () *js-nan-float*))))
+    ("isNaN"                   . ,(lambda (x) (%js-nan-p (%js-to-number x))))
+    ("isFinite"                . ,(lambda (x)
+                                    (let ((n (%js-to-number x)))
+                                      (and (not (%js-float-nan-p n)) (not (%js-float-infinity-p n))))))
+    ("Number.isNaN"            . ,(lambda (x) (%js-float-nan-p x)))
+    ("Number.isFinite"         . ,(lambda (x)
+                                    (and (numberp x) (not (%js-float-nan-p x)) (not (%js-float-infinity-p x)))))
+    ("Number.isInteger"        . ,(lambda (x)
+                                    (and (numberp x) (not (%js-float-nan-p x)) (= x (truncate x)))))
+    ("Number.parseInt"         . ,#'%js-to-number)
+    ("Number.parseFloat"       . ,#'%js-to-number)
+    ("Number.MAX_SAFE_INTEGER" . ,(lambda () 9007199254740991.0d0))
+    ("Number.MIN_SAFE_INTEGER" . ,(lambda () -9007199254740991.0d0))
+    ("Number.EPSILON"          . ,(lambda () 2.220446049250313d-16))
+    ("Number.MAX_VALUE"        . ,(lambda () most-positive-double-float))
+    ;; JSON stubs
+    ("JSON.stringify"          . ,(lambda (val &optional _replacer _space)
+                                    (declare (ignore _replacer _space))
+                                    (%js-json-stringify val)))
+    ("JSON.parse"              . ,(lambda (str &optional _reviver)
+                                    (declare (ignore _reviver))
+                                    (%js-json-parse str))))
   "Alist of (name . function) specs used to build *js-builtin-map*.")
 
 (defun %build-js-builtin-map ()
@@ -141,6 +176,31 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
         (cons "trimEnd" #'%js-string-trim-end))
   "Alist of JS String.prototype method name -> host helper (receiver is S, first arg).")
 
+(defparameter *js-set-method-table*
+  (list (cons "add" #'%js-set-add)         (cons "delete" #'%js-set-delete)
+        (cons "has" #'%js-set-has)         (cons "clear" #'%js-set-clear)
+        (cons "forEach" #'%js-set-for-each)
+        (cons "keys" (lambda (s) (%js-set-keys s)))
+        (cons "values" (lambda (s) (%js-set-keys s)))  ; Set keys = values
+        (cons "entries" #'%js-set-entries)
+        (cons "union" #'%js-set-union)
+        (cons "intersection" #'%js-set-intersection)
+        (cons "difference" #'%js-set-difference)
+        (cons "symmetricDifference" #'%js-set-symmetric-difference)
+        (cons "isSubsetOf" #'%js-set-is-subset-of)
+        (cons "isSupersetOf" #'%js-set-is-superset-of)
+        (cons "isDisjointFrom" #'%js-set-is-disjoint-from))
+  "Alist of JS Set.prototype method name -> host helper.")
+
+(defparameter *js-map-method-table*
+  (list (cons "set" #'%js-map-set)     (cons "get" #'%js-map-get)
+        (cons "has" #'%js-map-has)     (cons "delete" #'%js-map-delete)
+        (cons "clear" #'%js-map-clear) (cons "forEach" #'%js-map-for-each)
+        (cons "keys" (lambda (m) (%js-map-keys m)))
+        (cons "values" (lambda (m) (%js-map-values m)))
+        (cons "entries" (lambda (m) (%js-map-entries m))))
+  "Alist of JS Map.prototype method name -> host helper.")
+
 (defun %js-bound-method (table receiver name)
   "Look NAME up in TABLE; return a closure that calls the helper with RECEIVER
 prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefined."
@@ -151,11 +211,25 @@ prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefine
         +js-undefined+)))
 
 (defun %js-resolve-method (obj key)
-  "Resolve OBJ.KEY to a bound Array/String method closure, or +js-undefined+.
+  "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.
 Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
   (cond
-    ((%js-vec-p obj) (%js-bound-method *js-array-method-table* obj key))
-    ((stringp obj)   (%js-bound-method *js-string-method-table* obj key))
+    ;; Array prototype methods
+    ((%js-vec-p obj)
+     (cond ((string= key "length") (coerce (length obj) 'double-float))
+           (t (%js-bound-method *js-array-method-table* obj key))))
+    ;; String prototype methods + length
+    ((stringp obj)
+     (cond ((string= key "length") (coerce (length obj) 'double-float))
+           (t (%js-bound-method *js-string-method-table* obj key))))
+    ;; Set prototype methods + size
+    ((hash-table-p obj)
+     (cond ((string= key "size") (coerce (hash-table-count obj) 'double-float))
+           (t (%js-bound-method *js-set-method-table* obj key))))
+    ;; Map prototype methods + size
+    ((js-map-p obj)
+     (cond ((string= key "size") (coerce (%js-map-size obj) 'double-float))
+           (t (%js-bound-method *js-map-method-table* obj key))))
     (t +js-undefined+)))
 
 (setf *js-method-resolver* #'%js-resolve-method)

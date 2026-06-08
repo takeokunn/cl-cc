@@ -27,9 +27,9 @@ Returns (values method-sig-plist remaining-stream)."
   (let ((current (cdr stream)))            ; consume :function keyword
     (multiple-value-bind (name-tok rest) (php-expect :T-IDENT current)
       (let ((method-name (php-ident-sym (php-tok-value name-tok))))
-        (multiple-value-bind (params rest2 param-types param-attributes)
+        (multiple-value-bind (params rest2 param-types param-attributes _by-ref)
             (php-parse-param-list rest)
-          (declare (ignore param-attributes))
+          (declare (ignore param-attributes _by-ref))
           (multiple-value-bind (return-type rest3)
               (php-parse-return-type rest2)
             (values (list :name method-name

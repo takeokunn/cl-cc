@@ -38,6 +38,36 @@
                      (php-exception-class-name condition)
                      (php-exception-value condition)))))
 
+;;; -----------------------------------------------------------------------
+;;;  PHP Reference semantics — box pattern
+;;; -----------------------------------------------------------------------
+;;;
+;;; PHP references (&$var) are implemented as single-element vectors (boxes).
+;;; The parser emits %php-make-ref at call sites for by-reference arguments,
+;;; and callee bodies use %php-deref / %php-ref-set! to read and write through
+;;; the box so mutations are visible to the caller after the call returns.
+
+(defstruct (php-ref (:conc-name php-ref-))
+  (value nil))
+
+(defun %php-ref-p (x) (php-ref-p x))
+
+(defun %php-make-ref (initial-value)
+  "Create a PHP reference box holding INITIAL-VALUE."
+  (make-php-ref :value initial-value))
+
+(defun %php-deref (ref)
+  "Dereference a PHP reference box, returning its current value."
+  (if (php-ref-p ref)
+      (php-ref-value ref)
+      ref))  ; non-ref passthrough for caller safety
+
+(defun %php-ref-set! (ref new-value)
+  "Mutate the PHP reference box REF to hold NEW-VALUE; return NEW-VALUE."
+  (if (php-ref-p ref)
+      (setf (php-ref-value ref) new-value)
+      new-value))
+
 (defun %php-yield (&optional value)
   "Return a runtime representation for a PHP yield point."
   (list :yield value))

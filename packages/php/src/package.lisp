@@ -69,4 +69,11 @@
    #:%php-array-find-key
    #:%php-array-any
    #:%php-array-all
-   #:%php-callable-ref))
+   #:%php-callable-ref
+   ;; Reference / by-ref semantics
+   #:php-ref-p
+   #:%php-ref-p
+   #:%php-make-ref
+   #:%php-deref
+   #:%php-ref-set!
+   #:*php-by-ref-param-registry*))

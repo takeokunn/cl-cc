@@ -212,8 +212,8 @@ intersection type syntax as metadata only."
   (nth-value 1 (php-parse-type-annotation stream)))
 
 (defun %php-parse-single-param (stream)
-  "Parse one PHP parameter entry: attribute* visibility? type? $var.
-Returns (values param-sym rest param-type param-attr-plist)."
+  "Parse one PHP parameter entry: attribute* visibility? readonly? type? &? ..? $var [= default].
+Returns (values param-sym rest param-type param-attr-plist by-ref-p variadic-p)."
   (multiple-value-bind (attributes rest-after-attributes) (%php-parse-attributes stream)
     ;; PHP 8.0 constructor property promotion: visibility/readonly modifiers may
     ;; precede the type, e.g. __construct(public int $x).
@@ -221,37 +221,54 @@ Returns (values param-sym rest param-type param-attr-plist)."
         (%php-parse-visibility-modifiers rest-after-attributes)
       (multiple-value-bind (param-type rest-after-type)
           (php-parse-type-annotation rest-after-mods)
-        (when (%php-reference-token-p rest-after-type)
-          (error "PHP parse error: PHP parameter by reference (&$param) is not yet supported"))
-        (multiple-value-bind (var-tok rest) (php-expect :T-VAR rest-after-type)
-          (let* ((param (php-var-sym (php-tok-value var-tok)))
-                 (attr-plist
-                  (when (or attributes promo-modifiers)
-                    (cons param
-                          (append (when attributes
-                                    (%php-attribute-metadata attributes :parameter))
-                                  (when promo-modifiers
-                                    (list :php-promote promo-modifiers)))))))
-            (values param rest param-type attr-plist)))))))
+        ;; PHP by-reference marker: &$param
+        (let* ((by-ref-p (%php-reference-token-p rest-after-type))
+               (rest-after-amp (if by-ref-p (cdr rest-after-type) rest-after-type))
+               ;; PHP variadic parameter: ...$args
+               (variadic-p (and (eq (php-peek-type rest-after-amp) :T-ELLIPSIS)))
+               (rest-after-ellipsis (if variadic-p (cdr rest-after-amp) rest-after-amp)))
+          (multiple-value-bind (var-tok rest) (php-expect :T-VAR rest-after-ellipsis)
+            (let* ((param (php-var-sym (php-tok-value var-tok)))
+                   (attr-plist
+                    (when (or attributes promo-modifiers by-ref-p)
+                      (cons param
+                            (append (when attributes
+                                      (%php-attribute-metadata attributes :parameter))
+                                    (when promo-modifiers
+                                      (list :php-promote promo-modifiers))
+                                    (when by-ref-p
+                                      (list :php-by-ref t)))))))
+              (values param rest param-type attr-plist by-ref-p variadic-p))))))))
+
+(defparameter *php-by-ref-param-registry* (make-hash-table :test #'equal)
+  "Maps PHP function name strings to lists of by-reference parameter indices (0-based).")
 
 (defun php-parse-param-list (stream)
-  "Parse (attribute* type? $param, ...). Return params, rest, type metadata, and attribute metadata."
+  "Parse (attribute* type? &? ..? $param [= default], ...).
+Return (values params rest param-types param-attributes by-ref-indices)."
   (let ((current (%php-consume-expected :T-LPAREN stream))
         (params nil)
         (param-types nil)
-        (param-attributes nil))
+        (param-attributes nil)
+        (by-ref-indices nil)
+        (idx 0))
     (if (eq (php-peek-type current) :T-RPAREN)
-        (values nil (cdr current) nil)
+        (values nil (cdr current) nil nil nil)
         (progn
           (loop
-            (multiple-value-bind (param rest param-type attr-plist)
+            (multiple-value-bind (param rest param-type attr-plist by-ref-p _variadic-p)
                 (%php-parse-single-param current)
+              (declare (ignore _variadic-p))
               (push param params)
               (when param-type
                 (push (cons param param-type) param-types))
               (when attr-plist
                 (push attr-plist param-attributes))
-              (setf current rest))
+              (when by-ref-p
+                (push idx by-ref-indices))
+              (setf current rest)
+              (incf idx))
+            ;; Optional default value: skip expression tokens
             (when (and current (eq (php-peek-type current) :T-OP)
                        (equal "=" (php-peek-value current)))
               (setf current (cdr current))
@@ -265,7 +282,8 @@ Returns (values param-sym rest param-type param-attr-plist)."
           (values (nreverse params)
                   (%php-consume-expected :T-RPAREN current)
                   (nreverse param-types)
-                  (nreverse param-attributes))))))
+                  (nreverse param-attributes)
+                  (nreverse by-ref-indices))))))
 
 (defun php-parse-return-type (stream)
   "Parse an optional : type annotation after a function parameter list."

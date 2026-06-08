@@ -169,8 +169,9 @@ function' at runtime (e.g. array_push)."
 
 (defun %php-parse-arrow-function (stream known-vars)
   "Parse fn(params) => expr and lower it to captured ast-lambda."
-  (multiple-value-bind (params rest param-types) (php-parse-param-list stream)
-    (declare (ignore param-types))
+  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices)
+      (php-parse-param-list stream)
+    (declare (ignore param-types _param-attrs _by-ref-indices))
     (multiple-value-bind (return-type rest2) (php-parse-return-type rest)
       (declare (ignore return-type))
       (unless (and (eq (php-peek-type rest2) :T-OP)
@@ -205,8 +206,9 @@ function' at runtime (e.g. array_push)."
 
 (defun %php-parse-anonymous-function (stream known-vars)
   "Parse function(params) use(vars) { body } as an ast-lambda with explicit captures."
-  (multiple-value-bind (params rest param-types) (php-parse-param-list stream)
-    (declare (ignore param-types))
+  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices)
+      (php-parse-param-list stream)
+    (declare (ignore param-types _param-attrs _by-ref-indices))
     (multiple-value-bind (captures rest2) (%php-parse-closure-use-list rest)
       (multiple-value-bind (return-type rest3) (php-parse-return-type rest2)
         (declare (ignore return-type))

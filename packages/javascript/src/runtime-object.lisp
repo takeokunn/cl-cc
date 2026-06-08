@@ -15,42 +15,30 @@
           do (setf (gethash (string k) ht) v))
     ht))
 
-(defun %js-object-keys (obj)
-  "Return array of own enumerable string keys."
+(defun %js-internal-key-p (k)
+  "True when K is an internal double-underscore key like __proto__, __class__, etc.
+These are used by the CL-CC JS runtime to store prototype/class metadata and
+should not be exposed to user-visible Object.keys() / for-in enumeration."
+  (let ((n (length k)))
+    (and (> n 4)
+         (string= k "__" :end1 2)
+         (string= k "__" :start1 (- n 2)))))
+
+;;; Internal: iterate non-internal properties of OBJ, collecting (select-fn k v)
+;;; into a fresh adjustable vector. Returns an empty array when OBJ is not a HT.
+(defun %js-object-collect (obj select-fn)
   (if (%js-ht-p obj)
       (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
         (maphash (lambda (k v)
-                   (declare (ignore v))
-                   (unless (and (> (length k) 2)
-                                (string= (subseq k 0 2) "__"))
-                     (vector-push-extend k result)))
+                   (unless (%js-internal-key-p k)
+                     (vector-push-extend (funcall select-fn k v) result)))
                  obj)
         result)
       (%js-make-array)))
 
-(defun %js-object-values (obj)
-  "Return array of own enumerable values."
-  (if (%js-ht-p obj)
-      (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-        (maphash (lambda (k v)
-                   (unless (and (> (length k) 2)
-                                (string= (subseq k 0 2) "__"))
-                     (vector-push-extend v result)))
-                 obj)
-        result)
-      (%js-make-array)))
-
-(defun %js-object-entries (obj)
-  "Return array of [key, value] pairs."
-  (if (%js-ht-p obj)
-      (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-        (maphash (lambda (k v)
-                   (unless (and (> (length k) 2)
-                                (string= (subseq k 0 2) "__"))
-                     (vector-push-extend (%js-make-array k v) result)))
-                 obj)
-        result)
-      (%js-make-array)))
+(defun %js-object-keys    (obj) (%js-object-collect obj (lambda (k v) (declare (ignore v)) k)))
+(defun %js-object-values  (obj) (%js-object-collect obj (lambda (k v) (declare (ignore k)) v)))
+(defun %js-object-entries (obj) (%js-object-collect obj (lambda (k v) (%js-make-array k v))))
 
 (defun %js-object-assign (target &rest sources)
   "Copy all enumerable own properties from SOURCES to TARGET."
@@ -149,7 +137,7 @@
   (let ((ht (%js-make-ht)))
     (%js-for-of iterable
                 (lambda (item)
-                  (let* ((k (%js-to-string (funcall key-fn item)))
+                  (let* ((k (%js-to-string (%js-funcall key-fn item)))
                          (bucket (multiple-value-bind (v f) (gethash k ht)
                                    (if f v
                                        (let ((arr (make-array 0 :element-type t
@@ -159,6 +147,140 @@
                                          arr)))))
                     (vector-push-extend item bucket))))
     ht))
+
+;;; -----------------------------------------------------------------------
+;;;  JSON serialization / deserialization
+;;; -----------------------------------------------------------------------
+
+(defun %js-json-stringify-value (val depth)
+  "Recursively convert JS value VAL to a JSON string (depth limited to 50)."
+  (when (> depth 50) (return-from %js-json-stringify-value "null"))
+  (cond
+    ((or (eq val +js-null+) (eq val +js-undefined+) (null val)) "null")
+    ((eq val t)  "true")
+    ((eq val nil) "false")
+    ((%js-float-nan-p val) "null")
+    ((%js-float-infinity-p val) "null")
+    ((numberp val)
+     (let ((n (coerce val 'double-float)))
+       (if (= n (floor n))
+           (format nil "~D" (floor n))
+           (format nil "~F" n))))
+    ((stringp val)
+     (with-output-to-string (s)
+       (write-char #\" s)
+       (loop for ch across val do
+         (cond ((char= ch #\") (write-string "\\\"" s))
+               ((char= ch #\\) (write-string "\\\\" s))
+               ((char= ch #\Newline) (write-string "\\n" s))
+               ((char= ch #\Return) (write-string "\\r" s))
+               ((char= ch #\Tab) (write-string "\\t" s))
+               (t (write-char ch s))))
+       (write-char #\" s)))
+    ((%js-vec-p val)
+     (format nil "[~{~A~^,~}]"
+             (loop for i below (length val)
+                   collect (%js-json-stringify-value (aref val i) (1+ depth)))))
+    ((%js-ht-p val)
+     (let ((pairs nil))
+       (maphash (lambda (k v)
+                  (unless (%js-internal-key-p k)
+                    (let ((vs (%js-json-stringify-value v (1+ depth))))
+                      (unless (string= vs "undefined")
+                        (push (format nil "~A:~A" (%js-json-stringify-value k 0) vs) pairs)))))
+                val)
+       (format nil "{~{~A~^,~}}" (nreverse pairs))))
+    (t "null")))
+
+(defun %js-json-stringify (val)
+  (%js-json-stringify-value val 0))
+
+(defun %js-json-parse (str)
+  "Minimal JSON parser: handles null, true, false, numbers, strings, arrays, objects.
+For production use, a full JSON parser would be needed."
+  (handler-case
+      (%js-json-parse-value (string-trim '(#\Space #\Tab #\Newline #\Return) str) 0)
+    (error () +js-undefined+)))
+
+(defun %js-json-parse-value (str pos)
+  "Parse JSON value at POS in STR, returning (values parsed-value new-pos)."
+  (let ((c (and (< pos (length str)) (char str pos))))
+    (cond
+      ((null c) (values +js-undefined+ pos))
+      ((char= c #\") (%js-json-parse-string str (1+ pos)))
+      ((char= c #\{) (%js-json-parse-object str (1+ pos)))
+      ((char= c #\[) (%js-json-parse-array str (1+ pos)))
+      ((and (>= (length str) (+ pos 4)) (string= str "null" :start1 pos :end1 (+ pos 4)))
+       (values +js-null+ (+ pos 4)))
+      ((and (>= (length str) (+ pos 4)) (string= str "true" :start1 pos :end1 (+ pos 4)))
+       (values t (+ pos 4)))
+      ((and (>= (length str) (+ pos 5)) (string= str "false" :start1 pos :end1 (+ pos 5)))
+       (values nil (+ pos 5)))
+      ((or (digit-char-p c) (char= c #\-))
+       (%js-json-parse-number str pos))
+      (t (values +js-undefined+ pos)))))
+
+(defun %js-json-skip-ws (str pos)
+  (loop while (and (< pos (length str))
+                   (member (char str pos) '(#\Space #\Tab #\Newline #\Return)))
+        do (incf pos))
+  pos)
+
+(defun %js-json-parse-string (str pos)
+  (with-output-to-string (buf)
+    (loop
+      (when (>= pos (length str)) (return))
+      (let ((c (char str pos)))
+        (when (char= c #\") (return))
+        (incf pos)
+        (if (char= c #\\)
+            (let ((esc (char str pos)))
+              (incf pos)
+              (write-char (case esc (#\" #\") (#\\ #\\) (#\/ #\/) (#\n #\Newline)
+                                    (#\r #\Return) (#\t #\Tab) (t esc)) buf))
+            (write-char c buf))))
+    (values (get-output-stream-string buf) (1+ pos))))
+
+(defun %js-json-parse-number (str pos)
+  (let ((end pos))
+    (when (char= (char str end) #\-) (incf end))
+    (loop while (and (< end (length str)) (or (digit-char-p (char str end)) (char= (char str end) #\.)
+                                              (member (char str end) '(#\e #\E #\+ #\-))))
+          do (incf end))
+    (values (handler-case (coerce (read-from-string (subseq str pos end)) 'double-float)
+              (error () *js-nan-float*))
+            end)))
+
+(defun %js-json-parse-array (str pos)
+  (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+    (setf pos (%js-json-skip-ws str pos))
+    (when (and (< pos (length str)) (char= (char str pos) #\]))
+      (return-from %js-json-parse-array (values result (1+ pos))))
+    (loop
+      (multiple-value-bind (val new-pos) (%js-json-parse-value str (%js-json-skip-ws str pos))
+        (vector-push-extend val result)
+        (setf pos (%js-json-skip-ws str new-pos))
+        (cond ((and (< pos (length str)) (char= (char str pos) #\,)) (incf pos))
+              ((and (< pos (length str)) (char= (char str pos) #\])) (return (values result (1+ pos))))
+              (t (return (values result pos))))))))
+
+(defun %js-json-parse-object (str pos)
+  (let ((ht (%js-make-ht)))
+    (setf pos (%js-json-skip-ws str pos))
+    (when (and (< pos (length str)) (char= (char str pos) #\}))
+      (return-from %js-json-parse-object (values ht (1+ pos))))
+    (loop
+      (setf pos (%js-json-skip-ws str pos))
+      (unless (and (< pos (length str)) (char= (char str pos) #\")) (return (values ht pos)))
+      (multiple-value-bind (key new-pos) (%js-json-parse-string str (1+ pos))
+        (setf pos (%js-json-skip-ws str new-pos))
+        (when (and (< pos (length str)) (char= (char str pos) #\:)) (incf pos))
+        (multiple-value-bind (val new-pos2) (%js-json-parse-value str (%js-json-skip-ws str pos))
+          (setf (gethash key ht) val
+                pos (%js-json-skip-ws str new-pos2))
+          (cond ((and (< pos (length str)) (char= (char str pos) #\,)) (incf pos))
+                ((and (< pos (length str)) (char= (char str pos) #\})) (return (values ht (1+ pos))))
+                (t (return (values ht pos)))))))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Destructuring helpers

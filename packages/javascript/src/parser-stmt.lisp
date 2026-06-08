@@ -38,6 +38,12 @@
 (defvar *js-continue-targets* nil
   "Stack of continue targets for nested loops, innermost first.")
 
+(defvar *js-label-break-targets* (make-hash-table :test #'equal)
+  "Maps JS label name strings to their break target tags (for labeled break).")
+
+(defvar *js-label-continue-targets* (make-hash-table :test #'equal)
+  "Maps JS label name strings to their continue target tags (for labeled continue).")
+
 ;;; *js-strict-mode* and *js-module-mode* are defined in parser.lisp (loaded first).
 
 ;;; ─── Statement Dispatcher Table ──────────────────────────────────────────────
