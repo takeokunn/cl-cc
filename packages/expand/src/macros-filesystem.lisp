@@ -40,6 +40,29 @@
       `(print ,object ,stream)
       `(print ,object)))
 
+;;; ANSI pprint-logical-block. cl-cc has no real pretty-printer, so this degrades
+;;; to ordinary stream output: PREFIX, then BODY's writes, then SUFFIX. Uses the
+;;; flat (spec &body body) register-macro pattern (like print-unreadable-object)
+;;; because our-defmacro does not reliably support nested destructuring in
+;;; required params. STREAM-VAR is an in-scope stream symbol (or NIL →
+;;; *standard-output*); OBJECT is evaluated for compatibility but not traversed.
+(register-macro 'pprint-logical-block
+  (lambda (form env)
+    (declare (ignore env))
+    (let* ((spec       (second form))
+           (body       (cddr form))
+           (stream-var (first spec))
+           (object     (second spec))
+           (rest-keys  (cddr spec))
+           (prefix     (or (getf rest-keys :prefix) ""))
+           (suffix     (or (getf rest-keys :suffix) ""))
+           (strm       (if stream-var stream-var '*standard-output*)))
+      (list 'progn
+            object
+            (list 'write-string prefix strm)
+            (list 'prog1 (cons 'progn body)
+                  (list 'write-string suffix strm))))))
+
 ;;; ─── write (FR-569) — accepts all keywords, delegates to princ/prin1 ─────────
 
 (our-defmacro write (object &key stream (escape t) readably pretty circle
