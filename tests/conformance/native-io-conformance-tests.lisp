@@ -377,7 +377,9 @@
                          (ec (make-echo-stream in out)))
                     (list (read-char ec) (read-char ec)
                           (get-output-stream-string out)))")))
-    (assert-equal '(#\h #\e "hh") result)))
+    ;; Reading 'h' then 'e' echoes both to OUT, so OUT holds "he" (verified
+    ;; against host SBCL: (#\h #\e "he")). The previous "hh" expectation was wrong.
+    (assert-equal '(#\h #\e "he") result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
 ;;; Expected-Fail: Sequence I/O

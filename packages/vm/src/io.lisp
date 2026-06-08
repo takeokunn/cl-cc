@@ -475,7 +475,13 @@ the VM bridge resolves the current VM symbol value to its underlying stream."
                        (%vm-bridge-stream-arg output-stream)))
 
 (defun %vm-bridge-make-echo-stream (input-stream output-stream)
-  (make-echo-stream (%vm-bridge-stream-arg input-stream)
+  ;; INPUT is a cl-cc vm-string-input-stream — coerce it to a host input stream
+  ;; (host make-echo-stream rejects the struct). OUTPUT is already a host
+  ;; string-output-stream (vm-make-string-stream :output uses make-string-output-
+  ;; stream), so reads through the echo stream append to the SAME object that
+  ;; get-output-stream-string later reads. The returned host echo stream is
+  ;; resolved by vm-get-stream via its streamp branch.
+  (make-echo-stream (%vm-input-stream-to-host input-stream)
                     (%vm-bridge-stream-arg output-stream)))
 
 (defun %vm-input-stream-to-host (value)
