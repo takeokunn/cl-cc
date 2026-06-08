@@ -414,10 +414,16 @@ VM primitives that need protocol hooks without introducing new instructions."
              (multiple-value-bind (value found-p) (gethash slot-name obj-storage)
                (if found-p
                    value
-                   (if (and all-slots (member slot-name all-slots :test #'eq))
-                       (error (make-condition 'unbound-slot :name slot-name :instance obj-ht))
-                       (error "The slot ~S is missing from the object~@[ of class ~S~]"
-                              slot-name class-name))))))))))
+                   ;; For PHP/JS objects that use string keys, try string conversion.
+                   ;; This allows $obj->method to find "method" stored as a string key.
+                   (let ((str-key (string-downcase (symbol-name slot-name))))
+                     (multiple-value-bind (str-val str-found-p)
+                         (gethash str-key obj-storage)
+                       (if str-found-p
+                           str-val
+                           (if (and all-slots (member slot-name all-slots :test #'eq))
+                               (error (make-condition 'unbound-slot :name slot-name :instance obj-ht))
+                               nil))))))))))))
 
 (defun %vm-raw-slot-write (class-ht class-slots obj-ht slot-name value)
   "Write VALUE directly to SLOT-NAME in OBJ-HT/CLASS-HT."
@@ -429,7 +435,13 @@ VM primitives that need protocol hooks without introducing new instructions."
               (error "The slot ~S is missing from the object~@[ of class ~S~]"
                      slot-name (and class-ht (%vm-hashlike-gethash :__name__ class-ht))))
             (setf (aref obj-ht index) value))
-          (%vm-hashlike-sethash slot-name obj-ht value))))
+          ;; Try string key for PHP/JS objects that use string property names
+          (let ((str-key (string-downcase (symbol-name slot-name))))
+            (multiple-value-bind (_ found-p) (gethash str-key obj-ht)
+              (declare (ignore _))
+              (if found-p
+                  (setf (gethash str-key obj-ht) value)
+                  (%vm-hashlike-sethash slot-name obj-ht value)))))))
 
 (defun %vm-raw-slot-boundp (class-ht class-slots obj-ht slot-name)
   "Return whether SLOT-NAME is bound using direct OBJ-HT/CLASS-HT storage."

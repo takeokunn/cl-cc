@@ -107,3 +107,191 @@
 (defun %js-import-meta ()
   "Return import.meta stub object."
   (%js-make-object "url" "" "resolve" +js-undefined+))
+
+;;; ─── BigInt (ES2020) ─────────────────────────────────────────────────────────
+;;; js-bigint struct is declared in runtime.lisp (loads before this file).
+
+(defun %js-bigint (x)
+  "JS BigInt() constructor: coerce X to a BigInt."
+  (cond ((js-bigint-p x) x)
+        ((integerp x) (%make-js-bigint x))
+        ((floatp x) (%make-js-bigint (truncate x)))
+        ((stringp x) (handler-case (%make-js-bigint (parse-integer x :junk-allowed t))
+                       (error () (error "Cannot convert ~A to BigInt" x))))
+        (t (%make-js-bigint 0))))
+
+(defun %js-bigint-to-string (bi &optional (radix 10))
+  "Display a BigInt as string (without the n suffix at runtime)."
+  (format nil "~vR" radix (js-bigint-value bi)))
+
+(defmacro define-js-bigint-binop (name cl-op)
+  `(defun ,name (a b)
+     (cond ((and (js-bigint-p a) (js-bigint-p b))
+            (%make-js-bigint (,cl-op (js-bigint-value a) (js-bigint-value b))))
+           ((js-bigint-p a) (%make-js-bigint (,cl-op (js-bigint-value a) b)))
+           ((js-bigint-p b) (%make-js-bigint (,cl-op a (js-bigint-value b))))
+           (t (%make-js-bigint (,cl-op (truncate a) (truncate b)))))))
+
+(define-js-bigint-binop %js-bigint-add +)
+(define-js-bigint-binop %js-bigint-sub -)
+(define-js-bigint-binop %js-bigint-mul *)
+
+(defun %js-bigint-div (a b)
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+    (if (zerop bv) (error "Division by zero") (%make-js-bigint (truncate av bv)))))
+
+(defun %js-bigint-mod (a b)
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+    (if (zerop bv) (error "Division by zero") (%make-js-bigint (rem av bv)))))
+
+(defun %js-bigint-pow (a b)
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+    (%make-js-bigint (expt av bv))))
+
+(defun %js-bigint-compare (a b)
+  "Return -1/0/1 for BigInt comparison (also works if one side is a regular number)."
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+    (cond ((< av bv) -1) ((> av bv) 1) (t 0))))
+
+(defun %js-bigint-lshift (a n)
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (nv (if (js-bigint-p n) (js-bigint-value n) (truncate n))))
+    (%make-js-bigint (ash av nv))))
+
+(defun %js-bigint-rshift (a n)
+  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
+        (nv (if (js-bigint-p n) (js-bigint-value n) (truncate n))))
+    (%make-js-bigint (ash av (- nv)))))
+
+(defun %js-bigint-bitwise-and (a b)
+  (%make-js-bigint (logand (if (js-bigint-p a) (js-bigint-value a) (truncate a))
+                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
+
+(defun %js-bigint-bitwise-or (a b)
+  (%make-js-bigint (logior (if (js-bigint-p a) (js-bigint-value a) (truncate a))
+                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
+
+(defun %js-bigint-bitwise-xor (a b)
+  (%make-js-bigint (logxor (if (js-bigint-p a) (js-bigint-value a) (truncate a))
+                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
+
+(defun %js-bigint-negate (a)
+  (%make-js-bigint (- (if (js-bigint-p a) (js-bigint-value a) (truncate a)))))
+
+;;; ─── URI encoding/decoding ───────────────────────────────────────────────────
+
+(defun %js-encode-uri-component (str)
+  "JS encodeURIComponent: percent-encode all chars except unreserved."
+  (with-output-to-string (out)
+    (loop for ch across (%js-to-string str)
+          do (if (or (alphanumericp ch)
+                     (member ch '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\))))
+                 (write-char ch out)
+                 (let ((bytes (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
+                   (loop for byte across bytes
+                         do (format out "%~2,'0X" byte)))))))
+
+(defun %js-decode-uri-component (str)
+  "JS decodeURIComponent: decode percent-encoded string."
+  (let ((s (%js-to-string str))
+        (bytes (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+    (let ((i 0) (n (length s)))
+      (loop while (< i n)
+            do (let ((ch (char s i)))
+                 (if (and (char= ch #\%) (< (+ i 2) n))
+                     (progn
+                       (vector-push-extend (parse-integer s :start (1+ i) :end (+ i 3) :radix 16) bytes)
+                       (incf i 3))
+                     (progn
+                       (let ((b (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
+                         (loop for byte across b do (vector-push-extend byte bytes)))
+                       (incf i)))))
+      (sb-ext:octets-to-string bytes :external-format :utf-8))))
+
+(defun %js-encode-uri (str)
+  "JS encodeURI: encode URI, preserving scheme/path/query chars."
+  (with-output-to-string (out)
+    (loop for ch across (%js-to-string str)
+          do (if (or (alphanumericp ch)
+                     (member ch '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\)
+                                  #\; #\/ #\? #\: #\@ #\& #\= #\+ #\$ #\, #\#)))
+                 (write-char ch out)
+                 (let ((bytes (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
+                   (loop for byte across bytes do (format out "%~2,'0X" byte)))))))
+
+(defun %js-decode-uri (str)
+  "JS decodeURI: decode URI but leave reserved chars encoded."
+  (%js-decode-uri-component str))
+
+;;; ─── atob / btoa (base64 in browsers) ───────────────────────────────────────
+
+(defun %js-btoa (str)
+  "JS btoa: base64-encode a binary string."
+  (let* ((s (%js-to-string str))
+         (alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
+    (with-output-to-string (out)
+      (let ((bytes (map 'vector #'char-code s))
+            (n (length s)))
+        (loop for i from 0 below n by 3
+              do (let* ((b0 (aref bytes i))
+                        (b1 (if (< (1+ i) n) (aref bytes (1+ i)) 0))
+                        (b2 (if (< (+ i 2) n) (aref bytes (+ i 2)) 0)))
+                   (write-char (char alphabet (ash b0 -2)) out)
+                   (write-char (char alphabet (logior (ash (logand b0 3) 4) (ash b1 -4))) out)
+                   (write-char (if (< (1+ i) n) (char alphabet (logior (ash (logand b1 15) 2) (ash b2 -6))) #\=) out)
+                   (write-char (if (< (+ i 2) n) (char alphabet (logand b2 63)) #\=) out)))))))
+
+(defun %js-atob (str)
+  "JS atob: decode base64 string."
+  (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) (%js-to-string str)))
+         (alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
+    (flet ((dc (ch) (or (position ch alphabet) 0)))
+      (with-output-to-string (out)
+        (loop for i from 0 below (length s) by 4
+              while (< (+ i 3) (length s))
+              do (let* ((g0 (dc (char s i)))       (g1 (dc (char s (1+ i))))
+                        (g2 (if (char= (char s (+ i 2)) #\=) 0 (dc (char s (+ i 2)))))
+                        (g3 (if (char= (char s (+ i 3)) #\=) 0 (dc (char s (+ i 3))))))
+                   (write-char (code-char (logior (ash g0 2) (ash g1 -4))) out)
+                   (unless (char= (char s (+ i 2)) #\=)
+                     (write-char (code-char (logior (ash (logand g1 15) 4) (ash g2 -2))) out))
+                   (unless (char= (char s (+ i 3)) #\=)
+                     (write-char (code-char (logior (ash (logand g2 3) 6) g3)) out))))))))
+
+;;; ─── TextEncoder / TextDecoder stubs ─────────────────────────────────────────
+
+(defun %js-make-text-encoder ()
+  "JS TextEncoder stub (UTF-8 encoding)."
+  (%js-make-object
+   "encoding" "utf-8"
+   "encode"   (lambda (str)
+                (let* ((s (%js-to-string str))
+                       (bytes (sb-ext:string-to-octets s :external-format :utf-8))
+                       (vec (%js-make-typed-array "Uint8Array" (length bytes))))
+                  (loop for i below (length bytes)
+                        do (setf (aref (js-ta-buffer vec) i) (aref bytes i)))
+                  vec))
+   "encodeInto" (lambda (str _buf) (declare (ignore _buf))
+                  (%js-make-object "read" (coerce (length (%js-to-string str)) 'double-float)
+                                   "written" (coerce (length (%js-to-string str)) 'double-float)))))
+
+(defun %js-make-text-decoder (&optional (encoding "utf-8"))
+  "JS TextDecoder stub."
+  (declare (ignore encoding))
+  (%js-make-object
+   "encoding" "utf-8"
+   "decode"   (lambda (&optional buf)
+                (if (or (null buf) (eq buf +js-undefined+))
+                    ""
+                    (if (js-typed-array-p buf)
+                        (handler-case
+                            (sb-ext:octets-to-string
+                             (map '(vector (unsigned-byte 8)) #'identity
+                                  (coerce (subseq (js-ta-buffer buf) 0 (js-ta-length buf)) 'vector))
+                             :external-format :utf-8)
+                          (error () ""))
+                        (%js-to-string buf))))))

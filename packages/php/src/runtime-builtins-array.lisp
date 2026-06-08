@@ -355,3 +355,228 @@
       (when (every (lambda (other) (member (cdr pair) other :test #'equal)) others)
         (%php-array-set result (car pair) (cdr pair))))
     result))
+
+;;; ─── array_column / array_combine / array_flip ───────────────────────────────
+
+(defun %php-array-column (input column-key &optional index-key)
+  "PHP array_column: extract values from COLUMN-KEY across rows, optionally indexed by INDEX-KEY."
+  (let ((result (%php-make-array)))
+    (dolist (pair (%php-array-pairs input))
+      (let* ((row (cdr pair))
+             (val (if (hash-table-p row)
+                      (if (or (null column-key) (%php-null-p column-key))
+                          row
+                          (%php-array-ref row column-key))
+                      row))
+             (key (if (and index-key (not (%php-null-p index-key)) (hash-table-p row))
+                      (%php-array-ref row index-key)
+                      nil)))
+        (if key
+            (%php-array-set result key val)
+            (%php-array-set result (%php-array-next-auto-index result) val))))
+    result))
+
+(defun %php-array-combine (keys values)
+  "PHP array_combine: create array from KEYS and VALUES arrays."
+  (let* ((ks (%php-array-values-list keys))
+         (vs (%php-array-values-list values))
+         (result (%php-make-array)))
+    (loop for k in ks for v in vs
+          do (%php-array-set result k v))
+    result))
+
+(defun %php-array-flip (array)
+  "PHP array_flip: exchange keys and values."
+  (let ((result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (%php-array-set result (cdr pair) (car pair)))
+    result))
+
+;;; ─── array_fill / array_fill_keys ────────────────────────────────────────────
+
+(defun %php-array-fill (start-index num value)
+  "PHP array_fill: fill array with VALUE starting at START-INDEX."
+  (let ((result (%php-make-array)))
+    (dotimes (i num)
+      (%php-array-set result (+ start-index i) value))
+    result))
+
+(defun %php-array-fill-keys (keys value)
+  "PHP array_fill_keys: create array using KEYS with VALUE."
+  (let ((result (%php-make-array)))
+    (dolist (k (%php-array-values-list keys))
+      (%php-array-set result k value))
+    result))
+
+;;; ─── array_splice / array_replace ───────────────────────────────────────────
+
+(defun %php-array-splice (array offset &optional length replacement)
+  "PHP array_splice: remove LENGTH elements at OFFSET, optionally insert REPLACEMENT."
+  (let* ((pairs (%php-array-pairs array))
+         (size (length pairs))
+         (start (if (minusp offset) (max 0 (+ size offset)) (min offset size)))
+         (end (cond ((or (null length) (%php-null-p length)) size)
+                    ((minusp length) (max start (+ size length)))
+                    (t (min size (+ start length)))))
+         (before (subseq pairs 0 start))
+         (removed (subseq pairs start end))
+         (after (subseq pairs end))
+         (inserts (when (and replacement (hash-table-p replacement))
+                    (mapcar #'cdr (%php-array-pairs replacement))))
+         (new-pairs (append before
+                            (mapcar (lambda (v) (cons 0 v)) inserts)
+                            after)))
+    (clrhash array)
+    (setf (gethash +php-array-order-key+ array) nil
+          (gethash +php-array-next-index-key+ array) 0)
+    (loop for pair in new-pairs
+          do (%php-array-set array (%php-array-next-auto-index array) (cdr pair)))
+    (%php-list-to-array (mapcar #'cdr removed))))
+
+(defun %php-array-replace (array &rest replacements)
+  "PHP array_replace: replace values in ARRAY with values from REPLACEMENTS."
+  (let ((result (%php-copy-array array)))
+    (dolist (r replacements)
+      (when (hash-table-p r)
+        (dolist (pair (%php-array-pairs r))
+          (%php-array-set result (car pair) (cdr pair)))))
+    result))
+
+;;; ─── Additional sorts ────────────────────────────────────────────────────────
+
+(defun %php-krsort (array)
+  "PHP krsort: sort ARRAY by key descending."
+  (%php-sort-pairs-by array #'car :preserve-keys t :descending t))
+
+(defun %php-arsort (array)
+  "PHP arsort: sort ARRAY by value descending, preserving keys."
+  (%php-sort-pairs-by array #'cdr :preserve-keys t :descending t))
+
+;;; ─── array_diff_key / array_intersect_key ────────────────────────────────────
+
+(defun %php-array-diff-key (array &rest arrays)
+  "PHP array_diff_key: keys in ARRAY not present in any of ARRAYS."
+  (let* ((other-keys (loop for a in arrays
+                           append (mapcar #'car (%php-array-pairs a))))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (unless (member (car pair) other-keys :test #'equal)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-intersect-key (array &rest arrays)
+  "PHP array_intersect_key: keys in ARRAY present in all of ARRAYS."
+  (let* ((other-key-sets (loop for a in arrays
+                               collect (mapcar #'car (%php-array-pairs a))))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (when (every (lambda (ks) (member (car pair) ks :test #'equal)) other-key-sets)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-diff-assoc (array &rest arrays)
+  "PHP array_diff_assoc: key+value pairs in ARRAY not in others."
+  (let ((result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (unless (some (lambda (a)
+                      (let ((v (%php-array-ref a (car pair))))
+                        (and (not (%php-null-p v)) (equal v (cdr pair)))))
+                    arrays)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-intersect-assoc (array &rest arrays)
+  "PHP array_intersect_assoc: key+value pairs in ARRAY also in all others."
+  (let ((result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (when (every (lambda (a) (equal (%php-array-ref a (car pair)) (cdr pair))) arrays)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-merge-recursive (&rest arrays)
+  "PHP array_merge_recursive: merge arrays, combining duplicate keys recursively."
+  (let ((result (%php-make-array)))
+    (dolist (array arrays)
+      (when (hash-table-p array)
+        (dolist (pair (%php-array-pairs array))
+          (let ((existing (%php-array-ref result (car pair))))
+            (cond ((and (not (%php-null-p existing)) (hash-table-p existing) (hash-table-p (cdr pair)))
+                   (%php-array-set result (car pair) (apply #'%php-array-merge-recursive (list existing (cdr pair)))))
+                  ((not (%php-null-p existing))
+                   (let ((merged (%php-make-array)))
+                     (%php-array-set merged 0 existing)
+                     (%php-array-set merged 1 (cdr pair))
+                     (%php-array-set result (car pair) merged)))
+                  ((integerp (car pair))
+                   (%php-array-set result (%php-array-next-auto-index result) (cdr pair)))
+                  (t (%php-array-set result (car pair) (cdr pair))))))))
+    result))
+
+(defun %php-shuffle (array)
+  "PHP shuffle: randomize order of ARRAY elements."
+  (let* ((values (%php-array-values-list array))
+         (vec (coerce values 'vector))
+         (n (length vec)))
+    (loop for i from (1- n) downto 1
+          do (let* ((j (random (1+ i)))
+                    (tmp (aref vec i)))
+               (setf (aref vec i) (aref vec j)
+                     (aref vec j) tmp)))
+    (clrhash array)
+    (setf (gethash +php-array-order-key+ array) nil
+          (gethash +php-array-next-index-key+ array) 0)
+    (loop for v across vec
+          do (%php-array-set array (%php-array-next-auto-index array) v))
+    t))
+
+(defun %php-compact (&rest var-names)
+  "PHP compact: create array from variable names (returns empty — context-dependent)."
+  (%php-make-array))
+
+(defun %php-array-key-first (array)
+  "PHP array_key_first: return the first key of ARRAY."
+  (let ((pairs (%php-array-pairs array)))
+    (if pairs (car (first pairs)) +php-null+)))
+
+(defun %php-array-key-last (array)
+  "PHP array_key_last: return the last key of ARRAY."
+  (let ((pairs (%php-array-pairs array)))
+    (if pairs (car (car (last pairs))) +php-null+)))
+
+(defun %php-array-find (arr callback)
+  "Return the first element of ARR for which CALLBACK returns true, or PHP null.
+PHP 8.4: array_find()."
+  (let ((fn (%php-callable-function callback)))
+    (when (and fn (hash-table-p arr))
+      (dolist (pair (%php-array-pairs arr))
+        (when (%php-truthy (funcall fn (cdr pair)))
+          (return-from %php-array-find (cdr pair)))))
+    +php-null+))
+
+(defun %php-array-find-key (arr callback)
+  "Return the key of the first element for which CALLBACK returns true, or PHP null.
+PHP 8.4: array_find_key()."
+  (let ((fn (%php-callable-function callback)))
+    (when (and fn (hash-table-p arr))
+      (dolist (pair (%php-array-pairs arr))
+        (when (%php-truthy (funcall fn (cdr pair)))
+          (return-from %php-array-find-key (car pair)))))
+    +php-null+))
+
+(defun %php-array-any (arr callback)
+  "Return true when CALLBACK returns true for at least one element of ARR.
+PHP 8.4: array_any()."
+  (let ((fn (%php-callable-function callback)))
+    (and fn
+         (hash-table-p arr)
+         (some (lambda (pair) (%php-truthy (funcall fn (cdr pair))))
+               (%php-array-pairs arr)))))
+
+(defun %php-array-all (arr callback)
+  "Return true when CALLBACK returns true for every element of ARR.
+PHP 8.4: array_all(). Returns true for an empty array."
+  (let ((fn (%php-callable-function callback)))
+    (or (not fn)
+        (not (hash-table-p arr))
+        (every (lambda (pair) (%php-truthy (funcall fn (cdr pair))))
+               (%php-array-pairs arr)))))

@@ -165,39 +165,91 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
   "Simplified async generator: delegates to %js-make-async."
   (%js-make-async fn))
 
-;;; yield*: delegate to ITERABLE (simplified — no full coroutine stack).
-(defun %js-yield-from (iterable)
-  (%js-make-object "value" iterable "done" nil))
-
 ;;; -----------------------------------------------------------------------
-;;;  Generator (simplified coroutine model via CL closures)
+;;;  Generator — eager-collection model with full iterator protocol
+;;;
+;;; function* bodies compile as ordinary functions; yield calls %js-yield.
+;;; %js-make-generator runs the body eagerly with a dynamic collector so
+;;; every yield pushes its value into a list. The returned object is a
+;;; plain hash-table with "next"/"return"/"throw"/@@iterator — exactly
+;;; what %js-for-of, spread, and Array.from expect.
 ;;; -----------------------------------------------------------------------
 
-(defstruct (js-generator (:conc-name js-generator-))
-  thunk
-  done-p
-  value)
-
-(defun %js-make-generator (thunk)
-  "Create a generator from a function that accepts a next-value continuation."
-  (make-js-generator :thunk thunk :done-p nil :value +js-undefined+))
-
-(defun %js-generator-next (gen &optional (value +js-undefined+))
-  "Advance generator by one step."
-  (if (js-generator-done-p gen)
-      (%js-make-object "value" +js-undefined+ "done" t)
-      (handler-case
-          (let ((result (funcall (js-generator-thunk gen) value)))
-            (if (and (%js-ht-p result)
-                     (gethash "done" result))
-                (progn
-                  (setf (js-generator-done-p gen) t)
-                  result)
-                result))
-        (js-exception (c)
-          (setf (js-generator-done-p gen) t)
-          (%js-throw (js-exception-value c))))))
+(defvar *%js-yield-collector* nil
+  "When non-nil, a (values-reversed) cons cell owned by the active generator.")
 
 (defun %js-yield (value)
-  "Yield from a generator — placeholder; real yield requires compiler support."
-  (%js-make-object "value" value "done" nil))
+  "Push VALUE into the active generator collector, or return undefined."
+  (when *%js-yield-collector*
+    (push value (car *%js-yield-collector*)))
+  value)
+
+(defun %js-yield-from (iterable)
+  "yield* — drain ITERABLE into the active generator."
+  (when *%js-yield-collector*
+    (cond
+      ;; Already a JS iterator object (has "next")
+      ((%js-ht-p iterable)
+       (let ((next-fn (gethash "next" iterable)))
+         (when next-fn
+           (loop (let* ((result (%js-funcall next-fn))
+                        (done (and (%js-ht-p result) (gethash "done" result))))
+                   (when done (return (and (%js-ht-p result) (gethash "value" result))))
+                   (%js-yield (if (%js-ht-p result) (gethash "value" result) result)))))))
+      ;; Array / vector
+      ((%js-vec-p iterable)
+       (loop for i below (length iterable) do (%js-yield (aref iterable i))))
+      ;; String — iterate characters
+      ((stringp iterable)
+       (loop for ch across iterable do (%js-yield (string ch))))))
+  +js-undefined+)
+
+(defun %js-make-generator (body-fn)
+  "Eagerly run BODY-FN collecting yields; return a JS iterator object."
+  (let ((collector (list nil))            ; (yields-reversed)
+        (return-val +js-undefined+))
+    ;; Run the body with the collector bound
+    (let ((*%js-yield-collector* collector))
+      (handler-case (setf return-val (funcall body-fn))
+        (t () nil)))
+    ;; Build the iterator in FIFO order
+    (let* ((values (reverse (car collector)))
+           (remaining (list values))      ; boxed for mutation by closure
+           (done-box  (list nil)))
+      (let ((gen (%js-make-object
+                  "next"
+                  (lambda (&optional _send)
+                    (declare (ignore _send))
+                    (cond
+                      ((car done-box)
+                       (%js-make-object "value" +js-undefined+ "done" t))
+                      ((null (car remaining))
+                       (setf (car done-box) t)
+                       (%js-make-object "value" return-val "done" t))
+                      (t
+                       (let ((v (pop (car remaining))))
+                         (%js-make-object "value" v "done" nil)))))
+                  "return"
+                  (lambda (&optional (val +js-undefined+))
+                    (setf (car done-box) t)
+                    (%js-make-object "value" val "done" t))
+                  "throw"
+                  (lambda (&optional err)
+                    (setf (car done-box) t)
+                    (%js-throw (or err +js-undefined+))))))
+        ;; @@iterator self-reference makes this both iterable AND iterator
+        (setf (gethash "@@iterator" gen) (lambda () gen))
+        gen))))
+
+(defun %js-generator-next (gen &optional (value +js-undefined+))
+  "Advance GEN by one step (delegates to its 'next' method)."
+  (let ((next-fn (and (%js-ht-p gen) (gethash "next" gen))))
+    (if next-fn
+        (%js-funcall next-fn value)
+        (%js-make-object "value" +js-undefined+ "done" t))))
+
+(defun %js-wrap-generator-body (body-fn)
+  "Return a function that, when called, produces a fresh generator from BODY-FN.
+The compiler inserts this wrapper for every function* declaration."
+  (lambda (&rest args)
+    (%js-make-generator (lambda () (apply body-fn args)))))

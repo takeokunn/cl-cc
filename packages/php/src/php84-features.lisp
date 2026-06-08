@@ -398,45 +398,8 @@ Must be called from within a running Fiber body."
 
 ;;; ─── PHP 8.4 Array Functions ────────────────────────────────────────────────
 ;;;
-;;; PHP 8.4 adds array_find, array_find_key, array_any, array_all.
-
-(defun %php-array-find (arr callback)
-  "Return the first element of ARR for which CALLBACK returns true, or PHP null.
-PHP 8.4: array_find()."
-  (let ((fn (%php-callable-function callback)))
-    (when (and fn (hash-table-p arr))
-      (dolist (pair (%php-array-pairs arr))
-        (when (%php-truthy (funcall fn (cdr pair)))
-          (return-from %php-array-find (cdr pair)))))
-    +php-null+))
-
-(defun %php-array-find-key (arr callback)
-  "Return the key of the first element for which CALLBACK returns true, or PHP null.
-PHP 8.4: array_find_key()."
-  (let ((fn (%php-callable-function callback)))
-    (when (and fn (hash-table-p arr))
-      (dolist (pair (%php-array-pairs arr))
-        (when (%php-truthy (funcall fn (cdr pair)))
-          (return-from %php-array-find-key (car pair)))))
-    +php-null+))
-
-(defun %php-array-any (arr callback)
-  "Return true when CALLBACK returns true for at least one element of ARR.
-PHP 8.4: array_any()."
-  (let ((fn (%php-callable-function callback)))
-    (and fn
-         (hash-table-p arr)
-         (some (lambda (pair) (%php-truthy (funcall fn (cdr pair))))
-               (%php-array-pairs arr)))))
-
-(defun %php-array-all (arr callback)
-  "Return true when CALLBACK returns true for every element of ARR.
-PHP 8.4: array_all(). Returns true for an empty array."
-  (let ((fn (%php-callable-function callback)))
-    (or (not fn)
-        (not (hash-table-p arr))
-        (every (lambda (pair) (%php-truthy (funcall fn (cdr pair))))
-               (%php-array-pairs arr)))))
+;;; array_find, array_find_key, array_any, array_all are defined in
+;;; runtime-builtins-array.lisp (loaded before runtime-builtins-register.lisp).
 
 ;;; ─── PHP 8.2 Readonly Classes ───────────────────────────────────────────────
 ;;;
@@ -586,3 +549,14 @@ When no hooks are present, the list contains only the original property slot."
                               (php-skip-semis rest2)))
                     (values (list base-slot) (php-skip-semis rest2))))
               (values (list base-slot) (php-skip-semis rest))))))))
+
+;;; ─── Late registrations (after php84 functions are defined) ─────────────────
+
+(eval-when (:load-toplevel :execute)
+  ;; PHP 8.1 Fiber builtins.
+  (when (fboundp '%php-register-builtin)
+    (%php-register-builtin "fiber_create"     '%php-fiber-make)
+    (%php-register-builtin "fiber_start"      '%php-fiber-start)
+    (%php-register-builtin "fiber_resume"     '%php-fiber-resume)
+    (%php-register-builtin "fiber_suspend"    '%php-fiber-suspend)
+    (%php-register-builtin "fiber_get_return" '%php-fiber-get-return)))

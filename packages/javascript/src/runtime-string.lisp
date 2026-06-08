@@ -205,6 +205,36 @@ common Lisp string encoding; full Unicode normalization is not yet implemented).
   (declare (ignore form))
   s)
 
+(defun %js-string-to-well-formed (s)
+  "ES2024 String.prototype.toWellFormed — replace lone surrogates with U+FFFD.
+In CL strings (UCS-4), lone surrogates cannot arise, so this is identity."
+  s)
+
+(defun %js-string-is-well-formed (s)
+  "ES2024 String.prototype.isWellFormed — return true iff S contains no lone surrogates.
+In CL strings (UCS-4), strings are always well-formed in this sense."
+  (declare (ignore s))
+  t)
+
+(defun %js-string-to-locale-lower-case (s &optional locale)
+  "ES2015 String.prototype.toLocaleLowerCase."
+  (declare (ignore locale))
+  (string-downcase s))
+
+(defun %js-string-to-locale-upper-case (s &optional locale)
+  "ES2015 String.prototype.toLocaleUpperCase."
+  (declare (ignore locale))
+  (string-upcase s))
+
+(defun %js-string-locale-compare (s other &optional locales options)
+  "ES2015 String.prototype.localeCompare — returns -1, 0, or 1."
+  (declare (ignore locales options))
+  (let ((a s)
+        (b (%js-to-string other)))
+    (cond ((string< a b) -1.0d0)
+          ((string> a b)  1.0d0)
+          (t              0.0d0))))
+
 (defun %js-string-code-point-at (s pos)
   "JS String.prototype.codePointAt(pos) — returns Unicode code point at POS.
 For BMP characters (U+0000–U+FFFF) this is identical to charCodeAt."

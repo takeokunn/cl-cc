@@ -49,6 +49,23 @@
    #:%js-make-async-generator
    #:%js-make-generator
    #:%js-generator-next
+   #:%js-wrap-generator-body
+   #:*%js-yield-collector*
+   ;; Temporal API (ES2026)
+   #:*js-temporal-global*
+   #:%js-temporal-instant
+   #:%js-temporal-plain-date
+   #:%js-temporal-plain-time
+   #:%js-temporal-plain-datetime
+   #:%js-temporal-zoned-datetime
+   #:%js-temporal-duration
+   #:%js-temporal-plain-year-month
+   #:%js-temporal-plain-month-day
+   ;; ES2025 TypedArray
+   #:%js-uint8-from-hex
+   #:%js-uint8-from-base64
+   #:%js-uint8-to-hex
+   #:%js-uint8-to-base64
 
    ;; Exception handling
    #:%js-throw
@@ -177,7 +194,12 @@
    #:%js-object-from-entries
    #:%js-object-is
 
-   ;; String built-ins
+   ;; String built-ins (ES2015+, ES2024)
+   #:%js-string-to-well-formed
+   #:%js-string-is-well-formed
+   #:%js-string-to-locale-lower-case
+   #:%js-string-to-locale-upper-case
+   #:%js-string-locale-compare
    #:%js-string-length
    #:%js-string-char-at
    #:%js-string-char-code-at

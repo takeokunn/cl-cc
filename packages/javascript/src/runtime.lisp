@@ -64,6 +64,13 @@
 ;;;  Type system
 ;;; -----------------------------------------------------------------------
 
+;;; ─── BigInt struct (declared early so typeof/to-string can reference it) ─────
+
+(defstruct (js-bigint (:constructor %make-js-bigint (value)))
+  (value 0 :type integer))
+
+(defun %js-bigint-p (x) (js-bigint-p x))
+
 (defun %js-typeof (x)
   "Return JS typeof string for X."
   (cond
@@ -84,6 +91,8 @@
     ;; Symbol — must come before the default "object" case
     ;; js-symbol-p is defined in runtime-symbol.lisp (loaded later), so use typep
     ((typep x 'js-symbol)    "symbol")
+    ;; BigInt — defined in runtime-ops.lisp (loaded later), so use typep
+    ((typep x 'js-bigint)    "bigint")
     (t                       "object")))
 
 (defun %js-truthy (x)
@@ -372,6 +381,8 @@ dividend (5 % 3 => 2, -5 % 3 => -2), matching ECMAScript; division by zero => Na
      (let ((parts (loop for i below (length x)
                         collect (%js-to-string (aref x i)))))
        (format nil "~{~A~^,~}" parts)))
+    ;; BigInt — defined in runtime-ops.lisp (loaded later)
+    ((typep x 'js-bigint)   (format nil "~D" (js-bigint-value x)))
     (t (format nil "~A" x))))
 
 (defun %js-template-string (parts)

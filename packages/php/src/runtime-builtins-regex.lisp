@@ -459,3 +459,160 @@
                              (truncate (* (abs frac-part) (expt 10 decimals))))
                      int-with-sep)))
     (if (< n 0) (concatenate 'string "-" result) result)))
+
+;;; ─── preg_replace_callback ────────────────────────────────────────────────────
+
+(defun %php-preg-replace-callback (pattern callback subject &optional (limit -1) count-var)
+  "PHP preg_replace_callback: replace regex matches using a callback function."
+  (declare (ignore count-var))
+  (let* ((pat (%php-stringify pattern))
+         (s (%php-stringify subject))
+         (fn (%php-callable-function callback))
+         (compiled (%php-compile-regex pat))
+         (result (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
+         (pos 0)
+         (replacements 0)
+         (max-replacements (if (and (numberp limit) (> limit 0)) limit most-positive-fixnum)))
+    (when (and compiled fn)
+      (loop while (and (< pos (length s))
+                       (< replacements max-replacements))
+            do (multiple-value-bind (match-start match-end groups)
+                   (%php-regex-search compiled s pos)
+                 (if match-start
+                     (progn
+                       ;; Copy text before match
+                       (loop for i from pos below match-start
+                             do (vector-push-extend (char s i) result))
+                       ;; Build match array for callback
+                       (let* ((match-arr (%php-make-array))
+                              (full-match (subseq s match-start match-end)))
+                         (%php-array-set match-arr 0 full-match)
+                         (loop for g in groups for i from 1
+                               do (%php-array-set match-arr i (or g "")))
+                         ;; Call the callback
+                         (let ((replacement (%php-stringify (funcall fn match-arr))))
+                           (loop for ch across replacement
+                                 do (vector-push-extend ch result)))
+                         (incf replacements)
+                         (setf pos (max (1+ pos) match-end))))
+                     (progn
+                       ;; No more matches: copy remainder
+                       (loop for i from pos below (length s)
+                             do (vector-push-extend (char s i) result))
+                       (return))))))
+    (coerce result 'string)))
+
+(defun %php-preg-replace-callback-array (patterns callbacks subject &optional limit count)
+  "PHP preg_replace_callback_array: apply multiple pattern/callback pairs."
+  (declare (ignore count))
+  (let ((result subject))
+    (when (and (hash-table-p patterns) (hash-table-p callbacks))
+      (dolist (pair (%php-array-pairs patterns))
+        (let* ((pat (car pair))
+               (cb-fn (%php-array-ref callbacks pat)))
+          (when (not (%php-null-p cb-fn))
+            (setf result (%php-preg-replace-callback (cdr pair) cb-fn result limit))))))
+    result))
+
+;;; ─── Date helpers ────────────────────────────────────────────────────────────
+
+(defun %php-date-create (&optional (datetime nil))
+  "PHP date_create / DateTime::__construct: return a PHP DateTime-like array."
+  (let* ((ts (if (or (null datetime) (%php-null-p datetime) (string= (%php-stringify datetime) "now"))
+                 (%php-time)
+                 (or (%php-strtotime datetime) (%php-time))))
+         (obj (%php-make-array)))
+    (%php-array-set obj "__class__" "DateTime")
+    (%php-array-set obj "timestamp" ts)
+    obj))
+
+(defun %php-date-format (obj format)
+  "PHP date_format / DateTime::format."
+  (let ((ts (%php-array-ref obj "timestamp")))
+    (%php-date format (if (%php-null-p ts) (%php-time) ts))))
+
+(defun %php-date-modify (obj modifier)
+  "PHP date_modify: modify datetime object."
+  (declare (ignore modifier))
+  obj)
+
+(defun %php-date-diff (date1 date2 &optional absolute)
+  "PHP date_diff: return interval between two DateTime objects."
+  (declare (ignore absolute))
+  (let* ((ts1 (or (%php-array-ref date1 "timestamp") (%php-time)))
+         (ts2 (or (%php-array-ref date2 "timestamp") (%php-time)))
+         (diff (abs (- ts2 ts1)))
+         (result (%php-make-array)))
+    (%php-array-set result "days" (truncate diff 86400))
+    (%php-array-set result "h"    (truncate (mod diff 86400) 3600))
+    (%php-array-set result "i"    (truncate (mod diff 3600)  60))
+    (%php-array-set result "s"    (mod diff 60))
+    (%php-array-set result "invert" (if (< ts2 ts1) 1 0))
+    result))
+
+(defun %php-date-timestamp (obj)
+  "PHP DateTime::getTimestamp."
+  (or (%php-array-ref obj "timestamp") (%php-time)))
+
+(defun %php-gmdate (format &optional (timestamp nil))
+  "PHP gmdate: same as date() but always UTC."
+  (%php-date format timestamp))
+
+(defun %php-date-default-timezone-set (tz)
+  "PHP date_default_timezone_set (stub)."
+  (declare (ignore tz))
+  t)
+
+(defun %php-date-default-timezone-get ()
+  "PHP date_default_timezone_get (stub)."
+  "UTC")
+
+;;; ─── Array extra ─────────────────────────────────────────────────────────────
+
+(defun %php-array-walk-recursive (array callback &optional extra-data)
+  "PHP array_walk_recursive: apply callback to all leaf values."
+  (let ((fn (%php-callable-function callback)))
+    (when (and fn (hash-table-p array))
+      (labels ((walk (arr)
+                 (dolist (pair (%php-array-pairs arr))
+                   (if (hash-table-p (cdr pair))
+                       (walk (cdr pair))
+                       (if extra-data
+                           (funcall fn (cdr pair) (car pair) extra-data)
+                           (funcall fn (cdr pair) (car pair)))))))
+        (walk array))))
+  t)
+
+(defun %php-array-splice-in-place (array offset &optional length replacement)
+  "PHP array_splice modifying the original array."
+  (%php-array-splice array offset length replacement))
+
+(defun %php-natsort (array)
+  "PHP natsort: natural order sort preserving keys."
+  (%php-sort-pairs-by array #'cdr :preserve-keys t))
+
+(defun %php-natcasesort (array)
+  "PHP natcasesort: case-insensitive natural order sort preserving keys."
+  (let ((pairs (sort (copy-list (%php-array-pairs array))
+                     #'string-lessp
+                     :key (lambda (p) (string-downcase (%php-stringify (cdr p)))))))
+    (clrhash array)
+    (setf (gethash +php-array-order-key+ array) nil
+          (gethash +php-array-next-index-key+ array) 0)
+    (dolist (pair pairs)
+      (%php-array-set array (car pair) (cdr pair)))
+    t))
+
+(defun %php-array-map-null (array1 &rest arrays)
+  "PHP array_map with null callback: zip arrays into array-of-arrays."
+  (let ((result (%php-make-array))
+        (lists (mapcar #'%php-array-values-list (cons array1 arrays)))
+        (i 0))
+    (loop while (every #'consp lists)
+          do (let ((row (%php-make-array)))
+               (loop for lst in lists for j from 0
+                     do (%php-array-set row j (car lst)))
+               (%php-array-set result i row)
+               (incf i)
+               (setf lists (mapcar #'cdr lists))))
+    result))

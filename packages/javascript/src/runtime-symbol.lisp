@@ -108,6 +108,26 @@
   (%js-symbol-for "Symbol.split")
   "Symbol.split — String.prototype.split hook.")
 
+(defparameter %js-symbol-dispose
+  (%js-symbol-for "Symbol.dispose")
+  "Symbol.dispose — ES2025 explicit resource management (using statement).")
+
+(defparameter %js-symbol-async-dispose
+  (%js-symbol-for "Symbol.asyncDispose")
+  "Symbol.asyncDispose — ES2025 async resource management.")
+
+(defparameter %js-symbol-metadata
+  (%js-symbol-for "Symbol.metadata")
+  "Symbol.metadata — ES2025 decorator metadata.")
+
+(defparameter %js-symbol-is-concat-spreadable
+  (%js-symbol-for "Symbol.isConcatSpreadable")
+  "Symbol.isConcatSpreadable — Array.prototype.concat hook.")
+
+(defparameter %js-symbol-unscopables
+  (%js-symbol-for "Symbol.unscopables")
+  "Symbol.unscopables — with statement exclusions.")
+
 ;;; -----------------------------------------------------------------------
 ;;;  Symbol as property key — ht uses the js-symbol struct as key (eq lookup)
 ;;; -----------------------------------------------------------------------
@@ -145,6 +165,11 @@
           (gethash "replace"     sym-obj) %js-symbol-replace
           (gethash "search"      sym-obj) %js-symbol-search
           (gethash "split"       sym-obj) %js-symbol-split
+          (gethash "dispose"     sym-obj) %js-symbol-dispose
+          (gethash "asyncDispose" sym-obj) %js-symbol-async-dispose
+          (gethash "metadata"    sym-obj) %js-symbol-metadata
+          (gethash "isConcatSpreadable" sym-obj) %js-symbol-is-concat-spreadable
+          (gethash "unscopables" sym-obj) %js-symbol-unscopables
           ;; Static methods
           (gethash "for"         sym-obj) #'%js-symbol-for
           (gethash "keyFor"      sym-obj) #'%js-symbol-key-for

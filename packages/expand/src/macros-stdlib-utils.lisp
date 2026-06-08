@@ -410,3 +410,105 @@
 (our-defmacro graphic-char-p (char) `(cl:graphic-char-p ,char))
 (our-defmacro char-int       (char) `(cl:char-code ,char))
 (our-defmacro char-name      (char) `(cl:char-name ,char))
+
+;;; ─── Missing ANSI character comparisons ──────────────────────────────────────
+
+(our-defmacro char-not-equal (c &rest chars)
+  `(not (cl:char= ,c ,@chars)))
+
+(our-defmacro char-not-lessp (c &rest chars)
+  `(not (cl:char< ,c ,@chars)))
+
+(our-defmacro char-not-greaterp (c &rest chars)
+  `(not (cl:char> ,c ,@chars)))
+
+;;; ─── Missing ANSI list / string operations ────────────────────────────────────
+
+(our-defmacro copy-list (lst)
+  `(let ((l ,lst))
+     (loop for x in l collect x)))
+
+(our-defmacro list-length (lst)
+  `(length ,lst))
+
+(our-defmacro string-left-trim (bag string)
+  `(cl:string-left-trim ,bag ,string))
+
+(our-defmacro string-right-trim (bag string)
+  `(cl:string-right-trim ,bag ,string))
+
+;;; ─── ANSI bit / numeric ───────────────────────────────────────────────────────
+
+(our-defmacro arithmetic-shift (integer count)
+  `(cl:ash ,integer ,count))
+
+(our-defmacro integer-length (n)
+  `(cl:integer-length ,n))
+
+(our-defmacro logcount (n)
+  `(cl:logcount ,n))
+
+(our-defmacro float-sign (float1 &optional float2)
+  (if float2
+      `(cl:float-sign ,float1 ,float2)
+      `(cl:float-sign ,float1)))
+
+(our-defmacro float-digits  (f) `(cl:float-digits ,f))
+(our-defmacro float-radix   (f) `(cl:float-radix ,f))
+(our-defmacro float-precision (f) `(cl:float-precision ,f))
+(our-defmacro decode-float  (f) `(cl:decode-float ,f))
+(our-defmacro scale-float   (f e) `(cl:scale-float ,f ,e))
+(our-defmacro integer-decode-float (f) `(cl:integer-decode-float ,f))
+
+;;; ─── ANSI control ─────────────────────────────────────────────────────────────
+
+(our-defmacro multiple-value-prog1 (first-form &rest other-forms)
+  (let ((vals (gensym "MV")))
+    `(let ((,vals (multiple-value-list ,first-form)))
+       ,@other-forms
+       (values-list ,vals))))
+
+;;; ─── ANSI sequence ────────────────────────────────────────────────────────────
+
+(our-defmacro make-sequence (type length &rest kwargs)
+  `(cond ((subtypep ,type 'list)   (make-list ,length ,@kwargs))
+         ((subtypep ,type 'vector) (make-array ,length ,@kwargs))
+         ((subtypep ,type 'string) (make-string ,length ,@kwargs))
+         (t                         (make-list ,length ,@kwargs))))
+
+;;; ─── ANSI hash extras ─────────────────────────────────────────────────────────
+
+(our-defmacro sxhash (x) `(cl:sxhash ,x))
+(our-defmacro hash-table-rehash-size (ht) `(cl:hash-table-rehash-size ,ht))
+(our-defmacro hash-table-rehash-threshold (ht) `(cl:hash-table-rehash-threshold ,ht))
+
+;;; ─── ANSI CLOS slot ───────────────────────────────────────────────────────────
+
+(our-defmacro slot-boundp (instance slot-name)
+  `(cl:slot-boundp ,instance ,slot-name))
+
+(our-defmacro slot-makunbound (instance slot-name)
+  `(cl:slot-makunbound ,instance ,slot-name))
+
+(our-defmacro slot-exists-p (instance slot-name)
+  `(cl:slot-exists-p ,instance ,slot-name))
+
+;;; ─── ANSI pathname ────────────────────────────────────────────────────────────
+
+(our-defmacro namestring   (x) `(cl:namestring ,x))
+(our-defmacro truename     (x) `(cl:truename ,x))
+(our-defmacro probe-file   (x) `(cl:probe-file ,x))
+(our-defmacro pathname     (x) `(cl:pathname ,x))
+(our-defmacro make-pathname (&rest args) `(cl:make-pathname ,@args))
+(our-defmacro pathname-name      (x) `(cl:pathname-name ,x))
+(our-defmacro pathname-type      (x) `(cl:pathname-type ,x))
+(our-defmacro pathname-directory (x) `(cl:pathname-directory ,x))
+(our-defmacro pathname-host      (x) `(cl:pathname-host ,x))
+(our-defmacro pathname-device    (x) `(cl:pathname-device ,x))
+(our-defmacro pathname-version   (x) `(cl:pathname-version ,x))
+(our-defmacro merge-pathnames (p &optional d v) (if v `(cl:merge-pathnames ,p ,d ,v) (if d `(cl:merge-pathnames ,p ,d) `(cl:merge-pathnames ,p))))
+(our-defmacro enough-namestring (p &optional d) (if d `(cl:enough-namestring ,p ,d) `(cl:enough-namestring ,p)))
+(our-defmacro file-namestring  (x) `(cl:file-namestring ,x))
+(our-defmacro directory-namestring (x) `(cl:directory-namestring ,x))
+(our-defmacro translate-pathname (s f to-wildcard) `(cl:translate-pathname ,s ,f ,to-wildcard))
+(our-defmacro wild-pathname-p (x &optional f) (if f `(cl:wild-pathname-p ,x ,f) `(cl:wild-pathname-p ,x)))
