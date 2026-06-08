@@ -717,7 +717,9 @@
                  (make-vm-jump :label "Lh")
                  (make-vm-label :name "Lexit")
                  (make-vm-ret :reg :r0))
-           0 2))
+           ;; After peeling: peeled iteration (no back-jump) +
+           ;; original loop (with its back-jump). Total: 1 jump to Lh, 2 adds.
+           1 2))
   (pass insts expected-jumps-to-lh expected-adds)
   (let* ((out (funcall pass insts))
          (jumps-to-lh (count-if (lambda (x)
