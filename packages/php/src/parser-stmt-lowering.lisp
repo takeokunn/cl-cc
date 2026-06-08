@@ -255,15 +255,19 @@ values are unaffected."
         (param-attributes nil)
         (by-ref-indices nil)
         (param-defaults nil)
+        (variadic-param nil)
         (idx 0))
     (if (eq (php-peek-type current) :T-RPAREN)
-        (values nil (cdr current) nil nil nil nil)
+        (values nil (cdr current) nil nil nil nil nil)
         (progn
           (loop
-            (multiple-value-bind (param rest param-type attr-plist by-ref-p _variadic-p)
+            (multiple-value-bind (param rest param-type attr-plist by-ref-p variadic-p)
                 (%php-parse-single-param current)
-              (declare (ignore _variadic-p))
-              (push param params)
+              ;; A variadic parameter (...$args) is the AST rest-param, not a
+              ;; positional one, so it is kept separate from PARAMS.
+              (if variadic-p
+                  (setf variadic-param param)
+                  (push param params))
               (when param-type
                 (push (cons param param-type) param-types))
               (when attr-plist
@@ -290,7 +294,26 @@ values are unaffected."
                   (nreverse param-types)
                   (nreverse param-attributes)
                   (nreverse by-ref-indices)
-                  (nreverse param-defaults))))))
+                  (nreverse param-defaults)
+                  variadic-param)))))
+
+(defun %php-variadic-rest-binding (variadic-param body-forms)
+  "Given the variadic parameter symbol (or NIL) and the callable BODY-FORMS list,
+return (values rest-param-sym wrapped-body). When variadic, the AST rest-param is
+a fresh symbol that collects the trailing arguments as a Common Lisp list; the
+body is wrapped in a let that binds VARIADIC-PARAM to that list converted to a PHP
+ordered array (PHP variadics are arrays, not lists). When not variadic, returns
+(values nil BODY-FORMS) unchanged."
+  (if variadic-param
+      (let ((raw (gensym "PHP-VARIADIC-")))
+        (values raw
+                (list (make-ast-let
+                       :bindings (list (cons variadic-param
+                                             (make-ast-call
+                                              :func (make-ast-var :name 'cl-cc/php::%php-list-to-array)
+                                              :args (list (make-ast-var :name raw)))))
+                       :body body-forms))))
+      (values nil body-forms)))
 
 (defun %php-split-params-by-defaults (params param-defaults)
   "Split PARAMS into (values required-params optional-param-entries) for an AST

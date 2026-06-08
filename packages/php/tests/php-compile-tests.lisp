@@ -158,6 +158,20 @@ subscript). Pushing onto the referenced hash-table is the whole effect."
   (assert-string= "9" (%php-run-capture "<?php $a=[1]; $a[0]=9; echo $a[0];"))
   (assert-string= "5" (%php-run-capture "<?php $a=[]; $a['x']=5; echo $a['x'];")))
 
+(deftest php-e2e-variadic-parameters
+  "...$args collects the trailing arguments into a PHP array (regression: the
+variadic param received the first arg directly instead of a collected array)."
+  (assert-string= "10" (%php-run-capture "<?php function s(...$n){ return array_sum($n); } echo s(1,2,3,4);"))
+  (assert-string= "4"  (%php-run-capture "<?php function s(...$n){ return count($n); } echo s(1,2,3,4);"))
+  (assert-string= "0"  (%php-run-capture "<?php function s(...$n){ return count($n); } echo s();"))
+  (assert-string= "x:3" (%php-run-capture "<?php function f($a,...$rest){ return $a.':'.count($rest); } echo f('x',1,2,3);"))
+  (assert-string= "abc" (%php-run-capture "<?php function j(...$xs){ $r=''; foreach($xs as $x){ $r.=$x; } return $r; } echo j('a','b','c');")))
+
+(deftest php-e2e-variadic-all-callable-forms
+  "Variadics work in closures and arrow functions too."
+  (assert-string= "6"  (%php-run-capture "<?php $s=function(...$n){ return array_sum($n); }; echo $s(1,2,3);"))
+  (assert-string= "15" (%php-run-capture "<?php $s=fn(...$n)=>array_sum($n); echo $s(5,5,5);")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

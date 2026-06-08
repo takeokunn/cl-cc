@@ -169,7 +169,8 @@ function' at runtime (e.g. array_push)."
 
 (defun %php-parse-arrow-function (stream known-vars)
   "Parse fn(params) => expr and lower it to captured ast-lambda."
-  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices param-defaults)
+  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices
+                        param-defaults variadic-param)
       (php-parse-param-list stream)
     (declare (ignore param-types _param-attrs _by-ref-indices))
     (multiple-value-bind (return-type rest2) (php-parse-return-type rest)
@@ -179,14 +180,20 @@ function' at runtime (e.g. array_push)."
         (error "PHP parse error: expected => after arrow function parameters"))
       (multiple-value-bind (arrow-token rest3) (php-consume rest2)
         (declare (ignore arrow-token))
-        (multiple-value-bind (body rest4 kv4) (php-parse-expr rest3 (append params known-vars))
+        (multiple-value-bind (body rest4 kv4)
+            (php-parse-expr rest3 (append params
+                                          (when variadic-param (list variadic-param))
+                                          known-vars))
           (multiple-value-bind (required optionals)
               (%php-split-params-by-defaults params param-defaults)
-            (let* ((captures (%php-arrow-captures body params known-vars))
-                   (lambda (make-ast-lambda :params required
-                                            :optional-params optionals
-                                            :body (list body))))
-              (values (%php-capture-wrapper captures lambda) rest4 kv4))))))))
+            (multiple-value-bind (rest-param wrapped-body)
+                (%php-variadic-rest-binding variadic-param (list body))
+              (let* ((captures (%php-arrow-captures body params known-vars))
+                     (lambda (make-ast-lambda :params required
+                                              :optional-params optionals
+                                              :rest-param rest-param
+                                              :body wrapped-body)))
+                (values (%php-capture-wrapper captures lambda) rest4 kv4)))))))))
 
 (defun %php-parse-closure-use-list (stream)
   "Parse optional PHP closure use($x, &$y) and return (captures by-ref-set rest).
@@ -216,17 +223,22 @@ Captures is a list of variable symbols; by-ref-set is a hash-table of the by-ref
 (defun %php-parse-anonymous-function (stream known-vars)
   "Parse function(params) use($x, &$y) { body } as an ast-lambda with captures.
 By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
-  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices param-defaults)
+  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices
+                        param-defaults variadic-param)
       (php-parse-param-list stream)
     (declare (ignore param-types _param-attrs _by-ref-indices))
     (multiple-value-bind (captures by-ref rest2) (%php-parse-closure-use-list rest)
       (multiple-value-bind (return-type rest3) (php-parse-return-type rest2)
         (declare (ignore return-type))
         (multiple-value-bind (body-stmts rest4 kv4)
-            (php-parse-block rest3 (append params captures known-vars))
+            (php-parse-block rest3 (append params captures
+                                           (when variadic-param (list variadic-param))
+                                           known-vars))
           ;; For by-ref captures, wrap them in ref boxes so mutations propagate.
           (multiple-value-bind (required optionals)
               (%php-split-params-by-defaults params param-defaults)
+          (multiple-value-bind (rest-param wrapped-body)
+              (%php-variadic-rest-binding variadic-param (%php-callable-body body-stmts))
           (let* ((ref-bindings
                   (when (> (hash-table-count by-ref) 0)
                     (remove nil
@@ -237,11 +249,12 @@ By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
                                     captures))))
                  (lambda-ast (make-ast-lambda :params required
                                               :optional-params optionals
-                                              :body (%php-callable-body body-stmts)))
+                                              :rest-param rest-param
+                                              :body wrapped-body))
                  (wrapped (if ref-bindings
                               (make-ast-let :bindings ref-bindings :body (list lambda-ast))
                               lambda-ast)))
-            (values (%php-capture-wrapper captures wrapped) rest4 kv4))))))))
+            (values (%php-capture-wrapper captures wrapped) rest4 kv4)))))))))
 
 ;;; ─── Yield Handlers ─────────────────────────────────────────────────────────
 

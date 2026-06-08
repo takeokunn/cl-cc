@@ -504,7 +504,8 @@
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym
                     (php-resolve-qualified-name (php-tok-value name-tok) :function))))
-      (multiple-value-bind (params rest param-types param-attributes by-ref-indices param-defaults)
+      (multiple-value-bind (params rest param-types param-attributes by-ref-indices
+                            param-defaults variadic-param)
           (php-parse-param-list rest)
         (multiple-value-bind (return-type rest) (php-parse-return-type rest)
           ;; Register by-reference parameter info for call-site lowering
@@ -526,12 +527,18 @@
                                                         param-types return-type param-attributes nil :function)
                                          :body nil)
                         (php-skip-semis rest) known-vars)
-                (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
+                (multiple-value-bind (body-stmts rest _)
+                    (php-parse-block rest (append params
+                                                  (when variadic-param (list variadic-param))
+                                                  known-vars))
                   (declare (ignore _))
-                  (values (make-ast-defun :name fn-name
-                                           :params required
-                                           :optional-params optionals
-                                           :declarations (%php-function-declarations
-                                                          param-types return-type param-attributes nil :function)
-                                           :body (%php-callable-body body-stmts))
-                          rest known-vars)))))))))
+                  (multiple-value-bind (rest-param wrapped-body)
+                      (%php-variadic-rest-binding variadic-param (%php-callable-body body-stmts))
+                    (values (make-ast-defun :name fn-name
+                                             :params required
+                                             :optional-params optionals
+                                             :rest-param rest-param
+                                             :declarations (%php-function-declarations
+                                                            param-types return-type param-attributes nil :function)
+                                             :body wrapped-body)
+                            rest known-vars))))))))))
