@@ -98,6 +98,31 @@ ast-print appends a newline per statement, so values are combined with '.' / ','
   (assert-string= "1"  (%php-run-capture "<?php echo (5 == 5);"))
   (assert-string= "123" (%php-run-capture "<?php echo 1,2,3;")))
 
+(deftest php-e2e-logical-operators
+  "&& / || / ! evaluate to PHP booleans (regression: these lowered to unknown op
+symbols / an undefined cl-cc/php::! function, so any expression using them failed
+to compile)."
+  (assert-string= "T" (%php-run-capture "<?php echo (true && true) ? 'T':'F';"))
+  (assert-string= "F" (%php-run-capture "<?php echo (true && false) ? 'T':'F';"))
+  (assert-string= "T" (%php-run-capture "<?php echo (false || true) ? 'T':'F';"))
+  (assert-string= "F" (%php-run-capture "<?php echo (false || false) ? 'T':'F';"))
+  (assert-string= "T" (%php-run-capture "<?php echo !false ? 'T':'F';"))
+  (assert-string= "F" (%php-run-capture "<?php echo !5 ? 'T':'F';"))
+  (assert-string= "1" (%php-run-capture "<?php echo true && true;")))
+
+(deftest php-e2e-logical-in-conditions
+  "Logical operators compose in if conditions and short-circuit."
+  (assert-string= "both" (%php-run-capture "<?php $a=1; $b=2; if ($a && $b) { echo 'both'; }"))
+  (assert-string= "mid"  (%php-run-capture "<?php $x=5; if ($x > 0 && $x < 10) { echo 'mid'; }"))
+  (assert-string= "ok"   (%php-run-capture "<?php $a=true; $b=false; if (!$b && $a) { echo 'ok'; }")))
+
+(deftest php-e2e-logical-short-circuit
+  "&& does not evaluate its right operand when the left is false (the divide-by-
+zero in boom() must not run)."
+  (assert-string= "F"
+                  (%php-run-capture
+                   "<?php function boom(){ return 1/0; } $x=false; echo ($x && boom()) ? 'T':'F';")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

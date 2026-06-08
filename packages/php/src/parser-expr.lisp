@@ -305,10 +305,27 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
 
 (defun %php-binary-op-ast (op lhs rhs)
   "Lower PHP binary OP with LHS and RHS to the appropriate AST node."
-  (let ((helper (cdr (assoc op *php-binary-op-helper-table* :test #'equal))))
-    (if helper
-        (%php-call helper lhs rhs)
-        (make-ast-binop :op (intern op) :lhs lhs :rhs rhs))))
+  (cond
+    ;; Short-circuit logical operators. PHP && / || evaluate the RHS only when the
+    ;; LHS does not already decide the result, and they yield a real boolean — so
+    ;; they lower to an ast-if over truthiness, NOT a binop or helper call (a helper
+    ;; would eagerly evaluate both operands, breaking `$x && expensive()`). Each
+    ;; branch is %php-truthy so the result is PHP true (t) / false (nil).
+    ;; Without this, (intern "&&") produced an unknown cl-cc/php::&& op symbol that
+    ;; codegen could not emit, so every expression using && / || failed to compile.
+    ((equal op "&&")
+     (make-ast-if :cond (%php-truthy-call lhs)
+                  :then (%php-truthy-call rhs)
+                  :else (make-ast-quote :value nil)))
+    ((equal op "||")
+     (make-ast-if :cond (%php-truthy-call lhs)
+                  :then (make-ast-quote :value t)
+                  :else (%php-truthy-call rhs)))
+    (t
+     (let ((helper (cdr (assoc op *php-binary-op-helper-table* :test #'equal))))
+       (if helper
+           (%php-call helper lhs rhs)
+           (make-ast-binop :op (intern op) :lhs lhs :rhs rhs))))))
 
 (defun php-parse-power (stream known-vars)
   "Parse PHP exponentiation. ** is right-associative and binds above unary."
@@ -365,10 +382,19 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
            (member (php-peek-value stream) '("!" "-" "+" "~") :test #'equal))
       (multiple-value-bind (tok rest) (php-consume stream)
         (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
-          (values (if (equal "~" (php-tok-value tok))
-                      (%php-call 'cl-cc/php::%php-bitwise-not expr)
-                      (make-ast-call :func (make-ast-var :name (intern (php-tok-value tok)))
-                                     :args (list expr)))
+          (values (cond
+                    ((equal "~" (php-tok-value tok))
+                     (%php-call 'cl-cc/php::%php-bitwise-not expr))
+                    ;; Logical NOT: yield PHP false (nil) when EXPR is truthy, else
+                    ;; PHP true (t). Was lowered to a call on an undefined cl-cc/php::!
+                    ;; function, so any expression with ! failed.
+                    ((equal "!" (php-tok-value tok))
+                     (make-ast-if :cond (%php-truthy-call expr)
+                                  :then (make-ast-quote :value nil)
+                                  :else (make-ast-quote :value t)))
+                    (t
+                     (make-ast-call :func (make-ast-var :name (intern (php-tok-value tok)))
+                                    :args (list expr))))
                   rest2 kv2))))
      (t
       (php-parse-power stream known-vars))))
