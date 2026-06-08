@@ -339,6 +339,14 @@ lists get sequential integer keys 0,1,2,..."
                (%php-eq-strict a b)))
           (t (%php-eq-strict a b)))))
 
+(defun %php-neq-loose (a b)
+  "PHP != / <> : the negation of loose equality."
+  (not (%php-eq-loose a b)))
+
+(defun %php-neq-strict (a b)
+  "PHP !== : the negation of strict equality."
+  (not (%php-eq-strict a b)))
+
 (defun %php-make-array ()
   "Create an empty PHP ordered array."
   (let ((ht (make-hash-table :test #'equal)))

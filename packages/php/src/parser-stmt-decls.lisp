@@ -215,6 +215,11 @@
 
 (define-php-stmt-parser :echo (rest known-vars)
   ;; Echo supports comma-separated expressions: echo 1, 2, 3;
+  ;; Each value is converted with PHP's string semantics (true -> "1", false/null
+  ;; -> "", arrays -> "Array", numbers/strings as-is) via %php-concat, which calls
+  ;; %php-stringify per argument. Without this echo went straight to ast-print's
+  ;; generic VM printer, so a boolean (e.g. the result of == / a comparison)
+  ;; printed as "T"/"NIL" instead of PHP's "1"/"".
   (let ((exprs nil) (current rest) (kv known-vars))
     (loop
       (multiple-value-bind (expr rest2 kv2) (php-parse-expr current kv)
@@ -223,9 +228,8 @@
       (unless (and current (eq (php-peek-type current) :T-COMMA))
         (return))
       (setf current (cdr current)))
-    (values (make-ast-print :expr (if (cdr exprs)
-                                      (make-ast-progn :forms (nreverse exprs))
-                                      (car exprs)))
+    (values (make-ast-print
+             :expr (apply #'%php-call 'cl-cc/php::%php-concat (nreverse exprs)))
             (php-skip-semis current) kv)))
 
 (define-php-stmt-parser :return (rest known-vars)

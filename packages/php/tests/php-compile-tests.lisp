@@ -72,6 +72,32 @@ arg, so the inline-closure + array-literal register-clobber does not apply)."
                   (%php-run-capture
                    "<?php $f=array_filter([0,1,0,2], function($x){ return $x; }); $s=0; foreach($f as $v){ $s=$s+$v; } echo $s;")))
 
+(deftest php-e2e-equality-operators
+  "== / != / === / !== compile and evaluate (regression: these lowered to an
+unknown op symbol, so any function using them was silently dropped)."
+  (assert-string= "1"  (%php-run-capture "<?php function f($x){ return $x == 4; } echo f(4);"))
+  (assert-string= ""   (%php-run-capture "<?php function f($x){ return $x == 4; } echo f(3);"))
+  (assert-string= "1"  (%php-run-capture "<?php function f($x){ return $x != 4; } echo f(3);"))
+  (assert-string= "1"  (%php-run-capture "<?php function f($x){ return $x % 2 == 0; } echo f(4);")))
+
+(deftest php-e2e-equality-type-juggling
+  "PHP == juggles types ('5' == 5 is true) while === is strict ('5' === 5 false)."
+  (assert-string= "loose"
+                  (%php-run-capture "<?php $a='5'; if ($a == 5) { echo 'loose'; }"))
+  (assert-string= "strictfail"
+                  (%php-run-capture "<?php $a='5'; if ($a === 5) { echo 'x'; } else { echo 'strictfail'; }")))
+
+(deftest php-e2e-echo-boolean-php-semantics
+  "echo converts with PHP string semantics: true -> '1', false -> '' (regression:
+echo went to the generic VM printer and printed CL T/NIL). Single echo per case —
+ast-print appends a newline per statement, so values are combined with '.' / ','."
+  (assert-string= "1"  (%php-run-capture "<?php echo true;"))
+  (assert-string= ""   (%php-run-capture "<?php echo false;"))
+  (assert-string= "1X" (%php-run-capture "<?php echo true . 'X';"))
+  (assert-string= "X"  (%php-run-capture "<?php echo false . 'X';"))
+  (assert-string= "1"  (%php-run-capture "<?php echo (5 == 5);"))
+  (assert-string= "123" (%php-run-capture "<?php echo 1,2,3;")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

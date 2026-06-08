@@ -288,7 +288,19 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
     ("<=>" . cl-cc/php::%php-spaceship)
     ("&"   . cl-cc/php::%php-bitwise-and)
     ("^"   . cl-cc/php::%php-bitwise-xor)
-    ("|"   . cl-cc/php::%php-bitwise-or))
+    ("|"   . cl-cc/php::%php-bitwise-or)
+    ;; Equality / identity. PHP == and === carry type-juggling semantics that no
+    ;; single VM compare instruction expresses, so they lower to runtime helpers
+    ;; rather than a plain ast-binop. Without these, (intern "==") produced an
+    ;; unknown cl-cc/php::== op symbol that codegen could not emit, so EVERY
+    ;; function/closure whose body used == / != / === / !== silently failed to
+    ;; compile and was dropped (then "Undefined function" at the call site).
+    ;; Relational ops (< > <= >=) work because (intern "<") returns the inherited
+    ;; CL:< that codegen already handles.
+    ("=="  . cl-cc/php::%php-eq-loose)
+    ("===" . cl-cc/php::%php-eq-strict)
+    ("!="  . cl-cc/php::%php-neq-loose)
+    ("!==" . cl-cc/php::%php-neq-strict))
   "Alist mapping PHP binary operator strings to runtime helper symbols.")
 
 (defun %php-binary-op-ast (op lhs rhs)

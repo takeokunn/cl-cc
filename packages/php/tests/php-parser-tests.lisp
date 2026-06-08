@@ -32,10 +32,14 @@
 ;;; ─── :echo handler → ast-print ───────────────────────────────────────────
 
 (deftest php-parser-echo-produces-ast-print
-  "echo expr; lowers to ast-print wrapping the expression."
+  "echo expr; lowers to ast-print wrapping a %php-concat call (echo applies PHP
+string conversion to each value); the concat's first arg is the echoed expr."
   (let ((ast (%php-first "<?php echo 42;")))
     (assert-true (ast-print-p ast))
-    (assert-true (typep (cl-cc:ast-print-expr ast) 'cl-cc:ast-int))))
+    (let ((expr (cl-cc:ast-print-expr ast)))
+      (assert-true (cl-cc:ast-call-p expr))
+      (assert-string= "%PHP-CONCAT" (%php-call-name expr))
+      (assert-true (typep (first (cl-cc:ast-call-args expr)) 'cl-cc:ast-int)))))
 
 ;;; ─── :return handler → ast-return-from ───────────────────────────────────
 
@@ -327,9 +331,11 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
       (assert-string= "%PHP-BITWISE-XOR" (%php-call-name xor-node))
       (let ((and-node (first (cl-cc:ast-call-args xor-node))))
         (assert-string= "%PHP-BITWISE-AND" (%php-call-name and-node))
-        (assert-true (cl-cc:ast-binop-p (first (cl-cc:ast-call-args and-node))))
-        (assert-string= "==" (symbol-name (cl-cc:ast-binop-op
-                                            (first (cl-cc:ast-call-args and-node)))))))))
+        ;; == lowers to a %php-eq-loose call (PHP loose-equality type juggling),
+        ;; and binds tighter than &, so it is the AND node's first operand.
+        (let ((eq-node (first (cl-cc:ast-call-args and-node))))
+          (assert-true (cl-cc:ast-call-p eq-node))
+          (assert-string= "%PHP-EQ-LOOSE" (%php-call-name eq-node)))))))
 
 (deftest php-parser-arrow-function-expression
   "Characterization: fn($x) => $x + 1 should parse to a capture-wrapped ast-lambda."
