@@ -140,21 +140,25 @@
   (let ((val (vm-reg-get state (vm-src inst))))
     ;; Bind ANSI print-control variables from VM global state so that
     ;; (setq *print-base* 16) etc. actually affects write-to-string output.
-    (let ((cl:*print-base*    (%vm-read-print-var state '*print-base*   10))
-          (cl:*print-radix*   (%vm-read-print-var state '*print-radix*  nil))
-          (cl:*print-escape*  (%vm-read-print-var state '*print-escape* t))
-          (cl:*print-level*   (%vm-read-print-var state '*print-level*  nil))
-          (cl:*print-length*  (%vm-read-print-var state '*print-length* nil))
-          (cl:*print-circle*  (%vm-read-print-var state '*print-circle* nil))
-          (cl:*print-readably* (%vm-read-print-var state '*print-readably* nil))
-          (cl:*print-pretty*  (%vm-read-print-var state '*print-pretty* nil))
+    ;; Bind the cl-cc/vm print-control specials (the bare symbols) — these are
+    ;; what vm-write-object-to-string reads, so binding cl:*print-*  alone is
+    ;; overridden by it. Sourcing from VM global state lets both
+    ;; (setq *print-base* 16) AND (write-to-string x :base 16) take effect.
+    (let ((*print-base*    (%vm-read-print-var state '*print-base*   10))
+          (*print-radix*   (%vm-read-print-var state '*print-radix*  nil))
+          (*print-escape*  (%vm-read-print-var state '*print-escape* t))
+          (*print-level*   (%vm-read-print-var state '*print-level*  nil))
+          (*print-length*  (%vm-read-print-var state '*print-length* nil))
+          (*print-circle*  (%vm-read-print-var state '*print-circle* nil))
+          (*print-readably* (%vm-read-print-var state '*print-readably* nil))
+          (*print-pretty*  (%vm-read-print-var state '*print-pretty* nil))
           (cl:*print-pprint-dispatch*
             (%pprint-dispatch-host
              (%vm-read-print-var state '*print-pprint-dispatch*
                                  *print-pprint-dispatch*)))
-          (cl:*print-case*    (%vm-read-print-var state '*print-case*   :upcase)))
+          (*print-case*    (%vm-read-print-var state '*print-case*   :upcase)))
       (vm-reg-set state (vm-dst inst)
-                  (vm-write-object-to-string val :escape t :circle cl:*print-circle*)))
+                  (vm-write-object-to-string val :escape t :circle *print-circle*)))
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-princ-to-string-inst) state pc labels)

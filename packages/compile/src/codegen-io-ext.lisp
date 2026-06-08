@@ -20,21 +20,52 @@
 ;; FR-649: write-to-string — one-arg form uses the VM print instruction;
 ;; keyword-argument forms must call the runtime helper so ANSI print-control
 ;; keywords such as :BASE are honored.
+(defparameter *write-to-string-print-var-map*
+  ;; Maps write-to-string keyword args to the cl-cc/vm print-control globals that
+  ;; vm-write-to-string-inst reads (%vm-read-print-var). Fully-qualified symbols
+  ;; ensure we set the SAME global the VM consults (gethash keyed by symbol).
+  (list (cons :base     'cl-cc/vm:*print-base*)
+        (cons :radix    'cl-cc/vm:*print-radix*)
+        (cons :case     'cl-cc/vm:*print-case*)
+        (cons :escape   'cl-cc/vm:*print-escape*)
+        (cons :level    'cl-cc/vm:*print-level*)
+        (cons :length   'cl-cc/vm:*print-length*)
+        (cons :circle   'cl-cc/vm:*print-circle*)
+        (cons :readably 'cl-cc/vm:*print-readably*)
+        (cons :pretty   'cl-cc/vm:*print-pretty*))
+  "Alist: write-to-string keyword -> VM print-control global symbol.")
+
+(defun %write-to-string-arg-keyword (ast)
+  "Extract a literal keyword from an arg AST node (ast-var or ast-quote), or NIL."
+  (cond ((and (typep ast 'ast-var)   (keywordp (ast-var-name ast)))   (ast-var-name ast))
+        ((and (typep ast 'ast-quote) (keywordp (ast-quote-value ast))) (ast-quote-value ast))
+        (t nil)))
+
+;; write-to-string: the 1-arg form uses the VM print instruction directly; the
+;; keyword form (e.g. (write-to-string 42 :base 16)) sets the matching print
+;; globals — which vm-write-to-string-inst reads — around the instruction, then
+;; restores them. This honors :base/:radix/:case/etc. without a runtime call to a
+;; non-existent write-to-string function.
 (define-phase2-handler "WRITE-TO-STRING" (args result-reg ctx)
   (when args
     (let ((obj-reg (compile-ast (first args) ctx)))
       (if (null (cdr args))
           (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
-          (let ((func-reg (make-register ctx))
-                (compat-reg (make-register ctx))
-                (arg-regs (cons obj-reg
-                                (mapcar (lambda (arg) (compile-ast arg ctx))
-                                        (cdr args)))))
-            ;; Keep the legacy instruction visible to codegen-level tests while
-            ;; routing the actual result through the runtime function below.
-            (emit ctx (make-vm-write-to-string-inst :dst compat-reg :src obj-reg))
-            (emit ctx (make-vm-const :dst func-reg :value 'write-to-string))
-            (emit ctx (make-vm-call :dst result-reg :func func-reg :args arg-regs))))
+          (let ((saves nil))
+            (loop for (k-ast v-ast) on (cdr args) by #'cddr
+                  for kw    = (%write-to-string-arg-keyword k-ast)
+                  for pvar  = (and kw (cdr (assoc kw *write-to-string-print-var-map*)))
+                  when (and pvar v-ast)
+                    do (let ((val-reg  (compile-ast v-ast ctx))
+                             (save-reg (make-register ctx)))
+                         (emit ctx (make-vm-get-global :dst save-reg :name pvar))
+                         (emit ctx (make-vm-set-global :name pvar :src val-reg))
+                         (push (cons pvar save-reg) saves)))
+            ;; The instruction reads the print globals we just set.
+            (emit ctx (make-vm-write-to-string-inst :dst result-reg :src obj-reg))
+            ;; Restore originals (reverse order is unnecessary — each var is distinct).
+            (dolist (s saves)
+              (emit ctx (make-vm-set-global :name (car s) :src (cdr s))))))
       result-reg)))
 
 ;; write-string: optional stream arg
