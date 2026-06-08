@@ -504,28 +504,34 @@
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym
                     (php-resolve-qualified-name (php-tok-value name-tok) :function))))
-      (multiple-value-bind (params rest param-types param-attributes by-ref-indices)
+      (multiple-value-bind (params rest param-types param-attributes by-ref-indices param-defaults)
           (php-parse-param-list rest)
         (multiple-value-bind (return-type rest) (php-parse-return-type rest)
           ;; Register by-reference parameter info for call-site lowering
           (when by-ref-indices
             (setf (gethash (symbol-name fn-name) *php-by-ref-param-registry*)
                   by-ref-indices))
-          ;; Abstract / interface method signature: `function f(...): T;` with no
-          ;; body. Produce a body-less ast-defun (a signature) instead of
-          ;; requiring a brace block.
-          (if (eq (php-peek-type rest) :T-SEMI)
-              (values (make-ast-defun :name fn-name
-                                       :params params
-                                       :declarations (%php-function-declarations
-                                                      param-types return-type param-attributes nil :function)
-                                       :body nil)
-                      (php-skip-semis rest) known-vars)
-              (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
-                (declare (ignore _))
+          ;; Parameters with `= default` become &optional params so a call that
+          ;; omits them binds the default instead of leaving them unset.
+          (multiple-value-bind (required optionals)
+              (%php-split-params-by-defaults params param-defaults)
+            ;; Abstract / interface method signature: `function f(...): T;` with no
+            ;; body. Produce a body-less ast-defun (a signature) instead of
+            ;; requiring a brace block.
+            (if (eq (php-peek-type rest) :T-SEMI)
                 (values (make-ast-defun :name fn-name
-                                         :params params
+                                         :params required
+                                         :optional-params optionals
                                          :declarations (%php-function-declarations
                                                         param-types return-type param-attributes nil :function)
-                                         :body (%php-callable-body body-stmts))
-                        rest known-vars))))))))
+                                         :body nil)
+                        (php-skip-semis rest) known-vars)
+                (multiple-value-bind (body-stmts rest _) (php-parse-block rest (append params known-vars))
+                  (declare (ignore _))
+                  (values (make-ast-defun :name fn-name
+                                           :params required
+                                           :optional-params optionals
+                                           :declarations (%php-function-declarations
+                                                          param-types return-type param-attributes nil :function)
+                                           :body (%php-callable-body body-stmts))
+                          rest known-vars)))))))))

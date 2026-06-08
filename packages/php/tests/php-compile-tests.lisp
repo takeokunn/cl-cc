@@ -123,6 +123,26 @@ zero in boom() must not run)."
                   (%php-run-capture
                    "<?php function boom(){ return 1/0; } $x=false; echo ($x && boom()) ? 'T':'F';")))
 
+(deftest php-e2e-default-arguments
+  "Function parameters with `= default` bind the default when the call omits them,
+and the passed value otherwise (regression: php-parse-param-list parsed then
+discarded the default tokens, so omitted args were left unset / 0)."
+  (assert-string= "7"  (%php-run-capture "<?php function g($x=7){ return $x; } echo g();"))
+  (assert-string= "3"  (%php-run-capture "<?php function g($x=7){ return $x; } echo g(3);"))
+  (assert-string= "hi" (%php-run-capture "<?php function g($s='hi'){ return $s; } echo g();"))
+  (assert-string= "15" (%php-run-capture "<?php function f($a,$b=10){ return $a+$b; } echo f(5);"))
+  (assert-string= "7"  (%php-run-capture "<?php function f($a,$b=10){ return $a+$b; } echo f(5,2);"))
+  (assert-string= "6"  (%php-run-capture "<?php function f($a=1,$b=2,$c=3){ return $a+$b+$c; } echo f();"))
+  (assert-string= "15" (%php-run-capture "<?php function f($a=1,$b=2,$c=3){ return $a+$b+$c; } echo f(10);")))
+
+(deftest php-e2e-default-arguments-all-callable-forms
+  "Defaults work in closures, arrow functions, and methods, not just named functions."
+  (assert-string= "9"  (%php-run-capture "<?php $f=function($x=9){ return $x; }; echo $f();"))
+  (assert-string= "4"  (%php-run-capture "<?php $f=function($x=9){ return $x; }; echo $f(4);"))
+  (assert-string= "16" (%php-run-capture "<?php $f=fn($x=8)=>$x*2; echo $f();"))
+  (assert-string= "5"  (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m();"))
+  (assert-string= "20" (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m(20);")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

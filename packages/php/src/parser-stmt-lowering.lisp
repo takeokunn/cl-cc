@@ -245,15 +245,19 @@ Returns (values param-sym rest param-type param-attr-plist by-ref-p variadic-p).
 
 (defun php-parse-param-list (stream)
   "Parse (attribute* type? &? ..? $param [= default], ...).
-Return (values params rest param-types param-attributes by-ref-indices)."
+Return (values params rest param-types param-attributes by-ref-indices
+               param-defaults), where PARAM-DEFAULTS is an alist (param . default-ast)
+for each parameter that has a default value. Callers that bind only the first five
+values are unaffected."
   (let ((current (%php-consume-expected :T-LPAREN stream))
         (params nil)
         (param-types nil)
         (param-attributes nil)
         (by-ref-indices nil)
+        (param-defaults nil)
         (idx 0))
     (if (eq (php-peek-type current) :T-RPAREN)
-        (values nil (cdr current) nil nil nil)
+        (values nil (cdr current) nil nil nil nil)
         (progn
           (loop
             (multiple-value-bind (param rest param-type attr-plist by-ref-p _variadic-p)
@@ -268,14 +272,16 @@ Return (values params rest param-types param-attributes by-ref-indices)."
                 (push idx by-ref-indices))
               (setf current rest)
               (incf idx))
-            ;; Optional default value: skip expression tokens
+            ;; Optional default value: parse the default expression and record it
+            ;; against the just-parsed parameter (the most recent PARAMS entry).
+            ;; PHP default expressions are constant, so they are parsed with no
+            ;; known variables; php-parse-expr stops at the comma / close paren.
             (when (and current (eq (php-peek-type current) :T-OP)
                        (equal "=" (php-peek-value current)))
-              (setf current (cdr current))
-              (loop while (and current
-                               (not (eq (php-peek-type current) :T-COMMA))
-                               (not (eq (php-peek-type current) :T-RPAREN)))
-                    do (setf current (cdr current))))
+              (multiple-value-bind (default-ast rest2)
+                  (php-parse-expr (cdr current) nil)
+                (push (cons (first params) default-ast) param-defaults)
+                (setf current rest2)))
             (if (eq (php-peek-type current) :T-COMMA)
                 (setf current (cdr current))
                 (return)))
@@ -283,7 +289,32 @@ Return (values params rest param-types param-attributes by-ref-indices)."
                   (%php-consume-expected :T-RPAREN current)
                   (nreverse param-types)
                   (nreverse param-attributes)
-                  (nreverse by-ref-indices))))))
+                  (nreverse by-ref-indices)
+                  (nreverse param-defaults))))))
+
+(defun %php-split-params-by-defaults (params param-defaults)
+  "Split PARAMS into (values required-params optional-param-entries) for an AST
+callable. PARAM-DEFAULTS is the (param . default-ast) alist from
+php-parse-param-list. A parameter with a default — and (PHP semantics) every
+parameter after it — becomes an optional-param entry (name default-ast nil);
+parameters before the first defaulted one stay required. An optional parameter
+with no explicit default defaults to PHP null."
+  (if (null param-defaults)
+      (values params nil)
+      (let ((first-optional
+              (loop for p in params
+                    when (assoc p param-defaults :test #'eq) return p)))
+        (let ((required nil) (optionals nil) (seen-optional nil))
+          (dolist (p params)
+            (when (eq p first-optional) (setf seen-optional t))
+            (if seen-optional
+                (push (list p
+                            (or (cdr (assoc p param-defaults :test #'eq))
+                                (%php-null-quote))
+                            nil)
+                      optionals)
+                (push p required)))
+          (values (nreverse required) (nreverse optionals))))))
 
 (defun php-parse-return-type (stream)
   "Parse an optional : type annotation after a function parameter list."
