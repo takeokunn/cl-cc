@@ -1008,3 +1008,28 @@ double-float's exponent as d/D)."
   (assert-string= "[ab   ]"  (%php-run-capture "<?php echo sprintf('[%-5s]','ab');"))
   (assert-string= "3.14"     (%php-run-capture "<?php echo sprintf('%.2f',3.14159);"))
   (assert-string= "ff FF 10" (%php-run-capture "<?php echo sprintf('%x %X %o',255,255,8);")))
+
+(deftest php-e2e-base-conversions
+  "dechex/hexdec/decbin/bindec/decoct/octdec.  They were registered as LAMBDAs
+(non-CL-named), which the symbol-based builtin dispatch could not resolve
+('Undefined function: DECHEX'); now named %php-* helpers registered by symbol."
+  (assert-string= "ff"   (%php-run-capture "<?php echo dechex(255);"))
+  (assert-string= "255"  (%php-run-capture "<?php echo hexdec('ff');"))
+  (assert-string= "1010" (%php-run-capture "<?php echo decbin(10);"))
+  (assert-string= "10"   (%php-run-capture "<?php echo bindec('1010');"))
+  (assert-string= "100"  (%php-run-capture "<?php echo decoct(64);"))
+  (assert-string= "64"   (%php-run-capture "<?php echo octdec('100');"))
+  ;; negatives use 64-bit two's complement, like PHP
+  (assert-string= "ffffffffffffffff" (%php-run-capture "<?php echo dechex(-1);"))
+  (assert-string= "48879" (%php-run-capture "<?php echo hexdec(dechex(48879));")))
+
+(deftest php-e2e-max-min
+  "max/min accept a single array argument or multiple arguments and compare with
+PHP's <=> (numeric strings numerically).  They previously applied CL MAX, which
+errored on an array, a string, or mixed types."
+  (assert-string= "3"  (%php-run-capture "<?php echo max([3,1,2]);"))
+  (assert-string= "1"  (%php-run-capture "<?php echo min([3,1,2]);"))
+  (assert-string= "5"  (%php-run-capture "<?php echo max(1,5,3);"))
+  (assert-string= "10" (%php-run-capture "<?php echo max(1,'10',5);"))
+  (assert-string= "2"  (%php-run-capture "<?php echo min(2.5,2,3);"))
+  (assert-string= "42" (%php-run-capture "<?php echo max(42);")))

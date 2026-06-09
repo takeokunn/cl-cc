@@ -26,14 +26,34 @@ round(2.5) gave 2 and round(-2.5) gave -2 instead of PHP's 3 and -3."
                       (floor (+ scaled 0.5d0)))))
     (/ rounded scale)))
 
+(defun %php-min-max-reduce (values want-max)
+  "Shared core of max()/min().  VALUES is the argument list; with a single array
+argument the comparison runs over its elements.  Uses PHP's <=> (%php-spaceship)
+so numeric strings compare numerically and mixed types follow PHP's rules —
+previously max() applied CL MAX, which errored on strings, arrays, or mixed
+types and could not take a single array argument."
+  (let ((items (if (and (= (length values) 1) (hash-table-p (first values)))
+                   (%php-array-values-list (first values))
+                   values)))
+    (if (null items)
+        nil                              ; max()/min() of nothing -> false
+        (reduce (lambda (best x)
+                  (if (if want-max
+                          (> (%php-spaceship x best) 0)
+                          (< (%php-spaceship x best) 0))
+                      x best))
+                (rest items)
+                :initial-value (first items)))))
+
 (defun %php-max (&rest values)
-  "Return the largest numeric value in VALUES."
-  ;; (%php-max 1 3 2) => 3
-  (if values (apply #'max values) +php-null+))
+  "PHP max: the largest value.  With a single array argument, the largest of its
+elements; otherwise the largest of all arguments (PHP <=> comparison)."
+  ;; (%php-max 1 3 2) => 3 ; (%php-max '(3 1 2)) => 3
+  (%php-min-max-reduce values t))
 
 (defun %php-min (&rest values)
-  "Return the smallest numeric value in VALUES."
-  (if values (apply #'min values) +php-null+))
+  "PHP min: the smallest value (see %php-max for the argument forms)."
+  (%php-min-max-reduce values nil))
 
 (defun %php-rand (&optional min max)
   "Return a random integer, optionally between MIN and MAX inclusive."
@@ -118,6 +138,30 @@ produces in IEEE double."
   "PHP log2 (8.3 alias of log(x,2)): base-2 logarithm of X."
   (or (%php-log-exact-power (%php-numeric x) 2)
       (log (coerce (%php-numeric x) 'double-float) 2d0)))
+
+;;; ─── base conversions (dechex/hexdec/decbin/bindec/decoct/octdec) ───────────
+;;; These must be registered by NAMED SYMBOL, not a lambda: a PHP builtin call
+;;; lowers to a function symbol the VM resolves only if fbound, and a lambda
+;;; registration leaves no fbound symbol (so dechex(255) hit "Undefined
+;;; function: DECHEX").  Same fix as the non-CL-named math builtins.
+
+(defun %php-dec-to-base (n radix)
+  "Convert integer N to a base-RADIX string (lowercase).  A negative N is shown
+as PHP does — its 64-bit two's-complement representation."
+  (let ((i (%php-to-integer n)))
+    (when (minusp i) (setf i (+ i (expt 2 64))))
+    (format nil "~(~vR~)" radix i)))
+
+(defun %php-base-to-dec (s radix)
+  "Parse string S as a base-RADIX integer, ignoring trailing junk (PHP-style)."
+  (or (parse-integer (%php-stringify s) :radix radix :junk-allowed t) 0))
+
+(defun %php-decbin (n) "PHP decbin." (%php-dec-to-base n 2))
+(defun %php-decoct (n) "PHP decoct." (%php-dec-to-base n 8))
+(defun %php-dechex (n) "PHP dechex." (%php-dec-to-base n 16))
+(defun %php-bindec (s) "PHP bindec." (%php-base-to-dec s 2))
+(defun %php-octdec (s) "PHP octdec." (%php-base-to-dec s 8))
+(defun %php-hexdec (s) "PHP hexdec." (%php-base-to-dec s 16))
 
 (defun %php-hypot (x y)
   "PHP hypot: length of the hypotenuse of a right-angle triangle."
