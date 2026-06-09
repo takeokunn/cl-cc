@@ -186,6 +186,21 @@ list."
   (assert-string= "60" (%php-run-capture "<?php function s(...$n){ return array_sum($n); } $a=[10,20,30]; echo s(...$a);"))
   (assert-string= "20" (%php-run-capture "<?php $f=function($a,$b){ return $a*$b; }; $args=[4,5]; echo $f(...$args);")))
 
+(deftest php-e2e-for-loop-continue
+  "continue in a for loop runs the increment before re-testing (regression: the
+for->while lowering put the continue target before the increment, so continue
+skipped $i++ and looped forever)."
+  (assert-string= "6"  (%php-run-capture "<?php $s=0; for($i=0;$i<6;$i++){ if($i%2)continue; $s+=$i; } echo $s;"))
+  (assert-string= "6"  (%php-run-capture "<?php $s=0; for($i=0;$i<10;$i++){ if($i==5)break; if($i%2)continue; $s+=$i; } echo $s;"))
+  (assert-string= "6"  (%php-run-capture "<?php $s=0; for($i=0;$i<3;$i++){ for($j=0;$j<3;$j++){ if($j==1)continue; $s++; } } echo $s;")))
+
+(deftest php-e2e-for-loop-basics
+  "for loops without continue still iterate correctly (no regression from the
+dedicated for lowering)."
+  (assert-string= "10"  (%php-run-capture "<?php $s=0; for($i=1;$i<=4;$i++){ $s+=$i; } echo $s;"))
+  (assert-string= "3"   (%php-run-capture "<?php $s=0; for($i=0;$i<10;$i++){ if($i==3)break; $s+=$i; } echo $s;"))
+  (assert-string= "321" (%php-run-capture "<?php $s=''; for($i=3;$i>0;$i--){ $s.=$i; } echo $s;")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

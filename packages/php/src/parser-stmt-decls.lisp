@@ -289,10 +289,10 @@
                   ;; the condition, body and increment. Otherwise it stays a progn.
                   (values (make-ast-progn
                            :forms (php-finish-let-bindings
-                                   (list init (%php-lower-while-with-label
+                                   (list init (%php-lower-for-with-labels
                                                cond-expr
-                                               (append body-stmts
-                                                       (list incr))
+                                               body-stmts
+                                               incr
                                                *php-loop-continue-target*))))
                           rest kv))))))))))
 

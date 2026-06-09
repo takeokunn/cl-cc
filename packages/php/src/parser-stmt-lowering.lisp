@@ -440,6 +440,34 @@ with no explicit default defaults to PHP null."
                     (when *php-loop-break-target*
                       (list *php-loop-break-target*)))))))
 
+(defun %php-lower-for-with-labels (cond-expr body-stmts incr continue-tag)
+  "Lower a PHP for loop. CONTINUE-TAG (the loop's continue target) is placed
+BEFORE the increment, so `continue' runs the increment and then re-tests the
+condition — unlike a plain while, where continue jumps straight back to the test.
+Collapsing for into while with the increment merely appended to the body would
+make `continue' skip the increment and loop forever."
+  (let ((top-tag (gensym "FOR-TOP-")))
+    (make-ast-block :name nil
+      :body (list
+             (%php-make-tagbody
+              ;; Flow is driven by explicit gos because the tagbody lowerer does
+              ;; not fall through between tag sections. Normal end-of-body and an
+              ;; explicit `continue' both jump to CONTINUE-TAG, which runs INCR and
+              ;; loops back to the condition at TOP-TAG.
+              (append (list top-tag
+                            (make-ast-if
+                             :cond cond-expr
+                             :then (make-ast-quote :value nil)
+                             :else (make-ast-return-from :name nil
+                                                         :value (make-ast-quote :value nil))))
+                      body-stmts
+                      (list (make-ast-go :tag continue-tag))
+                      (list continue-tag)
+                      (list incr)
+                      (list (make-ast-go :tag top-tag))
+                      (when *php-loop-break-target*
+                        (list *php-loop-break-target*))))))))
+
 (defun %php-lower-do-while-with-label (cond-expr body-stmts loop-tag)
   "Lower a PHP do/while loop using LOOP-TAG as the continue target."
   (make-ast-block :name nil
