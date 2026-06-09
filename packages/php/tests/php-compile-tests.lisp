@@ -1065,3 +1065,21 @@ a 0x/0b/0o/leading-0 prefix."
   (assert-string= "-255" (%php-run-capture "<?php echo intval('-FF',16);"))
   (assert-string= "42"   (%php-run-capture "<?php echo intval('42abc');"))
   (assert-string= "42"   (%php-run-capture "<?php echo intval('42',10);")))
+
+(deftest php-e2e-gmdate-weekday
+  "gmdate day-of-week was off by one (decode-universal-time uses 0=Monday, but
+PHP w is 0=Sunday and N is 1=Monday..7=Sunday), so gmdate('D',0) gave Wed for
+1970-01-01 (a Thursday).  Also adds the g (12-hour, no leading zero) format."
+  (assert-string= "Thu"      (%php-run-capture "<?php echo gmdate('D',0);"))
+  (assert-string= "Thursday" (%php-run-capture "<?php echo gmdate('l',0);"))
+  (assert-string= "4"        (%php-run-capture "<?php echo gmdate('N',0);"))
+  (assert-string= "4"        (%php-run-capture "<?php echo gmdate('w',0);"))
+  ;; Sunday (1970-01-04): w=0, N=7
+  (assert-string= "Sun"      (%php-run-capture "<?php echo gmdate('D',86400*3);"))
+  (assert-string= "0"        (%php-run-capture "<?php echo gmdate('w',86400*3);"))
+  (assert-string= "7"        (%php-run-capture "<?php echo gmdate('N',86400*3);"))
+  ;; g = 12-hour without leading zero
+  (assert-string= "1:01 AM"  (%php-run-capture "<?php echo gmdate('g:i A',3661);"))
+  ;; existing date parts unaffected
+  (assert-string= "1970-01-02 00:00:00" (%php-run-capture "<?php echo gmdate('Y-m-d H:i:s',86400);"))
+  (assert-string= "Thursday, January 1, 1970" (%php-run-capture "<?php echo gmdate('l, F j, Y',0);")))

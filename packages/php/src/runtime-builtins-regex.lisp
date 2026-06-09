@@ -515,7 +515,13 @@ an array of every full match, k an array of every capture-group-k match."
     (destructuring-bind (sec min hour day month year dow dst tz) decoded
       (declare (ignore dst tz))
       (with-output-to-string (out)
+        ;; decode-universal-time's day-of-week is 0=Monday..6=Sunday; PHP's `w'
+        ;; is 0=Sunday..6=Saturday and `N' is 1=Monday..7=Sunday.  (Using the CL
+        ;; value directly made every weekday off by one — gmdate('D',0) gave Wed
+        ;; for 1970-01-01, a Thursday.)
         (let ((fmt (%php-stringify format))
+              (php-w (mod (1+ dow) 7))      ; PHP w: 0=Sunday
+              (php-n (1+ dow))              ; PHP N: 1=Monday..7=Sunday
               (month-names #("January" "February" "March" "April" "May" "June"
                              "July" "August" "September" "October" "November" "December"))
               (day-names #("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")))
@@ -531,12 +537,13 @@ an array of every full match, k an array of every capture-group-k match."
                       (#\F (aref month-names (1- month)))
                       (#\d (format nil "~2,'0D" day))
                       (#\j (format nil "~D" day))
-                      (#\D (subseq (aref day-names dow) 0 3))
-                      (#\l (aref day-names dow))
-                      (#\N (format nil "~D" (if (= dow 0) 7 dow)))  ; ISO day (Mon=1)
-                      (#\w (format nil "~D" dow))
+                      (#\D (subseq (aref day-names php-w) 0 3))
+                      (#\l (aref day-names php-w))
+                      (#\N (format nil "~D" php-n))
+                      (#\w (format nil "~D" php-w))
                       (#\H (format nil "~2,'0D" hour))
                       (#\G (format nil "~D" hour))
+                      (#\g (format nil "~D" (let ((h (mod hour 12))) (if (= h 0) 12 h))))
                       (#\h (format nil "~2,'0D" (let ((h (mod hour 12))) (if (= h 0) 12 h))))
                       (#\i (format nil "~2,'0D" min))
                       (#\s (format nil "~2,'0D" sec))
