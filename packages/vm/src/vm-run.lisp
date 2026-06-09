@@ -345,6 +345,11 @@ Otherwise a fresh state is created from OUTPUT-STREAM."
     (let ((result
             (let ((*vm-exec-flat* flat)
                   (*vm-exec-labels* labels)
+                  ;; Bind *standard-output* to the program's output stream so host
+                  ;; bridge builtins that print via write-string (var_dump,
+                  ;; var_export, …) land in the same place as echo / ast-print,
+                  ;; and are captured when the output stream is redirected.
+                  (*standard-output* (vm-output-stream state))
                   ;; Expose the running state so host bridges (e.g. JS Array.map)
                   ;; can call a VM closure back via %vm-call-closure-sync.
                   (*vm-state* state)

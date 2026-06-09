@@ -529,3 +529,27 @@ rational."
   ;; sqrt returns a double (PHP 14-digit precision), whole roots print as int
   (assert-string= "1.4142135623731" (%php-run-capture "<?php echo sqrt(2);"))
   (assert-string= "2"       (%php-run-capture "<?php echo sqrt(4);")))
+
+(deftest php-e2e-var-dump-and-export
+  "var_dump PRINTS a type-annotated dump (it does not return a string), and
+var_export prints a re-parseable representation.  Regressions: var_dump built
+its string with with-output-to-string and returned it (so nothing was printed)
+and used the raw CL float form; var_export was registered as a lambda, so the
+builtin dispatch (which bridges a function SYMBOL) failed with 'Undefined
+function'."
+  (assert-string= "int(42)"        (%php-run-capture "<?php var_dump(42);"))
+  (assert-string= "string(2) \"hi\"" (%php-run-capture "<?php var_dump('hi');"))
+  (assert-string= "bool(true)"     (%php-run-capture "<?php var_dump(true);"))
+  (assert-string= "float(1.5)"     (%php-run-capture "<?php var_dump(1.5);"))
+  (assert-string= "NULL"           (%php-run-capture "<?php var_dump(null);"))
+  ;; nested array dump in PHP's multi-line format
+  (assert-string= (format nil "array(2) {~%  [0]=>~%  int(1)~%  [1]=>~%  int(2)~%}")
+                  (%php-run-capture "<?php var_dump([1,2]);"))
+  ;; var_export re-parseable forms
+  (assert-string= "42"    (%php-run-capture "<?php var_export(42);"))
+  (assert-string= "'hi'"  (%php-run-capture "<?php var_export('hi');"))
+  (assert-string= "true"  (%php-run-capture "<?php var_export(true);"))
+  (assert-string= (format nil "array (~%  0 => 1,~%  1 => 2,~%)")
+                  (%php-run-capture "<?php var_export([1,2]);"))
+  ;; return-mode var_export
+  (assert-string= "7"     (%php-run-capture "<?php echo var_export(7, true);")))

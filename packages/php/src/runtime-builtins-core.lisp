@@ -90,17 +90,65 @@
         text
         (progn (princ text) t))))
 
+(defun %php-var-dump-to-stream (value stream indent)
+  "Write one var_dump entry for VALUE to STREAM at INDENT spaces (recursive for
+arrays).  Floats use the PHP number format, not the raw CL form."
+  (let ((pad (make-string indent :initial-element #\Space)))
+    (case (%php-value-type value)
+      (:null   (format stream "~ANULL~%" pad))
+      (:bool   (format stream "~Abool(~A)~%" pad (if value "true" "false")))
+      (:int    (format stream "~Aint(~D)~%" pad value))
+      (:float  (format stream "~Afloat(~A)~%" pad (%php-number-to-string value)))
+      (:string (format stream "~Astring(~D) \"~A\"~%" pad (length value) value))
+      (:array
+       (format stream "~Aarray(~D) {~%" pad (%php-count value))
+       (dolist (pair (%php-array-pairs value))
+         (let ((k (car pair)))
+           (if (integerp k)
+               (format stream "~A  [~D]=>~%" pad k)
+               (format stream "~A  [\"~A\"]=>~%" pad k)))
+         (%php-var-dump-to-stream (cdr pair) stream (+ indent 2)))
+       (format stream "~A}~%" pad))
+      (otherwise (format stream "~Aobject(~A)~%" pad (%php-value-display-string value))))))
+
 (defun %php-var-dump (&rest values)
-  "Return a basic var_dump-style string for VALUES."
-  ;; (%php-var-dump 1 "x") => "int(1)\nstring(1) \"x\"\n"
-  (with-output-to-string (stream)
-    (dolist (value values)
-      (case (%php-value-type value)
-        (:null (format stream "NULL~%"))
-        (:bool (format stream "bool(~A)~%" (if value "true" "false")))
-        (:int (format stream "int(~D)~%" value))
-        (:float (format stream "float(~A)~%" value))
-        (:string (format stream "string(~D) \"~A\"~%" (length value) value))
-        (:array (format stream "array(~D) ~A~%" (%php-count value)
-                        (%php-value-display-string value)))
-        (otherwise (format stream "object(~A)~%" (%php-value-display-string value)))))))
+  "PHP var_dump: WRITE a type-annotated dump of each value to output (it prints;
+it does not return a string)."
+  (dolist (value values)
+    (write-string (with-output-to-string (s)
+                    (%php-var-dump-to-stream value s 0))))
+  nil)
+
+(defun %php-var-export-string (value indent)
+  "Build PHP var_export output for VALUE (a re-parseable representation):
+ints/floats bare, strings single-quoted (with ' and \\ escaped), bools
+true/false, null NULL, arrays as `array ( k => v, ... )'."
+  (let ((pad (make-string indent :initial-element #\Space)))
+    (case (%php-value-type value)
+      (:null   "NULL")
+      (:bool   (if value "true" "false"))
+      (:int    (princ-to-string value))
+      (:float  (%php-number-to-string value))
+      (:string (with-output-to-string (s)
+                 (write-char #\' s)
+                 (loop for ch across value
+                       do (when (or (char= ch #\') (char= ch #\\)) (write-char #\\ s))
+                          (write-char ch s))
+                 (write-char #\' s)))
+      (:array
+       (with-output-to-string (s)
+         (format s "array (~%")
+         (dolist (pair (%php-array-pairs value))
+           (let ((k (car pair)))
+             (format s "~A  ~A => ~A,~%" pad
+                     (if (integerp k) (princ-to-string k)
+                         (%php-var-export-string k 0))
+                     (%php-var-export-string (cdr pair) (+ indent 2)))))
+         (format s "~A)" pad)))
+      (otherwise (%php-value-display-string value)))))
+
+(defun %php-var-export (value &optional return-p)
+  "PHP var_export: print VALUE's re-parseable representation, or return it as a
+string when RETURN-P is truthy."
+  (let ((s (%php-var-export-string value 0)))
+    (if (%php-truthy return-p) s (progn (write-string s) nil))))

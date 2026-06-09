@@ -512,9 +512,10 @@
   ;; Output / misc.
   (%php-register-builtin "echo" (lambda (&rest args) (dolist (a args) (write-string (%php-stringify a))) nil))
   (%php-register-builtin "print" (lambda (arg) (write-string (%php-stringify arg)) 1))
-  (%php-register-builtin "var_export" (lambda (v &optional return-p)
-                                        (let ((s (%php-print-r v)))
-                                          (if (%php-truthy return-p) s (write-string s)))))
+  ;; Registered by SYMBOL (not a lambda): builtin dispatch resolves to a function
+  ;; symbol to bridge, so the lambda-registered var_export failed with "Undefined
+  ;; function" when actually called.
+  (%php-register-builtin "var_export" '%php-var-export)
   (%php-register-builtin "serialize" (lambda (v) (format nil "s:~D:\"~A\"" (length (%php-stringify v)) (%php-stringify v))))
   (%php-register-builtin "unserialize" (lambda (s) (%php-stringify s)))
 
