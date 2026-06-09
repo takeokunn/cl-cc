@@ -933,3 +933,23 @@ number_format(1234.5) gave 1,234 instead of 3 and 1,235."
   (assert-string= "3.14"       (%php-run-capture "<?php echo number_format(3.14159,2);"))
   (assert-string= "1,234.57"   (%php-run-capture "<?php echo number_format(1234.567,2);"))
   (assert-string= "1.234,50"   (%php-run-capture "<?php echo number_format(1234.5,2,',','.');")))
+
+(deftest php-e2e-natsort
+  "natsort/natcasesort sort in NATURAL order (digit runs compared numerically),
+not lexically — img2 before img10.  Also adds strnatcmp/strnatcasecmp.  natsort
+previously used plain string< so 'img10' sorted before 'img2'."
+  (assert-string= "img1,img2,img10"
+                  (%php-run-capture "<?php $a=['img10','img2','img1']; natsort($a); echo implode(',',$a);"))
+  (assert-string= "file1.txt,file2.txt,file10.txt"
+                  (%php-run-capture "<?php $a=['file10.txt','file1.txt','file2.txt']; natsort($a); echo implode(',',$a);"))
+  ;; natsort preserves keys
+  (assert-string= "2,1,3"
+                  (%php-run-capture "<?php $a=[3=>'a10',1=>'a2',2=>'a1']; natsort($a); echo implode(',',array_keys($a));"))
+  ;; case-insensitive natural sort
+  (assert-string= "Img1,img2,IMG10"
+                  (%php-run-capture "<?php $a=['IMG10','img2','Img1']; natcasesort($a); echo implode(',',$a);"))
+  ;; strnatcmp / strnatcasecmp
+  (assert-string= "-1" (%php-run-capture "<?php echo strnatcmp('img2','img10');"))
+  (assert-string= "1"  (%php-run-capture "<?php echo strnatcmp('img10','img2');"))
+  (assert-string= "0"  (%php-run-capture "<?php echo strnatcmp('abc','abc');"))
+  (assert-string= "-1" (%php-run-capture "<?php echo strnatcasecmp('IMG2','img10');")))

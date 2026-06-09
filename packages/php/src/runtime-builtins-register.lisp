@@ -245,6 +245,8 @@
   (%php-register-builtin "array_walk_recursive" '%php-array-walk-recursive)
   (%php-register-builtin "natsort" '%php-natsort)
   (%php-register-builtin "natcasesort" '%php-natcasesort)
+  (%php-register-builtin "strnatcmp" '%php-strnatcmp)
+  (%php-register-builtin "strnatcasecmp" '%php-strnatcasecmp)
 
   ;; Array sorts and extras.
   (%php-register-builtin "array_multisort" '%php-array-multisort)
