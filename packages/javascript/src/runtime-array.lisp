@@ -16,6 +16,11 @@
           do (setf (aref arr i) el))
     arr))
 
+(defun %js-list-to-array (list)
+  "Create a JS array (adjustable vector) from a Common Lisp LIST. Used to turn a
+rest parameter's collected &rest list into a real JS array."
+  (apply #'%js-make-array list))
+
 (defun %js-array-push (arr val)
   "Append VAL to ARR; return new length."
   (vector-push-extend val arr)

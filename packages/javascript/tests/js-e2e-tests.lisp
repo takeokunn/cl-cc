@@ -40,6 +40,17 @@ globals, so EVERY JS program failed with 'Unbound global variable: *JS-...*')."
   (assert-string= "Hi Bob" (%js-run-capture "let n=\"Bob\"; console.log(`Hi ${n}`);"))
   (assert-string= "2"     (%js-run-capture "function mk(){let c=0; return ()=>++c;} let f=mk(); f(); console.log(f());")))
 
+(deftest js-e2e-default-and-rest-params
+  "function declarations honor default parameter values and ...rest collection
+(regression: %js-parse-param-list parsed then discarded defaults and mistreated
+...rest as a positional param)."
+  (assert-string= "5"  (%js-run-capture "function g(x=5){return x;} console.log(g());"))
+  (assert-string= "9"  (%js-run-capture "function g(x=5){return x;} console.log(g(9));"))
+  (assert-string= "13" (%js-run-capture "function f(a,b=10){return a+b;} console.log(f(3));"))
+  (assert-string= "3"  (%js-run-capture "function s(...n){return n.length;} console.log(s(1,2,3));"))
+  (assert-string= "10" (%js-run-capture "function s(...n){return n.reduce((a,b)=>a+b,0);} console.log(s(1,2,3,4));"))
+  (assert-string= "12" (%js-run-capture "function f(a,...rest){return a+rest.length;} console.log(f(10,1,2));")))
+
 (deftest js-e2e-class-this-binding
   "Class constructors and methods bind `this' to the instance — in both the host
 special and the VM-global %js-this — so this.x reads/writes the receiver
