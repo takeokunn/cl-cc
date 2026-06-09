@@ -34,6 +34,40 @@
   "Build a PHP truthiness helper call for conditional contexts."
   (%php-call 'cl-cc/php::%php-truthy expr))
 
+(defun %php-spread-call-p (node)
+  "Return true when NODE is a (...expr) spread-argument marker emitted by
+php-parse-arglist."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-spread)))))
+
+(defun %php-args-have-spread-p (args)
+  "Return true when ARGS contains a spread marker."
+  (some #'%php-spread-call-p args))
+
+(defun %php-spread-arglist-expr (args)
+  "Build a runtime list-of-arguments expression for a call with spreads: each
+positional arg A becomes (list A) and each spread (...expr) becomes its array's
+values list; the pieces are appended into one flat argument list for apply."
+  (make-ast-call
+   :func (make-ast-var :name 'append)
+   :args (mapcar (lambda (a)
+                   (if (%php-spread-call-p a)
+                       (make-ast-call
+                        :func (make-ast-var :name 'cl-cc/php::%php-array-values-list)
+                        :args (list (first (ast-call-args a))))
+                       (make-ast-call :func (make-ast-var :name 'list) :args (list a))))
+                 args)))
+
+(defun %php-call-with-spread (func-node args)
+  "Build a PHP call of FUNC-NODE with ARGS, expanding any (...expr) spread args
+via apply. FUNC-NODE is a value expression (e.g. a closure variable). When no
+spread is present this is an ordinary ast-call."
+  (if (%php-args-have-spread-p args)
+      (make-ast-apply :func func-node :args (list (%php-spread-arglist-expr args)))
+      (make-ast-call :func func-node :args args)))
+
 (defun %php-helper-var (name)
   "Return an AST variable for a PHP runtime helper NAME."
   (make-ast-var :name name))
@@ -106,15 +140,18 @@ function' at runtime (e.g. array_push)."
 (defun %php-parse-function-call (qualified-name fallback-name stream known-vars)
   "Parse a PHP function call and lower known builtins to runtime helpers."
   (multiple-value-bind (args rest kv) (php-parse-arglist stream known-vars)
-    (values (make-ast-call
-             :func (make-ast-var
-                    :name (or (and (%php-global-builtin-function-p
-                                    qualified-name fallback-name)
-                                   (%php-builtin-helper-symbol
-                                    (%php-simple-function-spelling qualified-name)))
-                              fallback-name))
-             :args args)
-            rest kv)))
+    (let ((fn-sym (or (and (%php-global-builtin-function-p
+                            qualified-name fallback-name)
+                           (%php-builtin-helper-symbol
+                            (%php-simple-function-spelling qualified-name)))
+                      fallback-name)))
+      (values (if (%php-args-have-spread-p args)
+                  ;; f(...$args): pass the function NAME symbol to apply so it
+                  ;; resolves as a function, spreading the runtime argument list.
+                  (make-ast-apply :func fn-sym
+                                  :args (list (%php-spread-arglist-expr args)))
+                  (make-ast-call :func (make-ast-var :name fn-sym) :args args))
+              rest kv))))
 
 ;;; ─── Null-coalesce / Elvis Lowering ─────────────────────────────────────────
 

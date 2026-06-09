@@ -172,6 +172,20 @@ variadic param received the first arg directly instead of a collected array)."
   (assert-string= "6"  (%php-run-capture "<?php $s=function(...$n){ return array_sum($n); }; echo $s(1,2,3);"))
   (assert-string= "15" (%php-run-capture "<?php $s=fn(...$n)=>array_sum($n); echo $s(5,5,5);")))
 
+(deftest php-e2e-spread-call
+  "f(...$args) expands an array into positional arguments (regression: spread
+lowered to an unconsumed %php-spread marker). Lowers to apply over a runtime arg
+list."
+  (assert-string= "5"  (%php-run-capture "<?php function add($a,$b){ return $a+$b; } $args=[2,3]; echo add(...$args);"))
+  (assert-string= "6"  (%php-run-capture "<?php function add3($a,$b,$c){ return $a+$b+$c; } $x=[1,2,3]; echo add3(...$x);"))
+  (assert-string= "xyz" (%php-run-capture "<?php function f($a,$b,$c){ return $a.$b.$c; } $r=['y','z']; echo f('x',...$r);"))
+  (assert-string= "3"  (%php-run-capture "<?php $a=[3,1,2]; echo max(...$a);")))
+
+(deftest php-e2e-spread-composes-with-variadic-and-closures
+  "Spread expands into a variadic collector, and works on dynamic closure calls."
+  (assert-string= "60" (%php-run-capture "<?php function s(...$n){ return array_sum($n); } $a=[10,20,30]; echo s(...$a);"))
+  (assert-string= "20" (%php-run-capture "<?php $f=function($a,$b){ return $a*$b; }; $args=[4,5]; echo $f(...$args);")))
+
 (deftest php-parser-cli-compile-path-for-php-files
   "Characterization: native compile path should auto-detect .php files and compile PHP source end-to-end."
   (let* ((tmp-dir (uiop:temporary-directory))

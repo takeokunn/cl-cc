@@ -864,7 +864,9 @@ precede a parameter's type in __construct."
 
 (deftest-each php-parser-call-syntax-variants
   "Modern PHP call syntax variants parse without error."
-  :cases (("spread-arg"    "<?php foo(...$args);"                #'cl-cc:ast-call-p)
+  ;; foo(...$args) lowers to an apply over a runtime-spread argument list, so it
+  ;; is an ast-apply (not an ast-call). The named-arg variants stay ast-call.
+  :cases (("spread-arg"    "<?php foo(...$args);"                #'cl-cc:ast-apply-p)
           ("named-args"    "<?php foo(name: 'x', age: 5);"      #'cl-cc:ast-call-p)
           ("named-mixed"   "<?php foo('pos', name: 'x');"       #'cl-cc:ast-call-p))
   (src pred)

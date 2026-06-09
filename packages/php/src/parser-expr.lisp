@@ -275,7 +275,7 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
            ;; path JS uses for fn(args)).
            ((eq type :T-LPAREN)
             (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest kv)
-              (setf obj (make-ast-call :func obj :args args)
+              (setf obj (%php-call-with-spread obj args)
                     rest rest2
                     kv kv2)))
           (t (return)))))
