@@ -443,6 +443,17 @@ Each member is an ast-slot-def whose :imports plist carries:
                         :body   (ast-defun-body  fn)))
       (t nil))))
 
+(defun %js-class-member-key (slot orig-name)
+  "Prototype/class key for a class member.  A get/set accessor is stored under
+__get_NAME / __set_NAME so %js-get-prop / %js-set-prop dispatch it as an
+accessor (invoke on read/write); a regular method keeps its plain name.  Without
+this, `get v()' was stored as a plain prototype method, so `obj.v' returned the
+getter FUNCTION instead of its result."
+  (case (getf (ast-imports slot) :js-member-kind)
+    (:getter (concatenate 'string "__get_" orig-name))
+    (:setter (concatenate 'string "__set_" orig-name))
+    (t orig-name)))
+
 (defun %js-lower-class-to-ast (name-sym super-expr members decorators)
   "Lower a parsed class to a prototype-based JS class using %js-make-class.
 Emits: (defvar ClassName (%js-make-class SuperOrNil CtorOrNil 'method1 fn1 ...))
@@ -484,7 +495,7 @@ DECORATORS — list of AST nodes for class-level decorators"
                                       (if n (string-downcase (symbol-name n)) "")))
                 for fn = (%js-slot-to-method-lambda slot)
                 when fn
-                  append (list (make-ast-quote :value orig-name) fn)))
+                  append (list (make-ast-quote :value (%js-class-member-key slot orig-name)) fn)))
          ;; Static method args, preceded by the "@@static" marker that
          ;; %js-make-class splits on to set them on the class object itself.
          (static-args
@@ -494,7 +505,7 @@ DECORATORS — list of AST nodes for class-level decorators"
                                       (if n (string-downcase (symbol-name n)) "")))
                 for fn = (%js-slot-to-method-lambda slot)
                 when fn
-                  append (list (make-ast-quote :value orig-name) fn)))
+                  append (list (make-ast-quote :value (%js-class-member-key slot orig-name)) fn)))
          ;; %js-make-class call: super ctor inst-methods... [@@static static-methods...]
          (make-class-call
           (make-ast-call

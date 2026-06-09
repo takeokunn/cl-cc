@@ -557,3 +557,25 @@ typeof was wrong."
   (assert-string= "v=null"    (%js-run-capture "console.log(\"v=\"+null);"))
   ;; void yields undefined
   (assert-string= "undefined" (%js-run-capture "console.log(void 0);")))
+
+;;; ─── 18. Class getters and setters ──────────────────────────────────────────
+
+(deftest js-e2e-class-getters-setters
+  "Class get/set accessors are invoked on instance property read/write with
+`this' bound to the instance, including inheritance via extends.  Regression:
+a class `get v()' was stored as a plain prototype method, so `obj.v' returned
+the getter FUNCTION instead of its result.  Class accessors now live under
+__get_NAME/__set_NAME on the prototype and %js-get-prop/%js-set-prop dispatch
+them through the prototype chain."
+  (assert-string= "9"  (%js-run-capture "class C{get v(){return 9;}} console.log(new C().v);"))
+  ;; getter sees `this'
+  (assert-string= "20" (%js-run-capture "class C{constructor(){this.n=10;} get v(){return this.n*2;}} console.log(new C().v);"))
+  ;; setter invoked on write
+  (assert-string= "5"  (%js-run-capture "class C{set v(x){this._x=x;}} const o=new C(); o.v=5; console.log(o._x);"))
+  ;; getter + setter on the same name both work
+  (assert-string= "8"  (%js-run-capture "class C{constructor(){this._x=1;} get x(){return this._x;} set x(v){this._x=v;}} const o=new C(); o.x=8; console.log(o.x);"))
+  ;; an inherited getter resolves through the prototype chain
+  (assert-string= "1"  (%js-run-capture "class A{get v(){return 1;}} class B extends A{} console.log(new B().v);"))
+  ;; regression guards: a regular method and a field are unaffected
+  (assert-string= "3"  (%js-run-capture "class C{m(){return 3;}} console.log(new C().m());"))
+  (assert-string= "7"  (%js-run-capture "class C{constructor(){this.x=7;}} console.log(new C().x);")))

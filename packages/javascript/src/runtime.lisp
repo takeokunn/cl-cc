@@ -275,26 +275,44 @@ invoke — mirroring how console.log resolves to a function value.")
 extends it to also recognize a compiled-JS closure (vm-closure-object), so
 prototype-chain method lookup can tell a method from an inherited data value.")
 
-(defun %js-proto-method-lookup (obj k)
-  "Walk OBJ's __proto__ chain for key K (JS prototype method resolution). A
-callable found on the chain is a METHOD: return a closure that binds %js-this
-to OBJ and then calls the method. A non-callable inherited value is returned
-as-is; a miss yields undefined.
-The dynamic binding of %js-this is what makes `this.x' in method bodies work."
+(defun %js-proto-accessor-lookup (obj accessor-key)
+  "Walk OBJ's __proto__ chain for ACCESSOR-KEY (e.g. \"__get_x\" / \"__set_x\")
+and return the accessor function, or NIL.  Used for class getters/setters, which
+live on the prototype."
   (loop with proto = (gethash "__proto__" obj)
         while (%js-ht-p proto)
-        do (multiple-value-bind (val found) (gethash k proto)
-             (when found
-               (return (if (funcall *js-callable-p* val)
-                           ;; Bind %js-this dynamically so `this' in the method
-                           ;; body resolves to OBJ, then dispatch through
-                           ;; %js-funcall for VM-closure compatibility.
-                           (let ((method val) (receiver obj))
-                             (lambda (&rest args)
-                               (%js-call-with-this receiver method args)))
-                           val)))
-             (setf proto (gethash "__proto__" proto)))
-        finally (return +js-undefined+)))
+        do (multiple-value-bind (val found) (gethash accessor-key proto)
+             (when found (return val)))
+           (setf proto (gethash "__proto__" proto))
+        finally (return nil)))
+
+(defun %js-proto-method-lookup (obj k)
+  "Walk OBJ's __proto__ chain for key K (JS prototype method resolution). A
+getter (__get_K on the chain) is invoked with `this' = OBJ and its result
+returned. A callable found under K is a METHOD: return a closure that binds
+%js-this to OBJ and then calls the method. A non-callable inherited value is
+returned as-is; a miss yields undefined.
+The dynamic binding of %js-this is what makes `this.x' in method bodies work."
+  (let ((getter-key (concatenate 'string "__get_" k)))
+    (loop with proto = (gethash "__proto__" obj)
+          while (%js-ht-p proto)
+          do ;; an inherited getter takes precedence and is invoked immediately
+             (multiple-value-bind (gfn gfound) (gethash getter-key proto)
+               (when gfound
+                 (return-from %js-proto-method-lookup (%js-call-with-this obj gfn nil))))
+             (multiple-value-bind (val found) (gethash k proto)
+               (when found
+                 (return-from %js-proto-method-lookup
+                   (if (funcall *js-callable-p* val)
+                       ;; Bind %js-this dynamically so `this' in the method body
+                       ;; resolves to OBJ, then dispatch through %js-funcall for
+                       ;; VM-closure compatibility.
+                       (let ((method val) (receiver obj))
+                         (lambda (&rest args)
+                           (%js-call-with-this receiver method args)))
+                       val))))
+             (setf proto (gethash "__proto__" proto))
+          finally (return +js-undefined+))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Property access
@@ -383,9 +401,11 @@ plain own property."
          ;; setter on the same key coexist instead of overwriting each other.
          ((%js-accessor-descriptor-p value)
           (%js-object-put-entry obj k value))
-         ;; Plain write to a key that has a setter: invoke it with `this' = OBJ.
+         ;; Plain write to a key that has a setter (own, or inherited from the
+         ;; class prototype): invoke it with `this' = OBJ.
          (t
-          (let ((setter (gethash (concatenate 'string "__set_" k) obj)))
+          (let ((setter (or (gethash (concatenate 'string "__set_" k) obj)
+                            (%js-proto-accessor-lookup obj (concatenate 'string "__set_" k)))))
             (if setter
                 (%js-call-with-this obj setter (list value))
                 (setf (gethash k obj) value))))))
