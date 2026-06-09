@@ -885,3 +885,20 @@ words were never broken."
   ;; ordinary space-wrapping unaffected
   (assert-string= "aaa|bbb|ccc" (%php-run-capture "<?php echo wordwrap('aaa bbb ccc',5,'|');"))
   (assert-string= "The quick|brown fox" (%php-run-capture "<?php echo wordwrap('The quick brown fox',10,'|');")))
+
+(deftest php-e2e-json-encode-pretty
+  "json_encode honours JSON_PRETTY_PRINT (4-space indent, newlines, space after
+the object colon).  The flags argument was previously declared ignored, so the
+flag produced compact output."
+  ;; compact output unchanged (no flag)
+  (assert-string= "{\"a\":1,\"b\":[2,3]}"
+                  (%php-run-capture "<?php echo json_encode(['a'=>1,'b'=>[2,3]]);"))
+  ;; pretty object with a nested array
+  (assert-string= (format nil "{~%    \"a\": 1,~%    \"b\": [~%        2,~%        3~%    ]~%}")
+                  (%php-run-capture "<?php echo json_encode(['a'=>1,'b'=>[2,3]],JSON_PRETTY_PRINT);"))
+  ;; pretty list
+  (assert-string= (format nil "[~%    1,~%    2,~%    3~%]")
+                  (%php-run-capture "<?php echo json_encode([1,2,3],JSON_PRETTY_PRINT);"))
+  ;; empty array stays inline even in pretty mode
+  (assert-string= (format nil "{~%    \"x\": [],~%    \"y\": 1~%}")
+                  (%php-run-capture "<?php echo json_encode(['x'=>[],'y'=>1],JSON_PRETTY_PRINT);")))

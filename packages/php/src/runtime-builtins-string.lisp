@@ -294,11 +294,12 @@
 ;;; ─── JSON functions ───────────────────────────────────────────────────────────
 
 (defun %php-json-encode (value &optional flags depth)
-  "PHP json_encode: encode PHP value to JSON string."
-  (declare (ignore flags depth))
-  (%php-json-encode-value value 0))
+  "PHP json_encode: encode PHP value to JSON string.  Honours JSON_PRETTY_PRINT
+(128): 4-space indentation, newlines, and a space after each object colon."
+  (declare (ignore depth))
+  (%php-json-encode-value value 0 (if (integerp flags) flags 0)))
 
-(defun %php-json-encode-value (val depth)
+(defun %php-json-encode-value (val depth flags)
   (when (> depth 512) (return-from %php-json-encode-value "null"))
   (cond
     ((%php-null-p val) "null")
@@ -311,17 +312,32 @@
     ((stringp val) (%php-json-quote-string val))
     ((hash-table-p val)
      (let* ((pairs (%php-array-pairs val))
-            (is-array-p (loop for i from 0 for (k . v) in pairs
-                              always (eql k i))))
-       (if is-array-p
-           (format nil "[~{~A~^,~}]"
-                   (mapcar (lambda (p) (%php-json-encode-value (cdr p) (1+ depth))) pairs))
-           (format nil "{~{~A~^,~}}"
-                   (mapcar (lambda (p)
-                             (format nil "~A:~A"
-                                     (%php-json-quote-string (%php-stringify (car p)))
-                                     (%php-json-encode-value (cdr p) (1+ depth))))
-                           pairs)))))
+            (is-array-p (loop for i from 0 for (k . v) in pairs always (eql k i)))
+            (pretty (logbitp 7 flags)))           ; JSON_PRETTY_PRINT = 128
+       (if (null pairs)
+           "[]"                                    ; PHP renders an empty array as []
+           (let ((items (mapcar
+                         (lambda (p)
+                           (let ((v-str (%php-json-encode-value (cdr p) (1+ depth) flags)))
+                             (if is-array-p
+                                 v-str
+                                 (concatenate 'string
+                                              (%php-json-quote-string (%php-stringify (car p)))
+                                              (if pretty ": " ":")
+                                              v-str))))
+                         pairs)))
+             (let ((o (if is-array-p "[" "{")) (c (if is-array-p "]" "}")))
+               (if pretty
+                   (let ((ind (make-string (* 4 (1+ depth)) :initial-element #\Space))
+                         (ind0 (make-string (* 4 depth) :initial-element #\Space)))
+                     (with-output-to-string (s)
+                       (write-string o s) (write-char #\Newline s)
+                       (loop for (it . rest) on items
+                             do (write-string ind s) (write-string it s)
+                                (when rest (write-char #\, s))
+                                (write-char #\Newline s))
+                       (write-string ind0 s) (write-string c s)))
+                   (format nil "~A~{~A~^,~}~A" o items c)))))))
     (t "null")))
 
 (defun %php-json-quote-string (s)
