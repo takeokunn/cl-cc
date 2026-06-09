@@ -570,27 +570,38 @@ so the block is the second arg of the %php-generator-exit call."
     (assert-equal (cl-cc:ast-imports (first asts))
                   (cl-cc:ast-imports (second asts)))))
 
+(defun %php-new-make-instance (value)
+  "Extract the ast-make-instance from a `new C(...)' lowering. The lowering wraps
+it in (let ((inst (make-instance C))) (if (has __construct) ...) inst), so the
+make-instance is the first binding's value; falls back to VALUE itself."
+  (if (cl-cc:ast-make-instance-p value)
+      value
+      (cdr (first (cl-cc:ast-let-bindings value)))))
+
 (deftest php-parser-use-alias-resolves-new-class-name
   "A class import alias resolves `new Alias()` to the imported fully-qualified class name."
-  (let* ((value (%php-first-binding-value
-                 "<?php namespace App\\Lib; use Vendor\\Thing as Thing; $x = new Thing();"))
-         (class-ref (cl-cc:ast-make-instance-class value)))
-    (assert-true (cl-cc:ast-make-instance-p value))
+  (let* ((mi (%php-new-make-instance
+              (%php-first-binding-value
+               "<?php namespace App\\Lib; use Vendor\\Thing as Thing; $x = new Thing();")))
+         (class-ref (cl-cc:ast-make-instance-class mi)))
+    (assert-true (cl-cc:ast-make-instance-p mi))
     (assert-true (cl-cc:ast-var-p class-ref))
     (assert-string= "VENDOR\\THING" (symbol-name (cl-cc:ast-var-name class-ref)))))
 
 (deftest php-parser-default-use-alias-resolves-new-class-name
   "A class import without `as` uses the final namespace segment as its alias."
-  (let* ((value (%php-first-binding-value
-                 "<?php namespace App\\Lib; use Vendor\\Thing; $x = new Thing();"))
-         (class-ref (cl-cc:ast-make-instance-class value)))
+  (let* ((mi (%php-new-make-instance
+              (%php-first-binding-value
+               "<?php namespace App\\Lib; use Vendor\\Thing; $x = new Thing();")))
+         (class-ref (cl-cc:ast-make-instance-class mi)))
     (assert-string= "VENDOR\\THING" (symbol-name (cl-cc:ast-var-name class-ref)))))
 
 (deftest php-parser-fully-qualified-new-class-name-stays-global
   "A leading namespace separator on `new` names resolves from the PHP global namespace."
-  (let* ((value (%php-first-binding-value
-                 "<?php namespace App\\Lib; $x = new \\Vendor\\Thing();"))
-         (class-ref (cl-cc:ast-make-instance-class value)))
+  (let* ((mi (%php-new-make-instance
+              (%php-first-binding-value
+               "<?php namespace App\\Lib; $x = new \\Vendor\\Thing();")))
+         (class-ref (cl-cc:ast-make-instance-class mi)))
     (assert-string= "VENDOR\\THING" (symbol-name (cl-cc:ast-var-name class-ref)))))
 
 (deftest php-parser-namespace-resolves-relative-class-declaration-and-ancestry

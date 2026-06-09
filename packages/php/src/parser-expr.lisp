@@ -147,11 +147,33 @@ gensym-named class and makes an instance of it."
     (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
       (let ((class-name (php-ident-sym (php-resolve-qualified-name qualified-name :class))))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
-          (values (make-ast-make-instance
-                   :class (make-ast-var :name class-name)
-                   :initargs (loop for i from 0 for a in args
-                                   collect (cons (intern (format nil "ARG~D" i) :keyword) a)))
-                  rest3 kv3))))))
+          ;; new C(args): allocate the instance (properties default-init from their
+          ;; initforms), then run __construct($this, args) via %php-construct, and
+          ;; yield the instance. (Previously the args were passed as :ARGn CLOS
+          ;; initargs — which the class rejected — and the constructor never ran.)
+          (let ((inst-sym (gensym "PHP-INST-")))
+            (values (make-ast-let
+                     :bindings (list (cons inst-sym
+                                           (make-ast-make-instance
+                                            :class (make-ast-var :name class-name)
+                                            :initargs nil)))
+                     :body (list
+                            ;; Run __construct($this, args) only if the class defines
+                            ;; it. The call uses the normal method-dispatch (vm-call)
+                            ;; path, with the instance as the implicit $this first arg.
+                            (make-ast-if
+                             :cond (make-ast-call
+                                    :func (make-ast-var :name 'cl-cc/php::%php-has-method)
+                                    :args (list (make-ast-var :name inst-sym)
+                                                (make-ast-quote :value (php-ident-sym "__construct"))))
+                             :then (make-ast-call
+                                    :func (make-ast-slot-value
+                                           :object (make-ast-var :name inst-sym)
+                                           :slot (php-ident-sym "__construct"))
+                                    :args (cons (make-ast-var :name inst-sym) args))
+                             :else (make-ast-quote :value nil))
+                            (make-ast-var :name inst-sym)))
+                    rest3 kv3)))))))
 
 ;;; ─── Postfix ++/-- lowering ──────────────────────────────────────────────────
 ;;;

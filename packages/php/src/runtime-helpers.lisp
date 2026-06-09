@@ -101,6 +101,17 @@ After BODY-FN returns the box is written back to the array (mutations propagate)
   return-value  ; the generator's final return value
   done-p)       ; true when all values have been consumed
 
+(defun %php-has-method (instance name-sym)
+  "Return true when INSTANCE's class defines a slot/method named NAME-SYM. Used by
+the `new C(args)' lowering to call __construct only when it exists — the call
+itself runs through the normal method-dispatch (vm-call) path, so the constructor
+executes in the right VM context."
+  (and (cl-cc/vm::%vm-vector-instance-p instance)
+       (let ((class (aref instance 0)))
+         (and (hash-table-p class)
+              (cl-cc/vm::%vm-slot-vector-index class name-sym)
+              t))))
+
 (defun %php-generator-p (x) (php-generator-p x))
 
 (defvar *current-generator* nil

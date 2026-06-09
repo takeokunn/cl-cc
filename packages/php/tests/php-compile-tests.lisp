@@ -13,6 +13,18 @@ fresh VM state runs the program end-to-end."
     ;; Trim a trailing newline the VM appends when flushing program output.
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
+(deftest php-e2e-constructor
+  "new C(args) runs __construct with the instance as $this and the args
+(regression: the constructor never ran — args were passed as :ARGn CLOS initargs
+the class rejected). A class with no __construct is unaffected."
+  (assert-string= "made" (%php-run-capture "<?php class C{ function __construct(){ echo 'made'; } } $o=new C();"))
+  (assert-string= "9"    (%php-run-capture "<?php class C{ public $x; function __construct($v){ $this->x=$v; } } $o=new C(9); echo $o->x;"))
+  (assert-string= "Bob:30" (%php-run-capture "<?php class P{ public $n; public $a; function __construct($n,$a){ $this->n=$n; $this->a=$a; } } $p=new P('Bob',30); echo $p->n.':'.$p->a;"))
+  ;; constructor + a method that uses the constructed state
+  (assert-string= "10"   (%php-run-capture "<?php class C{ public $x; function __construct($v){ $this->x=$v; } function dbl(){ return $this->x*2; } } $o=new C(5); echo $o->dbl();"))
+  ;; a class with no constructor still constructs and uses property defaults
+  (assert-string= "5"    (%php-run-capture "<?php class C{ public $x=5; } $o=new C(); echo $o->x;")))
+
 (deftest php-e2e-instance-method-this
   "Instance methods bind $this to the receiver (regression: $this was an unbound
 variable, so $this->x inside a method produced nothing). Implemented by giving
