@@ -1019,7 +1019,8 @@ Returns (values ast rest)."
        (multiple-value-bind (tok rest) (js-consume stream)
          (declare (ignore tok))
          (multiple-value-bind (expr rest2) (js-parse-unary rest)
-           (values (make-ast-progn :forms (list expr (make-ast-quote :value :undefined)))
+           ;; void expr -> evaluate expr, yield undefined (the +js-undefined+ sentinel)
+           (values (make-ast-progn :forms (list expr (make-ast-quote :value :js-undefined)))
                    rest2))))
       ;; delete
       ((eq type :T-DELETE)

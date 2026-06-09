@@ -59,16 +59,19 @@ yield, await, import()."
        (multiple-value-bind (tok rest) (js-consume stream)
          (declare (ignore tok))
          (values (make-ast-quote :value nil) rest)))
-      ;; null literal
+      ;; null literal. The runtime null sentinel is +js-null+ (= :js-null); this
+      ;; MUST match it, not the bare :null keyword — otherwise %js-to-string prints
+      ;; "NULL" and %js-not-nullish treats `null' as non-nullish (null ?? x broke).
+      ;; (+js-null+ itself can't be named here: this file compiles before runtime.)
       ((eq type :T-NULL)
        (multiple-value-bind (tok rest) (js-consume stream)
          (declare (ignore tok))
-         (values (make-ast-quote :value :null) rest)))
-      ;; undefined
+         (values (make-ast-quote :value :js-null) rest)))
+      ;; undefined — likewise the +js-undefined+ sentinel (= :js-undefined)
       ((eq type :T-UNDEFINED)
        (multiple-value-bind (tok rest) (js-consume stream)
          (declare (ignore tok))
-         (values (make-ast-quote :value :undefined) rest)))
+         (values (make-ast-quote :value :js-undefined) rest)))
       ;; this
       ((eq type :T-THIS)
        (multiple-value-bind (tok rest) (js-consume stream)
@@ -163,8 +166,8 @@ Returns (values ast rest)."
           (declare (ignore tok2))
           (if (eq (js-peek-type rest2) :T-ARROW)
               (%js-finish-arrow-function nil rest2)
-              ;; () as expression is a syntax error in JS but we emit nil for tolerance
-              (values (make-ast-quote :value :undefined) rest2)))
+              ;; () as expression is a syntax error in JS but we emit undefined for tolerance
+              (values (make-ast-quote :value :js-undefined) rest2)))
         ;; Non-empty: collect items, recording BOTH an arrow-param interpretation
         ;; (params + optionals + rest-sym) and an expression fallback (exprs), then
         ;; commit once we can peek past the ) for =>.  A default param `x = e` is

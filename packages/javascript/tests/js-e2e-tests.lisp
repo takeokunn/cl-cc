@@ -532,3 +532,28 @@ like ?? does."
   (assert-string= "hi"  (%js-run-capture "function f(a){return a || \"def\";} console.log(f(\"hi\"));"))
   ;; short-circuit: RHS not evaluated when LHS already decides the result
   (assert-string= "0"   (%js-run-capture "let c=0; function s(){c++;return true;} false && s(); console.log(c);")))
+
+;;; ─── 17. null / undefined literals use the runtime sentinels ─────────────────
+
+(deftest js-e2e-null-undefined-literals
+  "The null / undefined literals lower to the runtime +js-null+ / +js-undefined+
+sentinels (:js-null / :js-undefined).  Regression: they lowered to the bare
+:null / :undefined keywords, which the runtime did not recognize — so they
+printed \"NULL\" / \"UNDEFINED\", `null ?? x' returned null instead of x, and
+typeof was wrong."
+  (assert-string= "null"      (%js-run-capture "console.log(null);"))
+  (assert-string= "undefined" (%js-run-capture "console.log(undefined);"))
+  (assert-string= "null"      (%js-run-capture "const x=null; console.log(x);"))
+  ;; ?? now treats null/undefined as nullish
+  (assert-string= "d"         (%js-run-capture "console.log(null ?? \"d\");"))
+  (assert-string= "d"         (%js-run-capture "console.log(undefined ?? \"d\");"))
+  ;; && yields the null operand (printed correctly)
+  (assert-string= "null"      (%js-run-capture "const x=null; console.log(x && x.foo);"))
+  ;; typeof and loose-equality semantics
+  (assert-string= "object"    (%js-run-capture "console.log(typeof null);"))
+  (assert-string= "undefined" (%js-run-capture "console.log(typeof undefined);"))
+  (assert-string= "true"      (%js-run-capture "console.log(null == undefined);"))
+  ;; string concatenation
+  (assert-string= "v=null"    (%js-run-capture "console.log(\"v=\"+null);"))
+  ;; void yields undefined
+  (assert-string= "undefined" (%js-run-capture "console.log(void 0);")))
