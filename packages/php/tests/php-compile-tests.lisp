@@ -988,3 +988,23 @@ CL ROUND, so round(2.5) gave 2 and round(-2.5) gave -2 instead of 3 and -3."
   (assert-string= "3.14" (%php-run-capture "<?php echo round(3.14159,2);"))
   (assert-string= "1.96" (%php-run-capture "<?php echo round(1.95583,2);"))
   (assert-string= "1242000" (%php-run-capture "<?php echo round(1241757,-3);")))
+
+(deftest php-e2e-sprintf-flags
+  "sprintf: the + flag prints a leading + on non-negative numbers; the 'X flag
+sets a custom pad character; %e/%E use the e/E exponent marker (CL prints a
+double-float's exponent as d/D)."
+  ;; %e / %E exponent marker
+  (assert-string= "1.234568e+4" (%php-run-capture "<?php echo sprintf('%e',12345.678);"))
+  (assert-string= "1.200000E-4" (%php-run-capture "<?php echo sprintf('%E',0.00012);"))
+  ;; + flag
+  (assert-string= "+5 -5"  (%php-run-capture "<?php echo sprintf('%+d %+d',5,-5);"))
+  (assert-string= "+0042"  (%php-run-capture "<?php echo sprintf('%+05d',42);"))
+  (assert-string= "-0042"  (%php-run-capture "<?php echo sprintf('%05d',-42);"))
+  ;; custom pad character
+  (assert-string= "********42" (%php-run-capture "<?php echo sprintf(\"%'*10d\",42);"))
+  (assert-string= "--------hi" (%php-run-capture "<?php echo sprintf(\"%'-10s\",'hi');"))
+  ;; regressions: existing behaviour unchanged
+  (assert-string= "00042"   (%php-run-capture "<?php echo sprintf('%05d',42);"))
+  (assert-string= "[ab   ]"  (%php-run-capture "<?php echo sprintf('[%-5s]','ab');"))
+  (assert-string= "3.14"     (%php-run-capture "<?php echo sprintf('%.2f',3.14159);"))
+  (assert-string= "ff FF 10" (%php-run-capture "<?php echo sprintf('%x %X %o',255,255,8);")))
