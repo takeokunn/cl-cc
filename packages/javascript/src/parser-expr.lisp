@@ -490,14 +490,22 @@ Returns (values ast rest)."
     ;; Parameter list
     (multiple-value-bind (params optionals rest-sym rest2)
         (js-parse-params current)
-      (declare (ignore optionals rest-sym))
       ;; Body: { stmts... }
       (multiple-value-bind (tok3 rest3) (js-expect :T-LBRACE rest2)
         (declare (ignore tok3))
         (multiple-value-bind (body-forms rest4)
             (js-parse-function-body rest3)
-          (let ((lambda-ast (make-ast-lambda :params params
-                                             :body body-forms)))
+          (multiple-value-bind (required opts)
+              (%js-split-params-by-defaults params optionals)
+          ;; Wrap in (block nil ...) so `return' (which lowers to return-from nil)
+          ;; works — a function-expression body was previously used raw, so any
+          ;; `return value' silently produced nothing.
+          (multiple-value-bind (rest-param wrapped-body)
+              (%js-rest-binding rest-sym (%js-callable-body body-forms))
+          (let ((lambda-ast (make-ast-lambda :params required
+                                             :optional-params opts
+                                             :rest-param rest-param
+                                             :body wrapped-body)))
             ;; Wrap async/generator in metadata call if needed
             (let ((result (cond
                             ((and async-p is-generator)
@@ -513,7 +521,7 @@ Returns (values ast rest)."
                            :bindings (list (cons name result))
                            :body (list (make-ast-var :name name)))
                           result)
-                      rest4))))))))
+                      rest4))))))))))
 
 (defun js-parse-function-body (stream)
   "Parse statements inside { } until matching }. Forward declaration.

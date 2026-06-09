@@ -51,6 +51,16 @@ globals, so EVERY JS program failed with 'Unbound global variable: *JS-...*')."
   (assert-string= "10" (%js-run-capture "function s(...n){return n.reduce((a,b)=>a+b,0);} console.log(s(1,2,3,4));"))
   (assert-string= "12" (%js-run-capture "function f(a,...rest){return a+rest.length;} console.log(f(10,1,2));")))
 
+(deftest js-e2e-function-expressions
+  "Function expressions execute, including `return' (regression: their body was
+used raw without a (block nil ...), so `return value' silently produced nothing),
+default params, rest params, and IIFEs."
+  (assert-string= "5"  (%js-run-capture "let g=function(x){return x+1;}; console.log(g(4));"))
+  (assert-string= "5"  (%js-run-capture "console.log((function(x){return x+1;})(4));"))
+  (assert-string= "5"  (%js-run-capture "const g=function(x=5){return x;}; console.log(g());"))
+  (assert-string= "13" (%js-run-capture "const f=function(a,b=10){return a+b;}; console.log(f(3));"))
+  (assert-string= "3"  (%js-run-capture "const s=function(...n){return n.length;}; console.log(s(1,2,3));")))
+
 (deftest js-e2e-class-this-binding
   "Class constructors and methods bind `this' to the instance — in both the host
 special and the VM-global %js-this — so this.x reads/writes the receiver
