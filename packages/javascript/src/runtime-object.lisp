@@ -9,20 +9,23 @@
 ;;; -----------------------------------------------------------------------
 
 (defun %js-make-object (&rest key-value-pairs)
-  "Create a JS object from alternating key/value args."
+  "Create a JS object from alternating key/value args.  A get/set accessor
+descriptor value is routed to __get_K/__set_K (see %js-object-put-entry)."
   (let ((ht (%js-make-ht (max 8 (length key-value-pairs)))))
     (loop for (k v) on key-value-pairs by #'cddr
-          do (setf (gethash (string k) ht) v))
+          do (%js-object-put-entry ht (string k) v))
     ht))
 
 (defun %js-internal-key-p (k)
-  "True when K is an internal double-underscore key like __proto__, __class__, etc.
-These are used by the CL-CC JS runtime to store prototype/class metadata and
-should not be exposed to user-visible Object.keys() / for-in enumeration."
+  "True when K is an internal runtime key that must not appear in Object.keys() /
+for-in enumeration: a double-underscore-wrapped key (__proto__, __class__, ...)
+or an accessor slot (__get_NAME / __set_NAME)."
   (let ((n (length k)))
-    (and (> n 4)
-         (string= k "__" :end1 2)
-         (string= k "__" :start1 (- n 2)))))
+    (or (and (> n 4)
+             (string= k "__" :end1 2)
+             (string= k "__" :start1 (- n 2)))
+        (and (> n 6) (string= k "__get_" :end1 6))
+        (and (> n 6) (string= k "__set_" :end1 6)))))
 
 ;;; Internal: iterate non-internal properties of OBJ, collecting (select-fn k v)
 ;;; into a fresh adjustable vector. Returns an empty array when OBJ is not a HT.

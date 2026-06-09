@@ -280,6 +280,24 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
 ;;;  Property access
 ;;; -----------------------------------------------------------------------
 
+(defun %js-accessor-descriptor-p (v)
+  "True when V is a get/set accessor descriptor produced by %js-accessor
+(a hash-table tagged __accessor__ carrying KIND and FN)."
+  (and (%js-ht-p v) (gethash "__accessor__" v)))
+
+(defun %js-object-put-entry (ht k v)
+  "Store K -> V in object HT.  A get/set accessor descriptor is routed to the
+internal __get_K / __set_K slot (so a getter and setter on the same key both
+survive and are dispatched by %js-get-prop / %js-set-prop); anything else is a
+plain own property."
+  (if (%js-accessor-descriptor-p v)
+      (let ((kind (gethash "kind" v))
+            (fn   (gethash "fn"   v)))
+        (setf (gethash (concatenate 'string (if (equal kind "set") "__set_" "__get_") k) ht)
+              fn))
+      (setf (gethash k ht) v))
+  v)
+
 (defun %js-get-prop (obj key)
   "Get property KEY from JS object/array/string."
   (let ((k (%js-to-string key)))
@@ -303,16 +321,21 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
                 +js-undefined+)))
          (t (%js-method-ref obj k))))
       ((%js-ht-p obj)
-       (multiple-value-bind (val found) (gethash k obj)
-         (cond
-           ;; An own callable property is a method: return it bound to OBJ so
-           ;; `this' inside an object-literal method (let o={m(){return this.x}})
-           ;; resolves to the receiver, matching o.m() semantics.
-           ((and found (funcall *js-callable-p* val))
-            (let ((method val) (receiver obj))
-              (lambda (&rest args) (%js-call-with-this receiver method args))))
-           (found val)
-           (t (%js-proto-method-lookup obj k)))))
+       (let ((getter (gethash (concatenate 'string "__get_" k) obj)))
+         (if getter
+             ;; Accessor property (get v(){...} / Object.defineProperty getter):
+             ;; invoke the getter with `this' = OBJ and return its result.
+             (%js-call-with-this obj getter nil)
+             (multiple-value-bind (val found) (gethash k obj)
+               (cond
+                 ;; An own callable property is a method: return it bound to OBJ so
+                 ;; `this' inside an object-literal method (let o={m(){return this.x}})
+                 ;; resolves to the receiver, matching o.m() semantics.
+                 ((and found (funcall *js-callable-p* val))
+                  (let ((method val) (receiver obj))
+                    (lambda (&rest args) (%js-call-with-this receiver method args))))
+                 (found val)
+                 (t (%js-proto-method-lookup obj k)))))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
       (t +js-undefined+))))
@@ -334,7 +357,18 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
             (setf (aref obj idx) value)))
          (t nil)))
       ((%js-ht-p obj)
-       (setf (gethash k obj) value))
+       (cond
+         ;; Defining an accessor (object-literal get/set, or assignment of an
+         ;; accessor descriptor): route the fn to __get_K/__set_K so a getter and
+         ;; setter on the same key coexist instead of overwriting each other.
+         ((%js-accessor-descriptor-p value)
+          (%js-object-put-entry obj k value))
+         ;; Plain write to a key that has a setter: invoke it with `this' = OBJ.
+         (t
+          (let ((setter (gethash (concatenate 'string "__set_" k) obj)))
+            (if setter
+                (%js-call-with-this obj setter (list value))
+                (setf (gethash k obj) value))))))
       (t nil)))
   value)
 

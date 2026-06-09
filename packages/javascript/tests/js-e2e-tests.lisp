@@ -442,3 +442,25 @@ intended edit site.)"
   ;; regression guards: plain, single-param, and nested (curried) arrows still work
   (assert-string= "7"  (%js-run-capture "const f=(a,b)=>a+b; console.log(f(3,4));"))
   (assert-string= "7"  (%js-run-capture "const add=a=>b=>a+b; console.log(add(3)(4));")))
+
+;;; ─── 13. Object-literal getters and setters ──────────────────────────────────
+
+(deftest js-e2e-object-getters-setters
+  "Object-literal get/set accessors are invoked on property read/write with
+`this' bound to the object.  Regression: accessors were parsed (wrapped in a
+%js-accessor descriptor) but stored as a plain property, so o.v returned the
+descriptor object ([object Object]) instead of invoking the getter, and a
+get/set pair on one key overwrote each other.  Accessors now route to internal
+__get_K/__set_K slots that %js-get-prop/%js-set-prop dispatch."
+  ;; getter invoked on read
+  (assert-string= "42" (%js-run-capture "const o={get v(){return 42;}}; console.log(o.v);"))
+  ;; getter sees `this'
+  (assert-string= "20" (%js-run-capture "const o={n:10,get v(){return this.n*2;}}; console.log(o.v);"))
+  ;; setter invoked on write
+  (assert-string= "5"  (%js-run-capture "const o={_x:0,set v(n){this._x=n;}}; o.v=5; console.log(o._x);"))
+  ;; getter + setter on the SAME key both survive and both run (setter stores
+  ;; n+1, getter reads it back) — proves no overwrite and both are dispatched
+  (assert-string= "11" (%js-run-capture "const o={_c:0,get count(){return this._c;},set count(n){this._c=n+1;}}; o.count=10; console.log(o.count);"))
+  ;; regression guards: a regular method and a plain property are unaffected
+  (assert-string= "5"  (%js-run-capture "const o={n:5,m(){return this.n;}}; console.log(o.m());"))
+  (assert-string= "3"  (%js-run-capture "const o={a:1,b:2}; console.log(o.a+o.b);")))
