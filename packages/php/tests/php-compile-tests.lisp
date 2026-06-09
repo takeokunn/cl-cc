@@ -736,3 +736,23 @@ by package-independent SYMBOL-NAME."
   ;; call_user_func_array spreads the array as positional args
   (assert-string= "30" (%php-run-capture "<?php function add($a,$b){return $a+$b;} echo call_user_func_array('add',[10,20]);"))
   (assert-string= "36" (%php-run-capture "<?php function sq($x){return $x*$x;} echo call_user_func_array('sq',[6]);")))
+
+(deftest php-e2e-usort-in-place
+  "usort/uasort/uksort take the array BY REFERENCE and sort IN PLACE.  The old
+implementations built a fresh result array and returned it, so the caller's
+variable was never updated and the sort silently did nothing.  Now they mutate
+the passed hash-table (like sort/asort/ksort) and accept closure, arrow,
+builtin-name and user-function-name comparators.  stable-sort matches PHP 8.0+."
+  ;; usort with arrow comparators, ascending and descending
+  (assert-string= "1,2,3" (%php-run-capture "<?php $a=[3,1,2]; usort($a, fn($x,$y)=>$x-$y); echo implode(',',$a);"))
+  (assert-string= "3,2,1" (%php-run-capture "<?php $a=[3,1,2]; usort($a, fn($x,$y)=>$y-$x); echo implode(',',$a);"))
+  ;; usort with a user-function-name string comparator
+  (assert-string= "1,2,5,8" (%php-run-capture "<?php function cmp($a,$b){return $a-$b;} $c=[5,2,8,1]; usort($c,'cmp'); echo implode(',',$c);"))
+  ;; usort with a builtin-name string comparator
+  (assert-string= "apple,banana,cherry" (%php-run-capture "<?php $d=['banana','apple','cherry']; usort($d,'strcmp'); echo implode(',',$d);"))
+  ;; uasort preserves keys, sorts by value
+  (assert-string= "a,b,c" (%php-run-capture "<?php $e=['b'=>2,'a'=>1,'c'=>3]; uasort($e, fn($x,$y)=>$x-$y); echo implode(',',array_keys($e));"))
+  ;; uksort sorts by key
+  (assert-string= "apple,banana" (%php-run-capture "<?php $f=['banana'=>1,'apple'=>2]; uksort($f,'strcmp'); echo implode(',',array_keys($f));"))
+  ;; stable: equal comparands keep insertion order
+  (assert-string= "cab" (%php-run-capture "<?php $g=[['k'=>1,'v'=>'a'],['k'=>1,'v'=>'b'],['k'=>0,'v'=>'c']]; usort($g, fn($x,$y)=>$x['k']-$y['k']); echo $g[0]['v'].$g[1]['v'].$g[2]['v'];")))

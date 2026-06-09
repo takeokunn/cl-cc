@@ -276,44 +276,43 @@ time, so this only fires on misuse."
 
 ;;; ─── User-defined comparison sorts ───────────────────────────────────────────
 
+(defun %php-user-sort-in-place (array compare-fn select-fn preserve-keys)
+  "Sort ARRAY IN PLACE: PHP's usort/uasort/uksort take the array BY REFERENCE
+and mutate it (they do not return a sorted copy).  COMPARE-FN is applied to
+(funcall SELECT-FN pair) of each pair — #'cdr for value sorts, #'car for key
+sorts.  Numeric keys are re-indexed unless PRESERVE-KEYS.  Uses stable-sort to
+match PHP 8.0+ stable-sort semantics.  Returns T (the PHP return value).
+
+The earlier implementations built a fresh result array and returned it, so the
+caller's variable — which still held the original hash-table — was never
+updated and the sort appeared to do nothing."
+  (let ((fn (%php-callable-function compare-fn)))
+    (when fn
+      (let ((sorted (stable-sort (copy-list (%php-array-pairs array))
+                                 (lambda (a b)
+                                   (< (%php-numeric
+                                       (funcall fn (funcall select-fn a) (funcall select-fn b)))
+                                      0)))))
+        (clrhash array)
+        (setf (gethash +php-array-order-key+ array) nil
+              (gethash +php-array-next-index-key+ array) 0)
+        (dolist (pair sorted)
+          (%php-array-set array
+                          (if preserve-keys (car pair) (%php-array-next-auto-index array))
+                          (cdr pair)))))
+    t))
+
 (defun %php-usort (array compare-fn)
-  "PHP usort: sort ARRAY by user-defined COMPARE-FN, re-indexing keys."
-  (let* ((fn (%php-callable-function compare-fn))
-         (pairs (%php-array-pairs array))
-         (sorted (if fn
-                     (sort pairs (lambda (a b)
-                                   (< (funcall fn (cdr a) (cdr b)) 0)))
-                     pairs))
-         (result (%php-make-array)))
-    (loop for i from 0 for pair in sorted
-          do (%php-array-set result i (cdr pair)))
-    result))
+  "PHP usort: sort ARRAY in place by user COMPARE-FN on values, re-indexing keys."
+  (%php-user-sort-in-place array compare-fn #'cdr nil))
 
 (defun %php-uasort (array compare-fn)
-  "PHP uasort: sort by user compare, preserving key associations."
-  (let* ((fn (%php-callable-function compare-fn))
-         (pairs (%php-array-pairs array))
-         (sorted (if fn
-                     (sort pairs (lambda (a b)
-                                   (< (funcall fn (cdr a) (cdr b)) 0)))
-                     pairs))
-         (result (%php-make-array)))
-    (dolist (pair sorted)
-      (%php-array-set result (car pair) (cdr pair)))
-    result))
+  "PHP uasort: sort ARRAY in place by user COMPARE-FN on values, preserving keys."
+  (%php-user-sort-in-place array compare-fn #'cdr t))
 
 (defun %php-uksort (array compare-fn)
-  "PHP uksort: sort by key using user compare."
-  (let* ((fn (%php-callable-function compare-fn))
-         (pairs (%php-array-pairs array))
-         (sorted (if fn
-                     (sort pairs (lambda (a b)
-                                   (< (funcall fn (car a) (car b)) 0)))
-                     pairs))
-         (result (%php-make-array)))
-    (dolist (pair sorted)
-      (%php-array-set result (car pair) (cdr pair)))
-    result))
+  "PHP uksort: sort ARRAY in place by user COMPARE-FN on keys, preserving keys."
+  (%php-user-sort-in-place array compare-fn #'car t))
 
 ;;; ─── array_walk / array_chunk / array_pad ────────────────────────────────────
 
