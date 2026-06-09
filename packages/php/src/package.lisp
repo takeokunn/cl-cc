@@ -50,6 +50,7 @@
        #:%php-exception-matches-p
        #:%php-enum-make-case
        #:%php-enum-cases
+       #:%php-enum-case-list
        #:%php-enum-from
        #:%php-enum-try-from
        #:%php-enum-case-value

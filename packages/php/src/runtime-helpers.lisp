@@ -591,35 +591,46 @@ to max(existing-next-index, key + 1), matching PHP array literal semantics."
                          value)))))
 
 (defun %php-enum-make-case (enum-name case-name value)
-  "Create a PHP enum case singleton payload."
-  (let ((case (make-hash-table :test #'eq)))
+  "Create a PHP enum case singleton payload.  `name' and `value' are stored under
+STRING keys so $case->name / $case->value resolve through the slot-read string-
+key fallback (a symbol key would require the runtime-interned property symbol to
+land in the same package, which it does not reliably)."
+  ;; :test #'equal — the slot-read string-key fallback looks up "name"/"value"
+  ;; with a freshly built string, which is not EQ to the stored key; equal makes
+  ;; both the string property keys and the keyword internal keys resolve.
+  (let ((case (make-hash-table :test #'equal)))
     (setf (gethash :__php-enum-case__ case) t
           (gethash :__enum-name__ case) enum-name
           (gethash :__case-name__ case) case-name
-          (gethash 'value case) value
-          (gethash 'name case) (symbol-name case-name))
+          (gethash "value" case) value
+          (gethash "name" case) (symbol-name case-name))
     case))
 
 (defun %php-enum-case-p (value)
   "Return true when VALUE is a PHP enum case payload."
   (and (hash-table-p value) (gethash :__php-enum-case__ value)))
 
-(defun %php-enum-cases (enum-class)
-  "Return all enum case singleton payloads stored on ENUM-CLASS."
+(defun %php-enum-case-list (enum-class)
+  "Return ENUM-CLASS's case singleton payloads as a CL list (insertion order)."
   (check-type enum-class hash-table)
   (loop for slot-name in (gethash :__class-slots__ enum-class)
         for slot-value = (gethash slot-name enum-class)
         when (%php-enum-case-p slot-value)
           collect slot-value))
 
+(defun %php-enum-cases (enum-class)
+  "Return ENUM::cases() — a PHP ARRAY of the case singletons (so count(), foreach,
+etc. work). The previous CL list broke count()/array builtins."
+  (%php-list-to-array (%php-enum-case-list enum-class)))
+
 (defun %php-enum-case-value (enum-case)
   "Return ENUM-CASE's backed value, or PHP null for unit cases."
   (check-type enum-case hash-table)
-  (gethash 'value enum-case +php-null+))
+  (gethash "value" enum-case +php-null+))
 
 (defun %php-enum-try-from (enum-class value)
   "Return the backed enum case from ENUM-CLASS matching VALUE, or PHP null."
-  (or (find value (%php-enum-cases enum-class)
+  (or (find value (%php-enum-case-list enum-class)
             :key #'%php-enum-case-value
             :test #'%php-eq-strict)
       +php-null+))

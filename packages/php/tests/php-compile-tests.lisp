@@ -389,7 +389,11 @@ dedicated for lowering)."
     (setf (gethash :__class-slots__ class) '(draft published)
           (gethash 'draft class) draft
           (gethash 'published class) published)
-    (assert-equal (list draft published) (cl-cc/php:%php-enum-cases class))
+    ;; %php-enum-case-list is the internal CL list; %php-enum-cases (ENUM::cases())
+    ;; now returns a PHP array (hash-table) so count()/foreach work.
+    (assert-equal (list draft published) (cl-cc/php:%php-enum-case-list class))
+    (assert-true (hash-table-p (cl-cc/php:%php-enum-cases class)))
+    (assert-= 2 (cl-cc/php:%php-count (cl-cc/php:%php-enum-cases class)))
     (assert-eq published (cl-cc/php:%php-enum-from class 1))
     (assert-equal cl-cc/php:+php-null+ (cl-cc/php:%php-enum-try-from class 99))
     (assert-= 1 (cl-cc/php:%php-enum-case-value published))))
@@ -553,3 +557,19 @@ function'."
                   (%php-run-capture "<?php var_export([1,2]);"))
   ;; return-mode var_export
   (assert-string= "7"     (%php-run-capture "<?php echo var_export(7, true);")))
+
+(deftest php-e2e-enum-name-value-cases
+  "Enum cases expose ->name and ->value, S::cases() is a PHP array, and
+S::from/tryFrom resolve backed cases.  Regression: cases stored name/value under
+CL symbol keys in an EQ hash-table, so $case->name (a string-key fallback) never
+matched; cases() returned a CL list that broke count()/foreach."
+  (assert-string= "A"  (%php-run-capture "<?php enum S{case A;} echo S::A->name;"))
+  (assert-string= "a"  (%php-run-capture "<?php enum S:string{case A='a';case B='b';} echo S::A->value;"))
+  (assert-string= "10" (%php-run-capture "<?php enum S:int{case A=10;} echo S::A->value;"))
+  (assert-string= "2"  (%php-run-capture "<?php enum S{case A;case B;} echo count(S::cases());"))
+  (assert-string= "AB" (%php-run-capture "<?php enum S{case A;case B;} $n=''; foreach(S::cases() as $c){$n.=$c->name;} echo $n;"))
+  (assert-string= "B"  (%php-run-capture "<?php enum S:int{case A=1;case B=2;} echo S::from(2)->name;"))
+  (assert-string= "null" (%php-run-capture "<?php enum S:int{case A=1;} echo S::tryFrom(9)===null?'null':'f';"))
+  (assert-string= "y"  (%php-run-capture "<?php enum S{case A;} echo S::A===S::A?'y':'n';"))
+  ;; match on enum cases
+  (assert-string= "hearts" (%php-run-capture "<?php enum Suit:string{case H='h';case S='s';} $x=Suit::H; echo match($x){Suit::H=>'hearts',Suit::S=>'spades'};")))
