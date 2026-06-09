@@ -627,3 +627,24 @@ parseFloat parses the leading numeric prefix."
   (assert-string= "NaN"  (%js-run-capture "console.log(parseFloat(\"abc\"));"))
   ;; namespace static methods still work alongside the callable form
   (assert-string= "true" (%js-run-capture "console.log(Number.isInteger(5));")))
+
+;;; ─── 21. Tagged template literals ────────────────────────────────────────────
+
+(deftest js-e2e-tagged-templates
+  "A tagged template tag`...` calls TAG with the cooked-strings array first
+(length = substitutions + 1) and the substitution VALUES after.  Regression: the
+lowering passed the single CONCATENATED template string instead, so `tag`a${5}b``
+gave the tag one wrong argument."
+  ;; the first argument is the strings array
+  (assert-string= "1"     (%js-run-capture "function t(s){return s.length;} console.log(t`hi`);"))
+  (assert-string= "hello" (%js-run-capture "function t(s){return s[0];} console.log(t`hello`);"))
+  ;; substitution values follow the strings array, in order
+  (assert-string= "a5b"   (%js-run-capture "function t(s,v){return s[0]+v+s[1];} console.log(t`a${5}b`);"))
+  (assert-string= "x1y2z" (%js-run-capture "function t(s,a,b){return s[0]+a+s[1]+b+s[2];} console.log(t`x${1}y${2}z`);"))
+  ;; the strings array is a real array (join, length, rest-collected values)
+  (assert-string= "a|b|c" (%js-run-capture "function tag(s,...v){return s.join('|');} console.log(tag`a${1}b${2}c`);"))
+  ;; leading/trailing substitutions give empty boundary strings
+  (assert-string= "[]9[]" (%js-run-capture "function t(s,v){return '['+s[0]+']'+v+'['+s[1]+']';} console.log(t`${9}`);"))
+  ;; regression guards: plain template literals still concatenate
+  (assert-string= "val=5" (%js-run-capture "const n=5; console.log(`val=${n}`);"))
+  (assert-string= "sum=5" (%js-run-capture "console.log(`sum=${2+3}`);")))

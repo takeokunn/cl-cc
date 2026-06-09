@@ -923,13 +923,55 @@ Returns (values ast rest). Loops until no more postfix ops."
         ;; trigger, so `f "x"` is not mistaken for a tagged template.
         ((or (eq type :T-TEMPLATE-START)
              (eq type :T-TEMPLATE-PARTS))
-         (multiple-value-bind (template-ast rest) (%js-parse-template-literal stream)
-           (setf ast (make-ast-call :func ast :args (list template-ast))
-                 stream rest)))
+         (multiple-value-bind (call-ast rest) (%js-parse-tagged-template ast stream)
+           (setf ast call-ast stream rest)))
         (t (return)))))
   (values ast stream))
 
 ;;; ─── Template Literal ────────────────────────────────────────────────────────
+
+(defun %js-template-parts-and-rest (stream)
+  "Return (values PARTS rest) for a template literal at STREAM, where PARTS is the
+lexer's list of strings and (:template-expr tokens). Handles the T-STRING (no
+interpolation), T-TEMPLATE-PARTS, and T-TEMPLATE-START forms."
+  (let ((tok (js-peek stream)))
+    (case (js-tok-type tok)
+      (:T-STRING
+       (multiple-value-bind (str-tok rest) (js-consume stream)
+         (values (list (js-tok-value str-tok)) rest)))
+      (:T-TEMPLATE-PARTS
+       (multiple-value-bind (parts-tok rest) (js-consume stream)
+         (values (js-tok-value parts-tok) rest)))
+      (:T-TEMPLATE-START
+       (multiple-value-bind (tok2 rest) (js-consume stream)
+         (declare (ignore tok2))
+         (%js-template-parts-and-rest rest)))
+      (t (error "JS parse error: expected template literal, got ~S" tok)))))
+
+(defun %js-parse-tagged-template (tag-ast stream)
+  "Lower a tagged template tag`...` to (call TAG strings-array value1 value2 ...),
+per the TC39 tagged-template protocol: the first argument is the array of cooked
+literal portions (length = number of substitutions + 1) and the rest are the
+substitution VALUES.  (The previous lowering passed the single concatenated
+template string instead.)"
+  (multiple-value-bind (parts rest) (%js-template-parts-and-rest stream)
+    (let ((cooked nil) (values nil) (current ""))
+      (dolist (part parts)
+        (cond
+          ((stringp part)
+           (setf current (concatenate 'string current part)))
+          ((and (consp part) (eq (car part) :template-expr))
+           (push (make-ast-quote :value current) cooked)
+           (setf current "")
+           (multiple-value-bind (expr _r) (js-parse-assignment-expr (cadr part))
+             (declare (ignore _r))
+             (push expr values)))))
+      (push (make-ast-quote :value current) cooked)
+      (values (make-ast-call
+               :func tag-ast
+               :args (cons (apply #'%js-call '%js-make-array (nreverse cooked))
+                           (nreverse values)))
+              rest))))
 
 (defun %js-parse-template-literal (stream)
   "Parse a template literal starting at :T-TEMPLATE-START or :T-STRING.
