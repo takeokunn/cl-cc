@@ -674,3 +674,24 @@ dispatch (resolving a function SYMBOL) could not call ('Undefined function')."
   (assert-string= "n"  (%php-run-capture "<?php echo array_is_list([1=>'a',0=>'b'])?'y':'n';"))
   (assert-string= "n"  (%php-run-capture "<?php echo array_is_list(['x'=>1])?'y':'n';"))
   (assert-string= "y"  (%php-run-capture "<?php echo array_is_list([])?'y':'n';")))
+
+(deftest php-e2e-math-non-cl-named-builtins
+  "Math builtins whose names are NOT CL functions (fmod, atan2, log10, log2,
+hypot, deg2rad, rad2deg, base_convert).  These were registered as LAMBDAs, so
+the builtin dispatch — which lowers a call to a function SYMBOL and resolves it
+only when fbound — left no fbound symbol and hit 'Undefined function'.  sin/cos/
+log/exp escaped the bug only by colliding with inherited CL function names.  Now
+registered by named %php- symbol."
+  ;; fmod: remainder, sign follows the dividend (NOT CL mod, which would give 2)
+  (assert-string= "1"  (%php-run-capture "<?php echo fmod(7,3);"))
+  (assert-string= "-1" (%php-run-capture "<?php echo fmod(-7,3);"))
+  ;; atan2(1,1) = pi/4
+  (assert-string= "0.7854" (%php-run-capture "<?php echo round(atan2(1,1),4);"))
+  (assert-string= "3"  (%php-run-capture "<?php echo log10(1000);"))
+  (assert-string= "3"  (%php-run-capture "<?php echo log2(8);"))
+  (assert-string= "5"  (%php-run-capture "<?php echo hypot(3,4);"))
+  (assert-string= "3.14159" (%php-run-capture "<?php echo round(deg2rad(180),5);"))
+  (assert-string= "180" (%php-run-capture "<?php echo round(rad2deg(3.141592653589793),2);"))
+  ;; base_convert: lowercase digits, both directions
+  (assert-string= "11111111" (%php-run-capture "<?php echo base_convert('ff',16,2);"))
+  (assert-string= "ff" (%php-run-capture "<?php echo base_convert('255',10,16);")))

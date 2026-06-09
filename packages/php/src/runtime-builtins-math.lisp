@@ -71,6 +71,69 @@ INF approximation used elsewhere) rather than signalling an error."
   ;; (%php-pi) => 3.141592653589793d0
   pi)
 
+;;; ─── functions whose names are NOT CL builtins ─────────────────────────────
+;;; These MUST be registered by symbol (not a lambda). A PHP builtin call lowers
+;;; to a bare function symbol; the VM resolves it only if that symbol is fbound.
+;;; sin/cos/tan/log/exp resolve accidentally because they collide with CL names,
+;;; but fmod/atan2/log10/hypot/deg2rad/… do not, so a lambda registration leaves
+;;; no fbound symbol and the call hits `Undefined function'. See
+;;; runtime-builtins-register.lisp.
+
+(defun %php-fmod (x y)
+  "PHP fmod: floating-point remainder of X / Y (sign follows the dividend)."
+  ;; (%php-fmod 7 3) => 1.0d0
+  (let ((dx (coerce (%php-numeric x) 'double-float))
+        (dy (coerce (%php-numeric y) 'double-float)))
+    (- dx (* (coerce (truncate dx dy) 'double-float) dy))))
+
+(defun %php-atan2 (y x)
+  "PHP atan2: arc tangent of two variables (Y first, like C)."
+  (atan (coerce (%php-numeric y) 'double-float)
+        (coerce (%php-numeric x) 'double-float)))
+
+(defun %php-log-exact-power (x base)
+  "If X is an exact positive integer power of integer BASE, return that integer
+exponent, else NIL.  Lets log10(1000) yield 3 exactly the way PHP's correctly-
+rounded C log10 does, instead of the 2.9999999999999996 that log(x)/log(base)
+produces in IEEE double."
+  (when (and (integerp x) (plusp x))
+    (loop with n = x and e = 0
+          do (multiple-value-bind (q r) (truncate n base)
+               (cond ((/= r 0) (return nil))
+                     ((= q 1) (return (1+ e)))
+                     (t (setf n q e (1+ e))))))))
+
+(defun %php-log10 (x)
+  "PHP log10: base-10 logarithm of X."
+  (or (%php-log-exact-power (%php-numeric x) 10)
+      (log (coerce (%php-numeric x) 'double-float) 10d0)))
+
+(defun %php-log2 (x)
+  "PHP log2 (8.3 alias of log(x,2)): base-2 logarithm of X."
+  (or (%php-log-exact-power (%php-numeric x) 2)
+      (log (coerce (%php-numeric x) 'double-float) 2d0)))
+
+(defun %php-hypot (x y)
+  "PHP hypot: length of the hypotenuse of a right-angle triangle."
+  (let ((dx (coerce (%php-numeric x) 'double-float))
+        (dy (coerce (%php-numeric y) 'double-float)))
+    (sqrt (+ (* dx dx) (* dy dy)))))
+
+(defun %php-deg2rad (degrees)
+  "PHP deg2rad: convert DEGREES to radians."
+  (* (coerce (%php-numeric degrees) 'double-float) (/ pi 180)))
+
+(defun %php-rad2deg (radians)
+  "PHP rad2deg: convert RADIANS to degrees."
+  (* (coerce (%php-numeric radians) 'double-float) (/ 180 pi)))
+
+(defun %php-base-convert (number from-base to-base)
+  "PHP base_convert: convert a string NUMBER from FROM-BASE to TO-BASE (2..36),
+returning the digits in lowercase as PHP does."
+  (let ((value (parse-integer (%php-stringify number)
+                              :radix (%php-to-integer from-base) :junk-allowed t)))
+    (string-downcase (format nil "~vR" (%php-to-integer to-base) (or value 0)))))
+
 ;;; ─── bcmath extension (arbitrary precision) ────────────────────────────────
 
 (defun %php-bcadd (left right &optional (scale 0))
