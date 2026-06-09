@@ -49,6 +49,23 @@ Coerce first: (sqrt 2) on the integer 2 yields a single-float, losing precision
   "Return BASE raised to EXPONENT."
   (expt base exponent))
 
+(defun %php-intdiv (a b)
+  "PHP intdiv (7.0): integer division of A by B truncated toward zero."
+  (let ((divisor (%php-to-integer b)))
+    (if (zerop divisor)
+        (%php-throw 'division-by-zero-error "Division by zero")
+        (truncate (%php-to-integer a) divisor))))
+
+(defun %php-fdiv (a b)
+  "PHP fdiv (8.0): IEEE float division — division by zero yields +/-INF (or the
+INF approximation used elsewhere) rather than signalling an error."
+  (let ((x (coerce (%php-numeric a) 'double-float))
+        (y (coerce (%php-numeric b) 'double-float)))
+    (if (zerop y)
+        (cond ((minusp x) most-negative-double-float)
+              (t most-positive-double-float))
+        (/ x y))))
+
 (defun %php-pi ()
   "Return pi as a double-float."
   ;; (%php-pi) => 3.141592653589793d0

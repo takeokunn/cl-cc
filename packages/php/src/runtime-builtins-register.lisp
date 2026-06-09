@@ -304,6 +304,9 @@
   (%php-register-builtin "mt_rand" '%php-mt-rand)
   (%php-register-builtin "sqrt" '%php-sqrt)
   (%php-register-builtin "pow" '%php-pow)
+  (%php-register-builtin "intdiv" '%php-intdiv)
+  (%php-register-builtin "fdiv" '%php-fdiv)
+  (%php-register-builtin "array_is_list" '%php-array-is-list)
   (%php-register-builtin "pi" '%php-pi)
   (%php-register-builtin "sin" (lambda (x) (sin (coerce x 'double-float))))
   (%php-register-builtin "cos" (lambda (x) (cos (coerce x 'double-float))))
@@ -394,9 +397,8 @@
   (%php-register-builtin "boolval" '%php-boolval)
   (%php-register-builtin "settype" (lambda (v _type) (declare (ignore _type)) v))
   (%php-register-builtin "get_debug_type" '%php-gettype)
-  (%php-register-builtin "array_is_list" (lambda (a) (when (hash-table-p a)
-                                                         (loop for i from 0 for k in (%php-array-ordered-keys a)
-                                                               always (eql k i)))))
+  ;; array_is_list is registered by SYMBOL above (a lambda-registered builtin
+  ;; fails dispatch with "Undefined function").
 
   ;; File I/O.
   (%php-register-builtin "file_get_contents" '%php-file-get-contents)

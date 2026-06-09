@@ -659,3 +659,18 @@ array's entries plus the right's entries whose keys are not already present
   (assert-string= "5"     (%php-run-capture "<?php echo 2+3;"))
   (assert-string= "8"     (%php-run-capture "<?php echo '5'+3;"))
   (assert-string= "4"     (%php-run-capture "<?php echo count(array_merge([1,2],[3,4]));")))
+
+(deftest php-e2e-intdiv-fdiv-array-is-list
+  "intdiv (7.0), fdiv (8.0) and array_is_list (8.1) builtins.  intdiv and fdiv
+were unregistered; array_is_list was registered as a LAMBDA, which the builtin
+dispatch (resolving a function SYMBOL) could not call ('Undefined function')."
+  (assert-string= "3"  (%php-run-capture "<?php echo intdiv(7,2);"))
+  (assert-string= "-3" (%php-run-capture "<?php echo intdiv(-7,2);"))
+  (assert-string= "3"  (%php-run-capture "<?php echo intdiv('10','3');"))
+  (assert-string= "2.5" (%php-run-capture "<?php echo fdiv(10,4);"))
+  (assert-string= "3"  (%php-run-capture "<?php echo fdiv(6,2);"))
+  ;; array_is_list: sequential 0..n-1 keys
+  (assert-string= "y"  (%php-run-capture "<?php echo array_is_list([1,2,3])?'y':'n';"))
+  (assert-string= "n"  (%php-run-capture "<?php echo array_is_list([1=>'a',0=>'b'])?'y':'n';"))
+  (assert-string= "n"  (%php-run-capture "<?php echo array_is_list(['x'=>1])?'y':'n';"))
+  (assert-string= "y"  (%php-run-capture "<?php echo array_is_list([])?'y':'n';")))
