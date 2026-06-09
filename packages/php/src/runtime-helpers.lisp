@@ -304,6 +304,26 @@ lists get sequential integer keys 0,1,2,..."
         ((and (hash-table-p value) (%php-array-empty-p value)) nil)
         (t t)))
 
+(defun %php-numeric (x)
+  "PHP numeric coercion for an arithmetic operand: number -> itself, null -> 0,
+true -> 1, false -> 0, string -> its leading numeric value (%php-to-number).
+Without this, PHP +,-,* lowered to raw CL arithmetic and errored on any non-
+number operand (null + 3, '5' + 3, true + 1 all signalled `not of type NUMBER')."
+  (cond ((numberp x) x)
+        ((%php-null-p x) 0)
+        ((eq x t) 1)
+        ((null x) 0)
+        ((stringp x) (%php-to-number x))
+        (t 0)))
+
+(defun %php-add (a b)
+  "PHP + : numeric addition with operand coercion (array union is handled
+elsewhere; both-array operands are not coerced here)."
+  (+ (%php-numeric a) (%php-numeric b)))
+
+(defun %php-sub (a b) "PHP - with operand coercion." (- (%php-numeric a) (%php-numeric b)))
+(defun %php-mul (a b) "PHP * with operand coercion." (* (%php-numeric a) (%php-numeric b)))
+
 (defun %php-to-number (s)
   "Coerce PHP string S to a number for loose comparisons."
   (check-type s string)

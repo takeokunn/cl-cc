@@ -493,3 +493,19 @@ and dropped the whole program."
   ;; the known-variable path is unaffected
   (assert-string= "8"  (%php-run-capture "<?php $a=5; $a += 3; echo $a;"))
   (assert-string= "xy" (%php-run-capture "<?php $s='x'; $s .= 'y'; echo $s;")))
+
+(deftest php-e2e-arithmetic-operand-coercion
+  "PHP +, -, * coerce non-number operands (null->0, true->1, numeric string->
+number) instead of erroring.  Regression: they lowered to raw CL arithmetic, so
+null + 3, '5' + 3, true + 1 all signalled `not of type NUMBER'."
+  (assert-string= "3"   (%php-run-capture "<?php echo null + 3;"))
+  (assert-string= "8"   (%php-run-capture "<?php echo '5' + 3;"))
+  (assert-string= "8"   (%php-run-capture "<?php echo '4' * '2';"))
+  (assert-string= "2.5" (%php-run-capture "<?php echo '1.5' + 1;"))
+  (assert-string= "2"   (%php-run-capture "<?php echo true + 1;"))
+  (assert-string= "5"   (%php-run-capture "<?php echo 2 - -3;"))
+  ;; pure-number arithmetic, precedence, compound and loops are unaffected
+  (assert-string= "5"   (%php-run-capture "<?php echo 2 + 3;"))
+  (assert-string= "14"  (%php-run-capture "<?php echo 2 + 3 * 4;"))
+  (assert-string= "7"   (%php-run-capture "<?php $a=10; $a -= 3; echo $a;"))
+  (assert-string= "10"  (%php-run-capture "<?php $s=0; for($i=1;$i<=4;$i++){$s+=$i;} echo $s;")))

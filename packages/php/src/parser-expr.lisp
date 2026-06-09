@@ -388,6 +388,13 @@ element ($a[k]); other targets are returned unchanged."
 
 (defparameter *php-binary-op-helper-table*
   '(("."   . cl-cc/php::%php-concat)
+    ;; Arithmetic + - * coerce their operands (null->0, true->1, numeric string
+    ;; ->number) — lowering them to raw CL +,-,* errored on any non-number
+    ;; operand (null + 3, "5" + 3). %, /, ** already route to helpers / handle
+    ;; their own coercion.
+    ("+"   . cl-cc/php::%php-add)
+    ("-"   . cl-cc/php::%php-sub)
+    ("*"   . cl-cc/php::%php-mul)
     ("%"   . cl-cc/php::%php-modulo)
     ("<<"  . cl-cc/php::%php-shift-left)
     (">>"  . cl-cc/php::%php-shift-right)

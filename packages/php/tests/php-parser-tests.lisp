@@ -301,18 +301,17 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
     (assert-string= "%PHP-SHIFT-RIGHT" (%php-call-name right))))
 
 (deftest php-parser-shift-precedence-is-below-addition
-  "Addition binds tighter than shifts in PHP 8.x."
+  "Addition binds tighter than shifts in PHP 8.x.  (+ now lowers to a %php-add
+helper call — operand-coercing — so the shift's left operand is that call.)"
   (let ((value (%php-first-binding-value "<?php $result = 1 + 2 << 3;")))
     (assert-string= "%PHP-SHIFT-LEFT" (%php-call-name value))
-    (assert-true (cl-cc:ast-binop-p (first (cl-cc:ast-call-args value))))
-    (assert-eq '+ (cl-cc:ast-binop-op (first (cl-cc:ast-call-args value))))))
+    (assert-string= "%PHP-ADD" (%php-call-name (first (cl-cc:ast-call-args value))))))
 
 (deftest php-parser-concat-precedence-is-below-addition
   "String concatenation binds looser than + and - in PHP 8.x."
   (let ((value (%php-first-binding-value "<?php $result = 1 + 2 . 3;")))
     (assert-string= "%PHP-CONCAT" (%php-call-name value))
-    (assert-true (cl-cc:ast-binop-p (first (cl-cc:ast-call-args value))))
-    (assert-eq '+ (cl-cc:ast-binop-op (first (cl-cc:ast-call-args value))))))
+    (assert-string= "%PHP-ADD" (%php-call-name (first (cl-cc:ast-call-args value))))))
 
 (deftest php-parser-bitwise-operators-lower-to-helpers
   "&, ^, and | lower to PHP bitwise helpers."
