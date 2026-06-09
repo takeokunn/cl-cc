@@ -13,6 +13,19 @@ fresh VM state runs the program end-to-end."
     ;; Trim a trailing newline the VM appends when flushing program output.
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
+(deftest php-e2e-complex-string-interpolation
+  "Curly-brace interpolation {$expr} supports array access, nested access, and
+method calls — not just a bare variable (regression: the lexer required } right
+after {$var, so {$a[\"k\"]} raised a lex error)."
+  (assert-string= "v=5" (%php-run-capture "<?php $a=['k'=>5]; echo \"v={$a['k']}\";"))
+  (assert-string= "n=9" (%php-run-capture "<?php $a=['x'=>['y'=>9]]; echo \"n={$a['x']['y']}\";"))
+  (assert-string= "m=42" (%php-run-capture "<?php class C{ function g(){ return 42; } } $o=new C(); echo \"m={$o->g()}\";"))
+  (assert-string= "Hi Bob, age 30!"
+                  (%php-run-capture "<?php $n='Bob'; $a=['age'=>30]; echo \"Hi $n, age {$a['age']}!\";"))
+  ;; simple interpolation and plain strings unaffected
+  (assert-string= "Hi Bob!" (%php-run-capture "<?php $n='Bob'; echo \"Hi $n!\";"))
+  (assert-string= "Hi Bob!" (%php-run-capture "<?php $n='Bob'; echo \"Hi {$n}!\";")))
+
 (deftest php-e2e-foreach-over-array-literal
   "foreach over a PHP array literal iterates its values (regression: the non-key
 foreach path used to assume a CL list and errored on the hash-table array)."
