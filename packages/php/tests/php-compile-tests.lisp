@@ -26,6 +26,21 @@ plain $var was mutated), yielding the OLD value, including $this->n++ in a metho
   ;; per statement, so combine with '.')
   (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
 
+(deftest php-e2e-list-destructuring
+  "list(...) = expr destructuring assignment works, mirroring the short [$a,$b]
+form.  Regression: list($a,$b) lowered to a %php-list-bind call node that the
+assignment parser did not recognize ('unsupported assignment target'); now it
+parses to the same array-literal node as [$a,$b], flowing through
+%php-lower-list-assign."
+  (assert-string= "3"      (%php-run-capture "<?php list($a,$b)=[1,2]; echo $a+$b;"))
+  (assert-string= "60"     (%php-run-capture "<?php list($a,$b,$c)=[10,20,30]; echo $a+$b+$c;"))
+  ;; destructuring a function's array return
+  (assert-string= "4-9"    (%php-run-capture "<?php function pair(){return [4,9];} list($x,$y)=pair(); echo $x.'-'.$y;"))
+  (assert-string= "Bob:30" (%php-run-capture "<?php list($n,$a)=['Bob',30]; echo $n.':'.$a;"))
+  ;; the short [$a,$b] form (and swap) keep working
+  (assert-string= "1,2"    (%php-run-capture "<?php [$a,$b]=[1,2]; echo $a.','.$b;"))
+  (assert-string= "2,1"    (%php-run-capture "<?php $a=1;$b=2; [$a,$b]=[$b,$a]; echo $a.','.$b;")))
+
 (deftest php-e2e-static-members
   "Static methods and properties resolve via ClassName::member.  Regression: the
 `static` modifier lexes as a T-TYPE (it doubles as the `static` return type), so

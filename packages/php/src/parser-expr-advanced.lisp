@@ -685,10 +685,13 @@ to read is a PHP fatal error, modelled by the %php-array-append-target stub."
             (%php-parse-array-expr rest known-vars :open :T-LPAREN :close :T-RPAREN)
             (values (make-ast-quote :value nil) rest known-vars)))
       (:list
+       ;; list($a, $b) = expr is destructuring assignment. Parse it to the SAME
+       ;; array-literal node that the short form [$a, $b] produces, so it flows
+       ;; through the existing assignment-target path (%php-array-literal-call-p ->
+       ;; %php-lower-list-assign). The old %php-list-bind call node was not a
+       ;; recognized assignment target -> "unsupported assignment target".
        (if (eq (php-peek-type rest) :T-LPAREN)
-           (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
-             (values (make-ast-call :func (make-ast-var :name '%php-list-bind) :args args)
-                     rest2 kv2))
+           (%php-parse-array-expr rest known-vars :open :T-LPAREN :close :T-RPAREN)
            (values (make-ast-quote :value nil) rest known-vars)))
       (:function
        (%php-parse-anonymous-function rest known-vars)))))
