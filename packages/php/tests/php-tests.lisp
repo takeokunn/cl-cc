@@ -117,11 +117,12 @@
     (assert-true (ast-int-p ast))
     (assert-= 42 (ast-int-value ast)))
   (let ((ast (first (cl-cc/php:parse-php-source "<?php echo 42;"))))
-    (assert-true (ast-print-p ast))
-    ;; echo wraps its expr in a %php-concat call (PHP string conversion); the
-    ;; echoed int is the concat's first argument.
-    (assert-true (cl-cc:ast-call-p (ast-print-expr ast)))
-    (assert-true (ast-int-p (first (cl-cc:ast-call-args (ast-print-expr ast))))))
+    ;; echo lowers to a PRINC call (no trailing newline) wrapping a %php-concat
+    ;; call (PHP string conversion); the echoed int is the concat's first arg.
+    (assert-true (cl-cc:ast-call-p ast))
+    (let ((concat (first (cl-cc:ast-call-args ast))))
+      (assert-true (cl-cc:ast-call-p concat))
+      (assert-true (ast-int-p (first (cl-cc:ast-call-args concat))))))
   (let ((ast (first (cl-cc/php:parse-php-source "<?php $x = 42;"))))
     (assert-true (or (ast-let-p ast) (ast-setq-p ast))))
   (let ((ast (first (cl-cc/php:parse-php-source "<?php if ($x) { echo 1; }"))))

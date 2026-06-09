@@ -245,8 +245,13 @@
       (unless (and current (eq (php-peek-type current) :T-COMMA))
         (return))
       (setf current (cdr current)))
-    (values (make-ast-print
-             :expr (apply #'%php-call 'cl-cc/php::%php-concat (nreverse exprs)))
+    ;; echo emits its arguments verbatim with NO trailing newline.  ast-print
+    ;; lowers to vm-print ("~A~%"), which appended a spurious newline after
+    ;; every echo; route through princ (vm-princ, no newline/no escaping)
+    ;; instead.  The builtin registry keys on symbol-name ("PRINC"), so this
+    ;; reuses the proven CL princ -> vm-princ codegen path.
+    (values (%php-call 'princ
+                       (apply #'%php-call 'cl-cc/php::%php-concat (nreverse exprs)))
             (php-skip-semis current) kv)))
 
 (define-php-stmt-parser :return (rest known-vars)

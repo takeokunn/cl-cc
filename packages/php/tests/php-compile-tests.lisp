@@ -26,6 +26,27 @@ plain $var was mutated), yielding the OLD value, including $this->n++ in a metho
   ;; per statement, so combine with '.')
   (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
 
+(deftest php-e2e-echo-no-trailing-newline-multi
+  "Separate newline-less echos do NOT get a newline between them (regression:
+echo lowered to ast-print -> vm-print '~A~%', appending a spurious newline after
+every echo).  %php-run-capture trims only TRAILING newlines, so this is the
+discriminator: old behaviour produced \"a\\nb\\nc\", now \"abc\"."
+  (assert-string= "abc" (%php-run-capture "<?php echo 'a'; echo 'b'; echo 'c';")))
+
+(deftest php-e2e-echo-no-trailing-newline-multiarg
+  "Multi-argument echo concatenates its args with no separators or newline."
+  (assert-string= "xyz" (%php-run-capture "<?php echo 'x', 'y', 'z';")))
+
+(deftest php-e2e-echo-interior-newline-preserved
+  "An explicit newline inside an echoed string is preserved (interior, not trailing).
+NB: CL string literals have no \\n escape (\\ escapes the next char literally), so the
+expected value is built with FORMAT ~% rather than written \"p\\nq\"."
+  (assert-string= (format nil "p~%q") (%php-run-capture "<?php echo \"p\\n\"; echo 'q';")))
+
+(deftest php-e2e-inline-html-verbatim
+  "Inline HTML between ?> and <?php is emitted verbatim with no injected newline."
+  (assert-string= "1hello2" (%php-run-capture "<?php echo 1; ?>hello<?php echo 2;")))
+
 (deftest php-e2e-heredoc-nowdoc
   "Heredoc <<<EOT interpolates $vars and {$expr} like a double-quoted string;
 nowdoc <<<'EOT' is literal.  Regression: the heredoc body was emitted as a raw

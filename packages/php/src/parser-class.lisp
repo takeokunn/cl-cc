@@ -259,8 +259,10 @@ to %php-parse-expr-stmt for expression statements."
   (cond
     ((eq (php-peek-type stream) :T-INLINE-HTML)
       (multiple-value-bind (tok rest) (php-consume stream)
+        ;; Inline HTML is emitted verbatim with NO trailing newline; lower to a
+        ;; princ call (vm-princ), not ast-print (vm-print, which appends ~%).
         (values (%php-attach-attributes-to-node
-                 (make-ast-print :expr (make-ast-quote :value (php-tok-value tok)))
+                 (%php-call 'princ (make-ast-quote :value (php-tok-value tok)))
                  attributes)
                 rest known-vars)))
     (t

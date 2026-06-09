@@ -29,14 +29,16 @@
     (cl-cc/php:php-check-supported-forms
      (cl-cc/php:parse-php-source src))))
 
-;;; ─── :echo handler → ast-print ───────────────────────────────────────────
+;;; ─── :echo handler → princ call (no trailing newline) ────────────────────
 
-(deftest php-parser-echo-produces-ast-print
-  "echo expr; lowers to ast-print wrapping a %php-concat call (echo applies PHP
-string conversion to each value); the concat's first arg is the echoed expr."
+(deftest php-parser-echo-lowers-to-princ-call
+  "echo expr; lowers to a PRINC call (vm-princ, no trailing newline — ast-print
+would append ~%) wrapping a %php-concat call (echo applies PHP string conversion
+to each value); the concat's first arg is the echoed expr."
   (let ((ast (%php-first "<?php echo 42;")))
-    (assert-true (ast-print-p ast))
-    (let ((expr (cl-cc:ast-print-expr ast)))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "PRINC" (%php-call-name ast))
+    (let ((expr (first (cl-cc:ast-call-args ast))))
       (assert-true (cl-cc:ast-call-p expr))
       (assert-string= "%PHP-CONCAT" (%php-call-name expr))
       (assert-true (typep (first (cl-cc:ast-call-args expr)) 'cl-cc:ast-int)))))
@@ -167,7 +169,10 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
   "parse-php-source returns all top-level statements in order."
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; echo 2; echo 3;")))
     (assert-= 3 (length asts))
-    (assert-true (every #'ast-print-p asts))))
+    (assert-true (every (lambda (a)
+                          (and (cl-cc:ast-call-p a)
+                               (string= "PRINC" (%php-call-name a))))
+                        asts))))
 
 ;;; ─── Characterization tests for unsupported PHP support gaps ───────────────
 
@@ -549,13 +554,18 @@ undefined-var introduce path."
   "A closing ?> tag terminates PHP mode without becoming an expression token."
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; ?>")))
     (assert-= 1 (length asts))
-    (assert-true (cl-cc:ast-print-p (first asts)))))
+    (assert-true (cl-cc:ast-call-p (first asts)))
+    (assert-string= "PRINC" (%php-call-name (first asts)))))
 
 (deftest php-parser-inline-html-between-tags
-  "Inline HTML after ?> lowers to print output before the next PHP block."
+  "Inline HTML after ?> lowers to verbatim (princ, no newline) output before the
+next PHP block."
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; ?>hello<?php echo 2;")))
     (assert-= 3 (length asts))
-    (assert-true (every #'cl-cc:ast-print-p asts))))
+    (assert-true (every (lambda (a)
+                          (and (cl-cc:ast-call-p a)
+                               (string= "PRINC" (%php-call-name a))))
+                        asts))))
 
 (deftest php-parser-namespace-use-metadata-preservation
   "namespace/use declarations annotate subsequent top-level AST nodes."
