@@ -274,7 +274,10 @@ For production use, a full JSON parser would be needed."
   pos)
 
 (defun %js-json-parse-string (str pos)
-  (with-output-to-string (buf)
+  ;; NB: use an explicit stream, not WITH-OUTPUT-TO-STRING — the latter returns
+  ;; the buffer string and discards the body's (values …), so the new position was
+  ;; lost (and the inner get-output-stream-string drained the buffer, yielding "").
+  (let ((buf (make-string-output-stream)))
     (loop
       (when (>= pos (length str)) (return))
       (let ((c (char str pos)))

@@ -75,6 +75,27 @@ empty let into nested single-binding lets)."
   (assert-string= "Bob30" (%js-run-capture "const {name,age}={name:'Bob',age:30}; console.log(name+age);"))
   (assert-string= "12"  (%js-run-capture "function f(){ let [a,b]=[3,4]; return a*b; } console.log(f());")))
 
+(deftest js-e2e-json-and-math-globals
+  "JSON and Math are seeded as global objects (regression: they were never added
+to the prelude). JSON.parse worked once its string scanner stopped discarding the
+position via with-output-to-string."
+  (assert-string= "{\"a\":1,\"b\":2}" (%js-run-capture "console.log(JSON.stringify({a:1,b:2}));"))
+  (assert-string= "[1,2,3]"  (%js-run-capture "console.log(JSON.stringify([1,2,3]));"))
+  (assert-string= "5"  (%js-run-capture "let o=JSON.parse('{\"x\":5}'); console.log(o.x);"))
+  (assert-string= "42hi" (%js-run-capture "let p=JSON.parse(JSON.stringify({n:42,s:'hi'})); console.log(p.n+p.s);"))
+  (assert-string= "20" (%js-run-capture "console.log(JSON.parse('[10,20,30]')[1]);"))
+  (assert-string= "7"  (%js-run-capture "console.log(Math.max(3,7,2));"))
+  (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
+  (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
+
+(deftest js-e2e-integer-valued-float-formatting
+  "An integer-valued float prints without a decimal point, JS-style (7.0 -> '7'),
+while real decimals are preserved."
+  (assert-string= "7"    (%js-run-capture "console.log(7.0);"))
+  (assert-string= "3.14" (%js-run-capture "console.log(3.14);"))
+  (assert-string= "2.5"  (%js-run-capture "console.log(2.5);"))
+  (assert-string= "4"    (%js-run-capture "console.log(Math.sqrt(16));")))
+
 (deftest js-e2e-class-this-binding
   "Class constructors and methods bind `this' to the instance — in both the host
 special and the VM-global %js-this — so this.x reads/writes the receiver

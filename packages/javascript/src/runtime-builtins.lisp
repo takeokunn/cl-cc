@@ -633,6 +633,39 @@
 (defvar *js-builtin-map* (%build-js-builtin-map)
   "Dispatch table from JS built-in name to CL function.")
 
+(defun %js-make-namespace-object (prefix)
+  "Build a JS namespace global object (Math, JSON, …) from *js-builtin-specs*
+entries whose key is PREFIX + '.' + property. A property whose name is entirely
+uppercase (a constant such as Math.PI / Number.MAX_SAFE_INTEGER) has its zero-arg
+spec called to materialize the value; method properties keep their function. This
+derives the object straight from the existing dispatch table, so it stays complete
+and never references a helper that does not exist."
+  (let ((plen (length prefix))
+        (pairs nil))
+    (dolist (spec *js-builtin-specs*)
+      (let ((key (car spec)))
+        (when (and (> (length key) (1+ plen))
+                   (string= prefix key :end2 plen)
+                   (char= (char key plen) #\.))
+          (let* ((prop (subseq key (1+ plen)))
+                 (val (cdr spec))
+                 (constant-p (and (plusp (length prop))
+                                  (every (lambda (c)
+                                           (or (and (alpha-char-p c) (upper-case-p c))
+                                               (digit-char-p c) (char= c #\_)))
+                                         prop))))
+            (push prop pairs)
+            (push (if (and constant-p (functionp val)) (funcall val) val) pairs)))))
+    (apply #'%js-make-object (nreverse pairs))))
+
+(defun %js-make-math ()
+  "Construct the JS Math global object (constants + methods)."
+  (%js-make-namespace-object "Math"))
+
+(defun %js-make-json ()
+  "Construct the JS JSON global object (stringify / parse)."
+  (%js-make-namespace-object "JSON"))
+
 (defun js-program-forms (source &key strict-mode module-p)
   "Parse JS SOURCE and prepend the runtime-global prelude so compiled programs
 have the standard globals available. Returns a list of shared-AST top-level
@@ -664,6 +697,14 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar
           :name (js-ident-sym "Date")
           :value (make-ast-var :name '%js-make-date)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "JSON")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-json) :args nil)
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Math")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-math) :args nil)
           :kind 'defparameter)
          ;; globalThis — reference to the global object (stub: empty object)
          (make-ast-defvar

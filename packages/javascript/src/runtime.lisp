@@ -396,8 +396,10 @@ dividend (5 % 3 => 2, -5 % 3 => -2), matching ECMAScript; division by zero => Na
          (if (%js-float-infinity-p x)
              (if (> x 0) "Infinity" "-Infinity")
              (let ((s (format nil "~F" x)))
-               ;; Remove trailing zeros after decimal, JS style
-               (string-right-trim "0" (string-right-trim "." s))))))
+               ;; JS prints an integer-valued float without a decimal: 7.0 -> "7".
+               ;; Trim trailing zeros FIRST, then a now-trailing dot. (The reverse
+               ;; order left "7." because "7.0" does not end in ".".)
+               (string-right-trim "." (string-right-trim "0" s))))))
     ((numberp x)            (format nil "~A" x))
     ((%js-ht-p x)           "[object Object]")
     ((%js-vec-p x)
