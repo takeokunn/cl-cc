@@ -307,6 +307,55 @@ returned 1 instead of 3)."
                        (return)))))
       count)))
 
+(defun %php-preg-match-matches (pattern subject)
+  "Return the $matches array for preg_match($pattern,$subject): index 0 = the
+full match, k = capture group k (empty string if the group did not match), or an
+empty array when PATTERN does not match.  Returned BY VALUE and assigned to the
+caller's $matches at the call site — the VM copies host structs across the
+bridge, so a mutable ref box would not propagate."
+  (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
+    (let ((ic (find #\i flags)) (ml (find #\m flags))
+          (str (%php-stringify subject))
+          (arr (%php-make-array)))
+      (multiple-value-bind (fn gcount)
+          (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () (values nil 0)))
+        (when fn
+          (loop for i from 0 to (length str)
+                do (multiple-value-bind (end groups) (%php-regex-match-at fn gcount str i)
+                     (when end
+                       (loop for k from 0 to gcount
+                             do (%php-array-set arr k (%php-regex-group-string groups k str)))
+                       (return))))))
+      arr)))
+
+(defun %php-preg-match-all-matches (pattern subject)
+  "Return the $matches array for preg_match_all in PREG_PATTERN_ORDER: index 0 is
+an array of every full match, k an array of every capture-group-k match."
+  (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
+    (let ((ic (find #\i flags)) (ml (find #\m flags))
+          (str (%php-stringify subject)))
+      (multiple-value-bind (fn gcount)
+          (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () (values nil 0)))
+        (let ((per-group (make-array (1+ gcount))) (count 0) (pos 0))
+          (dotimes (k (1+ gcount)) (setf (aref per-group k) (%php-make-array)))
+          (when fn
+            (loop while (<= pos (length str))
+                  do (let ((ms nil) (me nil) (mg nil))
+                       (loop for i from pos to (length str)
+                             do (multiple-value-bind (e g) (%php-regex-match-at fn gcount str i)
+                                  (when e (setf ms i me e mg g) (return))))
+                       (if ms
+                           (progn
+                             (loop for k from 0 to gcount
+                                   do (%php-array-set (aref per-group k) count
+                                                      (%php-regex-group-string mg k str)))
+                             (incf count)
+                             (setf pos (max (1+ ms) me)))
+                           (return)))))
+          (let ((arr (%php-make-array)))
+            (loop for k from 0 to gcount do (%php-array-set arr k (aref per-group k)))
+            arr))))))
+
 ;;; -----------------------------------------------------------------------
 ;;;  preg_replace
 ;;; -----------------------------------------------------------------------

@@ -116,7 +116,14 @@
           (emit ctx (make-vm-set-global :name var-name :src (or cache-reg value-reg))))
         value-reg)
       (t
-       (error "Unbound variable for setq: ~S" var-name)))))
+       ;; Assigning to an as-yet-unknown variable creates it as a global. This
+       ;; matches the dynamic-language semantics of the PHP/JS frontends (a fresh
+       ;; `$x = …' / `x = …' defines the variable) and lets a programmatically
+       ;; built setq node — e.g. the preg_match($s,$m) $matches out-param
+       ;; lowering — target a variable the parser never declared.
+       (setf (gethash var-name (ctx-global-variables ctx)) t)
+       (emit ctx (make-vm-set-global :name var-name :src value-reg))
+       value-reg))))
 
 (defmethod compile-ast ((node ast-quote) ctx)
   (%emit-constant ctx (ast-quote-value node)))

@@ -166,6 +166,45 @@ FN-SYM(...$a) — a variadic closure that forwards all of its arguments."
       (make-ast-lambda :params nil :optional-params nil
                        :rest-param rest-param :body wrapped-body))))
 
+(defun %php-preg-match-out-param-call-p (qualified-name args)
+  "True when this is preg_match / preg_match_all with a $matches variable arg —
+the call whose third argument is a by-reference out-parameter."
+  (and (>= (length args) 3)
+       (typep (third args) 'cl-cc/ast:ast-var)
+       (let ((name (string-downcase (%php-strip-leading-namespace-separator qualified-name))))
+         (or (string= name "preg_match") (string= name "preg_match_all")))))
+
+(defun %php-lower-preg-match-out-param (qualified-name args)
+  "Lower preg_match($p,$s,$m) / preg_match_all($p,$s,$m) so $matches is populated
+in the caller's variable: assign $m = the matches array (a helper returns it BY
+VALUE — the VM copies host structs across the bridge, so a ref box cannot
+propagate), then yield the match count.  Pattern/subject are bound to temps so
+each is evaluated once and the two helper calls never share arg AST nodes."
+  (let* ((name (string-downcase (%php-strip-leading-namespace-separator qualified-name)))
+         (all-p (string= name "preg_match_all"))
+         (matches-sym (if all-p 'cl-cc/php::%php-preg-match-all-matches
+                          'cl-cc/php::%php-preg-match-matches))
+         (count-sym (if all-p 'cl-cc/php::%php-preg-match-all '%php-preg-match))
+         (matches-var (cl-cc/ast:ast-var-name (third args)))
+         (pat-tmp (gensym "PHP-PREG-PAT-"))
+         (subj-tmp (gensym "PHP-PREG-SUBJ-"))
+         (count-tmp (gensym "PHP-PREG-COUNT-")))
+    (make-ast-let
+     :bindings (list (cons pat-tmp (first args)) (cons subj-tmp (second args)))
+     :body (list
+            (make-ast-let
+             :bindings (list (cons count-tmp
+                                   (make-ast-call :func (make-ast-var :name count-sym)
+                                                  :args (list (make-ast-var :name pat-tmp)
+                                                              (make-ast-var :name subj-tmp)))))
+             :body (list
+                    (make-ast-setq
+                     :var matches-var
+                     :value (make-ast-call :func (make-ast-var :name matches-sym)
+                                           :args (list (make-ast-var :name pat-tmp)
+                                                       (make-ast-var :name subj-tmp))))
+                    (make-ast-var :name count-tmp)))))))
+
 (defun %php-parse-function-call (qualified-name fallback-name stream known-vars)
   "Parse a PHP function call and lower known builtins to runtime helpers."
   (multiple-value-bind (args rest kv) (php-parse-arglist stream known-vars)
@@ -175,6 +214,9 @@ FN-SYM(...$a) — a variadic closure that forwards all of its arguments."
                             (%php-simple-function-spelling qualified-name)))
                       fallback-name)))
       (values (cond
+                ;; preg_match($p,$s,$m): $matches is a by-reference out-param.
+                ((%php-preg-match-out-param-call-p qualified-name args)
+                 (%php-lower-preg-match-out-param qualified-name args))
                 ;; f(...): first-class callable — a forwarding closure, not a call.
                 ((and (= (length args) 1) (%php-fcc-marker-p (first args)))
                  (%php-build-fcc-closure fn-sym))

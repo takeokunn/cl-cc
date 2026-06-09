@@ -827,3 +827,20 @@ matcher now records each capturing group's span, so backreferences resolve."
   (assert-string= "3" (%php-run-capture "<?php echo preg_match_all('/\\d/', '1a2b3');"))
   (assert-string= "3" (%php-run-capture "<?php echo preg_match_all('/\\w+/', 'foo bar baz');"))
   (assert-string= "0" (%php-run-capture "<?php echo preg_match_all('/\\d/', 'abc');")))
+
+(deftest php-e2e-preg-match-out-param
+  "preg_match($p,$s,$m) / preg_match_all populate the $matches out-parameter in
+the caller's variable (a FRESH variable — no pre-declaration needed).  A
+call-site transform assigns $m = the matches array (returned by value) and
+yields the count.  Relies on ast-setq auto-declaring an unknown variable as a
+global; a ref box could not be used (the VM copies host structs across the
+bridge)."
+  ;; capture groups land in $m[1], $m[2], full match in $m[0]
+  (assert-string= "12|34" (%php-run-capture "<?php preg_match('/(\\d+)-(\\d+)/', '12-34', $m); echo $m[1].'|'.$m[2];"))
+  (assert-string= "1:123:123" (%php-run-capture "<?php $r=preg_match('/(\\d+)/', 'abc123', $m); echo $r.':'.$m[0].':'.$m[1];"))
+  (assert-string= "bob at host" (%php-run-capture "<?php preg_match('/(\\w+)@(\\w+)/', 'bob@host', $m); echo $m[1].' at '.$m[2];"))
+  ;; the return value is still the count (0 when no match)
+  (assert-string= "0" (%php-run-capture "<?php echo preg_match('/\\d/', 'abc', $m);"))
+  ;; preg_match_all populates $matches in PREG_PATTERN_ORDER
+  (assert-string= "1,2,3" (%php-run-capture "<?php preg_match_all('/(\\d)/', '1a2b3', $m); echo implode(',', $m[1]);"))
+  (assert-string= "12,34" (%php-run-capture "<?php preg_match_all('/\\d+/', 'a12b34', $m); echo implode(',', $m[0]);")))
