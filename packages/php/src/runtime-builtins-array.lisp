@@ -419,6 +419,36 @@ updated and the sort appeared to do nothing."
         (%php-array-set result (car pair) (cdr pair))))
     result))
 
+(defun %php-callback-equal-p (cb value items)
+  "True when VALUE compares equal (callback returns 0) to some element of the
+CL list ITEMS, using the user comparison callback CB."
+  (and cb (some (lambda (o) (zerop (%php-numeric (funcall cb value o)))) items)))
+
+(defun %php-array-udiff (array &rest rest)
+  "PHP array_udiff: elements of ARRAY not found in the other arrays, compared by
+the LAST argument — a callback ($a,$b) -> negative/0/positive (0 means equal)."
+  (let* ((cb (%php-callable-function (car (last rest))))
+         (others (loop for a in (butlast rest)
+                       when (hash-table-p a) append (mapcar #'cdr (%php-array-pairs a))))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (unless (%php-callback-equal-p cb (cdr pair) others)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
+(defun %php-array-uintersect (array &rest rest)
+  "PHP array_uintersect: elements of ARRAY present in ALL other arrays, compared
+by the last argument (a user comparison callback)."
+  (let* ((cb (%php-callable-function (car (last rest))))
+         (arrays (remove-if-not #'hash-table-p (butlast rest)))
+         (result (%php-make-array)))
+    (dolist (pair (%php-array-pairs array))
+      (when (and cb (every (lambda (a)
+                             (%php-callback-equal-p cb (cdr pair) (mapcar #'cdr (%php-array-pairs a))))
+                           arrays))
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
 ;;; ─── array_column / array_combine / array_flip ───────────────────────────────
 
 (defun %php-array-column (input column-key &optional index-key)

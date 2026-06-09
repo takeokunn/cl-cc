@@ -1100,3 +1100,13 @@ PHP w is 0=Sunday and N is 1=Monday..7=Sunday), so gmdate('D',0) gave Wed for
   (assert-string= "3rd"  (%php-run-capture "<?php echo gmdate('jS',172800);"))
   (assert-string= "11th" (%php-run-capture "<?php echo gmdate('jS',864000);"))
   (assert-string= "21st" (%php-run-capture "<?php echo gmdate('jS',1728000);")))
+
+(deftest php-e2e-date-construct-and-udiff
+  "gmmktime (GMT alias of mktime) plus array_udiff/array_uintersect (diff and
+intersect with a user comparison callback) — all were missing."
+  (assert-string= "86400"      (%php-run-capture "<?php echo gmmktime(0,0,0,1,2,1970);"))
+  (assert-string= "2000-12-25" (%php-run-capture "<?php echo gmdate('Y-m-d',mktime(0,0,0,12,25,2000));"))
+  (assert-string= "[1,3]"      (%php-run-capture "<?php echo json_encode(array_values(array_udiff([1,2,3,4],[2,4],fn($a,$b)=>$a-$b)));"))
+  (assert-string= "[2,4]"      (%php-run-capture "<?php echo json_encode(array_values(array_uintersect([1,2,3,4],[2,4,5],fn($a,$b)=>$a-$b)));"))
+  ;; callback-driven (case-insensitive) comparison
+  (assert-string= "[\"C\"]"    (%php-run-capture "<?php echo json_encode(array_values(array_udiff(['A','b','C'],['a','B'],fn($x,$y)=>strcasecmp($x,$y))));")))
