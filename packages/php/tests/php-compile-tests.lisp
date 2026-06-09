@@ -694,4 +694,7 @@ registered by named %php- symbol."
   (assert-string= "180" (%php-run-capture "<?php echo round(rad2deg(3.141592653589793),2);"))
   ;; base_convert: lowercase digits, both directions
   (assert-string= "11111111" (%php-run-capture "<?php echo base_convert('ff',16,2);"))
-  (assert-string= "ff" (%php-run-capture "<?php echo base_convert('255',10,16);")))
+  (assert-string= "ff" (%php-run-capture "<?php echo base_convert('255',10,16);"))
+  ;; is_finite / is_infinite (also lambda-registered; same dispatch bug)
+  (assert-string= "y" (%php-run-capture "<?php echo is_finite(1.5)?'y':'n';"))
+  (assert-string= "y" (%php-run-capture "<?php echo is_infinite(fdiv(1,0))?'y':'n';")))

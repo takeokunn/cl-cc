@@ -127,6 +127,16 @@ produces in IEEE double."
   "PHP rad2deg: convert RADIANS to degrees."
   (* (coerce (%php-numeric radians) 'double-float) (/ 180 pi)))
 
+(defun %php-is-finite (x)
+  "PHP is_finite: true when X is a finite float (not INF or NAN)."
+  (let ((v (%php-numeric x)))
+    (if (and (floatp v) (= v v) (< (abs v) most-positive-double-float)) t nil)))
+
+(defun %php-is-infinite (x)
+  "PHP is_infinite: true when X is the INF approximation used elsewhere."
+  (let ((v (%php-numeric x)))
+    (if (and (floatp v) (= v v) (>= (abs v) most-positive-double-float)) t nil)))
+
 (defun %php-base-convert (number from-base to-base)
   "PHP base_convert: convert a string NUMBER from FROM-BASE to TO-BASE (2..36),
 returning the digits in lowercase as PHP does."
