@@ -82,18 +82,30 @@
           (slot-type (when (and property-type (eq (php-peek-type after-type) :T-VAR))
                        property-type)))
       (multiple-value-bind (var-tok rest) (php-consume current)
-        (let ((slot (make-ast-slot-def :name (php-var-sym (php-tok-value var-tok))
-                                       :type slot-type
-                                        :allocation (if (member :static modifiers :test #'eq)
-                                                        :class
-                                                        :instance)
-                                        :imports (%php-slot-metadata modifiers
-                                                                    :attributes attributes
-                                                                    :target-type :property))))
+        ;; Use the SAME symbol convention as member access ($o->x): strip the
+        ;; leading $ and intern via php-ident-sym (upcased). php-var-sym did not
+        ;; upcase, so `public $x' declared slot |x| while $o->x looked up X, giving
+        ;; "slot X is missing from the object".
+        (let* ((raw  (php-tok-value var-tok))
+               (bare (if (and (stringp raw) (plusp (length raw)) (char= (char raw 0) #\$))
+                         (subseq raw 1) raw))
+               (initform nil))
+          ;; Default value: parse it into the slot initform (was discarded).
           (when (and rest (eq (php-peek-type rest) :T-OP)
                      (equal "=" (php-peek-value rest)))
-            (setf rest (%php-skip-expression-like (cdr rest) '(:T-SEMI) nil)))
-          (values slot (php-skip-semis rest)))))))
+            (multiple-value-bind (default-ast rest2) (php-parse-expr (cdr rest) nil)
+              (setf initform default-ast
+                    rest rest2)))
+          (let ((slot (make-ast-slot-def :name (php-ident-sym bare)
+                                         :type slot-type
+                                         :initform initform
+                                         :allocation (if (member :static modifiers :test #'eq)
+                                                         :class
+                                                         :instance)
+                                         :imports (%php-slot-metadata modifiers
+                                                                      :attributes attributes
+                                                                      :target-type :property))))
+            (values slot (php-skip-semis rest))))))))
 
 (defun %php-skip-legacy-visibility-modifiers (stream)
   "Legacy modifier skipper retained for callers that only need the stream."

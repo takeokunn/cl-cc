@@ -13,6 +13,15 @@ fresh VM state runs the program end-to-end."
     ;; Trim a trailing newline the VM appends when flushing program output.
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
+(deftest php-e2e-class-property-access
+  "Public properties read/write through $o->x with the correct slot name
+(regression: a property declared via php-var-sym got slot |x| while $o->x looked
+up X -> 'slot X is missing'), and a `= default' initializes the slot."
+  (assert-string= "7" (%php-run-capture "<?php class C{ public $x=7; } $o=new C(); echo $o->x;"))
+  (assert-string= "5" (%php-run-capture "<?php class C{ public $x; } $o=new C(); $o->x=5; echo $o->x;"))
+  (assert-string= "x=7" (%php-run-capture "<?php class C{ public $x=7; } $o=new C(); echo \"x={$o->x}\";"))
+  (assert-string= "hi" (%php-run-capture "<?php class C{ public $s='hi'; } $o=new C(); echo $o->s;")))
+
 (deftest php-e2e-complex-string-interpolation
   "Curly-brace interpolation {$expr} supports array access, nested access, and
 method calls — not just a bare variable (regression: the lexer required } right

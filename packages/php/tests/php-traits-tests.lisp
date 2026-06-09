@@ -198,9 +198,11 @@
          (prop  (first slots)))
     (assert-eq :trait (cl-cc:ast-defclass-php-kind ast))
     (assert-true (cl-cc:ast-slot-def-p prop))
-    ;; PHP variables are case-sensitive, so property slot names preserve case
-    ;; ($name -> name), consistent with regular class properties — not upcased.
-    (assert-string= "name" (symbol-name (cl-cc:ast-slot-name prop)))))
+    ;; Property slot names use the SAME symbol convention as member access
+    ;; ($obj->name interns via php-ident-sym, upcased), so the declared slot name
+    ;; matches how it is read/written. ($name -> NAME.) Without this they mismatched
+    ;; and $obj->name raised "slot NAME is missing".
+    (assert-string= "NAME" (symbol-name (cl-cc:ast-slot-name prop)))))
 
 (deftest php-trait-multiple-methods
   "A trait with several methods produces one slot-def per method."
