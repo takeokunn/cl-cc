@@ -9,6 +9,37 @@
 
 ;;; ─── Helpers ──────────────────────────────────────────────────────────────────
 
+(defun %js-run-capture (source)
+  "Compile JavaScript SOURCE to the VM, seed the JS runtime globals, run it, and
+return everything console.log printed (trailing newline trimmed). Exercises the
+real execution path, unlike the parse-only %js-e2e-parse checks."
+  (let* ((result  (cl-cc:compile-string source :target :vm :language :javascript))
+         (program (cl-cc/compile:compilation-result-program result))
+         (out     (make-string-output-stream))
+         (state   (cl-cc/vm:make-vm-state :output-stream out)))
+    (cl-cc/pipeline:seed-js-runtime-globals state)
+    ;; %js-console-log writes via (format t ...) → *standard-output*, so bind it
+    ;; to capture; the CLI relies on *standard-output* being the terminal.
+    (let ((*standard-output* out))
+      (cl-cc/vm:run-compiled program :output-stream out :state state))
+    (string-right-trim '(#\Newline) (get-output-stream-string out))))
+
+(deftest js-e2e-runs-basic-programs
+  "JavaScript programs execute end-to-end (regression: the prelude bound Symbol/
+Infinity/error classes to host *js-* specials that were never seeded as VM
+globals, so EVERY JS program failed with 'Unbound global variable: *JS-...*')."
+  (assert-string= "hello" (%js-run-capture "console.log(\"hello\");"))
+  (assert-string= "14"    (%js-run-capture "console.log(2+3*4);"))
+  (assert-string= "7"     (%js-run-capture "function f(a,b){return a+b;} console.log(f(3,4));"))
+  (assert-string= "10"    (%js-run-capture "let s=0; for(let i=1;i<=4;i++){s+=i;} console.log(s);")))
+
+(deftest js-e2e-runs-arrays-and-closures
+  "Array higher-order methods, template literals, and closures run."
+  (assert-string= "2,4,6" (%js-run-capture "console.log([1,2,3].map(x=>x*2).join(\",\"));"))
+  (assert-string= "2,4"   (%js-run-capture "console.log([1,2,3,4].filter(x=>x%2==0).join(\",\"));"))
+  (assert-string= "Hi Bob" (%js-run-capture "let n=\"Bob\"; console.log(`Hi ${n}`);"))
+  (assert-string= "2"     (%js-run-capture "function mk(){let c=0; return ()=>++c;} let f=mk(); f(); console.log(f());")))
+
 (defun %js-e2e-parse (src)
   "Parse SRC and return the list of top-level AST nodes."
   (cl-cc/javascript:parse-js-source src))

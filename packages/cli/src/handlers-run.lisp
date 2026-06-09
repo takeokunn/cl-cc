@@ -53,6 +53,10 @@ exits with status 0 on success."
                 ((eq language :javascript)
                   (let ((result (apply #'compile-string source :target :vm :language :javascript kwargs)))
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
+                    ;; The JS prelude binds standard globals (Symbol, Infinity, the
+                    ;; error classes, …) to the values of host *js-* specials, which
+                    ;; compile to vm-get-global; seed them so they resolve at runtime.
+                    (cl-cc/pipeline:seed-js-runtime-globals vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))
                       (%maybe-write-pgo-profile opts result vm-state)
                       ret)))

@@ -620,6 +620,27 @@ bridge — the same package-derived whitelist used for PHP."
       (setf cl-cc/javascript::*js-callable-p*
             (lambda (x) (or (functionp x) (cl-cc/vm::%vm-closure-object-p x)))))))
 
+(defun seed-js-runtime-globals (state)
+  "Seed JavaScript runtime special variables into STATE's VM globals.
+
+The JS prelude (js-program-forms) binds standard globals to the VALUES of host
+specials — e.g. Symbol to *js-symbol-global*, Infinity to *js-inf-float*, the error
+classes to *js-error-class* etc. Each such reference compiles to a vm-get-global,
+so without seeding EVERY JS program fails at runtime with
+'Unbound global variable: *JS-...*'. Mirror the package-derived function-bridge
+whitelist: copy every bound *JS-…* special in :cl-cc/javascript into STATE's
+globals so the prelude resolves."
+  (let ((pkg (find-package :cl-cc/javascript)))
+    (when (and pkg state)
+      (do-symbols (sym pkg)
+        (when (and (eq (symbol-package sym) pkg)
+                   (boundp sym)
+                   (let ((name (symbol-name sym)))
+                     (and (>= (length name) 4)
+                          (string= "*JS-" name :end2 4))))
+          (setf (gethash sym (cl-cc/vm:vm-global-vars state))
+                (symbol-value sym)))))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Public compilation API
 ;;; ─────────────────────────────────────────────────────────────────────────

@@ -63,6 +63,7 @@
    #:compile-string-with-stdlib
    #:parse-source-for-language
    #:get-stdlib-forms
+   #:seed-js-runtime-globals
    #:warm-stdlib-cache  ; defined in :cl-cc/selfhost; pre-interned here so
                         ; pipeline-runtime can call it as bare symbol
     #:pipeline-opts
