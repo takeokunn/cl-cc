@@ -190,3 +190,26 @@
     (let ((result (cl-cc/vm::vm-reg-get s :R0)))
       (assert-true (search "a" result))
       (assert-true (search "b" result)))))
+
+;;; ─── ~F / ~E / ~$ floating-point directive parameters ──────────────────────
+
+(deftest-each fmt-float-directive-params
+  "The ~F/~E/~$ directives honor their width/decimals/scale parameters.
+Regression: %vm-format-float ignored PARAMS entirely, so ~,2f printed full
+precision (3.14159) instead of 3.14. With params present the directive is
+reconstructed and delegated to the host FORMAT for full ANSI semantics."
+  :cases (("f-2-decimals"   "~,2f"  3.14159  "3.14")
+          ("f-1-rounds"     "~,1f"  2.67     "2.7")
+          ("f-width-pad"    "~6,2f" 3.14159  "  3.14")
+          ("f-integer-arg"  "~,2f"  3        "3.00")
+          ("f-negative"     "~,2f"  -3.14159 "-3.14")
+          ("f-no-params"    "~f"    3.14159  "3.14159")
+          ("dollar-default" "~$"    3.14159  "3.14")
+          ("dollar-intdig"  "~,3$"  3.14159  "003.14"))
+  (control arg expected)
+  (assert-equal expected (cl-cc/vm::%vm-format-render-to-string control (list arg))))
+
+(deftest fmt-float-params-in-context
+  "Float directive parameters work alongside surrounding text and multiple args."
+  (assert-equal "1.50 and 2.56"
+                (cl-cc/vm::%vm-format-render-to-string "~,2f and ~,2f" (list 1.5 2.555))))

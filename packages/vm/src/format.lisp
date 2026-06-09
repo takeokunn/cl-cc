@@ -340,18 +340,47 @@
       (atsignp (%vm-format-write stream (%vm-format-roman value colonp)))
       (t (%vm-format-write stream (%vm-format-english value colonp))))))
 
+(defun %vm-format-params-prefix (params)
+  "Render PARAMS (already resolved to integers/characters/nil) as a directive
+parameter prefix, e.g. (6 2) -> \"6,2\", (nil 2) -> \",2\", (6) -> \"6\". Trailing
+nils are dropped; a nil between non-nils becomes an empty field (its default)."
+  (let ((last (position-if #'identity params :from-end t)))
+    (if (null last)
+        ""
+        (cl:with-output-to-string (s)
+          (loop for i from 0 to last
+                for p = (nth i params)
+                do (when (plusp i) (cl:write-char #\, s))
+                   (when p
+                     (if (characterp p)
+                         (progn (cl:write-char #\' s) (cl:write-char p s))
+                         (princ p s))))))))
+
 (defun %vm-format-float (directive value params stream)
-  (declare (ignore params))
-  (let ((mode (case directive
-                (#\F :fixed)
-                (#\E :exponential)
-                (#\G :shortest)
-                (#\$ :fixed)
-                (otherwise :shortest))))
-    (%vm-format-write stream
-                      (if (fboundp 'vm-float-to-string)
-                          (vm-float-to-string value :mode mode)
-                          (princ-to-string value)))))
+  ;; With explicit parameters (~w,dF, ~,2$, ...), reconstruct the directive and
+  ;; delegate to the host FORMAT, which implements the full ANSI width/decimals/
+  ;; scale/pad semantics — the VM shortest/fixed printer ignored them entirely
+  ;; (~,2f printed full precision). ~$ always delegates (its default is 2 decimals,
+  ;; not the shortest representation). Parameter-free ~F/~E/~G keep the existing
+  ;; VM printer for byte-identical output to before.
+  (if (or (char= directive #\$)
+          (find-if #'identity params))
+      (%vm-format-write
+       stream
+       (cl:format nil
+                  (concatenate 'string "~" (%vm-format-params-prefix params)
+                               (string directive))
+                  value))
+      (let ((mode (case directive
+                    (#\F :fixed)
+                    (#\E :exponential)
+                    (#\G :shortest)
+                    (#\$ :fixed)
+                    (otherwise :shortest))))
+        (%vm-format-write stream
+                          (if (fboundp 'vm-float-to-string)
+                              (vm-float-to-string value :mode mode)
+                              (princ-to-string value))))))
 
 (defun %vm-format-character-name (ch)
   (or (char-name ch) (string ch)))
