@@ -15,6 +15,17 @@
   (expected form)
   (assert-equal expected (run-string form :stdlib t)))
 
+(deftest-each remove-if-macro-no-stdlib
+  "remove-if / remove-if-not work as MACROS without the stdlib defun fallback.
+A stray FR-179 compiler macro used to intercept the call and suppress macro
+expansion, leaving a bare call to an undefined REMOVE-IF function."
+  :cases (("remove-if"        '(1 3) "(remove-if #'evenp '(1 2 3 4))")
+          ("remove-if-not"    '(2 4) "(remove-if-not #'evenp '(1 2 3 4))")
+          ("remove-if-not-key" '(1 3) "(remove-if-not #'evenp '(1 2 3 4) :key #'1+)")
+          ("remove-if-empty"  nil    "(remove-if #'plusp '(-1 -2))"))
+  (expected form)
+  (assert-equal expected (run-string form)))
+
 ;;; Let Alias Fix and Prog1/Prog2 Tests
 
 (deftest-each let-no-alias-and-prog1-prog2

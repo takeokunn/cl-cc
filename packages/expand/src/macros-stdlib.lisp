@@ -454,15 +454,13 @@ ANSI: uses symbol-macrolet so setf on slot names writes back to the object."
            (%fr179-fused-map-filter-form (second form) (third form))
            form))))
 
-(dolist (name '(remove-if remove-if-not))
-  (register-compiler-macro
-   name
-   (lambda (form env)
-     (declare (ignore env))
-     (if (and (= (length form) 3)
-              (%fr179-simple-mapcar-form-p (third form)))
-         (%fr179-fused-filter-map-form (car form) (second form) (third form))
-         form))))
+;; NOTE: remove-if / remove-if-not are MACROS (defined in macros-hof.lisp), not
+;; functions, so they must NOT have a compiler macro: the registered compiler
+;; macro intercepted every call and, when no map-filter fusion applied, returned
+;; the form unchanged WITHOUT letting the macro expand — leaving a bare call to
+;; an undefined REMOVE-IF function (`(remove-if pred lst)' => "Undefined
+;; function: REMOVE-IF" unless the stdlib defun happened to be loaded).  The
+;; macro already lowers to a tight DOLIST, so the fusion is unnecessary here.
 
 ;; MAPCAR — list accumulation over lists and vectors (FR-341)
 (our-defmacro mapcar (function sequence)
