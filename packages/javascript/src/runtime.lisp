@@ -188,6 +188,26 @@ type symbol cannot be named at read time — resolve it by name at runtime."
     ((and (numberp a) (numberp b)) (= a b))
     (t (equal a b))))
 
+(defun %js-relational (a b num-op str-op)
+  "JS Abstract Relational Comparison core, returning a JS boolean (t/nil).
+When both operands are strings they compare lexicographically by code unit
+(STR-OP); otherwise both coerce to number (ToNumber) and compare with NUM-OP,
+except that a NaN operand makes every relational comparison false. This is why
+JS relational operators must NOT lower to the VM's CL <,>,<=,>= directly: those
+return 1/0 and mishandle strings/NaN/coercion."
+  (if (and (stringp a) (stringp b))
+      (and (funcall str-op a b) t)
+      (let ((na (%js-to-number a))
+            (nb (%js-to-number b)))
+        (if (or (%js-nan-p na) (%js-nan-p nb))
+            nil
+            (and (funcall num-op na nb) t)))))
+
+(defun %js-lt (a b) "JS a < b."  (%js-relational a b #'<  #'string<))
+(defun %js-gt (a b) "JS a > b."  (%js-relational a b #'>  #'string>))
+(defun %js-le (a b) "JS a <= b." (%js-relational a b #'<= #'string<=))
+(defun %js-ge (a b) "JS a >= b." (%js-relational a b #'>= #'string>=))
+
 (defun %js-instanceof (obj constructor)
   "JS instanceof. constructor must be a hash-table with __prototype__."
   (when (%js-ht-p obj)

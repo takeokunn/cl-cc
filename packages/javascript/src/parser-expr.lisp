@@ -69,11 +69,14 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
     ;; `- * /' and comparisons are numeric-only and use the direct VM constructors.
     ;; `/' is NOT here — JS division must yield a float (5/2 => 2.5), but the VM
     ;; `/' returns the CL rational 5/2; it routes through %js-divide instead.
-    (dolist (entry '(("-" . -) ("*" . *)
-                     ("<" . <) (">" . >) ("<=" . <=) (">=" . >=)))
+    ;; Comparisons (< > <= >=) are NOT here: lowering them to the VM's CL
+    ;; comparison returns 1/0 (not a JS boolean) and ignores JS relational
+    ;; semantics (string compare, NaN-always-false, ToNumber coercion). They
+    ;; route through %js-lt/gt/le/ge via *js-binop-runtime-helpers* instead.
+    (dolist (entry '(("-" . -) ("*" . *)))
       (setf (gethash (car entry) ht) (cdr entry)))
     ht)
-  "Maps arithmetic/comparison operator strings to AST binop operator symbols.")
+  "Maps arithmetic operator strings to AST binop operator symbols.")
 
 (defun js-lower-binop-keyword (op-str)
   "Map operator string to AST binop keyword, or NIL for runtime-dispatch ops."
@@ -84,6 +87,8 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
     (dolist (entry '(("+"   . %js-add)  ("/"  . %js-divide)
                      ("%"   . %js-mod)  ("**" . %js-pow)
                      ("===" . %js-strict-eq) ("==" . %js-loose-eq)
+                     ("<"   . %js-lt) (">"  . %js-gt)
+                     ("<="  . %js-le) (">=" . %js-ge)
                      ("|"   . %js-bitwise-or) ("^"  . %js-bitwise-xor)
                      ("&"   . %js-bitwise-and)
                      ("<<"  . %js-shift-left)  (">>" . %js-shift-right)

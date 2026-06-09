@@ -487,3 +487,25 @@ The namespaces are built from the *js-builtin-specs* table by
   ;; regression guards: Math and JSON still work
   (assert-string= "2"      (%js-run-capture "console.log(Math.max(1,2));"))
   (assert-string= "{\"a\":1}" (%js-run-capture "console.log(JSON.stringify({a:1}));")))
+
+;;; ─── 15. Relational operators return JS booleans + JS semantics ──────────────
+
+(deftest js-e2e-relational-operators
+  "< > <= >= return JS booleans (true/false) and follow JS Abstract Relational
+Comparison: string operands compare lexicographically, a NaN operand is always
+false, and mixed operands coerce via ToNumber.  Regression: they lowered to the
+VM's CL comparison and returned 1/0, ignoring string/NaN/coercion semantics.
+Now they route through %js-lt/gt/le/ge."
+  (assert-string= "true"  (%js-run-capture "console.log(5 > 0);"))
+  (assert-string= "false" (%js-run-capture "console.log(2 < 1);"))
+  (assert-string= "true"  (%js-run-capture "console.log(3 >= 3);"))
+  (assert-string= "false" (%js-run-capture "console.log(4 <= 2);"))
+  ;; string operands compare lexicographically
+  (assert-string= "true"  (%js-run-capture "console.log(\"apple\" < \"banana\");"))
+  ;; NaN comparisons are always false
+  (assert-string= "false" (%js-run-capture "console.log(NaN > 0);"))
+  ;; mixed string/number coerces to number
+  (assert-string= "true"  (%js-run-capture "console.log(\"5\" > 3);"))
+  ;; comparison used in boolean position (ternary, loop) still works
+  (assert-string= "y"     (%js-run-capture "console.log(5 > 3 ? \"y\" : \"n\");"))
+  (assert-string= "6"     (%js-run-capture "let s=0; for(let i=0;i<4;i++){s+=i;} console.log(s);")))
