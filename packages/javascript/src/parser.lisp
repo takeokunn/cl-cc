@@ -168,13 +168,24 @@ Equivalent to (parse-js-source source :strict-mode t :module-p t)."
 statements that follow it in STMTS, so the binding scopes over the rest of the
 block. Walks backwards; non-let statements and already-bodied lets pass through.
 The JS analog of the PHP frontend's php-finish-let-bindings — without it
-`let total = 0; … total …' leaves total unscoped and reads as undefined."
+`let total = 0; … total …' leaves total unscoped and reads as undefined.
+
+A multi-binding empty-bodied let (from `let a = 1, b = a + 1' or destructuring,
+where a = tmp[0] must see the tmp = init binding) is expanded into NESTED
+single-binding lets: ast-let binds in parallel, but JS declarations are sequential
+(let*), so earlier bindings must scope over later initializers."
   (let ((tail nil))
     (dolist (stmt (reverse stmts) tail)
       (if (and (ast-let-p stmt) (null (ast-let-body stmt)))
-          (progn
-            (setf (ast-let-body stmt) tail)
-            (setf tail (list stmt)))
+          (let ((nested tail)
+                (decls (ast-let-declarations stmt)))
+            ;; Right-to-left: the innermost let wraps TAIL; each earlier binding
+            ;; wraps the let built so far, so it scopes over later initializers.
+            (dolist (binding (reverse (ast-let-bindings stmt)))
+              (setf nested (list (make-ast-let :bindings (list binding)
+                                               :body nested
+                                               :declarations decls))))
+            (setf tail nested))
           (push stmt tail)))))
 
 (defun %js-callable-body (body-stmts)

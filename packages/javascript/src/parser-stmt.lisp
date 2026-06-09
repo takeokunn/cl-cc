@@ -425,6 +425,12 @@ DEFAULT-AST is nil."
           (setf current (cdr current))
           (return)))
     (setf current (js-skip-semis current))
+    ;; A single empty-bodied let carrying all bindings. ast-let binds in PARALLEL,
+    ;; but JS declarations are sequential (let*) — `let a = 1, b = a + 1' and
+    ;; destructuring (a = tmp[0] must see tmp = init) both depend on it. The
+    ;; block-finishing pass %js-finish-let-bindings expands a multi-binding
+    ;; empty-bodied let into nested single-binding lets, giving that sequential
+    ;; scoping (and scoping the bindings over the rest of the block).
     (values (make-ast-let :bindings all-bindings :body nil
                           :declarations (list kind))
             current)))

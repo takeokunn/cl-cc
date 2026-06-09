@@ -44,10 +44,14 @@
     (assert-true (cl-cc:ast-let-p ast))))
 
 (deftest js-parser-const-multi-decl
-  "const a = 1, b = 2; parses to ast-let with 2 bindings."
+  "const a = 1, b = 2; parses to sequential nested single-binding lets (ast-let
+binds in parallel, so JS's sequential `let' is modelled as a nested chain)."
   (let ((ast (%js-first "const a = 1, b = 2;")))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-= 2 (length (cl-cc:ast-let-bindings ast)))))
+    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))
+    (let ((inner (first (cl-cc:ast-let-body ast))))
+      (assert-true (cl-cc:ast-let-p inner))
+      (assert-= 1 (length (cl-cc:ast-let-bindings inner))))))
 
 ;;; ─── Arrow functions ──────────────────────────────────────────────────────────
 
@@ -257,16 +261,18 @@ postfix parser never attached it to the tag."
 ;;; ─── Destructuring ────────────────────────────────────────────────────────────
 
 (deftest js-parser-array-destructuring
-  "const [a, b] = arr; produces ast-let with multiple bindings."
+  "const [a, b] = arr; produces a nested let chain (tmp = arr, then a = tmp[0],
+b = tmp[1]); each let is single-binding for sequential scoping. Behavior is
+checked by js-e2e-destructuring-and-sequential-decls."
   (let ((ast (%js-first "const [a, b] = arr;")))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (>= (length (cl-cc:ast-let-bindings ast)) 2))))
+    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))))
 
 (deftest js-parser-object-destructuring
-  "const {x, y} = obj; produces ast-let with multiple bindings."
+  "const {x, y} = obj; produces a nested let chain (single-binding lets)."
   (let ((ast (%js-first "const {x, y} = obj;")))
     (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (>= (length (cl-cc:ast-let-bindings ast)) 2))))
+    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))))
 
 (deftest js-parser-array-destructuring-default
   "const [a = 1, b = 2] = arr; parses element defaults."

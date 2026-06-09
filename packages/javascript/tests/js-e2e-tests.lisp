@@ -61,6 +61,20 @@ default params, rest params, and IIFEs."
   (assert-string= "13" (%js-run-capture "const f=function(a,b=10){return a+b;}; console.log(f(3));"))
   (assert-string= "3"  (%js-run-capture "const s=function(...n){return n.length;}; console.log(s(1,2,3));")))
 
+(deftest js-e2e-destructuring-and-sequential-decls
+  "Array/object destructuring and multi-declarator let bind sequentially
+(regression: ast-let binds in parallel, so a later initializer could not see an
+earlier binding — destructuring's a = tmp[0] could not see tmp = init, and
+`let a=1, b=a+1' gave nothing; %js-finish-let-bindings now expands a multi-binding
+empty let into nested single-binding lets)."
+  (assert-string= "6"   (%js-run-capture "let a=5, b=a+1; console.log(b);"))
+  (assert-string= "30"  (%js-run-capture "let [a,b]=[10,20]; console.log(a+b);"))
+  (assert-string= "123" (%js-run-capture "let [a,b,c]=[1,2,3]; console.log(a*100+b*10+c);"))
+  (assert-string= "3"   (%js-run-capture "let {x,y}={x:1,y:2}; console.log(x+y);"))
+  (assert-string= "2"   (%js-run-capture "let [,b]=[1,2]; console.log(b);"))
+  (assert-string= "Bob30" (%js-run-capture "const {name,age}={name:'Bob',age:30}; console.log(name+age);"))
+  (assert-string= "12"  (%js-run-capture "function f(){ let [a,b]=[3,4]; return a*b; } console.log(f());")))
+
 (deftest js-e2e-class-this-binding
   "Class constructors and methods bind `this' to the instance — in both the host
 special and the VM-global %js-this — so this.x reads/writes the receiver
@@ -188,20 +202,28 @@ class Dog extends Animal {
 ;;; ─── 5. Object destructuring ──────────────────────────────────────────────────
 
 (deftest js-e2e-object-destructuring
-  "Object destructuring assignment produces ast-let bindings accessing properties.
-After %js-finish-let-bindings the 3 const declarations nest into 1 top-level let."
+  "Object destructuring lowers to a nested let chain whose bindings access
+properties via %js-get-prop. After %js-finish-let-bindings the const declarations
+nest into single-binding lets for sequential scoping."
   (let ((asts (%js-e2e-parse "
 const person = { name: 'Alice', age: 30, city: 'NY' };
 const { name, age } = person;
 const { city: location } = person;
 ")))
     (assert-true (>= (length asts) 1))
-    ;; Search the nested let chain for a destructuring let (> 1 binding)
-    (labels ((has-multi-bind-let (node)
+    ;; Search the nested let chain for a binding whose value is a %js-get-prop
+    ;; call — the hallmark of a lowered destructuring access.
+    (labels ((getprop-binding-p (b)
+               (let ((v (cdr b)))
+                 (and (cl-cc:ast-call-p v)
+                      (cl-cc:ast-var-p (cl-cc:ast-call-func v))
+                      (search "GET-PROP"
+                              (symbol-name (cl-cc:ast-var-name (cl-cc:ast-call-func v)))))))
+             (chain-has-getprop (node)
                (when (cl-cc:ast-let-p node)
-                 (or (> (length (cl-cc:ast-let-bindings node)) 1)
-                     (some #'has-multi-bind-let (cl-cc:ast-let-body node))))))
-      (assert-true (some #'has-multi-bind-let asts)))))
+                 (or (some #'getprop-binding-p (cl-cc:ast-let-bindings node))
+                     (some #'chain-has-getprop (cl-cc:ast-let-body node))))))
+      (assert-true (some #'chain-has-getprop asts)))))
 
 ;;; ─── 6. Generator sequence ────────────────────────────────────────────────────
 
