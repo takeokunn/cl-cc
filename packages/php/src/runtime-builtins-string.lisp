@@ -644,26 +644,43 @@ fractional part (3.0 -> \"3\"), others in full."
 
 (defun %php-wordwrap (str &optional (width 75) (break-str "
 ") (cut-long-words nil))
-  "PHP wordwrap: wrap string at WIDTH characters."
-  (declare (ignore cut-long-words))
+  "PHP wordwrap: wrap STRING to lines of at most WIDTH characters, breaking on
+spaces.  When CUT-LONG-WORDS is true, a single word longer than WIDTH is
+force-broken into WIDTH-sized pieces (otherwise it overflows its own line)."
   (let ((s (%php-stringify str))
         (w (or width 75))
         (brk (%php-stringify break-str)))
     (with-output-to-string (out)
       (let ((line-len 0)
             (current-word (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)))
-        (flet ((flush-word ()
-                 (let ((wlen (length current-word)))
-                   (when (> wlen 0)
-                     (when (and (> line-len 0) (> (+ line-len 1 wlen) w))
-                       (write-string brk out)
-                       (setf line-len 0))
-                     (when (> line-len 0)
-                       (write-char #\Space out)
-                       (incf line-len))
-                     (write-string current-word out)
-                     (incf line-len wlen)
-                     (setf (fill-pointer current-word) 0)))))
+        (labels ((emit-break () (write-string brk out) (setf line-len 0))
+                 (flush-word ()
+                   (let ((wlen (length current-word)))
+                     (when (> wlen 0)
+                       (cond
+                         ;; Fits on the current line (with a separating space).
+                         ((<= (+ line-len (if (> line-len 0) 1 0) wlen) w)
+                          (when (> line-len 0) (write-char #\Space out) (incf line-len))
+                          (write-string current-word out)
+                          (incf line-len wlen))
+                         ;; Doesn't fit, but no cut (or word fits a fresh line):
+                         ;; move it to a new line as a unit (overflowing if needed).
+                         ((or (not (%php-truthy cut-long-words)) (<= wlen w))
+                          (when (> line-len 0) (emit-break))
+                          (write-string current-word out)
+                          (setf line-len wlen))
+                         ;; Cut: force-break the over-long word into WIDTH pieces.
+                         (t
+                          (when (> line-len 0) (emit-break))
+                          (let ((start 0))
+                            (loop
+                              (let ((take (min w (- wlen start))))
+                                (write-string (subseq current-word start (+ start take)) out)
+                                (setf line-len take)
+                                (incf start take)
+                                (when (>= start wlen) (return))
+                                (emit-break))))))
+                       (setf (fill-pointer current-word) 0)))))
           (loop for ch across s
                 do (if (char= ch #\Space)
                        (flush-word)

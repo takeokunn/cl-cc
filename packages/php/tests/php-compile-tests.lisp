@@ -872,3 +872,16 @@ returned 'WorLd'.  The defaults are now built from real control characters."
   (assert-string= "The QUICK Brown"  (%php-run-capture "<?php echo ucwords('the QUICK brown');"))
   ;; explicit custom delimiter still works
   (assert-string= "Hello-World"      (%php-run-capture "<?php echo ucwords('hello-world', '-');")))
+
+(deftest php-e2e-wordwrap-cut
+  "wordwrap with the cut-long-words flag force-breaks a word longer than the
+width into width-sized pieces.  The flag was declared ignored, so over-long
+words were never broken."
+  (assert-string= "aaa|aaa" (%php-run-capture "<?php echo wordwrap('aaaaaa',3,'|',true);"))
+  (assert-string= "a|very|long|word|b" (%php-run-capture "<?php echo wordwrap('a verylongword b',4,'|',true);"))
+  (assert-string= "A very|long|wooooooo|ord." (%php-run-capture "<?php echo wordwrap('A very long woooooooord.',8,'|',true);"))
+  ;; without cut, an over-long word overflows its own line (no leading break)
+  (assert-string= "aaaaaa" (%php-run-capture "<?php echo wordwrap('aaaaaa',3,'|',false);"))
+  ;; ordinary space-wrapping unaffected
+  (assert-string= "aaa|bbb|ccc" (%php-run-capture "<?php echo wordwrap('aaa bbb ccc',5,'|');"))
+  (assert-string= "The quick|brown fox" (%php-run-capture "<?php echo wordwrap('The quick brown fox',10,'|');")))
