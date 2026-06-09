@@ -67,7 +67,9 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
     ;; NOTE: `+' is intentionally NOT here — it is polymorphic in JS (numeric add
     ;; OR string concat) and routes through %js-add via *js-binop-runtime-helpers*.
     ;; `- * /' and comparisons are numeric-only and use the direct VM constructors.
-    (dolist (entry '(("-" . -) ("*" . *) ("/" . /)
+    ;; `/' is NOT here — JS division must yield a float (5/2 => 2.5), but the VM
+    ;; `/' returns the CL rational 5/2; it routes through %js-divide instead.
+    (dolist (entry '(("-" . -) ("*" . *)
                      ("<" . <) (">" . >) ("<=" . <=) (">=" . >=)))
       (setf (gethash (car entry) ht) (cdr entry)))
     ht)
@@ -79,7 +81,7 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
 
 (defparameter *js-binop-runtime-helpers*
   (let ((ht (make-hash-table :test #'equal)))
-    (dolist (entry '(("+"   . %js-add)
+    (dolist (entry '(("+"   . %js-add)  ("/"  . %js-divide)
                      ("%"   . %js-mod)  ("**" . %js-pow)
                      ("===" . %js-strict-eq) ("==" . %js-loose-eq)
                      ("|"   . %js-bitwise-or) ("^"  . %js-bitwise-xor)

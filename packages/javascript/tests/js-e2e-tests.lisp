@@ -88,6 +88,16 @@ position via with-output-to-string."
   (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
   (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
 
+(deftest js-e2e-division-yields-float
+  "JS / produces an IEEE number, not a CL rational (regression: 5/2 printed
+'5/2'). Integer-valued quotients still print cleanly, and /0 gives Infinity."
+  (assert-string= "2.5"  (%js-run-capture "console.log(5/2);"))
+  (assert-string= "3"    (%js-run-capture "console.log(6/2);"))
+  (assert-string= "3.5"  (%js-run-capture "let a=7,b=2; console.log(a/b);"))
+  (assert-string= "1.25" (%js-run-capture "console.log(10/4/2);"))
+  (assert-string= "4"    (%js-run-capture "let n=[2,4,6]; console.log(n.reduce((a,b)=>a+b,0)/n.length);"))
+  (assert-string= "Inf"  (%js-run-capture "console.log(5/0 === Infinity ? 'Inf' : 'no');")))
+
 (deftest js-e2e-integer-valued-float-formatting
   "An integer-valued float prints without a decimal point, JS-style (7.0 -> '7'),
 while real decimals are preserved."

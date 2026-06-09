@@ -374,6 +374,20 @@ dividend (5 % 3 => 2, -5 % 3 => -2), matching ECMAScript; division by zero => Na
       :js-nan
       (rem a b)))
 
+(defun %js-divide (a b)
+  "JS `/' operator. JS numbers are IEEE doubles, so division always yields a float
+(5/2 => 2.5, 6/2 => 3.0 which prints as `3'); the CL `/' alone would return the
+rational 5/2. Division by zero gives +/-Infinity (or NaN for 0/0), per ECMAScript."
+  (let ((na (%js-to-number a))
+        (nb (%js-to-number b)))
+    (cond
+      ((or (not (numberp na)) (not (numberp nb))) *js-nan-float*)
+      ((zerop nb)
+       (cond ((zerop na)  *js-nan-float*)
+             ((plusp na)  *js-inf-float*)
+             (t           *js-neg-inf-float*)))
+      (t (/ (coerce na 'double-float) (coerce nb 'double-float))))))
+
 (defun %js-pow (a b)
   "JS `**' exponentiation operator (Math.pow / a ** b)."
   (expt a b))
