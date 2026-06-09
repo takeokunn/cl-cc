@@ -13,6 +13,19 @@ fresh VM state runs the program end-to-end."
     ;; Trim a trailing newline the VM appends when flushing program output.
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
+(deftest php-e2e-postfix-incdec-on-places
+  "Postfix ++/-- mutate an object property and an array element (regression: only a
+plain $var was mutated), yielding the OLD value, including $this->n++ in a method."
+  (assert-string= "2"  (%php-run-capture "<?php class C{ public $n=0; } $o=new C(); $o->n++; $o->n++; echo $o->n;"))
+  (assert-string= "10" (%php-run-capture "<?php class C{ public $n=10; } $o=new C(); echo $o->n++;"))
+  (assert-string= "4"  (%php-run-capture "<?php class C{ public $n=5; } $o=new C(); $o->n--; echo $o->n;"))
+  ;; the canonical counter: $this->n++ inside a method
+  (assert-string= "3"  (%php-run-capture "<?php class C{ public $n=0; function inc(){ $this->n++; } } $o=new C(); $o->inc(); $o->inc(); $o->inc(); echo $o->n;"))
+  (assert-string= "2"  (%php-run-capture "<?php $a=[0]; $a[0]++; $a[0]++; echo $a[0];"))
+  ;; postfix yields the old element value (single echo: ast-print adds a newline
+  ;; per statement, so combine with '.')
+  (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
+
 (deftest php-e2e-constructor
   "new C(args) runs __construct with the instance as $this and the args
 (regression: the constructor never ran — args were passed as :ARGn CLOS initargs

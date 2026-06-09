@@ -185,21 +185,51 @@ gensym-named class and makes an instance of it."
   "Maps postfix operator string to the CL arithmetic symbol.")
 
 (defun %php-lower-postfix-incdec (op obj)
-  "Lower PHP postfix OP on OBJ: capture old value, adjust, return old value.
-Non-variable targets are returned unchanged (mutation is not supported there)."
-  (if (ast-var-p obj)
-      (let* ((arith-op (cdr (assoc op *php-postfix-incdec-ops* :test #'equal)))
-             (tmp      (gensym "PHP-POSTFIX-"))
-             (var-sym  (ast-var-name obj)))
-        (make-ast-let
-         :bindings (list (cons tmp (make-ast-var :name var-sym)))
-         :body     (list (make-ast-setq
-                          :var   var-sym
-                          :value (make-ast-binop :op  arith-op
-                                                 :lhs (make-ast-var :name tmp)
-                                                 :rhs (make-ast-int  :value 1)))
-                         (make-ast-var :name tmp))))
-      obj))
+  "Lower PHP postfix OP on OBJ: capture the old value, adjust the place by ±1, and
+yield the OLD value. Handles a $variable, an object property ($o->p), and an array
+element ($a[k]); other targets are returned unchanged."
+  (let ((arith-op (cdr (assoc op *php-postfix-incdec-ops* :test #'equal))))
+    (flet ((plus1 (val-ast)
+             (make-ast-binop :op arith-op :lhs val-ast :rhs (make-ast-int :value 1))))
+      (cond
+        ((ast-var-p obj)
+         (let ((tmp (gensym "PHP-POSTFIX-")) (var-sym (ast-var-name obj)))
+           (make-ast-let
+            :bindings (list (cons tmp (make-ast-var :name var-sym)))
+            :body (list (make-ast-setq :var var-sym :value (plus1 (make-ast-var :name tmp)))
+                        (make-ast-var :name tmp)))))
+        ;; $o->p++ : bind the receiver once, read the old slot value, write +1, then
+        ;; yield the old value. Nested lets give sequential (let*) scoping.
+        ((ast-slot-value-p obj)
+         (let ((recv (gensym "PHP-RECV-")) (old (gensym "PHP-OLD-"))
+               (prop (ast-slot-value-slot obj)))
+           (make-ast-let
+            :bindings (list (cons recv (ast-slot-value-object obj)))
+            :body (list (make-ast-let
+                         :bindings (list (cons old (make-ast-slot-value
+                                                    :object (make-ast-var :name recv) :slot prop)))
+                         :body (list (make-ast-set-slot-value
+                                      :object (make-ast-var :name recv) :slot prop
+                                      :value (plus1 (make-ast-var :name old)))
+                                     (make-ast-var :name old)))))))
+        ;; $a[k]++ : bind the array and key once, read the old element, write +1.
+        ((%php-array-ref-call-p obj)
+         (destructuring-bind (arr-expr key-expr) (ast-call-args obj)
+           (let ((arr (gensym "PHP-ARR-")) (key (gensym "PHP-KEY-")) (old (gensym "PHP-OLD-")))
+             (make-ast-let
+              :bindings (list (cons arr arr-expr))
+              :body (list (make-ast-let
+                           :bindings (list (cons key key-expr))
+                           :body (list (make-ast-let
+                                        :bindings (list (cons old (%php-array-ref-call
+                                                                   (make-ast-var :name arr)
+                                                                   (make-ast-var :name key))))
+                                        :body (list (%php-array-set-call
+                                                     (make-ast-var :name arr)
+                                                     (make-ast-var :name key)
+                                                     (plus1 (make-ast-var :name old)))
+                                                    (make-ast-var :name old))))))))))
+        (t obj)))))
 
 (defun php-parse-postfix (stream known-vars)
   "Parse postfix expressions: method calls, property access, array access."
