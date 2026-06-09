@@ -903,10 +903,18 @@ fractional part (3.0 -> \"3\"), others in full."
     (if (= (length s) 0) s
         (concatenate 'string (string (char-downcase (char s 0))) (subseq s 1)))))
 
-(defun %php-ucwords (string &optional (delimiters " \t\r\n\f\v"))
-  "PHP ucwords: uppercase first char of each word in STRING."
+(defun %php-ucwords (string &optional delimiters)
+  "PHP ucwords: uppercase the first char of each word in STRING.
+
+The default word delimiters are PHP's \" \\t\\r\\n\\f\\v\" — space, tab, CR, LF,
+form-feed, vertical-tab.  These MUST be built from actual control characters:
+the Common Lisp string literal \" \\t\\r\\n\\f\\v\" does NOT interpret the
+escapes (CL has no \\t escape), so it read as the letters \"trnfv\" — which meant
+`r' counted as a word boundary and ucwords(\"world\") returned \"WorLd\"."
   (let* ((s (%php-stringify string))
-         (delims (coerce (%php-stringify delimiters) 'list))
+         (delims (if (and delimiters (not (%php-null-p delimiters)))
+                     (coerce (%php-stringify delimiters) 'list)
+                     (list #\Space #\Tab #\Return #\Newline #\Page (code-char 11))))
          (prev-delim t))
     (coerce (loop for ch across s
                   collect (if prev-delim (char-upcase ch) ch)

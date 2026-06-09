@@ -858,3 +858,17 @@ bridge)."
   ;; preg_match_all populates $matches in PREG_PATTERN_ORDER
   (assert-string= "1,2,3" (%php-run-capture "<?php preg_match_all('/(\\d)/', '1a2b3', $m); echo implode(',', $m[1]);"))
   (assert-string= "12,34" (%php-run-capture "<?php preg_match_all('/\\d+/', 'a12b34', $m); echo implode(',', $m[0]);")))
+
+(deftest php-e2e-ucwords-delimiters
+  "ucwords uppercases the first letter of each word.  The default delimiter set
+was the CL literal \" \\t\\r\\n\\f\\v\", which CL does NOT escape — it read as the
+letters trnfv, so any 'r' counted as a word boundary and ucwords('world')
+returned 'WorLd'.  The defaults are now built from real control characters."
+  (assert-string= "Hello World"      (%php-run-capture "<?php echo ucwords('hello world');"))
+  ;; words containing r/t/n/f/v must NOT get interior capitals
+  (assert-string= "World Order Roar" (%php-run-capture "<?php echo ucwords('world order roar');"))
+  (assert-string= "Fluffy Vivid"     (%php-run-capture "<?php echo ucwords('fluffy vivid');"))
+  ;; existing capitals are preserved (ucwords only touches word-initial chars)
+  (assert-string= "The QUICK Brown"  (%php-run-capture "<?php echo ucwords('the QUICK brown');"))
+  ;; explicit custom delimiter still works
+  (assert-string= "Hello-World"      (%php-run-capture "<?php echo ucwords('hello-world', '-');")))
