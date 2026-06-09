@@ -947,22 +947,55 @@ prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefine
           (lambda (&rest args) (apply fn receiver args)))
         +js-undefined+)))
 
+(defun %js-strip-trailing-dot (s)
+  "Drop a single trailing '.' that CL's ~,0F leaves (\"8.\" -> \"8\")."
+  (if (and (plusp (length s)) (char= (char s (1- (length s))) #\.))
+      (subseq s 0 (1- (length s)))
+      s))
+
+(defun %js-number-to-precision (x p)
+  "JS Number.prototype.toPrecision(P): X rendered to P significant digits, using
+fixed notation when the decimal exponent is in [-6, P), exponential otherwise —
+matching the ECMAScript algorithm."
+  (cond
+    ((or (< p 1) (> p 100)) (format nil "~A" x))      ; JS RangeError; degrade gracefully
+    ((zerop x)
+     (if (= p 1) "0" (format nil "0.~A" (make-string (1- p) :initial-element #\0))))
+    (t
+     (let* ((neg (minusp x))
+            (ax  (abs (coerce x 'double-float)))
+            (e   (floor (log ax 10d0))))
+       ;; Correct e for floating-point log error so 10^e <= ax < 10^(e+1).
+       (loop while (>= (/ ax (expt 10d0 e)) 10d0) do (incf e))
+       (loop while (<  (/ ax (expt 10d0 e)) 1d0)  do (decf e))
+       (let ((body
+               (if (or (< e -6) (>= e p))
+                   ;; exponential: 1 integer digit + (p-1) fraction digits, lowercase e
+                   (format nil "~,v,,,,,'eE" (1- p) ax)
+                   ;; fixed: (p-1-e) fraction digits, strip any trailing dot
+                   (%js-strip-trailing-dot
+                    (format nil "~,vF" (max 0 (- p 1 e)) ax)))))
+         (if neg (concatenate 'string "-" body) body))))))
+
 (defparameter *js-number-method-table*
   (list (cons "toFixed"
               (lambda (n digits)
                 (let ((d (if (eq digits +js-undefined+) 0 (truncate (%js-to-number digits)))))
-                  (format nil "~,vF" d (%js-to-number n)))))
+                  ;; CL ~,0F yields a trailing dot ("8."); JS toFixed(0) -> "8".
+                  (%js-strip-trailing-dot (format nil "~,vF" d (%js-to-number n))))))
         (cons "toString"
               (lambda (n &optional (radix 10))
                 (let ((r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))
                       (ni (truncate (%js-to-number n))))
+                  ;; JS uses lowercase digits for radices > 10 (ff, not FF).
                   (if (= r 10) (format nil "~A" (%js-to-number n))
-                      (format nil "~vR" r ni)))))
+                      (string-downcase (format nil "~vR" r ni))))))
         (cons "toPrecision"
               (lambda (n prec)
                 (if (eq prec +js-undefined+)
                     (format nil "~A" (%js-to-number n))
-                    (format nil "~,vG" (truncate (%js-to-number prec)) (%js-to-number n)))))
+                    (%js-number-to-precision (%js-to-number n)
+                                             (truncate (%js-to-number prec))))))
         (cons "toExponential"
               (lambda (n &optional digits)
                 ;; JS Number.prototype.toExponential([fractionDigits]) → "d.ddde±d"

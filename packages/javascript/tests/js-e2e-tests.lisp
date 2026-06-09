@@ -648,3 +648,21 @@ gave the tag one wrong argument."
   ;; regression guards: plain template literals still concatenate
   (assert-string= "val=5" (%js-run-capture "const n=5; console.log(`val=${n}`);"))
   (assert-string= "sum=5" (%js-run-capture "console.log(`sum=${2+3}`);")))
+
+(deftest js-e2e-number-prototype-methods
+  "Number.prototype methods resolve and format JS-faithfully.  Regression:
+%js-get-prop never routed numeric receivers to %js-method-ref (they fell to the
++js-undefined+ default), so (123.456).toFixed(2) called undefined -> 'Undefined
+function: :JS-UNDEFINED'.  Also fixes CL/JS formatting drift: lowercase radix
+digits, no trailing dot on toFixed(0), no padding spaces on toPrecision."
+  (assert-string= "123.46" (%js-run-capture "console.log((123.456).toFixed(2));"))
+  (assert-string= "8"      (%js-run-capture "console.log((7.5).toFixed(0));"))
+  (assert-string= "ff"     (%js-run-capture "console.log((255).toString(16));"))
+  (assert-string= "1010"   (%js-run-capture "console.log((10).toString(2));"))
+  (assert-string= "FF"     (%js-run-capture "console.log((255).toString(16).toUpperCase());"))
+  (assert-string= "3.14"   (%js-run-capture "console.log((3.14159).toPrecision(3));"))
+  (assert-string= "100"    (%js-run-capture "console.log((100).toPrecision(3));"))
+  (assert-string= "1.2e+3" (%js-run-capture "console.log((1234.5).toPrecision(2));"))
+  (assert-string= "0.000012" (%js-run-capture "console.log((0.00001234).toPrecision(2));"))
+  (assert-string= "-3.14"  (%js-run-capture "console.log((-3.14159).toPrecision(3));"))
+  (assert-string= "42"     (%js-run-capture "console.log((42).valueOf());")))

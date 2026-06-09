@@ -383,6 +383,12 @@ plain own property."
                  (t (%js-proto-method-lookup obj k)))))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
+      ;; Number.prototype / Symbol.prototype methods (toFixed, toString(radix),
+      ;; toPrecision, description, …).  Primitives box to their wrapper prototype
+      ;; for method access; route to the resolver exactly like strings do.  Without
+      ;; this, (123.456).toFixed(2) fell to the +js-undefined+ default and then the
+      ;; call site invoked undefined -> "Undefined function: :JS-UNDEFINED".
+      ((or (numberp obj) (js-symbol-p obj)) (%js-method-ref obj k))
       (t +js-undefined+))))
 
 (defun %js-set-prop (obj key value)
