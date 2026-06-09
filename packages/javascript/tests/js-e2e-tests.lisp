@@ -88,6 +88,21 @@ position via with-output-to-string."
   (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
   (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
 
+(deftest js-e2e-try-catch-finally
+  "try/catch/finally executes (regression: the try/catch/finally thunks are
+vm-closures, but %js-try-catch-finally invoked them with raw CL:FUNCALL, which
+cannot call a vm-closure — every try statement failed)."
+  (assert-string= "a"     (%js-run-capture "try { console.log('a'); } catch(e) { console.log('b'); }"))
+  (assert-string= "oops"  (%js-run-capture "try { throw 'oops'; } catch(e) { console.log(e); }"))
+  (assert-string= "43"    (%js-run-capture "try { throw 42; } catch(e) { console.log(e+1); }"))
+  (assert-string= (format nil "t~%f")   (%js-run-capture "try { console.log('t'); } finally { console.log('f'); }"))
+  (assert-string= (format nil "c:x~%fin") (%js-run-capture "try { throw 'x'; } catch(e) { console.log('c:'+e); } finally { console.log('fin'); }"))
+  (assert-string= "boom"  (%js-run-capture "try { throw new Error('boom'); } catch(e) { console.log(e.message); }"))
+  ;; finally runs before a return inside try
+  (assert-string= (format nil "cleanup~%1") (%js-run-capture "function f(){ try { return 1; } finally { console.log('cleanup'); } } console.log(f());"))
+  ;; nested try with re-throw
+  (assert-string= "outer:inner" (%js-run-capture "try { try { throw 'inner'; } catch(e) { throw 'outer:'+e; } } catch(e) { console.log(e); }")))
+
 (deftest js-e2e-object-spread
   "Object spread {...a, k:v} merges own properties with later entries overriding
 earlier ones (regression: a spread entry misaligned the %js-make-object key/value

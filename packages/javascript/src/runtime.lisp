@@ -449,16 +449,19 @@ rational 5/2. Division by zero gives +/-Infinity (or NaN for 0/0), per ECMAScrip
 
 (defun %js-try-catch-finally (try-thunk catch-thunk finally-thunk)
   "Execute TRY-THUNK; on JS exception call CATCH-THUNK with the value.
-   FINALLY-THUNK is always called. Returns value of try or catch."
+   FINALLY-THUNK is always called. Returns value of try or catch.
+   The thunks are compiled-JS lambdas (vm-closure-objects), so they must be
+   invoked through %js-funcall (-> *js-apply-fn* -> %vm-call-closure-sync), not a
+   raw CL:FUNCALL which cannot call a vm-closure."
   (let ((result +js-undefined+))
     (unwind-protect
          (handler-case
-             (setf result (funcall try-thunk))
+             (setf result (%js-funcall try-thunk))
            (js-exception (c)
              (when catch-thunk
-               (setf result (funcall catch-thunk (js-exception-value c))))))
+               (setf result (%js-funcall catch-thunk (js-exception-value c))))))
       (when finally-thunk
-        (funcall finally-thunk)))
+        (%js-funcall finally-thunk)))
     result))
 
 (defun %js-for-in (obj body-fn)
