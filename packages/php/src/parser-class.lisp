@@ -97,7 +97,11 @@
         (let* ((raw  (php-tok-value var-tok))
                (bare (if (and (stringp raw) (plusp (length raw)) (char= (char raw 0) #\$))
                          (subseq raw 1) raw))
-               (initform nil))
+               ;; An untyped property with no initializer defaults to PHP null —
+               ;; NOT the unbound-slot-marker. Without this, $o->x on `public $x;'
+               ;; read as the marker, so is_null($o->x) was false and $o->x ?? d
+               ;; never coalesced.
+               (initform (make-ast-quote :value +php-null+)))
           ;; Default value: parse it into the slot initform (was discarded).
           (when (and rest (eq (php-peek-type rest) :T-OP)
                      (equal "=" (php-peek-value rest)))

@@ -448,3 +448,16 @@ match(true){$x>3=>…} never matched; now they go through %php-lt/gt/le/ge
   (assert-string= "6"  (%php-run-capture "<?php $s=0; for($i=0;$i<4;$i++){$s+=$i;} echo $s;"))
   ;; spaceship still returns -1/0/1
   (assert-string= "-1" (%php-run-capture "<?php echo 1<=>2;")))
+
+(deftest php-e2e-uninitialized-property-null
+  "An untyped property declared without an initializer (public $x;) defaults to
+PHP null, so is_null($o->x) is true and $o->x ?? d coalesces.  Regression: the
+slot read as the unbound-slot-marker, so is_null was false and ?? did not fall
+through to the default."
+  (assert-string= "yes" (%php-run-capture "<?php class C{public $x;} $o=new C(); echo is_null($o->x)?'yes':'no';"))
+  (assert-string= "def" (%php-run-capture "<?php class C{public $x;} $o=new C(); echo $o->x ?? 'def';"))
+  ;; an explicit default is unaffected
+  (assert-string= "7"   (%php-run-capture "<?php class C{public $x=7;} $o=new C(); echo $o->x ?? 'def';"))
+  (assert-string= "hi"  (%php-run-capture "<?php class C{public $s='hi';} $o=new C(); echo $o->s;"))
+  ;; writing then reading a no-default property still works
+  (assert-string= "9"   (%php-run-capture "<?php class C{public $x;} $o=new C(); $o->x=9; echo $o->x;")))
