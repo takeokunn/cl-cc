@@ -116,21 +116,38 @@
               (push case-meta enum-cases)
               (setf current rest2))
             (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
-              (when slot (push slot slots))
+              (when slot
+                ;; Enum methods are stored CLASS-allocated (on the enum class
+                ;; object) so $case->method() resolves through the case's
+                ;; __class__ link; they remain instance methods — $this (= the
+                ;; case) is still prepended because they are not `static'.
+                (when (and enum-p (ast-slot-def-p slot)
+                           (ast-defun-p (ast-slot-initform slot)))
+                  (setf (ast-slot-allocation slot) :class))
+                (push slot slots))
               (setf current rest2)))))
-      (let ((slots-rev (nreverse slots)))
+      (let* ((slots-rev (nreverse slots))
+             (defclass (make-ast-defclass :name class-name
+                                          :superclasses supers
+                                          :slots slots-rev
+                                          :php-kind (or kind (and enum-p :enum))
+                                          :php-enum-type enum-type
+                                          :php-enum-cases (nreverse enum-cases))))
         ;; Register trait methods for compile-time application (mirrors parser-trait.lisp).
         (when (eq kind :trait)
           (setf (gethash (string-upcase (symbol-name class-name)) *php-trait-registry*)
                 slots-rev))
-        (values (make-ast-defclass :name class-name
-                                    :superclasses supers
-                                    :slots slots-rev
-                                    :php-kind (or kind (and enum-p :enum))
-                                    :php-enum-type enum-type
-                                    :php-enum-cases (nreverse enum-cases))
-                (%php-consume-expected :T-RBRACE current)
-                known-vars)))))
+        (values
+         ;; For enums, follow the class def with a call that links each case
+         ;; singleton to the class (__class__) so method dispatch works.
+         (if enum-p
+             (make-ast-progn
+              :forms (list defclass
+                           (%php-call 'cl-cc/php::%php-enum-finalize
+                                      (make-ast-var :name class-name))))
+             defclass)
+         (%php-consume-expected :T-RBRACE current)
+         known-vars)))))
 
 ;;; ─── Use/import parsing helpers ──────────────────────────────────────────
 

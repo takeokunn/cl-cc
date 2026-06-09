@@ -736,7 +736,9 @@ After php-finish-let-bindings, $x let wraps $y let in its body."
 
 (deftest php-parser-unit-enum-cases
   "Unit enums parse as PHP enum defclasses with singleton case class slots."
-  (let* ((ast (%php-first "<?php enum Suit { case Hearts; case Diamonds; }"))
+  (let* ((form (%php-first "<?php enum Suit { case Hearts; case Diamonds; }"))
+         ;; An enum now lowers to (progn defclass (link-cases)); unwrap the defclass.
+         (ast (if (cl-cc:ast-progn-p form) (first (cl-cc:ast-progn-forms form)) form))
          (slots (cl-cc:ast-defclass-slots ast)))
     (assert-eq :enum (cl-cc:ast-defclass-php-kind ast))
     (assert-null (cl-cc:ast-defclass-php-enum-type ast))
@@ -753,7 +755,8 @@ After php-finish-let-bindings, $x let wraps $y let in its body."
 
 (deftest php-parser-backed-enum-cases
   "Backed enums preserve int/string backing metadata and per-case values."
-  (let* ((ast (%php-first "<?php enum Status: int { case Draft = 0; case Published = 1; }"))
+  (let* ((form (%php-first "<?php enum Status: int { case Draft = 0; case Published = 1; }"))
+         (ast (if (cl-cc:ast-progn-p form) (first (cl-cc:ast-progn-forms form)) form))
          (slots (cl-cc:ast-defclass-slots ast)))
     (assert-eq :enum (cl-cc:ast-defclass-php-kind ast))
     (assert-eq :int (cl-cc:ast-defclass-php-enum-type ast))
@@ -764,7 +767,8 @@ After php-finish-let-bindings, $x let wraps $y let in its body."
 
 (deftest php-parser-enum-implements-methods-traits-and-constants
   "Enum bodies accept implements, methods, trait uses, and constants."
-  (let* ((ast (%php-first "<?php enum Status implements JsonSerializable { use HasLabels; const FOO = 'x'; public function label() { return 'ok'; } case Draft = 0; }"))
+  (let* ((form (%php-first "<?php enum Status implements JsonSerializable { use HasLabels; const FOO = 'x'; public function label() { return 'ok'; } case Draft = 0; }"))
+         (ast (if (cl-cc:ast-progn-p form) (first (cl-cc:ast-progn-forms form)) form))
          (slot-names (mapcar (lambda (slot) (symbol-name (cl-cc:ast-slot-name slot)))
                              (cl-cc:ast-defclass-slots ast))))
     (assert-true (member "JSONSERIALIZABLE"

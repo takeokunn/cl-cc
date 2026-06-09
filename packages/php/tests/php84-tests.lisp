@@ -281,8 +281,10 @@
 
 (deftest php84-enum-with-method-produces-slot-def
   "An enum with a method body contains the method as a slot-def."
-  (let* ((ast   (%php84-first
+  (let* ((form  (%php84-first
                  "<?php enum Status: int { case Draft = 0; public function label(): string { return 'Draft'; } }"))
+         ;; An enum now lowers to (progn defclass (link-cases)); unwrap the defclass.
+         (ast   (if (cl-cc:ast-progn-p form) (first (cl-cc:ast-progn-forms form)) form))
          (slots (cl-cc:ast-defclass-slots ast))
          (slot-names (mapcar (lambda (s) (symbol-name (cl-cc:ast-slot-name s))) slots)))
     (assert-eq :enum (cl-cc:ast-defclass-php-kind ast))

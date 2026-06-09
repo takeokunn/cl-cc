@@ -573,3 +573,20 @@ matched; cases() returned a CL list that broke count()/foreach."
   (assert-string= "y"  (%php-run-capture "<?php enum S{case A;} echo S::A===S::A?'y':'n';"))
   ;; match on enum cases
   (assert-string= "hearts" (%php-run-capture "<?php enum Suit:string{case H='h';case S='s';} $x=Suit::H; echo match($x){Suit::H=>'hearts',Suit::S=>'spades'};")))
+
+(deftest php-e2e-enum-methods
+  "Enum cases can call methods defined on the enum, with $this bound to the case.
+Regression: enum methods lived on the class as instance-method slots that the
+case singletons (plain payloads, not make-instance objects) never received, so
+S::A->m() found no method ('Undefined function: NIL').  Enum methods are now
+class-allocated and each case is linked to the enum class via __class__."
+  (assert-string= "L" (%php-run-capture "<?php enum S{case A; public function label(){return 'L';}} echo S::A->label();"))
+  ;; $this->value inside a method
+  (assert-string= "A" (%php-run-capture "<?php enum S:string{case A='a'; public function up(){return strtoupper($this->value);}} echo S::A->up();"))
+  ;; match($this) inside a method
+  (assert-string= "red" (%php-run-capture "<?php enum Suit{case H;case S; public function color(){return match($this){Suit::H=>'red',Suit::S=>'black'};}} echo Suit::H->color();"))
+  ;; method with an argument
+  (assert-string= "6" (%php-run-capture "<?php enum S{case A; public function add($n){return $n+1;}} echo S::A->add(5);"))
+  ;; methods coexist with name/value/const and don't break them
+  (assert-string= "A" (%php-run-capture "<?php enum S{case A; public function x(){return 1;}} echo S::A->name;"))
+  (assert-string= "5" (%php-run-capture "<?php enum S{case A; const X=5; public function y(){return 2;}} echo S::X;")))

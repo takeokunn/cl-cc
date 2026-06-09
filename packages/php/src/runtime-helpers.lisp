@@ -610,6 +610,16 @@ land in the same package, which it does not reliably)."
   "Return true when VALUE is a PHP enum case payload."
   (and (hash-table-p value) (gethash :__php-enum-case__ value)))
 
+(defun %php-enum-finalize (enum-class)
+  "Link each of ENUM-CLASS's case singletons to the class via :__class__ so that
+$case->method() dispatches through the class.  (Enum methods are stored class-
+allocated, so slot-read on a case whose __class__ is the enum class resolves
+them.)  Returns ENUM-CLASS."
+  (when (hash-table-p enum-class)
+    (dolist (case (%php-enum-case-list enum-class))
+      (setf (gethash :__class__ case) enum-class)))
+  enum-class)
+
 (defun %php-enum-case-list (enum-class)
   "Return ENUM-CLASS's case singleton payloads as a CL list (insertion order)."
   (check-type enum-class hash-table)
