@@ -80,19 +80,41 @@
   "Return true when VALUE is iterable by PHP array helpers."
   (hash-table-p value))
 
+(defun %php-string-to-int-base (s base)
+  "Parse string S as an integer in BASE (PHP intval semantics).  BASE 0 detects
+the base from a 0x / 0b / 0o / leading-0 prefix.  A leading sign and whitespace
+are allowed; trailing junk is ignored."
+  (let* ((str (string-left-trim '(#\Space #\Tab #\Newline #\Return) (%php-stringify s)))
+         (n (length str)) (i 0) (neg nil) (radix base))
+    (when (and (< i n) (member (char str i) '(#\+ #\-)))
+      (setf neg (char= (char str i) #\-)) (incf i))
+    (flet ((has-prefix (p) (and (<= (+ i (length p)) n)
+                                (string-equal str p :start1 i :end1 (+ i (length p))))))
+      (cond
+        ((and (member base '(0 16)) (has-prefix "0x")) (setf radix 16 i (+ i 2)))
+        ((and (member base '(0 2))  (has-prefix "0b")) (setf radix 2  i (+ i 2)))
+        ((and (member base '(0 8))  (has-prefix "0o")) (setf radix 8  i (+ i 2)))
+        ((and (= base 0) (< i n) (char= (char str i) #\0)) (setf radix 8))   ; leading 0 -> octal
+        ((= base 0) (setf radix 10))))
+    (let ((val (or (parse-integer str :start i :radix (max 2 radix) :junk-allowed t) 0)))
+      (if neg (- val) val))))
+
 (defun %php-intval (value &optional base)
-  "Convert VALUE to a PHP integer."
-  ;; (%php-intval "42") => 42
-  ;; (%php-intval +php-null+) => 0
-  (declare (ignore base))
+  "Convert VALUE to a PHP integer.  For a string VALUE a numeric BASE (other than
+10) parses it in that base — BASE 0 autodetects from a 0x/0b/0o/0 prefix."
+  ;; (%php-intval "42") => 42 ; (%php-intval "0x1A" 16) => 26 ; (%php-intval "077" 8) => 63
   (cond ((%php-null-p value) 0)
         ((eq value t) 1)
         ((null value) 0)
         ((integerp value) value)
         ((floatp value) (truncate value))
-        ((stringp value) (or (parse-integer (string-trim '(#\Space #\Tab #\Newline #\Return) value)
-                                             :junk-allowed t)
-                             0))
+        ((stringp value)
+         (let ((b (and (numberp base) (truncate base))))
+           (if (and b (/= b 10))
+               (%php-string-to-int-base value b)
+               (or (parse-integer (string-trim '(#\Space #\Tab #\Newline #\Return) value)
+                                  :junk-allowed t)
+                   0))))
         (t 1)))
 
 (defun %php-floatval (value)

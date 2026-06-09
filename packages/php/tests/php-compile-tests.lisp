@@ -1047,3 +1047,21 @@ settype, sscanf, spl_autoload_*, class_implements/parents/uses — are now named
   (assert-string= "arr" (%php-run-capture "<?php echo is_array(sscanf('a b','%s %s'))?'arr':'x';"))
   (assert-string= "arr" (%php-run-capture "<?php class C{} echo is_array(class_implements(new C()))?'arr':'x';"))
   (assert-string= "t" (%php-run-capture "<?php echo spl_autoload_register(function($c){})?'t':'f';")))
+
+(deftest php-e2e-intval-base
+  "intval(string, base) parses in the given base; the base argument was ignored,
+so intval('1A',16) gave 1 and intval('077',8) gave 77.  Base 0 autodetects from
+a 0x/0b/0o/leading-0 prefix."
+  (assert-string= "42"  (%php-run-capture "<?php echo intval('42');"))
+  (assert-string= "26"  (%php-run-capture "<?php echo intval('1A',16);"))
+  (assert-string= "26"  (%php-run-capture "<?php echo intval('0x1A',16);"))
+  (assert-string= "63"  (%php-run-capture "<?php echo intval('077',8);"))
+  (assert-string= "10"  (%php-run-capture "<?php echo intval('1010',2);"))
+  ;; base 0 autodetect
+  (assert-string= "26"  (%php-run-capture "<?php echo intval('0x1A',0);"))
+  (assert-string= "15"  (%php-run-capture "<?php echo intval('017',0);"))
+  (assert-string= "5"   (%php-run-capture "<?php echo intval('0b101',0);"))
+  ;; negative, trailing junk, explicit base 10
+  (assert-string= "-255" (%php-run-capture "<?php echo intval('-FF',16);"))
+  (assert-string= "42"   (%php-run-capture "<?php echo intval('42abc');"))
+  (assert-string= "42"   (%php-run-capture "<?php echo intval('42',10);")))
