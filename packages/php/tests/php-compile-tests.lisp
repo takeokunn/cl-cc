@@ -422,3 +422,29 @@ dedicated for lowering)."
                  :target :vm
                  :language :php)))
     (assert-true (typep result 'cl-cc/compile:compilation-result))))
+
+(deftest php-e2e-match-and-relational-booleans
+  "match(true){$cond=>…} works and relational operators return PHP booleans.
+Two regressions: (1) match arms with multiple conditions (1,2=>…) built an
+ast-binop :or that codegen could not emit, so the match produced nothing; now
+they chain via nested ifs. (2) <,>,<=,>= lowered to the VM's integer compare
+(1/0), so gettype(5>3) was \"integer\", (5>3)===true was false, and
+match(true){$x>3=>…} never matched; now they go through %php-lt/gt/le/ge
+(derived from %php-spaceship) and yield a real boolean."
+  ;; match on a value (single and multiple conditions per arm)
+  (assert-string= "b"   (%php-run-capture "<?php $x=2; echo match($x){1=>'a',2=>'b'};"))
+  (assert-string= "low" (%php-run-capture "<?php $x=2; echo match($x){1,2=>'low',3=>'hi'};"))
+  (assert-string= "hi"  (%php-run-capture "<?php $x=3; echo match($x){1,2=>'low',3=>'hi'};"))
+  ;; match(true) with comparison conditions
+  (assert-string= "big"   (%php-run-capture "<?php $x=5; echo match(true){$x>3=>'big',default=>'small'};"))
+  (assert-string= "small" (%php-run-capture "<?php $x=1; echo match(true){$x>3=>'big',default=>'small'};"))
+  ;; relational operators yield PHP booleans
+  (assert-string= "boolean" (%php-run-capture "<?php echo gettype(5>3);"))
+  (assert-string= "boolean" (%php-run-capture "<?php echo gettype(2<1);"))
+  (assert-string= "T"       (%php-run-capture "<?php echo (5>3)===true ? 'T':'n';"))
+  (assert-string= "boolean" (%php-run-capture "<?php echo gettype(true);"))
+  ;; string comparison and loop conditions still work
+  (assert-string= "y"  (%php-run-capture "<?php echo 'apple'<'banana' ? 'y':'n';"))
+  (assert-string= "6"  (%php-run-capture "<?php $s=0; for($i=0;$i<4;$i++){$s+=$i;} echo $s;"))
+  ;; spaceship still returns -1/0/1
+  (assert-string= "-1" (%php-run-capture "<?php echo 1<=>2;")))

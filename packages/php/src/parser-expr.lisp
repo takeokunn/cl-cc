@@ -392,6 +392,13 @@ element ($a[k]); other targets are returned unchanged."
     ("<<"  . cl-cc/php::%php-shift-left)
     (">>"  . cl-cc/php::%php-shift-right)
     ("<=>" . cl-cc/php::%php-spaceship)
+    ;; Relational ops must yield a PHP boolean, not the VM's integer 1/0 (which
+    ;; broke gettype(5>3), (5>3)===true and match(true){$cond=>…}). %php-lt/gt/le/ge
+    ;; derive from %php-spaceship for correct PHP comparison semantics.
+    ("<"   . cl-cc/php::%php-lt)
+    (">"   . cl-cc/php::%php-gt)
+    ("<="  . cl-cc/php::%php-le)
+    (">="  . cl-cc/php::%php-ge)
     ("&"   . cl-cc/php::%php-bitwise-and)
     ("^"   . cl-cc/php::%php-bitwise-xor)
     ("|"   . cl-cc/php::%php-bitwise-or)

@@ -24,6 +24,8 @@
   "Return the PHP runtime value type keyword for X."
   (cond ((%php-null-p x) :null)
         ((null x) :bool)
+        ((eq x t) :bool)   ; PHP true; without this, type-of t -> BOOLEAN, so
+                           ; gettype(true) was "object" and gettype(5>3) wrong
         ((integerp x) :int)
         ((floatp x) :float)
         ((stringp x) :string)
@@ -475,6 +477,17 @@ auto-increment index to one greater than the key."
         ((and (stringp a) (numberp b)) (if (< (%php-to-number a) b) -1 1))
         ((and (numberp a) (stringp b)) (if (< a (%php-to-number b)) -1 1))
         (t (if (string< (%php-stringify a) (%php-stringify b)) -1 1))))
+
+;;; Relational operators return a PHP boolean (t / nil), NOT 1 / 0.  They lower
+;;; through these helpers rather than a plain ast-binop (CL <,>) because the VM
+;;; comparison yields an INTEGER 1/0, so `5 > 3' had type integer — gettype(5>3)
+;;; was "integer", (5>3) === true was false, and match(true){$x>3=>…} never
+;;; matched.  Deriving from %php-spaceship also gives correct PHP comparison
+;;; semantics (numeric strings, type juggling) for free.
+(defun %php-lt (a b) "PHP a < b."  (and (< (%php-spaceship a b) 0) t))
+(defun %php-gt (a b) "PHP a > b."  (and (> (%php-spaceship a b) 0) t))
+(defun %php-le (a b) "PHP a <= b." (and (<= (%php-spaceship a b) 0) t))
+(defun %php-ge (a b) "PHP a >= b." (and (>= (%php-spaceship a b) 0) t))
 
 (defun %php-bitwise-and (a b)
   "Return PHP bitwise AND for integer-coerced operands."

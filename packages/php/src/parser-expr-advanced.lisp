@@ -330,17 +330,23 @@ the yielded value for later generator lowering passes."
   (%php-call '%php-match-error))
 
 (defun %php-build-match-condition (subject-sym tests)
-  "Build an OR of strict-equality tests for one match arm."
-  (let ((comparisons
-          (mapcar (lambda (test)
-                    (%php-call 'cl-cc/php::%php-eq-strict
-                               (make-ast-var :name subject-sym)
-                               test))
-                  tests)))
-    (reduce (lambda (lhs rhs)
-              (make-ast-binop :op 'or :lhs lhs :rhs rhs))
-            (cdr comparisons)
-            :initial-value (car comparisons))))
+  "Build the condition for one match arm: true when SUBJECT === any of TESTS.
+Lowered as a short-circuit nested if rather than (ast-binop :op 'or ...) — codegen
+has no emitter for an :or binop, so a multi-condition arm (1, 2 => …) silently
+failed to compile and the whole match produced nothing."
+  (labels ((eq-test (test)
+             (%php-call 'cl-cc/php::%php-eq-strict
+                        (make-ast-var :name subject-sym) test))
+           (build (ts)
+             ;; Single (or final) test: the bare strict-equality call, which is
+             ;; already a boolean. Earlier tests chain via if so the arm matches
+             ;; when SUBJECT === any test, without an :or binop.
+             (if (cdr ts)
+                 (make-ast-if :cond (eq-test (car ts))
+                              :then (make-ast-quote :value t)
+                              :else (build (cdr ts)))
+                 (eq-test (car ts)))))
+    (build tests)))
 
 (defun %php-lower-match (subject arms default-expr)
   "Lower PHP match SUBJECT and ARMS to a subject let plus nested ast-if chain."
