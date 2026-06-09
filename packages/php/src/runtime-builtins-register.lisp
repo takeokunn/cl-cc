@@ -264,27 +264,15 @@
 
   ;; PHP Exception / Throwable helpers.
   (%php-register-builtin "set_exception_handler" '%php-set-exception-handler)
-  (%php-register-builtin "class_implements" (lambda (class-name &optional autoload)
-                                               (declare (ignore autoload class-name))
-                                               (%php-make-array)))
-  (%php-register-builtin "class_parents" (lambda (class-name &optional autoload)
-                                           (declare (ignore autoload class-name))
-                                           (%php-make-array)))
-  (%php-register-builtin "class_uses" (lambda (class-name &optional autoload)
-                                        (declare (ignore autoload class-name))
-                                        (%php-make-array)))
-  (%php-register-builtin "spl_autoload_register" (lambda (fn &optional throw prepend)
-                                                    (declare (ignore fn throw prepend))
-                                                    t))
-  (%php-register-builtin "spl_autoload_unregister" (lambda (fn)
-                                                      (declare (ignore fn))
-                                                      t))
-  (%php-register-builtin "spl_autoload_functions" (lambda () (%php-make-array)))
+  (%php-register-builtin "class_implements" '%php-class-implements)
+  (%php-register-builtin "class_parents" '%php-class-parents)
+  (%php-register-builtin "class_uses" '%php-class-uses)
+  (%php-register-builtin "spl_autoload_register" '%php-spl-autoload-register)
+  (%php-register-builtin "spl_autoload_unregister" '%php-spl-autoload-unregister)
+  (%php-register-builtin "spl_autoload_functions" '%php-spl-autoload-functions)
 
   ;; extract() — import array keys as variables (returns count; we can't mutate the calling scope)
-  (%php-register-builtin "extract" (lambda (array &optional flags prefix)
-                                     (declare (ignore flags prefix))
-                                     (if (hash-table-p array) (%php-count array) 0)))
+  (%php-register-builtin "extract" '%php-extract)
 
   ;; SPL data structures (stubs returning empty arrays).
   (%php-register-builtin "SplStack"    (lambda () (%php-make-array)))
@@ -342,7 +330,7 @@
   (%php-register-builtin "is_nan"      (lambda (x) (and (floatp x) (not (= x x)))))
   (%php-register-builtin "is_finite"   '%php-is-finite)
   (%php-register-builtin "is_infinite" '%php-is-infinite)
-  (%php-register-builtin "lcg_value" (lambda () (random 1.0d0)))
+  (%php-register-builtin "lcg_value" '%php-lcg-value)
   (%php-register-builtin "mt_srand"  (lambda (&optional seed) (when seed (setf *random-state* (make-random-state t)))))
   (%php-register-builtin "srand"     (lambda (&optional seed) (when seed (setf *random-state* (make-random-state t)))))
 
@@ -390,7 +378,7 @@
   (%php-register-builtin "floatval" '%php-floatval)
   (%php-register-builtin "strval" '%php-strval)
   (%php-register-builtin "boolval" '%php-boolval)
-  (%php-register-builtin "settype" (lambda (v _type) (declare (ignore _type)) v))
+  (%php-register-builtin "settype" '%php-settype)
   (%php-register-builtin "get_debug_type" '%php-gettype)
   ;; array_is_list is registered by SYMBOL above (a lambda-registered builtin
   ;; fails dispatch with "Undefined function").
@@ -469,20 +457,8 @@
   (%php-register-builtin "http_build_query" '%php-http-build-query)
 
   ;; Generators / iterators.
-  (%php-register-builtin "iterator_to_array" (lambda (iter &optional (preserve-keys t))
-                                               (if (php-generator-p iter)
-                                                   (let ((result (%php-make-array)))
-                                                     (loop for i from 0
-                                                           while (%php-generator-valid iter)
-                                                           do (if (%php-truthy preserve-keys)
-                                                                  (%php-array-set result i (%php-generator-next iter))
-                                                                  (%php-array-set result (%php-array-next-auto-index result) (%php-generator-next iter))))
-                                                     result)
-                                                   iter)))
-  (%php-register-builtin "iterator_count" (lambda (iter)
-                                            (if (php-generator-p iter)
-                                                (length (php-gen-values iter))
-                                                (%php-count iter))))
+  (%php-register-builtin "iterator_to_array" '%php-iterator-to-array)
+  (%php-register-builtin "iterator_count" '%php-iterator-count)
 
   ;; Class / OOP introspection.
   (%php-register-builtin "class_exists" '%php-class-exists)
@@ -574,7 +550,7 @@
   (%php-register-builtin "number_format" '%php-number-format)
   (%php-register-builtin "sprintf" '%php-sprintf)
   (%php-register-builtin "printf" '%php-printf)
-  (%php-register-builtin "sscanf" (lambda (str fmt &rest _) (declare (ignore _)) (list (%php-stringify str) (%php-stringify fmt))))
+  (%php-register-builtin "sscanf" '%php-sscanf)
   (%php-register-builtin "scanf" (lambda (fmt &rest _) (declare (ignore fmt _)) (%php-make-array)))
 
   ;; Additional math

@@ -701,3 +701,62 @@
 (defun %php-microtime-float ()
   "PHP microtime(true): return current time as float."
   (coerce (- (get-internal-real-time) 0) 'double-float))
+
+;;; ─── Non-CL-named builtins that must be registered by SYMBOL ────────────────
+;;; A PHP builtin call lowers to a function symbol the VM resolves only if it is
+;;; fbound; a lambda registration leaves no fbound symbol, so these all hit
+;;; "Undefined function: <NAME>".  Named helpers fix that.  (Several remain
+;;; deliberate stubs — full reflection / scope-mutation is not modelled.)
+
+(defun %php-class-implements (class &optional autoload)
+  "PHP class_implements (stub: full interface reflection NYI)."
+  (declare (ignore class autoload)) (%php-make-array))
+(defun %php-class-parents (class &optional autoload)
+  "PHP class_parents (stub: full class reflection NYI)."
+  (declare (ignore class autoload)) (%php-make-array))
+(defun %php-class-uses (class &optional autoload)
+  "PHP class_uses (stub: full trait reflection NYI)."
+  (declare (ignore class autoload)) (%php-make-array))
+(defun %php-spl-autoload-register (&rest ignored)
+  "PHP spl_autoload_register (stub — autoloading not modelled)."
+  (declare (ignore ignored)) t)
+(defun %php-spl-autoload-unregister (&rest ignored)
+  "PHP spl_autoload_unregister (stub)."
+  (declare (ignore ignored)) t)
+(defun %php-spl-autoload-functions ()
+  "PHP spl_autoload_functions (stub)."
+  (%php-make-array))
+(defun %php-extract (array &optional flags prefix)
+  "PHP extract (stub — returns the count; the calling scope cannot be mutated
+from a host builtin)."
+  (declare (ignore flags prefix))
+  (if (hash-table-p array) (%php-count array) 0))
+(defun %php-lcg-value ()
+  "PHP lcg_value: a pseudo-random float in [0,1)."
+  (random 1.0d0))
+(defun %php-settype (v &optional type)
+  "PHP settype (stub — scalar by-reference mutation is not modelled)."
+  (declare (ignore type)) v)
+(defun %php-sscanf (str fmt &rest ignored)
+  "PHP sscanf (stub — format parsing / out-params NYI; returns a PHP array)."
+  (declare (ignore ignored))
+  (%php-list-to-array (list (%php-stringify str) (%php-stringify fmt))))
+
+(defun %php-iterator-to-array (iter &optional (preserve-keys t))
+  "PHP iterator_to_array: drain a Generator into a PHP array."
+  (if (php-generator-p iter)
+      (let ((result (%php-make-array)))
+        (loop for i from 0
+              while (%php-generator-valid iter)
+              do (if (%php-truthy preserve-keys)
+                     (%php-array-set result i (%php-generator-next iter))
+                     (%php-array-set result (%php-array-next-auto-index result)
+                                     (%php-generator-next iter))))
+        result)
+      iter))
+
+(defun %php-iterator-count (iter)
+  "PHP iterator_count: number of elements a Generator yields."
+  (if (php-generator-p iter)
+      (length (php-gen-values iter))
+      (%php-count iter)))

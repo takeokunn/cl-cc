@@ -1033,3 +1033,17 @@ errored on an array, a string, or mixed types."
   (assert-string= "10" (%php-run-capture "<?php echo max(1,'10',5);"))
   (assert-string= "2"  (%php-run-capture "<?php echo min(2.5,2,3);"))
   (assert-string= "42" (%php-run-capture "<?php echo max(42);")))
+
+(deftest php-e2e-symbol-registered-builtins
+  "Builtins that were registered as LAMBDAs (non-CL-named) and so hit 'Undefined
+function' when called — iterator_to_array/iterator_count, lcg_value, extract,
+settype, sscanf, spl_autoload_*, class_implements/parents/uses — are now named
+%php-* helpers registered by symbol and are callable."
+  (assert-string= "2" (%php-run-capture "<?php function g(){yield 1;yield 2;} echo count(iterator_to_array(g()));"))
+  (assert-string= "3" (%php-run-capture "<?php function g(){yield 1;yield 2;yield 3;} echo iterator_count(g());"))
+  (assert-string= "f" (%php-run-capture "<?php echo is_float(lcg_value())?'f':'n';"))
+  (assert-string= "2" (%php-run-capture "<?php echo extract(['x'=>5,'y'=>6]);"))
+  (assert-string= "ok" (%php-run-capture "<?php $x=5; echo settype($x,'string')?'ok':'f';"))
+  (assert-string= "arr" (%php-run-capture "<?php echo is_array(sscanf('a b','%s %s'))?'arr':'x';"))
+  (assert-string= "arr" (%php-run-capture "<?php class C{} echo is_array(class_implements(new C()))?'arr':'x';"))
+  (assert-string= "t" (%php-run-capture "<?php echo spl_autoload_register(function($c){})?'t':'f';")))
