@@ -919,3 +919,17 @@ Objects decode to associative arrays."
   ;; round-trip through encode
   (assert-string= "alice:editor:y"
                   (%php-run-capture "<?php $o=['user'=>'alice','roles'=>['admin','editor'],'active'=>true]; $r=json_decode(json_encode($o),true); echo $r['user'].':'.$r['roles'][1].':'.($r['active']?'y':'n');")))
+
+(deftest php-e2e-number-format-rounding
+  "number_format rounds half AWAY FROM ZERO (PHP semantics), not banker's
+half-to-even.  It used CL ROUND, so number_format(2.5) gave 2 and
+number_format(1234.5) gave 1,234 instead of 3 and 1,235."
+  (assert-string= "1,235"  (%php-run-capture "<?php echo number_format(1234.5);"))
+  (assert-string= "3"      (%php-run-capture "<?php echo number_format(2.5);"))
+  (assert-string= "1"      (%php-run-capture "<?php echo number_format(0.5);"))
+  (assert-string= "1,234"  (%php-run-capture "<?php echo number_format(1234.4);"))
+  (assert-string= "-1,235" (%php-run-capture "<?php echo number_format(-1234.5);"))
+  ;; decimals and custom separators unaffected
+  (assert-string= "3.14"       (%php-run-capture "<?php echo number_format(3.14159,2);"))
+  (assert-string= "1,234.57"   (%php-run-capture "<?php echo number_format(1234.567,2);"))
+  (assert-string= "1.234,50"   (%php-run-capture "<?php echo number_format(1234.5,2,',','.');")))
