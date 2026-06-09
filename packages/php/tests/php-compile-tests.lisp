@@ -66,6 +66,20 @@ parses to the same array-literal node as [$a,$b], flowing through
   (assert-string= "1,2"    (%php-run-capture "<?php [$a,$b]=[1,2]; echo $a.','.$b;"))
   (assert-string= "2,1"    (%php-run-capture "<?php $a=1;$b=2; [$a,$b]=[$b,$a]; echo $a.','.$b;")))
 
+(deftest php-e2e-list-destructuring-nested-keyed
+  "Nested and keyed list destructuring.  %php-lower-list-assign previously bound
+only flat top-level $var targets positionally, ignoring `key => $var' entries
+and skipping nested [..] targets.  Now it recurses into nested targets and
+accesses by key when a key is present."
+  ;; nested
+  (assert-string= "6"   (%php-run-capture "<?php [[$a,$b],$c]=[[1,2],3]; echo $a+$b+$c;"))
+  (assert-string= "6"   (%php-run-capture "<?php list(list($a,$b),$c)=[[1,2],3]; echo $a+$b+$c;"))
+  ;; keyed (order-independent access by key)
+  (assert-string= "3"   (%php-run-capture "<?php ['x'=>$a,'y'=>$b]=['x'=>1,'y'=>2]; echo $a+$b;"))
+  (assert-string= "1"   (%php-run-capture "<?php ['y'=>$a,'x'=>$b]=['x'=>1,'y'=>2]; echo $a-$b;")) ; a=2,b=1
+  ;; nested + keyed combined
+  (assert-string= "9,3" (%php-run-capture "<?php [['k'=>$a],$b]=[['k'=>9],3]; echo $a.','.$b;")))
+
 (deftest php-e2e-static-members
   "Static methods and properties resolve via ClassName::member.  Regression: the
 `static` modifier lexes as a T-TYPE (it doubles as the `static` return type), so

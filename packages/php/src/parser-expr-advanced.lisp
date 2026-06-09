@@ -630,24 +630,47 @@ i.e. a valid destructuring-assignment target like [$a, $b] or list($a, $b)."
          (and (ast-var-p func)
               (eq (ast-var-name func) 'cl-cc/php::%php-array)))))
 
+(defun %php-list-constructor-p (node)
+  "True when NODE is a [..] / list(..) constructor (a %php-array call) — i.e. a
+nested destructuring target."
+  (and (ast-call-p node)
+       (let ((f (ast-call-func node)))
+         (and (ast-var-p f) (eq (ast-var-name f) 'cl-cc/php::%php-array)))))
+
+(defun %php-collect-list-bindings (lhs val bindings)
+  "Accumulate destructuring bindings for LHS (a %php-array constructor) pulling
+from the VAL expression.  Honours `key => $var' entries (access by key) and
+recurses into nested [..] / list(..) targets.  Returns the bindings list, with
+later entries pushed on the front (caller nreverses)."
+  (let ((idx 0))
+    (dolist (entry (ast-call-args lhs) bindings)
+      ;; Each entry is (make-ast-list :elements (key-present-p key value)).
+      (let* ((elts (and (ast-list-p entry) (ast-list-elements entry)))
+             (key-present (and elts (ast-quote-p (first elts)) (ast-quote-value (first elts))))
+             (key (and elts (second elts)))
+             (target (third elts))
+             (access (if key-present
+                         (%php-array-ref-call val key)
+                         (%php-array-ref-call val (make-ast-int :value idx)))))
+        (cond
+          ((null target) nil)                     ; [ , $b] hole — skip
+          ((ast-var-p target)
+           (push (cons (ast-var-name target) access) bindings))
+          ((%php-list-constructor-p target)        ; nested [$a,$b] / list(..)
+           (setf bindings (%php-collect-list-bindings target access bindings)))))
+      (incf idx))
+    bindings))
+
 (defun %php-lower-list-assign (lhs val)
   "Lower [$a, $b, ...] = VAL destructuring assignment. LHS is a %php-array
 constructor call whose entry values are the assignment targets. Each target
-binds to (%php-array-ref VAL index) in a single body-less let (consistent with
-how plain $x = v introduces a binding). NIL holes ([, $b]) are skipped.
-Re-references VAL per element, which is correct for the common variable RHS."
-  (let ((bindings nil)
-        (idx 0))
-    (dolist (entry (ast-call-args lhs))
-      ;; Each entry is (make-ast-list :elements (key-present-p key value)).
-      (let* ((elts (and (ast-list-p entry) (ast-list-elements entry)))
-             (target (third elts)))
-        (when (and target (ast-var-p target))
-          (push (cons (ast-var-name target)
-                      (%php-array-ref-call val (make-ast-int :value idx)))
-                bindings)))
-      (incf idx))
-    (make-ast-let :bindings (nreverse bindings) :body nil)))
+binds to (%php-array-ref VAL <index-or-key>) in a single body-less let
+(consistent with how plain $x = v introduces a binding). NIL holes ([, $b]) are
+skipped; `key => $var' uses the key; nested [..] targets recurse. Re-references
+VAL per element, which is correct for the common variable RHS."
+  (make-ast-let
+   :bindings (nreverse (%php-collect-list-bindings lhs val nil))
+   :body nil))
 
 (defun %php-array-set-call (array key value)
   "Lower ARRAY[KEY] = VALUE to the PHP ordered-array mutation helper."
