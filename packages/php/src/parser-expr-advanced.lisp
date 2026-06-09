@@ -146,6 +146,26 @@ function' at runtime (e.g. array_push)."
          (string= (string-upcase simple-name)
                   (symbol-name fallback-name)))))
 
+(defun %php-fcc-marker-p (node)
+  "True when NODE is the first-class-callable marker emitted for f(...)."
+  (and (ast-call-p node)
+       (let ((f (ast-call-func node)))
+         (and (ast-var-p f) (eq (ast-var-name f) '%php-first-class-callable)))))
+
+(defun %php-build-fcc-closure (fn-sym)
+  "Build the PHP 8.1 first-class-callable closure for FN-SYM — fn(...$a) =>
+FN-SYM(...$a) — a variadic closure that forwards all of its arguments."
+  (let* ((args-sym (gensym "PHP-FCC-ARGS-"))
+         (body (make-ast-apply
+                :func fn-sym
+                :args (list (make-ast-call
+                             :func (make-ast-var :name 'cl-cc/php::%php-array-values-list)
+                             :args (list (make-ast-var :name args-sym)))))))
+    (multiple-value-bind (rest-param wrapped-body)
+        (%php-variadic-rest-binding args-sym (list body))
+      (make-ast-lambda :params nil :optional-params nil
+                       :rest-param rest-param :body wrapped-body))))
+
 (defun %php-parse-function-call (qualified-name fallback-name stream known-vars)
   "Parse a PHP function call and lower known builtins to runtime helpers."
   (multiple-value-bind (args rest kv) (php-parse-arglist stream known-vars)
@@ -154,12 +174,16 @@ function' at runtime (e.g. array_push)."
                            (%php-builtin-helper-symbol
                             (%php-simple-function-spelling qualified-name)))
                       fallback-name)))
-      (values (if (%php-args-have-spread-p args)
-                  ;; f(...$args): pass the function NAME symbol to apply so it
-                  ;; resolves as a function, spreading the runtime argument list.
-                  (make-ast-apply :func fn-sym
-                                  :args (list (%php-spread-arglist-expr args)))
-                  (make-ast-call :func (make-ast-var :name fn-sym) :args args))
+      (values (cond
+                ;; f(...): first-class callable — a forwarding closure, not a call.
+                ((and (= (length args) 1) (%php-fcc-marker-p (first args)))
+                 (%php-build-fcc-closure fn-sym))
+                ;; f(...$args): pass the function NAME symbol to apply so it
+                ;; resolves as a function, spreading the runtime argument list.
+                ((%php-args-have-spread-p args)
+                 (make-ast-apply :func fn-sym
+                                 :args (list (%php-spread-arglist-expr args))))
+                (t (make-ast-call :func (make-ast-var :name fn-sym) :args args)))
               rest kv))))
 
 ;;; ─── Null-coalesce / Elvis Lowering ─────────────────────────────────────────

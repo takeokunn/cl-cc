@@ -624,3 +624,21 @@ spread element lowered to a (%php-spread ...) call with no backing function
   ;; regression guards: plain arrays and call spread still work
   (assert-string= "6"       (%php-run-capture "<?php echo array_sum([1,2,3]);"))
   (assert-string= "6"       (%php-run-capture "<?php function s(...$n){return array_sum($n);} $a=[1,2,3]; echo s(...$a);")))
+
+(deftest php-e2e-first-class-callable
+  "f(...) creates a first-class callable (PHP 8.1) — a forwarding closure
+fn(...$a) => f(...$a) — for user functions and builtins.  Regression: f(...)
+parsed the ... as a %php-first-class-callable marker ARGUMENT, so f(...) called
+f with the marker ('Undefined function: %PHP-FIRST-CLASS-CALLABLE')."
+  (assert-string= "25" (%php-run-capture "<?php function sq($x){return $x*$x;} $f=sq(...); echo $f(5);"))
+  ;; forwards multiple arguments
+  (assert-string= "7"  (%php-run-capture "<?php function sub($a,$b){return $a-$b;} $f=sub(...); echo $f(10,3);"))
+  ;; usable as a callable in higher-order functions
+  (assert-string= "12" (%php-run-capture "<?php function dbl($x){return $x*2;} $f=dbl(...); echo array_sum(array_map($f,[1,2,3]));"))
+  ;; works for builtins
+  (assert-string= "5"  (%php-run-capture "<?php $f=strlen(...); echo $f('hello');"))
+  ;; inline as an argument
+  (assert-string= "14" (%php-run-capture "<?php function sq($x){return $x*$x;} echo array_sum(array_map(sq(...),[1,2,3]));"))
+  ;; regression guards: ordinary calls and call-spread unaffected
+  (assert-string= "25" (%php-run-capture "<?php function sq($x){return $x*$x;} echo sq(5);"))
+  (assert-string= "3"  (%php-run-capture "<?php function s(...$n){return array_sum($n);} $a=[1,2]; echo s(...$a);")))
