@@ -395,6 +395,7 @@ element ($a[k]); other targets are returned unchanged."
     ("+"   . cl-cc/php::%php-add)
     ("-"   . cl-cc/php::%php-sub)
     ("*"   . cl-cc/php::%php-mul)
+    ("/"   . cl-cc/php::%php-div)
     ("%"   . cl-cc/php::%php-modulo)
     ("<<"  . cl-cc/php::%php-shift-left)
     (">>"  . cl-cc/php::%php-shift-right)

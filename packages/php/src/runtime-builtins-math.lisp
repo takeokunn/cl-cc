@@ -40,8 +40,10 @@
   (%php-rand min max))
 
 (defun %php-sqrt (number)
-  "Return the square root of NUMBER."
-  (sqrt number))
+  "Return the square root of NUMBER as a double-float (PHP floats are doubles).
+Coerce first: (sqrt 2) on the integer 2 yields a single-float, losing precision
+(1.4142135 vs 1.4142135623731)."
+  (sqrt (coerce number 'double-float)))
 
 (defun %php-pow (base exponent)
   "Return BASE raised to EXPONENT."

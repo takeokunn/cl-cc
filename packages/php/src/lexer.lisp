@@ -291,7 +291,11 @@ interpolation for parser lowering without requiring a full string sub-lexer."
           ;; Bind *read-eval* nil to prevent reader macro execution.
           ;; Wrap in handler-case to catch malformed exponents like "1e+" or "1e".
           (handler-case
+            ;; Bind *read-default-float-format* to double-float so "3.14" reads
+            ;; directly as 3.14d0. Reading it as a single-float first and then
+            ;; coercing baked in the single-float imprecision (3.14 -> 3.1400001…).
             (let* ((*read-eval* nil)
+                   (*read-default-float-format* 'double-float)
                    (val (read-from-string num-str)))
               (if (realp val)
                   (values (make-php-token :T-FLOAT (float val 1.0d0)) pos)

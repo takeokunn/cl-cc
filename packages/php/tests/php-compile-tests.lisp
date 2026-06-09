@@ -509,3 +509,23 @@ null + 3, '5' + 3, true + 1 all signalled `not of type NUMBER'."
   (assert-string= "14"  (%php-run-capture "<?php echo 2 + 3 * 4;"))
   (assert-string= "7"   (%php-run-capture "<?php $a=10; $a -= 3; echo $a;"))
   (assert-string= "10"  (%php-run-capture "<?php $s=0; for($i=1;$i<=4;$i++){$s+=$i;} echo $s;")))
+
+(deftest php-e2e-float-stringification
+  "PHP echoes/interpolates floats correctly: whole-valued floats as integers,
+others with trailing zeros trimmed and no CL exponent marker; float literals
+keep double precision; / yields a float (or an int when evenly divisible).
+Regression: %php-stringify used princ-to-string (1.5 -> \"1.5d0\", 5/2 -> \"5/2\"),
+literals were read as single-floats (3.14 -> 3.1400001…), and / returned a
+rational."
+  (assert-string= "3"       (%php-run-capture "<?php echo 1.5 * 2;"))
+  (assert-string= "1.75"    (%php-run-capture "<?php echo 1.5 + 0.25;"))
+  (assert-string= "3.14"    (%php-run-capture "<?php echo 3.14;"))
+  (assert-string= "6"       (%php-run-capture "<?php echo 6.0;"))
+  (assert-string= "1000000" (%php-run-capture "<?php echo 1000000.0;"))
+  (assert-string= "2.5"     (%php-run-capture "<?php echo 10 / 4;"))
+  (assert-string= "5"       (%php-run-capture "<?php echo 10 / 2;"))
+  (assert-string= "x=1.5"   (%php-run-capture "<?php echo 'x=' . 1.5;"))
+  (assert-string= "v=2.5"   (%php-run-capture "<?php $f=2.5; echo \"v=$f\";"))
+  ;; sqrt returns a double (PHP 14-digit precision), whole roots print as int
+  (assert-string= "1.4142135623731" (%php-run-capture "<?php echo sqrt(2);"))
+  (assert-string= "2"       (%php-run-capture "<?php echo sqrt(4);")))

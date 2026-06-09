@@ -324,6 +324,16 @@ elsewhere; both-array operands are not coerced here)."
 (defun %php-sub (a b) "PHP - with operand coercion." (- (%php-numeric a) (%php-numeric b)))
 (defun %php-mul (a b) "PHP * with operand coercion." (* (%php-numeric a) (%php-numeric b)))
 
+(defun %php-div (a b)
+  "PHP / : returns a float, EXCEPT when both operands are integers and evenly
+divisible (then an integer).  Was the CL / operator, which yielded an exact
+rational (10 / 4 -> 5/2, printed \"5/2\")."
+  (let ((na (%php-numeric a))
+        (nb (%php-numeric b)))
+    (if (and (integerp na) (integerp nb) (not (zerop nb)) (zerop (mod na nb)))
+        (truncate na nb)
+        (/ (coerce na 'double-float) (coerce nb 'double-float)))))
+
 (defun %php-to-number (s)
   "Coerce PHP string S to a number for loose comparisons."
   (check-type s string)
@@ -451,13 +461,36 @@ auto-increment index to one greater than the key."
   (check-type s string)
   (string-upcase s))
 
+(defun %php-number-to-string (n)
+  "Format a PHP number the way echo / string interpolation does: integers as-is,
+floats (and the rationals PHP / can produce) with up to 14 significant digits,
+trailing zeros trimmed, no exponent marker — and a whole-valued float prints as
+an integer (3.0 -> \"3\").  princ-to-string leaked the CL form: \"1.5d0\", \"5/2\"."
+  (cond
+    ((integerp n) (princ-to-string n))
+    (t
+     (let ((d (coerce n 'double-float)))
+       (cond
+         ;; whole-valued within the integer-printable range
+         ((and (= d (ftruncate d)) (< (abs d) 1d15))
+          (princ-to-string (truncate d)))
+         (t
+          ;; 14 fractional digits then trim trailing zeros (whole case handled
+          ;; above, so a fractional digit always remains).
+          (let* ((s (format nil "~,14F" d))
+                 (dot (position #\. s)))
+            (if dot
+                (let ((end (1+ (position-if (lambda (c) (char/= c #\0)) s :from-end t))))
+                  (subseq s 0 (max end (+ dot 2))))
+                s))))))))
+
 (defun %php-stringify (value)
   "Convert VALUE to PHP's simple string representation for interpolation."
   (cond ((%php-null-p value) "")
         ((null value) "")
         ((eq value t) "1")
         ((stringp value) value)
-        ((numberp value) (princ-to-string value))
+        ((numberp value) (%php-number-to-string value))
         ((hash-table-p value) "Array")
         (t (princ-to-string value))))
 
