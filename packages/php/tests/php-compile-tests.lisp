@@ -590,3 +590,20 @@ class-allocated and each case is linked to the enum class via __class__."
   ;; methods coexist with name/value/const and don't break them
   (assert-string= "A" (%php-run-capture "<?php enum S{case A; public function x(){return 1;}} echo S::A->name;"))
   (assert-string= "5" (%php-run-capture "<?php enum S{case A; const X=5; public function y(){return 2;}} echo S::X;")))
+
+(deftest php-e2e-nullsafe-operator
+  "The ?-> nullsafe operator short-circuits to null when the receiver is null,
+else reads the property / calls the method (passing the receiver as \$this).
+Regression: the null check was an (ast-binop := ...) — CL NUMERIC equality — so
+\$o?->x on an object raised 'not of type NUMBER'; the receiver was also evaluated
+twice and ?->m() did not pass \$this."
+  (assert-string= "5"       (%php-run-capture "<?php class C{public $x=5;} $o=new C(); echo $o?->x;"))
+  (assert-string= "def"     (%php-run-capture "<?php class C{public $x=5;} $o=null; echo $o?->x ?? 'def';"))
+  (assert-string= "7"       (%php-run-capture "<?php class C{function m(){return 7;}} $o=new C(); echo $o?->m();"))
+  (assert-string= "n"       (%php-run-capture "<?php class C{function m(){return 7;}} $o=null; echo $o?->m() ?? 'n';"))
+  ;; ?-> method passes the receiver as $this
+  (assert-string= "3"       (%php-run-capture "<?php class C{public $v=3; function get(){return $this->v;}} $o=new C(); echo $o?->get();"))
+  ;; chaining: a null link short-circuits the rest
+  (assert-string= "none"    (%php-run-capture "<?php class C{public $n=null;} $o=new C(); echo $o?->n?->x ?? 'none';"))
+  ;; a null property value coalesces
+  (assert-string= "wasnull" (%php-run-capture "<?php class C{public $x;} $o=new C(); echo $o?->x ?? 'wasnull';")))

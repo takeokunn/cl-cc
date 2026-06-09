@@ -305,24 +305,39 @@ element ($a[k]); other targets are returned unchanged."
            (multiple-value-bind (tok rest2) (php-consume rest)
              (declare (ignore tok))
              (multiple-value-bind (name-str rest3) (%php-member-name rest2)
+               ;; $o?->member: bind the receiver to a temp (evaluated ONCE — the
+               ;; receiver may have side effects, e.g. getObj()?->x), and short-
+               ;; circuit to PHP null when it is null. The null test is
+               ;; %php-null-p, NOT (ast-binop := …): `=' is CL NUMERIC equality,
+               ;; so (= obj nil) on an object raised "not of type NUMBER".
                (let* ((prop (php-ident-sym name-str))
-                      (null-check (make-ast-binop :op '= :lhs obj
-                                                  :rhs (make-ast-quote :value nil))))
+                      (recv (gensym "PHP-NULLSAFE-"))
+                      (recv-var (make-ast-var :name recv))
+                      (null-check (%php-call 'cl-cc/php::%php-null-p recv-var))
+                      (access (if (eq (php-peek-type rest3) :T-LPAREN)
+                                  nil   ; computed below with the arglist
+                                  (make-ast-slot-value :object recv-var :slot prop))))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
-                       (setf obj (make-ast-if
-                                  :cond null-check
-                                  :then (make-ast-quote :value nil)
-                                  :else (make-ast-call
-                                         :func (make-ast-slot-value :object obj :slot prop)
-                                         :args args))
+                       ;; method call passes the receiver as $this (first arg)
+                       (setf obj (make-ast-let
+                                  :bindings (list (cons recv obj))
+                                  :body (list (make-ast-if
+                                               :cond null-check
+                                               :then (make-ast-quote :value +php-null+)
+                                               :else (make-ast-call
+                                                      :func (make-ast-slot-value
+                                                             :object recv-var :slot prop)
+                                                      :args (cons recv-var args)))))
                              rest rest4
                              kv kv4))
-                      (setf obj (make-ast-if
-                                 :cond null-check
-                                 :then (make-ast-quote :value nil)
-                                 :else (make-ast-slot-value :object obj :slot prop))
-                            rest rest3))))))
+                     (setf obj (make-ast-let
+                                :bindings (list (cons recv obj))
+                                :body (list (make-ast-if
+                                             :cond null-check
+                                             :then (make-ast-quote :value +php-null+)
+                                             :else access)))
+                           rest rest3))))))
           ;; :: static member/method access. Enum built-ins lower to PHP helpers.
           ((eq type :T-DOUBLE-COLON)
            (multiple-value-bind (tok rest2) (php-consume rest)
