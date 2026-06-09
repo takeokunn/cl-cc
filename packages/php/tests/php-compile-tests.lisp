@@ -607,3 +607,20 @@ twice and ?->m() did not pass \$this."
   (assert-string= "none"    (%php-run-capture "<?php class C{public $n=null;} $o=new C(); echo $o?->n?->x ?? 'none';"))
   ;; a null property value coalesces
   (assert-string= "wasnull" (%php-run-capture "<?php class C{public $x;} $o=new C(); echo $o?->x ?? 'wasnull';")))
+
+(deftest php-e2e-array-spread
+  "The spread operator splices an array into an array literal ([...$a, 3]),
+re-indexing integer keys and preserving string keys (PHP 8.1).  Regression: the
+spread element lowered to a (%php-spread ...) call with no backing function
+('Undefined function: %PHP-SPREAD'); %php-array now splices spread markers."
+  (assert-string= "6"       (%php-run-capture "<?php $a=[1,2]; $b=[...$a,3]; echo array_sum($b);"))
+  (assert-string= "1,2,3,4" (%php-run-capture "<?php $a=[2,3]; $b=[1,...$a,4]; echo implode(',',$b);"))
+  (assert-string= "2"       (%php-run-capture "<?php $a=[1]; $b=[2]; $c=[...$a,...$b]; echo count($c);"))
+  (assert-string= "11"      (%php-run-capture "<?php $a=[5,6]; $b=[...$a]; echo array_sum($b);"))
+  ;; string keys are preserved
+  (assert-string= "12"      (%php-run-capture "<?php $a=['x'=>1]; $b=[...$a,'y'=>2]; echo $b['x'].$b['y'];"))
+  ;; integer keys are re-indexed from 0
+  (assert-string= "12"      (%php-run-capture "<?php $a=[5=>1, 9=>2]; $b=[...$a]; echo $b[0].$b[1];"))
+  ;; regression guards: plain arrays and call spread still work
+  (assert-string= "6"       (%php-run-capture "<?php echo array_sum([1,2,3]);"))
+  (assert-string= "6"       (%php-run-capture "<?php function s(...$n){return array_sum($n);} $a=[1,2,3]; echo s(...$a);")))

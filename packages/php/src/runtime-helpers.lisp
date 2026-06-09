@@ -574,21 +574,43 @@ an integer (3.0 -> \"3\").  princ-to-string leaked the CL form: \"1.5d0\", \"5/2
     (setf (gethash +php-array-next-index-key+ array) (1+ index))
     index))
 
+(defun %php-spread (array)
+  "Wrap ARRAY in a spread marker for %php-array to splice in.  Lowered from
+[...$a] inside an array literal.  (In a CALL, ...$a is rewritten before runtime,
+so this is only reached for array-literal spreads.)"
+  (cons :__php-spread__ array))
+
+(defun %php-spread-marker-p (x)
+  "True when X is a %php-spread marker."
+  (and (consp x) (eq (car x) :__php-spread__)))
+
 (defun %php-array (&rest entries)
   "Construct a PHP ordered array from flat entry descriptors.
 
 Each entry descriptor is a list of the form (KEY-PRESENT-P KEY VALUE). When
 KEY-PRESENT-P is false, KEY is ignored and VALUE is inserted at the current
 auto-increment integer index. Explicit integer keys update the next auto-index
-to max(existing-next-index, key + 1), matching PHP array literal semantics."
+to max(existing-next-index, key + 1), matching PHP array literal semantics.
+A VALUE that is a %php-spread marker ([...$a]) splices the wrapped array's
+elements in — integer keys re-indexed, string keys preserved (PHP 8.1)."
   (let ((array (make-hash-table :test #'equal)))
     (setf (gethash +php-array-order-key+ array) nil
           (gethash +php-array-next-index-key+ array) 0)
     (dolist (entry entries array)
       (destructuring-bind (key-present-p key value) entry
-         (%php-array-set array
-                         (if key-present-p key (%php-array-next-auto-index array))
-                         value)))))
+        (cond
+          ((%php-spread-marker-p value)
+           (let ((src (cdr value)))
+             (when (hash-table-p src)
+               (dolist (k (gethash +php-array-order-key+ src))
+                 (let ((v (gethash k src)))
+                   (if (integerp k)
+                       (%php-array-set array (%php-array-next-auto-index array) v)
+                       (%php-array-set array k v)))))))
+          (t
+           (%php-array-set array
+                           (if key-present-p key (%php-array-next-auto-index array))
+                           value)))))))
 
 (defun %php-enum-make-case (enum-name case-name value)
   "Create a PHP enum case singleton payload.  `name' and `value' are stored under
