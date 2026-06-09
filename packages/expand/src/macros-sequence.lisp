@@ -5,16 +5,17 @@
 
 ;; COPY-SEQ (FR-507): shallow copy of a sequence (list or vector)
 (our-defmacro copy-seq (seq)
-  "Return a fresh copy of SEQ (works for lists and vectors)."
+  "Return a fresh copy of SEQ (works for lists and vectors).
+Lists copy via COPY-LIST; vectors/strings via (SUBSEQ s 0), which the VM
+materializes into a fresh independent host sequence.  We deliberately do NOT
+route through CL-CC/VM:VM-COW-COPY-SEQ: it is a host helper absent from the VM
+bridge whitelist (so user programs hit \"Undefined function\"), and for vectors
+it returns a copy-on-write VM-COW-VECTOR wrapper that would leak into user code."
   (let ((s (gensym "SEQ")))
-    (let* ((vm-pkg (find-package "CL-CC/VM"))
-           (cow-copy-sym (and vm-pkg (find-symbol "VM-COW-COPY-SEQ" vm-pkg))))
-      `(let ((,s ,seq))
-         ,(if cow-copy-sym
-              `(,cow-copy-sym ,s)
-              `(if (listp ,s)
-                   (copy-list ,s)
-                   (subseq ,s 0)))))))
+    `(let ((,s ,seq))
+       (if (listp ,s)
+           (copy-list ,s)
+           (subseq ,s 0)))))
 
 ;; FILL (FR-502): fill a sequence (list or vector) with item; supports :start/:end
 (our-defmacro fill (seq item &key start end)

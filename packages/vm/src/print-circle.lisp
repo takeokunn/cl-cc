@@ -116,9 +116,48 @@
     (%write-circle-object object stream state escape))
   object)
 
+(defun %vm-print-materialize (object seen)
+  "Recursively unwrap COW list/vector wrappers so OBJECT prints as plain CL data.
+The COW optimization (VM-COW-LIST / VM-COW-VECTOR) is meant to be invisible:
+CAR/AREF materialize on access, but the print path handed the raw wrapper to the
+host writer, which printed #S(VM-COW-LIST ...).  Rebuild fresh structure ONLY
+where a wrapper is actually present (identity preserved otherwise, so wrapper-free
+structures incur no copy), and guard against cycles via the SEEN table."
+  (cond
+    ((vm-cow-list-p object)
+     (%vm-print-materialize (vm-cow-list-backing object) seen))
+    ((vm-cow-vector-p object)
+     (%vm-print-materialize (vm-cow-vector-backing object) seen))
+    ((consp object)
+     (if (gethash object seen)
+         object
+         (progn
+           (setf (gethash object seen) t)
+           (let ((a (%vm-print-materialize (car object) seen))
+                 (d (%vm-print-materialize (cdr object) seen)))
+             (if (and (eq a (car object)) (eq d (cdr object)))
+                 object
+                 (cons a d))))))
+    ;; Only general (element-type T) vectors can hold wrappers; strings and
+    ;; bit-vectors cannot, so leave them untouched.
+    ((and (vectorp object) (eq (array-element-type object) t))
+     (if (gethash object seen)
+         object
+         (progn
+           (setf (gethash object seen) t)
+           (let ((changed nil)
+                 (new (make-array (length object))))
+             (dotimes (i (length object))
+               (let ((e (%vm-print-materialize (aref object i) seen)))
+                 (unless (eq e (aref object i)) (setf changed t))
+                 (setf (aref new i) e)))
+             (if changed new object)))))
+    (t object)))
+
 (defun vm-write-object-to-string (object &key (escape t) (circle *print-circle*))
   "Return OBJECT's printed representation.
 Uses the host fast path when CIRCLE is NIL; the full circle-detection path otherwise."
+  (setf object (%vm-print-materialize object (make-hash-table :test 'eq)))
   (if (not circle)
       (let ((cl:*print-escape* escape)
             (cl:*print-case* *print-case*)

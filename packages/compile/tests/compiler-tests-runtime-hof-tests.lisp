@@ -106,6 +106,31 @@ instruction coerced its input to a string).  butlast/last expand to subseq."
   "subseq on a vector returns a vector of the right length."
   (assert-= 3 (run-string "(length (subseq (vector 1 2 3 4 5) 1 4))")))
 
+;;; COPY-SEQ / COW-Wrapper Print Tests
+
+(deftest-each copy-seq-sequences
+  "copy-seq returns a fresh independent copy for lists, strings, and vectors.
+Regression: copy-seq expanded to CL-CC/VM:VM-COW-COPY-SEQ (absent from the VM
+bridge -> \"Undefined function\"); the portable fallback then exposed a deeper
+leak where copy-list/copy-seq returned a VM-COW-LIST/VM-COW-VECTOR wrapper that
+printed as #S(VM-COW-LIST ...).  Now the print path materializes COW wrappers."
+  :cases (("list"   '(1 2 3) "(copy-seq '(1 2 3))")
+          ("symbols" '(a b c) "(copy-seq '(a b c))")
+          ("string" "hello"  "(copy-seq \"hello\")")
+          ("copy-list" '(1 2 3) "(copy-list '(1 2 3))"))
+  (expected form)
+  (assert-equal expected (run-string form)))
+
+(deftest copy-seq-vector-independent
+  "Mutating a copy-seq'd vector does not affect the original (COW write-isolation)."
+  (assert-= 1 (run-string
+               "(let* ((o (vector 1 2 3)) (c (copy-seq o))) (setf (aref c 0) 99) (aref o 0))")))
+
+(deftest copy-seq-nested-wrapper-prints
+  "A list containing a copy-seq'd vector prints the inner vector, not its wrapper."
+  (assert-equal '(#(1 2) 9)
+                (run-string "(list (copy-seq (vector 1 2)) 9)")))
+
 ;;; TYPECASE Dispatch Tests
 
 (deftest-each typecase-dispatch
