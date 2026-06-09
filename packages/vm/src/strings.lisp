@@ -479,12 +479,25 @@ Each byte encodes +CHAR-CLASS-* flags. Treat as read-only after load.")
 
 (defmethod execute-instruction ((inst vm-subseq) state pc labels)
   (declare (ignore labels))
-  (let* ((string (vm-reg-get state (vm-string-reg inst)))
-         (start  (vm-reg-get state (vm-start inst)))
-         ;; nil end-slot means no upper bound — pass nil to subseq (= end of sequence)
-         (end    (if (vm-end inst) (vm-reg-get state (vm-end inst)) nil))
-          (result (vm-string-subseq (%vm-host-string string) start end)))
-    (vm-reg-set state (vm-dst inst) (%vm-maybe-sso-string (vm-string-materialize result)))
+  ;; SUBSEQ is a sequence operation: it must work on lists and vectors, not only
+  ;; strings.  The previous version coerced the input to a string, so (subseq
+  ;; '(1 2 3) 0 2) and (subseq #(1 2 3) 0 2) — and butlast/last, which expand to
+  ;; subseq — raised a type error.
+  (let* ((seq   (vm-reg-get state (vm-string-reg inst)))
+         (start (vm-reg-get state (vm-start inst)))
+         ;; nil end-slot means no upper bound (= end of sequence)
+         (end   (if (vm-end inst) (vm-reg-get state (vm-end inst)) nil))
+         (result
+           (cond
+             ((listp seq)
+              (subseq seq start (or end (length seq))))
+             ((or (stringp seq) (%vm-sso-string-p seq))
+              (%vm-maybe-sso-string
+               (vm-string-materialize (vm-string-subseq (%vm-host-string seq) start end))))
+             (t
+              (let ((v (%vm-cow-vector-materialize seq)))
+                (subseq v start (or end (length v))))))))
+    (vm-reg-set state (vm-dst inst) result)
     (values (1+ pc) nil nil)))
 
 (defmethod execute-instruction ((inst vm-concatenate) state pc labels)

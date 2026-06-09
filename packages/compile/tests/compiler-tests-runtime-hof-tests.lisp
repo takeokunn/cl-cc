@@ -90,3 +90,18 @@ expansion, leaving a bare call to an undefined REMOVE-IF function."
           ("caddar" 3   "(caddar '((1 2 3) b c))"))
   (expected form)
   (assert-equal expected (run-string form :stdlib t)))
+
+(deftest-each subseq-sequences
+  "subseq works on lists and vectors, not only strings (the vm-subseq
+instruction coerced its input to a string).  butlast/last expand to subseq."
+  :cases (("list"        '(1 2)   "(subseq '(1 2 3 4) 0 2)")
+          ("list-rest"   '(2 3 4) "(subseq '(1 2 3 4) 1)")
+          ("string"      "he"     "(subseq \"hello\" 0 2)")
+          ("butlast"     '(1 2)   "(butlast '(1 2 3))")
+          ("butlast-n"   '(1 2)   "(butlast '(1 2 3 4) 2)"))
+  (expected form)
+  (assert-equal expected (run-string form)))
+
+(deftest subseq-vector-runtime
+  "subseq on a vector returns a vector of the right length."
+  (assert-= 3 (run-string "(length (subseq (vector 1 2 3 4 5) 1 4))")))
