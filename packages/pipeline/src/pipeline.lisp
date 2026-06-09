@@ -618,7 +618,28 @@ bridge — the same package-derived whitelist used for PHP."
       ;; Teach prototype method lookup to recognize a compiled-JS method (a
       ;; vm-closure) as callable, so obj.method resolves to a bound method.
       (setf cl-cc/javascript::*js-callable-p*
-            (lambda (x) (or (functionp x) (cl-cc/vm::%vm-closure-object-p x)))))))
+            (lambda (x) (or (functionp x) (cl-cc/vm::%vm-closure-object-p x))))
+      ;; Bind `this' for a method/constructor call in BOTH the host special and
+      ;; the VM-global %js-this: a compiled-JS method body reads `this' via
+      ;; vm-get-global, so the host dynamic binding alone is invisible to it.
+      ;; Save/restore around the call so nested method calls (a.m() calling b.n())
+      ;; restore the outer receiver.
+      (setf cl-cc/javascript::*js-apply-with-this-fn*
+            (lambda (this fn args)
+              (let ((state cl-cc/vm:*vm-state*))
+                (if state
+                    (let* ((gv   (cl-cc/vm:vm-global-vars state))
+                           (had  (nth-value 1 (gethash 'cl-cc/javascript::%js-this gv)))
+                           (prev (gethash 'cl-cc/javascript::%js-this gv)))
+                      (setf (gethash 'cl-cc/javascript::%js-this gv) this)
+                      (unwind-protect
+                           (let ((cl-cc/javascript::%js-this this))
+                             (funcall cl-cc/javascript::*js-apply-fn* fn args))
+                        (if had
+                            (setf (gethash 'cl-cc/javascript::%js-this gv) prev)
+                            (remhash 'cl-cc/javascript::%js-this gv))))
+                    (let ((cl-cc/javascript::%js-this this))
+                      (funcall cl-cc/javascript::*js-apply-fn* fn args)))))))))
 
 (defun seed-js-runtime-globals (state)
   "Seed JavaScript runtime special variables into STATE's VM globals.
@@ -637,7 +658,12 @@ globals so the prelude resolves."
                    (boundp sym)
                    (let ((name (symbol-name sym)))
                      (and (>= (length name) 4)
-                          (string= "*JS-" name :end2 4))))
+                          ;; *JS-* specials (Symbol/Infinity/error classes/…) and
+                          ;; %JS-* special vars like %js-this (so `this' at top
+                          ;; level resolves to undefined rather than erroring; a
+                          ;; method call overrides it with the receiver).
+                          (or (string= "*JS-" name :end2 4)
+                              (string= "%JS-" name :end2 4)))))
           (setf (gethash sym (cl-cc/vm:vm-global-vars state))
                 (symbol-value sym)))))))
 

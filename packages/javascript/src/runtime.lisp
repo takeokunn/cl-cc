@@ -206,6 +206,21 @@ Array higher-order methods use this instead of CL:FUNCALL so the same code path
 works whether FN is a host function (tests) or a compiled-JS closure (runtime)."
   (funcall *js-apply-fn* fn args))
 
+(defvar *js-apply-with-this-fn*
+  (lambda (this fn args)
+    (let ((%js-this this))
+      (funcall *js-apply-fn* fn args)))
+  "Invoke a method/constructor FN with `this' = THIS. The default binds only the
+host special %js-this (enough for host-function methods in unit tests). The
+pipeline installs a version that ALSO sets the VM-global %js-this, because a
+compiled-JS method body reads `this' via vm-get-global and cannot see the host
+dynamic binding.")
+
+(defun %js-call-with-this (this fn args)
+  "Call method/constructor FN with `this' bound to THIS for both host and
+compiled-VM method bodies."
+  (funcall *js-apply-with-this-fn* this fn args))
+
 (defvar *js-method-resolver* nil
   "When set, a function (receiver method-name-string) -> a bound method closure,
 or +js-undefined+ when the name is not a method. Installed by a late runtime
@@ -241,8 +256,7 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
                            ;; %js-funcall for VM-closure compatibility.
                            (let ((method val) (receiver obj))
                              (lambda (&rest args)
-                               (let ((%js-this receiver))
-                                 (funcall *js-apply-fn* method args))))
+                               (%js-call-with-this receiver method args)))
                            val)))
              (setf proto (gethash "__proto__" proto)))
         finally (return +js-undefined+)))
@@ -275,7 +289,15 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
          (t (%js-method-ref obj k))))
       ((%js-ht-p obj)
        (multiple-value-bind (val found) (gethash k obj)
-         (if found val (%js-proto-method-lookup obj k))))
+         (cond
+           ;; An own callable property is a method: return it bound to OBJ so
+           ;; `this' inside an object-literal method (let o={m(){return this.x}})
+           ;; resolves to the receiver, matching o.m() semantics.
+           ((and found (funcall *js-callable-p* val))
+            (let ((method val) (receiver obj))
+              (lambda (&rest args) (%js-call-with-this receiver method args))))
+           (found val)
+           (t (%js-proto-method-lookup obj k)))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
       (t +js-undefined+))))

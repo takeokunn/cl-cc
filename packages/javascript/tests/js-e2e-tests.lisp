@@ -40,6 +40,18 @@ globals, so EVERY JS program failed with 'Unbound global variable: *JS-...*')."
   (assert-string= "Hi Bob" (%js-run-capture "let n=\"Bob\"; console.log(`Hi ${n}`);"))
   (assert-string= "2"     (%js-run-capture "function mk(){let c=0; return ()=>++c;} let f=mk(); f(); console.log(f());")))
 
+(deftest js-e2e-class-this-binding
+  "Class constructors and methods bind `this' to the instance — in both the host
+special and the VM-global %js-this — so this.x reads/writes the receiver
+(regression: this compiled to vm-get-global %js-this which was never set, so any
+class using `this' failed with 'Unbound global variable: %JS-THIS')."
+  (assert-string= "7"  (%js-run-capture "class C{constructor(x){this.x=x;} get(){return this.x;}} console.log(new C(7).get());"))
+  (assert-string= "Bob" (%js-run-capture "class P{constructor(n){this.name=n;}} let p=new P(\"Bob\"); console.log(p.name);"))
+  ;; this.n++ mutates the receiver across calls
+  (assert-string= "2"  (%js-run-capture "class Ctr{constructor(){this.n=0;} inc(){this.n++; return this.n;}} let c=new Ctr(); c.inc(); console.log(c.inc());"))
+  ;; nested method call restores the outer receiver afterwards
+  (assert-string= "10" (%js-run-capture "class B{v(){return 10;}} class A{constructor(){this.b=new B();} go(){return this.b.v();}} console.log(new A().go());")))
+
 (defun %js-e2e-parse (src)
   "Parse SRC and return the list of top-level AST nodes."
   (cl-cc/javascript:parse-js-source src))

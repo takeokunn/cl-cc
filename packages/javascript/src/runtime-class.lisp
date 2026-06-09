@@ -53,9 +53,9 @@ When KLASS defines no constructor, forward to __super__."
   (let ((ctor (and (%js-ht-p klass) (gethash "__constructor__" klass))))
     (cond
       (ctor
-       ;; Bind %js-this to the new instance so the constructor can access it
-       (let ((%js-this obj))
-         (funcall *js-apply-fn* ctor args)))
+       ;; Bind %js-this to the new instance (host + VM global) so the constructor
+       ;; can access it via `this.x = ...'.
+       (%js-call-with-this obj ctor args))
       ((and (%js-ht-p klass) (gethash "__super__" klass))
        (%js-run-constructor (gethash "__super__" klass) obj args)))))
 
