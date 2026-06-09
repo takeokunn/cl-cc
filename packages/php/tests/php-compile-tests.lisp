@@ -718,3 +718,21 @@ consults *php-predefined-constants* and lowers a hit to its literal value."
   (assert-string= "8" (%php-run-capture "<?php echo \\PHP_MAJOR_VERSION;"))
   ;; an UNKNOWN bare identifier still lowers to a var (no crash, empty value)
   (assert-string= "" (%php-run-capture "<?php echo NOT_A_REAL_CONSTANT_XYZ;")))
+
+(deftest php-e2e-call-user-func
+  "call_user_func / call_user_func_array over Closure, builtin-name, and
+USER-function-name callables.  String callables for USER functions previously
+failed ('Invalid function designator') because the resolver only checked the
+builtin table; now %php-callable-user-function matches the VM function registry
+by package-independent SYMBOL-NAME."
+  ;; user function by string name
+  (assert-string= "25" (%php-run-capture "<?php function sq($x){return $x*$x;} echo call_user_func('sq',5);"))
+  (assert-string= "7"  (%php-run-capture "<?php function add($a,$b){return $a+$b;} echo call_user_func('add',3,4);"))
+  ;; builtin by string name
+  (assert-string= "HI" (%php-run-capture "<?php echo call_user_func('strtoupper','hi');"))
+  ;; closure / arrow
+  (assert-string= "101" (%php-run-capture "<?php $f=function($n){return $n+100;}; echo call_user_func($f,1);"))
+  (assert-string= "21"  (%php-run-capture "<?php $g=fn($x)=>$x*3; echo call_user_func($g,7);"))
+  ;; call_user_func_array spreads the array as positional args
+  (assert-string= "30" (%php-run-capture "<?php function add($a,$b){return $a+$b;} echo call_user_func_array('add',[10,20]);"))
+  (assert-string= "36" (%php-run-capture "<?php function sq($x){return $x*$x;} echo call_user_func_array('sq',[6]);")))

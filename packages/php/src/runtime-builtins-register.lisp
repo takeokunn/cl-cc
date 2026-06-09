@@ -486,6 +486,8 @@
   (%php-register-builtin "class_exists" '%php-class-exists)
   (%php-register-builtin "interface_exists" '%php-interface-exists)
   (%php-register-builtin "function_exists" '%php-function-exists)
+  (%php-register-builtin "call_user_func" '%php-call-user-func)
+  (%php-register-builtin "call_user_func_array" '%php-call-user-func-array)
   (%php-register-builtin "method_exists" '%php-method-exists)
   (%php-register-builtin "property_exists" '%php-property-exists)
   (%php-register-builtin "get_class" '%php-get-class)

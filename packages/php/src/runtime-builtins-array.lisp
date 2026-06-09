@@ -22,9 +22,56 @@ usort with a closure callback silently no-op (the resolver returned NIL)."
          (lambda (&rest args)
            (cl-cc/vm::%vm-call-closure-sync callback cl-cc/vm:*vm-state* args)))
         ((and (symbolp callback) (fboundp callback)) (symbol-function callback))
-        ((and (stringp callback) (fboundp '%php-lookup-builtin))
-         (funcall (symbol-function '%php-lookup-builtin) callback))
+        ((stringp callback)
+         ;; A string callable names a global function.  Try builtins first, then
+         ;; the VM function registry for USER functions (function foo(){...}).
+         (or (and (fboundp '%php-lookup-builtin)
+                  (funcall (symbol-function '%php-lookup-builtin) callback))
+             (%php-callable-user-function callback)))
         (t nil)))
+
+(defun %php-callable-user-function (name)
+  "Resolve PHP user-function NAME (a string) to a callable via the VM function
+registry, or NIL.  PHP function names are case-insensitive; the compiler interns
+each into whatever *package* was current at parse time, so matching by EQ symbol
+is fragile across the host/VM boundary.  Match by SYMBOL-NAME (upcased) instead,
+which is package-independent.  A registry hit that is a vm-closure-object is
+wrapped in the same %vm-call-closure-sync trampoline used for Closure args."
+  (let ((state cl-cc/vm:*vm-state*))
+    (when (and state (stringp name))
+      (let ((target (string-upcase name))
+            (registry (cl-cc/vm:vm-function-registry state)))
+        (block found
+          (maphash (lambda (sym fn)
+                     (when (and (symbolp sym)
+                                (string= (symbol-name sym) target))
+                       (return-from found
+                         (if (cl-cc/vm::%vm-closure-object-p fn)
+                             (lambda (&rest args)
+                               (cl-cc/vm::%vm-call-closure-sync fn state args))
+                             fn))))
+                   registry)
+          nil)))))
+
+(defun %php-call-user-func (callback &rest args)
+  "PHP call_user_func: invoke CALLBACK (Closure, function-name string, or a host
+function) with ARGS and return the result."
+  (let ((fn (%php-callable-function callback)))
+    (if fn
+        (apply fn args)
+        (%php-throw 'type-error
+                    "call_user_func(): Argument #1 ($callback) must be a valid callback"))))
+
+(defun %php-call-user-func-array (callback args-array)
+  "PHP call_user_func_array: invoke CALLBACK with the values of PHP ARGS-ARRAY
+spread as positional arguments."
+  (let ((fn (%php-callable-function callback)))
+    (if fn
+        (apply fn (if (hash-table-p args-array)
+                      (%php-array-values-list args-array)
+                      nil))
+        (%php-throw 'type-error
+                    "call_user_func_array(): Argument #1 ($callback) must be a valid callback"))))
 
 (defun %php-array-merge (&rest arrays)
   "Merge PHP ARRAYS into a new array."
