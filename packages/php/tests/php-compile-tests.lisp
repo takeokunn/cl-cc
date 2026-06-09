@@ -781,3 +781,32 @@ unserialize just stringified) and, being non-CL-named, also failed dispatch
   (assert-string= "T"  (%php-run-capture "<?php echo unserialize('b:1;')?'T':'F';"))
   ;; malformed input -> false
   (assert-string= "F"  (%php-run-capture "<?php echo unserialize('garbage')?'T':'F';")))
+
+(deftest php-e2e-string-escape-preservation
+  "PHP double-quoted strings keep the backslash for UNRECOGNIZED escapes (PHP
+semantics), while still processing recognized ones.  Previously every unknown
+escape dropped its backslash, so \"/\\d/\" lexed to \"/d/\" and regex character
+classes (\\d \\w \\s) never matched."
+  ;; unrecognized escapes keep the backslash
+  (assert-string= "a\\.b"  (%php-run-capture "<?php echo \"a\\.b\";"))
+  (assert-string= "\\d\\w" (%php-run-capture "<?php echo \"\\d\\w\";"))
+  ;; recognized escapes still process
+  (assert-string= "3" (%php-run-capture "<?php echo strlen(\"a\\nb\");"))   ; a + newline + b
+  (assert-string= "A" (%php-run-capture "<?php echo \"\\x41\";"))           ; hex
+  (assert-string= "H" (%php-run-capture "<?php echo \"\\u{48}\";"))         ; unicode
+  (assert-string= "1" (%php-run-capture "<?php echo strlen(\"\\t\");")))    ; tab
+
+(deftest php-e2e-preg-replace-callback
+  "preg_replace_callback / _array.  preg_replace_callback called a non-existent
+%php-regex-search and never stripped the /.../ delimiters, so every call raised
+'The function %PHP-REGEX-SEARCH is undefined.'  preg_replace_callback_array had
+the wrong arity (separate patterns/callbacks args instead of one map)."
+  ;; the callback receives $matches[0] = full match and returns the replacement
+  (assert-string= "a2b4" (%php-run-capture "<?php echo preg_replace_callback('/\\d/', fn($m)=>$m[0]*2, 'a1b2');"))
+  (assert-string= "HI THERE" (%php-run-capture "<?php echo preg_replace_callback('/[a-z]+/', fn($m)=>strtoupper($m[0]), 'hi there');"))
+  ;; limit caps the number of replacements
+  (assert-string= "XX34" (%php-run-capture "<?php echo preg_replace_callback('/\\d/', fn($m)=>'X', '1234', 2);"))
+  ;; works with the double-quoted pattern too (escape-preservation fix)
+  (assert-string= "a2b4" (%php-run-capture "<?php echo preg_replace_callback(\"/\\d/\", fn($m)=>$m[0]*2, 'a1b2');"))
+  ;; preg_replace_callback_array: a single [pattern => callback] map
+  (assert-string= "LNLN" (%php-run-capture "<?php echo preg_replace_callback_array(['/\\d/'=>fn($m)=>'N','/[a-z]/'=>fn($m)=>'L'], 'a1b2');")))

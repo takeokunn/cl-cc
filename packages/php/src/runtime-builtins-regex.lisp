@@ -463,55 +463,56 @@
 ;;; ─── preg_replace_callback ────────────────────────────────────────────────────
 
 (defun %php-preg-replace-callback (pattern callback subject &optional (limit -1) count-var)
-  "PHP preg_replace_callback: replace regex matches using a callback function."
-  (declare (ignore count-var))
-  (let* ((pat (%php-stringify pattern))
-         (s (%php-stringify subject))
-         (fn (%php-callable-function callback))
-         (compiled (%php-compile-regex pat))
-         (result (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-         (pos 0)
-         (replacements 0)
-         (max-replacements (if (and (numberp limit) (> limit 0)) limit most-positive-fixnum)))
-    (when (and compiled fn)
-      (loop while (and (< pos (length s))
-                       (< replacements max-replacements))
-            do (multiple-value-bind (match-start match-end groups)
-                   (%php-regex-search compiled s pos)
-                 (if match-start
-                     (progn
-                       ;; Copy text before match
-                       (loop for i from pos below match-start
-                             do (vector-push-extend (char s i) result))
-                       ;; Build match array for callback
-                       (let* ((match-arr (%php-make-array))
-                              (full-match (subseq s match-start match-end)))
-                         (%php-array-set match-arr 0 full-match)
-                         (loop for g in groups for i from 1
-                               do (%php-array-set match-arr i (or g "")))
-                         ;; Call the callback
-                         (let ((replacement (%php-stringify (funcall fn match-arr))))
-                           (loop for ch across replacement
-                                 do (vector-push-extend ch result)))
-                         (incf replacements)
-                         (setf pos (max (1+ pos) match-end))))
-                     (progn
-                       ;; No more matches: copy remainder
-                       (loop for i from pos below (length s)
-                             do (vector-push-extend (char s i) result))
-                       (return))))))
-    (coerce result 'string)))
+  "PHP preg_replace_callback: replace regex matches in SUBJECT using CALLBACK.
+The callback receives a PHP array whose [0] element is the full match and
+returns the replacement string.  Scans like %php-preg-replace (strip the
+/.../ delimiters + flags, compile with ic/ml, then scan forward); the NFA
+matcher used here exposes only the full match, so the callback's array carries
+$matches[0] (the engine does not yet thread capture groups through this path).
 
-(defun %php-preg-replace-callback-array (patterns callbacks subject &optional limit count)
-  "PHP preg_replace_callback_array: apply multiple pattern/callback pairs."
+The previous implementation called the non-existent %php-regex-search and never
+stripped the pattern delimiters, so every call raised
+`The function %PHP-REGEX-SEARCH is undefined.'"
+  (declare (ignore count-var))
+  (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
+    (let* ((ic (find #\i flags))
+           (ml (find #\m flags))
+           (str (%php-stringify subject))
+           (cb (%php-callable-function callback))
+           (fn (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () nil)))
+           (max-replacements (if (and (numberp limit) (> limit 0)) limit most-positive-fixnum)))
+      (if (and fn cb)
+          (with-output-to-string (out)
+            (let ((pos 0) (replacements 0))
+              (loop while (<= pos (length str))
+                    do (if (>= replacements max-replacements)
+                           (progn (write-string (subseq str pos) out) (return))
+                           (let ((match-start nil) (match-end nil))
+                             ;; Scan forward for the next match position.
+                             (loop for i from pos to (length str)
+                                   for e = (funcall fn str i nil)
+                                   when e do (setf match-start i match-end e) (return))
+                             (if match-start
+                                 (let ((match-arr (%php-make-array)))
+                                   (write-string (subseq str pos match-start) out)
+                                   (%php-array-set match-arr 0 (subseq str match-start match-end))
+                                   (write-string (%php-stringify (funcall cb match-arr)) out)
+                                   (incf replacements)
+                                   (setf pos (max (1+ match-start) match-end)))
+                                 (progn (write-string (subseq str pos) out) (return))))))))
+          str))))
+
+(defun %php-preg-replace-callback-array (pattern-map subject &optional (limit -1) count)
+  "PHP preg_replace_callback_array: PATTERN-MAP is a single PHP array mapping
+each regex pattern (key) to its callback (value); apply them in order to
+SUBJECT.  The previous signature took separate patterns/callbacks arrays, so a
+normal call preg_replace_callback_array(['/re/' => fn], $s) passed too few
+arguments."
   (declare (ignore count))
   (let ((result subject))
-    (when (and (hash-table-p patterns) (hash-table-p callbacks))
-      (dolist (pair (%php-array-pairs patterns))
-        (let* ((pat (car pair))
-               (cb-fn (%php-array-ref callbacks pat)))
-          (when (not (%php-null-p cb-fn))
-            (setf result (%php-preg-replace-callback (cdr pair) cb-fn result limit))))))
+    (when (hash-table-p pattern-map)
+      (dolist (pair (%php-array-pairs pattern-map))
+        (setf result (%php-preg-replace-callback (car pair) (cdr pair) result limit))))
     result))
 
 ;;; ─── Date helpers ────────────────────────────────────────────────────────────

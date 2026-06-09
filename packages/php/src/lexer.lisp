@@ -176,22 +176,58 @@ interpolation for parser lowering without requiring a full string sub-lexer."
           ((and terminator (char= ch terminator))
            (return (values (finish-string) (1+ pos))))
           ((char= ch #\\)
-           ;; Escape sequence
+           ;; Escape sequence. PHP double-quoted strings recognize a fixed set
+           ;; of escapes; an UNRECOGNIZED escape KEEPS its backslash (so a regex
+           ;; pattern written as "/\d/" survives intact — previously the
+           ;; backslash was dropped, leaving "/d/" which never matched a digit).
            (incf pos)
            (when (>= pos (length source))
              (error "PHP lex error: trailing backslash in string"))
            (let ((esc (char source pos)))
-             (vector-push-extend
-              (case esc
-                (#\n  #\Newline)
-                (#\t  #\Tab)
-                (#\r  #\Return)
-                (#\\  #\\)
-                (#\"  #\")
-                 (#\$  #\$)
-                 (otherwise esc))
-                buf)
-               (incf pos)))
+             (cond
+               ((char= esc #\n) (vector-push-extend #\Newline buf) (incf pos))
+               ((char= esc #\t) (vector-push-extend #\Tab buf) (incf pos))
+               ((char= esc #\r) (vector-push-extend #\Return buf) (incf pos))
+               ((char= esc #\v) (vector-push-extend (code-char 11) buf) (incf pos))
+               ((char= esc #\f) (vector-push-extend (code-char 12) buf) (incf pos))
+               ((char= esc #\e) (vector-push-extend (code-char 27) buf) (incf pos))
+               ((char= esc #\\) (vector-push-extend #\\ buf) (incf pos))
+               ((char= esc #\") (vector-push-extend #\" buf) (incf pos))
+               ((char= esc #\$) (vector-push-extend #\$ buf) (incf pos))
+               ;; \x.. — one or two hex digits -> byte
+               ((char= esc #\x)
+                (incf pos)
+                (let ((start pos))
+                  (loop while (and (< pos (length source)) (< (- pos start) 2)
+                                   (digit-char-p (char source pos) 16))
+                        do (incf pos))
+                  (if (> pos start)
+                      (vector-push-extend
+                       (code-char (parse-integer source :start start :end pos :radix 16)) buf)
+                      (progn (vector-push-extend #\\ buf) (vector-push-extend #\x buf)))))
+               ;; \u{...} — unicode codepoint
+               ((and (char= esc #\u) (< (1+ pos) (length source))
+                     (char= (char source (1+ pos)) #\{))
+                (incf pos 2)
+                (let ((start pos))
+                  (loop while (and (< pos (length source)) (not (char= (char source pos) #\})))
+                        do (incf pos))
+                  (vector-push-extend
+                   (code-char (parse-integer source :start start :end pos :radix 16)) buf)
+                  (when (and (< pos (length source)) (char= (char source pos) #\}))
+                    (incf pos))))
+               ;; \0-\777 — octal byte
+               ((digit-char-p esc 8)
+                (let ((start pos))
+                  (loop while (and (< pos (length source)) (< (- pos start) 3)
+                                   (digit-char-p (char source pos) 8))
+                        do (incf pos))
+                  (vector-push-extend
+                   (code-char (parse-integer source :start start :end pos :radix 8)) buf)))
+               ;; unrecognized escape — PHP keeps the backslash literally
+               (t (vector-push-extend #\\ buf)
+                  (vector-push-extend esc buf)
+                  (incf pos)))))
           ((and (char= ch #\{)
                 (< (+ pos 2) (length source))
                 (char= (char source (1+ pos)) #\$)
