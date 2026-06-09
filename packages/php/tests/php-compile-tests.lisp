@@ -26,6 +26,31 @@ plain $var was mutated), yielding the OLD value, including $this->n++ in a metho
   ;; per statement, so combine with '.')
   (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
 
+(deftest php-e2e-heredoc-nowdoc
+  "Heredoc <<<EOT interpolates $vars and {$expr} like a double-quoted string;
+nowdoc <<<'EOT' is literal.  Regression: the heredoc body was emitted as a raw
+non-interpolated T-STRING (so $n printed literally), and the nowdoc label scan
+swallowed the closing quote into the marker ('end marker EOT' not found').  Now
+the heredoc body is routed through the shared interpolation lexer and the label
+is scanned as an identifier."
+  ;; heredoc interpolates a simple $var
+  (assert-string= "Hi Bob"
+                  (%php-run-capture (format nil "<?php $n=\"Bob\"; echo <<<EOT~%Hi $n~%EOT;~%")))
+  ;; multiple vars and a {$expr} brace form
+  (assert-string= "X-Y"
+                  (%php-run-capture (format nil "<?php $a=\"X\";$b=\"Y\"; echo <<<EOT~%$a-$b~%EOT;~%")))
+  (assert-string= "Hi Bob!"
+                  (%php-run-capture (format nil "<?php $n=\"Bob\"; echo <<<EOT~%Hi {$n}!~%EOT;~%")))
+  ;; multi-line body preserves interior newlines
+  (assert-string= (format nil "line1~%val=Z")
+                  (%php-run-capture (format nil "<?php $n=\"Z\"; echo <<<EOT~%line1~%val=$n~%EOT;~%")))
+  ;; double-quoted heredoc label is still an (interpolating) heredoc
+  (assert-string= "v=Q"
+                  (%php-run-capture (format nil "<?php $n=\"Q\"; echo <<<\"EOT\"~%v=$n~%EOT;~%")))
+  ;; nowdoc is literal — $n is NOT interpolated
+  (assert-string= "Hi $n"
+                  (%php-run-capture (format nil "<?php $n=\"Bob\"; echo <<<'EOT'~%Hi $n~%EOT;~%"))))
+
 (deftest php-e2e-list-destructuring
   "list(...) = expr destructuring assignment works, mirroring the short [$a,$b]
 form.  Regression: list($a,$b) lowered to a %php-list-bind call node that the

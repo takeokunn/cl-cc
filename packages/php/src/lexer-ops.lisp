@@ -221,17 +221,23 @@ Returns the updated position and token list."
                  (< (+ pos 2) len)
                  (char= (char source (1+ pos)) #\<)
                  (char= (char source (+ pos 2)) #\<))
-            ;; Parse <<<IDENTIFIER or <<<'IDENTIFIER' (nowdoc)
+            ;; Parse <<<LABEL, <<<"LABEL" (heredoc, interpolated) or <<<'LABEL'
+            ;; (nowdoc, literal). The label is an identifier — scan only
+            ;; identifier chars so the closing quote is not swallowed into it.
             (let* ((start (+ pos 3))
-                   (nowdoc-p (and (< start len) (char= (char source start) #\')))
-                   (id-start (if nowdoc-p (1+ start) start))
+                   (quote-char (and (< start len)
+                                    (member (char source start) '(#\' #\"))
+                                    (char source start)))
+                   (nowdoc-p (eql quote-char #\'))
+                   (id-start (if quote-char (1+ start) start))
                    (id-end id-start))
-              (loop while (and (< id-end len) (not (member (char source id-end)
-                                                           '(#\Newline #\Return))))
+              (loop while (and (< id-end len)
+                               (let ((c (char source id-end)))
+                                 (or (php-alpha-p c) (digit-char-p c) (char= c #\_))))
                     do (incf id-end))
               (let ((id (subseq source id-start id-end)))
-                (when nowdoc-p
-                  (when (and (< id-end len) (char= (char source id-end) #\'))
+                (when quote-char
+                  (when (and (< id-end len) (char= (char source id-end) quote-char))
                     (incf id-end)))
                 ;; Skip to end marker (ID alone on a line, possibly followed by ;)
                 (let ((body-start (if (< id-end len) (1+ id-end) id-end))
@@ -242,7 +248,15 @@ Returns the updated position and token list."
                               (end (+ marker-pos (length marker))))
                           (when (and (< end len) (char= (char source end) #\;))
                             (incf end))
-                          (push (make-php-token :T-STRING body) tokens)
+                          ;; Heredoc interpolates $vars / {$expr} like a double-quoted
+                          ;; string; nowdoc is literal. Route the heredoc body through
+                          ;; the shared interpolation lexer (terminator nil = to end).
+                          (push (make-php-token
+                                 :T-STRING
+                                 (if nowdoc-p
+                                     body
+                                     (%php-lex-interpolated-string body 0 :terminator nil)))
+                                tokens)
                           (setf pos end))
                         (error "PHP lex error: heredoc end marker ~S not found" id)))))))
            ;; Operators, punctuation

@@ -27,3 +27,4 @@ a.out
 \#*\#
 .#*
 tmp_*
+cl-cc-timings-override-for-test.tsv

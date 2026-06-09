@@ -136,12 +136,20 @@
 ;;; String literal lexers
 
 (defun lex-double-quoted-string (source pos)
-  "Lex a double-quoted string starting AFTER the opening \".
+  "Lex a double-quoted string starting AFTER the opening \".  Returns either a
+plain string or (:PHP-INTERPOLATED-STRING SEGMENTS).  Thin wrapper over the
+shared interpolation lexer, terminated by the closing double quote."
+  (%php-lex-interpolated-string source pos :terminator #\"))
 
-Returns either a plain string or (:PHP-INTERPOLATED-STRING SEGMENTS), where
-SEGMENTS contains (:STRING text) and (:VAR \"$name\") entries. This preserves
-simple PHP $variable interpolation for parser lowering without requiring a
-full string sub-lexer."
+(defun %php-lex-interpolated-string (source pos &key (terminator #\"))
+  "Shared double-quoted-string-style interpolation lexer.  Reads from POS until
+TERMINATOR (a char, which is consumed) or, when TERMINATOR is NIL, the end of
+SOURCE (used for heredoc bodies, which have no closing-quote delimiter).
+
+Returns (values result end-pos) where RESULT is either a plain string or
+(:PHP-INTERPOLATED-STRING SEGMENTS); SEGMENTS contains (:STRING text), (:VAR
+\"$name\") and (:EXPR text) entries.  This preserves PHP $variable / {$expr}
+interpolation for parser lowering without requiring a full string sub-lexer."
   (let ((buf (make-array 64 :element-type 'character :fill-pointer 0 :adjustable t))
         (segments nil)
         (interpolated-p nil))
@@ -160,10 +168,12 @@ full string sub-lexer."
                    (copy-seq buf))))
     (loop
       (when (>= pos (length source))
-        (error "PHP lex error: unterminated double-quoted string"))
+        (if terminator
+            (error "PHP lex error: unterminated double-quoted string")
+            (return (values (finish-string) pos))))
       (let ((ch (char source pos)))
         (cond
-          ((char= ch #\")
+          ((and terminator (char= ch terminator))
            (return (values (finish-string) (1+ pos))))
           ((char= ch #\\)
            ;; Escape sequence
