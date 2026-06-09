@@ -337,6 +337,85 @@
                (t (write-char ch out))))
     (write-char #\" out)))
 
+;;; ─── serialize / unserialize (PHP's native serialization format) ────────────
+;;;
+;;; N;                  null
+;;; b:0; / b:1;         bool
+;;; i:42;               int
+;;; d:3.14;             float
+;;; s:5:"hello";        string (LEN is byte length; we approximate with chars)
+;;; a:2:{<k><v><k><v>}  array — count, then key/value serialized pairs
+
+(defun %php-serialize-float-text (val)
+  "Render float VAL the way PHP serialize does: integral values without a
+fractional part (3.0 -> \"3\"), others in full."
+  (if (= val (floor val))
+      (format nil "~D" (floor val))
+      (format nil "~F" val)))
+
+(defun %php-serialize-into (value out)
+  "Write the PHP-serialized form of VALUE to stream OUT."
+  (cond
+    ((%php-null-p value) (write-string "N;" out))
+    ((eq value t) (write-string "b:1;" out))
+    ((null value) (write-string "b:0;" out))
+    ((integerp value) (format out "i:~D;" value))
+    ((floatp value) (format out "d:~A;" (%php-serialize-float-text value)))
+    ((stringp value) (format out "s:~D:\"~A\";" (length value) value))
+    ((hash-table-p value)
+     (let ((pairs (%php-array-pairs value)))
+       (format out "a:~D:{" (length pairs))
+       (dolist (pair pairs)
+         (%php-serialize-into (car pair) out)
+         (%php-serialize-into (cdr pair) out))
+       (write-string "}" out)))
+    (t (write-string "N;" out))))
+
+(defun %php-serialize (value)
+  "PHP serialize: produce a storable string representation of VALUE."
+  (with-output-to-string (out)
+    (%php-serialize-into value out)))
+
+(defun %php-unserialize-at (str pos)
+  "Parse one serialized value from STR at POS. Return (values value next-pos)."
+  (case (char str pos)
+    (#\N (values +php-null+ (+ pos 2)))                         ; N;
+    (#\b (values (char= (char str (+ pos 2)) #\1) (+ pos 4)))   ; b:0; / b:1;
+    (#\i (let* ((start (+ pos 2)) (semi (position #\; str :start start)))
+           (values (parse-integer str :start start :end semi) (1+ semi))))
+    (#\d (let* ((start (+ pos 2)) (semi (position #\; str :start start)))
+           (values (let ((*read-default-float-format* 'double-float))
+                     (coerce (read-from-string (subseq str start semi)) 'double-float))
+                   (1+ semi))))
+    (#\s (let* ((len-start (+ pos 2))
+                (colon (position #\: str :start len-start))
+                (len (parse-integer str :start len-start :end colon))
+                (data-start (+ colon 2))            ; skip :"
+                (data-end (+ data-start len)))
+           (values (subseq str data-start data-end) (+ data-end 2)))) ; skip ";
+    (#\a (let* ((count-start (+ pos 2))
+                (colon (position #\: str :start count-start))
+                (count (parse-integer str :start count-start :end colon))
+                (p (+ colon 2))                     ; skip :{
+                (arr (%php-make-array)))
+           (dotimes (_ count)
+             (multiple-value-bind (k kp) (%php-unserialize-at str p)
+               (multiple-value-bind (v vp) (%php-unserialize-at str kp)
+                 (%php-array-set arr k v)
+                 (setf p vp))))
+           (values arr (1+ p))))                    ; skip }
+    ;; Unknown tag -> malformed input; PHP unserialize returns false (NIL).
+    (t (values nil pos))))
+
+(defun %php-unserialize (str)
+  "PHP unserialize: reconstruct a value from its serialized STR. Returns false
+(NIL) on malformed input, like PHP."
+  (handler-case
+      (multiple-value-bind (value pos) (%php-unserialize-at (%php-stringify str) 0)
+        (declare (ignore pos))
+        value)
+    (error () nil)))
+
 (defun %php-json-decode (str &optional assoc depth flags)
   "PHP json_decode: parse JSON string to PHP value."
   (declare (ignore assoc depth flags))

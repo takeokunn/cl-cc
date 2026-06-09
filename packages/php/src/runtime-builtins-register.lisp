@@ -513,8 +513,8 @@
   ;; symbol to bridge, so the lambda-registered var_export failed with "Undefined
   ;; function" when actually called.
   (%php-register-builtin "var_export" '%php-var-export)
-  (%php-register-builtin "serialize" (lambda (v) (format nil "s:~D:\"~A\"" (length (%php-stringify v)) (%php-stringify v))))
-  (%php-register-builtin "unserialize" (lambda (s) (%php-stringify s)))
+  (%php-register-builtin "serialize" '%php-serialize)
+  (%php-register-builtin "unserialize" '%php-unserialize)
 
   ;; Misc. globals / constants
   (%php-register-builtin "PHP_EOL" (lambda () (string #\Newline)))

@@ -756,3 +756,28 @@ builtin-name and user-function-name comparators.  stable-sort matches PHP 8.0+."
   (assert-string= "apple,banana" (%php-run-capture "<?php $f=['banana'=>1,'apple'=>2]; uksort($f,'strcmp'); echo implode(',',array_keys($f));"))
   ;; stable: equal comparands keep insertion order
   (assert-string= "cab" (%php-run-capture "<?php $g=[['k'=>1,'v'=>'a'],['k'=>1,'v'=>'b'],['k'=>0,'v'=>'c']]; usort($g, fn($x,$y)=>$x['k']-$y['k']); echo $g[0]['v'].$g[1]['v'].$g[2]['v'];")))
+
+(deftest php-e2e-serialize-unserialize
+  "serialize/unserialize produce and parse PHP's native serialization format.
+They were registered as LAMBDA stubs (serialize only handled strings;
+unserialize just stringified) and, being non-CL-named, also failed dispatch
+('Undefined function: SERIALIZE').  Now proper recursive %php-serialize /
+%php-unserialize registered by symbol."
+  ;; scalars
+  (assert-string= "i:42;"        (%php-run-capture "<?php echo serialize(42);"))
+  (assert-string= "s:5:\"hello\";" (%php-run-capture "<?php echo serialize('hello');"))
+  (assert-string= "b:1;"         (%php-run-capture "<?php echo serialize(true);"))
+  (assert-string= "b:0;"         (%php-run-capture "<?php echo serialize(false);"))
+  (assert-string= "N;"           (%php-run-capture "<?php echo serialize(null);"))
+  (assert-string= "d:3.14;"      (%php-run-capture "<?php echo serialize(3.14);"))
+  ;; arrays — list and assoc, matching PHP's exact format
+  (assert-string= "a:3:{i:0;i:1;i:1;i:2;i:2;i:3;}"
+                  (%php-run-capture "<?php echo serialize([1,2,3]);"))
+  (assert-string= "a:2:{s:1:\"a\";i:1;s:1:\"b\";i:2;}"
+                  (%php-run-capture "<?php echo serialize(['a'=>1,'b'=>2]);"))
+  ;; round-trip: scalars and nested arrays
+  (assert-string= "50" (%php-run-capture "<?php echo unserialize(serialize(42))+8;"))
+  (assert-string= "v"  (%php-run-capture "<?php $x=unserialize(serialize([1,2,['k'=>'v']])); echo $x[2]['k'];"))
+  (assert-string= "T"  (%php-run-capture "<?php echo unserialize('b:1;')?'T':'F';"))
+  ;; malformed input -> false
+  (assert-string= "F"  (%php-run-capture "<?php echo unserialize('garbage')?'T':'F';")))
