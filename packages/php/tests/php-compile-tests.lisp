@@ -479,3 +479,17 @@ program; it also wrongly treated false/0 as nullish."
   ;; array element
   (assert-string= "v"    (%php-run-capture "<?php $a=[]; $a['k'] ??= 'v'; echo $a['k'];"))
   (assert-string= "3"    (%php-run-capture "<?php $a=['k'=>3]; $a['k'] ??= 'v'; echo $a['k'];")))
+
+(deftest php-e2e-compound-assign-undefined-var
+  "A compound assignment on an undefined variable treats the missing left
+operand as null (0 for arithmetic/bitwise, '' for concat, RHS for ??=) and
+INTRODUCES the variable.  Regression: it read the unbound variable into a temp
+and dropped the whole program."
+  (assert-string= "3"  (%php-run-capture "<?php $a += 3; echo $a;"))
+  (assert-string= "-3" (%php-run-capture "<?php $a -= 3; echo $a;"))
+  (assert-string= "0"  (%php-run-capture "<?php $a *= 5; echo $a;"))
+  (assert-string= "hi" (%php-run-capture "<?php $s .= 'hi'; echo $s;"))
+  (assert-string= "y"  (%php-run-capture "<?php $a ??= 'y'; echo $a;"))
+  ;; the known-variable path is unaffected
+  (assert-string= "8"  (%php-run-capture "<?php $a=5; $a += 3; echo $a;"))
+  (assert-string= "xy" (%php-run-capture "<?php $s='x'; $s .= 'y'; echo $s;")))

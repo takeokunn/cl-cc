@@ -452,23 +452,45 @@ compile and the whole program was dropped; and `(null value)' wrongly treated
 PHP false as nullish.  A single `(eq value null)' fixes both."
   (%php-call 'eq value (%php-null-quote)))
 
-(defun %php-lower-compound-assign (op lhs-expr rhs-expr target-kind)
-  "Build the lowered AST for PHP compound assignment OP on LHS-EXPR."
+(defun %php-compound-undefined-current (op)
+  "AST for the value an UNDEFINED variable takes as the left operand of `$x OP= r'.
+PHP treats the missing var as null, which coerces to 0 for arithmetic/bitwise
+operators and to '' for the `.' (concat) operator."
+  (cond
+    ((equal op ".=") (make-ast-quote :value ""))
+    (t (make-ast-int :value 0))))
+
+(defun %php-lower-compound-assign (op lhs-expr rhs-expr target-kind &optional (var-known t))
+  "Build the lowered AST for PHP compound assignment OP on LHS-EXPR.  VAR-KNOWN
+applies to the :VAR kind: when NIL the variable does not yet exist, so it is
+INTRODUCED (PHP treats the undefined left operand as null) rather than read +
+setq'd — without this `$a += 3' (no prior $a) read an unbound $a and dropped the
+whole program."
   (ecase target-kind
     (:var
-     (let* ((var-sym (ast-var-name lhs-expr))
-            (tmp (gensym "PHP-COMPOUND-LHS-"))
-            (tmp-var (make-ast-var :name tmp)))
-       (make-ast-let
-        :bindings (list (cons tmp lhs-expr))
-        :body (list (if (equal op "??=")
-                        (make-ast-if
-                         :cond (%php-nullish-cond tmp-var)
-                         :then (make-ast-setq :var var-sym :value rhs-expr)
-                         :else tmp-var)
-                        (make-ast-setq
-                         :var var-sym
-                         :value (%php-compound-value op tmp-var rhs-expr)))))))
+     (let ((var-sym (ast-var-name lhs-expr)))
+       (if var-known
+           (let* ((tmp (gensym "PHP-COMPOUND-LHS-"))
+                  (tmp-var (make-ast-var :name tmp)))
+             (make-ast-let
+              :bindings (list (cons tmp lhs-expr))
+              :body (list (if (equal op "??=")
+                              (make-ast-if
+                               :cond (%php-nullish-cond tmp-var)
+                               :then (make-ast-setq :var var-sym :value rhs-expr)
+                               :else tmp-var)
+                              (make-ast-setq
+                               :var var-sym
+                               :value (%php-compound-value op tmp-var rhs-expr))))))
+           ;; Undefined var: introduce it. ??= on undefined (null) yields RHS; any
+           ;; other op applies to the coerced-null left operand (0 or '').
+           (make-ast-let
+            :bindings (list (cons var-sym
+                                  (if (equal op "??=")
+                                      rhs-expr
+                                      (%php-compound-value
+                                       op (%php-compound-undefined-current op) rhs-expr))))
+            :body nil))))
     (:array
      (destructuring-bind (array key) (ast-call-args lhs-expr)
        (let* ((array-sym (gensym "PHP-COMPOUND-ARRAY-"))

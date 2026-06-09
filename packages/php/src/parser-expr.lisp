@@ -602,7 +602,7 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
                       (if already-known
                           (make-ast-setq :var var-sym :value val)
                           (make-ast-let :bindings (list (cons var-sym val)) :body nil))
-                      (%php-lower-compound-assign op lhs val :var))
+                      (%php-lower-compound-assign op lhs val :var already-known))
                   rest3
                   new-kv)))
               ;; $a[] = v  — append. The array is a mutable hash-table held by

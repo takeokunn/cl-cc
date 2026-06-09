@@ -507,8 +507,11 @@ so the block is the second arg of the %php-generator-exit call."
                         (%php-call-name (cl-cc:ast-binop-lhs value)))))))
 
 (deftest php-parser-null-coalescing-assignment-variable
-  "$x ??= 42 lowers to a null-checking conditional assignment."
-  (let ((ast (%php-first "<?php $x ??= 42;")))
+  "$x ??= 42 on a KNOWN variable lowers to a null-checking conditional
+assignment.  ($x is pre-declared; on an undefined var ??= introduces it to the
+RHS directly, a different and simpler shape.)"
+  (let* ((outer (%php-first "<?php $x = 1; $x ??= 42;"))
+         (ast (first (cl-cc:ast-let-body outer))))
     (assert-true (cl-cc:ast-let-p ast))
     (let ((if-node (first (cl-cc:ast-let-body ast))))
       (assert-true (cl-cc:ast-if-p if-node))
@@ -525,9 +528,14 @@ so the block is the second arg of the %php-generator-exit call."
       (assert-true (cl-cc:ast-binop-p (cl-cc:ast-set-slot-value-value slot-set))))))
 
 (deftest php-parser-all-compound-assignment-operators-parse
-  "Every PHP compound assignment operator parses as a read-modify-write form."
+  "Every PHP compound assignment operator on a KNOWN variable parses as a
+read-modify-write form (a let whose body reads the old value and writes back).
+$x is pre-declared so this exercises the read-modify-write path, not the
+undefined-var introduce path."
   (dolist (op '("+=" "-=" "*=" "/=" ".=" "%=" "**=" "&=" "|=" "^=" "<<=" ">>=" "??="))
-    (let ((ast (%php-first (format nil "<?php $x ~A 2;" op))))
+    ;; `$x = 1' lowers to (let ((x 1)) BODY); the compound form is BODY[0].
+    (let* ((outer (%php-first (format nil "<?php $x = 1; $x ~A 2;" op)))
+           (ast (first (cl-cc:ast-let-body outer))))
       (assert-true (cl-cc:ast-let-p ast))
       (assert-true (first (cl-cc:ast-let-body ast))))))
 
