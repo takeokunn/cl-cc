@@ -902,3 +902,20 @@ flag produced compact output."
   ;; empty array stays inline even in pretty mode
   (assert-string= (format nil "{~%    \"x\": [],~%    \"y\": 1~%}")
                   (%php-run-capture "<?php echo json_encode(['x'=>[],'y'=>1],JSON_PRETTY_PRINT);")))
+
+(deftest php-e2e-json-decode
+  "json_decode parses JSON objects, strings, nested structures, and scalars.
+The decoder was fundamentally broken: parse-string returned an empty fresh
+stream (every string -> \"\"), and the parse functions never threaded the cursor
+(faked it with (+ pos 1)), so objects and any multi-char/nested value failed.
+Objects decode to associative arrays."
+  (assert-string= "3"       (%php-run-capture "<?php $d=json_decode('{\"a\":1,\"b\":2}',true); echo $d['a']+$d['b'];"))
+  (assert-string= "Bob-30"  (%php-run-capture "<?php $d=json_decode('{\"name\":\"Bob\",\"age\":30}',true); echo $d['name'].'-'.$d['age'];"))
+  (assert-string= "3"       (%php-run-capture "<?php $d=json_decode('{\"x\":{\"y\":[1,2,3]}}',true); echo $d['x']['y'][2];"))
+  (assert-string= "bb3"     (%php-run-capture "<?php $d=json_decode('[\"a\",\"bb\",\"ccc\"]'); echo $d[1].strlen($d[2]);"))
+  ;; scalars and malformed input
+  (assert-string= "y"       (%php-run-capture "<?php echo json_decode('true')?'y':'n';"))
+  (assert-string= "null"    (%php-run-capture "<?php echo json_decode('not json')===null?'null':'x';"))
+  ;; round-trip through encode
+  (assert-string= "alice:editor:y"
+                  (%php-run-capture "<?php $o=['user'=>'alice','roles'=>['admin','editor'],'active'=>true]; $r=json_decode(json_encode($o),true); echo $r['user'].':'.$r['roles'][1].':'.($r['active']?'y':'n');")))

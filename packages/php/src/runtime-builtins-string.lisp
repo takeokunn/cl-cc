@@ -433,9 +433,15 @@ fractional part (3.0 -> \"3\"), others in full."
     (error () nil)))
 
 (defun %php-json-decode (str &optional assoc depth flags)
-  "PHP json_decode: parse JSON string to PHP value."
+  "PHP json_decode: parse JSON STR to a PHP value.  Objects decode to PHP
+associative arrays.  (PHP's default object/stdClass mode is not modelled, so the
+ASSOC argument is effectively always on — array access $d['k'] works for decoded
+objects; $d->k does not.)  Returns null on malformed input."
   (declare (ignore assoc depth flags))
-  (handler-case (%php-json-parse-value (%php-stringify str) 0)
+  (handler-case
+      (multiple-value-bind (val pos) (%php-json-parse-value (%php-stringify str) 0)
+        (declare (ignore pos))
+        val)
     (error () +php-null+)))
 
 (defun %php-json-skip-ws (s pos)
@@ -444,72 +450,94 @@ fractional part (3.0 -> \"3\"), others in full."
         do (incf pos))
   pos)
 
+;;; The JSON parser threads the cursor: every %php-json-parse-* returns
+;;; (values value next-pos).  (The previous version returned only the value and
+;;; faked the cursor with (+ pos 1) — correct only for single-character values,
+;;; so objects, nested structures, and multi-digit numbers all broke; and
+;;; parse-string returned an empty fresh stream, so every string decoded to "".)
 (defun %php-json-parse-value (s pos)
+  "Parse one JSON value at POS. Return (values value next-pos)."
   (setf pos (%php-json-skip-ws s pos))
-  (when (>= pos (length s)) (return-from %php-json-parse-value +php-null+))
+  (when (>= pos (length s)) (return-from %php-json-parse-value (values +php-null+ pos)))
   (let ((ch (char s pos)))
     (cond
       ((char= ch #\") (%php-json-parse-string s (1+ pos)))
       ((char= ch #\{) (%php-json-parse-object s (1+ pos)))
       ((char= ch #\[) (%php-json-parse-array s (1+ pos)))
-      ((and (>= (length s) (+ pos 4)) (string= s "null" :start1 pos :end1 (+ pos 4))) +php-null+)
-      ((and (>= (length s) (+ pos 4)) (string= s "true" :start1 pos :end1 (+ pos 4))) t)
-      ((and (>= (length s) (+ pos 5)) (string= s "false" :start1 pos :end1 (+ pos 5))) nil)
+      ((and (<= (+ pos 4) (length s)) (string= s "null" :start1 pos :end1 (+ pos 4))) (values +php-null+ (+ pos 4)))
+      ((and (<= (+ pos 4) (length s)) (string= s "true" :start1 pos :end1 (+ pos 4))) (values t (+ pos 4)))
+      ((and (<= (+ pos 5) (length s)) (string= s "false" :start1 pos :end1 (+ pos 5))) (values nil (+ pos 5)))
       ((or (digit-char-p ch) (char= ch #\-))
        (let ((end pos))
          (when (char= ch #\-) (incf end))
          (loop while (and (< end (length s))
                           (or (digit-char-p (char s end)) (member (char s end) '(#\. #\e #\E #\+ #\-))))
                do (incf end))
-         (handler-case (read-from-string (subseq s pos end)) (error () 0))))
-      (t +php-null+))))
+         (values (handler-case (let ((*read-default-float-format* 'double-float))
+                                 (read-from-string (subseq s pos end)))
+                   (error () 0))
+                 end)))
+      (t (values +php-null+ (1+ pos))))))
 
 (defun %php-json-parse-string (s pos)
-  (with-output-to-string (buf)
+  "POS is just after the opening quote. Return (values string next-pos)."
+  (let ((buf (make-string-output-stream)))
     (loop while (and (< pos (length s)) (not (char= (char s pos) #\")))
           do (let ((ch (char s pos)))
                (incf pos)
                (if (char= ch #\\)
                    (let ((esc (char s pos)))
                      (incf pos)
-                     (write-char (case esc (#\" #\") (#\\ #\\) (#\n #\Newline) (#\r #\Return) (#\t #\Tab) (t esc)) buf))
-                   (write-char ch buf)))))
-  (values (get-output-stream-string (make-string-output-stream)) (1+ pos)))
+                     (case esc
+                       (#\" (write-char #\" buf))
+                       (#\\ (write-char #\\ buf))
+                       (#\/ (write-char #\/ buf))
+                       (#\n (write-char #\Newline buf))
+                       (#\r (write-char #\Return buf))
+                       (#\t (write-char #\Tab buf))
+                       (#\b (write-char #\Backspace buf))
+                       (#\f (write-char #\Page buf))
+                       (#\u (let ((code (parse-integer s :start pos :end (min (length s) (+ pos 4)) :radix 16)))
+                              (incf pos 4)
+                              (write-char (code-char code) buf)))
+                       (t (write-char esc buf))))
+                   (write-char ch buf))))
+    ;; Return the collected string and skip the closing quote.
+    (values (get-output-stream-string buf) (1+ pos))))
 
 (defun %php-json-parse-object (s pos)
+  "POS is just after the opening brace. Return (values php-array next-pos)."
   (let ((result (%php-make-array)))
     (setf pos (%php-json-skip-ws s pos))
-    (when (char= (char s pos) #\}) (return-from %php-json-parse-object result))
+    (when (and (< pos (length s)) (char= (char s pos) #\}))
+      (return-from %php-json-parse-object (values result (1+ pos))))
     (loop
       (setf pos (%php-json-skip-ws s pos))
-      (unless (char= (char s pos) #\") (return result))
-      (let* ((key-start (1+ pos))
-             (key-end (position #\" s :start key-start)))
-        (unless key-end (return result))
-        (let ((key (subseq s key-start key-end)))
-          (setf pos (1+ key-end)
-                pos (%php-json-skip-ws s pos))
-          (when (char= (char s pos) #\:) (incf pos))
-          (setf pos (%php-json-skip-ws s pos))
-          (let ((val (%php-json-parse-value s pos)))
-            (%php-array-set result key val)
-            (setf pos (%php-json-skip-ws s (+ pos 1)))
-            (cond ((char= (char s pos) #\,) (incf pos))
-                  ((char= (char s pos) #\}) (return result))
-                  (t (return result))))))))
-  result)
+      (unless (and (< pos (length s)) (char= (char s pos) #\"))
+        (return (values result pos)))
+      (multiple-value-bind (key kpos) (%php-json-parse-string s (1+ pos))
+        (setf pos (%php-json-skip-ws s kpos))
+        (when (and (< pos (length s)) (char= (char s pos) #\:)) (incf pos))
+        (multiple-value-bind (val vpos) (%php-json-parse-value s pos)
+          (%php-array-set result key val)
+          (setf pos (%php-json-skip-ws s vpos))
+          (cond ((and (< pos (length s)) (char= (char s pos) #\,)) (incf pos))
+                ((and (< pos (length s)) (char= (char s pos) #\})) (return (values result (1+ pos))))
+                (t (return (values result pos)))))))))
 
 (defun %php-json-parse-array (s pos)
+  "POS is just after the opening bracket. Return (values php-array next-pos)."
   (let ((result (%php-make-array)))
     (setf pos (%php-json-skip-ws s pos))
-    (when (char= (char s pos) #\]) (return-from %php-json-parse-array result))
+    (when (and (< pos (length s)) (char= (char s pos) #\]))
+      (return-from %php-json-parse-array (values result (1+ pos))))
     (loop for i from 0
-          do (let ((val (%php-json-parse-value s pos)))
+          do (multiple-value-bind (val vpos) (%php-json-parse-value s pos)
                (%php-array-set result i val)
-               (setf pos (%php-json-skip-ws s (+ pos 1)))
-               (cond ((char= (char s pos) #\,) (incf pos))
-                     (t (return result)))))
-    result))
+               (setf pos (%php-json-skip-ws s vpos))
+               (cond ((and (< pos (length s)) (char= (char s pos) #\,)) (incf pos))
+                     ((and (< pos (length s)) (char= (char s pos) #\])) (return (values result (1+ pos))))
+                     (t (return (values result pos))))))))
 
 ;;; ─── mb_* multibyte string functions ─────────────────────────────────────────
 ;;; In CL, strings are Unicode-aware, so mb_* is mostly identical to the regular
