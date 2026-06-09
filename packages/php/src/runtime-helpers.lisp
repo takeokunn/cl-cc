@@ -316,10 +316,25 @@ number operand (null + 3, '5' + 3, true + 1 all signalled `not of type NUMBER').
         ((stringp x) (%php-to-number x))
         (t 0)))
 
+(defun %php-array-union (a b)
+  "PHP array + : a new array with all of A's entries (keys preserved), plus B's
+entries whose keys are not already present in A — the LEFT operand wins on key
+conflicts.  Unlike array_merge, integer keys are NOT reindexed."
+  (let ((result (%php-array))
+        (a-keys (gethash +php-array-order-key+ a)))
+    (dolist (pair (%php-array-pairs a))
+      (%php-array-set result (car pair) (cdr pair)))
+    (dolist (pair (%php-array-pairs b))
+      (unless (member (car pair) a-keys :test #'equal)
+        (%php-array-set result (car pair) (cdr pair))))
+    result))
+
 (defun %php-add (a b)
-  "PHP + : numeric addition with operand coercion (array union is handled
-elsewhere; both-array operands are not coerced here)."
-  (+ (%php-numeric a) (%php-numeric b)))
+  "PHP + : array UNION when both operands are arrays (left keys win, keys
+preserved), otherwise numeric addition with operand coercion."
+  (if (and (hash-table-p a) (hash-table-p b))
+      (%php-array-union a b)
+      (+ (%php-numeric a) (%php-numeric b))))
 
 (defun %php-sub (a b) "PHP - with operand coercion." (- (%php-numeric a) (%php-numeric b)))
 (defun %php-mul (a b) "PHP * with operand coercion." (* (%php-numeric a) (%php-numeric b)))

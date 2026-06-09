@@ -642,3 +642,20 @@ f with the marker ('Undefined function: %PHP-FIRST-CLASS-CALLABLE')."
   ;; regression guards: ordinary calls and call-spread unaffected
   (assert-string= "25" (%php-run-capture "<?php function sq($x){return $x*$x;} echo sq(5);"))
   (assert-string= "3"  (%php-run-capture "<?php function s(...$n){return array_sum($n);} $a=[1,2]; echo s(...$a);")))
+
+(deftest php-e2e-array-union
+  "The + operator on two arrays is array UNION — the result has all of the left
+array's entries plus the right's entries whose keys are not already present
+(left wins), with keys preserved (NOT reindexed like array_merge).  Regression:
+%php-add coerced both arrays to 0, so [1,2]+[3,4,5] gave 0 and count() errored."
+  (assert-string= "3"     (%php-run-capture "<?php $a=[1,2]+[3,4,5]; echo count($a);"))
+  (assert-string= "1,2,5" (%php-run-capture "<?php $a=[1,2]+[3,4,5]; echo implode(',',$a);"))
+  ;; left operand wins on key conflicts; string keys preserved
+  (assert-string= "12"    (%php-run-capture "<?php $a=['x'=>1]+['x'=>9,'y'=>2]; echo $a['x'].$a['y'];"))
+  ;; integer keys preserved (not reindexed)
+  (assert-string= "ac"    (%php-run-capture "<?php $a=[1=>'a']+[1=>'b',2=>'c']; echo $a[1].$a[2];"))
+  (assert-string= "2"     (%php-run-capture "<?php $a=[]+[1,2]; echo count($a);"))
+  ;; regression guards: numeric +, coercion, and array_merge are unaffected
+  (assert-string= "5"     (%php-run-capture "<?php echo 2+3;"))
+  (assert-string= "8"     (%php-run-capture "<?php echo '5'+3;"))
+  (assert-string= "4"     (%php-run-capture "<?php echo count(array_merge([1,2],[3,4]));")))
