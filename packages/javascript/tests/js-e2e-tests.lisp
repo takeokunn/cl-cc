@@ -464,3 +464,26 @@ __get_K/__set_K slots that %js-get-prop/%js-set-prop dispatch."
   ;; regression guards: a regular method and a plain property are unaffected
   (assert-string= "5"  (%js-run-capture "const o={n:5,m(){return this.n;}}; console.log(o.m());"))
   (assert-string= "3"  (%js-run-capture "const o={a:1,b:2}; console.log(o.a+o.b);")))
+
+;;; ─── 14. Object/Reflect/Number/Array/String static-method namespaces ─────────
+
+(deftest js-e2e-static-method-namespaces
+  "Object/Reflect/Number/Array/String static-method namespace globals are seeded
+in the prelude, so Object.keys, Reflect.ownKeys, Number.isInteger, Array.isArray,
+etc. resolve.  Regression: only Math and JSON were seeded — Object (and the rest)
+were never globals, so Object.keys({a:1}) found no `Object' and returned empty.
+The namespaces are built from the *js-builtin-specs* table by
+%js-make-namespace-object, so they stay complete."
+  (assert-string= "a,b" (%js-run-capture "console.log(Object.keys({a:1,b:2}).join(\",\"));"))
+  (assert-string= "2"   (%js-run-capture "console.log(Object.keys({a:1,b:2}).length);"))
+  (assert-string= "1,2" (%js-run-capture "console.log(Object.values({a:1,b:2}).join(\",\"));"))
+  (assert-string= "1"   (%js-run-capture "console.log(Object.entries({a:1}).length);"))
+  (assert-string= "2"   (%js-run-capture "console.log(Object.assign({},{a:1},{b:2}).b);"))
+  (assert-string= "true"  (%js-run-capture "console.log(Array.isArray([1,2]));"))
+  (assert-string= "false" (%js-run-capture "console.log(Array.isArray(5));"))
+  (assert-string= "true"  (%js-run-capture "console.log(Number.isInteger(5));"))
+  (assert-string= "2"   (%js-run-capture "console.log(Reflect.ownKeys({a:1,b:2}).length);"))
+  (assert-string= "9007199254740991" (%js-run-capture "console.log(Number.MAX_SAFE_INTEGER);"))
+  ;; regression guards: Math and JSON still work
+  (assert-string= "2"      (%js-run-capture "console.log(Math.max(1,2));"))
+  (assert-string= "{\"a\":1}" (%js-run-capture "console.log(JSON.stringify({a:1}));")))

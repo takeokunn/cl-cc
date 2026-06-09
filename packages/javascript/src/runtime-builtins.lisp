@@ -706,6 +706,47 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
           :name (js-ident-sym "Math")
           :value (make-ast-call :func (make-ast-var :name '%js-make-math) :args nil)
           :kind 'defparameter)
+         ;; Static-method namespaces (Object.keys, Reflect.ownKeys, Number.isInteger,
+         ;; Array.isArray, String.fromCharCode, Promise.resolve, Intl.*). Each is
+         ;; built straight from the *js-builtin-specs* dispatch table by
+         ;; %js-make-namespace-object, so it stays complete. (The constructor/callable
+         ;; forms — Number(x), new Array() — are a separate gap; these objects are not
+         ;; yet callable.) Without these globals, Object.keys({a:1}) found no `Object'.
+         (make-ast-defvar
+          :name (js-ident-sym "Object")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Object")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Reflect")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Reflect")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Number")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Number")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Array")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Array")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "String")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "String")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Promise")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Promise")))
+          :kind 'defparameter)
+         (make-ast-defvar
+          :name (js-ident-sym "Intl")
+          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
+                                :args (list (make-ast-quote :value "Intl")))
+          :kind 'defparameter)
          ;; globalThis — reference to the global object (stub: empty object)
          (make-ast-defvar
           :name (js-ident-sym "globalThis")
