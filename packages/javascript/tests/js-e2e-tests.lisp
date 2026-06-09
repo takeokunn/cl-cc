@@ -509,3 +509,26 @@ Now they route through %js-lt/gt/le/ge."
   ;; comparison used in boolean position (ternary, loop) still works
   (assert-string= "y"     (%js-run-capture "console.log(5 > 3 ? \"y\" : \"n\");"))
   (assert-string= "6"     (%js-run-capture "let s=0; for(let i=0;i<4;i++){s+=i;} console.log(s);")))
+
+;;; ─── 16. Logical && / || short-circuit and yield an operand ──────────────────
+
+(deftest js-e2e-logical-and-or
+  "&& and || short-circuit and yield an OPERAND (not a boolean), per JS.
+Regression: they lowered to an ast-binop :and/:or that codegen could not emit,
+so any function whose body used && or || failed to compile and was silently
+dropped ('Undefined function').  Now they lower to let+if using %js-truthy,
+like ?? does."
+  (assert-string= "false" (%js-run-capture "console.log(true && false);"))
+  (assert-string= "true"  (%js-run-capture "console.log(true && true);"))
+  ;; && / || yield the operand value, not a coerced boolean
+  (assert-string= "2"  (%js-run-capture "console.log(1 && 2);"))
+  (assert-string= "0"  (%js-run-capture "console.log(0 && 2);"))
+  (assert-string= "5"  (%js-run-capture "console.log(0 || 5);"))
+  (assert-string= "3"  (%js-run-capture "console.log(3 || 5);"))
+  (assert-string= "b"  (%js-run-capture "console.log(\"a\" && \"b\");"))
+  ;; chaining and the `|| default' idiom inside a function (the dropped-function case)
+  (assert-string= "3"   (%js-run-capture "console.log(1 && 2 && 3);"))
+  (assert-string= "def" (%js-run-capture "function f(a){return a || \"def\";} console.log(f());"))
+  (assert-string= "hi"  (%js-run-capture "function f(a){return a || \"def\";} console.log(f(\"hi\"));"))
+  ;; short-circuit: RHS not evaluated when LHS already decides the result
+  (assert-string= "0"   (%js-run-capture "let c=0; function s(){c++;return true;} false && s(); console.log(c);")))

@@ -133,9 +133,12 @@ spread in array literals and call arguments via apply."
     ;; Direct AST binop (arithmetic, comparison) — O(1) table lookup
     ((gethash op-str *js-direct-binop-keywords*)
      (make-ast-binop :op (gethash op-str *js-direct-binop-keywords*) :lhs lhs :rhs rhs))
-    ;; Logical short-circuit operators — require special AST forms
-    ((string= op-str "||") (make-ast-binop :op :or  :lhs lhs :rhs rhs))
-    ((string= op-str "&&") (make-ast-binop :op :and :lhs lhs :rhs rhs))
+    ;; Logical short-circuit operators. JS && / || yield an OPERAND (not a
+    ;; boolean) and short-circuit, so they lower to let+if like ?? does — NOT to
+    ;; an ast-binop :and/:or (which codegen cannot emit; the enclosing function
+    ;; then failed to compile and was silently dropped — "Undefined function").
+    ((string= op-str "||") (%js-lower-logical-or  lhs rhs))
+    ((string= op-str "&&") (%js-lower-logical-and lhs rhs))
     ((string= op-str "??") (%js-lower-nullish-coalesce lhs rhs))
     ;; Negated equality — wrap in NOT
     ((string= op-str "!==")
@@ -157,6 +160,28 @@ spread in array literals and call arguments via apply."
      :bindings (list (cons tmp lhs))
      :body (list (make-ast-if
                   :cond (%js-call '%js-not-nullish (make-ast-var :name tmp))
+                  :then (make-ast-var :name tmp)
+                  :else rhs)))))
+
+(defun %js-lower-logical-and (lhs rhs)
+  "Lower LHS && RHS: evaluate LHS once; if it is JS-truthy the result is RHS,
+otherwise the result is LHS itself (so `0 && x' -> 0, `a && b' -> b)."
+  (let ((tmp (gensym "JS-AND-")))
+    (make-ast-let
+     :bindings (list (cons tmp lhs))
+     :body (list (make-ast-if
+                  :cond (%js-call '%js-truthy (make-ast-var :name tmp))
+                  :then rhs
+                  :else (make-ast-var :name tmp))))))
+
+(defun %js-lower-logical-or (lhs rhs)
+  "Lower LHS || RHS: evaluate LHS once; if it is JS-truthy the result is LHS,
+otherwise the result is RHS (so `3 || x' -> 3, `0 || b' -> b)."
+  (let ((tmp (gensym "JS-OR-")))
+    (make-ast-let
+     :bindings (list (cons tmp lhs))
+     :body (list (make-ast-if
+                  :cond (%js-call '%js-truthy (make-ast-var :name tmp))
                   :then (make-ast-var :name tmp)
                   :else rhs)))))
 
