@@ -88,6 +88,17 @@ position via with-output-to-string."
   (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
   (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
 
+(deftest js-e2e-object-spread
+  "Object spread {...a, k:v} merges own properties with later entries overriding
+earlier ones (regression: a spread entry misaligned the %js-make-object key/value
+pairs). Lowers to a left-to-right fold of %js-object-assign / set."
+  (assert-string= "6"     (%js-run-capture "let a={x:1,y:2}; let b={...a,z:3}; console.log(b.x+b.y+b.z);"))
+  (assert-string= "3"     (%js-run-capture "let a={x:1},c={y:2}; console.log(({...a,...c}).x+({...a,...c}).y);"))
+  (assert-string= "9"     (%js-run-capture "let a={x:1,y:2}; console.log(({...a,y:9}).y);"))
+  (assert-string= "3"     (%js-run-capture "let a={y:2}; let b={x:1,...a}; console.log(b.x+b.y);"))
+  ;; spread makes a shallow copy independent of the source
+  (assert-string= "5,99"  (%js-run-capture "let a={n:5}; let b={...a}; b.n=99; console.log(a.n+','+b.n);")))
+
 (deftest js-e2e-spread-arrays-and-calls
   "...spread expands an iterable in array literals and call arguments (regression:
 the %js-spread marker was left as a single element / argument). Lowers to apply

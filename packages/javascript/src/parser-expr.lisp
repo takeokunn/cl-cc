@@ -469,7 +469,8 @@ spread elements, getters, and setters."
         (multiple-value-bind (tok2 rest2) (js-consume rest)
           (declare (ignore tok2))
           (values (%js-call '%js-make-object) rest2))
-        (let ((pairs nil)
+        (let ((entries nil)        ; ordered: (:spread expr) | (:pair key val)
+              (has-spread nil)
               (current rest))
           (loop
             (when (eq (js-peek-type current) :T-RBRACE)
@@ -477,24 +478,35 @@ spread elements, getters, and setters."
             (multiple-value-bind (key val method-p computed-p rest2)
                 (%js-parse-object-property current)
               (declare (ignore method-p computed-p))
-              (cond
-                ;; Spread entry
-                ((eq key :spread)
-                 (push (%js-call '%js-spread val) pairs))
-                (t
-                 (push key pairs)
-                 (push val pairs)))
+              (if (eq key :spread)
+                  (progn (push (list :spread val) entries) (setf has-spread t))
+                  (push (list :pair key val) entries))
               (setf current rest2))
             (if (eq (js-peek-type current) :T-COMMA)
                 (multiple-value-bind (tok2 rest2) (js-consume current)
                   (declare (ignore tok2))
                   (setf current rest2))
                 (return)))
+          (setf entries (nreverse entries))
           (multiple-value-bind (tok2 rest2) (js-expect :T-RBRACE current)
             (declare (ignore tok2))
-            (values (make-ast-call :func (make-ast-var :name '%js-make-object)
-                                   :args (nreverse pairs))
-                    rest2))))))
+            (values
+             (if has-spread
+                 ;; {...a, k:v, ...b}: merge semantics. Fold entries left-to-right,
+                 ;; threading the object: a spread copies the source's own props
+                 ;; (%js-object-assign), a pair sets one key (%js-object-spread-set,
+                 ;; which returns the object). Later entries override earlier keys.
+                 (let ((acc (%js-call '%js-make-object)))
+                   (dolist (e entries acc)
+                     (setf acc (if (eq (first e) :spread)
+                                   (%js-call '%js-object-assign acc (second e))
+                                   (%js-call '%js-object-spread-set acc
+                                             (second e) (third e))))))
+                 (make-ast-call
+                  :func (make-ast-var :name '%js-make-object)
+                  :args (loop for e in entries
+                              append (list (second e) (third e)))))
+             rest2))))))
 
 ;;; ─── Function Expression Parser ──────────────────────────────────────────────
 

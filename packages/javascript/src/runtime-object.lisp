@@ -47,6 +47,12 @@ should not be exposed to user-visible Object.keys() / for-in enumeration."
       (maphash (lambda (k v) (setf (gethash k target) v)) src)))
   target)
 
+(defun %js-object-spread-set (obj key value)
+  "Set OBJ[KEY] = VALUE and return OBJ. Used to fold object-literal entries that
+follow a spread (the fold threads the object, and %js-set-prop returns the value)."
+  (%js-set-prop obj key value)
+  obj)
+
 (defun %js-object-create (proto)
   "Create object with PROTO as prototype."
   (let ((ht (%js-make-ht)))
