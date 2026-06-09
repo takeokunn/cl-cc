@@ -165,9 +165,13 @@ Returns (values ast rest)."
               (%js-finish-arrow-function nil rest2)
               ;; () as expression is a syntax error in JS but we emit nil for tolerance
               (values (make-ast-quote :value :undefined) rest2)))
-        ;; Non-empty: collect expressions
+        ;; Non-empty: collect items, recording BOTH an arrow-param interpretation
+        ;; (params + optionals + rest-sym) and an expression fallback (exprs), then
+        ;; commit once we can peek past the ) for =>.  A default param `x = e` is
+        ;; ambiguous with a parenthesized assignment `(x = e)`, so we keep both.
         (let ((exprs nil)
               (params nil)
+              (optionals nil)        ; (sym . default-ast) alist for `x = default'
               (is-arrow-candidate t)
               (current rest)
               (rest-sym nil))
@@ -186,11 +190,27 @@ Returns (values ast rest)."
               (t
                ;; Try as assignment-expr
                (multiple-value-bind (expr rest2) (js-parse-assignment-expr current)
-                 (push expr exprs)
-                 ;; Can it be an arrow param?
-                 (when (ast-var-p expr)
-                   (push (ast-var-name expr) params))
-                 (setf current rest2))))
+                 (setf current rest2)
+                 ;; Default parameter: `var = default'.  js-parse-assignment-expr
+                 ;; stops at the `=' here (it is not an assignment operator in this
+                 ;; position), so consume it ourselves and parse the default.
+                 (if (and (ast-var-p expr)
+                          (eq (js-peek-type current) :T-OP)
+                          (string= (js-peek-value current) "="))
+                     (multiple-value-bind (eq-tok rest3) (js-consume current)
+                       (declare (ignore eq-tok))
+                       (multiple-value-bind (default-expr rest4)
+                           (js-parse-assignment-expr rest3)
+                         (push (ast-var-name expr) params)
+                         (push (cons (ast-var-name expr) default-expr) optionals)
+                         ;; non-arrow fallback: a parenthesized assignment expr
+                         (push (make-ast-setq :var (ast-var-name expr) :value default-expr)
+                               exprs)
+                         (setf current rest4)))
+                     (progn
+                       (push expr exprs)
+                       (when (ast-var-p expr)
+                         (push (ast-var-name expr) params)))))))
             (if (eq (js-peek-type current) :T-COMMA)
                 (multiple-value-bind (tok2 rest2) (js-consume current)
                   (declare (ignore tok2))
@@ -202,10 +222,9 @@ Returns (values ast rest)."
             (declare (ignore tok2))
             ;; Check for =>
             (if (and is-arrow-candidate (eq (js-peek-type rest2) :T-ARROW))
-                (let ((arrow-params (nreverse params)))
-                  (when rest-sym
-                    (setf arrow-params (append arrow-params (list rest-sym))))
-                  (%js-finish-arrow-function arrow-params rest2))
+                (%js-finish-arrow-function (nreverse params) rest2
+                                           :optionals (nreverse optionals)
+                                           :rest-sym rest-sym)
                 ;; Parenthesized expression — return last expression (or progn)
                 (let ((all-exprs (nreverse exprs)))
                   (values (if (null (cdr all-exprs))
@@ -213,28 +232,38 @@ Returns (values ast rest)."
                               (make-ast-progn :forms all-exprs))
                           rest2))))))))
 
-(defun %js-finish-arrow-function (params stream)
-  "Consume => and parse arrow function body. PARAMS is list of symbols.
-Returns (values ast rest)."
+(defun %js-finish-arrow-function (params stream &key optionals rest-sym)
+  "Consume => and parse arrow function body. PARAMS is the list of required-param
+symbols; OPTIONALS is a (sym . default-ast) alist for defaulted params; REST-SYM
+is the rest-parameter symbol (or nil).  Returns (values ast rest)."
   (multiple-value-bind (tok rest) (js-expect :T-ARROW stream)
     (declare (ignore tok))
-    (if (eq (js-peek-type rest) :T-LBRACE)
-        ;; Block body: => { stmts }. Wrap in (block nil ...) via %js-callable-body
-        ;; so `return' (which lowers to return-from nil) works — a bare lambda
-        ;; establishes no block, so without this the body fails to compile and the
-        ;; enclosing form is silently dropped (same fix as regular functions).
-        (multiple-value-bind (tok2 rest2) (js-consume rest)
-          (declare (ignore tok2))
-          (multiple-value-bind (body-forms rest3)
-              (js-parse-function-body rest2)
-            (values (make-ast-lambda :params params
-                                     :body (%js-callable-body body-forms))
-                    rest3)))
-        ;; Concise body: => expr. The lambda yields EXPR directly as its value;
-        ;; no return-from/block is needed (and a bare lambda binds no block nil).
-        (multiple-value-bind (expr rest2) (js-parse-assignment-expr rest)
-          (values (make-ast-lambda :params params :body (list expr))
-                  rest2)))))
+    (multiple-value-bind (required opts) (%js-split-params-by-defaults params optionals)
+      ;; FINISH builds the lambda from a body-form list: defaults become
+      ;; optional-params; the rest param is routed through %js-rest-binding, which
+      ;; wraps the body to bind REST-SYM to a JS array of the trailing args.
+      (flet ((finish (body-forms rest2)
+               (multiple-value-bind (rest-param wrapped-body)
+                   (%js-rest-binding rest-sym body-forms)
+                 (values (make-ast-lambda :params required
+                                          :optional-params opts
+                                          :rest-param rest-param
+                                          :body wrapped-body)
+                         rest2))))
+        (if (eq (js-peek-type rest) :T-LBRACE)
+            ;; Block body: => { stmts }. Wrap in (block nil ...) via %js-callable-body
+            ;; so `return' (which lowers to return-from nil) works — a bare lambda
+            ;; establishes no block, so without this the body fails to compile and the
+            ;; enclosing form is silently dropped (same fix as regular functions).
+            (multiple-value-bind (tok2 rest2) (js-consume rest)
+              (declare (ignore tok2))
+              (multiple-value-bind (body-forms rest3)
+                  (js-parse-function-body rest2)
+                (finish (%js-callable-body body-forms) rest3)))
+            ;; Concise body: => expr. The lambda yields EXPR directly as its value;
+            ;; no return-from/block is needed (and a bare lambda binds no block nil).
+            (multiple-value-bind (expr rest2) (js-parse-assignment-expr rest)
+              (finish (list expr) rest2)))))))
 
 ;;; ─── Async Expression ────────────────────────────────────────────────────────
 

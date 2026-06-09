@@ -415,3 +415,30 @@ Object/array/primitive typeof results are unaffected."
   (assert-string= "object"   (%js-run-capture "console.log(typeof {a:1});"))
   (assert-string= "object"   (%js-run-capture "console.log(typeof [1,2]);"))
   (assert-string= "string number boolean" (%js-run-capture "console.log(typeof \"x\", typeof 5, typeof true);")))
+
+;;; ─── 12. Arrow function default + rest parameters ────────────────────────────
+
+(deftest js-e2e-arrow-default-and-rest-params
+  "Arrow functions support default parameters (x=5) and rest parameters (...n).
+Regression: the speculative paren/arrow parser had no branch for `=' (so a default
+errored with 'expected ) but got =') and appended the rest param as an ORDINARY
+positional (so (...n)=>n.length saw n as a single arg -> undefined).  Now defaults
+become optional-params and the rest param routes through %js-rest-binding.  (The
+parser fix also removed a dead duplicate parser-expr-pratt.lisp that shadowed the
+intended edit site.)"
+  ;; default used (no arg) and overridden (arg given)
+  (assert-string= "10" (%js-run-capture "const f=(x=5)=>x*2; console.log(f());"))
+  (assert-string= "6"  (%js-run-capture "const f=(x=5)=>x*2; console.log(f(3));"))
+  ;; default on the 2nd parameter
+  (assert-string= "12" (%js-run-capture "const f=(a,b=2)=>a+b; console.log(f(10));"))
+  (assert-string= "15" (%js-run-capture "const f=(a,b=2)=>a+b; console.log(f(10,5));"))
+  ;; rest parameter collects trailing args as an array
+  (assert-string= "3"  (%js-run-capture "const f=(...n)=>n.length; console.log(f(1,2,3));"))
+  (assert-string= "10" (%js-run-capture "const f=(...n)=>n.reduce((a,b)=>a+b,0); console.log(f(1,2,3,4));"))
+  ;; required param followed by a rest param
+  (assert-string= "12" (%js-run-capture "const f=(a,...n)=>a+n.length; console.log(f(10,1,2));"))
+  ;; default with a block body
+  (assert-string= "6"  (%js-run-capture "const f=(x=5)=>{return x+1;}; console.log(f());"))
+  ;; regression guards: plain, single-param, and nested (curried) arrows still work
+  (assert-string= "7"  (%js-run-capture "const f=(a,b)=>a+b; console.log(f(3,4));"))
+  (assert-string= "7"  (%js-run-capture "const add=a=>b=>a+b; console.log(add(3)(4));")))
