@@ -557,11 +557,19 @@ Returns (values ast rest)."
                             (is-generator
                              (%js-call '%js-make-generator lambda-ast))
                             (t lambda-ast))))
-              ;; Named function — wrap in let for self-reference
+              ;; Named function expression — the name is visible INSIDE the body
+              ;; (for self-recursion) but not outside.  A plain (let ((f lambda)) f)
+              ;; binds in PARALLEL, so `f` inside the lambda body resolves to the
+              ;; enclosing scope (undefined → "Undefined function") rather than the
+              ;; function itself.  Bind the name to nil first, then assign the
+              ;; lambda: the name is now mutated AND captured by the lambda, so the
+              ;; compiler boxes it and the closure reads the assigned value —
+              ;; letrec semantics, so `function fac(n){...fac(n-1)...}` recurses.
               (values (if name
                           (make-ast-let
-                           :bindings (list (cons name result))
-                           :body (list (make-ast-var :name name)))
+                           :bindings (list (cons name (make-ast-quote :value nil)))
+                           :body (list (make-ast-setq :var name :value result)
+                                       (make-ast-var :name name)))
                           result)
                       rest4))))))))))
 

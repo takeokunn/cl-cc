@@ -71,6 +71,16 @@
 
 (defun %js-bigint-p (x) (js-bigint-p x))
 
+(defun %js-vm-closure-p (x)
+  "Package-safe predicate for a compiled-JS closure (a cl-cc/vm:vm-closure-object).
+The VM package is NOT an ASDF compile-time dependency of the JS frontend (closures
+are invoked through the runtime *js-apply-fn* pointer), so the vm-closure-object
+type symbol cannot be named at read time — resolve it by name at runtime."
+  (let ((pkg (find-package "CL-CC/VM")))
+    (and pkg
+         (let ((sym (find-symbol "VM-CLOSURE-OBJECT" pkg)))
+           (and sym (find-class sym nil) (typep x sym))))))
+
 (defun %js-typeof (x)
   "Return JS typeof string for X."
   (cond
@@ -88,6 +98,11 @@
      (let ((callable (gethash "__call__" x)))
        (if callable "function" "object")))
     ((functionp x)           "function")
+    ;; Compiled JS functions are vm-closure-objects (not CL functions and not
+    ;; hash-tables with __call__), so without this they fell through to the
+    ;; default "object" — breaking the ubiquitous `typeof f === "function"`
+    ;; feature-detection idiom.
+    ((%js-vm-closure-p x)    "function")
     ;; Symbol — must come before the default "object" case
     ;; js-symbol-p is defined in runtime-symbol.lisp (loaded later), so use typep
     ((typep x 'js-symbol)    "symbol")

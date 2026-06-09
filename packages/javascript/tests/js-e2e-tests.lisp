@@ -383,3 +383,35 @@ const upper = user?.profile?.address?.city?.toUpperCase();
     ;; The const declarations now nest into a single outer let (each scopes over
     ;; the following statements), so the first top-level form is an ast-let.
     (assert-true (cl-cc:ast-let-p (first asts)))))
+
+;;; ─── 11. Named function-expression recursion + typeof function ───────────────
+
+(deftest js-e2e-named-function-expression-recursion
+  "A named function expression's name is visible INSIDE its own body for
+self-recursion (but not outside).  Regression: it lowered to a PARALLEL
+(let ((f lambda)) f), so `f` inside the body resolved to the enclosing scope
+(undefined → 'Undefined function').  Now letrec-style: bind the name to nil, then
+assign the lambda — the name is mutated AND captured, so it is boxed and the
+closure reads the assignment."
+  (assert-string= "120" (%js-run-capture "const f=function fac(n){return n<=1?1:n*fac(n-1);}; console.log(f(5));"))
+  (assert-string= "55"  (%js-run-capture "const f=function fib(n){return n<2?n:fib(n-1)+fib(n-2);}; console.log(f(10));"))
+  ;; anonymous and non-self-referential named expressions are unaffected
+  (assert-string= "5"   (%js-run-capture "const f=function(x){return x+1;}; console.log(f(4));"))
+  (assert-string= "6"   (%js-run-capture "const f=function g(x){return x*2;}; console.log(f(3));"))
+  ;; passing a named function expression as an argument
+  (assert-string= "6,2,4" (%js-run-capture "console.log([3,1,2].map(function dbl(x){return x*2;}).join(\",\"));")))
+
+(deftest js-e2e-typeof-function
+  "typeof returns 'function' for compiled JS functions (regression: they are
+vm-closure-objects, not CL functions, so typeof fell through to 'object',
+breaking the ubiquitous `typeof f === \"function\"' feature-detection idiom).
+Object/array/primitive typeof results are unaffected."
+  (assert-string= "function" (%js-run-capture "const f=function(x){return x;}; console.log(typeof f);"))
+  (assert-string= "function" (%js-run-capture "const g=x=>x; console.log(typeof g);"))
+  (assert-string= "function" (%js-run-capture "function h(){return 1;} console.log(typeof h);"))
+  (assert-string= "function" (%js-run-capture "const o={m(){return 1;}}; console.log(typeof o.m);"))
+  (assert-string= "yes"      (%js-run-capture "const h=function(){}; console.log(typeof h===\"function\"?\"yes\":\"no\");"))
+  ;; non-function typeof results unchanged
+  (assert-string= "object"   (%js-run-capture "console.log(typeof {a:1});"))
+  (assert-string= "object"   (%js-run-capture "console.log(typeof [1,2]);"))
+  (assert-string= "string number boolean" (%js-run-capture "console.log(typeof \"x\", typeof 5, typeof true);")))
