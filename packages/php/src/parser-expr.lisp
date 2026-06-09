@@ -193,11 +193,19 @@ Non-variable targets are returned unchanged (mutation is not supported there)."
                (let ((prop (php-ident-sym name-str)))
                  (if (eq (php-peek-type rest3) :T-LPAREN)
                      (multiple-value-bind (args rest4 kv4) (php-parse-arglist rest3 kv)
-                       (setf obj (make-ast-call
-                                  :func (make-ast-slot-value :object obj :slot prop)
-                                  :args args)
-                             rest rest4
-                             kv kv4))
+                       ;; Bind the receiver to a temp (evaluated once) and pass it
+                       ;; as the method's implicit first argument ($this); the
+                       ;; method declares $this as its first parameter.
+                       (let ((recv (gensym "PHP-RECV-")))
+                         (setf obj (make-ast-let
+                                    :bindings (list (cons recv obj))
+                                    :body (list (make-ast-call
+                                                 :func (make-ast-slot-value
+                                                        :object (make-ast-var :name recv)
+                                                        :slot prop)
+                                                 :args (cons (make-ast-var :name recv) args))))
+                               rest rest4
+                               kv kv4)))
                      (setf obj (make-ast-slot-value :object obj :slot prop)
                            rest rest3))))))
           ;; ?-> nullsafe

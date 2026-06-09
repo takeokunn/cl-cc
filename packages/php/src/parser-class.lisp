@@ -156,6 +156,14 @@ Returns (values slot-def-or-nil remaining-stream)."
         (multiple-value-bind (method-ast rest _) (php-parse-statement stream known-vars)
            (declare (ignore _))
            (%php-attach-attributes-to-node method-ast attributes :method)
+           ;; Instance methods receive an implicit $this first parameter; the call
+           ;; site ($o->m(args)) passes the receiver as the first argument. Static
+           ;; methods have no receiver, so they are left as-is.
+           (when (and method-ast
+                      (ast-defun-p method-ast)
+                      (not (member :static modifiers :test #'eq)))
+             (setf (ast-defun-params method-ast)
+                   (cons (php-var-sym "$this") (ast-defun-params method-ast))))
            (values (when method-ast
                     ;; Store full ast-defun in slot-def initform to preserve method body
                     (make-ast-slot-def :name (ast-defun-name method-ast)

@@ -13,6 +13,20 @@ fresh VM state runs the program end-to-end."
     ;; Trim a trailing newline the VM appends when flushing program output.
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
+(deftest php-e2e-instance-method-this
+  "Instance methods bind $this to the receiver (regression: $this was an unbound
+variable, so $this->x inside a method produced nothing). Implemented by giving
+each instance method an implicit $this first parameter that the call site
+($o->m(args)) fills with the receiver."
+  (assert-string= "3"  (%php-run-capture "<?php class C{ public $x=3; function g(){ return $this->x; } } $o=new C(); echo $o->g();"))
+  (assert-string= "15" (%php-run-capture "<?php class C{ public $b=10; function add($a){ return $this->b+$a; } } $o=new C(); echo $o->add(5);"))
+  (assert-string= "7"  (%php-run-capture "<?php class C{ public $n=0; function setN($v){ $this->n=$v; } } $o=new C(); $o->setN(7); echo $o->n;"))
+  (assert-string= "2"  (%php-run-capture "<?php class C{ public $c=0; function inc(){ $this->c=$this->c+1; return $this->c; } } $o=new C(); $o->inc(); echo $o->inc();"))
+  ;; returning $this and chaining method calls
+  (assert-string= "1"  (%php-run-capture "<?php class C{ public $v=1; function get(){ return $this->v; } function me(){ return $this; } } $o=new C(); echo $o->me()->get();"))
+  ;; a method that does not use $this still works (receiver passed but unused)
+  (assert-string= "42" (%php-run-capture "<?php class C{ function g(){ return 42; } } $o=new C(); echo $o->g();")))
+
 (deftest php-e2e-class-property-access
   "Public properties read/write through $o->x with the correct slot name
 (regression: a property declared via php-var-sym got slot |x| while $o->x looked
