@@ -396,7 +396,11 @@ assignment (right-assoc), ternary, binary ops, and comma."
                  (multiple-value-bind (tok2 rest4) (js-expect :T-COLON rest3)
                    (declare (ignore tok2))
                    (multiple-value-bind (else-ast rest5) (js-parse-assignment-expr rest4)
-                     (setf lhs (make-ast-if :cond lhs :then then-ast :else else-ast)
+                     ;; Coerce the condition to a JS boolean (%js-truthy), like the
+                     ;; if/while/for statements do — otherwise "", null, undefined
+                     ;; and NaN (all non-nil values) test as truthy in `c ? a : b'.
+                     (setf lhs (make-ast-if :cond (%js-truthy-call lhs)
+                                            :then then-ast :else else-ast)
                            rest rest5))))))
             ;; Comma operator
             ((eq op-type :T-COMMA)

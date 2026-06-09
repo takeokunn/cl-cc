@@ -579,3 +579,27 @@ them through the prototype chain."
   ;; regression guards: a regular method and a field are unaffected
   (assert-string= "3"  (%js-run-capture "class C{m(){return 3;}} console.log(new C().m());"))
   (assert-string= "7"  (%js-run-capture "class C{constructor(){this.x=7;}} console.log(new C().x);")))
+
+;;; ─── 19. Falsy values: ternary truthiness, NaN, uninitialized var ────────────
+
+(deftest js-e2e-conditional-truthiness
+  "JS falsy values (false, 0, NaN, \"\", null, undefined) test as false in a
+ternary, and an uninitialized declaration is undefined (not nil/false).
+Regressions: the ternary passed its condition to ast-if WITHOUT %js-truthy (so
+\"\"/null/undefined/NaN tested truthy); %js-truthy missed the float NaN literal;
+and `let x;' bound x to nil so typeof x was \"boolean\"."
+  ;; ternary coerces truthiness for every falsy value
+  (assert-string= "f" (%js-run-capture "console.log(\"\" ? \"t\" : \"f\");"))
+  (assert-string= "f" (%js-run-capture "console.log(null ? \"t\" : \"f\");"))
+  (assert-string= "f" (%js-run-capture "console.log(undefined ? \"t\" : \"f\");"))
+  (assert-string= "f" (%js-run-capture "console.log(NaN ? \"t\" : \"f\");"))
+  (assert-string= "f" (%js-run-capture "console.log(0 ? \"t\" : \"f\");"))
+  ;; truthy values still test true; an empty array/object is truthy in JS
+  (assert-string= "t" (%js-run-capture "console.log(\"x\" ? \"t\" : \"f\");"))
+  (assert-string= "t" (%js-run-capture "console.log([] ? \"t\" : \"f\");"))
+  ;; NaN is falsy in an if-statement too
+  (assert-string= "f" (%js-run-capture "if(NaN){console.log(\"t\");}else{console.log(\"f\");}"))
+  ;; an uninitialized declaration is undefined
+  (assert-string= "undefined" (%js-run-capture "let x; console.log(typeof x);"))
+  (assert-string= "true"      (%js-run-capture "let y; console.log(y === undefined);"))
+  (assert-string= "f"         (%js-run-capture "let z; console.log(z ? \"t\" : \"f\");")))

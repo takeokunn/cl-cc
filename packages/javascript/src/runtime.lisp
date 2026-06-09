@@ -115,7 +115,10 @@ type symbol cannot be named at read time — resolve it by name at runtime."
   (not (or (eq x nil)
            (eq x +js-undefined+)
            (eq x +js-null+)
-           (eq x :js-nan)
+           ;; %js-nan-p, not (eq x :js-nan): the NaN literal is a float NaN
+           ;; (*js-nan-float*), not the keyword sentinel, so a bare (eq x :js-nan)
+           ;; missed it and `NaN ? a : b' / `if (NaN)' tested truthy.
+           (%js-nan-p x)
            (eql x 0)
            (eql x 0.0d0)
            (eql x -0.0d0)

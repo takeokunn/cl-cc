@@ -403,7 +403,10 @@ DEFAULT-AST is nil."
       ;; Parse one declarator
       (multiple-value-bind (binding rest) (%js-parse-binding-pattern current)
         (setf current rest)
-        (let ((init-expr (make-ast-quote :value nil)))
+        ;; A declarator with no initializer (`let x;') is undefined, NOT nil/false.
+        ;; Binding it to nil made `typeof x' report "boolean" and `x === undefined'
+        ;; false; the runtime undefined sentinel is :js-undefined.
+        (let ((init-expr (make-ast-quote :value :js-undefined)))
           ;; Optional initializer: = expr
           (when (and current
                      (eq (js-peek-type current) :T-OP)
