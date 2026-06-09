@@ -106,9 +106,9 @@ T-TYPE.  Returns (values name-string rest)."
              (declare (ignore tok2))
              (values expr rest3 kv2)))))
        ((member type '(:T-IDENT :T-BACKSLASH) :test #'eq)
-        ;; Could be a function call or identifier/constant.
+        ;; Could be a function call, a predefined constant, or a user constant.
         (multiple-value-bind (qualified-name rest) (php-parse-qualified-name stream)
-          (let ((name (php-ident-sym (php-resolve-qualified-name qualified-name :const))))
+          (let ((const-name (php-resolve-qualified-name qualified-name :const)))
             (if (eq (php-peek-type rest) :T-LPAREN)
                 (multiple-value-bind (call rest2 kv2)
                     (%php-parse-function-call qualified-name
@@ -116,7 +116,14 @@ T-TYPE.  Returns (values name-string rest)."
                                                (php-resolve-qualified-name qualified-name :function))
                                               rest known-vars)
                   (values call rest2 kv2))
-                (values (make-ast-var :name name) rest known-vars)))))
+                ;; Bare identifier: a predefined constant (PHP_EOL, M_PI, …)
+                ;; lowers to its literal value; anything else stays an ast-var so
+                ;; user define()/const values still resolve at runtime.
+                (multiple-value-bind (value found) (%php-lookup-constant const-name)
+                  (if found
+                      (values (make-ast-quote :value value) rest known-vars)
+                      (values (make-ast-var :name (php-ident-sym const-name))
+                              rest known-vars)))))))
       ;; self:: / static:: / parent:: — class-relative static access.  These lex
       ;; as T-TYPE keywords (:SELF/:STATIC/:PARENT).  Only meaningful immediately
       ;; before :: ; resolve to the enclosing class object (a global var) so the

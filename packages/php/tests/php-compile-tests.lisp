@@ -698,3 +698,23 @@ registered by named %php- symbol."
   ;; is_finite / is_infinite (also lambda-registered; same dispatch bug)
   (assert-string= "y" (%php-run-capture "<?php echo is_finite(1.5)?'y':'n';"))
   (assert-string= "y" (%php-run-capture "<?php echo is_infinite(fdiv(1,0))?'y':'n';")))
+
+(deftest php-e2e-predefined-constants
+  "Predefined PHP constants (PHP_EOL, PHP_INT_MAX, M_PI, STR_PAD_LEFT, SORT_*).
+A bare identifier not followed by '(' was lowered to an ast-var — an undefined
+global — so every constant read as the empty string.  Now php-parse-primary
+consults *php-predefined-constants* and lowers a hit to its literal value."
+  (assert-string= "9223372036854775807" (%php-run-capture "<?php echo PHP_INT_MAX;"))
+  (assert-string= "8"       (%php-run-capture "<?php echo PHP_INT_SIZE;"))
+  (assert-string= "3.14159" (%php-run-capture "<?php echo round(M_PI,5);"))
+  (assert-string= "8.4.0"   (%php-run-capture "<?php echo PHP_VERSION;"))
+  (assert-string= "2"       (%php-run-capture "<?php echo SORT_STRING;"))
+  ;; PHP_EOL is a real newline
+  (assert-string= "y" (%php-run-capture "<?php echo PHP_EOL===\"\\n\"?'y':'n';"))
+  ;; STR_PAD_LEFT/RIGHT drive str_pad correctly (were empty -> broken padding)
+  (assert-string= "005" (%php-run-capture "<?php echo str_pad('5',3,'0',STR_PAD_LEFT);"))
+  (assert-string= "500" (%php-run-capture "<?php echo str_pad('5',3,'0',STR_PAD_RIGHT);"))
+  ;; leading-backslash qualified reference resolves to the global constant
+  (assert-string= "8" (%php-run-capture "<?php echo \\PHP_MAJOR_VERSION;"))
+  ;; an UNKNOWN bare identifier still lowers to a var (no crash, empty value)
+  (assert-string= "" (%php-run-capture "<?php echo NOT_A_REAL_CONSTANT_XYZ;")))

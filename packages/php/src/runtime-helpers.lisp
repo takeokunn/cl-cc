@@ -15,6 +15,99 @@
   "Return true when X is the PHP null sentinel."
   (eq x +php-null+))
 
+;;; ─── Predefined constants ──────────────────────────────────────────────────
+;;; PHP magic/predefined constants (PHP_EOL, M_PI, STR_PAD_LEFT, SORT_*, …) are
+;;; referenced BARE — `echo PHP_EOL;`, `str_pad($s,3,'0',STR_PAD_LEFT)` — not as
+;;; calls.  The parser (php-parse-primary) consults this table and lowers a hit
+;;; to a literal; a miss stays an ast-var so user define()/const values still
+;;; resolve at runtime.  (Previously these were zero-arg lambda builtins that
+;;; were never invoked, so every bare reference read as an undefined var → "".)
+(defparameter *php-predefined-constants*
+  (let ((h (make-hash-table :test #'equal)))
+    (flet ((c (name value) (setf (gethash name h) value)))
+      ;; core
+      (c "PHP_EOL" (string #\Newline))
+      (c "PHP_INT_MAX" 9223372036854775807)
+      (c "PHP_INT_MIN" -9223372036854775808)
+      (c "PHP_INT_SIZE" 8)
+      (c "PHP_FLOAT_MAX" most-positive-double-float)
+      (c "PHP_FLOAT_MIN" least-positive-normalized-double-float)
+      (c "PHP_FLOAT_EPSILON" 2.220446049250313d-16)
+      (c "PHP_FLOAT_DIG" 15)
+      (c "PHP_VERSION" "8.4.0")
+      (c "PHP_VERSION_ID" 80400)
+      (c "PHP_MAJOR_VERSION" 8)
+      (c "PHP_MINOR_VERSION" 4)
+      (c "PHP_RELEASE_VERSION" 0)
+      (c "PHP_OS" "Linux")
+      (c "PHP_OS_FAMILY" "Linux")
+      (c "PHP_MAXPATHLEN" 4096)
+      (c "PHP_SAPI" "cli")
+      (c "DIRECTORY_SEPARATOR" "/")
+      (c "PATH_SEPARATOR" ":")
+      ;; math
+      (c "M_PI" pi)
+      (c "M_E" (exp 1.0d0))
+      (c "M_SQRT2" (sqrt 2.0d0))
+      (c "M_SQRT3" (sqrt 3.0d0))
+      (c "M_SQRT1_2" (/ 1.0d0 (sqrt 2.0d0)))
+      (c "M_2_SQRTPI" (/ 2.0d0 (sqrt pi)))
+      (c "M_1_PI" (/ 1.0d0 pi))
+      (c "M_2_PI" (/ 2.0d0 pi))
+      (c "M_PI_2" (/ pi 2))
+      (c "M_PI_4" (/ pi 4))
+      (c "M_LN2" (log 2.0d0))
+      (c "M_LN10" (log 10.0d0))
+      (c "M_LOG2E" (log (exp 1.0d0) 2.0d0))
+      (c "M_LOG10E" (log (exp 1.0d0) 10.0d0))
+      (c "M_EULER" 0.5772156649015329d0)
+      (c "INF" most-positive-double-float)
+      (c "NAN" most-positive-double-float)
+      ;; error reporting
+      (c "E_ALL" 32767) (c "E_ERROR" 1) (c "E_WARNING" 2) (c "E_NOTICE" 8)
+      (c "E_STRICT" 2048) (c "E_DEPRECATED" 8192) (c "E_USER_ERROR" 256)
+      (c "E_USER_WARNING" 512) (c "E_USER_NOTICE" 1024)
+      ;; sort
+      (c "SORT_REGULAR" 0) (c "SORT_NUMERIC" 1) (c "SORT_STRING" 2)
+      (c "SORT_DESC" 3) (c "SORT_ASC" 4) (c "SORT_NATURAL" 6) (c "SORT_FLAG_CASE" 8)
+      ;; count / array_filter
+      (c "COUNT_NORMAL" 0) (c "COUNT_RECURSIVE" 1)
+      (c "ARRAY_FILTER_USE_BOTH" 1) (c "ARRAY_FILTER_USE_KEY" 2)
+      ;; str_pad
+      (c "STR_PAD_RIGHT" 1) (c "STR_PAD_LEFT" 0) (c "STR_PAD_BOTH" 2)
+      ;; htmlspecialchars
+      (c "ENT_HTML401" 0) (c "ENT_QUOTES" 3) (c "ENT_COMPAT" 2)
+      (c "ENT_NOQUOTES" 0) (c "ENT_HTML5" 48)
+      ;; json
+      (c "JSON_PRETTY_PRINT" 128) (c "JSON_UNESCAPED_UNICODE" 256)
+      (c "JSON_UNESCAPED_SLASHES" 64) (c "JSON_THROW_ON_ERROR" 4194304)
+      (c "JSON_ERROR_NONE" 0) (c "JSON_HEX_TAG" 1)
+      ;; filesystem
+      (c "FILE_APPEND" 8) (c "FILE_USE_INCLUDE_PATH" 1)
+      (c "FILE_IGNORE_NEW_LINES" 2) (c "FILE_SKIP_EMPTY_LINES" 4)
+      (c "LOCK_SH" 1) (c "LOCK_EX" 2) (c "LOCK_UN" 3)
+      (c "SEEK_SET" 0) (c "SEEK_CUR" 1) (c "SEEK_END" 2)
+      ;; preg
+      (c "PREG_SPLIT_NO_EMPTY" 1) (c "PREG_SPLIT_DELIM_CAPTURE" 2)
+      (c "PREG_PATTERN_ORDER" 1) (c "PREG_SET_ORDER" 2) (c "PREG_OFFSET_CAPTURE" 256)
+      ;; round modes
+      (c "PHP_ROUND_HALF_UP" 1) (c "PHP_ROUND_HALF_DOWN" 2)
+      (c "PHP_ROUND_HALF_EVEN" 3) (c "PHP_ROUND_HALF_ODD" 4))
+    h)
+  "Name (case-sensitive string) → value for PHP predefined constants.")
+
+(defun %php-lookup-constant (name)
+  "Return (values VALUE T) when NAME is a predefined PHP constant, else
+(values NIL NIL).  Tries NAME, then its unqualified tail (after the last \\) so
+\\PHP_EOL and NS\\PHP_EOL resolve to the global constant."
+  (multiple-value-bind (value found) (gethash name *php-predefined-constants*)
+    (if found
+        (values value t)
+        (let ((sep (position (code-char 92) name :from-end t)))
+          (if sep
+              (gethash (subseq name (1+ sep)) *php-predefined-constants*)
+              (values nil nil))))))
+
 (defun %php-array-empty-p (ht)
   "Return true when PHP ordered array HT contains no user entries."
   (check-type ht hash-table)
