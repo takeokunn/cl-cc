@@ -461,3 +461,21 @@ through to the default."
   (assert-string= "hi"  (%php-run-capture "<?php class C{public $s='hi';} $o=new C(); echo $o->s;"))
   ;; writing then reading a no-default property still works
   (assert-string= "9"   (%php-run-capture "<?php class C{public $x;} $o=new C(); $o->x=9; echo $o->x;")))
+
+(deftest php-e2e-nullish-coalescing-assignment
+  "$x ??= v assigns only when $x is PHP null, for variables, object properties
+and array elements.  Regression: %php-nullish-cond built an (ast-binop :op 'or)
+that codegen could not emit, so EVERY ??= failed to compile and dropped the whole
+program; it also wrongly treated false/0 as nullish."
+  ;; variable: assigns when null, keeps an existing value
+  (assert-string= "x"    (%php-run-capture "<?php $a=null; $a ??= 'x'; echo $a;"))
+  (assert-string= "keep" (%php-run-capture "<?php $a='keep'; $a ??= 'x'; echo $a;"))
+  ;; false and 0 are NOT nullish — ??= must not overwrite them
+  (assert-string= "F"    (%php-run-capture "<?php $a=false; $a ??= 'x'; echo $a===false?'F':'o';"))
+  (assert-string= "0"    (%php-run-capture "<?php $a=0; $a ??= 'x'; echo $a;"))
+  ;; object property
+  (assert-string= "y"    (%php-run-capture "<?php class C{public $x;} $o=new C(); $o->x ??= 'y'; echo $o->x;"))
+  (assert-string= "5"    (%php-run-capture "<?php class C{public $x=5;} $o=new C(); $o->x ??= 'y'; echo $o->x;"))
+  ;; array element
+  (assert-string= "v"    (%php-run-capture "<?php $a=[]; $a['k'] ??= 'v'; echo $a['k'];"))
+  (assert-string= "3"    (%php-run-capture "<?php $a=['k'=>3]; $a['k'] ??= 'v'; echo $a['k'];")))

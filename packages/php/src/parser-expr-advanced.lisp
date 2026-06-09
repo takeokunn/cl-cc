@@ -445,10 +445,12 @@ failed to compile and the whole match produced nothing."
         (error "PHP parse error: unsupported compound assignment operator ~S" op))))
 
 (defun %php-nullish-cond (value)
-  "Return a condition that is true when VALUE is Lisp NIL or PHP null."
-  (make-ast-binop :op 'or
-                  :lhs (%php-call 'null value)
-                  :rhs (%php-call 'cl-cc/php::%php-null-p value)))
+  "Return a condition that is true when VALUE is PHP null — the inverse of
+%php-not-null-cond.  Was (ast-binop :op 'or (null value) (%php-null-p value)):
+codegen has no :or-binop emitter, so EVERY ??= (the only caller) failed to
+compile and the whole program was dropped; and `(null value)' wrongly treated
+PHP false as nullish.  A single `(eq value null)' fixes both."
+  (%php-call 'eq value (%php-null-quote)))
 
 (defun %php-lower-compound-assign (op lhs-expr rhs-expr target-kind)
   "Build the lowered AST for PHP compound assignment OP on LHS-EXPR."
