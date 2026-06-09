@@ -105,3 +105,21 @@ instruction coerced its input to a string).  butlast/last expand to subseq."
 (deftest subseq-vector-runtime
   "subseq on a vector returns a vector of the right length."
   (assert-= 3 (run-string "(length (subseq (vector 1 2 3 4 5) 1 4))")))
+
+;;; TYPECASE Dispatch Tests
+
+(deftest-each typecase-dispatch
+  "typecase dispatches on the runtime type via TYPEP.  Regression: the old
+CASE-based jump table dispatched on VM-TYPE-OF whose symbol tags ('FIXNUM)
+never matched the jump table's keyword keys (:INTEGER), so every typed clause
+fell through to the default arm."
+  :cases (("integer" "i" "(typecase 5 (string \"s\") (integer \"i\") (cons \"c\") (t \"o\"))")
+          ("string"  "s" "(typecase \"hi\" (string \"s\") (integer \"i\") (cons \"c\") (t \"o\"))")
+          ("cons"    "c" "(typecase '(1 2) (string \"s\") (integer \"i\") (cons \"c\") (t \"o\"))")
+          ("default" "o" "(typecase 3.5 (string \"s\") (integer \"i\") (cons \"c\") (t \"o\"))"))
+  (expected form)
+  (assert-equal expected (run-string form)))
+
+(deftest etypecase-dispatch-runtime
+  "etypecase dispatches like typecase for a matching clause."
+  (assert-equal "I" (run-string "(etypecase 42 (string \"S\") (integer \"I\"))")))
