@@ -159,8 +159,11 @@
   :timeout 30
   :tags '(:format :tilde-caret :self-host)
   (let ((cl-cc/vm::*vm-self-host-mode* t))
-    ;; ~^ inside ~{ stops iteration when list exhausted
-    (assert-equal "ab"
+    ;; ~^ inside ~{ suppresses the trailing separator on the LAST element only:
+    ;; ~{~A~^, ~} is the canonical comma-join, so this is "a, b, c" (not "ab" —
+    ;; the previous expectation encoded a bug where plain ~^ always terminated,
+    ;; dropping every separator and the final element).
+    (assert-equal "a, b, c"
                   (fmt-run "~{~A~^, ~}" '("a" "b" "c")))))
 
 ;;; ──────────────────────────────────────────────────────────────────────

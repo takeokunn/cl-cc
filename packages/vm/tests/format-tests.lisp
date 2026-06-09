@@ -213,3 +213,26 @@ reconstructed and delegated to the host FORMAT for full ANSI semantics."
   "Float directive parameters work alongside surrounding text and multiple args."
   (assert-equal "1.50 and 2.56"
                 (cl-cc/vm::%vm-format-render-to-string "~,2f and ~,2f" (list 1.5 2.555))))
+
+;;; ─── ~{ ~} iteration with ~^ separator (ANSI) ──────────────────────────────
+
+(deftest fmt-iteration-caret-separator
+  "~{...~} iterates a list; ~^ inside it terminates when the list is exhausted,
+which is what makes ~{~a~^, ~} the canonical comma-join. Regression: plain ~^
+always terminated (the (null params) clause), and a per-item caret hack dropped
+the last element — ~{~a~^, ~} over (1 2 3) produced \"12\" instead of \"1, 2, 3\"."
+  (flet ((f (control arg) (cl-cc/vm::%vm-format-render-to-string control (list arg))))
+    (assert-equal "1, 2, 3"   (f "~{~a~^, ~}"  '(1 2 3)))
+    (assert-equal "9"         (f "~{~a~^, ~}"  '(9)))
+    (assert-equal ""          (f "~{~a~^, ~}"  '()))
+    (assert-equal "1 2 3 "    (f "~{~a ~}"     '(1 2 3)))
+    (assert-equal "1=2 3=4 "  (f "~{~a=~a ~}"  '(1 2 3 4)))
+    (assert-equal "[a, b, c]" (f "[~{~a~^, ~}]" '("a" "b" "c")))
+    (assert-equal "1 2 "      (f "~2{~a ~}"    '(1 2 3 4)))
+    ;; ~:{ ~} iterates a list of sublists
+    (assert-equal "(1 2)(3 4)" (f "~:{(~a ~a)~}" '((1 2) (3 4))))))
+
+(deftest fmt-caret-top-level
+  "~^ at top level (not in ~{~}) terminates only when no args remain."
+  (assert-equal "12" (cl-cc/vm::%vm-format-render-to-string "~a~^~a" (list 1 2)))
+  (assert-equal "1"  (cl-cc/vm::%vm-format-render-to-string "~a~^~a" (list 1))))

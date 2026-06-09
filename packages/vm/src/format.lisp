@@ -252,6 +252,21 @@
   (let ((value (nth index params)))
     (if (null value) default value)))
 
+(defun %vm-format-escape-terminate-p (params ctx)
+  "ANSI ~^ (escape-upward) termination predicate.  With no parameters, terminate
+when no arguments remain in CTX.  One parameter n: terminate when n is zero.
+Two n,m: when n = m.  Three n,m,p: when n <= m <= p.  (The old test terminated
+whenever PARAMS was empty — i.e. for EVERY plain ~^ — so ~{~a~^, ~} dropped all
+separators and ~a~^~a stopped after the first arg.)"
+  (let ((p0 (%vm-format-param params 0 nil))
+        (p1 (%vm-format-param params 1 nil))
+        (p2 (%vm-format-param params 2 nil)))
+    (cond
+      ((and p0 p1 p2) (and (<= p0 p1) (<= p1 p2)))
+      ((and p0 p1)    (eql p0 p1))
+      (p0             (eql p0 0))
+      (t              (zerop (%vm-format-remaining-count ctx))))))
+
 (defun %vm-format-group-digits (string comma-char comma-interval)
   (let* ((signp (and (> (cl:length string) 0) (cl:find (cl:char string 0) "+-")))
          (start (if signp 1 0))
@@ -604,28 +619,49 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
                        (#\{ (multiple-value-bind (section-end after-section)
                                 (%vm-format-find-section-end format-string next #\{)
                                (let* ((body (cl:subseq format-string next section-end))
-                                     (max-iterations (%vm-format-param params 0 nil))
-                                      (items (cond
-                                               (atsignp nil)
-                                               (t (%vm-format-next-arg ctx))))
-                                      (caretp (and (not atsignp)
-                                                   (not colonp)
-                                                   (search "~^" body :test #'char-equal))))
-                                 (loop with count = 0
-                                       while (or (null max-iterations) (< count max-iterations))
-                                       do (cond
-                                            (atsignp
-                                             (when (zerop (%vm-format-remaining-count ctx)) (return))
-                                             (%vm-format-render body ctx stream))
-                                            ((null items) (return))
-                                            ((and caretp (plusp count) (null (cdr items)))
-                                             (return))
-                                            (colonp
-                                             (%vm-format-write stream
-                                                               (%vm-format-render-to-string body (pop items))))
-                                           (t (%vm-format-write stream
-                                                                (%vm-format-render-to-string body (list (pop items))))))
-                                         (incf count)))
+                                      (max-iterations (%vm-format-param params 0 nil))
+                                      (items (if atsignp nil (%vm-format-next-arg ctx))))
+                                 (flet ((under-max (count) (or (null max-iterations)
+                                                               (< count max-iterations))))
+                                   (cond
+                                     ;; ~@{ ~}: iterate over the remaining FORMAT arguments
+                                     ;; directly; ~^ / arg exhaustion ends it.
+                                     (atsignp
+                                      (loop with count = 0
+                                            while (and (under-max count)
+                                                       (plusp (%vm-format-remaining-count ctx)))
+                                            do (multiple-value-bind (c term)
+                                                   (%vm-format-render body ctx stream)
+                                                 (declare (ignore c))
+                                                 (when term (return)))
+                                               (incf count)))
+                                     ;; ~:{ ~}: ITEMS is a list of sublists; each sublist is
+                                     ;; one iteration step's argument set.
+                                     (colonp
+                                      (loop with count = 0
+                                            for sub in items
+                                            while (under-max count)
+                                            do (%vm-format-write stream
+                                                                 (%vm-format-render-to-string body sub))
+                                               (incf count)))
+                                     ;; ~{ ~}: ITEMS is the list. Render BODY repeatedly
+                                     ;; against ONE shared sub-context so the body consumes
+                                     ;; one-or-more args per pass and ~^ sees the remaining
+                                     ;; args (terminating when the list is exhausted mid-pass).
+                                     (t
+                                      (let ((sub-ctx (%make-vm-format-context (coerce items 'vector))))
+                                        (loop with count = 0
+                                              while (and (under-max count)
+                                                         (plusp (%vm-format-remaining-count sub-ctx)))
+                                              do (let ((before (%vm-format-remaining-count sub-ctx)))
+                                                   (multiple-value-bind (c term)
+                                                       (%vm-format-render body sub-ctx stream)
+                                                     (declare (ignore c))
+                                                     (when term (return))
+                                                     ;; a body that consumes no args would loop forever
+                                                     (when (= (%vm-format-remaining-count sub-ctx) before)
+                                                       (return))))
+                                                 (incf count)))))))
                               (setf next after-section)))
                        (#\< (multiple-value-bind (section-end after-section)
                                 (%vm-format-find-section-end format-string next #\<)
@@ -636,8 +672,7 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
                                                 (%vm-format-param params 1 #\Space)
                                                 atsignp))
                               (setf next after-section)))
-                       (#\^ (when (or (null params)
-                                      (zerop (%vm-format-remaining-count ctx)))
+                       (#\^ (when (%vm-format-escape-terminate-p params ctx)
                               (return-from %vm-format-render (values ctx t))))
                          (#\/ (let ((slash (cl:position #\/ format-string :start next :end limit)))
                                 (unless slash (error "Unterminated ~~/ FORMAT directive"))
