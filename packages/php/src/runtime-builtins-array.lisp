@@ -562,17 +562,23 @@ updated and the sort appeared to do nothing."
     (dolist (array arrays)
       (when (hash-table-p array)
         (dolist (pair (%php-array-pairs array))
-          (let ((existing (%php-array-ref result (car pair))))
-            (cond ((and (not (%php-null-p existing)) (hash-table-p existing) (hash-table-p (cdr pair)))
-                   (%php-array-set result (car pair) (apply #'%php-array-merge-recursive (list existing (cdr pair)))))
-                  ((not (%php-null-p existing))
-                   (let ((merged (%php-make-array)))
-                     (%php-array-set merged 0 existing)
-                     (%php-array-set merged 1 (cdr pair))
-                     (%php-array-set result (car pair) merged)))
-                  ((integerp (car pair))
-                   (%php-array-set result (%php-array-next-auto-index result) (cdr pair)))
-                  (t (%php-array-set result (car pair) (cdr pair))))))))
+          (let ((key (car pair)) (val (cdr pair)))
+            (cond
+              ;; Integer keys are ALWAYS appended (renumbered), never merged by
+              ;; key — this is what array_merge (and the recursive descent into a
+              ;; list) does.  Previously the key-0 collision of two lists merged
+              ;; by key and wrapped, so [[1]]+[[2]] gave [[1,2]] not [1,2].
+              ((integerp key)
+               (%php-array-set result (%php-array-next-auto-index result) val))
+              (t
+               (let ((existing (%php-array-ref result key)))
+                 (if (%php-null-p existing)
+                     (%php-array-set result key val)
+                     ;; String-key collision: combine both sides as arrays and
+                     ;; merge recursively (a scalar is first wrapped in [x]).
+                     (let ((ex (if (hash-table-p existing) existing (%php-list-to-array (list existing))))
+                           (nw (if (hash-table-p val) val (%php-list-to-array (list val)))))
+                       (%php-array-set result key (%php-array-merge-recursive ex nw)))))))))))
     result))
 
 (defun %php-shuffle (array)

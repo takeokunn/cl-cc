@@ -953,3 +953,24 @@ previously used plain string< so 'img10' sorted before 'img2'."
   (assert-string= "1"  (%php-run-capture "<?php echo strnatcmp('img10','img2');"))
   (assert-string= "0"  (%php-run-capture "<?php echo strnatcmp('abc','abc');"))
   (assert-string= "-1" (%php-run-capture "<?php echo strnatcasecmp('IMG2','img10');")))
+
+(deftest php-e2e-array-merge-recursive
+  "array_merge_recursive: integer keys are appended; colliding string keys are
+combined into an array and merged recursively.  Merging two lists at a shared
+string key previously over-nested (['a'=>[1]] + ['a'=>[2]] gave [[1,2]] instead
+of [1,2]) because the recursive descent merged the lists' integer key 0 by key."
+  (assert-string= "{\"a\":[1,2]}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>[1]],['a'=>[2]]));"))
+  (assert-string= "{\"a\":[1,2]}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>1],['a'=>2]));"))
+  (assert-string= "{\"a\":[1,2]}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>[1]],['a'=>2]));"))
+  (assert-string= "{\"a\":{\"x\":[1,2]}}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>['x'=>1]],['a'=>['x'=>2]]));"))
+  ;; integer keys append; distinct keys kept; 3-way merge
+  (assert-string= "[1,2,3,4]"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive([1,2],[3,4]));"))
+  (assert-string= "{\"a\":1,\"b\":2}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>1],['b'=>2]));"))
+  (assert-string= "{\"a\":[1,2,3]}"
+                  (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>[1]],['a'=>[2]],['a'=>[3]]));")))
