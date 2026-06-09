@@ -507,8 +507,15 @@ an array of every full match, k an array of every capture-group-k match."
           (t nil))
       (error () nil))))
 
+(defun %php-date-ordinal-suffix (day)
+  "PHP date S: the English ordinal suffix for DAY (st/nd/rd/th)."
+  (if (<= 11 (mod day 100) 13)
+      "th"
+      (case (mod day 10) (1 "st") (2 "nd") (3 "rd") (t "th"))))
+
 (defun %php-date (format &optional (timestamp nil))
-  "PHP date — format a timestamp. Supports d D j m M Y y H i s N w z t."
+  "PHP date — format a timestamp. Supports d D j N w S m n M F Y y L t z H G g h
+i s A a U and \\-escapes."
   (let* ((ts (or timestamp (%php-time)))
          (ut (+ ts +php-epoch-offset+))
          (decoded (multiple-value-list (decode-universal-time ut 0))))
@@ -519,12 +526,19 @@ an array of every full match, k an array of every capture-group-k match."
         ;; is 0=Sunday..6=Saturday and `N' is 1=Monday..7=Sunday.  (Using the CL
         ;; value directly made every weekday off by one — gmdate('D',0) gave Wed
         ;; for 1970-01-01, a Thursday.)
-        (let ((fmt (%php-stringify format))
-              (php-w (mod (1+ dow) 7))      ; PHP w: 0=Sunday
-              (php-n (1+ dow))              ; PHP N: 1=Monday..7=Sunday
-              (month-names #("January" "February" "March" "April" "May" "June"
-                             "July" "August" "September" "October" "November" "December"))
-              (day-names #("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")))
+        (let* ((fmt (%php-stringify format))
+               (php-w (mod (1+ dow) 7))      ; PHP w: 0=Sunday
+               (php-n (1+ dow))              ; PHP N: 1=Monday..7=Sunday
+               (leap-p (and (zerop (mod year 4))
+                            (or (plusp (mod year 100)) (zerop (mod year 400)))))
+               (month-lengths (vector 31 (if leap-p 29 28) 31 30 31 30 31 31 30 31 30 31))
+               (days-in-month (aref month-lengths (1- month)))
+               (day-of-year (+ (loop for m from 1 below month
+                                     sum (aref month-lengths (1- m)))
+                               (1- day)))
+               (month-names #("January" "February" "March" "April" "May" "June"
+                              "July" "August" "September" "October" "November" "December"))
+               (day-names #("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")))
           (loop for i from 0 below (length fmt)
                 for ch = (char fmt i)
                 do (write-string
@@ -541,6 +555,10 @@ an array of every full match, k an array of every capture-group-k match."
                       (#\l (aref day-names php-w))
                       (#\N (format nil "~D" php-n))
                       (#\w (format nil "~D" php-w))
+                      (#\S (%php-date-ordinal-suffix day))
+                      (#\L (if leap-p "1" "0"))
+                      (#\t (format nil "~D" days-in-month))
+                      (#\z (format nil "~D" day-of-year))
                       (#\H (format nil "~2,'0D" hour))
                       (#\G (format nil "~D" hour))
                       (#\g (format nil "~D" (let ((h (mod hour 12))) (if (= h 0) 12 h))))

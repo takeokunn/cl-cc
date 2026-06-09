@@ -1083,3 +1083,20 @@ PHP w is 0=Sunday and N is 1=Monday..7=Sunday), so gmdate('D',0) gave Wed for
   ;; existing date parts unaffected
   (assert-string= "1970-01-02 00:00:00" (%php-run-capture "<?php echo gmdate('Y-m-d H:i:s',86400);"))
   (assert-string= "Thursday, January 1, 1970" (%php-run-capture "<?php echo gmdate('l, F j, Y',0);")))
+
+(deftest php-e2e-gmdate-formats
+  "gmdate L (leap year), t (days in month), z (day of year, 0-based), and S
+(ordinal suffix) format characters, which were previously emitted literally."
+  (assert-string= "0"  (%php-run-capture "<?php echo gmdate('L',0);"))        ; 1970 not leap
+  (assert-string= "1"  (%php-run-capture "<?php echo gmdate('L',63072000);")) ; 1972 leap
+  (assert-string= "31" (%php-run-capture "<?php echo gmdate('t',0);"))        ; January
+  (assert-string= "28" (%php-run-capture "<?php echo gmdate('t',2678400);"))  ; Feb 1970
+  (assert-string= "29" (%php-run-capture "<?php echo gmdate('t',65750400);")) ; Feb 1972 (leap)
+  (assert-string= "0"  (%php-run-capture "<?php echo gmdate('z',0);"))        ; Jan 1
+  (assert-string= "1"  (%php-run-capture "<?php echo gmdate('z',86400);"))    ; Jan 2
+  ;; ordinal suffixes
+  (assert-string= "1st"  (%php-run-capture "<?php echo gmdate('jS',0);"))
+  (assert-string= "2nd"  (%php-run-capture "<?php echo gmdate('jS',86400);"))
+  (assert-string= "3rd"  (%php-run-capture "<?php echo gmdate('jS',172800);"))
+  (assert-string= "11th" (%php-run-capture "<?php echo gmdate('jS',864000);"))
+  (assert-string= "21st" (%php-run-capture "<?php echo gmdate('jS',1728000);")))
