@@ -974,3 +974,17 @@ of [1,2]) because the recursive descent merged the lists' integer key 0 by key."
                   (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>1],['b'=>2]));"))
   (assert-string= "{\"a\":[1,2,3]}"
                   (%php-run-capture "<?php echo json_encode(array_merge_recursive(['a'=>[1]],['a'=>[2]],['a'=>[3]]));")))
+
+(deftest php-e2e-round-half-away
+  "round() rounds half AWAY FROM ZERO (PHP), not banker's half-to-even.  It used
+CL ROUND, so round(2.5) gave 2 and round(-2.5) gave -2 instead of 3 and -3."
+  (assert-string= "3"    (%php-run-capture "<?php echo round(2.5);"))
+  (assert-string= "4"    (%php-run-capture "<?php echo round(3.5);"))
+  (assert-string= "-3"   (%php-run-capture "<?php echo round(-2.5);"))
+  (assert-string= "1"    (%php-run-capture "<?php echo round(0.5);"))
+  (assert-string= "2"    (%php-run-capture "<?php echo round(2.4);"))
+  (assert-string= "-2"   (%php-run-capture "<?php echo round(-2.4);"))
+  ;; precision (positive and negative) unaffected / correct
+  (assert-string= "3.14" (%php-run-capture "<?php echo round(3.14159,2);"))
+  (assert-string= "1.96" (%php-run-capture "<?php echo round(1.95583,2);"))
+  (assert-string= "1242000" (%php-run-capture "<?php echo round(1241757,-3);")))

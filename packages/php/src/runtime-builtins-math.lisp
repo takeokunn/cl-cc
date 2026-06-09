@@ -16,9 +16,15 @@
   (floor number))
 
 (defun %php-round (number &optional (precision 0))
-  "Return NUMBER rounded to PRECISION decimal places."
-  (let ((scale (expt 10 precision)))
-    (/ (round (* number scale)) scale)))
+  "Return NUMBER rounded to PRECISION decimal places, with halves rounding AWAY
+from zero (PHP semantics).  CL ROUND uses banker's rounding (half-to-even), so
+round(2.5) gave 2 and round(-2.5) gave -2 instead of PHP's 3 and -3."
+  (let* ((scale (expt 10 precision))
+         (scaled (* number scale))
+         (rounded (if (minusp scaled)
+                      (- (floor (+ (- scaled) 0.5d0)))
+                      (floor (+ scaled 0.5d0)))))
+    (/ rounded scale)))
 
 (defun %php-max (&rest values)
   "Return the largest numeric value in VALUES."
