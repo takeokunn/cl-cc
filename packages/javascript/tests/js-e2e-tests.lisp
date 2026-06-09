@@ -603,3 +603,27 @@ and `let x;' bound x to nil so typeof x was \"boolean\"."
   (assert-string= "undefined" (%js-run-capture "let x; console.log(typeof x);"))
   (assert-string= "true"      (%js-run-capture "let y; console.log(y === undefined);"))
   (assert-string= "f"         (%js-run-capture "let z; console.log(z ? \"t\" : \"f\");")))
+
+;;; ─── 20. Coercion functions: Number/String/Boolean/parseInt/parseFloat ───────
+
+(deftest js-e2e-coercion-functions
+  "Number(x)/String(x)/Boolean(x)/parseInt/parseFloat work as functions.
+Regression: the global holding each is a value, not a callable function symbol
+the codegen could dispatch, so a bare Number(x) raised 'Undefined function:
+NUMBER'.  The CALL is now lowered straight to the runtime helper; Number.isInteger
+(member access) is unaffected.  Also: Number(\"3.14\") kept double precision and
+parseFloat parses the leading numeric prefix."
+  (assert-string= "43"   (%js-run-capture "console.log(Number(\"42\") + 1);"))
+  (assert-string= "3.14" (%js-run-capture "console.log(Number(\"3.14\"));"))
+  (assert-string= "0"    (%js-run-capture "console.log(Number());"))
+  (assert-string= "42x"  (%js-run-capture "console.log(String(42) + \"x\");"))
+  (assert-string= "null" (%js-run-capture "console.log(String(null));"))
+  (assert-string= "true false"  (%js-run-capture "console.log(Boolean(1), Boolean(0));"))
+  (assert-string= "false true"  (%js-run-capture "console.log(Boolean(\"\"), Boolean(\"x\"));"))
+  (assert-string= "42"   (%js-run-capture "console.log(parseInt(\"42px\"));"))
+  (assert-string= "255"  (%js-run-capture "console.log(parseInt(\"ff\", 16));"))
+  (assert-string= "3.14" (%js-run-capture "console.log(parseFloat(\"3.14abc\"));"))
+  (assert-string= "1500" (%js-run-capture "console.log(parseFloat(\"1.5e3xyz\"));"))
+  (assert-string= "NaN"  (%js-run-capture "console.log(parseFloat(\"abc\"));"))
+  ;; namespace static methods still work alongside the callable form
+  (assert-string= "true" (%js-run-capture "console.log(Number.isInteger(5));")))

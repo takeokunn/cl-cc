@@ -18,12 +18,31 @@
     (error () *js-nan-float*)))
 
 (defun %js-parse-float (s)
-  "Parse a floating-point number from string S."
-  (handler-case
-    (let* ((str (string-trim '(#\Space #\Tab #\Newline) (%js-to-string s)))
-           (val (read-from-string str nil *js-nan-float*)))
-      (if (realp val) (coerce val 'double-float) *js-nan-float*))
-    (error () *js-nan-float*)))
+  "JS parseFloat: parse the LONGEST leading numeric prefix of S (so \"3.14abc\"
+-> 3.14), or NaN when there is no leading number."
+  (let* ((str (string-trim '(#\Space #\Tab #\Newline #\Return) (%js-to-string s)))
+         (len (length str)) (i 0) (saw-digit nil))
+    (labels ((eat-digits ()
+               (loop while (and (< i len) (digit-char-p (char str i)))
+                     do (setf saw-digit t) (incf i))))
+      (when (and (< i len) (member (char str i) '(#\+ #\-))) (incf i))
+      (eat-digits)
+      (when (and (< i len) (char= (char str i) #\.)) (incf i) (eat-digits))
+      (unless saw-digit (return-from %js-parse-float *js-nan-float*))
+      ;; optional exponent: e[+/-]digits — only consumed if well-formed
+      (when (and (< i len) (member (char str i) '(#\e #\E)))
+        (let ((save i))
+          (incf i)
+          (when (and (< i len) (member (char str i) '(#\+ #\-))) (incf i))
+          (if (and (< i len) (digit-char-p (char str i)))
+              (loop while (and (< i len) (digit-char-p (char str i))) do (incf i))
+              (setf i save))))
+      (handler-case
+          (let ((*read-eval* nil)
+                (*read-default-float-format* 'double-float))
+            (let ((v (read-from-string (subseq str 0 i) nil *js-nan-float*)))
+              (if (realp v) (coerce v 'double-float) *js-nan-float*)))
+        (error () *js-nan-float*)))))
 
 (defun %js-is-nan (x)
   "Return true if X converts to NaN."

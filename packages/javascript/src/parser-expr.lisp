@@ -103,6 +103,35 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
   (make-ast-call :func (make-ast-var :name name)
                  :args args))
 
+(defparameter *js-coercion-call-helpers*
+  (let ((ht (make-hash-table :test 'eq)))
+    (dolist (entry '(("Number" . %js-to-number)
+                     ("String" . %js-to-string)
+                     ("Boolean" . %js-truthy)
+                     ("parseInt" . %js-parse-int)
+                     ("parseFloat" . %js-parse-float)))
+      (setf (gethash (js-ident-sym (car entry)) ht) (cdr entry)))
+    ht)
+  "Bare-call coercion builtins -> runtime helper symbols.  Number(x)/String(x)/
+Boolean(x)/parseInt/parseFloat are called as functions, but the global holding
+each is a value (not a callable function symbol the codegen can dispatch), so a
+bare `Number(x)' raised `Undefined function: NUMBER'.  We lower the CALL directly
+to the helper; `Number.isInteger' (member access) is unaffected.")
+
+(defun %js-lower-coercion-call (helper args)
+  "Lower a coercion builtin CALL to its HELPER. parseInt/parseFloat take the args
+as-is (s, radix); Number/String/Boolean take one argument, with the JS empty-call
+defaults Number()=0, String()=\"\", Boolean()=false."
+  (cond
+    ((member helper '(%js-parse-int %js-parse-float))
+     (apply #'%js-call helper args))
+    ((null args)
+     (case helper
+       (%js-to-number (make-ast-int :value 0))
+       (%js-to-string (make-ast-quote :value ""))
+       (t             (make-ast-quote :value nil))))
+    (t (%js-call helper (first args)))))
+
 (defun %js-spread-marker-p (node)
   "True when NODE is a (%js-spread expr) marker produced for ...expr."
   (and (ast-call-p node)
@@ -842,10 +871,16 @@ Returns (values ast rest). Loops until no more postfix ops."
         ;; Call: fn(args)
         ((eq type :T-LPAREN)
          (multiple-value-bind (args rest) (js-parse-arguments stream)
-           (setf ast (if (%js-items-have-spread-p args)
-                         ;; fn(...a, x) -> (apply fn (append a (list x)))
-                         (make-ast-apply :func ast :args (list (%js-spread-list-expr args)))
-                         (make-ast-call :func ast :args args))
+           (setf ast (cond
+                       ((%js-items-have-spread-p args)
+                        ;; fn(...a, x) -> (apply fn (append a (list x)))
+                        (make-ast-apply :func ast :args (list (%js-spread-list-expr args))))
+                       ;; coercion builtin called as a function: Number(x), String(x), …
+                       ((and (ast-var-p ast)
+                             (gethash (ast-var-name ast) *js-coercion-call-helpers*))
+                        (%js-lower-coercion-call
+                         (gethash (ast-var-name ast) *js-coercion-call-helpers*) args))
+                       (t (make-ast-call :func ast :args args)))
                  stream rest)))
         ;; Optional chain ?.
         ((and (eq type :T-OP) (string= val "?."))

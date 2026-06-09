@@ -149,7 +149,11 @@ type symbol cannot be named at read time — resolve it by name at runtime."
                      ;; otherwise yield symbols/lists) — JS ToNumber must only
                      ;; ever produce a number or NaN.
                      (handler-case
+                         ;; *read-default-float-format* double: "3.14" must read
+                         ;; as 3.14d0, not a single-float (which loses precision:
+                         ;; 3.14 -> 3.1400001…).
                          (let* ((*read-eval* nil)
+                                (*read-default-float-format* 'double-float)
                                 (datum (read-from-string trimmed)))
                            (if (realp datum)
                                (coerce datum 'double-float)
