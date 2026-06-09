@@ -18,6 +18,18 @@
 ;;;; Load order: after parser.lisp, before parser-expr-advanced.lisp.
 (in-package :cl-cc/php)
 
+;;; ─── Class context for self:: / static:: / parent:: ─────────────────────────
+;;; Bound (dynamically) by the :class statement parser around the class body so
+;;; that `self::`, `static::`, and `parent::` in method bodies resolve to the
+;;; enclosing class object (a global var bound to the class metadata HT) and its
+;;; first superclass.  Nil outside any class body — using self::/parent:: there
+;;; is a parse error, matching PHP.
+(defvar *php-current-class* nil
+  "php-ident-sym of the class whose body is currently being parsed, or NIL.")
+(defvar *php-current-supers* nil
+  "List of php-ident-sym superclass names for the class being parsed (first =
+direct parent for parent::).")
+
 ;;; ─── Member-name helper ──────────────────────────────────────────────────────
 ;;; PHP permits reserved keywords (from, list, class, print, default, ...) and
 ;;; type words as method / property / constant names after -> ?-> and ::, e.g.
@@ -30,11 +42,21 @@
   "Consume a member name (after -> / ?-> / ::) accepting T-IDENT, T-KEYWORD, or
 T-TYPE.  Returns (values name-string rest)."
   (let ((type (php-peek-type stream)))
-    (if (member type '(:T-IDENT :T-KEYWORD :T-TYPE) :test #'eq)
-        (multiple-value-bind (tok rest) (php-consume stream)
-          (let ((v (php-tok-value tok)))
-            (values (if (stringp v) v (string-downcase (symbol-name v))) rest)))
-        (error "PHP parse error: expected member name but got ~S" (php-peek stream)))))
+    (cond
+      ((member type '(:T-IDENT :T-KEYWORD :T-TYPE) :test #'eq)
+       (multiple-value-bind (tok rest) (php-consume stream)
+         (let ((v (php-tok-value tok)))
+           (values (if (stringp v) v (string-downcase (symbol-name v))) rest))))
+      ;; Static property access C::$n — the member is lexed as a T-VAR ("$n").
+      ;; Strip the leading $ so the name rendezvous with the slot declaration,
+      ;; which stores the bare (php-ident-sym) name.
+      ((eq type :T-VAR)
+       (multiple-value-bind (tok rest) (php-consume stream)
+         (let* ((v (php-tok-value tok))
+                (bare (if (and (stringp v) (plusp (length v)) (char= (char v 0) #\$))
+                          (subseq v 1) v)))
+           (values bare rest))))
+      (t (error "PHP parse error: expected member name but got ~S" (php-peek stream))))))
 
 ;;; ─── Expression Parser ──────────────────────────────────────────────────────
 
@@ -95,6 +117,24 @@ T-TYPE.  Returns (values name-string rest)."
                                               rest known-vars)
                   (values call rest2 kv2))
                 (values (make-ast-var :name name) rest known-vars)))))
+      ;; self:: / static:: / parent:: — class-relative static access.  These lex
+      ;; as T-TYPE keywords (:SELF/:STATIC/:PARENT).  Only meaningful immediately
+      ;; before :: ; resolve to the enclosing class object (a global var) so the
+      ;; postfix :: handler does the member lookup.  self/static → current class,
+      ;; parent → its first superclass.
+      ((and (eq type :T-TYPE)
+            (member (php-peek-value stream) '(:SELF :STATIC :PARENT) :test #'eq))
+       (multiple-value-bind (tok rest) (php-consume stream)
+         (if (eq (php-peek-type rest) :T-DOUBLE-COLON)
+             (let* ((kw (php-tok-value tok))
+                    (cls (if (eq kw :PARENT)
+                             (first *php-current-supers*)
+                             *php-current-class*)))
+               (if cls
+                   (values (make-ast-var :name cls) rest known-vars)
+                   (error "PHP parse error: ~A:: used outside of a~:[ class~; subclass~] context"
+                          kw (eq kw :PARENT))))
+             (error "PHP parse error: unexpected token ~S in expression" (php-peek stream)))))
       (t (error "PHP parse error: unexpected token ~S in expression" (php-peek stream))))))
 
 (defun %php-parse-anonymous-class (stream known-vars)

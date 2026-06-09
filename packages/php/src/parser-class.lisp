@@ -11,10 +11,18 @@
   "Consume zero or more visibility/modifier keywords and return them as metadata."
   (let ((modifiers nil))
     (loop while (and stream
-                     (eq (php-peek-type stream) :T-KEYWORD)
-                     (member (php-peek-value stream)
-                             '(:public :private :protected :static
-                               :abstract :final :readonly)))
+                     (let ((type (php-peek-type stream))
+                           (val  (php-peek-value stream)))
+                       (or (and (eq type :T-KEYWORD)
+                                (member val '(:public :private :protected :static
+                                              :abstract :final :readonly)))
+                           ;; `static` lexes as a T-TYPE because it is also the
+                           ;; `static` return-type keyword.  In modifier position
+                           ;; it is the static-member modifier — accept it here so
+                           ;; static properties/methods are flagged :static rather
+                           ;; than parsed with a bogus `static` type hint and left
+                           ;; instance-allocated (which broke C::$prop and C::m()).
+                           (and (eq type :T-TYPE) (eq val :STATIC)))))
           do (push (php-peek-value stream) modifiers)
              (setf stream (cdr stream)))
     (values (nreverse modifiers) stream)))
@@ -165,9 +173,16 @@ Returns (values slot-def-or-nil remaining-stream)."
              (setf (ast-defun-params method-ast)
                    (cons (php-var-sym "$this") (ast-defun-params method-ast))))
            (values (when method-ast
-                    ;; Store full ast-defun in slot-def initform to preserve method body
+                    ;; Store full ast-defun in slot-def initform to preserve method body.
+                    ;; Static methods are class-allocated so their bound closure lives on
+                    ;; the class object itself — C::method() then resolves via slot-value
+                    ;; on the class (the same path class constants already use).  Instance
+                    ;; methods stay :instance so each object carries its own closure.
                     (make-ast-slot-def :name (ast-defun-name method-ast)
                                         :initform method-ast
+                                        :allocation (if (member :static modifiers :test #'eq)
+                                                        :class
+                                                        :instance)
                                         :imports (%php-slot-metadata modifiers
                                                                     :attributes attributes
                                                                     :target-type :method)))
@@ -204,7 +219,11 @@ Returns (values superclass-list remaining-stream)."
                        (php-resolve-qualified-name (php-tok-value name-tok) :class))))
       (multiple-value-bind (supers rest) (%php-parse-class-superclasses rest)
         (let ((current (%php-consume-expected :T-LBRACE rest))
-              (slots nil))
+              (slots nil)
+              ;; Expose the class + parents to expression parsing so self:: /
+              ;; static:: / parent:: inside method bodies resolve correctly.
+              (*php-current-class* class-name)
+              (*php-current-supers* supers))
           (loop
             (setf current (php-skip-semis current))
             (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))

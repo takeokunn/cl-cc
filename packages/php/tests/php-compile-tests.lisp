@@ -26,6 +26,44 @@ plain $var was mutated), yielding the OLD value, including $this->n++ in a metho
   ;; per statement, so combine with '.')
   (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
 
+(deftest php-e2e-static-members
+  "Static methods and properties resolve via ClassName::member.  Regression: the
+`static` modifier lexes as a T-TYPE (it doubles as the `static` return type), so
+the class-body modifier parser skipped it — static props/methods were left
+instance-allocated and ClassName::member found nothing on the class object
+('Undefined function: NIL' / empty).  Static members are now class-allocated
+(like class constants), so slot-value on the class object resolves them."
+  ;; static method called by class name
+  (assert-string= "25" (%php-run-capture "<?php class M{ static function sq($x){ return $x*$x; } } echo M::sq(5);"))
+  ;; static property read
+  (assert-string= "5"  (%php-run-capture "<?php class C{ static $n=5; } echo C::$n;"))
+  ;; class constant still works alongside a static property in the same class
+  (assert-string= "3|5" (%php-run-capture "<?php class C{ const PI=3; static $n=5; } echo C::PI.'|'.C::$n;"))
+  ;; one static method consuming another's result, both by class name
+  (assert-string= "21" (%php-run-capture "<?php class U{ static function inc($x){ return $x+1; } static function dbl($x){ return $x*2; } } echo U::inc(U::dbl(10));")))
+
+(deftest php-e2e-self-static-parent
+  "self::, static::, and parent:: resolve inside method bodies, including a class
+referring to itself for recursion (ClassName::m / self::m).  Regression: methods
+were compiled as class-slot initforms BEFORE the class registered its own global,
+so a self-reference hit the 'Unbound variable' path and the whole class form was
+dropped (silent empty output).  The class name is now registered as a global
+before its method bodies compile."
+  ;; self:: static method dispatch
+  (assert-string= "9"  (%php-run-capture "<?php class C{ static function f(){ return self::g(); } static function g(){ return 9; } } echo C::f();"))
+  ;; static:: (late static binding spelling) dispatch
+  (assert-string= "7"  (%php-run-capture "<?php class C{ static function f(){ return static::g(); } static function g(){ return 7; } } echo C::f();"))
+  ;; self::CONST inside a method
+  (assert-string= "42" (%php-run-capture "<?php class C{ const X=42; static function get(){ return self::X; } } echo C::get();"))
+  ;; recursion via ClassName::m
+  (assert-string= "120" (%php-run-capture "<?php class F{ static function fac($n){ return $n<=1?1:$n*F::fac($n-1); } } echo F::fac(5);"))
+  ;; recursion via self::m
+  (assert-string= "720" (%php-run-capture "<?php class F{ static function fac($n){ return $n<=1?1:$n*self::fac($n-1); } } echo F::fac(6);"))
+  ;; parent:: static dispatch to a superclass method
+  (assert-string= "11" (%php-run-capture "<?php class A{ static function who(){ return 1; } } class B extends A{ static function who2(){ return parent::who()+10; } } echo B::who2();"))
+  ;; a static method called from inside an instance method, by class name
+  (assert-string= "109" (%php-run-capture "<?php class K{ public $base=100; static function tag(){ return 9; } function show(){ return $this->base+K::tag(); } } $o=new K(); echo $o->show();")))
+
 (deftest php-e2e-constructor
   "new C(args) runs __construct with the instance as $this and the args
 (regression: the constructor never ran — args were passed as :ARGn CLOS initargs

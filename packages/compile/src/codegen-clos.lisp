@@ -40,6 +40,14 @@
         (default-initarg-regs nil)
         (class-slot-names nil)
         (metaclass-reg nil))
+    ;; Register the class name as a global BEFORE compiling slot initforms so a
+    ;; method body that refers to its own class (self::X, C::staticMethod(),
+    ;; recursion via ClassName::m()) sees the name as a known global.  Each
+    ;; method's per-function global cache then re-emits vm-get-global in its own
+    ;; frame; at runtime the class is already set-global'd by the time any method
+    ;; runs.  Without this the self-reference hit the "Unbound variable" path and
+    ;; the whole class form was dropped (silent empty output).
+    (setf (gethash name (ctx-global-variables ctx)) dst)
     (loop for slot in slots
           collect (ast-slot-name slot)                                          into s-names
           when (ast-slot-initarg slot)
