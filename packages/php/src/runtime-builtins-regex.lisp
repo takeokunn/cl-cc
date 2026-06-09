@@ -70,10 +70,17 @@
               pos))))
 
 (defun %php-compile-regex (pat &key ic ml)
-  "Compile PHP regex pattern PAT to a matcher (str pos) -> end-pos or nil."
+  "Compile PHP regex pattern PAT to a matcher (str pos g) -> end-pos or nil.
+
+Returns (values matcher group-count).  When the matcher is called with a
+hash-table G, each capturing group records its matched span as
+(start . end) under its 1-based group number — the greedy non-backtracking
+engine never has to undo a recorded span, so capture stays simple.  Callers
+that don't need groups pass NIL for G."
   (let ((compile-atom nil)
         (compile-seq  nil)
-        (compile-alt  nil))
+        (compile-alt  nil)
+        (group-count  0))
     (setf compile-atom
           (lambda (pos)
             (if (>= pos (length pat))
@@ -94,8 +101,17 @@
                  (multiple-value-bind (f e) (funcall compile-alt (+ pos 3))
                    (values f (if (and (< e (length pat)) (char= (char pat e) #\))) (1+ e) e))))
                 ((char= ch #\()
-                 (multiple-value-bind (f e) (funcall compile-alt (1+ pos))
-                   (values f (if (and (< e (length pat)) (char= (char pat e) #\))) (1+ e) e))))
+                 ;; Capturing group — allocate its 1-based number BEFORE
+                 ;; compiling the inner pattern so nested groups number
+                 ;; left-to-right by opening paren, as PHP does.
+                 (let ((gnum (incf group-count)))
+                   (multiple-value-bind (f e) (funcall compile-alt (1+ pos))
+                     (values (lambda (s i g)
+                               (let ((end (funcall f s i g)))
+                                 (when end
+                                   (when g (setf (gethash gnum g) (cons i end)))
+                                   end)))
+                             (if (and (< e (length pat)) (char= (char pat e) #\))) (1+ e) e)))))
                 ((char= ch #\.)
                  (values (lambda (s i g) (declare (ignore g))
                             (when (and (< i (length s))
@@ -185,7 +201,60 @@
                   (values ff pos)))))
     (multiple-value-bind (fn _) (funcall compile-alt 0)
       (declare (ignore _))
-      fn)))
+      (values fn group-count))))
+
+(defun %php-regex-match-at (fn group-count s i)
+  "Run matcher FN (from %php-compile-regex) at position I of S with capture.
+Return (values match-end groups) on success, NIL on failure.  GROUPS is a
+vector indexed by group number: index 0 = the full match (i . end), 1..N = each
+capturing group's (start . end) span or NIL when the group did not participate."
+  (let* ((g (make-hash-table))
+         (end (funcall fn s i g)))
+    (when end
+      (let ((groups (make-array (1+ group-count) :initial-element nil)))
+        (setf (aref groups 0) (cons i end))
+        (loop for k from 1 to group-count
+              do (setf (aref groups k) (gethash k g)))
+        (values end groups)))))
+
+(defun %php-regex-group-string (groups idx s)
+  "Return the substring of S captured by group IDX, or \"\" when absent."
+  (let ((span (and (< idx (length groups)) (aref groups idx))))
+    (if span (subseq s (car span) (cdr span)) "")))
+
+(defun %php-regex-expand-replacement (repl groups s)
+  "Expand $N, ${N} and \\N backreferences in REPL using GROUPS (from
+%php-regex-match-at) over subject S.  $0 / \\0 is the whole match.  A reference
+to a group that did not match expands to the empty string."
+  (with-output-to-string (out)
+    (let ((i 0) (n (length repl)))
+      (loop while (< i n)
+            do (let ((ch (char repl i)))
+                 (cond
+                   ;; ${N}
+                   ((and (char= ch #\$) (< (1+ i) n) (char= (char repl (1+ i)) #\{))
+                    (let ((close (position #\} repl :start (+ i 2))))
+                      (if close
+                          (let ((num (parse-integer repl :start (+ i 2) :end close :junk-allowed t)))
+                            (when num (write-string (%php-regex-group-string groups num s) out))
+                            (setf i (1+ close)))
+                          (progn (write-char ch out) (incf i)))))
+                   ;; $N or \N — consume up to two digits, preferring the
+                   ;; two-digit group when it exists.
+                   ((and (or (char= ch #\$) (char= ch #\\))
+                         (< (1+ i) n) (digit-char-p (char repl (1+ i))))
+                    (let* ((d1 (digit-char-p (char repl (1+ i))))
+                           (d2 (and (< (+ i 2) n) (digit-char-p (char repl (+ i 2)))))
+                           (two (and d2 (+ (* 10 d1) d2))))
+                      (if (and two (< two (length groups)))
+                          (progn (write-string (%php-regex-group-string groups two s) out)
+                                 (setf i (+ i 3)))
+                          (progn (write-string (%php-regex-group-string groups d1 s) out)
+                                 (setf i (+ i 2))))))
+                   ;; \\ and other backslash escapes -> the escaped char literally
+                   ((and (char= ch #\\) (< (1+ i) n))
+                    (write-char (char repl (1+ i)) out) (setf i (+ i 2)))
+                   (t (write-char ch out) (incf i))))))))
 
 (defun %php-regex-exec (pattern-str subject &key (start 0) ic ml)
   "Try to match PATTERN-STR in SUBJECT from START. Returns (values match-str match-start) or nil."
@@ -213,7 +282,13 @@
         (if match-str 1 0)))))
 
 (defun %php-preg-match-all (pattern subject)
-  "PHP preg_match_all: return count of all matches."
+  "PHP preg_match_all: return the number of full matches.
+
+The matcher is anchored at the position it is given, so we must SCAN forward to
+the next match rather than only testing the current position — the previous loop
+tested fn at successive positions and stopped at the first gap, so it counted
+only matches that happened to be consecutive from index 0 (e.g. '1a2b3' / \\d
+returned 1 instead of 3)."
   (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
     (let* ((ic (find #\i flags))
            (ml (find #\m flags))
@@ -222,11 +297,14 @@
            (count 0)
            (pos 0))
       (when fn
-        (loop
-          (let ((end (funcall fn str pos nil)))
-            (unless end (return))
-            (incf count)
-            (setf pos (max (1+ pos) end)))))
+        (loop while (<= pos (length str))
+              do (let ((match-start nil) (match-end nil))
+                   (loop for i from pos to (length str)
+                         for e = (funcall fn str i nil)
+                         when e do (setf match-start i match-end e) (return))
+                   (if match-start
+                       (progn (incf count) (setf pos (max (1+ match-start) match-end)))
+                       (return)))))
       count)))
 
 ;;; -----------------------------------------------------------------------
@@ -239,31 +317,28 @@
     (let* ((ic (find #\i flags))
            (ml (find #\m flags))
            (str (%php-stringify subject))
-           (repl (%php-stringify replacement))
-           (fn (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () nil))))
-      (if fn
-          (with-output-to-string (out)
-            (let ((pos 0))
-              (loop while (<= pos (length str))
-                    do (let ((match-start nil) (match-end nil))
-                         ;; Scan forward for the next match
-                         (loop for i from pos to (length str)
-                               for e = (funcall fn str i nil)
-                               when e
-                                 do (setf match-start i match-end e)
-                                    (return))
-                         (if match-start
-                             (progn
-                               ;; Write text before match
-                               (write-string (subseq str pos match-start) out)
-                               ;; Write replacement (with $0 support for the matched text)
-                               (write-string repl out)
-                               (setf pos (max (1+ match-start) match-end)))
-                             (progn
-                               ;; No more matches — write rest of string
-                               (write-string (subseq str pos) out)
-                               (return)))))))
-          str))))
+           (repl (%php-stringify replacement)))
+      (multiple-value-bind (fn gcount)
+          (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () nil))
+        (if fn
+            (with-output-to-string (out)
+              (let ((pos 0))
+                (loop while (<= pos (length str))
+                      do (let ((match-start nil) (match-end nil) (groups nil))
+                           ;; Scan forward for the next match, capturing groups.
+                           (loop for i from pos to (length str)
+                                 do (multiple-value-bind (e g) (%php-regex-match-at fn gcount str i)
+                                      (when e (setf match-start i match-end e groups g) (return))))
+                           (if match-start
+                               (progn
+                                 (write-string (subseq str pos match-start) out)
+                                 ;; Expand $0/$1/${1}/\1 backreferences in the replacement.
+                                 (write-string (%php-regex-expand-replacement repl groups str) out)
+                                 (setf pos (max (1+ match-start) match-end)))
+                               (progn
+                                 (write-string (subseq str pos) out)
+                                 (return)))))))
+            str)))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  preg_split

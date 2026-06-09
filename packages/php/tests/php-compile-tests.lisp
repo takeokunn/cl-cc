@@ -810,3 +810,20 @@ the wrong arity (separate patterns/callbacks args instead of one map)."
   (assert-string= "a2b4" (%php-run-capture "<?php echo preg_replace_callback(\"/\\d/\", fn($m)=>$m[0]*2, 'a1b2');"))
   ;; preg_replace_callback_array: a single [pattern => callback] map
   (assert-string= "LNLN" (%php-run-capture "<?php echo preg_replace_callback_array(['/\\d/'=>fn($m)=>'N','/[a-z]/'=>fn($m)=>'L'], 'a1b2');")))
+
+(deftest php-e2e-preg-capture-groups
+  "Capture groups in the regex engine: $1/$2/${1}/\\1/$0 backreferences in
+preg_replace, and a corrected preg_match_all count.  The greedy non-backtracking
+matcher now records each capturing group's span, so backreferences resolve."
+  ;; $1/$2 swap and reorder
+  (assert-string= "badc"  (%php-run-capture "<?php echo preg_replace('/(\\w)(\\w)/', '$2$1', 'abcd');"))
+  (assert-string= "34/12" (%php-run-capture "<?php echo preg_replace('/(\\d+)-(\\d+)/', '$2/$1', '12-34');"))
+  ;; $0 = whole match, ${1} brace form
+  (assert-string= "a[12]b" (%php-run-capture "<?php echo preg_replace('/\\d+/', '[$0]', 'a12b');"))
+  (assert-string= "hi!"    (%php-run-capture "<?php echo preg_replace('/(\\w+)/', '${1}!', 'hi');"))
+  ;; nested groups number left-to-right by opening paren
+  (assert-string= "4-2"    (%php-run-capture "<?php echo preg_replace('/((\\d)(\\d))/', '$2-$3', '42');"))
+  ;; preg_match_all counts ALL matches (was 1 — anchored from index 0)
+  (assert-string= "3" (%php-run-capture "<?php echo preg_match_all('/\\d/', '1a2b3');"))
+  (assert-string= "3" (%php-run-capture "<?php echo preg_match_all('/\\w+/', 'foo bar baz');"))
+  (assert-string= "0" (%php-run-capture "<?php echo preg_match_all('/\\d/', 'abc');")))
