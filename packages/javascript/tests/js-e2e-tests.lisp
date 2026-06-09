@@ -88,6 +88,18 @@ position via with-output-to-string."
   (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
   (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
 
+(deftest js-e2e-spread-arrays-and-calls
+  "...spread expands an iterable in array literals and call arguments (regression:
+the %js-spread marker was left as a single element / argument). Lowers to apply
+over a runtime-appended list."
+  (assert-string= "1,2,3,4" (%js-run-capture "let a=[1,2]; console.log([...a,3,4].join(','));"))
+  (assert-string= "4"   (%js-run-capture "let a=[1,2],c=[3,4]; console.log([...a,...c].length);"))
+  (assert-string= "0,1,2,3" (%js-run-capture "console.log([0,...[1,2],3].join(','));"))
+  (assert-string= "6"   (%js-run-capture "function add(a,b,c){return a+b+c;} console.log(add(...[1,2,3]));"))
+  (assert-string= "1-2-3" (%js-run-capture "function f(a,b,c){return a+'-'+b+'-'+c;} console.log(f(1,...[2,3]));"))
+  (assert-string= "a-b-c" (%js-run-capture "console.log([...'abc'].join('-'));"))
+  (assert-string= "7"   (%js-run-capture "console.log(Math.max(...[3,7,2]));")))
+
 (deftest js-e2e-division-yields-float
   "JS / produces an IEEE number, not a CL rational (regression: 5/2 printed
 '5/2'). Integer-valued quotients still print cleanly, and /0 gives Infinity."

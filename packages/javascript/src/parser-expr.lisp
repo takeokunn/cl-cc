@@ -98,6 +98,29 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
   (make-ast-call :func (make-ast-var :name name)
                  :args args))
 
+(defun %js-spread-marker-p (node)
+  "True when NODE is a (%js-spread expr) marker produced for ...expr."
+  (and (ast-call-p node)
+       (let ((f (ast-call-func node)))
+         (and (ast-var-p f) (eq (ast-var-name f) '%js-spread)))))
+
+(defun %js-items-have-spread-p (items)
+  "True when ITEMS contains a ...expr spread marker."
+  (some #'%js-spread-marker-p items))
+
+(defun %js-spread-list-expr (items)
+  "Build a runtime list expression that flattens ITEMS: each (%js-spread expr)
+marker contributes its values (%js-spread already returns a CL list) and each
+regular item contributes a one-element list, appended together. Used to expand
+spread in array literals and call arguments via apply."
+  (make-ast-call
+   :func (make-ast-var :name 'append)
+   :args (mapcar (lambda (it)
+                   (if (%js-spread-marker-p it)
+                       it
+                       (make-ast-call :func (make-ast-var :name 'list) :args (list it))))
+                 items)))
+
 (defun %js-lower-binary (op-str lhs rhs)
   "Lower a binary operator string + lhs + rhs to the appropriate AST.
    Dispatch is data-driven via *js-direct-binop-keywords* and *js-binop-runtime-helpers*."
@@ -300,9 +323,14 @@ Handles elision (holes), spread elements, and assignment expressions."
                    (t (return)))))))
           (multiple-value-bind (tok2 rest2) (js-expect :T-RBRACKET current)
             (declare (ignore tok2))
-            (values (make-ast-call :func (make-ast-var :name '%js-make-array)
-                                   :args (nreverse elements))
-                    rest2))))))
+            (let ((elems (nreverse elements)))
+              (values (if (%js-items-have-spread-p elems)
+                          ;; [...a, x] -> (apply #'%js-make-array (append a (list x)))
+                          (make-ast-apply :func '%js-make-array
+                                          :args (list (%js-spread-list-expr elems)))
+                          (make-ast-call :func (make-ast-var :name '%js-make-array)
+                                         :args elems))
+                      rest2)))))))
 
 (defun %js-parse-object-property (stream)
   "Parse one property in an object literal.
@@ -764,7 +792,10 @@ Returns (values ast rest). Loops until no more postfix ops."
         ;; Call: fn(args)
         ((eq type :T-LPAREN)
          (multiple-value-bind (args rest) (js-parse-arguments stream)
-           (setf ast (make-ast-call :func ast :args args)
+           (setf ast (if (%js-items-have-spread-p args)
+                         ;; fn(...a, x) -> (apply fn (append a (list x)))
+                         (make-ast-apply :func ast :args (list (%js-spread-list-expr args)))
+                         (make-ast-call :func ast :args args))
                  stream rest)))
         ;; Optional chain ?.
         ((and (eq type :T-OP) (string= val "?."))

@@ -297,11 +297,12 @@ checked by js-e2e-destructuring-and-sequential-decls."
 ;;; ─── Spread operator ──────────────────────────────────────────────────────────
 
 (deftest js-parser-spread-in-array
-  "[...arr] produces a call containing %js-spread."
+  "[...arr] lowers to an apply of %js-make-array over the spread-expanded element
+list (a spread element makes the array literal an ast-apply, not a plain call)."
   (let ((ast (%js-first "const x = [...arr];")))
     (assert-true (cl-cc:ast-let-p ast))
     (let ((val (cdr (first (cl-cc:ast-let-bindings ast)))))
-      (assert-true (cl-cc:ast-call-p val)))))
+      (assert-true (cl-cc:ast-apply-p val)))))
 
 ;;; ─── Optional chaining ────────────────────────────────────────────────────────
 
