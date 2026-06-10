@@ -151,6 +151,39 @@ yield, await, import()."
 
 ;;; ─── Parenthesized Expression / Arrow Function ───────────────────────────────
 
+(defun %js-call-callee-name (ast)
+  "If AST is (ast-call (ast-var NAME) …), return NAME; else NIL."
+  (when (and (ast-call-p ast) (ast-var-p (ast-call-func ast)))
+    (ast-var-name (ast-call-func ast))))
+
+(defun %js-expr-to-binding-pattern (expr)
+  "Convert an arrow CoverGrammar parameter EXPR — already parsed as an expression
+— into a destructuring binding pattern for %js-emit-destructure-bindings, or NIL
+if EXPR is not a pattern.  A plain var becomes its symbol; an array literal
+(%js-make-array …) becomes an :array-pattern (holes/spread/nesting preserved); an
+object literal (%js-make-object k v …) becomes an :object-pattern.  This is how
+([a,b])=>… and ({x,y})=>… recover their patterns, since the paren contents were
+parsed as an array/object literal before the => was seen."
+  (cond
+    ((ast-var-p expr) (ast-var-name expr))
+    ((eq (%js-call-callee-name expr) '%js-make-array)
+     (list :array-pattern (gensym "ARR-DEST-")
+           (mapcar
+            (lambda (el)
+              (cond
+                ((and (ast-quote-p el) (eq (ast-quote-value el) :js-hole)) :hole)
+                ((eq (%js-call-callee-name el) '%js-spread)
+                 (list :rest (%js-expr-to-binding-pattern (first (ast-call-args el)))))
+                (t (%js-expr-to-binding-pattern el))))
+            (ast-call-args expr))))
+    ((eq (%js-call-callee-name expr) '%js-make-object)
+     (list :object-pattern (gensym "OBJ-DEST-")
+           (loop for (k v) on (ast-call-args expr) by #'cddr
+                 collect (list (and (ast-quote-p k) (ast-quote-value k))
+                               (%js-expr-to-binding-pattern v)
+                               nil))))
+    (t nil)))
+
 (defun %js-parse-paren-or-arrow (stream)
   "Parse ( ... ) — either a parenthesized expression or arrow function params.
 Returns (values ast rest)."
@@ -175,6 +208,7 @@ Returns (values ast rest)."
         (let ((exprs nil)
               (params nil)
               (optionals nil)        ; (sym . default-ast) alist for `x = default'
+              (param-patterns nil)   ; (gensym . binding-pattern) for [a,b]/{x,y} params
               (is-arrow-candidate t)
               (current rest)
               (rest-sym nil))
@@ -212,8 +246,20 @@ Returns (values ast rest)."
                          (setf current rest4)))
                      (progn
                        (push expr exprs)
-                       (when (ast-var-p expr)
-                         (push (ast-var-name expr) params)))))))
+                       (cond
+                         ((ast-var-p expr)
+                          (push (ast-var-name expr) params))
+                         ;; Array/object literal in param position: an arrow
+                         ;; destructuring pattern.  Give it a gensym param and
+                         ;; record the pattern for body-prologue unpacking.
+                         (t
+                          (let ((pat (%js-expr-to-binding-pattern expr)))
+                            (if (and pat (listp pat))
+                                (let ((g (second pat)))
+                                  (push g params)
+                                  (push (cons g pat) param-patterns))
+                                ;; not a valid pattern -> not an arrow
+                                (setf is-arrow-candidate nil))))))))))
             (if (eq (js-peek-type current) :T-COMMA)
                 (multiple-value-bind (tok2 rest2) (js-consume current)
                   (declare (ignore tok2))
@@ -227,7 +273,8 @@ Returns (values ast rest)."
             (if (and is-arrow-candidate (eq (js-peek-type rest2) :T-ARROW))
                 (%js-finish-arrow-function (nreverse params) rest2
                                            :optionals (nreverse optionals)
-                                           :rest-sym rest-sym)
+                                           :rest-sym rest-sym
+                                           :param-patterns (nreverse param-patterns))
                 ;; Parenthesized expression — return last expression (or progn)
                 (let ((all-exprs (nreverse exprs)))
                   (values (if (null (cdr all-exprs))
@@ -235,10 +282,12 @@ Returns (values ast rest)."
                               (make-ast-progn :forms all-exprs))
                           rest2))))))))
 
-(defun %js-finish-arrow-function (params stream &key optionals rest-sym)
+(defun %js-finish-arrow-function (params stream &key optionals rest-sym param-patterns)
   "Consume => and parse arrow function body. PARAMS is the list of required-param
 symbols; OPTIONALS is a (sym . default-ast) alist for defaulted params; REST-SYM
-is the rest-parameter symbol (or nil).  Returns (values ast rest)."
+is the rest-parameter symbol (or nil); PARAM-PATTERNS is a (gensym . pattern)
+alist for destructuring params like ([a,b])=>… (the gensym param is unpacked by a
+body-prologue let, exactly as for named functions).  Returns (values ast rest)."
   (multiple-value-bind (tok rest) (js-expect :T-ARROW stream)
     (declare (ignore tok))
     (multiple-value-bind (required opts) (%js-split-params-by-defaults params optionals)
@@ -247,7 +296,9 @@ is the rest-parameter symbol (or nil).  Returns (values ast rest)."
       ;; wraps the body to bind REST-SYM to a JS array of the trailing args.
       (flet ((finish (body-forms rest2)
                (multiple-value-bind (rest-param wrapped-body)
-                   (%js-rest-binding rest-sym body-forms)
+                   (%js-rest-binding rest-sym
+                                     (%js-prepend-param-destructuring
+                                      param-patterns body-forms))
                  (values (make-ast-lambda :params required
                                           :optional-params opts
                                           :rest-param rest-param

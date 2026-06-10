@@ -122,6 +122,25 @@ sub-bindings now recurses, building bindings in let* order."
   (assert-string= "6"     (%js-run-capture "function f([a,[b,c]]){return a+b+c;} console.log(f([1,[2,3]]));"))
   (assert-string= "3"     (%js-run-capture "function f({data:{items}}){return items.length;} console.log(f({data:{items:[1,2,3]}}));")))
 
+(deftest js-e2e-arrow-destructuring
+  "Arrow-function parameters may be destructuring patterns: ([a,b])=>… and
+({x,y})=>…, including nesting and the .map(([a,b])=>…) idiom.  Regression: the
+paren contents were parsed as an array/object literal and only plain identifiers
+became params, so the pattern was dropped and the arrow silently produced nothing.
+%js-expr-to-binding-pattern now recovers the pattern from the literal when => is
+seen, reusing the body-prologue destructuring lowering."
+  (assert-string= "11" (%js-run-capture "const f=([a,b])=>a+b; console.log(f([5,6]));"))
+  (assert-string= "12" (%js-run-capture "const g=({x,y})=>x*y; console.log(g({x:3,y:4}));"))
+  (assert-string= "6"  (%js-run-capture "const k=([a,[b,c]])=>a+b+c; console.log(k([1,[2,3]]));"))
+  (assert-string= "7"  (%js-run-capture "const q=({a:{b}})=>b; console.log(q({a:{b:7}}));"))
+  ;; the canonical idiom: destructuring in a .map/.forEach callback
+  (assert-string= "3,7" (%js-run-capture "console.log([[1,2],[3,4]].map(([a,b])=>a+b).join(','));"))
+  (assert-string= "10,20" (%js-run-capture "console.log([{n:1},{n:2}].map(({n})=>n*10).join(','));"))
+  ;; plain arrows and parenthesized expressions still parse (no regression)
+  (assert-string= "10" (%js-run-capture "const r=x=>x*2; console.log(r(5));"))
+  (assert-string= "7"  (%js-run-capture "const p=(a,b)=>a-b; console.log(p(9,2));"))
+  (assert-string= "3"  (%js-run-capture "console.log((1,2,3));")))
+
 (deftest js-e2e-json-and-math-globals
   "JSON and Math are seeded as global objects (regression: they were never added
 to the prelude). JSON.parse worked once its string scanner stopped discarding the
