@@ -104,6 +104,24 @@ machinery), including rest, defaults, and multiple destructuring params."
   ;; plain params still work (no regression)
   (assert-string= "7"   (%js-run-capture "function f(a,b){return a-b;} console.log(f(9,2));")))
 
+(deftest js-e2e-nested-destructuring
+  "Destructuring patterns nest (array-in-array, object-in-object, mixed) for both
+var declarations and function parameters.  Regression: %js-emit-destructure-
+bindings bound a nested pattern's gensym but never recursed to unpack it, so inner
+names stayed undefined and the binding form failed to compile.  %js-destructure-
+sub-bindings now recurses, building bindings in let* order."
+  (assert-string= "1 2 3" (%js-run-capture "const [a,[b,c]]=[1,[2,3]]; console.log(a,b,c);"))
+  (assert-string= "42"    (%js-run-capture "const {a:{b}}={a:{b:42}}; console.log(b);"))
+  (assert-string= "1 2"   (%js-run-capture "const {p,q:{r}}={p:1,q:{r:2}}; console.log(p,r);"))
+  (assert-string= "1 2 3 4" (%js-run-capture "const [[a,b],[c,d]]=[[1,2],[3,4]]; console.log(a,b,c,d);"))
+  (assert-string= "99"    (%js-run-capture "const {u:{v:{w}}}={u:{v:{w:99}}}; console.log(w);"))
+  ;; nested + rest, nested + default
+  (assert-string= "1 2 3-4" (%js-run-capture "const [a,[b,...c]]=[1,[2,3,4]]; console.log(a,b,c.join('-'));"))
+  (assert-string= "1 9"   (%js-run-capture "const {a,b:{c=9}}={a:1,b:{}}; console.log(a,c);"))
+  ;; nested destructuring in a function parameter
+  (assert-string= "6"     (%js-run-capture "function f([a,[b,c]]){return a+b+c;} console.log(f([1,[2,3]]));"))
+  (assert-string= "3"     (%js-run-capture "function f({data:{items}}){return items.length;} console.log(f({data:{items:[1,2,3]}}));")))
+
 (deftest js-e2e-json-and-math-globals
   "JSON and Math are seeded as global objects (regression: they were never added
 to the prelude). JSON.parse worked once its string scanner stopped discarding the

@@ -315,10 +315,26 @@ DEFAULT-AST is nil."
       (second binding-or-sym)
       binding-or-sym))
 
+(defun %js-destructure-sub-bindings (target access-expr)
+  "Return an ORDERED list of (sym . init) bindings for a destructuring sub-TARGET
+initialized from ACCESS-EXPR.  When TARGET is itself a nested array/object pattern
+(e.g. the [b,c] in [a,[b,c]], or the {b} in {a:{b}}), recurse so the nested names
+are bound too; a plain symbol yields a single binding.  Recursion is what makes
+nested destructuring work — previously the nested pattern's gensym was bound but
+never unpacked, so b/c stayed undefined and the binding form failed to compile."
+  (if (and (listp target)
+           (member (first target) '(:array-pattern :object-pattern)))
+      (multiple-value-bind (b _e) (%js-emit-destructure-bindings target access-expr)
+        (declare (ignore _e))
+        b)
+      (list (cons (%js-binding-to-sym target) access-expr))))
+
 (defun %js-emit-destructure-bindings (binding init-expr)
   "Emit let bindings for a destructuring BINDING initialized from INIT-EXPR.
   Returns (values bindings-alist extra-lets) where bindings-alist is
-  ((sym . init-expr) ...) and extra-lets is a list of additional let wrappers."
+  ((sym . init-expr) ...) in let* order and extra-lets is unused (nil).
+  Bindings are accumulated with APPEND to preserve order: a nested pattern's
+  gensym must be bound before the bindings that read from it."
   (if (not (listp binding))
       ;; Simple symbol
       (values (list (cons binding init-expr)) nil)
@@ -329,7 +345,6 @@ DEFAULT-AST is nil."
           ((eq kind :object-pattern)
            ;; tmp = init-expr, then destructure fields
            (let ((bindings (list (cons tmp init-expr)))
-                 (extras nil)
                  (consumed-keys nil))
              (dolist (field desc)
                (if (eq (car field) :rest)
@@ -337,29 +352,32 @@ DEFAULT-AST is nil."
                    ;; passing the already-bound keys so they're excluded from the
                    ;; rest object.  Rest is syntactically last, so consumed-keys is
                    ;; complete here.
-                   (push (cons (second field)
-                               (make-ast-call
-                                :func (make-ast-var :name '%js-destructure-object)
-                                :args (list* (make-ast-var :name tmp)
-                                             (make-ast-quote :value :rest)
-                                             (mapcar (lambda (k)
-                                                       (make-ast-quote :value k))
-                                                     (reverse consumed-keys)))))
-                         extras)
-                   ;; named property, with optional default ((key local default))
-                   (let ((key   (first field))
-                         (local (second field))
-                         (dflt  (third field)))
+                   (setf bindings
+                         (append bindings
+                                 (list (cons (second field)
+                                             (make-ast-call
+                                              :func (make-ast-var :name '%js-destructure-object)
+                                              :args (list* (make-ast-var :name tmp)
+                                                           (make-ast-quote :value :rest)
+                                                           (mapcar (lambda (k)
+                                                                     (make-ast-quote :value k))
+                                                                   (reverse consumed-keys))))))))
+                   ;; named property, with optional default ((key local default)).
+                   ;; LOCAL may itself be a nested pattern — recurse via sub-bindings.
+                   (let* ((key    (first field))
+                          (local  (second field))
+                          (dflt   (third field))
+                          (access (%js-default-access
+                                   (make-ast-call
+                                    :func (make-ast-var :name '%js-get-prop)
+                                    :args (list (make-ast-var :name tmp)
+                                                (make-ast-quote :value key)))
+                                   dflt)))
                      (push key consumed-keys)
-                     (push (cons (%js-binding-to-sym local)
-                                 (%js-default-access
-                                  (make-ast-call
-                                   :func (make-ast-var :name '%js-get-prop)
-                                   :args (list (make-ast-var :name tmp)
-                                               (make-ast-quote :value key)))
-                                  dflt))
-                           extras))))
-             (values (append bindings (nreverse extras)) nil)))
+                     (setf bindings
+                           (append bindings
+                                   (%js-destructure-sub-bindings local access))))))
+             (values bindings nil)))
           ((eq kind :array-pattern)
            ;; tmp = init-expr, then destructure by index
            (let ((bindings (list (cons tmp init-expr)))
@@ -369,33 +387,38 @@ DEFAULT-AST is nil."
                  ((eq elem :hole)
                   (incf idx))
                  ((and (listp elem) (eq (car elem) :rest))
-                  (push (cons (second elem)
-                              (make-ast-call
-                               :func (make-ast-var :name '%js-destructure-array)
-                               :args (list (make-ast-var :name tmp)
-                                           (make-ast-quote :value idx)
-                                           (make-ast-quote :value :rest))))
-                        bindings))
-                 ;; element with default: (:default sym default-ast)
+                  (setf bindings
+                        (append bindings
+                                (list (cons (second elem)
+                                            (make-ast-call
+                                             :func (make-ast-var :name '%js-destructure-array)
+                                             :args (list (make-ast-var :name tmp)
+                                                         (make-ast-quote :value idx)
+                                                         (make-ast-quote :value :rest))))))))
+                 ;; element with default: (:default target default-ast) — TARGET may
+                 ;; be a nested pattern.
                  ((and (listp elem) (eq (car elem) :default))
-                  (push (cons (%js-binding-to-sym (second elem))
-                              (%js-default-access
-                               (make-ast-call
-                                :func (make-ast-var :name '%js-get-prop)
-                                :args (list (make-ast-var :name tmp)
-                                            (make-ast-quote :value idx)))
-                               (third elem)))
-                        bindings)
+                  (let ((access (%js-default-access
+                                 (make-ast-call
+                                  :func (make-ast-var :name '%js-get-prop)
+                                  :args (list (make-ast-var :name tmp)
+                                              (make-ast-quote :value idx)))
+                                 (third elem))))
+                    (setf bindings
+                          (append bindings
+                                  (%js-destructure-sub-bindings (second elem) access))))
                   (incf idx))
+                 ;; plain element — may itself be a nested pattern.
                  (t
-                  (push (cons (%js-binding-to-sym elem)
-                              (make-ast-call
-                               :func (make-ast-var :name '%js-get-prop)
-                               :args (list (make-ast-var :name tmp)
-                                           (make-ast-quote :value idx))))
-                        bindings)
+                  (let ((access (make-ast-call
+                                 :func (make-ast-var :name '%js-get-prop)
+                                 :args (list (make-ast-var :name tmp)
+                                             (make-ast-quote :value idx)))))
+                    (setf bindings
+                          (append bindings
+                                  (%js-destructure-sub-bindings elem access))))
                   (incf idx))))
-             (values (nreverse bindings) nil)))
+             (values bindings nil)))
           (t (values (list (cons binding init-expr)) nil))))))
 
 ;;; ─── Variable Declaration Parsing ───────────────────────────────────────────
