@@ -475,9 +475,34 @@ The runtime keys map logical plan IDs onto VM profile keys:
            :errors                 errors
            :pgo-counter-plan       pgo-counter-plan))))))
 
+(defun %form-needs-toplevel-path-p (form)
+  "True when FORM mentions a condition/handler control construct anywhere, so it
+must use the top-level compile path (which establishes the VM handler frame)
+rather than the single-expression path.  Matched by symbol-name so it is robust
+to the reader's package."
+  (labels ((control-sym-p (x)
+             (and (symbolp x) (not (null x))
+                  (member (symbol-name x)
+                          '("HANDLER-CASE" "HANDLER-BIND" "IGNORE-ERRORS"
+                            "UNWIND-PROTECT" "RESTART-CASE" "WITH-SIMPLE-RESTART")
+                          :test #'string=)))
+           (walk (x)
+             (and (consp x)
+                  (or (control-sym-p (car x))
+                      (walk (car x))
+                      (walk (cdr x))))))
+    (and (walk form) t)))
+
 (defun %compile-string-forms (forms opts)
-  "Compile already-parsed FORMS through the single-form or top-level path."
-  (if (= (length forms) 1)
+  "Compile already-parsed FORMS through the single-form or top-level path.
+
+A single CONTROL form (handler-case / ignore-errors / unwind-protect) is routed
+through the top-level path, not compile-expression: the single-expression path
+does not establish the VM handler frame, so a lone (handler-case (error …) …)
+program failed to catch — yet the same program preceded by any other form (which
+takes the top-level path) caught correctly."
+  (if (and (= (length forms) 1)
+           (not (%form-needs-toplevel-path-p (first forms))))
       (apply #'compile-expression (first forms) (%opts->compile-kwargs opts))
       (let ((*enable-cps-vm-primary-path* nil))
         (let ((result (%call-with-tiered-optimizer-policy

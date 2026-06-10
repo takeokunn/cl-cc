@@ -52,6 +52,22 @@ expansion, leaving a bare call to an undefined REMOVE-IF function."
   (assert-eq t (run-string "
 (let ((cleaned nil)) (handler-case (unwind-protect (error \"boom\") (setf cleaned t)) (error (e) cleaned)))")))
 
+(deftest handler-case-as-sole-top-level-form
+  "A handler-case that is the ONLY top-level form catches a signalled condition.
+Regression: the single-expression compile path (taken only for a 1-form program)
+did not establish the VM handler frame, so a lone (handler-case (error …) …)
+failed to catch — yet the same form preceded by any other form (which takes the
+top-level path) caught correctly.  %form-needs-toplevel-path-p now routes a lone
+control form through the top-level path."
+  (assert-equal :caught (run-string "(handler-case (error \"x\") (error (e) :caught))"))
+  (assert-equal :caught (run-string "(handler-case (error \"x\") (error (e) (progn :caught)))"))
+  ;; nested inside another call (the handler-case is not the outermost form)
+  (assert-equal 5 (run-string "(+ 2 (handler-case (error \"x\") (error (e) 3)))"))
+  ;; ignore-errors as the sole form returns NIL on a signalled error
+  (assert-eq nil (run-string "(ignore-errors (error \"y\"))"))
+  ;; no-error path still returns the protected value
+  (assert-= 7 (run-string "(handler-case (+ 3 4) (error (e) 0))")))
+
 ;;; Self-Hosting CLOS Compiler Test
 
 (deftest self-host-clos-compiler
