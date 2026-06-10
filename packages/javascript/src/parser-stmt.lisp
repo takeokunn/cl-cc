@@ -450,12 +450,15 @@ DEFAULT-AST is nil."
 
 (defun %js-parse-param-list (stream)
   "Parse (param, ...) parameter list.
-  Returns (values params-list rest optionals rest-sym), where OPTIONALS is an
-  alist (sym . default-ast) for parameters with `= default' and REST-SYM is the
-  ...rest parameter symbol (or NIL). Callers binding only the first two values are
-  unaffected."
+  Returns (values params-list rest optionals rest-sym param-patterns), where
+  OPTIONALS is an alist (sym . default-ast) for parameters with `= default',
+  REST-SYM is the ...rest parameter symbol (or NIL), and PARAM-PATTERNS is an
+  alist (param-gensym . binding-pattern) for destructuring parameters like
+  function f([a,b]) / f({x,y}) — the caller prepends a destructuring let to the
+  body that unpacks the gensym param into the pattern's names.  Callers binding
+  only the first values are unaffected."
   (let ((current (%js-consume-expected :T-LPAREN stream))
-        (params nil) (optionals nil) (rest-sym nil))
+        (params nil) (optionals nil) (rest-sym nil) (param-patterns nil))
     (loop
       (when (or (js-at-eof-p current)
                 (eq (js-peek-type current) :T-RPAREN))
@@ -472,6 +475,11 @@ DEFAULT-AST is nil."
          (multiple-value-bind (binding rest) (%js-parse-binding-pattern current)
            (let ((sym (%js-binding-to-sym binding)))
              (push sym params)
+             ;; A destructuring param (binding is a (:array-pattern|:object-pattern
+             ;; gensym desc) list, not a bare symbol): record it so the caller can
+             ;; unpack the gensym into the named locals at the top of the body.
+             (when (listp binding)
+               (push (cons sym binding) param-patterns))
              (setf current rest)
              ;; Default parameter value: = expr — recorded so the param becomes
              ;; an &optional with that default (was parsed and discarded).
@@ -487,7 +495,30 @@ DEFAULT-AST is nil."
     (values (nreverse params)
             (%js-consume-expected :T-RPAREN current)
             (nreverse optionals)
-            rest-sym)))
+            rest-sym
+            (nreverse param-patterns))))
+
+(defun %js-prepend-param-destructuring (param-patterns body-stmts)
+  "Prepend a destructuring let for each (param-gensym . binding-pattern) in
+PARAM-PATTERNS to BODY-STMTS, so function f([a,b]){…} unpacks the gensym param
+into a and b at the top of the body.  Each empty-bodied let is then nested over
+the rest of the body via %js-finish-let-bindings — without that the unbodied let
+fails to compile, the top-level handler-case drops the whole defun, and calls hit
+'Undefined function'.  Re-running the pass is idempotent: already-bodied lets in
+BODY-STMTS pass through unchanged."
+  (if (null param-patterns)
+      body-stmts
+      (%js-finish-let-bindings
+       (append
+        (mapcar (lambda (pp)
+                  (multiple-value-bind (bindings _extras)
+                      (%js-emit-destructure-bindings (cdr pp)
+                                                     (make-ast-var :name (car pp)))
+                    (declare (ignore _extras))
+                    (make-ast-let :bindings bindings :body nil
+                                  :declarations (list :let))))
+                param-patterns)
+        body-stmts))))
 
 (defun %js-split-params-by-defaults (params optionals)
   "Split PARAMS into (values required optional-entries). OPTIONALS is the
@@ -543,9 +574,11 @@ body is wrapped in a let binding REST-SYM to that list converted to a JS array
         (multiple-value-bind (tok rest) (js-consume current)
           (setf fn-name (js-ident-sym (js-tok-value tok))
                 current rest)))
-      (multiple-value-bind (params rest optionals rest-sym) (%js-parse-param-list current)
+      (multiple-value-bind (params rest optionals rest-sym param-patterns)
+          (%js-parse-param-list current)
         (multiple-value-bind (body-ast rest2) (js-parse-block rest)
-          (let ((body-stmts (ast-progn-forms body-ast))
+          (let ((body-stmts (%js-prepend-param-destructuring
+                             param-patterns (ast-progn-forms body-ast)))
                 (decls nil))
             (when async-p     (push :js-async     decls))
             (when generator-p (push :js-generator decls))

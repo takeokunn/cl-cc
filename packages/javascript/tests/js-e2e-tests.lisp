@@ -88,6 +88,22 @@ array rest was a one-element CL list (Array.isArray false, rest.join threw with
   (assert-string= "{\"b\":2,\"c\":3}" (%js-run-capture "const {a,...rest}={a:1,b:2,c:3}; console.log(JSON.stringify(rest));"))
   (assert-string= "{}"    (%js-run-capture "const {m,...n}={m:1}; console.log(JSON.stringify(n));")))
 
+(deftest js-e2e-parameter-destructuring
+  "Named-function parameters may be destructuring patterns: function f([a,b]) and
+function g({x,y}).  Regression: the pattern was parsed but discarded (the param
+kept only its gensym), so the body never unpacked it; the unbodied let then failed
+to compile and the defun was silently dropped -> 'Undefined function: F'.  Now the
+param gensym is unpacked by a body-prologue let (reusing the var-destructuring
+machinery), including rest, defaults, and multiple destructuring params."
+  (assert-string= "30"  (%js-run-capture "function f([a,b]){return a+b;} console.log(f([10,20]));"))
+  (assert-string= "12"  (%js-run-capture "function f({x,y}){return x*y;} console.log(f({x:3,y:4}));"))
+  (assert-string= "1:2,3" (%js-run-capture "function f([a,...r]){return a+':'+r.join(',');} console.log(f([1,2,3]));"))
+  (assert-string= "{\"b\":2}" (%js-run-capture "function f({a,...rest}){return JSON.stringify(rest);} console.log(f({a:1,b:2}));"))
+  (assert-string= "6"   (%js-run-capture "function f([a,b],{x}){return a+b+x;} console.log(f([1,2],{x:3}));"))
+  (assert-string= "10"  (%js-run-capture "function f({x=10}){return x;} console.log(f({}));"))
+  ;; plain params still work (no regression)
+  (assert-string= "7"   (%js-run-capture "function f(a,b){return a-b;} console.log(f(9,2));")))
+
 (deftest js-e2e-json-and-math-globals
   "JSON and Math are seeded as global objects (regression: they were never added
 to the prelude). JSON.parse worked once its string scanner stopped discarding the
