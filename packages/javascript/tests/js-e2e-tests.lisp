@@ -234,19 +234,23 @@ class using `this' failed with 'Unbound global variable: %JS-THIS')."
   (cl-cc/javascript:parse-js-source src))
 
 (defun %js-e2e-has-defun-named (name asts)
-  "Return the AST-DEFUN whose name matches upcased NAME, or NIL."
+  "Return the AST-DEFUN whose name matches NAME case-insensitively, or NIL.
+JS identifiers are now interned case-preserving, so a defun named `fib' is the
+symbol |fib|; compare with string-equal so these structural tests stay name-case
+agnostic."
   (find-if (lambda (ast)
              (and (cl-cc:ast-defun-p ast)
-                  (string= (string-upcase name)
-                            (symbol-name (cl-cc:ast-defun-name ast)))))
+                  (string-equal name
+                                (symbol-name (cl-cc:ast-defun-name ast)))))
            asts))
 
 (defun %js-e2e-has-defclass-named (name asts)
-  "Return the AST-DEFCLASS whose name matches upcased NAME, or NIL."
+  "Return the AST-DEFCLASS whose name matches NAME case-insensitively, or NIL.
+JS identifiers are interned case-preserving now, so compare with string-equal."
   (find-if (lambda (ast)
              (and (cl-cc:ast-defclass-p ast)
-                  (string= (string-upcase name)
-                            (symbol-name (cl-cc:ast-defclass-name ast)))))
+                  (string-equal name
+                                (symbol-name (cl-cc:ast-defclass-name ast)))))
            asts))
 
 (defun %js-count-ast-type (pred asts)
@@ -338,7 +342,7 @@ class Dog extends Animal {
     (assert-true (not (null (%js-e2e-has-defclass-named "ANIMAL" asts))))
     (assert-true (not (null (%js-e2e-has-defclass-named "DOG" asts))))
     (let ((dog (%js-e2e-has-defclass-named "DOG" asts)))
-      (assert-true (some (lambda (s) (string= "ANIMAL" (symbol-name s)))
+      (assert-true (some (lambda (s) (string-equal "Animal" (symbol-name s)))
                 (cl-cc:ast-defclass-superclasses dog))))))
 
 ;;; ─── 5. Object destructuring ──────────────────────────────────────────────────
@@ -809,3 +813,13 @@ returned undefined."
   (assert-string= "3" (%js-run-capture "class A{static items=[1,2,3];} console.log(A.items.length);"))
   ;; the case fix also helps uppercase INSTANCE field names
   (assert-string= "7" (%js-run-capture "class C{COUNT=7;} console.log(new C().COUNT);")))
+
+(deftest js-e2e-case-sensitive-identifiers
+  "JavaScript identifiers are case-sensitive: a/A, foo/Foo are distinct, and a
+lowercase instance variable does not collide with its Class name.  Regression:
+js-ident-sym (and %js-binding-sym) upcased every identifier, so `const a = new
+A()' overwrote the class's global slot and A.staticMember then read undefined."
+  (assert-string= "5 10" (%js-run-capture "const A=5; const a=10; console.log(A+' '+a);"))
+  (assert-string= "1 2" (%js-run-capture "function foo(){return 1;} function Foo(){return 2;} console.log(foo()+' '+Foo());"))
+  (assert-string= "10" (%js-run-capture "class A{static Y=10;m(){return 1;}} const a=new A(); a.m(); console.log(A.Y);"))
+  (assert-string= "7 0" (%js-run-capture "class Point{constructor(x){this.x=x;} static origin(){return new Point(0);}} const p=new Point(7); console.log(p.x+' '+Point.origin().x);")))

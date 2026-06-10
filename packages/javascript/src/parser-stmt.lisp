@@ -197,8 +197,11 @@ symbol JS.X while the body referenced X (via js-ident-sym). Every `return param'
 or `console.log(localVar)' then hit an unbound variable, the enclosing function
 body failed to compile, the top-level handler-case silently dropped the defun,
 and calls reported `Undefined function'. The package already namespaces JS
-symbols, so the prefix was redundant as well as desynchronized."
-  (intern (string-upcase (if (stringp name) name (symbol-name name)))
+symbols, so the prefix was redundant as well as desynchronized.
+
+Preserves CASE — must use the IDENTICAL scheme as js-ident-sym (JavaScript is
+case-sensitive), so a binding and its references resolve to the same symbol."
+  (intern (if (stringp name) name (symbol-name name))
           :cl-cc/javascript))
 
 (defun %js-parse-pattern-default (stream)

@@ -57,8 +57,10 @@
 ;;; ─── Symbol helpers ──────────────────────────────────────────────────────────
 
 (defun js-ident-sym (str)
-  "Intern a JS identifier string as a CL symbol in :cl-cc/javascript."
-  (intern (string-upcase (if (stringp str) str (symbol-name str)))
+  "Intern a JS identifier string as a CL symbol in :cl-cc/javascript.
+Preserves CASE (JavaScript is case-sensitive); kept in sync with the canonical
+definition in parser.lisp and with %js-binding-sym."
+  (intern (if (stringp str) str (symbol-name str))
           :cl-cc/javascript))
 
 (defun js-private-ident-sym (str)

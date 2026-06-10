@@ -127,8 +127,11 @@ overflowing the control stack."
 
 (defun js-ident-sym (str)
   "Convert a JS identifier string STR to an interned CL symbol in :cl-cc/javascript.
-Accepts both strings and symbols; upcases the name before interning."
-  (intern (string-upcase (if (stringp str) str (symbol-name str)))
+Accepts both strings and symbols.  Preserves CASE — JavaScript is case-sensitive,
+so `a'/`A', `foo'/`Foo', and a lowercase instance var vs its Class name must be
+distinct symbols.  Must stay in sync with %js-binding-sym (binding side) and the
+parser-class.lisp copy."
+  (intern (if (stringp str) str (symbol-name str))
           :cl-cc/javascript))
 
 (defun js-private-sym (str)

@@ -97,13 +97,14 @@ return-from nil) exits the arrow — a bare lambda establishes no block named ni
   "class Dog {} produces ast-defclass."
   (let ((ast (%js-first "class Dog {}")))
     (assert-true (cl-cc:ast-defclass-p ast))
-    (assert-string= "DOG" (symbol-name (cl-cc:ast-defclass-name ast)))))
+    ;; case-preserved: JS `Dog' interns as |Dog|, not DOG
+    (assert-string= "Dog" (symbol-name (cl-cc:ast-defclass-name ast)))))
 
 (deftest js-parser-class-with-extends
   "class Cat extends Animal {} records superclass."
   (let ((ast (%js-first "class Cat extends Animal {}")))
     (assert-true (cl-cc:ast-defclass-p ast))
-    (assert-true (some (lambda (s) (string= "ANIMAL" (symbol-name s)))
+    (assert-true (some (lambda (s) (string= "Animal" (symbol-name s)))
               (cl-cc:ast-defclass-superclasses ast)))))
 
 (deftest js-parser-class-with-constructor
