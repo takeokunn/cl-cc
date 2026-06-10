@@ -786,3 +786,14 @@ injected into the constructor."
   (assert-string= "6"  (%js-run-capture "class C{a=2;b=this.a*3;} console.log(new C().b);"))
   ;; derived class: parent constructor still runs AND own field initialises
   (assert-string= "y 99" (%js-run-capture "class A{constructor(n){this.n=n;}} class D extends A{extra=99;} const d=new D('y'); console.log(d.n+' '+d.extra);")))
+
+(deftest js-e2e-class-self-reference
+  "A class may reference itself inside its own methods (factory methods, recursion,
+static helpers).  Regression: the class name was registered as a known global
+only AFTER its methods compiled, so a self-reference (new A(), return A,
+A.helper()) failed as an unbound variable."
+  (assert-string= "z" (%js-run-capture "class A{constructor(n){this.n=n;} static create(n){return new A(n);}} console.log(A.create('z').n);"))
+  (assert-string= "6" (%js-run-capture "class A{constructor(n){this.n=n;} clone(){return new A(this.n+1);}} console.log(new A(5).clone().n);"))
+  (assert-string= "true" (%js-run-capture "class A{static self(){return A;}} console.log(A.self()===A);"))
+  (assert-string= "42" (%js-run-capture "class A{static y(){return 42;} static z(){return A.y();}} console.log(A.z());"))
+  (assert-string= "object" (%js-run-capture "class A{static make(){return new A();}} console.log(typeof A.make());")))

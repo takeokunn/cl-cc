@@ -19,6 +19,11 @@
     (let ((name (ast-defclass-name node))
           (dst  (make-register ctx)))
       (setf (ctx-tail-position ctx) nil)
+      ;; Register the class name as a known global BEFORE compiling its methods,
+      ;; so a self-reference inside a method (new A(), return A, A.staticHelper(),
+      ;; recursion) resolves to vm-get-global A rather than failing as an unbound
+      ;; variable.  set-global below sets the value; the read happens at call time.
+      (setf (gethash name (ctx-global-variables ctx)) t)
       (let ((call-reg (compile-ast (ast-defclass-metaclass node) ctx)))
         (emit ctx (make-vm-move :dst dst :src call-reg))
         (emit ctx (make-vm-set-global :name name :src dst))
