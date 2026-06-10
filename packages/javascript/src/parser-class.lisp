@@ -385,8 +385,11 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
                          :name sym
                          :initform initform
                          :allocation (if static-p :class :instance)
+                         ;; Pass ORIG-NAME so the field key preserves the original
+                         ;; case (downcasing the symbol broke `static VERSION = …'
+                         ;; — set under "version" but read as A.VERSION).
                          :imports (%js-member-kind-metadata
-                                   :field static-p private-p nil nil decorators))
+                                   :field static-p private-p nil nil decorators orig-name))
                         (js-skip-semis current)))))))))
 
 ;;; ─── %js-parse-class-body ────────────────────────────────────────────────────
@@ -506,6 +509,12 @@ DECORATORS — list of AST nodes for class-level decorators"
                                         (and (%js-slot-method-p s)
                                              (getf (ast-imports s) :js-static)))
                                       members))
+         ;; Static fields: `static x = init;' — set once on the class object.
+         (static-field-slots (remove-if-not (lambda (s)
+                                              (and (not (%js-slot-method-p s))
+                                                   (getf (ast-imports s) :js-static)
+                                                   (eq (getf (ast-imports s) :js-member-kind) :field)))
+                                            members))
          ;; Instance fields (non-method, non-static): `x = init;' / `x;'.  These
          ;; initialize on every instance BEFORE the constructor body; lower each to
          ;; (%js-set-prop this "x" init) and prepend to the constructor.
@@ -565,6 +574,16 @@ DECORATORS — list of AST nodes for class-level decorators"
                 for fn = (%js-slot-to-method-lambda slot)
                 when fn
                   append (list (make-ast-quote :value (%js-class-member-key slot orig-name)) fn)))
+         ;; Static field args (name value …): set on the class object alongside
+         ;; the static methods, via the same "@@static" marker.
+         (static-field-args
+          (loop for slot in static-field-slots
+                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                                    (let ((n (ast-slot-name slot)))
+                                      (if n (string-downcase (symbol-name n)) "")))
+                append (list (make-ast-quote :value orig-name)
+                             (or (ast-slot-initform slot)
+                                 (make-ast-quote :value +js-undefined+)))))
          ;; %js-make-class call: super ctor inst-methods... [@@static static-methods...]
          (make-class-call
           (make-ast-call
@@ -572,8 +591,9 @@ DECORATORS — list of AST nodes for class-level decorators"
            :args (list* (or super-expr (make-ast-quote :value nil))
                         ctor-lambda
                         (append method-args
-                                (when static-args
-                                  (cons (make-ast-quote :value "@@static") static-args))))))
+                                (when (or static-args static-field-args)
+                                  (cons (make-ast-quote :value "@@static")
+                                        (append static-args static-field-args)))))))
          ;; Single primary ast-defclass node — carries full semantic info for
          ;; tools/tests AND encodes the runtime implementation. :php-kind
          ;; :javascript tells codegen-clos to compile the :metaclass make-class-call

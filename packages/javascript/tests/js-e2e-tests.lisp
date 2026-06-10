@@ -797,3 +797,15 @@ A.helper()) failed as an unbound variable."
   (assert-string= "true" (%js-run-capture "class A{static self(){return A;}} console.log(A.self()===A);"))
   (assert-string= "42" (%js-run-capture "class A{static y(){return 42;} static z(){return A.y();}} console.log(A.z());"))
   (assert-string= "object" (%js-run-capture "class A{static make(){return new A();}} console.log(typeof A.make());")))
+
+(deftest js-e2e-static-fields
+  "static field initializers (static X = value;) set the value on the class
+object.  Regression: static fields were never collected (only static methods),
+and the field key was downcased, so static VERSION read as A.VERSION (uppercase)
+returned undefined."
+  (assert-string= "1.0" (%js-run-capture "class A{static VERSION='1.0';} console.log(A.VERSION);"))
+  (assert-string= "100" (%js-run-capture "class A{static MAX=100; static MIN=0;} console.log(A.MAX-A.MIN);"))
+  (assert-string= "1 2" (%js-run-capture "class A{static count=0; static inc(){return ++A.count;}} console.log(A.inc()+' '+A.inc());"))
+  (assert-string= "3" (%js-run-capture "class A{static items=[1,2,3];} console.log(A.items.length);"))
+  ;; the case fix also helps uppercase INSTANCE field names
+  (assert-string= "7" (%js-run-capture "class C{COUNT=7;} console.log(new C().COUNT);")))
