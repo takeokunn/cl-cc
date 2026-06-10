@@ -239,6 +239,14 @@ DEFAULT-AST is nil."
       ((eq type :T-IDENT)
        (multiple-value-bind (tok rest) (js-consume stream)
          (values (%js-binding-sym (js-tok-value tok)) rest)))
+      ;; Contextual keywords are valid identifiers in a binding position
+      ;; (const set = …, function f(get){…}).  They only act as keywords in
+      ;; specific positions (class getter/setter, for-of, import …), which are
+      ;; parsed before reaching here.  Mirrors the expression-side handling.
+      ((member type '(:T-GET :T-SET :T-FROM :T-AS :T-OF
+                      :T-TARGET :T-META :T-USING :T-STATIC :T-LET) :test #'eq)
+       (multiple-value-bind (tok rest) (js-consume stream)
+         (values (%js-binding-sym (js-tok-value tok)) rest)))
       ;; Object destructuring: {a, b: c, ...rest}
       ((eq type :T-LBRACE)
        (let ((current (cdr stream))

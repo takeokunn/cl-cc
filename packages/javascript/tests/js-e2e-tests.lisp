@@ -838,3 +838,17 @@ so the object stays callable for super(args)."
   (assert-string= "Hi Bob!" (%js-run-capture "class A{constructor(n){this.n=n;} greet(){return 'Hi '+this.n;}} class B extends A{constructor(n){super(n);} greet(){return super.greet()+'!';}} console.log(new B('Bob').greet());"))
   ;; super() constructor call still works (no regression)
   (assert-string= "k" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{constructor(n){super(n);}} console.log(new B('k').n);")))
+
+(deftest js-e2e-contextual-keywords-as-identifiers
+  "Contextual keywords (get/set/of/from/as/static/...) are valid identifiers in
+binding positions: const set = …, function f(get){…}, destructuring.  They only
+act as keywords in specific positions (class getter/setter, for-of, import),
+which still work.  Regression: the binding-pattern parser accepted only :T-IDENT,
+so `const set = new Set()' failed with 'expected binding pattern, got :T-SET'."
+  (assert-string= "5"  (%js-run-capture "const set=5; console.log(set);"))
+  (assert-string= "3"  (%js-run-capture "const of=1, from=2; console.log(of+from);"))
+  (assert-string= "10" (%js-run-capture "function f(set){return set*2;} console.log(f(5));"))
+  (assert-string= "3"  (%js-run-capture "const [get,set]=[1,2]; console.log(get+set);"))
+  ;; keyword positions unaffected
+  (assert-string= "5"  (%js-run-capture "class C{get x(){return 5;}} console.log(new C().x);"))
+  (assert-string= "6"  (%js-run-capture "let s=0; for(const x of [1,2,3]){s+=x;} console.log(s);")))
