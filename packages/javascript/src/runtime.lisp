@@ -236,11 +236,17 @@ return 1/0 and mishandle strings/NaN/coercion."
 JS source `this.x' compiles to (%js-get-prop %js-this \"x\").
 Methods are called via %js-funcall-with-this which establishes this binding.")
 
-(defvar *js-apply-fn* (lambda (fn args) (apply fn args))
+(defvar *js-apply-fn*
+  (lambda (fn args)
+    ;; A callable JS object (e.g. `super', Intl/Symbol stubs) carries its
+    ;; implementation under __call__; otherwise host APPLY.
+    (if (and (hash-table-p fn) (gethash "__call__" fn))
+        (apply (gethash "__call__" fn) args)
+        (apply fn args)))
   "Invoker used to call a JS callback value (e.g. the FN passed to Array.map /
-filter / reduce / sort). Defaults to host APPLY so plain host lambdas work in
-unit tests; the pipeline rebinds it to a VM-closure-aware invoker so a callback
-that is a compiled-JS closure (vm-closure-object) is dispatched through the VM.")
+filter / reduce / sort). Defaults to host APPLY (plus __call__ objects) so plain
+host lambdas work in unit tests; the pipeline rebinds it to a VM-closure-aware
+invoker so a callback that is a compiled-JS closure is dispatched through the VM.")
 
 (defun %js-funcall (fn &rest args)
   "Call JS callback FN with ARGS through the installed *js-apply-fn* invoker.
@@ -312,9 +318,14 @@ The dynamic binding of %js-this is what makes `this.x' in method bodies work."
                  (return-from %js-proto-method-lookup
                    (if (funcall *js-callable-p* val)
                        ;; Bind %js-this dynamically so `this' in the method body
-                       ;; resolves to OBJ, then dispatch through %js-funcall for
-                       ;; VM-closure compatibility.
-                       (let ((method val) (receiver obj))
+                       ;; resolves to the receiver, then dispatch through %js-funcall
+                       ;; for VM-closure compatibility.  For a `super' object
+                       ;; (carrying __super_this__) bind to the REAL instance, not the
+                       ;; super object, so super.method() sees the correct `this'.
+                       (let ((method val)
+                             (receiver (multiple-value-bind (st found)
+                                           (gethash "__super_this__" obj)
+                                         (if found st obj))))
                          (lambda (&rest args)
                            (%js-call-with-this receiver method args)))
                        val))))

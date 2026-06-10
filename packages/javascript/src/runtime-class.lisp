@@ -60,15 +60,27 @@ When KLASS defines no constructor, forward to __super__."
        (%js-run-constructor (gethash "__super__" klass) obj args)))))
 
 (defun %js-make-super-binding (super-class this)
-  "Return the value of `super' inside a subclass constructor: a callable that runs
-SUPER-CLASS's constructor on THIS, so `super(args)' initializes the instance via
-the parent (and the parent's own super() chains upward).  Lexical SUPER-CLASS is
-captured here — using the instance's class would loop on multi-level inheritance.
-Member form `super.method()' is not yet supported (it sees this closure)."
-  (lambda (&rest args)
-    (when (and (%js-ht-p super-class))
-      (%js-run-constructor super-class this args))
-    +js-undefined+))
+  "Return the value of `super' inside a subclass method/constructor.  It is a JS
+object that is BOTH:
+- CALLABLE — super(args) runs SUPER-CLASS's constructor on THIS (constructor use);
+  invoked via its __call__ by *js-apply-fn*.
+- a MEMBER target — super.method() resolves METHOD on SUPER-CLASS's prototype but
+  binds `this' to THIS (the real instance), not the super object, via the
+  __super_this__ marker that %js-proto-method-lookup honors.
+Lexical SUPER-CLASS is captured here (the instance's class would loop on
+multi-level inheritance)."
+  (let ((super-obj (%js-make-ht)))
+    (when (%js-ht-p super-class)
+      (let ((super-proto (gethash "__prototype__" super-class)))
+        (when super-proto
+          (setf (gethash "__proto__" super-obj) super-proto))))
+    (setf (gethash "__super_this__" super-obj) this)
+    (setf (gethash "__call__" super-obj)
+          (lambda (&rest args)
+            (when (%js-ht-p super-class)
+              (%js-run-constructor super-class this args))
+            +js-undefined+))
+    super-obj))
 
 (defun %js-new (constructor &optional (args nil))
   "Instantiate a JS class. CONSTRUCTOR is a class object from %js-make-class

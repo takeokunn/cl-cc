@@ -823,3 +823,18 @@ A()' overwrote the class's global slot and A.staticMember then read undefined."
   (assert-string= "1 2" (%js-run-capture "function foo(){return 1;} function Foo(){return 2;} console.log(foo()+' '+Foo());"))
   (assert-string= "10" (%js-run-capture "class A{static Y=10;m(){return 1;}} const a=new A(); a.m(); console.log(A.Y);"))
   (assert-string= "7 0" (%js-run-capture "class Point{constructor(x){this.x=x;} static origin(){return new Point(0);}} const p=new Point(7); console.log(p.x+' '+Point.origin().x);")))
+
+(deftest js-e2e-super-method
+  "super.method() calls the parent's method bound to the current instance, and
+super(args) constructor calls still work — both can appear in the same subclass.
+Regression: super lowered to a call-only closure, so super.f() did member access
+on it and got :JS-UNDEFINED.  super is now a JS object (proto=parent prototype,
+__super_this__=this, __call__=parent ctor); vm-resolve-function honors __call__
+so the object stays callable for super(args)."
+  (assert-string= "11" (%js-run-capture "class A{f(){return 1;}} class B extends A{f(){return super.f()+10;}} console.log(new B().f());"))
+  (assert-string= "AB" (%js-run-capture "class A{greet(){return 'A';}} class B extends A{greet(){return super.greet()+'B';}} console.log(new B().greet());"))
+  (assert-string= "10" (%js-run-capture "class A{constructor(){this.x=5;} m(){return this.x;}} class B extends A{m(){return super.m()*2;}} console.log(new B().m());"))
+  ;; super() and super.method() together in one subclass
+  (assert-string= "Hi Bob!" (%js-run-capture "class A{constructor(n){this.n=n;} greet(){return 'Hi '+this.n;}} class B extends A{constructor(n){super(n);} greet(){return super.greet()+'!';}} console.log(new B('Bob').greet());"))
+  ;; super() constructor call still works (no regression)
+  (assert-string= "k" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{constructor(n){super(n);}} console.log(new B('k').n);")))

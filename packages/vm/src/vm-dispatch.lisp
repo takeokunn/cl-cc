@@ -106,6 +106,12 @@ check the host bridge whitelist."
   (or (%resolve-direct-function-designator value)
       (and (symbolp value)
            (%resolve-symbol-function-designator state value))
+      ;; A callable JS object (super, Intl/Symbol/Temporal stubs) carries its
+      ;; implementation under the "__call__" key — resolve to that function so
+      ;; `super(args)' and stub(...) calls dispatch to it.
+      (and (hash-table-p value)
+           (let ((callimpl (gethash "__call__" value)))
+             (and callimpl (vm-resolve-function state callimpl))))
       (error "Invalid function designator: ~S" value)))
 
 (defun vm-label-table-store (table label pc)

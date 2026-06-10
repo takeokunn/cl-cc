@@ -636,10 +636,16 @@ bridge — the same package-derived whitelist used for PHP."
       ;; is the controlled inverse bridge (host runtime → VM closure) using the
       ;; *vm-state* dynamically bound around VM execution.
       (setf cl-cc/javascript::*js-apply-fn*
-            (lambda (fn args)
-              (if (cl-cc/vm::%vm-closure-object-p fn)
-                  (cl-cc/vm::%vm-call-closure-sync fn cl-cc/vm:*vm-state* args)
-                  (apply fn args))))
+            (labels ((invoke (fn args)
+                       (cond
+                         ((cl-cc/vm::%vm-closure-object-p fn)
+                          (cl-cc/vm::%vm-call-closure-sync fn cl-cc/vm:*vm-state* args))
+                         ;; A callable JS object (e.g. `super', Intl/Symbol stubs)
+                         ;; carries its implementation under __call__.
+                         ((and (hash-table-p fn) (gethash "__call__" fn))
+                          (invoke (gethash "__call__" fn) args))
+                         (t (apply fn args)))))
+              #'invoke))
       ;; Teach prototype method lookup to recognize a compiled-JS method (a
       ;; vm-closure) as callable, so obj.method resolves to a bound method.
       (setf cl-cc/javascript::*js-callable-p*
