@@ -769,3 +769,20 @@ multi-level chains (C extends B extends A) call the right parent, not loop."
   (assert-string= "12" (%js-run-capture "class A{constructor(x){this.x=x;}} class B extends A{constructor(x){super(x*2);}} class C extends B{constructor(x){super(x+1);}} console.log(new C(5).x);"))
   ;; no explicit constructor still inherits the parent's (no regression)
   (assert-string= "z" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{} console.log(new B('z').n);")))
+
+(deftest js-e2e-class-fields
+  "Class field initializers (x = value;) run on every instance before the
+constructor body.  Two stacked regressions: the initializer was stored as an
+unresolved %JS-FIELD-INIT placeholder (never parsed), and field inits were never
+injected into the constructor."
+  (assert-string= "0"  (%js-run-capture "class C{count=0;} console.log(new C().count);"))
+  (assert-string= "15" (%js-run-capture "class C{x=5;y=10;} const c=new C(); console.log(c.x+c.y);"))
+  (assert-string= "hi" (%js-run-capture "class C{name='hi';} console.log(new C().name);"))
+  ;; mutable field (array) shared across method calls on one instance
+  (assert-string= "1,2" (%js-run-capture "class C{items=[];add(v){this.items.push(v);return this.items.length;}} const c=new C(); console.log(c.add(1)+','+c.add(2));"))
+  ;; field initialised before the explicit constructor body runs
+  (assert-string= "11" (%js-run-capture "class C{x=1;constructor(){this.x+=10;}} console.log(new C().x);"))
+  ;; later field may reference an earlier one via this
+  (assert-string= "6"  (%js-run-capture "class C{a=2;b=this.a*3;} console.log(new C().b);"))
+  ;; derived class: parent constructor still runs AND own field initialises
+  (assert-string= "y 99" (%js-run-capture "class A{constructor(n){this.n=n;}} class D extends A{extra=99;} const d=new D('y'); console.log(d.n+' '+d.extra);")))

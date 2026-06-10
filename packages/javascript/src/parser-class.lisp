@@ -375,12 +375,11 @@ Handles: methods, getters, setters, fields, static blocks, decorators."
                              ((:T-RBRACE :T-RPAREN :T-RBRACKET) (decf depth)))
                            (push (car current) expr-toks)
                            (setf current (cdr current)))
+                  ;; Parse the collected tokens into a real expression AST.  (They
+                  ;; were previously wrapped in an unresolved %JS-FIELD-INIT
+                  ;; placeholder, so field initializers never actually ran.)
                   (setf initform
-                        (make-ast-call
-                         :func (make-ast-var :name (js-ident-sym "%JS-FIELD-INIT"))
-                         :args (mapcar (lambda (tok)
-                                         (make-ast-quote :value (js-tok-value tok)))
-                                       (nreverse expr-toks))))))
+                        (nth-value 0 (js-parse-assignment-expr (nreverse expr-toks))))))
               (let ((sym (if (symbolp name) name (gensym "JS-FIELD-"))))
                 (values (make-ast-slot-def
                          :name sym
@@ -507,10 +506,46 @@ DECORATORS — list of AST nodes for class-level decorators"
                                         (and (%js-slot-method-p s)
                                              (getf (ast-imports s) :js-static)))
                                       members))
-         ;; Constructor lambda (nil if no explicit constructor)
-         (ctor-lambda (if ctor-slot
-                          (%js-wrap-method-super (%js-slot-to-method-lambda ctor-slot) super-expr)
-                          (make-ast-quote :value nil)))
+         ;; Instance fields (non-method, non-static): `x = init;' / `x;'.  These
+         ;; initialize on every instance BEFORE the constructor body; lower each to
+         ;; (%js-set-prop this "x" init) and prepend to the constructor.
+         (field-slots (remove-if (lambda (s)
+                                   (or (%js-slot-method-p s)
+                                       (getf (ast-imports s) :js-static)
+                                       (not (eq (getf (ast-imports s) :js-member-kind) :field))))
+                                 members))
+         (field-inits
+          (loop for slot in field-slots
+                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                                    (let ((n (ast-slot-name slot)))
+                                      (if n (string-downcase (symbol-name n)) "")))
+                collect (%js-call '%js-set-prop
+                                  (make-ast-var :name '%js-this)
+                                  (make-ast-quote :value orig-name)
+                                  (or (ast-slot-initform slot)
+                                      (make-ast-quote :value +js-undefined+)))))
+         ;; Constructor lambda: explicit ctor gets field inits prepended; a class
+         ;; with fields but no explicit ctor gets a synthetic one (forwarding to
+         ;; super for a derived class so the parent still initializes).
+         (ctor-lambda
+          (cond
+            (ctor-slot
+             (let ((lam (%js-slot-to-method-lambda ctor-slot)))
+               (when field-inits
+                 (setf (ast-lambda-body lam) (append field-inits (ast-lambda-body lam))))
+               (%js-wrap-method-super lam super-expr)))
+            (field-inits
+             (make-ast-lambda
+              :params nil
+              :rest-param (when super-expr 'js-ctor-rest-args)
+              :body (append
+                     (when super-expr
+                       (list (%js-call '%js-run-constructor
+                                       (%js-super-ref super-expr)
+                                       (make-ast-var :name '%js-this)
+                                       (make-ast-var :name 'js-ctor-rest-args))))
+                     field-inits)))
+            (t (make-ast-quote :value nil))))
          ;; Instance method args: ("name1" fn1 "name2" fn2 ...)
          (method-args
           (loop for slot in method-slots
