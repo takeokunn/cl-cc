@@ -118,7 +118,10 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
                      ("setTimeout" . %js-set-timeout)
                      ("setInterval" . %js-set-interval)
                      ("clearTimeout" . %js-clear-timer)
-                     ("clearInterval" . %js-clear-timer)))
+                     ("clearInterval" . %js-clear-timer)
+                     ;; Symbol(desc) constructs a symbol; Symbol.iterator (member
+                     ;; access on the global) is unaffected.
+                     ("Symbol" . %js-make-symbol)))
       (setf (gethash (js-ident-sym (car entry)) ht) (cdr entry)))
     ht)
   "Bare-call coercion builtins -> runtime helper symbols.  Number(x)/String(x)/
@@ -134,7 +137,8 @@ defaults Number()=0, String()=\"\", Boolean()=false."
   (cond
     ((member helper '(%js-parse-int %js-parse-float
                       %js-structured-clone %js-queue-microtask
-                      %js-set-timeout %js-set-interval %js-clear-timer))
+                      %js-set-timeout %js-set-interval %js-clear-timer
+                      %js-make-symbol))
      (apply #'%js-call helper args))
     ((null args)
      (case helper

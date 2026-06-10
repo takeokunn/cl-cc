@@ -1065,9 +1065,10 @@ matching the ECMAScript algorithm."
 
 (defparameter *js-symbol-method-table*
   (list (cons "toString"    #'%js-symbol-to-string)
-        (cons "description" #'%js-symbol-description)
         (cons "valueOf"     (lambda (s) s)))
-  "Alist of Symbol.prototype method name -> helpers.")
+  "Alist of Symbol.prototype METHOD name -> helpers.  `description' is NOT here: it
+is an accessor PROPERTY (sym.description returns the string, not a function), so it
+is handled in the getter cond branch of the symbol resolver instead.")
 
 (defun %js-resolve-method (obj key)
   "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.

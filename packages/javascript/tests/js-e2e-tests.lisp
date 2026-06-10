@@ -852,3 +852,19 @@ so `const set = new Set()' failed with 'expected binding pattern, got :T-SET'."
   ;; keyword positions unaffected
   (assert-string= "5"  (%js-run-capture "class C{get x(){return 5;}} console.log(new C().x);"))
   (assert-string= "6"  (%js-run-capture "let s=0; for(const x of [1,2,3]){s+=x;} console.log(s);")))
+
+(deftest js-e2e-symbol-constructor
+  "Symbol(desc) constructs a primitive symbol (regression: the bare call resolved
+to the function symbol |Symbol| rather than the global value -> 'Undefined
+function: Symbol'; added to the coercion-call table like parseInt).  And
+sym.description is an accessor PROPERTY, not a method (it was in the method table,
+so it returned a bound closure instead of the string)."
+  (assert-string= "symbol" (%js-run-capture "console.log(typeof Symbol('x'));"))
+  (assert-string= "Symbol(d)" (%js-run-capture "console.log(Symbol('d').toString());"))
+  (assert-string= "k" (%js-run-capture "console.log(Symbol('k').description);"))
+  (assert-string= "true" (%js-run-capture "console.log(Symbol().description===undefined);"))
+  (assert-string= "symbol" (%js-run-capture "console.log(typeof Symbol());"))
+  ;; symbol as a computed object key
+  (assert-string= "42" (%js-run-capture "const o={}; const k=Symbol('key'); o[k]=42; console.log(o[k]);"))
+  ;; member access on the Symbol global (well-known symbols) unaffected
+  (assert-string= "symbol" (%js-run-capture "console.log(typeof Symbol.iterator);")))
