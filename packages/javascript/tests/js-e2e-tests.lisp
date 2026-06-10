@@ -75,6 +75,19 @@ empty let into nested single-binding lets)."
   (assert-string= "Bob30" (%js-run-capture "const {name,age}={name:'Bob',age:30}; console.log(name+age);"))
   (assert-string= "12"  (%js-run-capture "function f(){ let [a,b]=[3,4]; return a*b; } console.log(f());")))
 
+(deftest js-e2e-destructuring-rest
+  "Array and object destructuring rest elements collect into a real JS array /
+object.  Regression: the :rest sentinel was mistaken for a default value, so an
+array rest was a one-element CL list (Array.isArray false, rest.join threw with
+':JS-UNDEFINED') and an object rest was null.  The array rest now yields a vector
+(map/join/length work) and the object rest a fresh object excluding bound keys."
+  (assert-string= "3,4,5" (%js-run-capture "const [x,y,...r]=[1,2,3,4,5]; console.log(r.join(','));"))
+  (assert-string= "true"  (%js-run-capture "const [x,...r]=[1,2,3]; console.log(Array.isArray(r));"))
+  (assert-string= "4,6,8,10" (%js-run-capture "const [a,...r]=[1,2,3,4,5]; console.log(r.map(n=>n*2).join(','));"))
+  (assert-string= "0"     (%js-run-capture "const [p,...q]=[1]; console.log(q.length);"))
+  (assert-string= "{\"b\":2,\"c\":3}" (%js-run-capture "const {a,...rest}={a:1,b:2,c:3}; console.log(JSON.stringify(rest));"))
+  (assert-string= "{}"    (%js-run-capture "const {m,...n}={m:1}; console.log(JSON.stringify(n));")))
+
 (deftest js-e2e-json-and-math-globals
   "JSON and Math are seeded as global objects (regression: they were never added
 to the prelude). JSON.parse worked once its string scanner stopped discarding the

@@ -329,20 +329,28 @@ DEFAULT-AST is nil."
           ((eq kind :object-pattern)
            ;; tmp = init-expr, then destructure fields
            (let ((bindings (list (cons tmp init-expr)))
-                 (extras nil))
+                 (extras nil)
+                 (consumed-keys nil))
              (dolist (field desc)
                (if (eq (car field) :rest)
-                   ;; rest property: emit %js-destructure-object call
+                   ;; rest property: emit (%js-destructure-object tmp :rest k1 k2 …)
+                   ;; passing the already-bound keys so they're excluded from the
+                   ;; rest object.  Rest is syntactically last, so consumed-keys is
+                   ;; complete here.
                    (push (cons (second field)
                                (make-ast-call
                                 :func (make-ast-var :name '%js-destructure-object)
-                                :args (list (make-ast-var :name tmp)
-                                            (make-ast-quote :value :rest))))
+                                :args (list* (make-ast-var :name tmp)
+                                             (make-ast-quote :value :rest)
+                                             (mapcar (lambda (k)
+                                                       (make-ast-quote :value k))
+                                                     (reverse consumed-keys)))))
                          extras)
                    ;; named property, with optional default ((key local default))
                    (let ((key   (first field))
                          (local (second field))
                          (dflt  (third field)))
+                     (push key consumed-keys)
                      (push (cons (%js-binding-to-sym local)
                                  (%js-default-access
                                   (make-ast-call

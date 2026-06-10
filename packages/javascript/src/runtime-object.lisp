@@ -346,13 +346,34 @@ For production use, a full JSON parser would be needed."
 ;;; -----------------------------------------------------------------------
 
 (defun %js-destructure-array (arr &rest indices-and-defaults)
-  "Return a list of values from ARR at given indices (with defaults)."
-  (loop for (idx default) on indices-and-defaults by #'cddr
-        collect (let ((v (%js-get-prop arr idx)))
-                  (if (eq v +js-undefined+) default v))))
+  "Array-destructuring rest helper.  The lowering calls this only for a rest
+element: (%js-destructure-array arr idx :rest) collects arr[idx..end-1] into a
+fresh JS array (a real vector, so rest.map/.join/Array.isArray all work).
+Regression: the :rest sentinel was mistaken for a default value, so `rest' was a
+one-element CL list — `typeof rest' was \"object\" and rest.join threw.  A
+value-mode fallback (pairs of index/default) is kept for safety."
+  (if (and (= (length indices-and-defaults) 2)
+           (eq (second indices-and-defaults) :rest))
+      (let ((idx (first indices-and-defaults))
+            (len (truncate (%js-to-number (%js-get-prop arr "length")))))
+        (%js-list-to-array
+         (loop for i from idx below len collect (%js-get-prop arr i))))
+      (loop for (idx default) on indices-and-defaults by #'cddr
+            collect (let ((v (%js-get-prop arr idx)))
+                      (if (eq v +js-undefined+) default v)))))
 
 (defun %js-destructure-object (obj &rest keys-and-defaults)
-  "Return a list of values from OBJ for given keys (with defaults)."
-  (loop for (k default) on keys-and-defaults by #'cddr
-        collect (let ((v (%js-get-prop obj k)))
-                  (if (eq v +js-undefined+) default v))))
+  "Object-destructuring rest helper.  Rest form (emitted by the lowering):
+   (%js-destructure-object obj :rest k1 k2 …) → a fresh JS object holding obj's
+own enumerable keys EXCEPT the already-destructured k1,k2,… .  Regression: the
+rest call passed no excluded keys and returned a one-element list, so `others'
+was null/garbage.  A value-mode fallback (pairs of key/default) is kept."
+  (if (and keys-and-defaults (eq (first keys-and-defaults) :rest))
+      (let ((excluded (rest keys-and-defaults))
+            (out (%js-make-object)))
+        (dolist (k (coerce (%js-object-keys obj) 'list) out)
+          (unless (member k excluded :test #'equal)
+            (%js-set-prop out k (%js-get-prop obj k)))))
+      (loop for (k default) on keys-and-defaults by #'cddr
+            collect (let ((v (%js-get-prop obj k)))
+                      (if (eq v +js-undefined+) default v)))))
