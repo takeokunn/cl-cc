@@ -739,3 +739,20 @@ digits, no trailing dot on toFixed(0), no padding spaces on toPrecision."
   (assert-string= "0.000012" (%js-run-capture "console.log((0.00001234).toPrecision(2));"))
   (assert-string= "-3.14"  (%js-run-capture "console.log((-3.14159).toPrecision(3));"))
   (assert-string= "42"     (%js-run-capture "console.log((42).valueOf());")))
+
+(deftest js-e2e-standalone-global-builtins
+  "Standalone global builtins (structuredClone, queueMicrotask, setTimeout, …)
+are reachable as bare direct calls.  Regression: each lived in *js-builtin-map*
+but had no prelude binding / coercion-call lowering, so structuredClone(x) raised
+'Undefined function: STRUCTUREDCLONE' (the global holds a value, not a callable
+function symbol the direct-call codegen can dispatch)."
+  ;; structuredClone deep-copies (nested mutation does not affect the original)
+  (assert-string= "3" (%js-run-capture "console.log(structuredClone({b:[2,3]}).b[1]);"))
+  (assert-string= "5,99" (%js-run-capture "const o={x:{y:5}}; const c=structuredClone(o); c.x.y=99; console.log(o.x.y+','+c.x.y);"))
+  (assert-string= "3" (%js-run-capture "console.log(structuredClone([1,2,3]).length);"))
+  ;; timers/microtasks run synchronously in our model
+  (assert-string= "micro" (%js-run-capture "queueMicrotask(()=>console.log('micro'));"))
+  (assert-string= "timeout" (%js-run-capture "setTimeout(()=>console.log('timeout'),0);"))
+  ;; indirect (value) use still works, and the coercion builtins are unaffected
+  (assert-string= "1" (%js-run-capture "const f=structuredClone; console.log(f({a:1}).a);"))
+  (assert-string= "42" (%js-run-capture "console.log(parseInt('42px'));")))

@@ -652,6 +652,47 @@
 (defvar *js-builtin-map* (%build-js-builtin-map)
   "Dispatch table from JS built-in name to CL function.")
 
+(defun %js-builtin-ref (name)
+  "Return the host function/value registered for builtin NAME in *js-builtin-map*,
+or +js-undefined+.  Used to bind standalone global builtins to a runtime VALUE so
+`typeof structuredClone' and `const f = structuredClone; f(x)' work; direct calls
+`structuredClone(x)' are handled separately by *js-coercion-call-helpers*, which
+lowers to the named %js-* helper the direct-call codegen can dispatch."
+  (or (gethash name *js-builtin-map*) +js-undefined+))
+
+;;; Standalone global builtins as NAMED functions for the direct-call lowering
+;;; (*js-coercion-call-helpers*); the value binding above uses %js-builtin-ref.
+
+(defun %js-structured-clone (val &rest _opts)
+  "structuredClone(value[, options]): deep clone VAL (options ignored)."
+  (declare (ignore _opts))
+  (%js-deep-clone val))
+
+(defun %js-queue-microtask (fn &rest _)
+  "queueMicrotask(fn): synchronous in our single-threaded model."
+  (declare (ignore _))
+  (%js-funcall fn)
+  +js-undefined+)
+
+(defun %js-set-timeout (fn &rest _)
+  "setTimeout(fn[, delay, …args]): synchronous in our model — run FN now.
+%js-funcall handles both host functions and VM closures (a VM closure is not
+host FUNCTIONP, so a functionp guard would silently skip the callback)."
+  (declare (ignore _))
+  (unless (or (eq fn +js-undefined+) (eq fn +js-null+))
+    (%js-funcall fn))
+  +js-undefined+)
+
+(defun %js-set-interval (&rest _)
+  "setInterval(...): a no-op stub (running it would never terminate)."
+  (declare (ignore _))
+  +js-undefined+)
+
+(defun %js-clear-timer (&rest _)
+  "clearTimeout / clearInterval: a no-op stub."
+  (declare (ignore _))
+  +js-undefined+)
+
 (defun %js-make-namespace-object (prefix)
   "Build a JS namespace global object (Math, JSON, …) from *js-builtin-specs*
 entries whose key is PREFIX + '.' + property. A property whose name is entirely
@@ -813,6 +854,19 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar :name (js-ident-sym "parseFloat")   :value (make-ast-var :name '%js-parse-float)     :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "isNaN")        :value (make-ast-var :name '%js-is-nan)          :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "isFinite")     :value (make-ast-var :name '%js-is-finite)       :kind 'defparameter)
+         ;; Standalone global builtins that live in *js-builtin-map* but had no
+         ;; prelude binding, so they were unreachable as bare globals
+         ;; (structuredClone(x) -> "Undefined function: STRUCTUREDCLONE").  Bound
+         ;; via %js-builtin-ref since their spec entries are inline lambdas with no
+         ;; dedicated %js-* symbol.  Constructors with host-struct return values
+         ;; (Set/RegExp) are deliberately NOT auto-bound here — they need the
+         ;; separate VM-boundary work.
+         (make-ast-defvar :name (js-ident-sym "structuredClone") :value (%js-call '%js-builtin-ref (make-ast-quote :value "structuredClone")) :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "queueMicrotask")  :value (%js-call '%js-builtin-ref (make-ast-quote :value "queueMicrotask"))  :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "setTimeout")      :value (%js-call '%js-builtin-ref (make-ast-quote :value "setTimeout"))      :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "setInterval")     :value (%js-call '%js-builtin-ref (make-ast-quote :value "setInterval"))     :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "clearTimeout")    :value (%js-call '%js-builtin-ref (make-ast-quote :value "clearTimeout"))    :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "clearInterval")   :value (%js-call '%js-builtin-ref (make-ast-quote :value "clearInterval"))   :kind 'defparameter)
          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
 
 ;;; -----------------------------------------------------------------------

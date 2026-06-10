@@ -109,7 +109,16 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
                      ("String" . %js-to-string)
                      ("Boolean" . %js-truthy)
                      ("parseInt" . %js-parse-int)
-                     ("parseFloat" . %js-parse-float)))
+                     ("parseFloat" . %js-parse-float)
+                     ;; Standalone global builtins whose prelude binding is a value,
+                     ;; not a callable function symbol — lower the direct call to the
+                     ;; helper (the global binding still serves indirect/value use).
+                     ("structuredClone" . %js-structured-clone)
+                     ("queueMicrotask" . %js-queue-microtask)
+                     ("setTimeout" . %js-set-timeout)
+                     ("setInterval" . %js-set-interval)
+                     ("clearTimeout" . %js-clear-timer)
+                     ("clearInterval" . %js-clear-timer)))
       (setf (gethash (js-ident-sym (car entry)) ht) (cdr entry)))
     ht)
   "Bare-call coercion builtins -> runtime helper symbols.  Number(x)/String(x)/
@@ -123,7 +132,9 @@ to the helper; `Number.isInteger' (member access) is unaffected.")
 as-is (s, radix); Number/String/Boolean take one argument, with the JS empty-call
 defaults Number()=0, String()=\"\", Boolean()=false."
   (cond
-    ((member helper '(%js-parse-int %js-parse-float))
+    ((member helper '(%js-parse-int %js-parse-float
+                      %js-structured-clone %js-queue-microtask
+                      %js-set-timeout %js-set-interval %js-clear-timer))
      (apply #'%js-call helper args))
     ((null args)
      (case helper
