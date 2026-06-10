@@ -756,3 +756,16 @@ function symbol the direct-call codegen can dispatch)."
   ;; indirect (value) use still works, and the coercion builtins are unaffected
   (assert-string= "1" (%js-run-capture "const f=structuredClone; console.log(f({a:1}).a);"))
   (assert-string= "42" (%js-run-capture "console.log(parseInt('42px'));")))
+
+(deftest js-e2e-super-constructor
+  "A subclass constructor calls the parent via super(args).  Regression: super
+lowered to a nonexistent %js-super var, so super(n) raised 'Undefined function:
+%JS-SUPER'.  The lexically-enclosing super class is captured per class so
+multi-level chains (C extends B extends A) call the right parent, not loop."
+  (assert-string= "y" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{constructor(n){super(n);}} console.log(new B('y').n);"))
+  (assert-string= "x x!" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{constructor(n){super(n);this.m=n+'!';}} const b=new B('x'); console.log(b.n+' '+b.m);"))
+  (assert-string= "11" (%js-run-capture "class A{constructor(){this.k=1;}} class B extends A{constructor(){super();this.k+=10;}} console.log(new B().k);"))
+  ;; multi-level: C(5)->super(6)->B->super(12)->A sets x=12 (lexical super, no loop)
+  (assert-string= "12" (%js-run-capture "class A{constructor(x){this.x=x;}} class B extends A{constructor(x){super(x*2);}} class C extends B{constructor(x){super(x+1);}} console.log(new C(5).x);"))
+  ;; no explicit constructor still inherits the parent's (no regression)
+  (assert-string= "z" (%js-run-capture "class A{constructor(n){this.n=n;}} class B extends A{} console.log(new B('z').n);")))

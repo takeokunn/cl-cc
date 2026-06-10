@@ -59,6 +59,17 @@ When KLASS defines no constructor, forward to __super__."
       ((and (%js-ht-p klass) (gethash "__super__" klass))
        (%js-run-constructor (gethash "__super__" klass) obj args)))))
 
+(defun %js-make-super-binding (super-class this)
+  "Return the value of `super' inside a subclass constructor: a callable that runs
+SUPER-CLASS's constructor on THIS, so `super(args)' initializes the instance via
+the parent (and the parent's own super() chains upward).  Lexical SUPER-CLASS is
+captured here — using the instance's class would loop on multi-level inheritance.
+Member form `super.method()' is not yet supported (it sees this closure)."
+  (lambda (&rest args)
+    (when (and (%js-ht-p super-class))
+      (%js-run-constructor super-class this args))
+    +js-undefined+))
+
 (defun %js-new (constructor &optional (args nil))
   "Instantiate a JS class. CONSTRUCTOR is a class object from %js-make-class
 (with __prototype__/__constructor__/__super__), a HT carrying a host __new__, or

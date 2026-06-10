@@ -443,6 +443,30 @@ Each member is an ast-slot-def whose :imports plist carries:
                         :body   (ast-defun-body  fn)))
       (t nil))))
 
+(defun %js-super-ref (super-expr)
+  "A FRESH reference to SUPER-EXPR for embedding inside a method/constructor body,
+so the super-class AST node is not shared between the %js-make-class call and each
+wrapped body."
+  (if (ast-var-p super-expr)
+      (make-ast-var :name (ast-var-name super-expr))
+      super-expr))
+
+(defun %js-wrap-method-super (lambda-ast super-expr)
+  "When the class has a SUPER-EXPR, wrap LAMBDA-AST's body in a let binding %js-super
+to a super-binding built from the (lexical) super class and the current this, so
+super(args) calls the parent constructor.  Mutates LAMBDA-AST in place (preserving
+its params/optional/rest) and returns it."
+  (when (and lambda-ast (ast-lambda-p lambda-ast) super-expr)
+    (setf (ast-lambda-body lambda-ast)
+          (list (make-ast-let
+                 :bindings (list (cons '%js-super
+                                       (%js-call '%js-make-super-binding
+                                                 (%js-super-ref super-expr)
+                                                 (make-ast-var :name '%js-this))))
+                 :declarations (list :let)
+                 :body (ast-lambda-body lambda-ast)))))
+  lambda-ast)
+
 (defun %js-class-member-key (slot orig-name)
   "Prototype/class key for a class member.  A get/set accessor is stored under
 __get_NAME / __set_NAME so %js-get-prop / %js-set-prop dispatch it as an
@@ -485,7 +509,7 @@ DECORATORS — list of AST nodes for class-level decorators"
                                       members))
          ;; Constructor lambda (nil if no explicit constructor)
          (ctor-lambda (if ctor-slot
-                          (%js-slot-to-method-lambda ctor-slot)
+                          (%js-wrap-method-super (%js-slot-to-method-lambda ctor-slot) super-expr)
                           (make-ast-quote :value nil)))
          ;; Instance method args: ("name1" fn1 "name2" fn2 ...)
          (method-args
@@ -493,7 +517,7 @@ DECORATORS — list of AST nodes for class-level decorators"
                 for orig-name = (or (getf (ast-imports slot) :js-orig-name)
                                     (let ((n (ast-slot-name slot)))
                                       (if n (string-downcase (symbol-name n)) "")))
-                for fn = (%js-slot-to-method-lambda slot)
+                for fn = (%js-wrap-method-super (%js-slot-to-method-lambda slot) super-expr)
                 when fn
                   append (list (make-ast-quote :value (%js-class-member-key slot orig-name)) fn)))
          ;; Static method args, preceded by the "@@static" marker that
