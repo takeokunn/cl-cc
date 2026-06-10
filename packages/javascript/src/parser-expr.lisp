@@ -121,7 +121,20 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
                      ("clearInterval" . %js-clear-timer)
                      ;; Symbol(desc) constructs a symbol; Symbol.iterator (member
                      ;; access on the global) is unaffected.
-                     ("Symbol" . %js-make-symbol)))
+                     ("Symbol" . %js-make-symbol)
+                     ;; Other global functions whose prelude binding is a value
+                     ;; (not a callable symbol), so a bare call needs lowering.
+                     ;; (BigInt is intentionally NOT here: BigInt(x) builds a
+                     ;; js-bigint struct that the arithmetic ops don't accept,
+                     ;; unlike the 10n literal path — a separate bigint fix.)
+                     ("encodeURIComponent" . %js-encode-uri-component)
+                     ("decodeURIComponent" . %js-decode-uri-component)
+                     ("encodeURI" . %js-encode-uri)
+                     ("decodeURI" . %js-decode-uri)
+                     ("btoa" . %js-btoa)
+                     ("atob" . %js-atob)
+                     ("isNaN" . %js-is-nan)
+                     ("isFinite" . %js-is-finite)))
       (setf (gethash (js-ident-sym (car entry)) ht) (cdr entry)))
     ht)
   "Bare-call coercion builtins -> runtime helper symbols.  Number(x)/String(x)/
@@ -138,7 +151,10 @@ defaults Number()=0, String()=\"\", Boolean()=false."
     ((member helper '(%js-parse-int %js-parse-float
                       %js-structured-clone %js-queue-microtask
                       %js-set-timeout %js-set-interval %js-clear-timer
-                      %js-make-symbol))
+                      %js-make-symbol
+                      %js-encode-uri-component %js-decode-uri-component
+                      %js-encode-uri %js-decode-uri %js-btoa %js-atob
+                      %js-is-nan %js-is-finite))
      (apply #'%js-call helper args))
     ((null args)
      (case helper

@@ -461,6 +461,45 @@ const upper = user?.profile?.address?.city?.toUpperCase();
     ;; the following statements), so the first top-level form is an ast-let.
     (assert-true (cl-cc:ast-let-p (first asts)))))
 
+;;; ─── 10b. Optional chaining / nullish coalescing execution ──────────────────
+
+(deftest js-e2e-optional-chaining-execution
+  "Optional chaining ?. returns undefined when any link in the chain is null/
+undefined, and the actual value otherwise.  Nullish coalescing ?? returns the
+left operand unless it is null/undefined."
+  ;; basic ?. property access
+  (assert-string= "NYC"
+    (%js-run-capture
+     "const u={profile:{city:'NYC'}}; console.log(u?.profile?.city);"))
+  ;; ?. on null: whole chain → undefined
+  (assert-string= "undefined"
+    (%js-run-capture
+     "const u=null; console.log(u?.profile?.city);"))
+  ;; ?. on undefined property mid-chain
+  (assert-string= "undefined"
+    (%js-run-capture
+     "const u={profile:null}; console.log(u?.profile?.city);"))
+  ;; ?. with ?? fallback
+  (assert-string= "N/A"
+    (%js-run-capture
+     "const u={profile:{}}; console.log(u?.profile?.zip ?? 'N/A');"))
+  ;; ?? does NOT short-circuit on false/0/empty-string (only null/undefined)
+  (assert-string= "0"
+    (%js-run-capture "console.log(0 ?? 'fallback');"))
+  (assert-string= ""
+    (%js-run-capture "console.log('' ?? 'fallback');"))
+  (assert-string= "false"
+    (%js-run-capture "console.log(false ?? 'fallback');"))
+  ;; ?. method call
+  (assert-string= "HELLO"
+    (%js-run-capture "const s='hello'; console.log(s?.toUpperCase());"))
+  ;; ?. method call on null → undefined
+  (assert-string= "undefined"
+    (%js-run-capture "const s=null; console.log(s?.toUpperCase());"))
+  ;; chained ?? picks first non-nullish
+  (assert-string= "b"
+    (%js-run-capture "console.log(null ?? undefined ?? 'b' ?? 'c');")))
+
 ;;; ─── 11. Named function-expression recursion + typeof function ───────────────
 
 (deftest js-e2e-named-function-expression-recursion
@@ -868,3 +907,133 @@ so it returned a bound closure instead of the string)."
   (assert-string= "42" (%js-run-capture "const o={}; const k=Symbol('key'); o[k]=42; console.log(o[k]);"))
   ;; member access on the Symbol global (well-known symbols) unaffected
   (assert-string= "symbol" (%js-run-capture "console.log(typeof Symbol.iterator);")))
+
+(deftest js-e2e-global-function-calls
+  "Global functions whose prelude binding is a value (btoa/atob, the URI encode/
+decode family, isNaN/isFinite) are callable bare.  Regression: the bare call
+resolved to the function symbol holding the global rather than a callable, so
+btoa('hi') raised 'Undefined function: btoa' — same fix as parseInt/Symbol via the
+coercion-call table."
+  (assert-string= "aGk=" (%js-run-capture "console.log(btoa('hi'));"))
+  (assert-string= "hi"   (%js-run-capture "console.log(atob('aGk='));"))
+  (assert-string= "a%20b" (%js-run-capture "console.log(encodeURIComponent('a b'));"))
+  (assert-string= "a b"  (%js-run-capture "console.log(decodeURIComponent('a%20b'));"))
+  (assert-string= "a%20b/c" (%js-run-capture "console.log(encodeURI('a b/c'));"))
+  (assert-string= "false true" (%js-run-capture "console.log(isNaN(5)+' '+isNaN(NaN));"))
+  (assert-string= "true false" (%js-run-capture "console.log(isFinite(5)+' '+isFinite(Infinity));")))
+
+(deftest js-e2e-for-in
+  "for...in enumerates enumerable string keys of an object."
+  (assert-string= "a,b,c"
+    (%js-run-capture
+     "const o={a:1,b:2,c:3}; const keys=[]; for(let k in o){keys.push(k);} console.log(keys.join(','));"))
+  ;; inherited prototype keys are NOT enumerated (our objects have no prototype chain)
+  (assert-string= "x"
+    (%js-run-capture
+     "const o={x:10}; let result=''; for(let k in o){result+=k;} console.log(result);")))
+
+(deftest js-e2e-for-of-array
+  "for...of iterates elements of an array."
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "const a=[1,2,3]; const out=[]; for(let v of a){out.push(v);} console.log(out.join(','));"))
+  ;; works with a computed array
+  (assert-string= "10,20"
+    (%js-run-capture
+     "let s=0; for(const n of [10,20]){s+=n;} console.log(s);")))
+
+(deftest js-e2e-for-of-string
+  "for...of iterates characters of a string."
+  (assert-string= "h,e,l,l,o"
+    (%js-run-capture
+     "const chars=[]; for(let c of 'hello'){chars.push(c);} console.log(chars.join(','));")))
+
+(deftest js-e2e-for-of-destructuring
+  "for...of with array destructuring pattern unpacks each element.
+Regression: %js-lower-for-of-in previously bound only the gensym to the element
+but never called %js-emit-destructure-bindings — a and b stayed undefined."
+  (assert-string= "1a,2b"
+    (%js-run-capture
+     "const pairs=[[1,'a'],[2,'b']]; const out=[];
+for(let [n,s] of pairs){out.push(n+s);}
+console.log(out.join(','));"))
+  ;; object destructuring in for...of
+  (assert-string= "Alice,Bob"
+    (%js-run-capture
+     "const people=[{name:'Alice'},{name:'Bob'}]; const names=[];
+for(const {name} of people){names.push(name);}
+console.log(names.join(','));"))
+  ;; rest in array destructuring
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "const rows=[[1,2,3]];
+for(const [a,...rest] of rows){console.log([a].concat(rest).join(','));}")))
+
+(deftest js-e2e-generator-execution
+  "Generator functions execute lazily via the eager-collect %js-make-generator model:
+the body runs once collecting all yields into a list, then for...of drains it."
+  (assert-string= "0,1,2,3,4"
+    (%js-run-capture
+     "function* range(n){for(let i=0;i<n;i++){yield i;}}
+const out=[]; for(const v of range(5)){out.push(v);} console.log(out.join(','));"))
+  ;; generator as a value passed to spread
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "function* g(){yield 1; yield 2; yield 3;}
+console.log([...g()].join(','));"))
+  ;; generator with yield*
+  (assert-string= "a,b,c"
+    (%js-run-capture
+     "function* letters(){yield* ['a','b','c'];}
+const out=[]; for(const v of letters()){out.push(v);} console.log(out.join(','));")))
+
+(deftest js-e2e-map-iteration
+  "Map iteration: for...of over a Map yields [key,value] pairs in insertion order.
+Array.from(map) and Map.entries()/keys()/values() also work."
+  ;; basic for...of over a Map
+  (assert-string= "a=1,b=2"
+    (%js-run-capture
+     "const m=new Map([['a',1],['b',2]]); const out=[];
+for(const [k,v] of m){out.push(k+'='+v);}
+console.log(out.join(','));"))
+  ;; Map.size and .get/.set/.has
+  (assert-string= "2 1 true false"
+    (%js-run-capture
+     "const m=new Map(); m.set('x',1); m.set('y',2);
+console.log(m.size+' '+m.get('x')+' '+m.has('x')+' '+m.has('z'));"))
+  ;; Array.from on a Map
+  (assert-string= "2"
+    (%js-run-capture
+     "const m=new Map([[1,'a'],[2,'b']]); console.log(Array.from(m).length);")))
+
+(deftest js-e2e-set-iteration
+  "Set iteration: for...of over a Set yields each value once in insertion order.
+Set.size, .has, .add, .delete work."
+  ;; basic for...of over a Set
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "const s=new Set([1,2,3,2,1]); const out=[];
+for(const v of s){out.push(v);}
+console.log(out.join(','));"))
+  ;; Set.size and .has
+  (assert-string= "3 true false"
+    (%js-run-capture
+     "const s=new Set([1,2,3]); console.log(s.size+' '+s.has(2)+' '+s.has(9));"))
+  ;; Set spread into array (union of two sets via spread)
+  (assert-string= "4"
+    (%js-run-capture
+     "const a=new Set([1,2,3]); const b=new Set([3,4]);
+const u=new Set([...a,...b]); console.log(u.size);")))
+
+(deftest js-e2e-array-from
+  "Array.from converts iterables/array-likes to arrays.  Supports an optional
+map function and handles strings, Sets, Maps, and generators."
+  (assert-string= "1,2,3"
+    (%js-run-capture "console.log(Array.from([1,2,3]).join(','));"))
+  (assert-string= "h,e,l,l,o"
+    (%js-run-capture "console.log(Array.from('hello').join(','));"))
+  (assert-string= "2,4,6"
+    (%js-run-capture "console.log(Array.from([1,2,3],x=>x*2).join(','));"))
+  ;; Array.from on a Set
+  (assert-string= "3"
+    (%js-run-capture "console.log(Array.from(new Set([1,2,3])).length);")))

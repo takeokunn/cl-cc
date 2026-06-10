@@ -51,23 +51,37 @@ Returns (values ast rest)."
 (defun %js-lower-for-of-in (binding iter-expr body-fn-name loop-tag end-tag)
   "Shared lowering for for-in and for-of loops.
 ITER-EXPR is the call that produces the iteration list.
+BINDING is either a plain symbol (simple) or an (:array-pattern/:object-pattern …)
+destructuring pattern — in the latter case we emit full destructuring bindings inside
+the loop so `for (let [a,b] of pairs)' correctly unpacks each element.
 Returns a closure that accepts the parsed body-ast."
   (declare (ignore body-fn-name))
   (let ((var-sym  (%js-binding-to-sym binding))
         (iter-sym (gensym "FOR-ITER-")))
     (lambda (body-ast)
-      (let ((body-stmts (if (ast-progn-p body-ast)
-                            (ast-progn-forms body-ast)
-                            (list body-ast))))
+      (let* ((body-stmts (if (ast-progn-p body-ast)
+                             (ast-progn-forms body-ast)
+                             (list body-ast)))
+             (elem-access (make-ast-call
+                           :func (make-ast-var :name 'car)
+                           :args (list (make-ast-var :name iter-sym))))
+             ;; For destructuring patterns emit all inner bindings inside the loop.
+             ;; %js-emit-destructure-bindings returns ((gensym . source) name1 name2 …).
+             ;; The first binding is (gensym . (var gensym)) — a self-reference placeholder;
+             ;; we replace its RHS with the actual (car iter-sym) element access.
+             (loop-bindings
+              (if (listp binding)
+                  (multiple-value-bind (dest-bindings _)
+                      (%js-emit-destructure-bindings binding (make-ast-var :name var-sym))
+                    (declare (ignore _))
+                    (cons (cons var-sym elem-access) (rest dest-bindings)))
+                  (list (cons var-sym elem-access)))))
         (make-ast-let
          :bindings (list (cons iter-sym iter-expr))
          :body (list (%js-lower-while-with-tags
                       (%js-truthy-call (make-ast-var :name iter-sym))
                       (list (make-ast-let
-                             :bindings (list (cons var-sym
-                                                   (make-ast-call
-                                                    :func (make-ast-var :name 'car)
-                                                    :args (list (make-ast-var :name iter-sym)))))
+                             :bindings loop-bindings
                              :body (append body-stmts
                                            (list (make-ast-setq
                                                   :var iter-sym
