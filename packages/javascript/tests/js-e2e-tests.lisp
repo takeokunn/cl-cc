@@ -136,6 +136,13 @@ seen, reusing the body-prologue destructuring lowering."
   ;; the canonical idiom: destructuring in a .map/.forEach callback
   (assert-string= "3,7" (%js-run-capture "console.log([[1,2],[3,4]].map(([a,b])=>a+b).join(','));"))
   (assert-string= "10,20" (%js-run-capture "console.log([{n:1},{n:2}].map(({n})=>n*10).join(','));"))
+  ;; rest INSIDE an arrow pattern: array spread lowers to apply+append, object
+  ;; spread to a fold chain — both reversed by the converter
+  (assert-string= "3" (%js-run-capture "const g=([a,...r])=>r.length; console.log(g([1,2,3,4]));"))
+  (assert-string= "{\"b\":2,\"c\":3}" (%js-run-capture "const m=({a,...rest})=>JSON.stringify(rest); console.log(m({a:1,b:2,c:3}));"))
+  (assert-string= "1:2,3;4:5,6" (%js-run-capture "console.log([[1,2,3],[4,5,6]].map(([a,...rest])=>a+':'+rest.join(',')).join(';'));"))
+  ;; object spread literals (not arrow params) are unaffected by the fold-chain detection
+  (assert-string= "1 2" (%js-run-capture "const o={...{a:1},...{b:2}}; console.log(o.a,o.b);"))
   ;; plain arrows and parenthesized expressions still parse (no regression)
   (assert-string= "10" (%js-run-capture "const r=x=>x*2; console.log(r(5));"))
   (assert-string= "7"  (%js-run-capture "const p=(a,b)=>a-b; console.log(p(9,2));"))
