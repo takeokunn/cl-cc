@@ -129,9 +129,34 @@
         do (setf stream (cdr stream)))
   stream)
 
+(defun %php-promoted-param-assignments (param-attributes)
+  "Build (ast-set-slot-value $this->prop $param) nodes for each promoted param.
+PARAM-ATTRIBUTES is the :php-param-attributes plist value from an ast-defun."
+  (loop for attr-plist in param-attributes
+        for param = (car attr-plist)
+        when (getf (cdr attr-plist) :php-promote)
+          collect (make-ast-set-slot-value
+                   :object (make-ast-var :name (php-var-sym "$this"))
+                   :slot   (php-ident-sym (symbol-name param))
+                   :value  (make-ast-var :name param))))
+
+(defun %php-promoted-property-slots (param-attributes)
+  "Build ast-slot-def nodes declaring each promoted param as a class property.
+PHP 8.0 constructor promotion both declares AND initializes the property."
+  (loop for attr-plist in param-attributes
+        for param = (car attr-plist)
+        for mods = (getf (cdr attr-plist) :php-promote)
+        when mods
+          collect (make-ast-slot-def
+                   :name      (php-ident-sym (symbol-name param))
+                   :initform  (make-ast-quote :value +php-null+)
+                   :allocation (if (member :static mods :test #'eq) :class :instance)
+                   :imports   (%php-slot-metadata mods :target-type :property))))
+
 (defun %php-parse-class-body-member (stream known-vars)
   "Parse one class body member: a property declaration or a method definition.
-Returns (values slot-def-or-nil remaining-stream)."
+Returns (values slot-def-or-nil remaining-stream extra-slots).
+EXTRA-SLOTS is a list of additional slots to inject (used for constructor promotion)."
   (multiple-value-bind (attributes stream) (%php-parse-attributes stream)
   (multiple-value-bind (modifiers stream) (%php-parse-visibility-modifiers stream)
   (let ((stream (php-skip-semis stream)))
@@ -176,21 +201,34 @@ Returns (values slot-def-or-nil remaining-stream)."
                       (not (member :static modifiers :test #'eq)))
              (setf (ast-defun-params method-ast)
                    (cons (php-var-sym "$this") (ast-defun-params method-ast))))
-           (values (when method-ast
-                    ;; Store full ast-defun in slot-def initform to preserve method body.
-                    ;; Static methods are class-allocated so their bound closure lives on
-                    ;; the class object itself — C::method() then resolves via slot-value
-                    ;; on the class (the same path class constants already use).  Instance
-                    ;; methods stay :instance so each object carries its own closure.
-                    (make-ast-slot-def :name (ast-defun-name method-ast)
-                                        :initform method-ast
-                                        :allocation (if (member :static modifiers :test #'eq)
-                                                        :class
-                                                        :instance)
-                                        :imports (%php-slot-metadata modifiers
-                                                                    :attributes attributes
-                                                                    :target-type :method)))
-                   rest)))
+           ;; Constructor property promotion (PHP 8.0+): inject $this->prop = $param;
+           ;; at the top of __construct for each param tagged :php-promote.
+           (let (promoted-slots)
+             (when (and method-ast
+                        (ast-defun-p method-ast)
+                        (eq (ast-defun-name method-ast) (php-ident-sym "__construct")))
+               (let* ((attrs (getf (ast-defun-declarations method-ast) :php-param-attributes))
+                      (promos (%php-promoted-param-assignments attrs)))
+                 (when promos
+                   (setf (ast-defun-body method-ast)
+                         (append promos (ast-defun-body method-ast)))
+                   (setf promoted-slots (%php-promoted-property-slots attrs)))))
+             (values (when method-ast
+                       ;; Store full ast-defun in slot-def initform to preserve method body.
+                       ;; Static methods are class-allocated so their bound closure lives on
+                       ;; the class object itself — C::method() then resolves via slot-value
+                       ;; on the class (the same path class constants already use).  Instance
+                       ;; methods stay :instance so each object carries its own closure.
+                       (make-ast-slot-def :name (ast-defun-name method-ast)
+                                          :initform method-ast
+                                          :allocation (if (member :static modifiers :test #'eq)
+                                                          :class
+                                                          :instance)
+                                          :imports (%php-slot-metadata modifiers
+                                                                       :attributes attributes
+                                                                       :target-type :method)))
+                     rest
+                     promoted-slots))))
       ;; Unknown class-body syntax must not be silently discarded. Silent skip
       ;; made unsupported PHP look successfully parsed while losing source.
       (t (error "PHP unsupported feature in class body near token ~S" (php-peek stream))))))))

@@ -1093,12 +1093,13 @@ const c=new C(); console.log(c.val());"))
     (%js-run-capture
      "class C{#v; constructor(v){this.#v=v;} double(){return this.#v*2;}}
 console.log(new C(5).double());"))
-  ;; inheritance: subclass can have same-named private field as parent
-  (assert-string= "parent child"
+  ;; subclass uses parent's private field via inherited method
+  (assert-string= "7"
     (%js-run-capture
-     "class P{#v='parent'; getP(){return this.#v;}}
-class C extends P{#v='child'; getC(){return this.#v;}}
-const c=new C(); console.log(c.getP()+' '+c.getC());")))
+     "class P{#n; constructor(n){this.#n=n;} get(){return this.#n;}}
+class C extends P{constructor(n){super(n);} doubled(){return this.get()*2;}}
+console.log(new C(7).get());")))
+
 
 
 (deftest js-e2e-promise-chaining

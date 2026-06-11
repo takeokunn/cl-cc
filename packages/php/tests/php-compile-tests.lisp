@@ -151,6 +151,22 @@ the class rejected). A class with no __construct is unaffected."
   ;; a class with no constructor still constructs and uses property defaults
   (assert-string= "5"    (%php-run-capture "<?php class C{ public $x=5; } $o=new C(); echo $o->x;")))
 
+(deftest php-e2e-constructor-promotion
+  "PHP 8.0 constructor property promotion: `public $x` in __construct parameter
+list auto-assigns $this->x = $x without explicit body code."
+  ;; basic single-param promotion
+  (assert-string= "42"
+    (%php-run-capture "<?php class C{ function __construct(public $x){} } $o=new C(42); echo $o->x;"))
+  ;; two promoted params
+  (assert-string= "hello:99"
+    (%php-run-capture "<?php class P{ function __construct(public $n, public $v){} } $p=new P('hello',99); echo $p->n.':'.$p->v;"))
+  ;; mixed: one promoted, one regular param — $this->x auto-set, $label used in body
+  (assert-string= "5:extra"
+    (%php-run-capture "<?php class M{ function __construct(public $x, $label){ echo $this->x.':'.$label; } } $o=new M(5,'extra');"))
+  ;; promotion + explicit body
+  (assert-string= "10"
+    (%php-run-capture "<?php class C{ function __construct(public $v){ $this->v=$this->v*2; } } $o=new C(5); echo $o->v;")))
+
 (deftest php-e2e-instance-method-this
   "Instance methods bind $this to the receiver (regression: $this was an unbound
 variable, so $this->x inside a method produced nothing). Implemented by giving

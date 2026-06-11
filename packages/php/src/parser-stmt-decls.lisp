@@ -115,7 +115,7 @@
               (push slot slots)
               (push case-meta enum-cases)
               (setf current rest2))
-            (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
+            (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars)
               (when slot
                 ;; Enum methods are stored CLASS-allocated (on the enum class
                 ;; object) so $case->method() resolves through the case's
@@ -125,6 +125,8 @@
                            (ast-defun-p (ast-slot-initform slot)))
                   (setf (ast-slot-allocation slot) :class))
                 (push slot slots))
+              ;; Constructor property promotion generates extra property slots.
+              (dolist (es extra-slots) (push es slots))
               (setf current rest2)))))
       (let* ((slots-rev (nreverse slots))
              (defclass (make-ast-defclass :name class-name
