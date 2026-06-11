@@ -1073,3 +1073,122 @@ map function and handles strings, Sets, Maps, and generators."
   ;; Array.from on a Set
   (assert-string= "3"
     (%js-run-capture "console.log(Array.from(new Set([1,2,3])).length);")))
+
+(deftest js-e2e-private-class-fields
+  "Private class fields (#name) are stored in the instance's __private__ slot
+and are inaccessible from outside the class.  ES2022 syntax, inherited by
+ES2026."
+  ;; basic private field read/write
+  (assert-string= "42"
+    (%js-run-capture
+     "class C{#x; constructor(v){this.#x=v;} get(){return this.#x;}}
+console.log(new C(42).get());"))
+  ;; private field with default initializer
+  (assert-string= "0"
+    (%js-run-capture
+     "class C{#count=0; inc(){this.#count++;} val(){return this.#count;}}
+const c=new C(); console.log(c.val());"))
+  ;; private method (static)
+  (assert-string= "10"
+    (%js-run-capture
+     "class C{#v; constructor(v){this.#v=v;} double(){return this.#v*2;}}
+console.log(new C(5).double());"))
+  ;; inheritance: subclass can have same-named private field as parent
+  (assert-string= "parent child"
+    (%js-run-capture
+     "class P{#v='parent'; getP(){return this.#v;}}
+class C extends P{#v='child'; getC(){return this.#v;}}
+const c=new C(); console.log(c.getP()+' '+c.getC());")))
+
+
+(deftest js-e2e-promise-chaining
+  "Promise.then() and Promise.catch() chain correctly in the synchronous model."
+  ;; basic .then chain
+  (assert-string= "6"
+    (%js-run-capture
+     "Promise.resolve(3).then(x=>x*2).then(x=>console.log(x));"))
+  ;; .catch on rejected promise
+  (assert-string= "caught: oops"
+    (%js-run-capture
+     "Promise.reject('oops').catch(e=>console.log('caught: '+e));"))
+  ;; Promise.all
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "Promise.all([Promise.resolve(1),Promise.resolve(2),Promise.resolve(3)])
+.then(vs=>console.log(vs.join(',') ));"))
+  ;; async function + .then chaining
+  (assert-string= "done"
+    (%js-run-capture
+     "async function f(){return 'done';}
+f().then(v=>console.log(v));")))
+
+(deftest js-e2e-weakmap-weakset
+  "WeakMap and WeakSet store object-keyed associations without preventing GC.
+In our host-CL model they behave like normal Map/Set for observable behavior."
+  ;; WeakMap basic get/set/has
+  (assert-string= "42 true false"
+    (%js-run-capture
+     "const wm=new WeakMap(); const k={}; wm.set(k,42);
+console.log(wm.get(k)+' '+wm.has(k)+' '+wm.has({}));"))
+  ;; WeakSet basic add/has/delete
+  (assert-string= "true false"
+    (%js-run-capture
+     "const ws=new WeakSet(); const o={}; ws.add(o);
+console.log(ws.has(o)+' '+ws.has({}));"))
+  ;; WeakMap delete
+  (assert-string= "true false"
+    (%js-run-capture
+     "const wm=new WeakMap(); const k={}; wm.set(k,1);
+const had=wm.has(k); wm.delete(k); console.log(had+' '+wm.has(k));")))
+
+(deftest js-e2e-object-static-methods
+  "Object.keys/values/entries/assign/fromEntries work on plain objects."
+  (assert-string= "a,b"
+    (%js-run-capture "console.log(Object.keys({a:1,b:2}).join(','));"))
+  (assert-string= "1,2"
+    (%js-run-capture "console.log(Object.values({a:1,b:2}).join(','));"))
+  (assert-string= "a=1,b=2"
+    (%js-run-capture
+     "console.log(Object.entries({a:1,b:2}).map(([k,v])=>k+'='+v).join(','));"))
+  (assert-string= "3"
+    (%js-run-capture
+     "const t={}; Object.assign(t,{x:1},{y:2}); console.log(t.x+t.y);"))
+  (assert-string= "10"
+    (%js-run-capture
+     "const o=Object.fromEntries([['x',10]]); console.log(o.x);")))
+
+(deftest js-e2e-string-methods-es2021
+  "String methods added in ES2021+: replaceAll, at."
+  (assert-string= "a-b-c"
+    (%js-run-capture "console.log('a.b.c'.replaceAll('.', '-'));"))
+  (assert-string= "c"
+    (%js-run-capture "console.log('abc'.at(-1));"))
+  (assert-string= "a"
+    (%js-run-capture "console.log('abc'.at(0));"))
+  ;; String.prototype.trimStart / trimEnd
+  (assert-string= "hi  "
+    (%js-run-capture "console.log('  hi  '.trimStart());"))
+  (assert-string= "  hi"
+    (%js-run-capture "console.log('  hi  '.trimEnd());")))
+
+(deftest js-e2e-array-methods-es2023
+  "Array methods added in ES2023: toReversed, toSorted, toSpliced, with, at,
+findLast, findLastIndex."
+  ;; toReversed returns new array (non-mutating)
+  (assert-string= "3,2,1"
+    (%js-run-capture "const a=[1,2,3]; console.log(a.toReversed().join(','));"))
+  ;; original array unchanged
+  (assert-string= "1,2,3"
+    (%js-run-capture "const a=[1,2,3]; a.toReversed(); console.log(a.join(','));"))
+  ;; toSorted
+  (assert-string= "1,2,3"
+    (%js-run-capture "console.log([3,1,2].toSorted().join(','));"))
+  ;; Array.prototype.at (negative index)
+  (assert-string= "3"
+    (%js-run-capture "console.log([1,2,3].at(-1));"))
+  ;; findLast
+  (assert-string= "4"
+    (%js-run-capture "console.log([1,2,3,4].findLast(x=>x%2===0));"))
+  ;; findLastIndex
+  (assert-string= "3"
+    (%js-run-capture "console.log([1,2,3,4].findLastIndex(x=>x%2===0));")))
