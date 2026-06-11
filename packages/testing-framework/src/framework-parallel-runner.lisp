@@ -243,6 +243,15 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
     ;; The semaphore-based killer above handles the suite deadline reliably.
     (unwind-protect
          (let ((*parallel-suite-deadline* suite-deadline))
+           ;; Reseed from wall-clock time before generating the random seed.
+           ;; The nix core image has a fixed *random-state* that always produces
+           ;; seed 1193941380623146742, which triggers a pre-existing deadlock at
+           ;; worker 3.  get-internal-real-time advances independently of the
+           ;; frozen core image state, so this breaks the determinism.
+           (unless seed
+             (setf *random-state*
+                   (sb-ext:seed-random-state
+                    (mod (get-internal-real-time) most-positive-fixnum))))
            (let* ((actual-seed     (or seed (random most-positive-fixnum)))
                   (*random-state*  (sb-ext:seed-random-state actual-seed))
                   (tests-plists    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))

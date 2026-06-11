@@ -19,6 +19,7 @@
    #:%js-nullish-coalesce
    #:%js-optional-chain
    #:%js-optional-call
+   #:%js-optional-method-call
    #:%js-spread
 
    ;; Destructuring

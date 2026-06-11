@@ -618,15 +618,24 @@ body is wrapped in a let binding REST-SYM to that list converted to a JS array
             (when generator-p (push :js-generator decls))
             (multiple-value-bind (required opts)
                 (%js-split-params-by-defaults params optionals)
-              (multiple-value-bind (rest-param wrapped-body)
+              (multiple-value-bind (rest-param body-forms)
                   (%js-rest-binding rest-sym (%js-callable-body body-stmts))
-                (values (make-ast-defun :name (or fn-name (gensym "JS-FN-"))
-                                        :params required
-                                        :optional-params opts
-                                        :rest-param rest-param
-                                        :declarations (nreverse decls)
-                                        :body wrapped-body)
-                        rest2)))))))))
+                ;; Generator functions: wrap body in (%js-make-generator (lambda () body))
+                ;; so calling the defun returns a fresh generator iterator object.
+                ;; Parameters are captured by the zero-arg inner lambda's closure.
+                (let ((wrapped-body
+                       (if generator-p
+                           (list (%js-call '%js-make-generator
+                                           (make-ast-lambda :params nil
+                                                            :body body-forms)))
+                           body-forms)))
+                  (values (make-ast-defun :name (or fn-name (gensym "JS-FN-"))
+                                          :params required
+                                          :optional-params opts
+                                          :rest-param rest-param
+                                          :declarations (nreverse decls)
+                                          :body wrapped-body)
+                          rest2))))))))))
 
 ;;; ─── If Statement ────────────────────────────────────────────────────────────
 

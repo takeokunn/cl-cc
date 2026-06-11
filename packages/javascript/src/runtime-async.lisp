@@ -223,9 +223,11 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
   "Eagerly run BODY-FN collecting yields; return a JS iterator object."
   (let ((collector (list nil))            ; (yields-reversed)
         (return-val +js-undefined+))
-    ;; Run the body with the collector bound
+    ;; Run the body with the collector bound.
+    ;; BODY-FN is a VM closure, so use %js-funcall (not CL:FUNCALL) so the
+    ;; *js-apply-fn* invoker can re-enter the VM for compiled-JS bodies.
     (let ((*%js-yield-collector* collector))
-      (handler-case (setf return-val (funcall body-fn))
+      (handler-case (setf return-val (%js-funcall body-fn))
         (t () nil)))
     ;; Build the iterator in FIFO order
     (let* ((values (reverse (car collector)))

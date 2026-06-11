@@ -76,19 +76,28 @@ Returns a closure that accepts the parsed body-ast."
                     (declare (ignore _))
                     (cons (cons var-sym elem-access) (rest dest-bindings)))
                   (list (cons var-sym elem-access)))))
-        (make-ast-let
-         :bindings (list (cons iter-sym iter-expr))
-         :body (list (%js-lower-while-with-tags
-                      (%js-truthy-call (make-ast-var :name iter-sym))
-                      (list (make-ast-let
-                             :bindings loop-bindings
-                             :body (append body-stmts
-                                           (list (make-ast-setq
-                                                  :var iter-sym
-                                                  :value (make-ast-call
-                                                          :func (make-ast-var :name 'cdr)
-                                                          :args (list (make-ast-var :name iter-sym))))))))
-                      loop-tag end-tag)))))))
+        (let* ((iter-advance (make-ast-setq
+                               :var iter-sym
+                               :value (make-ast-call
+                                       :func (make-ast-var :name 'cdr)
+                                       :args (list (make-ast-var :name iter-sym)))))
+               (combined-body (append body-stmts (list iter-advance)))
+               ;; For destructuring, build nested single-binding lets so each binding
+               ;; sees all earlier ones (let* semantics).  %js-emit-destructure-bindings
+               ;; returns bindings in dependency order, so folding from the inside out
+               ;; is correct for any nesting depth.
+               (inner-form
+                (if (listp binding)
+                    (let ((r combined-body))
+                      (dolist (b (reverse loop-bindings) (first r))
+                        (setf r (list (make-ast-let :bindings (list b) :body r)))))
+                    (make-ast-let :bindings loop-bindings :body combined-body))))
+          (make-ast-let
+           :bindings (list (cons iter-sym iter-expr))
+           :body (list (%js-lower-while-with-tags
+                        (%js-truthy-call (make-ast-var :name iter-sym))
+                        (list inner-form)
+                        loop-tag end-tag))))))))
 
 (defun js-parse-for-stmt (stream)
   "Handle for(init;cond;update){}, for(var x in obj){},

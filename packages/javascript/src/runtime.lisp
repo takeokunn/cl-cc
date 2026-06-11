@@ -466,6 +466,13 @@ plain own property."
       (apply func args)
       +js-undefined+))
 
+(defun %js-optional-method-call (obj key &rest args)
+  "obj?.method(args) — short-circuit to undefined when OBJ is null/undefined."
+  (if (%js-not-nullish obj)
+      (let ((method (%js-get-prop obj key)))
+        (apply #'%js-funcall method args))
+      +js-undefined+))
+
 ;;; -----------------------------------------------------------------------
 ;;;  String / Template
 ;;; -----------------------------------------------------------------------

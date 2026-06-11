@@ -849,6 +849,7 @@ host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
          (make-ast-defvar :name (js-ident-sym "Map")          :value (make-ast-var :name '%js-make-map)        :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "WeakMap")      :value (make-ast-var :name '%js-make-weak-map)   :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "WeakSet")      :value (make-ast-var :name '%js-make-weak-set)   :kind 'defparameter)
+         (make-ast-defvar :name (js-ident-sym "Set")          :value (%js-call '%js-builtin-ref (make-ast-quote :value "Set")) :kind 'defparameter)
          ;; Global number-parsing functions
          (make-ast-defvar :name (js-ident-sym "parseInt")     :value (make-ast-var :name '%js-parse-int)       :kind 'defparameter)
          (make-ast-defvar :name (js-ident-sym "parseFloat")   :value (make-ast-var :name '%js-parse-float)     :kind 'defparameter)

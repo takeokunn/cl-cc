@@ -937,8 +937,8 @@ coercion-call table."
   (assert-string= "1,2,3"
     (%js-run-capture
      "const a=[1,2,3]; const out=[]; for(let v of a){out.push(v);} console.log(out.join(','));"))
-  ;; works with a computed array
-  (assert-string= "10,20"
+  ;; works with a computed array (10+20=30)
+  (assert-string= "30"
     (%js-run-capture
      "let s=0; for(const n of [10,20]){s+=n;} console.log(s);")))
 

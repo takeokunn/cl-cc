@@ -638,14 +638,17 @@ Returns (values ast rest)."
                                              :optional-params opts
                                              :rest-param rest-param
                                              :body wrapped-body)))
-            ;; Wrap async/generator in metadata call if needed
+            ;; Wrap async/generator expressions.
+            ;; Generator expressions use %js-wrap-generator-body which returns a
+            ;; CALLABLE that creates a fresh generator on each invocation — unlike
+            ;; %js-make-generator which runs the body eagerly with no arguments.
             (let ((result (cond
                             ((and async-p is-generator)
                              (%js-call '%js-make-async-generator lambda-ast))
                             (async-p
                              (%js-call '%js-make-async lambda-ast))
                             (is-generator
-                             (%js-call '%js-make-generator lambda-ast))
+                             (%js-call '%js-wrap-generator-body lambda-ast))
                             (t lambda-ast))))
               ;; Named function expression — the name is visible INSIDE the body
               ;; (for self-recursion) but not outside.  A plain (let ((f lambda)) f)
@@ -757,13 +760,18 @@ Returns (values ast rest)."
            (multiple-value-bind (tok rest2) (js-consume rest)
              (declare (ignore tok))
              (cond
-               ;; ?.prop
+               ;; ?.prop — if followed by ( emit optional-method-call, else optional-chain
                ((eq (js-peek-type rest2) :T-IDENT)
                 (multiple-value-bind (prop-tok rest3) (js-consume rest2)
                   (let ((key (make-ast-quote :value (js-tok-value prop-tok))))
-                    (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-chain)
-                                             :args (list ast key))
-                          rest rest3))))
+                    (if (eq (js-peek-type rest3) :T-LPAREN)
+                        (multiple-value-bind (args rest4) (js-parse-arguments rest3)
+                          (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-method-call)
+                                                   :args (list* ast key args))
+                                rest rest4))
+                        (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-chain)
+                                                 :args (list ast key))
+                              rest rest3)))))
                ;; ?.[expr]
                ((eq (js-peek-type rest2) :T-LBRACKET)
                 (multiple-value-bind (tok2 rest3) (js-consume rest2)
@@ -918,13 +926,18 @@ Returns (values ast rest). Loops until no more postfix ops."
          (multiple-value-bind (tok rest) (js-consume stream)
            (declare (ignore tok))
            (cond
-             ;; ?.prop
+             ;; ?.prop — if followed by ( emit optional-method-call, else optional-chain
              ((eq (js-peek-type rest) :T-IDENT)
               (multiple-value-bind (prop-tok rest2) (js-consume rest)
                 (let ((key (make-ast-quote :value (js-tok-value prop-tok))))
-                  (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-chain)
-                                           :args (list ast key))
-                        stream rest2))))
+                  (if (eq (js-peek-type rest2) :T-LPAREN)
+                      (multiple-value-bind (args rest3) (js-parse-arguments rest2)
+                        (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-method-call)
+                                                 :args (list* ast key args))
+                              stream rest3))
+                      (setf ast (make-ast-call :func (make-ast-var :name '%js-optional-chain)
+                                               :args (list ast key))
+                            stream rest2)))))
              ;; ?.[expr]
              ((eq (js-peek-type rest) :T-LBRACKET)
               (multiple-value-bind (tok2 rest2) (js-consume rest)
