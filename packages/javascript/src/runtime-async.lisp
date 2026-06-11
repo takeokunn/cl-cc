@@ -77,9 +77,10 @@ console is a defvar'd global object, log/error/warn are bridged host functions."
                          (%js-funcall body-fn (%js-await item)))))
 
 (defun %js-async (thunk)
-  "Execute THUNK, wrapping result/exception in a promise."
+  "Execute THUNK, wrapping result/exception in a promise.
+THUNK is a VM closure so use %js-funcall (not CL:FUNCALL) to re-enter the VM."
   (handler-case
-      (%js-promise-resolve (funcall thunk))
+      (%js-promise-resolve (%js-funcall thunk))
     (js-exception (c)
       (%js-promise-reject (js-exception-value c)))))
 

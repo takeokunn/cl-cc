@@ -51,6 +51,7 @@
    #:%js-yield
    #:%js-yield-from
    #:%js-await
+   #:%js-async
    #:%js-make-async
    #:%js-make-async-generator
    #:%js-make-generator

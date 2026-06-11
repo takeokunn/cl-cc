@@ -446,6 +446,42 @@ async function fetchData(url) {
     (assert-true (not (null fn)))
     (assert-true (member :js-async (cl-cc:ast-defun-declarations fn)))))
 
+;;; ─── 9b. Async / await execution ────────────────────────────────────────────
+
+(deftest js-e2e-async-await-execution
+  "Async function declarations return a Promise; await unwraps it synchronously
+in the simplified async model.  Regression: only async function EXPRESSIONS were
+wrapped in %js-make-async; declarations only stored :js-async as metadata so
+calling async functions ran the body synchronously and returned the raw value
+instead of a Promise.  The fix wraps the body in %js-async (like generators use
+%js-make-generator) so params are captured by closure."
+  ;; basic async return value unwrapped by await
+  (assert-string= "10"
+    (%js-run-capture
+     "async function double(x){return x*2;}
+async function main(){const r=await double(5); console.log(r);}
+main();"))
+  ;; async/await chain
+  (assert-string= "6"
+    (%js-run-capture
+     "async function add(a,b){return a+b;}
+async function run(){const s=await add(2,4); console.log(s);}
+run();"))
+  ;; await on a non-promise passthrough (plain value)
+  (assert-string= "7"
+    (%js-run-capture
+     "async function id(x){return await x;}
+async function test(){console.log(await id(7));}
+test();"))
+  ;; async try/catch: exception becomes rejected promise
+  (assert-string= "caught"
+    (%js-run-capture
+     "async function fail(){throw new Error('oops');}
+async function main(){
+  try{await fail();}catch(e){console.log('caught');}
+}
+main();")))
+
 ;;; ─── 10. Optional chaining chain ─────────────────────────────────────────────
 
 (deftest js-e2e-optional-chaining-chain
