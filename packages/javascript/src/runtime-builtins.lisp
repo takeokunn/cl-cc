@@ -54,6 +54,135 @@
     (and (not (%js-float-nan-p n)) (not (%js-float-infinity-p n)))))
 
 ;;; -----------------------------------------------------------------------
+;;;  Math coerce-unary helpers
+;;; -----------------------------------------------------------------------
+
+(defmacro define-js-math-coerce-unary (name cl-fn)
+  "Define a unary JS Math helper that coerces its argument to double-float."
+  `(defun ,name (x) (,cl-fn (coerce (%js-to-number x) 'double-float))))
+
+(define-js-math-coerce-unary %js-math-sinh  sinh)
+(define-js-math-coerce-unary %js-math-cosh  cosh)
+(define-js-math-coerce-unary %js-math-tanh  tanh)
+(define-js-math-coerce-unary %js-math-asinh asinh)
+(define-js-math-coerce-unary %js-math-acosh acosh)
+(define-js-math-coerce-unary %js-math-atanh atanh)
+
+(defun %js-math-cbrt (x)
+  (let ((v (coerce (%js-to-number x) 'double-float)))
+    (if (minusp v)
+        (- (expt (- v) (/ 1.0d0 3.0d0)))
+        (expt v (/ 1.0d0 3.0d0)))))
+
+(defun %js-math-expm1 (x) (- (exp (coerce (%js-to-number x) 'double-float)) 1.0d0))
+(defun %js-math-log1p  (x) (log (+ 1.0d0 (coerce (%js-to-number x) 'double-float))))
+
+;;; -----------------------------------------------------------------------
+;;;  Number.isNaN / isFinite / isInteger strict predicates
+;;; -----------------------------------------------------------------------
+
+(defun %js-number-is-nan (x)     (%js-float-nan-p x))
+(defun %js-number-is-finite (x)
+  (and (numberp x) (not (%js-float-nan-p x)) (not (%js-float-infinity-p x))))
+(defun %js-number-is-integer (x)
+  (and (numberp x) (not (%js-float-nan-p x)) (= x (truncate x))))
+
+;;; -----------------------------------------------------------------------
+;;;  Standalone global-builtin helpers (referenced in *js-builtin-specs* below)
+;;; -----------------------------------------------------------------------
+;;;
+;;; These must appear BEFORE *js-builtin-specs* because ,#'fn in a defparameter
+;;; evaluates (function fn) at load time — sequential file loading requires the
+;;; defun to precede its reference.
+
+(defun %js-structured-clone (val &rest _opts)
+  "structuredClone(value[, options]): deep clone VAL (options ignored)."
+  (declare (ignore _opts))
+  (%js-deep-clone val))
+
+(defun %js-queue-microtask (fn &rest _)
+  "queueMicrotask(fn): synchronous in our single-threaded model."
+  (declare (ignore _))
+  (%js-funcall fn)
+  +js-undefined+)
+
+(defun %js-set-timeout (fn &rest _)
+  "setTimeout(fn[, delay, …args]): synchronous in our model — run FN now."
+  (declare (ignore _))
+  (unless (or (eq fn +js-undefined+) (eq fn +js-null+))
+    (%js-funcall fn))
+  +js-undefined+)
+
+(defun %js-set-interval (&rest _)
+  "setInterval(...): a no-op stub (running it would never terminate)."
+  (declare (ignore _))
+  +js-undefined+)
+
+(defun %js-clear-timer (&rest _)
+  "clearTimeout / clearInterval: a no-op stub."
+  (declare (ignore _))
+  +js-undefined+)
+
+;;; -----------------------------------------------------------------------
+;;;  Complex built-in helpers (named functions rather than inline lambdas)
+;;; -----------------------------------------------------------------------
+;;;
+;;; Keeping logic here and references in *js-builtin-specs* separates data
+;;; (the name→function table) from the implementation of each entry.
+
+(defun %js-bigint-as-int-n (width bigint)
+  "BigInt.asIntN(width, bigint): mask BIGINT to WIDTH-bit signed integer."
+  (let* ((w       (truncate (%js-to-number width)))
+         (v       (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint)))
+         (modulus (expt 2 w))
+         (half    (expt 2 (1- w)))
+         (masked  (mod v modulus)))
+    (%make-js-bigint (if (>= masked half) (- masked modulus) masked))))
+
+(defun %js-bigint-as-uint-n (width bigint)
+  "BigInt.asUintN(width, bigint): mask BIGINT to WIDTH-bit unsigned integer."
+  (let* ((w (truncate (%js-to-number width)))
+         (v (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint))))
+    (%make-js-bigint (mod v (expt 2 w)))))
+
+(defun %js-iterator-from-iterable (iterable)
+  "Iterator.from(iterable): wrap any iterable/iterator in the Iterator protocol."
+  (%js-add-iterator-helpers!
+   (cond
+     ((and (%js-ht-p iterable) (gethash "next" iterable))
+      iterable)
+     ((and (%js-ht-p iterable) (gethash "@@iterator" iterable))
+      (%js-funcall (gethash "@@iterator" iterable)))
+     ((%js-vec-p iterable)
+      (%js-make-generator
+       (lambda ()
+         (loop for i below (length iterable)
+               do (%js-yield (aref iterable i))))))
+     ((stringp iterable)
+      (%js-make-generator
+       (lambda ()
+         (loop for ch across iterable
+               do (%js-yield (string ch))))))
+     (t
+      (%js-make-object "next"
+                       (lambda ()
+                         (%js-make-object "value" +js-undefined+ "done" t)))))))
+
+(defun %js-map-group-by (iterable key-fn)
+  "Map.groupBy(iterable, keyFn): group ITERABLE elements by KEY-FN result."
+  (let ((result (%js-make-map)))
+    (%js-for-of iterable
+                (lambda (item)
+                  (let* ((key      (%js-funcall key-fn item))
+                         (existing (%js-map-get result key)))
+                    (if (eq existing +js-undefined+)
+                        (let ((arr (%js-make-vec 0)))
+                          (vector-push-extend item arr)
+                          (%js-map-set result key arr))
+                        (vector-push-extend item existing)))))
+    result))
+
+;;; -----------------------------------------------------------------------
 ;;;  Built-in dispatch table
 ;;; -----------------------------------------------------------------------
 
@@ -85,19 +214,15 @@
     ("Math.atan"               . ,#'%js-math-atan)
     ("Math.atan2"              . ,#'%js-math-atan2)
     ;; ES2015 hyperbolic + extra Math (map to CL transcendentals)
-    ("Math.sinh"               . ,(lambda (x) (sinh (coerce (%js-to-number x) 'double-float))))
-    ("Math.cosh"               . ,(lambda (x) (cosh (coerce (%js-to-number x) 'double-float))))
-    ("Math.tanh"               . ,(lambda (x) (tanh (coerce (%js-to-number x) 'double-float))))
-    ("Math.asinh"              . ,(lambda (x) (asinh (coerce (%js-to-number x) 'double-float))))
-    ("Math.acosh"              . ,(lambda (x) (acosh (coerce (%js-to-number x) 'double-float))))
-    ("Math.atanh"              . ,(lambda (x) (atanh (coerce (%js-to-number x) 'double-float))))
-    ("Math.cbrt"               . ,(lambda (x)
-                                    (let ((v (coerce (%js-to-number x) 'double-float)))
-                                      (if (minusp v)
-                                          (- (expt (- v) (/ 1.0d0 3.0d0)))
-                                          (expt v (/ 1.0d0 3.0d0))))))
-    ("Math.expm1"              . ,(lambda (x) (- (exp (coerce (%js-to-number x) 'double-float)) 1.0d0)))
-    ("Math.log1p"              . ,(lambda (x) (log (+ 1.0d0 (coerce (%js-to-number x) 'double-float)))))
+    ("Math.sinh"               . ,#'%js-math-sinh)
+    ("Math.cosh"               . ,#'%js-math-cosh)
+    ("Math.tanh"               . ,#'%js-math-tanh)
+    ("Math.asinh"              . ,#'%js-math-asinh)
+    ("Math.acosh"              . ,#'%js-math-acosh)
+    ("Math.atanh"              . ,#'%js-math-atanh)
+    ("Math.cbrt"               . ,#'%js-math-cbrt)
+    ("Math.expm1"              . ,#'%js-math-expm1)
+    ("Math.log1p"              . ,#'%js-math-log1p)
     ("Math.hypot"              . ,#'%js-math-hypot)
     ("Math.clz32"              . ,#'%js-math-clz32)
     ("Math.fround"             . ,#'%js-math-fround)
@@ -105,7 +230,7 @@
     ;; Array
     ("Array.isArray"           . ,#'%js-array-is-array)
     ("Array.from"              . ,#'%js-array-from)
-    ("Array.of"                . ,#'%js-make-array)
+    ("Array.of"                . ,#'%js-array-of)
     ;; Object
     ("Object.keys"             . ,#'%js-object-keys)
     ("Object.values"           . ,#'%js-object-values)
@@ -140,11 +265,9 @@
     ("parseFloat"              . ,#'%js-parse-float)
     ("isNaN"                   . ,#'%js-is-nan)
     ("isFinite"                . ,#'%js-is-finite)
-    ("Number.isNaN"            . ,(lambda (x) (%js-float-nan-p x)))
-    ("Number.isFinite"         . ,(lambda (x)
-                                    (and (numberp x) (not (%js-float-nan-p x)) (not (%js-float-infinity-p x)))))
-    ("Number.isInteger"        . ,(lambda (x)
-                                    (and (numberp x) (not (%js-float-nan-p x)) (= x (truncate x)))))
+    ("Number.isNaN"            . ,#'%js-number-is-nan)
+    ("Number.isFinite"         . ,#'%js-number-is-finite)
+    ("Number.isInteger"        . ,#'%js-number-is-integer)
     ("Number.parseInt"         . ,#'%js-to-number)
     ("Number.parseFloat"       . ,#'%js-to-number)
     ("Number.MAX_SAFE_INTEGER" . ,(lambda () 9007199254740991.0d0))
@@ -161,9 +284,9 @@
     ;; Symbol global (callable object)
     ("Symbol.for"              . ,#'%js-symbol-for)
     ("Symbol.keyFor"           . ,#'%js-symbol-key-for)
-    ;; Set constructor — %js-make-ht creates a hash-table used as Set
+    ;; Set constructor — creates an ordered js-set struct
     ("Set"                     . ,(lambda (&optional (iter +js-undefined+))
-                                    (let ((s (%js-make-ht)))
+                                    (let ((s (%js-make-set)))
                                       (when (and (not (eq iter +js-undefined+))
                                                  (not (eq iter +js-null+)))
                                         (%js-for-of iter (lambda (v) (%js-set-add s v))))
@@ -212,11 +335,6 @@
                                 (declare (ignore _locale options))
                                 (%js-make-object
                                  "select" (lambda (n) (if (= (%js-to-number n) 1) "one" "other")))))
-
-    ;; Array.prototype.group / groupToMap (ES2024) — static-ish
-    ("Array.from"          . ,#'%js-array-from)
-    ("Array.isArray"       . ,#'%js-array-is-array)
-    ("Array.of"            . ,#'%js-array-of)
 
     ;; TypedArray constructors
     ("Int8Array"           . ,(lambda (&optional arg) (%js-make-typed-array "Int8Array" arg)))
@@ -278,17 +396,8 @@
     ("Reflect.preventExtensions" . ,(lambda (_target) (declare (ignore _target)) t))
     ;; BigInt (ES2020) — arbitrary-precision integers
     ("BigInt"                  . ,#'%js-bigint)
-    ("BigInt.asIntN"           . ,(lambda (width bigint)
-                                    (let* ((w (truncate (%js-to-number width)))
-                                           (v (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint)))
-                                           (modulus (expt 2 w))
-                                           (half-modulus (expt 2 (1- w)))
-                                           (masked (mod v modulus)))
-                                      (%make-js-bigint (if (>= masked half-modulus) (- masked modulus) masked)))))
-    ("BigInt.asUintN"          . ,(lambda (width bigint)
-                                    (let* ((w (truncate (%js-to-number width)))
-                                           (v (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint))))
-                                      (%make-js-bigint (mod v (expt 2 w))))))
+    ("BigInt.asIntN"           . ,#'%js-bigint-as-int-n)
+    ("BigInt.asUintN"          . ,#'%js-bigint-as-uint-n)
     ;; URI encoding/decoding
     ("encodeURIComponent"      . ,#'%js-encode-uri-component)
     ("decodeURIComponent"      . ,#'%js-decode-uri-component)
@@ -354,95 +463,8 @@
     ("Object.getPrototypeOf" . ,(lambda (_obj) (declare (ignore _obj)) +js-null+))
     ;; Function constructor stub
     ("Function"          . ,(lambda (&rest _) (declare (ignore _)) (lambda (&rest __) (declare (ignore __)) +js-undefined+)))
-    ;; ES2024: Iterator.from + Iterator helpers (TC39 iterator protocol)
-    ("Iterator.from"     . ,(lambda (iterable)
-                               (let ((iter
-                                      (cond
-                                        ;; Already an iterator (has "next")
-                                        ((and (%js-ht-p iterable) (gethash "next" iterable))
-                                         iterable)
-                                        ;; Iterable (has @@iterator)
-                                        ((and (%js-ht-p iterable) (gethash "@@iterator" iterable))
-                                         (%js-funcall (gethash "@@iterator" iterable)))
-                                        ;; Array
-                                        ((%js-vec-p iterable)
-                                         (%js-make-generator (lambda ()
-                                           (loop for i below (length iterable)
-                                                 do (%js-yield (aref iterable i))))))
-                                        ;; String
-                                        ((stringp iterable)
-                                         (%js-make-generator (lambda ()
-                                           (loop for ch across iterable
-                                                 do (%js-yield (string ch))))))
-                                        (t (%js-make-object "next"
-                                             (lambda () (%js-make-object "value" +js-undefined+ "done" t)))))))
-                                 ;; Add iterator helper methods
-                                 (setf (gethash "map" iter)
-                                       (lambda (fn)
-                                         (%js-make-generator (lambda ()
-                                           (%js-for-of iter (lambda (v)
-                                             (%js-yield (%js-funcall fn v)))))))
-                                       (gethash "filter" iter)
-                                       (lambda (fn)
-                                         (%js-make-generator (lambda ()
-                                           (%js-for-of iter (lambda (v)
-                                             (when (%js-truthy (%js-funcall fn v))
-                                               (%js-yield v)))))))
-                                       (gethash "take" iter)
-                                       (lambda (n)
-                                         (let ((count (list 0)))
-                                           (%js-make-generator (lambda ()
-                                             (%js-for-of iter (lambda (v)
-                                               (when (< (car count) (truncate (%js-to-number n)))
-                                                 (%js-yield v)
-                                                 (incf (car count)))))))))
-                                       (gethash "drop" iter)
-                                       (lambda (n)
-                                         (let ((count (list 0)))
-                                           (%js-make-generator (lambda ()
-                                             (%js-for-of iter (lambda (v)
-                                               (if (< (car count) (truncate (%js-to-number n)))
-                                                   (incf (car count))
-                                                   (%js-yield v))))))))
-                                       (gethash "toArray" iter)
-                                       (lambda ()
-                                         (let ((arr (%js-make-vec 0)))
-                                           (%js-for-of iter (lambda (v) (vector-push-extend v arr)))
-                                           arr))
-                                       (gethash "forEach" iter)
-                                       (lambda (fn) (%js-for-of iter fn) +js-undefined+)
-                                       (gethash "reduce" iter)
-                                       (lambda (fn &optional init)
-                                         (let ((acc (if (eq init +js-undefined+) (list nil nil) (list init t))))
-                                           (%js-for-of iter (lambda (v)
-                                             (if (cadr acc)
-                                                 (setf (car acc) (%js-funcall fn (car acc) v))
-                                                 (setf (car acc) v (cadr acc) t))))
-                                           (car acc)))
-                                       (gethash "some" iter)
-                                       (lambda (fn)
-                                         (let ((found nil))
-                                           (%js-for-of iter (lambda (v)
-                                             (when (%js-truthy (%js-funcall fn v))
-                                               (setf found t))))
-                                           found))
-                                       (gethash "every" iter)
-                                       (lambda (fn)
-                                         (let ((all t))
-                                           (%js-for-of iter (lambda (v)
-                                             (unless (%js-truthy (%js-funcall fn v))
-                                               (setf all nil))))
-                                           all))
-                                       (gethash "find" iter)
-                                       (lambda (fn)
-                                         (let ((result +js-undefined+))
-                                           (%js-for-of iter (lambda (v)
-                                             (when (%js-truthy (%js-funcall fn v))
-                                               (setf result v))))
-                                           result))
-                                       (gethash "@@iterator" iter)
-                                       (lambda () iter))
-                                 iter)))
+    ;; ES2024: Iterator.from (TC39 iterator protocol)
+    ("Iterator.from"     . ,#'%js-iterator-from-iterable)
     ;; ES2025: Promise.try
     ("Promise.try"       . ,(lambda (fn &rest args)
                                (handler-case
@@ -475,20 +497,8 @@
                                      registry)))
     ;; WeakRef.prototype.deref
     ;; (WeakRef is already registered — add deref to the method resolver below)
-    ;; ES2024: Object.groupBy (ensure it's registered)
-    ("Map.groupBy"       . ,(lambda (iterable key-fn)
-                               (let ((result (%js-make-map)))
-                                 (%js-for-of iterable
-                                   (lambda (item)
-                                     (let* ((key (%js-funcall key-fn item))
-                                            (existing (%js-map-get result key)))
-                                       (if (eq existing +js-undefined+)
-                                           (progn
-                                             (let ((arr (%js-make-vec 0)))
-                                               (vector-push-extend item arr)
-                                               (%js-map-set result key arr)))
-                                           (vector-push-extend item existing)))))
-                                 result)))
+    ;; ES2024: Map.groupBy
+    ("Map.groupBy"       . ,#'%js-map-group-by)
     ;; Temporal API (ES2026 — Stage 4)
     ("Temporal"              . ,*js-temporal-global*)
     ("Temporal.Now"          . ,(gethash "Now" *js-temporal-global*))
@@ -508,8 +518,6 @@
                                              (if (%js-vec-p arr)
                                                  (format nil "~{~A~^,~}" (coerce arr 'list))
                                                  (%js-to-string arr))))
-    ;; Generator/iterator helpers
-    ("Array.from"        . ,#'%js-array-from)  ; re-register to pick up iterator objects
     ;; Array extra statics
     ("Array.fromAsync"   . ,(lambda (iter &optional map-fn _this) (declare (ignore _this))
                                (%js-promise-resolve (%js-array-from iter map-fn))))
@@ -604,21 +612,13 @@
                                                      (logior #x8000 (random #x3fff))
                                                      (random #xffffffffffff)))))
     ;; structuredClone
-    ("structuredClone"         . ,(lambda (val &optional _opts)
-                                    (declare (ignore _opts))
-                                    (%js-deep-clone val)))
+    ("structuredClone"         . ,#'%js-structured-clone)
     ;; queueMicrotask / setTimeout stubs (synchronous in our model)
-    ("queueMicrotask"          . ,(lambda (fn) (%js-funcall fn) +js-undefined+))
-    ("setTimeout"              . ,(lambda (fn &optional _delay &rest _args)
-                                    (declare (ignore _delay _args))
-                                    (%js-funcall fn) 0))
-    ("clearTimeout"            . ,(lambda (&rest _) (declare (ignore _)) +js-undefined+))
-    ("setInterval"             . ,(lambda (fn &optional _delay &rest _args)
-                                    (declare (ignore _delay _args))
-                                    (%js-funcall fn) 0))
-    ("clearInterval"           . ,(lambda (&rest _) (declare (ignore _)) +js-undefined+))
-    ;; Performance API stub
-    ("performance.now"         . ,(lambda () (coerce (- (get-universal-time) 2208988800) 'double-float)))
+    ("queueMicrotask"          . ,#'%js-queue-microtask)
+    ("setTimeout"              . ,#'%js-set-timeout)
+    ("clearTimeout"            . ,#'%js-clear-timer)
+    ("setInterval"             . ,#'%js-set-interval)
+    ("clearInterval"           . ,#'%js-clear-timer)
     ;; RegExp constructor
     ("RegExp"                  . ,(lambda (pattern &optional flags)
                                     (%js-make-regex (%js-to-string pattern)
@@ -660,39 +660,6 @@ or +js-undefined+.  Used to bind standalone global builtins to a runtime VALUE s
 lowers to the named %js-* helper the direct-call codegen can dispatch."
   (or (gethash name *js-builtin-map*) +js-undefined+))
 
-;;; Standalone global builtins as NAMED functions for the direct-call lowering
-;;; (*js-coercion-call-helpers*); the value binding above uses %js-builtin-ref.
-
-(defun %js-structured-clone (val &rest _opts)
-  "structuredClone(value[, options]): deep clone VAL (options ignored)."
-  (declare (ignore _opts))
-  (%js-deep-clone val))
-
-(defun %js-queue-microtask (fn &rest _)
-  "queueMicrotask(fn): synchronous in our single-threaded model."
-  (declare (ignore _))
-  (%js-funcall fn)
-  +js-undefined+)
-
-(defun %js-set-timeout (fn &rest _)
-  "setTimeout(fn[, delay, …args]): synchronous in our model — run FN now.
-%js-funcall handles both host functions and VM closures (a VM closure is not
-host FUNCTIONP, so a functionp guard would silently skip the callback)."
-  (declare (ignore _))
-  (unless (or (eq fn +js-undefined+) (eq fn +js-null+))
-    (%js-funcall fn))
-  +js-undefined+)
-
-(defun %js-set-interval (&rest _)
-  "setInterval(...): a no-op stub (running it would never terminate)."
-  (declare (ignore _))
-  +js-undefined+)
-
-(defun %js-clear-timer (&rest _)
-  "clearTimeout / clearInterval: a no-op stub."
-  (declare (ignore _))
-  +js-undefined+)
-
 (defun %js-make-namespace-object (prefix)
   "Build a JS namespace global object (Math, JSON, …) from *js-builtin-specs*
 entries whose key is PREFIX + '.' + property. A property whose name is entirely
@@ -726,473 +693,89 @@ and never references a helper that does not exist."
   "Construct the JS JSON global object (stringify / parse)."
   (%js-make-namespace-object "JSON"))
 
-(defun js-program-forms (source &key strict-mode module-p)
-  "Parse JS SOURCE and prepend the runtime-global prelude so compiled programs
-have the standard globals available. Returns a list of shared-AST top-level
-forms ready for the compiler backend — the JS analog of PARSE-ALL-FORMS.
-
-Currently seeds `console' as a defparameter'd global object built by the bridged
-host helper %JS-MAKE-CONSOLE; member access `console.log' then resolves through
-%js-get-prop to a bridged host function. Add further globals (Math, JSON, …) here."
-  (list* (make-ast-defvar
-          :name (js-ident-sym "console")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-console) :args nil)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Symbol")
-          :value (make-ast-var :name '*js-symbol-global*)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "undefined")
-          :value (make-ast-quote :value +js-undefined+)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Infinity")
-          :value (make-ast-var :name '*js-inf-float*)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "NaN")
-          :value (make-ast-var :name '*js-nan-float*)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Date")
-          :value (make-ast-var :name '%js-make-date)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "JSON")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-json) :args nil)
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Math")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-math) :args nil)
-          :kind 'defparameter)
-         ;; Static-method namespaces (Object.keys, Reflect.ownKeys, Number.isInteger,
-         ;; Array.isArray, String.fromCharCode, Promise.resolve, Intl.*). Each is
-         ;; built straight from the *js-builtin-specs* dispatch table by
-         ;; %js-make-namespace-object, so it stays complete. (The constructor/callable
-         ;; forms — Number(x), new Array() — are a separate gap; these objects are not
-         ;; yet callable.) Without these globals, Object.keys({a:1}) found no `Object'.
-         (make-ast-defvar
-          :name (js-ident-sym "Object")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Object")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Reflect")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Reflect")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Number")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Number")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Array")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Array")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "String")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "String")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Promise")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Promise")))
-          :kind 'defparameter)
-         (make-ast-defvar
-          :name (js-ident-sym "Intl")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-namespace-object)
-                                :args (list (make-ast-quote :value "Intl")))
-          :kind 'defparameter)
-         ;; globalThis — reference to the global object (stub: empty object)
-         (make-ast-defvar
-          :name (js-ident-sym "globalThis")
-          :value (make-ast-call :func (make-ast-var :name '%js-make-object) :args nil)
-          :kind 'defparameter)
-         ;; Temporal global (ES2026)
-         (make-ast-defvar :name (js-ident-sym "Temporal")
-                          :value (make-ast-var :name '*js-temporal-global*)
-                          :kind 'defparameter)
-         ;; BigInt global
-         (make-ast-defvar :name (js-ident-sym "BigInt")
-                          :value (make-ast-var :name '%js-bigint)
-                          :kind 'defparameter)
-         ;; URI helpers
-         (make-ast-defvar :name (js-ident-sym "encodeURIComponent")
-                          :value (make-ast-var :name '%js-encode-uri-component)
-                          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "decodeURIComponent")
-                          :value (make-ast-var :name '%js-decode-uri-component)
-                          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "encodeURI")
-                          :value (make-ast-var :name '%js-encode-uri)
-                          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "decodeURI")
-                          :value (make-ast-var :name '%js-decode-uri)
-                          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "btoa")
-                          :value (make-ast-var :name '%js-btoa)
-                          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "atob")
-                          :value (make-ast-var :name '%js-atob)
-                          :kind 'defparameter)
-         ;; Error class hierarchy
-         (make-ast-defvar :name (js-ident-sym "Error")          :value (make-ast-var :name '*js-error-class*)             :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "TypeError")      :value (make-ast-var :name '*js-type-error-class*)        :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "RangeError")     :value (make-ast-var :name '*js-range-error-class*)       :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "ReferenceError") :value (make-ast-var :name '*js-reference-error-class*)   :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "SyntaxError")    :value (make-ast-var :name '*js-syntax-error-class*)      :kind 'defparameter)
-         ;; Well-known constructors as top-level identifiers
-         (make-ast-defvar :name (js-ident-sym "Map")          :value (make-ast-var :name '%js-make-map)        :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "WeakMap")      :value (make-ast-var :name '%js-make-weak-map)   :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "WeakSet")      :value (make-ast-var :name '%js-make-weak-set)   :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "Set")          :value (%js-call '%js-builtin-ref (make-ast-quote :value "Set")) :kind 'defparameter)
-         ;; Global number-parsing functions
-         (make-ast-defvar :name (js-ident-sym "parseInt")     :value (make-ast-var :name '%js-parse-int)       :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "parseFloat")   :value (make-ast-var :name '%js-parse-float)     :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "isNaN")        :value (make-ast-var :name '%js-is-nan)          :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "isFinite")     :value (make-ast-var :name '%js-is-finite)       :kind 'defparameter)
-         ;; Standalone global builtins that live in *js-builtin-map* but had no
-         ;; prelude binding, so they were unreachable as bare globals
-         ;; (structuredClone(x) -> "Undefined function: STRUCTUREDCLONE").  Bound
-         ;; via %js-builtin-ref since their spec entries are inline lambdas with no
-         ;; dedicated %js-* symbol.  Constructors with host-struct return values
-         ;; (Set/RegExp) are deliberately NOT auto-bound here — they need the
-         ;; separate VM-boundary work.
-         (make-ast-defvar :name (js-ident-sym "structuredClone") :value (%js-call '%js-builtin-ref (make-ast-quote :value "structuredClone")) :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "queueMicrotask")  :value (%js-call '%js-builtin-ref (make-ast-quote :value "queueMicrotask"))  :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "setTimeout")      :value (%js-call '%js-builtin-ref (make-ast-quote :value "setTimeout"))      :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "setInterval")     :value (%js-call '%js-builtin-ref (make-ast-quote :value "setInterval"))     :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "clearTimeout")    :value (%js-call '%js-builtin-ref (make-ast-quote :value "clearTimeout"))    :kind 'defparameter)
-         (make-ast-defvar :name (js-ident-sym "clearInterval")   :value (%js-call '%js-builtin-ref (make-ast-quote :value "clearInterval"))   :kind 'defparameter)
-         (parse-js-source source :strict-mode strict-mode :module-p module-p)))
-
 ;;; -----------------------------------------------------------------------
-;;;  Method dispatch: obj.method resolved to a bound callable
+;;;  JS program prelude — declarative global binding table
 ;;; -----------------------------------------------------------------------
 ;;;
-;;; Loaded last (after every %js-array-*/%js-string-* helper is defined) so the
-;;; tables can name the functions directly. %js-get-prop delegates here via the
-;;; *js-method-resolver* hook installed at the bottom — `arr.push'/`nums.map(f)'/
-;;; `s.split(",")' then resolve to a closure that prepends the receiver, exactly
-;;; like console.log resolves to a function value the VM can invoke.
+;;; Each entry is (kind js-name cl-symbol-or-value):
+;;;   :call      — AST call  (cl-symbol &rest no-args)    e.g. (%js-make-console)
+;;;   :var       — AST var   cl-symbol                     e.g. *js-error-class*
+;;;   :namespace — namespace object built from the builtin dispatch table
+;;;   :quote     — AST quote of cl-symbol-or-value         e.g. :js-undefined
+;;;   :builtin   — %js-builtin-ref lookup by key string     e.g. "Set"
+;;;
+;;; Add new globals here; js-program-forms consumes this table automatically.
 
-(defparameter *js-array-method-table*
-  (list (cons "push" #'%js-array-push)         (cons "pop" #'%js-array-pop)
-        (cons "shift" #'%js-array-shift)        (cons "unshift" #'%js-array-unshift)
-        (cons "map" #'%js-array-map)            (cons "forEach" #'%js-array-for-each)
-        (cons "filter" #'%js-array-filter)      (cons "reduce" #'%js-array-reduce)
-        (cons "reduceRight" #'%js-array-reduce-right)
-        (cons "find" #'%js-array-find)          (cons "findIndex" #'%js-array-find-index)
-        (cons "some" #'%js-array-some)          (cons "every" #'%js-array-every)
-        (cons "includes" #'%js-array-includes)  (cons "indexOf" #'%js-array-index-of)
-        (cons "lastIndexOf" #'%js-array-last-index-of)
-        (cons "join" #'%js-array-join)          (cons "slice" #'%js-array-slice)
-        (cons "splice" #'%js-array-splice)      (cons "concat" #'%js-array-concat)
-        (cons "reverse" #'%js-array-reverse)    (cons "sort" #'%js-array-sort)
-        (cons "flat" #'%js-array-flat)          (cons "flatMap" #'%js-array-flat-map)
-        (cons "fill" #'%js-array-fill)          (cons "copyWithin" #'%js-array-copy-within)
-        (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys)
-        (cons "values"
-              (lambda (arr)
-                ;; Return an iterator that yields successive elements
-                (let ((i (list 0)))
-                  (%js-make-generator (lambda ()
-                    (loop while (< (car i) (length arr))
-                          do (%js-yield (aref arr (car i)))
-                             (incf (car i))))))))
-        ;; @@iterator — makes arrays iterable
-        (cons "@@iterator"
-              (lambda (arr)
-                (let ((i (list 0)))
-                  (%js-make-object
-                   "next" (lambda ()
-                            (if (< (car i) (length arr))
-                                (prog1 (%js-make-object "value" (aref arr (car i)) "done" nil)
-                                  (incf (car i)))
-                                (%js-make-object "value" +js-undefined+ "done" t)))
-                   "@@iterator" (lambda () (gethash "@@iterator" arr))))))
-        ;; ES2024
-        (cons "group"          #'%js-array-group)
-        (cons "groupToMap"     #'%js-array-group-to-map)
-        ;; ES2023
-        (cons "toReversed"      #'%js-array-to-reversed)
-        (cons "toSorted"        #'%js-array-to-sorted)
-        (cons "toSpliced"       #'%js-array-to-spliced)
-        (cons "with"            #'%js-array-with)
-        (cons "findLast"        #'%js-array-find-last)
-        (cons "findLastIndex"   #'%js-array-find-last-index)
-        (cons "at"              #'%js-array-at))
-  "Alist of JS Array.prototype method name -> host helper (receiver is ARR, first arg).")
+(defparameter *js-prelude-global-specs*
+  '((:call      "console"             %js-make-console)
+    (:var        "Symbol"              *js-symbol-global*)
+    (:quote      "undefined"           :js-undefined)
+    (:var        "Infinity"            *js-inf-float*)
+    (:var        "NaN"                 *js-nan-float*)
+    (:var        "Date"                %js-make-date)
+    ;; Namespace objects — built from *js-builtin-specs* entries whose key is PREFIX.PROP
+    (:namespace  "JSON"                "JSON")
+    (:namespace  "Math"                "Math")
+    (:namespace  "Object"              "Object")
+    (:namespace  "Reflect"             "Reflect")
+    (:namespace  "Number"              "Number")
+    (:namespace  "Array"               "Array")
+    (:namespace  "String"              "String")
+    (:namespace  "Promise"             "Promise")
+    (:namespace  "Intl"                "Intl")
+    (:call       "globalThis"          %js-make-object)
+    (:var        "Temporal"            *js-temporal-global*)
+    (:var        "BigInt"              %js-bigint)
+    ;; URI helpers
+    (:var        "encodeURIComponent"  %js-encode-uri-component)
+    (:var        "decodeURIComponent"  %js-decode-uri-component)
+    (:var        "encodeURI"           %js-encode-uri)
+    (:var        "decodeURI"           %js-decode-uri)
+    (:var        "btoa"                %js-btoa)
+    (:var        "atob"                %js-atob)
+    ;; Error class hierarchy
+    (:var        "Error"               *js-error-class*)
+    (:var        "TypeError"           *js-type-error-class*)
+    (:var        "RangeError"          *js-range-error-class*)
+    (:var        "ReferenceError"      *js-reference-error-class*)
+    (:var        "SyntaxError"         *js-syntax-error-class*)
+    ;; Collection constructors
+    (:var        "Map"                 %js-make-map)
+    (:var        "WeakMap"             %js-make-weak-map)
+    (:var        "WeakSet"             %js-make-weak-set)
+    ;; Set/timer globals are inline lambdas with no dedicated %js-* symbol;
+    ;; look them up via %js-builtin-ref so they stay in sync with *js-builtin-specs*.
+    (:builtin    "Set"                 "Set")
+    ;; Numeric parsing globals
+    (:var        "parseInt"            %js-parse-int)
+    (:var        "parseFloat"          %js-parse-float)
+    (:var        "isNaN"               %js-is-nan)
+    (:var        "isFinite"            %js-is-finite)
+    ;; Standalone global builtins — bound via %js-builtin-ref (inline lambdas)
+    (:builtin    "structuredClone"     "structuredClone")
+    (:builtin    "queueMicrotask"      "queueMicrotask")
+    (:builtin    "setTimeout"          "setTimeout")
+    (:builtin    "setInterval"         "setInterval")
+    (:builtin    "clearTimeout"        "clearTimeout")
+    (:builtin    "clearInterval"       "clearInterval"))
+  "Declarative prelude table: (kind js-name cl-symbol) emitted as defvar AST nodes
+before every compiled JS program so standard globals are available.")
 
-(defparameter *js-string-method-table*
-  (list (cons "slice" #'%js-string-slice)       (cons "indexOf" #'%js-string-index-of)
-        (cons "lastIndexOf" #'%js-string-last-index-of)
-        (cons "includes" #'%js-string-includes) (cons "startsWith" #'%js-string-starts-with)
-        (cons "endsWith" #'%js-string-ends-with)(cons "split" #'%js-string-split)
-        (cons "replace" #'%js-string-replace)   (cons "replaceAll" #'%js-string-replace-all)
-        (cons "padStart" #'%js-string-pad-start)(cons "padEnd" #'%js-string-pad-end)
-        (cons "at" #'%js-string-at)             (cons "repeat" #'%js-string-repeat)
-        (cons "charAt" #'%js-string-char-at)    (cons "charCodeAt" #'%js-string-char-code-at)
-        (cons "concat" #'%js-string-concat)     (cons "match" #'%js-string-match)
-        (cons "matchAll" #'%js-string-match-all)(cons "search" #'%js-string-search)
-        (cons "toUpperCase" #'%js-string-to-upper-case)
-        (cons "toLowerCase" #'%js-string-to-lower-case)
-        (cons "trim" #'%js-string-trim)         (cons "trimStart" #'%js-string-trim-start)
-        (cons "trimEnd" #'%js-string-trim-end)
-        (cons "codePointAt" #'%js-string-code-point-at)
-        (cons "normalize" #'%js-string-normalize)
-        (cons "substr" #'%js-string-slice)       ; deprecated alias
-        (cons "substring" #'%js-string-substring)
-        (cons "valueOf" (lambda (s) s))
-        (cons "toString" (lambda (s) s))
-        ;; ES2015 iterator protocol on strings
-        ;; ES2024
-        (cons "toWellFormed"       #'%js-string-to-well-formed)
-        (cons "isWellFormed"       #'%js-string-is-well-formed)
-        ;; ES2015 locale-aware
-        (cons "toLocaleLowerCase"  #'%js-string-to-locale-lower-case)
-        (cons "toLocaleUpperCase"  #'%js-string-to-locale-upper-case)
-        (cons "localeCompare"      #'%js-string-locale-compare)
-        (cons "@@iterator"
-              (lambda (s)
-                (let ((i (list 0)))
-                  (%js-make-object
-                   "next" (lambda ()
-                            (if (< (car i) (length s))
-                                (prog1 (%js-make-object "value" (string (char s (car i))) "done" nil)
-                                  (incf (car i)))
-                                (%js-make-object "value" +js-undefined+ "done" t))))))))
-  "Alist of JS String.prototype method name -> host helper (receiver is S, first arg).")
+(defun %js-prelude-form (spec)
+  "Emit a defparameter AST node for one entry in *js-prelude-global-specs*."
+  (destructuring-bind (kind js-name cl-sym) spec
+    (make-ast-defvar
+     :name  (js-ident-sym js-name)
+     :kind  'defparameter
+     :value (ecase kind
+               (:call      (%js-call cl-sym))
+               (:var       (make-ast-var :name cl-sym))
+               (:namespace (%js-call '%js-make-namespace-object (make-ast-quote :value cl-sym)))
+               (:quote     (make-ast-quote :value cl-sym))
+               (:builtin   (%js-call '%js-builtin-ref (make-ast-quote :value cl-sym)))))))
 
-(defparameter *js-set-method-table*
-  (list (cons "add" #'%js-set-add)         (cons "delete" #'%js-set-delete)
-        (cons "has" #'%js-set-has)         (cons "clear" #'%js-set-clear)
-        (cons "forEach" #'%js-set-for-each)
-        (cons "keys" (lambda (s) (%js-set-keys s)))
-        (cons "values" (lambda (s) (%js-set-keys s)))  ; Set keys = values
-        (cons "entries" #'%js-set-entries)
-        (cons "union" #'%js-set-union)
-        (cons "intersection" #'%js-set-intersection)
-        (cons "difference" #'%js-set-difference)
-        (cons "symmetricDifference" #'%js-set-symmetric-difference)
-        (cons "isSubsetOf" #'%js-set-is-subset-of)
-        (cons "isSupersetOf" #'%js-set-is-superset-of)
-        (cons "isDisjointFrom" #'%js-set-is-disjoint-from))
-  "Alist of JS Set.prototype method name -> host helper.")
-
-(defparameter *js-map-method-table*
-  (list (cons "set" #'%js-map-set)     (cons "get" #'%js-map-get)
-        (cons "has" #'%js-map-has)     (cons "delete" #'%js-map-delete)
-        (cons "clear" #'%js-map-clear) (cons "forEach" #'%js-map-for-each)
-        (cons "keys" (lambda (m) (%js-map-keys m)))
-        (cons "values" (lambda (m) (%js-map-values m)))
-        (cons "entries" (lambda (m) (%js-map-entries m))))
-  "Alist of JS Map.prototype method name -> host helper.")
-
-(defun %js-bound-method (table receiver name)
-  "Look NAME up in TABLE; return a closure that calls the helper with RECEIVER
-prepended (so `receiver.name(a,b)' becomes (helper receiver a b)), else undefined."
-  (let ((entry (assoc name table :test #'string=)))
-    (if entry
-        (let ((fn (cdr entry)))
-          (lambda (&rest args) (apply fn receiver args)))
-        +js-undefined+)))
-
-(defun %js-strip-trailing-dot (s)
-  "Drop a single trailing '.' that CL's ~,0F leaves (\"8.\" -> \"8\")."
-  (if (and (plusp (length s)) (char= (char s (1- (length s))) #\.))
-      (subseq s 0 (1- (length s)))
-      s))
-
-(defun %js-number-to-precision (x p)
-  "JS Number.prototype.toPrecision(P): X rendered to P significant digits, using
-fixed notation when the decimal exponent is in [-6, P), exponential otherwise —
-matching the ECMAScript algorithm."
-  (cond
-    ((or (< p 1) (> p 100)) (format nil "~A" x))      ; JS RangeError; degrade gracefully
-    ((zerop x)
-     (if (= p 1) "0" (format nil "0.~A" (make-string (1- p) :initial-element #\0))))
-    (t
-     (let* ((neg (minusp x))
-            (ax  (abs (coerce x 'double-float)))
-            (e   (floor (log ax 10d0))))
-       ;; Correct e for floating-point log error so 10^e <= ax < 10^(e+1).
-       (loop while (>= (/ ax (expt 10d0 e)) 10d0) do (incf e))
-       (loop while (<  (/ ax (expt 10d0 e)) 1d0)  do (decf e))
-       (let ((body
-               (if (or (< e -6) (>= e p))
-                   ;; exponential: 1 integer digit + (p-1) fraction digits, lowercase e
-                   (format nil "~,v,,,,,'eE" (1- p) ax)
-                   ;; fixed: (p-1-e) fraction digits, strip any trailing dot
-                   (%js-strip-trailing-dot
-                    (format nil "~,vF" (max 0 (- p 1 e)) ax)))))
-         (if neg (concatenate 'string "-" body) body))))))
-
-(defparameter *js-number-method-table*
-  (list (cons "toFixed"
-              (lambda (n digits)
-                (let ((d (if (eq digits +js-undefined+) 0 (truncate (%js-to-number digits)))))
-                  ;; CL ~,0F yields a trailing dot ("8."); JS toFixed(0) -> "8".
-                  (%js-strip-trailing-dot (format nil "~,vF" d (%js-to-number n))))))
-        (cons "toString"
-              (lambda (n &optional (radix 10))
-                (let ((r (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))
-                      (ni (truncate (%js-to-number n))))
-                  ;; JS uses lowercase digits for radices > 10 (ff, not FF).
-                  (if (= r 10) (format nil "~A" (%js-to-number n))
-                      (string-downcase (format nil "~vR" r ni))))))
-        (cons "toPrecision"
-              (lambda (n prec)
-                (if (eq prec +js-undefined+)
-                    (format nil "~A" (%js-to-number n))
-                    (%js-number-to-precision (%js-to-number n)
-                                             (truncate (%js-to-number prec))))))
-        (cons "toExponential"
-              (lambda (n &optional digits)
-                ;; JS Number.prototype.toExponential([fractionDigits]) → "d.ddde±d"
-                ;; ~E params: w,d,e,k,overflowchar,padchar,exptchar — set d and
-                ;; force lowercase 'e' as the exponent marker.
-                (let* ((v (%js-to-number n))
-                       (d (if (or (null digits) (eq digits +js-undefined+))
-                              6 (truncate (%js-to-number digits)))))
-                  (format nil "~,v,,,,,'eE" d (coerce v 'double-float)))))
-        (cons "valueOf" (lambda (n) (%js-to-number n)))
-        (cons "toLocaleString" (lambda (n &rest _) (declare (ignore _)) (format nil "~A" (%js-to-number n)))))
-  "Alist of Number.prototype method name -> (lambda (num args…)) helpers.")
-
-(defparameter *js-symbol-method-table*
-  (list (cons "toString"    #'%js-symbol-to-string)
-        (cons "valueOf"     (lambda (s) s)))
-  "Alist of Symbol.prototype METHOD name -> helpers.  `description' is NOT here: it
-is an accessor PROPERTY (sym.description returns the string, not a function), so it
-is handled in the getter cond branch of the symbol resolver instead.")
-
-(defun %js-resolve-method (obj key)
-  "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.
-Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
-  (cond
-    ;; Promise prototype methods (.then, .catch, .finally)
-    ((js-promise-p obj)
-     (cond ((string= key "then")
-            (lambda (on-fulfilled &optional on-rejected) (%js-promise-then obj on-fulfilled on-rejected)))
-           ((string= key "catch")
-            (lambda (on-rejected) (%js-promise-then obj +js-undefined+ on-rejected)))
-           ((string= key "finally")
-            (lambda (fn)
-              (%js-promise-then obj
-               (lambda (v) (%js-funcall fn) (%js-promise-resolve v))
-               (lambda (r) (%js-funcall fn) (%js-promise-reject r)))))
-           (t +js-undefined+)))
-    ;; Array prototype methods + length
-    ((%js-vec-p obj)
-     (cond ((string= key "length") (coerce (length obj) 'double-float))
-           (t (%js-bound-method *js-array-method-table* obj key))))
-    ;; String prototype methods + length
-    ((stringp obj)
-     (cond ((string= key "length") (coerce (length obj) 'double-float))
-           (t (%js-bound-method *js-string-method-table* obj key))))
-    ;; Map prototype methods + size
-    ((js-map-p obj)
-     (cond ((string= key "size") (coerce (%js-map-size obj) 'double-float))
-           (t (%js-bound-method *js-map-method-table* obj key))))
-    ;; Date prototype methods
-    ((js-date-p obj)
-     (%js-bound-method *js-date-method-table* obj key))
-    ;; TypedArray prototype methods + length/byteLength/byteOffset
-    ((js-typed-array-p obj)
-     (cond ((string= key "length")     (coerce (js-ta-length obj) 'double-float))
-           ((string= key "byteLength") (coerce (* (js-ta-length obj) (js-ta-element-size obj)) 'double-float))
-           ((string= key "byteOffset") (coerce (js-ta-byte-offset obj) 'double-float))
-           ((string= key "buffer")     (%js-make-object "byteLength" (* (js-ta-length obj) (js-ta-element-size obj))))
-           (t (%js-bound-method *js-typed-array-method-table* obj key))))
-    ;; RegExp prototype methods
-    ((js-regexp-p obj)
-     (cond ((string= key "source")    (js-regexp-source obj))
-           ((string= key "flags")     (js-regexp-flags obj))
-           ((string= key "global")    (js-regexp-global-p obj))
-           ((string= key "ignoreCase") (js-regexp-ignore-case-p obj))
-           ((string= key "multiline") (js-regexp-multiline-p obj))
-           ((string= key "lastIndex") (coerce (js-regexp-last-index obj) 'double-float))
-           ((string= key "test")      (let ((re obj)) (lambda (str) (%js-regex-test re str))))
-           ((string= key "exec")      (let ((re obj)) (lambda (str) (%js-regex-exec re str 0))))
-           (t +js-undefined+)))
-    ;; Hash-table objects: both Sets and plain JS objects (distinguished by stored key presence)
-    ((hash-table-p obj)
-     ;; First check for stored real properties (plain JS object keys)
-     (let ((stored (gethash key obj)))
-       (if (not (eq stored nil))
-           stored
-           ;; Fall through: size property and Set prototype methods,
-           ;; then Object.prototype methods available on all objects
-           (cond
-             ((string= key "size") (coerce (hash-table-count obj) 'double-float))
-             ;; Set methods
-             ((assoc key *js-set-method-table* :test #'string=)
-              (%js-bound-method *js-set-method-table* obj key))
-             ;; Object.prototype methods
-             ((string= key "hasOwnProperty")
-              (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj))))
-             ((string= key "toString")
-              (lambda () "[object Object]"))
-             ((string= key "valueOf")
-              (lambda () obj))
-             ((string= key "isPrototypeOf")
-              (lambda (_proto) (declare (ignore _proto)) nil))
-             ((string= key "propertyIsEnumerable")
-              (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj))))
-             ((string= key "constructor")
-              (lambda (&rest _) (declare (ignore _)) obj))
-             (t +js-undefined+)))))
-    ;; Number.prototype — numbers have methods too
-    ((numberp obj)
-     (let ((entry (assoc key *js-number-method-table* :test #'string=)))
-       (if entry
-           (let ((fn (cdr entry)))
-             (lambda (&rest args) (apply fn obj args)))
-           +js-undefined+)))
-    ;; Symbol.prototype
-    ((js-symbol-p obj)
-     (let ((entry (assoc key *js-symbol-method-table* :test #'string=)))
-       (if entry
-           (let ((fn (cdr entry)))
-             (lambda (&rest args) (apply fn obj args)))
-           (cond ((string= key "description") (%js-symbol-description obj))
-                 (t +js-undefined+)))))
-    ;; WeakRef — deref method
-    ((typep obj 'js-weak-ref)
-     (cond ((string= key "deref") (lambda () (%js-weak-ref-deref obj)))
-           (t +js-undefined+)))
-    ;; Function.prototype — bind/call/apply/name/length on closures/functions
-    ((functionp obj)
-     (cond
-       ((string= key "bind")
-        (lambda (this-arg &rest partial-args)
-          (lambda (&rest args)
-            (apply #'%js-funcall obj (list* this-arg (append partial-args args))))))
-       ((string= key "call")
-        (lambda (this-arg &rest args)
-          (apply #'%js-funcall obj (list* this-arg args))))
-       ((string= key "apply")
-        (lambda (this-arg args-array)
-          (apply #'%js-funcall obj
-                 (list* this-arg (if (%js-vec-p args-array) (coerce args-array 'list) nil)))))
-       ((string= key "name")   "")
-       ((string= key "length") 0.0d0)
-       ((string= key "toString") (lambda () "function() { [native code] }"))
-       ((string= key "call")   (lambda (this &rest args) (apply #'%js-funcall obj (list* this args))))
-       (t +js-undefined+)))
-    ;; BigInt.prototype — basic methods
-    ((js-bigint-p obj)
-     (cond ((string= key "toString")
-            (lambda (&optional radix)
-              (%js-bigint-to-string obj (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))))
-           ((string= key "valueOf") (lambda () obj))
-           ((string= key "toLocaleString") (lambda (&rest _) (declare (ignore _)) (%js-bigint-to-string obj)))
-           (t +js-undefined+)))
-    (t +js-undefined+)))
-
-(setf *js-method-resolver* #'%js-resolve-method)
+(defun js-program-forms (source &key strict-mode module-p)
+  "Parse JS SOURCE prepending the standard-globals prelude.
+Returns top-level AST forms ready for the compiler backend."
+  (append (mapcar #'%js-prelude-form *js-prelude-global-specs*)
+          (parse-js-source source :strict-mode strict-mode :module-p module-p)))
