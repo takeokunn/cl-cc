@@ -268,10 +268,10 @@
 ;;; ─── Set built-ins ───────────────────────────────────────────────────────────
 
 (defun %jr-set (&rest vals)
-  "Build a JS Set (hash-table with t values) from VALS."
-  (let ((ht (cl-cc/javascript::%js-make-ht)))
-    (dolist (v vals ht)
-      (cl-cc/javascript::%js-set-add ht v))))
+  "Build a JS Set from VALS."
+  (let ((s (cl-cc/javascript::%js-make-set)))
+    (dolist (v vals s)
+      (cl-cc/javascript::%js-set-add s v))))
 
 (deftest js-rt-set-basic
   "add/has/delete/size/clear on a set."
@@ -429,3 +429,98 @@
      nil
      (lambda () (setf ran t)))
     (assert-true ran)))
+
+;;; ─── Number.prototype methods (via %js-resolve-number-method) ────────────────
+
+(deftest-each js-rt-number-to-fixed
+  "Number.toFixed(digits): render a number to N decimal places."
+  :cases (("zero-digits"  3.14159d0 0 "3")
+          ("two-digits"   3.14159d0 2 "3.14")
+          ("integer"      42.0d0    0 "42"))
+  (n digits expected)
+  (let* ((method (cl-cc/javascript::%js-resolve-number-method n "toFixed"))
+         (result (funcall method digits)))
+    (assert-string= expected result)))
+
+(deftest-each js-rt-number-to-string-radix
+  "Number.toString(radix): render integer in the given base."
+  :cases (("base-10"  255 10 "255")
+          ("base-16"  255 16 "ff")
+          ("base-2"     8  2 "1000"))
+  (n radix expected)
+  (let* ((method (cl-cc/javascript::%js-resolve-number-method n "toString"))
+         (result (funcall method radix)))
+    (assert-string= expected result)))
+
+(deftest-each js-rt-number-to-precision
+  "Number.prototype.toPrecision(p): fixed notation when exponent in [-6,p)."
+  :cases (("one-sig"    123.456d0 1 "1e+2")
+          ("three-sig"  123.456d0 3 "123")
+          ("six-sig"    3.14159d0 6 "3.14159")
+          ("zero"       0.0d0     3 "0.00"))
+  (n prec expected)
+  (assert-string= expected
+    (cl-cc/javascript::%js-number-to-precision n prec)))
+
+;;; ─── Map built-ins ───────────────────────────────────────────────────────────
+
+(deftest js-rt-map-set-get-has-size
+  "Map set/get/has/size/delete."
+  (let ((m (cl-cc/javascript::%js-make-map)))
+    (cl-cc/javascript::%js-map-set m "k" 42)
+    (assert-= 1 (cl-cc/javascript::%js-map-size m))
+    (assert-true  (cl-cc/javascript::%js-map-has m "k"))
+    (assert-false (cl-cc/javascript::%js-map-has m "x"))
+    (assert-= 42  (cl-cc/javascript::%js-map-get m "k"))
+    (cl-cc/javascript::%js-map-delete m "k")
+    (assert-= 0 (cl-cc/javascript::%js-map-size m))))
+
+(deftest js-rt-map-for-each-order
+  "Map.forEach visits entries in insertion order."
+  (let ((m    (cl-cc/javascript::%js-make-map))
+        (seen nil))
+    (cl-cc/javascript::%js-map-set m "a" 1)
+    (cl-cc/javascript::%js-map-set m "b" 2)
+    (cl-cc/javascript::%js-map-set m "c" 3)
+    (cl-cc/javascript::%js-map-for-each m
+      (lambda (v k &rest _) (declare (ignore _)) (push (cons k v) seen)))
+    (assert-equal '(("a" . 1) ("b" . 2) ("c" . 3)) (nreverse seen))))
+
+(deftest js-rt-map-clear
+  "Map.clear removes all entries."
+  (let ((m (cl-cc/javascript::%js-make-map)))
+    (cl-cc/javascript::%js-map-set m "a" 1)
+    (cl-cc/javascript::%js-map-clear m)
+    (assert-= 0 (cl-cc/javascript::%js-map-size m))))
+
+;;; ─── Generator / yield ───────────────────────────────────────────────────────
+
+(deftest js-rt-generator-basic
+  "make-generator collects yield values into an iterable iterator."
+  (let* ((gen (cl-cc/javascript::%js-make-generator
+               (lambda ()
+                 (cl-cc/javascript::%js-yield 10)
+                 (cl-cc/javascript::%js-yield 20)
+                 (cl-cc/javascript::%js-yield 30))))
+         (arr (cl-cc/javascript::%js-iterator-to-array gen)))
+    (assert-equal '(10 20 30) (%jr-list arr))))
+
+(deftest js-rt-generator-done-after-exhaust
+  "Generator's next returns done=t once all yields are consumed."
+  (let* ((gen  (cl-cc/javascript::%js-make-generator
+                (lambda () (cl-cc/javascript::%js-yield 1))))
+         (r1   (cl-cc/javascript::%js-generator-next gen))
+         (r2   (cl-cc/javascript::%js-generator-next gen)))
+    (assert-false (cl-cc/javascript::%js-get-prop r1 "done"))
+    (assert-true  (cl-cc/javascript::%js-get-prop r2 "done"))))
+
+;;; ─── Object property with falsy value ────────────────────────────────────────
+
+(deftest js-rt-object-prop-false-value
+  "get-prop must return nil (CL false) when a key is explicitly set to nil.
+Regression: %js-resolve-object-method used (not (eq stored nil)) which treated
+nil-valued keys as missing."
+  (let ((obj (cl-cc/javascript::%js-make-object "flag" nil)))
+    (assert-false (cl-cc/javascript::%js-get-prop obj "flag"))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-get-prop obj "absent"))))
