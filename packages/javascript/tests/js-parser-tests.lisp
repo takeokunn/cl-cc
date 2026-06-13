@@ -77,19 +77,14 @@ return-from nil) exits the arrow — a bare lambda establishes no block named ni
 
 ;;; ─── Async functions ──────────────────────────────────────────────────────────
 
-(deftest js-parser-async-function-decl
-  "async function fetch() {} produces ast-defun with :js-async in declarations."
-  (let ((ast (%js-first "async function fetch() {}")))
+(deftest-each js-parser-function-modifiers
+  "Async and generator declarations mark the ast-defun appropriately."
+  :cases (("async"     "async function fetch() {}"  :js-async)
+          ("generator" "function* gen() {}"          :js-generator))
+  (src decl)
+  (let ((ast (%js-first src)))
     (assert-true (cl-cc:ast-defun-p ast))
-    (assert-true (member :js-async (cl-cc:ast-defun-declarations ast)))))
-
-;;; ─── Generator functions ──────────────────────────────────────────────────────
-
-(deftest js-parser-generator-function-decl
-  "function* gen() {} produces ast-defun with :js-generator in declarations."
-  (let ((ast (%js-first "function* gen() {}")))
-    (assert-true (cl-cc:ast-defun-p ast))
-    (assert-true (member :js-generator (cl-cc:ast-defun-declarations ast)))))
+    (assert-true (member decl (cl-cc:ast-defun-declarations ast)))))
 
 ;;; ─── Class declarations ───────────────────────────────────────────────────────
 
@@ -164,31 +159,21 @@ containing) parses to one class declaration."
     (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-defclass-p (first asts)))))
 
-(deftest js-parser-tagged-template-plain
-  "tag`hi`; — a no-interpolation tagged template is ONE call expression, not a
-bare identifier followed by a separate string. Regression: a plain backtick
-template lexed to :T-STRING, indistinguishable from a string literal, so the
-postfix parser never attached it to the tag."
-  (let ((asts (%js-parse "tag`hi`;")))
+(deftest-each js-parser-tagged-template
+  "Tagged templates (plain and interpolated) produce ONE ast-call."
+  :cases (("plain"        "tag`hi`;")
+          ("interpolated" "tag`hi ${name}`;"))
+  (src)
+  (let ((asts (%js-parse src)))
     (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-call-p (first asts)))))
 
-(deftest js-parser-tagged-template-interpolated
-  "tag`hi ${name}`; — an interpolated tagged template is ONE call expression."
-  (let ((asts (%js-parse "tag`hi ${name}`;")))
-    (assert-= 1 (length asts))
-    (assert-true (cl-cc:ast-call-p (first asts)))))
-
-(deftest js-parser-class-expression
-  "const C = class { m() {} }; — a class EXPRESSION parses without crashing
-(regression guard for the removed duplicate %js-parse-class-body)."
-  (let ((ast (%js-first "const C = class { m() { return 1; } };")))
-    (assert-true (cl-cc:ast-let-p ast))
-    (assert-true (not (null (cdr (first (cl-cc:ast-let-bindings ast))))))))
-
-(deftest js-parser-class-expression-extends
-  "const C = class extends Base { constructor() { super(); } }; parses."
-  (let ((ast (%js-first "const C = class extends Base { constructor() { super(); } };")))
+(deftest-each js-parser-class-expression
+  "Class expressions produce an ast-let binding."
+  :cases (("plain"   "const C = class { m() { return 1; } };")
+          ("extends" "const C = class extends Base { constructor() { super(); } };"))
+  (src)
+  (let ((ast (%js-first src)))
     (assert-true (cl-cc:ast-let-p ast))))
 
 ;;; ─── If / else ────────────────────────────────────────────────────────────────
@@ -214,21 +199,15 @@ postfix parser never attached it to the tag."
 
 ;;; ─── For loop ─────────────────────────────────────────────────────────────────
 
-(deftest js-parser-for-c-style-loop
-  "for (let i = 0; i < 10; i++) { } lowers to ast-let wrapping a block."
-  (let ((ast (%js-first "for (let i = 0; i < 10; i++) { }")))
+(deftest-each js-parser-for-loop-variants
+  "All for-loop forms lower to ast-let (or ast-block for C-style)."
+  :cases (("c-style" "for (let i = 0; i < 10; i++) { }")
+          ("of"      "for (const x of arr) { }")
+          ("in"      "for (const k in obj) { }"))
+  (src)
+  (let ((ast (%js-first src)))
     (assert-true (or (cl-cc:ast-let-p ast) (cl-cc:ast-block-p ast)
-            (cl-cc:ast-progn-p ast)))))
-
-(deftest js-parser-for-of-loop
-  "for (const x of arr) { } lowers to ast-let binding an iterator."
-  (let ((ast (%js-first "for (const x of arr) { }")))
-    (assert-true (cl-cc:ast-let-p ast))))
-
-(deftest js-parser-for-in-loop
-  "for (const k in obj) { } lowers to ast-let iterating keys."
-  (let ((ast (%js-first "for (const k in obj) { }")))
-    (assert-true (cl-cc:ast-let-p ast))))
+                     (cl-cc:ast-progn-p ast)))))
 
 ;;; ─── Switch / case ────────────────────────────────────────────────────────────
 
@@ -241,58 +220,28 @@ postfix parser never attached it to the tag."
 
 ;;; ─── Try / catch / finally ────────────────────────────────────────────────────
 
-(deftest js-parser-try-catch
-  "try { } catch (e) { } produces a %js-try-catch-finally call."
-  (let ((ast (%js-first "try { throw 1; } catch (e) { }")))
-    (assert-true (cl-cc:ast-call-p ast))
-    (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
-
-(deftest js-parser-try-finally
-  "try { } finally { } produces a %js-try-catch-finally call."
-  (let ((ast (%js-first "try { } finally { }")))
-    (assert-true (cl-cc:ast-call-p ast))
-    (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
-
-(deftest js-parser-try-catch-finally
-  "try { } catch (e) { } finally { } also produces a %js-try-catch-finally call."
-  (let ((ast (%js-first "try { throw 1; } catch (e) { } finally { }")))
+(deftest-each js-parser-try-forms
+  "All try variants lower to a %js-try-catch-finally call."
+  :cases (("catch"         "try { throw 1; } catch (e) { }")
+          ("finally"       "try { } finally { }")
+          ("catch-finally" "try { throw 1; } catch (e) { } finally { }"))
+  (src)
+  (let ((ast (%js-first src)))
     (assert-true (cl-cc:ast-call-p ast))
     (assert-string= "%JS-TRY-CATCH-FINALLY" (%js-call-name ast))))
 
 ;;; ─── Destructuring ────────────────────────────────────────────────────────────
 
-(deftest js-parser-array-destructuring
-  "const [a, b] = arr; produces a nested let chain (tmp = arr, then a = tmp[0],
-b = tmp[1]); each let is single-binding for sequential scoping. Behavior is
-checked by js-e2e-destructuring-and-sequential-decls."
-  (let ((ast (%js-first "const [a, b] = arr;")))
-    (assert-true (cl-cc:ast-let-p ast))
-    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))))
-
-(deftest js-parser-object-destructuring
-  "const {x, y} = obj; produces a nested let chain (single-binding lets)."
-  (let ((ast (%js-first "const {x, y} = obj;")))
-    (assert-true (cl-cc:ast-let-p ast))
-    (assert-= 1 (length (cl-cc:ast-let-bindings ast)))))
-
-(deftest js-parser-array-destructuring-default
-  "const [a = 1, b = 2] = arr; parses element defaults."
-  (let ((ast (%js-first "const [a = 1, b = 2] = arr;")))
-    (assert-true (cl-cc:ast-let-p ast))))
-
-(deftest js-parser-object-destructuring-default
-  "const {a = 1} = obj; parses a shorthand property default."
-  (let ((ast (%js-first "const {a = 1} = obj;")))
-    (assert-true (cl-cc:ast-let-p ast))))
-
-(deftest js-parser-object-destructuring-rename-default
-  "const {a: x = 5} = obj; parses a renamed property with a default."
-  (let ((ast (%js-first "const {a: x = 5} = obj;")))
-    (assert-true (cl-cc:ast-let-p ast))))
-
-(deftest js-parser-array-destructuring-default-with-rest
-  "const [x, y = 10, ...rest] = arr; mixes default and rest elements."
-  (let ((ast (%js-first "const [x, y = 10, ...rest] = arr;")))
+(deftest-each js-parser-destructuring
+  "Destructuring declarations produce ast-let (single-binding per nesting level)."
+  :cases (("array-basic"           "const [a, b] = arr;")
+          ("object-basic"          "const {x, y} = obj;")
+          ("array-defaults"        "const [a = 1, b = 2] = arr;")
+          ("object-defaults"       "const {a = 1} = obj;")
+          ("object-rename-default" "const {a: x = 5} = obj;")
+          ("array-rest-default"    "const [x, y = 10, ...rest] = arr;"))
+  (src)
+  (let ((ast (%js-first src)))
     (assert-true (cl-cc:ast-let-p ast))))
 
 ;;; ─── Spread operator ──────────────────────────────────────────────────────────
@@ -325,43 +274,27 @@ list (a spread element makes the array literal an ast-apply, not a plain call)."
 
 ;;; ─── Logical assignment ───────────────────────────────────────────────────────
 
-(deftest js-parser-logical-and-assign
-  "x &&= y; — let declaration nests around expression via %js-finish-let-bindings."
-  (let ((asts (%js-parse "let x = 1; x &&= 0;")))
-    (assert-= 1 (length asts))
-    (assert-true (cl-cc:ast-let-p (first asts)))))
-
-(deftest js-parser-logical-or-assign
-  "x ||= y; — let declaration nests around expression via %js-finish-let-bindings."
-  (let ((asts (%js-parse "let x = null; x ||= 42;")))
-    (assert-= 1 (length asts))
-    (assert-true (cl-cc:ast-let-p (first asts)))))
-
-(deftest js-parser-nullish-assign
-  "x ??= y; — let declaration nests around expression via %js-finish-let-bindings."
-  (let ((asts (%js-parse "let x = null; x ??= 'default';")))
+(deftest-each js-parser-logical-assignment
+  "Logical assignment operators (&&=, ||=, ??=) nest let declarations via %js-finish-let-bindings."
+  :cases (("and-assign"     "let x = 1;    x &&= 0;")
+          ("or-assign"      "let x = null; x ||= 42;")
+          ("nullish-assign" "let x = null; x ??= 'default';"))
+  (src)
+  (let ((asts (%js-parse src)))
     (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-let-p (first asts)))))
 
 ;;; ─── Template literals ────────────────────────────────────────────────────────
 
-(deftest js-parser-template-literal
-  "Backtick template literal produces some AST node (at minimum a string)."
-  (let ((ast (%js-first "const s = `hello`;")))
-    (assert-true (cl-cc:ast-let-p ast))
-    (let ((val (cdr (first (cl-cc:ast-let-bindings ast)))))
-      (assert-true (not (null val))))))
-
-(deftest js-parser-template-interpolation
-  "Interpolated template `hi ${name}!` parses without error to a binding value."
-  (let ((ast (%js-first "const s = `hi ${name}!`;")))
+(deftest-each js-parser-template-literals
+  "Template literals (plain, interpolated, expression) bind to an ast-let."
+  :cases (("plain"      "const s = `hello`;")
+          ("interpolate" "const s = `hi ${name}!`;")
+          ("expr"        "const s = `sum=${a + b * 2}`;"))
+  (src)
+  (let ((ast (%js-first src)))
     (assert-true (cl-cc:ast-let-p ast))
     (assert-true (not (null (cdr (first (cl-cc:ast-let-bindings ast))))))))
-
-(deftest js-parser-template-interpolation-expr
-  "Template interpolation with an expression `${a + b * 2}` parses."
-  (let ((ast (%js-first "const s = `sum=${a + b * 2}`;")))
-    (assert-true (cl-cc:ast-let-p ast))))
 
 ;;; ─── Import / export ──────────────────────────────────────────────────────────
 
