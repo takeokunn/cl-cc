@@ -23,6 +23,7 @@
    (:file "parser-expr-primary")
    (:file "parser-arrow")
    (:file "parser-stmt")
+   (:file "parser-stmt-fn")
    (:file "parser-stmt-control")
    (:file "parser-stmt-flow")
    (:file "parser-class")
