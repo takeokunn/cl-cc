@@ -35,6 +35,7 @@
    ;; emitted directly), matching the PHP frontend's inline-lowering model. The
    ;; former ast-lower.lisp was dead, uncalled, and inconsistent — removed.
    (:file "runtime")
+   (:file "runtime-property")
    (:file "runtime-control")
    (:file "runtime-array")
    (:file "runtime-object")
