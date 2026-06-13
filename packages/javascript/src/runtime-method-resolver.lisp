@@ -101,8 +101,8 @@
         (cons "has"                #'%js-set-has)
         (cons "clear"              #'%js-set-clear)
         (cons "forEach"            #'%js-set-for-each)
-        (cons "keys"               (lambda (s) (%js-set-keys s)))
-        (cons "values"             (lambda (s) (%js-set-keys s)))   ; Set keys = values
+        (cons "keys"               #'%js-set-keys)
+        (cons "values"             #'%js-set-keys)    ; Set.values === Set.keys
         (cons "entries"            #'%js-set-entries)
         (cons "union"              #'%js-set-union)
         (cons "intersection"       #'%js-set-intersection)
@@ -120,9 +120,9 @@
         (cons "delete"  #'%js-map-delete)
         (cons "clear"   #'%js-map-clear)
         (cons "forEach" #'%js-map-for-each)
-        (cons "keys"    (lambda (m) (%js-map-keys m)))
-        (cons "values"  (lambda (m) (%js-map-values m)))
-        (cons "entries" (lambda (m) (%js-map-entries m))))
+        (cons "keys"    #'%js-map-keys)
+        (cons "values"  #'%js-map-values)
+        (cons "entries" #'%js-map-entries))
   "Alist: JS Map.prototype method name -> host helper.")
 
 (defparameter *js-weak-map-method-table*
@@ -272,29 +272,21 @@ the table lookup. OBJ and KEY are bound in value-forms."
         (lambda (r) (%js-funcall fn) (%js-promise-reject r)))))
     (t +js-undefined+)))
 
-(defun %js-resolve-typed-array-method (obj key)
-  (cond
-    ((string= key "length")
-     (coerce (js-ta-length obj) 'double-float))
-    ((string= key "byteLength")
-     (coerce (* (js-ta-length obj) (js-ta-element-size obj)) 'double-float))
-    ((string= key "byteOffset")
-     (coerce (js-ta-byte-offset obj) 'double-float))
-    ((string= key "buffer")
-     (%js-make-object "byteLength" (* (js-ta-length obj) (js-ta-element-size obj))))
-    (t (%js-bound-method *js-typed-array-method-table* obj key))))
+(define-js-type-resolver %js-resolve-typed-array-method *js-typed-array-method-table*
+  "length"     (coerce (js-ta-length obj) 'double-float)
+  "byteLength" (coerce (* (js-ta-length obj) (js-ta-element-size obj)) 'double-float)
+  "byteOffset" (coerce (js-ta-byte-offset obj) 'double-float)
+  "buffer"     (%js-make-object "byteLength" (* (js-ta-length obj) (js-ta-element-size obj))))
 
-(defun %js-resolve-regexp-method (obj key)
-  (cond
-    ((string= key "source")     (js-regexp-source obj))
-    ((string= key "flags")      (js-regexp-flags obj))
-    ((string= key "global")     (js-regexp-global-p obj))
-    ((string= key "ignoreCase") (js-regexp-ignore-case-p obj))
-    ((string= key "multiline")  (js-regexp-multiline-p obj))
-    ((string= key "lastIndex")  (coerce (js-regexp-last-index obj) 'double-float))
-    ((string= key "test")       (let ((re obj)) (lambda (str) (%js-regex-test re str))))
-    ((string= key "exec")       (let ((re obj)) (lambda (str) (%js-regex-exec re str 0))))
-    (t +js-undefined+)))
+(define-js-type-resolver %js-resolve-regexp-method nil
+  "source"     (js-regexp-source obj)
+  "flags"      (js-regexp-flags obj)
+  "global"     (js-regexp-global-p obj)
+  "ignoreCase" (js-regexp-ignore-case-p obj)
+  "multiline"  (js-regexp-multiline-p obj)
+  "lastIndex"  (coerce (js-regexp-last-index obj) 'double-float)
+  "test"       (let ((re obj)) (lambda (str) (%js-regex-test re str)))
+  "exec"       (let ((re obj)) (lambda (str) (%js-regex-exec re str 0))))
 
 (defun %js-resolve-object-method (obj key)
   (multiple-value-bind (stored found) (gethash key obj)
@@ -343,17 +335,12 @@ the table lookup. OBJ and KEY are bound in value-forms."
     ((string= key "toString") (lambda () "function() { [native code] }"))
     (t +js-undefined+)))
 
-(defun %js-resolve-bigint-method (obj key)
-  (cond
-    ((string= key "toString")
-     (lambda (&optional radix)
-       (%js-bigint-to-string obj
-        (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))))
-    ((string= key "valueOf")
-     (lambda () obj))
-    ((string= key "toLocaleString")
-     (lambda (&rest _) (declare (ignore _)) (%js-bigint-to-string obj)))
-    (t +js-undefined+)))
+(define-js-type-resolver %js-resolve-bigint-method nil
+  "toString"      (lambda (&optional radix)
+                    (%js-bigint-to-string obj
+                     (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix)))))
+  "valueOf"       (lambda () obj)
+  "toLocaleString" (lambda (&rest _) (declare (ignore _)) (%js-bigint-to-string obj)))
 
 ;;; -----------------------------------------------------------------------
 ;;;  %js-resolve-method — the *js-method-resolver* implementation

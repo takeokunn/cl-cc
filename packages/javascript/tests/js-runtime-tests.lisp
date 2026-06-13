@@ -918,3 +918,63 @@ accessor slots (regression: the old inline check only matched __X__ form)."
     (cl-cc/javascript::%js-for-in
      obj (lambda (k &rest _) (declare (ignore _)) (push k keys)))
     (assert-equal '("a" "b") (sort keys #'string<))))
+
+;;; ─── Type resolver coverage (define-js-type-resolver) ────────────────────────
+
+(deftest-each js-rt-resolve-regexp-props
+  "Regexp resolver returns struct fields and bound-method closures."
+  :cases (("source"      "source"     "hello")
+          ("flags"       "flags"      "")
+          ("global"      "global"     nil))
+  (key expected)
+  (let* ((re (cl-cc/javascript::%js-make-regex "hello" ""))
+         (val (cl-cc/javascript::%js-resolve-regexp-method re key)))
+    (assert-equal expected val)))
+
+(deftest js-rt-resolve-regexp-test-method
+  "Regexp 'test' property resolves to a closure that tests the pattern."
+  (let* ((re  (cl-cc/javascript::%js-make-regex "hi" ""))
+         (fn  (cl-cc/javascript::%js-resolve-regexp-method re "test")))
+    (assert-true  (funcall fn "say hi there"))
+    (assert-false (funcall fn "goodbye"))))
+
+(deftest-each js-rt-resolve-typed-array-props
+  "TypedArray resolver returns numeric properties from struct slots."
+  :cases (("length"      "length"     3)
+          ("byteLength"  "byteLength" 12)
+          ("byteOffset"  "byteOffset" 0))
+  (key expected)
+  (let* ((ta  (cl-cc/javascript::%js-make-typed-array "Int32Array" 3))
+         (val (cl-cc/javascript::%js-resolve-typed-array-method ta key)))
+    (assert-= expected val)))
+
+(deftest-each js-rt-resolve-bigint-methods
+  "BigInt resolver returns method closures for toString/valueOf/toLocaleString."
+  :cases (("toString"       "toString"       "42")
+          ("toLocaleString" "toLocaleString" "42"))
+  (key expected)
+  (let* ((bi  (cl-cc/javascript::%make-js-bigint 42))
+         (fn  (cl-cc/javascript::%js-resolve-bigint-method bi key))
+         (result (funcall fn cl-cc/javascript::+js-undefined+)))
+    (assert-string= expected result)))
+
+(deftest js-rt-resolve-bigint-value-of
+  "BigInt valueOf returns the BigInt struct itself."
+  (let* ((bi  (cl-cc/javascript::%make-js-bigint 7))
+         (fn  (cl-cc/javascript::%js-resolve-bigint-method bi "valueOf")))
+    (assert-eq bi (funcall fn))))
+
+(deftest-each js-rt-get-own-property-descriptors-filters-internals
+  "getOwnPropertyDescriptors excludes __proto__, __get_X, __set_X, __class__ etc."
+  :cases (("visible"   "real"    t)
+          ("proto"     "__proto__" nil)
+          ("getter"    "__get_x"   nil)
+          ("setter"    "__set_x"   nil))
+  (key should-appear)
+  (let* ((obj (cl-cc/javascript::%js-make-object "real" 1)))
+    (setf (gethash "__proto__" obj) cl-cc/javascript::+js-null+
+          (gethash "__get_x"   obj) (lambda () 0)
+          (gethash "__set_x"   obj) (lambda (v) v))
+    (let* ((descs (cl-cc/javascript::%js-object-get-own-property-descriptors obj))
+           (found (nth-value 1 (gethash key descs))))
+      (assert-equal should-appear found))))
