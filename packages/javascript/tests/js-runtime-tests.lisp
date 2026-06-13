@@ -163,6 +163,48 @@
   (assert-equal '("a" "b" "c")
                 (%jr-list (cl-cc/javascript::%js-string-split "abc" ""))))
 
+(deftest-each js-rt-string-starts-ends-with
+  "startsWith and endsWith check prefix/suffix."
+  :cases (("starts-t"  #'cl-cc/javascript::%js-string-starts-with "hello" "hel" t)
+          ("starts-f"  #'cl-cc/javascript::%js-string-starts-with "hello" "ell" nil)
+          ("ends-t"    #'cl-cc/javascript::%js-string-ends-with   "hello" "llo" t)
+          ("ends-f"    #'cl-cc/javascript::%js-string-ends-with   "hello" "hel" nil))
+  (fn s sub expected)
+  (assert-equal expected (funcall fn s sub)))
+
+(deftest-each js-rt-string-pad
+  "padStart and padEnd extend string to the given length."
+  :cases (("pad-start" #'cl-cc/javascript::%js-string-pad-start "5"  3 "005")
+          ("pad-end"   #'cl-cc/javascript::%js-string-pad-end   "5"  3 "500"))
+  (fn s len expected)
+  (assert-string= expected (funcall fn s len "0")))
+
+(deftest js-rt-string-trim
+  "trim removes leading and trailing whitespace."
+  (assert-string= "hello" (cl-cc/javascript::%js-string-trim "  hello  "))
+  (assert-string= "hello  " (cl-cc/javascript::%js-string-trim-start "  hello  "))
+  (assert-string= "  hello" (cl-cc/javascript::%js-string-trim-end "  hello  ")))
+
+(deftest-each js-rt-string-at
+  "String.prototype.at supports positive and negative indices."
+  :cases (("first"  0  "h")
+          ("last"  -1  "o")
+          ("mid"    2  "l"))
+  (idx expected)
+  (assert-string= expected (cl-cc/javascript::%js-string-at "hello" idx)))
+
+(deftest js-rt-string-char-at-code-at
+  "charAt and charCodeAt return character and its code."
+  (assert-string= "e" (cl-cc/javascript::%js-string-char-at "hello" 1))
+  (assert-=      101  (cl-cc/javascript::%js-string-char-code-at "hello" 1)))
+
+(deftest-each js-rt-string-replace
+  "replace substitutes first occurrence; replaceAll substitutes all."
+  :cases (("first"  #'cl-cc/javascript::%js-string-replace     "aaa" "a" "b"  "baa")
+          ("all"    #'cl-cc/javascript::%js-string-replace-all  "aaa" "a" "b"  "bbb"))
+  (fn s pat rep expected)
+  (assert-string= expected (funcall fn s pat rep)))
+
 ;;; ─── Math ────────────────────────────────────────────────────────────────────
 
 (deftest-each js-rt-math-unary
