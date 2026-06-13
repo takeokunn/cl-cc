@@ -184,7 +184,7 @@ Uses fixed notation for exponents in [-6, P), exponential otherwise."
                 (let ((r  (if (eq radix +js-undefined+) 10 (truncate (%js-to-number radix))))
                       (ni (truncate (%js-to-number n))))
                   (if (= r 10)
-                      (format nil "~A" (%js-to-number n))
+                      (%js-to-string n)
                       (string-downcase (format nil "~vR" r ni))))))
         (cons "toPrecision"
               (lambda (n prec)

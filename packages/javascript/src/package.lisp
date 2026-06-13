@@ -258,6 +258,8 @@
    #:%js-promise-finally
 
    ;; Set built-ins
+   #:js-set-p
+   #:%js-make-set
    #:%js-set-add
    #:%js-set-delete
    #:%js-set-has
@@ -388,4 +390,8 @@
    #:%js-iterator-some
    #:%js-iterator-every
    #:%js-iterator-find
-   #:%js-iterator-to-array))
+   #:%js-iterator-to-array
+   #:%js-add-iterator-helpers!
+   #:%js-make-cl-iterator
+   #:%js-iter-next
+   #:%js-vec-to-iter))
