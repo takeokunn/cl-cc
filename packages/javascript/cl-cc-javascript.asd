@@ -20,6 +20,7 @@
    (:file "parser-expr")
    (:file "parser-expr-literal")
    (:file "parser-expr-postfix")
+   (:file "parser-expr-unary")
    (:file "parser-expr-primary")
    (:file "parser-arrow")
    (:file "parser-stmt")
