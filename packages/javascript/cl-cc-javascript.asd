@@ -26,6 +26,7 @@
    (:file "parser-class-lower")
    (:file "parser-module")
    (:file "parser-pattern")
+   (:file "parser-pattern-lower")
    ;; NOTE: there is intentionally no separate ast-lower pass. The parser lowers
    ;; JS-specific forms inline (e.g. %js-lower-assignment for &&=/||=/??=, %js-this
    ;; emitted directly), matching the PHP frontend's inline-lowering model. The
