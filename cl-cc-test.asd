@@ -137,7 +137,15 @@
     :components
      ((:file "js-lexer-tests")
       (:file "js-parser-tests")
-      (:file "js-e2e-tests")
+      ;; js-e2e-tests.lisp split into 4 focused files:
+      ;;   core:     shared helpers + basic programs + destructuring + JSON/Math/operators
+      ;;   ast:      parse-only AST shape tests (FizzBuzz, Fibonacci, classes, generators…)
+      ;;   advanced: optional chaining, typeof, class features, for-in/of, Map/Set
+      ;;   modern:   ES2022+ (private fields, Promise, WeakMap, ES2023-2026 built-ins)
+      (:file "js-e2e-core-tests")
+      (:file "js-e2e-ast-tests")
+      (:file "js-e2e-advanced-tests")
+      (:file "js-e2e-modern-tests")
       ;; js-runtime-tests.lisp split into 6 focused files:
       ;;   core:        typeof, coercion, equality, for-of/in, try-catch, bitwise
       ;;   array:       Array + ES2023 non-mutating variants + TypedArray
