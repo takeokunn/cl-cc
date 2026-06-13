@@ -124,63 +124,46 @@
   "Display a BigInt as string (without the n suffix at runtime)."
   (format nil "~vR" radix (js-bigint-value bi)))
 
+;;; Extract integer value from a BigInt or plain number.
+(defun %js-bigint-val (x)
+  (if (js-bigint-p x) (js-bigint-value x) (truncate x)))
+
 (defmacro define-js-bigint-binop (name cl-op)
+  "Define a BigInt binary op (handles mixed BigInt/number operands)."
   `(defun ,name (a b)
-     (cond ((and (js-bigint-p a) (js-bigint-p b))
-            (%make-js-bigint (,cl-op (js-bigint-value a) (js-bigint-value b))))
-           ((js-bigint-p a) (%make-js-bigint (,cl-op (js-bigint-value a) b)))
-           ((js-bigint-p b) (%make-js-bigint (,cl-op a (js-bigint-value b))))
-           (t (%make-js-bigint (,cl-op (truncate a) (truncate b)))))))
+     (%make-js-bigint (,cl-op (%js-bigint-val a) (%js-bigint-val b)))))
 
 (define-js-bigint-binop %js-bigint-add +)
 (define-js-bigint-binop %js-bigint-sub -)
 (define-js-bigint-binop %js-bigint-mul *)
+(define-js-bigint-binop %js-bigint-bitwise-and logand)
+(define-js-bigint-binop %js-bigint-bitwise-or  logior)
+(define-js-bigint-binop %js-bigint-bitwise-xor logxor)
 
 (defun %js-bigint-div (a b)
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+  (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
     (if (zerop bv) (error "Division by zero") (%make-js-bigint (truncate av bv)))))
 
 (defun %js-bigint-mod (a b)
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+  (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
     (if (zerop bv) (error "Division by zero") (%make-js-bigint (rem av bv)))))
 
 (defun %js-bigint-pow (a b)
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
-    (%make-js-bigint (expt av bv))))
+  (%make-js-bigint (expt (%js-bigint-val a) (%js-bigint-val b))))
 
 (defun %js-bigint-compare (a b)
   "Return -1/0/1 for BigInt comparison (also works if one side is a regular number)."
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (bv (if (js-bigint-p b) (js-bigint-value b) (truncate b))))
+  (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
     (cond ((< av bv) -1) ((> av bv) 1) (t 0))))
 
 (defun %js-bigint-lshift (a n)
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (nv (if (js-bigint-p n) (js-bigint-value n) (truncate n))))
-    (%make-js-bigint (ash av nv))))
+  (%make-js-bigint (ash (%js-bigint-val a) (%js-bigint-val n))))
 
 (defun %js-bigint-rshift (a n)
-  (let ((av (if (js-bigint-p a) (js-bigint-value a) (truncate a)))
-        (nv (if (js-bigint-p n) (js-bigint-value n) (truncate n))))
-    (%make-js-bigint (ash av (- nv)))))
-
-(defun %js-bigint-bitwise-and (a b)
-  (%make-js-bigint (logand (if (js-bigint-p a) (js-bigint-value a) (truncate a))
-                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
-
-(defun %js-bigint-bitwise-or (a b)
-  (%make-js-bigint (logior (if (js-bigint-p a) (js-bigint-value a) (truncate a))
-                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
-
-(defun %js-bigint-bitwise-xor (a b)
-  (%make-js-bigint (logxor (if (js-bigint-p a) (js-bigint-value a) (truncate a))
-                           (if (js-bigint-p b) (js-bigint-value b) (truncate b)))))
+  (%make-js-bigint (ash (%js-bigint-val a) (- (%js-bigint-val n)))))
 
 (defun %js-bigint-negate (a)
-  (%make-js-bigint (- (if (js-bigint-p a) (js-bigint-value a) (truncate a)))))
+  (%make-js-bigint (- (%js-bigint-val a))))
 
 ;;; ─── URI encoding/decoding ───────────────────────────────────────────────────
 

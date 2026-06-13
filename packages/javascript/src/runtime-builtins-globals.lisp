@@ -133,17 +133,13 @@
 (defun %js-bigint-as-int-n (width bigint)
   "BigInt.asIntN(width, bigint): mask BIGINT to WIDTH-bit signed integer."
   (let* ((w       (truncate (%js-to-number width)))
-         (v       (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint)))
          (modulus (expt 2 w))
-         (half    (expt 2 (1- w)))
-         (masked  (mod v modulus)))
-    (%make-js-bigint (if (>= masked half) (- masked modulus) masked))))
+         (masked  (mod (%js-bigint-val bigint) modulus)))
+    (%make-js-bigint (if (>= masked (expt 2 (1- w))) (- masked modulus) masked))))
 
 (defun %js-bigint-as-uint-n (width bigint)
   "BigInt.asUintN(width, bigint): mask BIGINT to WIDTH-bit unsigned integer."
-  (let* ((w (truncate (%js-to-number width)))
-         (v (if (js-bigint-p bigint) (js-bigint-value bigint) (truncate bigint))))
-    (%make-js-bigint (mod v (expt 2 w)))))
+  (%make-js-bigint (mod (%js-bigint-val bigint) (expt 2 (truncate (%js-to-number width))))))
 
 (defun %js-iterator-from-iterable (iterable)
   "Iterator.from(iterable): wrap any iterable/iterator in the Iterator protocol."
