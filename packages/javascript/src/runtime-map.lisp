@@ -67,45 +67,34 @@
   "Return the number of entries in Map M."
   (hash-table-count (js-map-ht m)))
 
-(defun %js-map-keys (m)
+(defmacro %define-js-map-iterator (name docstring &body value-expr)
+  "Define a Map iterator that yields VALUE-EXPR (with K and V bound to key/value)."
+  `(defun ,name (m)
+     ,docstring
+     (let ((keys (copy-list (js-map-order m)))
+           (ht   (js-map-ht m))
+           (i    0))
+       (%js-make-cl-iterator
+        (lambda ()
+          (if (>= i (length keys))
+              :done
+              (let* ((k (nth i keys))
+                     (v (gethash k ht +js-undefined+)))
+                (declare (ignorable k v))
+                (incf i)
+                (cons (progn ,@value-expr) nil))))))))
+
+(%define-js-map-iterator %js-map-keys
   "Return an iterator over Map M's keys in insertion order."
-  (let ((keys (copy-list (js-map-order m)))
-        (i 0))
-    (%js-make-cl-iterator
-     (lambda ()
-       (if (>= i (length keys))
-           :done
-           (let ((k (nth i keys)))
-             (incf i)
-             (cons k nil)))))))
+  k)
 
-(defun %js-map-values (m)
+(%define-js-map-iterator %js-map-values
   "Return an iterator over Map M's values in insertion order."
-  (let ((keys (copy-list (js-map-order m)))
-        (ht (js-map-ht m))
-        (i 0))
-    (%js-make-cl-iterator
-     (lambda ()
-       (if (>= i (length keys))
-           :done
-           (let* ((k (nth i keys))
-                  (v (gethash k ht +js-undefined+)))
-             (incf i)
-             (cons v nil)))))))
+  v)
 
-(defun %js-map-entries (m)
+(%define-js-map-iterator %js-map-entries
   "Return an iterator over Map M's [key,value] pairs in insertion order."
-  (let ((keys (copy-list (js-map-order m)))
-        (ht (js-map-ht m))
-        (i 0))
-    (%js-make-cl-iterator
-     (lambda ()
-       (if (>= i (length keys))
-           :done
-           (let* ((k (nth i keys))
-                  (v (gethash k ht +js-undefined+)))
-             (incf i)
-             (cons (%js-make-array k v) nil)))))))
+  (%js-make-array k v))
 
 (defun %js-map-for-each (m fn)
   "Call FN(value, key, map) for each entry in insertion order."

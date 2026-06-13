@@ -13,6 +13,18 @@
 ;;;  Method dispatch table for TypedArrays
 ;;; -----------------------------------------------------------------------
 
+;;; ─── Shared helpers ─────────────────────────────────────────────────────────
+
+(defparameter +%js-base64-alphabet+
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  "Base64 encoding alphabet (RFC 4648 standard encoding).")
+
+(defun %js-ta-clone-with-buffer (ta new-buf)
+  "Return a new TypedArray with the same type/element-size as TA but backed by NEW-BUF."
+  (make-js-typed-array :type-name (js-ta-type-name ta)
+                        :element-size (js-ta-element-size ta)
+                        :buffer new-buf :byte-offset 0 :length (length new-buf)))
+
 ;;; ─── ES2023 non-mutating TypedArray methods ──────────────────────────────────
 
 (defun %js-ta-to-reversed (ta)
@@ -21,23 +33,18 @@
          (new-buf (make-array n :element-type t :initial-element 0)))
     (dotimes (i n)
       (setf (aref new-buf i) (aref (js-ta-buffer ta) (- n 1 i))))
-    (make-js-typed-array :type-name (js-ta-type-name ta)
-                          :element-size (js-ta-element-size ta)
-                          :buffer new-buf :byte-offset 0 :length n)))
+    (%js-ta-clone-with-buffer ta new-buf)))
 
 (defun %js-ta-to-sorted (ta &optional compare-fn)
   "TypedArray.prototype.toSorted() — sorted copy."
   (let* ((n (js-ta-length ta))
-         (arr (copy-seq (js-ta-buffer ta)))
-         (new-buf (make-array n :element-type t :initial-element 0)))
-    (let ((sorted (if compare-fn
-                      (sort (coerce arr 'list)
-                            (lambda (a b) (< (%js-to-number (%js-funcall compare-fn a b)) 0)))
-                      (sort (coerce arr 'list) #'<))))
-      (loop for v in sorted for i from 0 do (setf (aref new-buf i) v)))
-    (make-js-typed-array :type-name (js-ta-type-name ta)
-                          :element-size (js-ta-element-size ta)
-                          :buffer new-buf :byte-offset 0 :length n)))
+         (new-buf (make-array n :element-type t :initial-element 0))
+         (sorted (sort (coerce (copy-seq (js-ta-buffer ta)) 'list)
+                       (if compare-fn
+                           (lambda (a b) (< (%js-to-number (%js-funcall compare-fn a b)) 0))
+                           #'<))))
+    (loop for v in sorted for i from 0 do (setf (aref new-buf i) v))
+    (%js-ta-clone-with-buffer ta new-buf)))
 
 (defun %js-ta-with (ta index value)
   "TypedArray.prototype.with() — copy with one element replaced."
@@ -45,9 +52,7 @@
          (i (if (< index 0) (+ n index) index))
          (new-buf (copy-seq (js-ta-buffer ta))))
     (setf (aref new-buf i) (%js-ta-coerce-element (js-ta-type-name ta) value))
-    (make-js-typed-array :type-name (js-ta-type-name ta)
-                          :element-size (js-ta-element-size ta)
-                          :buffer new-buf :byte-offset 0 :length n)))
+    (%js-ta-clone-with-buffer ta new-buf)))
 
 (defun %js-ta-at (ta index)
   "TypedArray.prototype.at() — negative indexing."
@@ -187,7 +192,7 @@
 (defun %js-uint8-to-base64 (ta &optional opts)
   "Uint8Array.prototype.toBase64() — ES2025."
   (declare (ignore opts))
-  (let* ((alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+  (let* ((alphabet +%js-base64-alphabet+)
          (n (js-ta-length ta))
          (buf (js-ta-buffer ta)))
     (with-output-to-string (out)
@@ -204,7 +209,7 @@
   "Uint8Array.fromBase64(string) — ES2025."
   (declare (ignore opts))
   (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) (%js-to-string b64-str)))
-         (alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+         (alphabet +%js-base64-alphabet+)
          (bytes (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
     (flet ((dc (ch) (or (position ch alphabet) 0)))
       (loop for i from 0 below (length s) by 4
