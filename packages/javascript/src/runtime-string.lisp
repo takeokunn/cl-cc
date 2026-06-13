@@ -119,25 +119,22 @@
 (define-js-string-passthrough %js-string-trim-start string-left-trim +js-whitespace-chars+)
 (define-js-string-passthrough %js-string-trim-end   string-right-trim +js-whitespace-chars+)
 
-(defun %js-string-pad-start (s len &optional (fill " "))
-  (let* ((fl (if (eq fill +js-undefined+) " " fill))
-         (need (- len (length s))))
-    (if (<= need 0)
-        s
-        (let ((pad (make-string need :initial-element #\Space)))
-          (loop for i below need
-                do (setf (char pad i) (char fl (mod i (max 1 (length fl))))))
-          (concatenate 'string pad s)))))
+(defmacro define-js-string-pad (name &key pad-before-p)
+  "Define a string padding function. PAD-BEFORE-P=T for padStart, NIL for padEnd."
+  `(defun ,name (s len &optional (fill " "))
+     (let* ((fl   (if (eq fill +js-undefined+) " " fill))
+            (need (- len (length s))))
+       (if (<= need 0)
+           s
+           (let ((pad (make-string need :initial-element #\Space)))
+             (loop for i below need
+                   do (setf (char pad i) (char fl (mod i (max 1 (length fl))))))
+             ,(if pad-before-p
+                  '(concatenate 'string pad s)
+                  '(concatenate 'string s pad)))))))
 
-(defun %js-string-pad-end (s len &optional (fill " "))
-  (let* ((fl (if (eq fill +js-undefined+) " " fill))
-         (need (- len (length s))))
-    (if (<= need 0)
-        s
-        (let ((pad (make-string need :initial-element #\Space)))
-          (loop for i below need
-                do (setf (char pad i) (char fl (mod i (max 1 (length fl))))))
-          (concatenate 'string s pad)))))
+(define-js-string-pad %js-string-pad-start :pad-before-p t)
+(define-js-string-pad %js-string-pad-end   :pad-before-p nil)
 
 (defun %js-string-at (s index)
   "JS String.prototype.at (negative indexing)."
@@ -216,15 +213,9 @@ In CL strings (UCS-4), strings are always well-formed in this sense."
   (declare (ignore s))
   t)
 
-(defun %js-string-to-locale-lower-case (s &optional locale)
-  "ES2015 String.prototype.toLocaleLowerCase."
-  (declare (ignore locale))
-  (string-downcase s))
-
-(defun %js-string-to-locale-upper-case (s &optional locale)
-  "ES2015 String.prototype.toLocaleUpperCase."
-  (declare (ignore locale))
-  (string-upcase s))
+;;; toLocaleUpperCase/toLocaleLowerCase are locale-neutral aliases in our model.
+(define-js-string-passthrough %js-string-to-locale-lower-case string-downcase)
+(define-js-string-passthrough %js-string-to-locale-upper-case string-upcase)
 
 (defun %js-string-locale-compare (s other &optional locales options)
   "ES2015 String.prototype.localeCompare — returns -1, 0, or 1."

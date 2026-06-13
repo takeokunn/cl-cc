@@ -52,19 +52,17 @@
       (setf (aref result idx) value))
     result))
 
-(defun %js-array-find-last (arr pred)
-  "Array.prototype.findLast(pred) — find last matching element."
-  (loop for i from (1- (length arr)) downto 0
-        when (%js-truthy (%js-funcall pred (aref arr i) i arr))
-          return (aref arr i)
-        finally (return +js-undefined+)))
-
 (defun %js-array-find-last-index (arr pred)
-  "Array.prototype.findLastIndex(pred) — index of last matching element."
+  "Array.prototype.findLastIndex(pred) — index of last matching element, or -1."
   (loop for i from (1- (length arr)) downto 0
         when (%js-truthy (%js-funcall pred (aref arr i) i arr))
           return i
         finally (return -1)))
+
+(defun %js-array-find-last (arr pred)
+  "Array.prototype.findLast(pred) — last element satisfying PRED, or undefined."
+  (let ((idx (%js-array-find-last-index arr pred)))
+    (if (= idx -1) +js-undefined+ (aref arr idx))))
 
 (defun %js-array-at (arr index)
   "Array.prototype.at(index) — supports negative indices."
@@ -74,20 +72,13 @@
         (aref arr i)
         +js-undefined+)))
 
-(defun %js-array-flat-nested (arr &optional (depth 1))
-  "Flatten ARR up to DEPTH levels (alias-safe version for toSorted)."
-  (%js-array-flat arr depth))
-
 ;;; -----------------------------------------------------------------------
 ;;;  Array.of (ES2015)
 ;;; -----------------------------------------------------------------------
 
 (defun %js-array-of (&rest elements)
-  "Array.of(...elements) — create array from arguments."
-  (let ((result (%js-make-vec (length elements))))
-    (loop for el in elements for i from 0
-          do (setf (aref result i) el))
-    result))
+  "Array.of(...elements) — create array from positional arguments."
+  (apply #'%js-make-array elements))
 
 ;;; -----------------------------------------------------------------------
 ;;;  ES2024 grouping methods

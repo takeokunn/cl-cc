@@ -108,19 +108,17 @@ rest parameter's collected &rest list into a real JS array."
           do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
     acc))
 
-(defun %js-array-find (arr fn)
-  "Return first element matching FN, or undefined."
-  (loop for i below (length arr)
-        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
-          return (aref arr i)
-        finally (return +js-undefined+)))
-
 (defun %js-array-find-index (arr fn)
-  "Return index of first element matching FN, or -1."
+  "Return index of first element satisfying FN, or -1."
   (loop for i below (length arr)
         when (%js-truthy (%js-funcall fn (aref arr i) i arr))
           return i
         finally (return -1)))
+
+(defun %js-array-find (arr fn)
+  "Return first element satisfying FN, or undefined."
+  (let ((idx (%js-array-find-index arr fn)))
+    (if (= idx -1) +js-undefined+ (aref arr idx))))
 
 (defun %js-array-some (arr fn)
   "True if any element satisfies FN."
@@ -303,20 +301,10 @@ rest parameter's collected &rest list into a real JS array."
 
 
 (defun %js-array-from (iterable &optional map-fn)
-  "JS Array.from."
+  "JS Array.from — collects any iterable into a fresh array, with optional map."
   (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-    (cond
-      ((%js-vec-p iterable)
-       (loop for i below (length iterable)
-             do (vector-push-extend (aref iterable i) result)))
-      ((stringp iterable)
-       (loop for ch across iterable
-             do (vector-push-extend (string ch) result)))
-      (t
-       (%js-for-of iterable (lambda (el) (vector-push-extend el result)))))
-    (if map-fn
-        (%js-array-map result map-fn)
-        result)))
+    (%js-for-of iterable (lambda (el) (vector-push-extend el result)))
+    (if map-fn (%js-array-map result map-fn) result)))
 
 
 (defun %js-array-is-array (x)

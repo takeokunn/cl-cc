@@ -79,7 +79,7 @@
   (let ((result (%js-make-ht)))
     (when (%js-ht-p obj)
       (maphash (lambda (k v)
-                 (unless (and (stringp k) (>= (length k) 2) (string= k "__" :end1 2))
+                 (unless (%js-internal-key-p k)
                    (setf (gethash k result)
                          (%js-make-object "value" v "writable" t "enumerable" t "configurable" t))))
                obj))
