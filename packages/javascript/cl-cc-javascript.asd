@@ -43,6 +43,7 @@
    (:file "runtime-array")
    (:file "runtime-array-es2023")
    (:file "runtime-object")
+   (:file "runtime-json")
    (:file "runtime-string")
    (:file "runtime-math")
    (:file "runtime-collections")

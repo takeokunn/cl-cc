@@ -42,11 +42,7 @@
   t)
 
 (defun %js-reflect-get-own-property-descriptor (target key)
-  (if (%js-ht-p target)
-      (let ((val (gethash (%js-to-string key) target +js-undefined+)))
-        (if (eq val +js-undefined+) +js-undefined+
-            (%js-make-object "value" val "writable" t "enumerable" t "configurable" t)))
-      +js-undefined+))
+  (%js-object-get-own-property-descriptor target key))
 
 (defun %js-object-define-property (obj key descriptor)
   (when (and (%js-ht-p obj) (%js-ht-p descriptor))
@@ -73,9 +69,10 @@
 
 (defun %js-object-get-own-property-descriptor (obj key)
   (if (%js-ht-p obj)
-      (let ((val (gethash (%js-to-string key) obj +js-undefined+)))
-        (if (eq val +js-undefined+) +js-undefined+
-            (%js-make-object "value" val "writable" t "enumerable" t "configurable" t)))
+      (multiple-value-bind (val found) (gethash (%js-to-string key) obj)
+        (if found
+            (%js-make-object "value" val "writable" t "enumerable" t "configurable" t)
+            +js-undefined+))
       +js-undefined+))
 
 (defun %js-object-get-own-property-descriptors (obj)
