@@ -311,3 +311,51 @@
   "%js-using-register returns its argument unchanged."
   (let ((r (list 1 2)))
     (assert-eq r (cl-cc/javascript::%js-using-register r))))
+
+;;; ─── runtime-property.lisp: accessor-descriptor-p, put-entry, optional ops ──
+
+(deftest-each js-rt-accessor-descriptor-p
+  "%js-accessor-descriptor-p distinguishes accessor HTs from plain values."
+  :cases (("get-accessor" (cl-cc/javascript::%js-accessor "get" (lambda () 1)) t)
+          ("set-accessor" (cl-cc/javascript::%js-accessor "set" (lambda (v) v))  t)
+          ("plain-ht"     (cl-cc/javascript::%js-make-object "x" 1)             nil)
+          ("string"       "not-an-accessor"                                      nil))
+  (val expected)
+  (assert-equal expected (cl-cc/javascript::%js-accessor-descriptor-p val)))
+
+(deftest js-rt-object-put-entry-accessor-routing
+  "%js-object-put-entry routes getter descriptor to __get_KEY slot."
+  (let* ((ht  (cl-cc/javascript::%js-make-ht))
+         (fn  (lambda () 42))
+         (desc (cl-cc/javascript::%js-accessor "get" fn)))
+    (cl-cc/javascript::%js-object-put-entry ht "foo" desc)
+    (assert-eq fn (gethash "__get_foo" ht))
+    (assert-false (nth-value 1 (gethash "foo" ht)))))
+
+(deftest-each js-rt-optional-call
+  "%js-optional-call invokes the function or returns +js-undefined+ for null/undefined."
+  :cases (("real-fn"     (lambda () 99)                   99)
+          ("undefined"   cl-cc/javascript::+js-undefined+ :undef)
+          ("null"        cl-cc/javascript::+js-null+       :undef))
+  (func expected)
+  (let ((result (cl-cc/javascript::%js-optional-call func)))
+    (if (eq expected :undef)
+        (assert-eq cl-cc/javascript::+js-undefined+ result)
+        (assert-= expected result))))
+
+(deftest js-rt-optional-method-call-present
+  "%js-optional-method-call calls the method when obj is not null/undefined."
+  (let* ((obj    (cl-cc/javascript::%js-make-object "double" (lambda (n) (* 2 n))))
+         (result (cl-cc/javascript::%js-optional-method-call obj "double" 5)))
+    (assert-= 10 result)))
+
+(deftest js-rt-optional-method-call-null
+  "%js-optional-method-call returns +js-undefined+ when obj is null."
+  (assert-eq cl-cc/javascript::+js-undefined+
+             (cl-cc/javascript::%js-optional-method-call cl-cc/javascript::+js-null+ "double" 5)))
+
+(deftest js-rt-concat-string-coercion
+  "%js-concat coerces to string when either operand is a string."
+  (assert-string= "42"    (cl-cc/javascript::%js-concat 4 "2"))
+  (assert-string= "ab"    (cl-cc/javascript::%js-concat "a" "b"))
+  (assert-=       6       (cl-cc/javascript::%js-concat 4 2)))

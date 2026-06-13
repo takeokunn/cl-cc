@@ -331,3 +331,75 @@ plain number via truncate — the key invariant behind define-js-bigint-binop."
   (let ((result (cl-cc/javascript::%js-regexp-escape "a.b+c?")))
     (assert-true (cl-cc/javascript::%js-string-includes result "\\."))
     (assert-true (cl-cc/javascript::%js-string-includes result "\\+"))))
+
+;;; ─── Map iterators — keys / values / entries ─────────────────────────────────
+
+(deftest js-rt-map-keys-iterator
+  "%js-map-keys returns a CL iterator yielding keys in insertion order."
+  (let* ((m   (cl-cc/javascript::%js-make-map))
+         (acc nil))
+    (cl-cc/javascript::%js-map-set m "a" 1)
+    (cl-cc/javascript::%js-map-set m "b" 2)
+    (cl-cc/javascript::%js-for-of
+     (cl-cc/javascript::%js-map-keys m)
+     (lambda (k) (push k acc)))
+    (assert-equal '("b" "a") acc)))
+
+(deftest js-rt-map-values-iterator
+  "%js-map-values returns an iterator yielding values in insertion order."
+  (let* ((m   (cl-cc/javascript::%js-make-map))
+         (acc nil))
+    (cl-cc/javascript::%js-map-set m "x" 10)
+    (cl-cc/javascript::%js-map-set m "y" 20)
+    (cl-cc/javascript::%js-for-of
+     (cl-cc/javascript::%js-map-values m)
+     (lambda (v) (push v acc)))
+    (assert-equal '(20 10) acc)))
+
+(deftest js-rt-map-entries-iterator
+  "%js-map-entries returns an iterator yielding [key, value] arrays."
+  (let* ((m   (cl-cc/javascript::%js-make-map))
+         (acc nil))
+    (cl-cc/javascript::%js-map-set m "k" 99)
+    (cl-cc/javascript::%js-for-of
+     (cl-cc/javascript::%js-map-entries m)
+     (lambda (e) (push (list (aref e 0) (aref e 1)) acc)))
+    (assert-equal '(("k" 99)) acc)))
+
+;;; ─── WeakMap ─────────────────────────────────────────────────────────────────
+
+(deftest js-rt-weak-map-lifecycle
+  "WeakMap: set/get/has/delete on object keys with identity lookup."
+  (let* ((wm  (cl-cc/javascript::%js-make-weak-map))
+         (key (cl-cc/javascript::%js-make-object "x" 1)))
+    (assert-true  (cl-cc/javascript::%js-weak-map-p wm))
+    (cl-cc/javascript::%js-weak-map-set wm key 42)
+    (assert-= 42 (cl-cc/javascript::%js-weak-map-get wm key))
+    (assert-true  (cl-cc/javascript::%js-weak-map-has wm key))
+    (assert-true  (cl-cc/javascript::%js-weak-map-delete wm key))
+    (assert-false (cl-cc/javascript::%js-weak-map-has wm key))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-weak-map-get wm key))))
+
+;;; ─── WeakSet ─────────────────────────────────────────────────────────────────
+
+(deftest js-rt-weak-set-lifecycle
+  "WeakSet: add/has/delete on object keys using identity equality."
+  (let* ((ws  (cl-cc/javascript::%js-make-weak-set))
+         (obj (cl-cc/javascript::%js-make-object "y" 2)))
+    (assert-true  (cl-cc/javascript::%js-weak-set-p ws))
+    (cl-cc/javascript::%js-weak-set-add ws obj)
+    (assert-true  (cl-cc/javascript::%js-weak-set-has ws obj))
+    (assert-false (cl-cc/javascript::%js-weak-set-has ws (cl-cc/javascript::%js-make-object)))
+    (cl-cc/javascript::%js-weak-set-delete ws obj)
+    (assert-false (cl-cc/javascript::%js-weak-set-has ws obj))))
+
+;;; ─── FinalizationRegistry (stub) ─────────────────────────────────────────────
+
+(deftest js-rt-finalization-registry-stub
+  "FinalizationRegistry register/unregister are no-ops returning undefined/nil."
+  (let* ((reg (cl-cc/javascript::%js-make-finalization-registry (lambda (hv) (declare (ignore hv)))))
+         (tgt (cl-cc/javascript::%js-make-object)))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-finreg-register reg tgt "held"))
+    (assert-false (cl-cc/javascript::%js-finreg-unregister reg "token"))))
