@@ -21,6 +21,7 @@
    (:file "parser-expr-literal")
    (:file "parser-expr-postfix")
    (:file "parser-expr-primary")
+   (:file "parser-arrow")
    (:file "parser-stmt")
    (:file "parser-stmt-control")
    (:file "parser-class")
