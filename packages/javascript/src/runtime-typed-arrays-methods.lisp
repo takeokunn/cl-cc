@@ -175,10 +175,11 @@
 ;;; ─── ES2025: Uint8Array hex/base64 encoding ──────────────────────────────────
 
 (defun %js-uint8-to-hex (ta)
-  "Uint8Array.prototype.toHex() — ES2025."
-  (with-output-to-string (out)
-    (dotimes (i (js-ta-length ta))
-      (format out "~2,'0x" (aref (js-ta-buffer ta) i)))))
+  "Uint8Array.prototype.toHex() — ES2025. Returns lowercase hex pairs."
+  (string-downcase
+   (with-output-to-string (out)
+     (dotimes (i (js-ta-length ta))
+       (format out "~2,'0x" (aref (js-ta-buffer ta) i))))))
 
 (defun %js-uint8-from-hex (hex-str)
   "Uint8Array.fromHex(string) — ES2025."

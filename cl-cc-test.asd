@@ -158,13 +158,17 @@
       ;;   resolver:    Method dispatch, RegExp, Reflect, Object fallback, bound-method
       ;;   date-json:   Temporal + Date.prototype + JSON stringify/parse
       ;;   object-ops:  Object static methods + destructuring + bitwise/shift + BigInt extras
+      ;;   symbol:      Symbol primitive, Symbol.for/keyFor registry, well-known symbols
+      ;;   ta-methods:  TypedArray ES2023 non-mutating methods + iterators + hex/base64
       (:file "js-runtime-core-tests")
       (:file "js-runtime-array-tests")
       (:file "js-runtime-string-number-tests")
       (:file "js-runtime-collections-tests")
       (:file "js-runtime-resolver-tests")
       (:file "js-runtime-date-json-tests")
-      (:file "js-runtime-object-ops-tests")))
+      (:file "js-runtime-object-ops-tests")
+      (:file "js-runtime-symbol-tests")
+      (:file "js-runtime-typed-array-methods-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
