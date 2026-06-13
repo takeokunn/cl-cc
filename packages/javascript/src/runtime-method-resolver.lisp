@@ -7,6 +7,21 @@
 (in-package :cl-cc/javascript)
 
 ;;; -----------------------------------------------------------------------
+;;;  Shared iterator helpers — referenced by method tables below
+;;; -----------------------------------------------------------------------
+
+(defun %js-string-char-iter (s)
+  "Return a JS Iterator that yields each character of string S as a one-char string."
+  (let ((i 0))
+    (%js-make-cl-iterator
+     (lambda ()
+       (if (>= i (length s))
+           :done
+           (let ((ch (string (char s i))))
+             (incf i)
+             (cons ch nil)))))))
+
+;;; -----------------------------------------------------------------------
 ;;;  Prototype method tables — alist of (method-name . host-helper)
 ;;; -----------------------------------------------------------------------
 ;;;
@@ -30,23 +45,8 @@
         (cons "flat" #'%js-array-flat)          (cons "flatMap" #'%js-array-flat-map)
         (cons "fill" #'%js-array-fill)          (cons "copyWithin" #'%js-array-copy-within)
         (cons "entries" #'%js-array-entries)    (cons "keys" #'%js-array-keys)
-        (cons "values"
-              (lambda (arr)
-                (let ((i (list 0)))
-                  (%js-make-generator (lambda ()
-                    (loop while (< (car i) (length arr))
-                          do (%js-yield (aref arr (car i)))
-                             (incf (car i))))))))
-        (cons "@@iterator"
-              (lambda (arr)
-                (let ((i (list 0)))
-                  (%js-make-object
-                   "next" (lambda ()
-                            (if (< (car i) (length arr))
-                                (prog1 (%js-make-object "value" (aref arr (car i)) "done" nil)
-                                  (incf (car i)))
-                                (%js-make-object "value" +js-undefined+ "done" t)))
-                   "@@iterator" (lambda () (gethash "@@iterator" arr))))))
+        (cons "values"      #'%js-vec-to-iter)
+        (cons "@@iterator"  #'%js-vec-to-iter)
         (cons "group"          #'%js-array-group)
         (cons "groupToMap"     #'%js-array-group-to-map)
         (cons "toReversed"     #'%js-array-to-reversed)
@@ -84,15 +84,7 @@
         (cons "toLocaleLowerCase"  #'%js-string-to-locale-lower-case)
         (cons "toLocaleUpperCase"  #'%js-string-to-locale-upper-case)
         (cons "localeCompare"      #'%js-string-locale-compare)
-        (cons "@@iterator"
-              (lambda (s)
-                (let ((i (list 0)))
-                  (%js-make-object
-                   "next" (lambda ()
-                            (if (< (car i) (length s))
-                                (prog1 (%js-make-object "value" (string (char s (car i))) "done" nil)
-                                  (incf (car i)))
-                                (%js-make-object "value" +js-undefined+ "done" t))))))))
+        (cons "@@iterator"  #'%js-string-char-iter))
   "Alist: JS String.prototype method name -> host helper (receiver = first arg).")
 
 (defparameter *js-set-method-table*
@@ -255,6 +247,24 @@ the table lookup. OBJ and KEY are bound in value-forms."
 (define-js-type-resolver %js-resolve-weak-set-method *js-weak-set-method-table*)
 (define-js-type-resolver %js-resolve-date-method     *js-date-method-table*)
 
+;;; Object.prototype fallback methods — table of (name . (lambda (obj) -> bound-method))
+;;; These are consulted only when the hash-table lookup on OBJ misses.
+
+(defparameter *js-object-fallback-method-table*
+  (list (cons "hasOwnProperty"
+              (lambda (obj) (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj)))))
+        (cons "toString"
+              (lambda (_obj) (declare (ignore _obj)) (lambda () "[object Object]")))
+        (cons "valueOf"
+              (lambda (obj) (lambda () obj)))
+        (cons "isPrototypeOf"
+              (lambda (_obj) (declare (ignore _obj)) (lambda (_p) (declare (ignore _p)) nil)))
+        (cons "propertyIsEnumerable"
+              (lambda (obj) (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj)))))
+        (cons "constructor"
+              (lambda (obj) (lambda (&rest _) (declare (ignore _)) obj))))
+  "Object.prototype fallback: (name . factory) where factory is (lambda (obj) -> method).")
+
 ;;; Complex resolvers: types with multiple special properties or unique logic
 
 (defun %js-resolve-promise-method (obj key)
@@ -292,18 +302,10 @@ the table lookup. OBJ and KEY are bound in value-forms."
   (multiple-value-bind (stored found) (gethash key obj)
     (if found
         stored
-        (cond
-          ((string= key "hasOwnProperty")
-           (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj))))
-          ((string= key "toString")          (lambda () "[object Object]"))
-          ((string= key "valueOf")           (lambda () obj))
-          ((string= key "isPrototypeOf")
-           (lambda (_proto) (declare (ignore _proto)) nil))
-          ((string= key "propertyIsEnumerable")
-           (lambda (k) (nth-value 1 (gethash (%js-to-string k) obj))))
-          ((string= key "constructor")
-           (lambda (&rest _) (declare (ignore _)) obj))
-          (t +js-undefined+)))))
+        (let ((entry (assoc key *js-object-fallback-method-table* :test #'string=)))
+          (if entry
+              (funcall (cdr entry) obj)
+              +js-undefined+)))))
 
 (defun %js-resolve-number-method (obj key)
   (%js-bound-method *js-number-method-table* obj key))

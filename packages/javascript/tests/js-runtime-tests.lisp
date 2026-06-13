@@ -1259,3 +1259,171 @@ b" (cl-cc/javascript::%js-json-parse "\"a\\nb\"")))
          (reparsed (cl-cc/javascript::%js-json-parse json)))
     (assert-string= "Alice" (gethash "name" reparsed))
     (assert-= 30.0d0 (gethash "age" reparsed))))
+
+;;; -----------------------------------------------------------------------
+;;;  Method resolver — new helpers and object fallback table
+;;; -----------------------------------------------------------------------
+
+(deftest js-rt-string-char-iter-yields-chars
+  "%js-string-char-iter returns an iterator that yields each char as a 1-char string."
+  (let* ((iter  (cl-cc/javascript::%js-string-char-iter "abc"))
+         (next  (gethash "next" iter))
+         (r1    (funcall next))
+         (r2    (funcall next))
+         (r3    (funcall next))
+         (done  (funcall next)))
+    (assert-string= "a"   (gethash "value" r1))
+    (assert-string= "b"   (gethash "value" r2))
+    (assert-string= "c"   (gethash "value" r3))
+    (assert-true           (gethash "done"  done))))
+
+(deftest js-rt-string-char-iter-via-get-prop
+  "String @@iterator method resolves to an iterator using %js-string-char-iter."
+  (let* ((fn    (cl-cc/javascript::%js-get-prop "xy" "@@iterator"))
+         (iter  (funcall fn))
+         (next  (gethash "next" iter))
+         (r1    (funcall next))
+         (r2    (funcall next))
+         (done  (funcall next)))
+    (assert-string= "x"   (gethash "value" r1))
+    (assert-string= "y"   (gethash "value" r2))
+    (assert-true           (gethash "done"  done))))
+
+(deftest js-rt-array-values-via-get-prop
+  "Array values() method resolves to an iterator over the elements."
+  (let* ((arr   (%jr-arr 10 20))
+         (fn    (cl-cc/javascript::%js-get-prop arr "values"))
+         (iter  (funcall fn))
+         (next  (gethash "next" iter))
+         (r1    (funcall next))
+         (r2    (funcall next))
+         (done  (funcall next)))
+    (assert-= 10 (gethash "value" r1))
+    (assert-= 20 (gethash "value" r2))
+    (assert-true  (gethash "done"  done))))
+
+(deftest js-rt-array-@@iterator-via-get-prop
+  "Array @@iterator() returns an independent iterator (iterable-iterator protocol)."
+  (let* ((arr   (%jr-arr 5 6))
+         (fn    (cl-cc/javascript::%js-get-prop arr "@@iterator"))
+         (iter  (funcall fn))
+         (next  (gethash "next" iter)))
+    (assert-true  (functionp next))
+    (assert-= 5  (gethash "value" (funcall next)))
+    (assert-= 6  (gethash "value" (funcall next)))))
+
+(deftest-each js-rt-object-fallback-methods
+  "Object fallback methods are available via %js-resolve-object-method."
+  :cases (("has-own-existing"  "hasOwnProperty"    "x"   t)
+          ("has-own-missing"   "hasOwnProperty"    "z"   nil)
+          ("prop-is-enum-yes"  "propertyIsEnumerable" "x" t)
+          ("prop-is-enum-no"   "propertyIsEnumerable" "z" nil))
+  (method key expected)
+  (let* ((obj (cl-cc/javascript::%js-make-object "x" 1))
+         (fn  (cl-cc/javascript::%js-resolve-object-method obj method)))
+    (assert-true  (functionp fn))
+    (assert-equal expected (funcall fn key))))
+
+(deftest js-rt-object-fallback-to-string
+  "Object fallback toString returns \"[object Object]\"."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (fn  (cl-cc/javascript::%js-resolve-object-method obj "toString")))
+    (assert-string= "[object Object]" (funcall fn))))
+
+(deftest js-rt-object-fallback-value-of
+  "Object fallback valueOf returns the object itself."
+  (let* ((obj (cl-cc/javascript::%js-make-object "k" 1))
+         (fn  (cl-cc/javascript::%js-resolve-object-method obj "valueOf")))
+    (assert-eq obj (funcall fn))))
+
+(deftest js-rt-object-fallback-constructor
+  "Object fallback constructor returns the object itself."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (fn  (cl-cc/javascript::%js-resolve-object-method obj "constructor")))
+    (assert-eq obj (funcall fn))))
+
+(deftest js-rt-object-fallback-stored-wins
+  "When obj has a stored key the stored value is returned, not the fallback."
+  (let* ((obj (cl-cc/javascript::%js-make-object "toString" "custom"))
+         (result (cl-cc/javascript::%js-resolve-object-method obj "toString")))
+    (assert-string= "custom" result)))
+
+(deftest js-rt-object-fallback-unknown-returns-undefined
+  "Unknown method names return +js-undefined+."
+  (let* ((obj    (cl-cc/javascript::%js-make-object))
+         (result (cl-cc/javascript::%js-resolve-object-method obj "nonExistent")))
+    (assert-eq cl-cc/javascript::+js-undefined+ result)))
+
+;;; -----------------------------------------------------------------------
+;;;  Promise.any / Promise.withResolvers
+;;; -----------------------------------------------------------------------
+
+(deftest js-rt-promise-any-first-fulfilled
+  "Promise.any resolves with the first fulfilled promise."
+  (let* ((p1 (cl-cc/javascript::%js-promise-reject "e1"))
+         (p2 (cl-cc/javascript::%js-promise-resolve 42))
+         (arr (%jr-arr p1 p2))
+         (r   (cl-cc/javascript::%js-promise-any arr)))
+    (assert-false (cl-cc/javascript::js-promise-rejected-p r))
+    (assert-= 42  (cl-cc/javascript::js-promise-value r))))
+
+(deftest js-rt-promise-any-all-rejected
+  "Promise.any rejects when all promises reject."
+  (let* ((p1 (cl-cc/javascript::%js-promise-reject "e1"))
+         (p2 (cl-cc/javascript::%js-promise-reject "e2"))
+         (arr (%jr-arr p1 p2))
+         (r   (cl-cc/javascript::%js-promise-any arr)))
+    (assert-true (cl-cc/javascript::js-promise-rejected-p r))))
+
+(deftest js-rt-promise-with-resolvers
+  "Promise.withResolvers returns an object with promise/resolve/reject."
+  (let* ((trio    (cl-cc/javascript::%js-promise-with-resolvers))
+         (promise (gethash "promise" trio))
+         (resolve (gethash "resolve" trio))
+         (reject  (gethash "reject"  trio)))
+    (assert-true (cl-cc/javascript::js-promise-p promise))
+    (assert-true (functionp resolve))
+    (assert-true (functionp reject))
+    (funcall resolve 99)
+    (assert-= 99 (cl-cc/javascript::js-promise-value promise))))
+
+;;; -----------------------------------------------------------------------
+;;;  Reflect.apply / Reflect.construct
+;;; -----------------------------------------------------------------------
+
+(deftest js-rt-reflect-apply
+  "Reflect.apply invokes fn with spread args."
+  (let* ((fn     (lambda (a b) (+ a b)))
+         (result (cl-cc/javascript::%js-reflect-apply fn nil (%jr-arr 3 4))))
+    (assert-= 7 result)))
+
+(deftest js-rt-reflect-construct
+  "Reflect.construct invokes a constructor function with an args vector."
+  (let* ((ctor  (lambda (&rest args) (first args)))
+         (args  (%jr-arr 77))
+         (obj   (cl-cc/javascript::%js-reflect-construct ctor args)))
+    (assert-= 77 obj)))
+
+;;; -----------------------------------------------------------------------
+;;;  AggregateError / WeakRef / RegExp.escape
+;;; -----------------------------------------------------------------------
+
+(deftest js-rt-aggregate-error-make
+  "%js-make-aggregate-error creates an object with message and errors."
+  (let* ((errs (%jr-arr "e1" "e2"))
+         (obj  (cl-cc/javascript::%js-make-aggregate-error errs "some errors")))
+    (assert-string= "some errors"   (gethash "message" obj))
+    (assert-string= "AggregateError" (gethash "name"   obj))
+    (assert-eq errs                  (gethash "errors" obj))))
+
+(deftest js-rt-weak-ref-make-deref
+  "%js-make-weak-ref / %js-weak-ref-deref round-trips the target."
+  (let* ((target  (cl-cc/javascript::%js-make-object "k" 1))
+         (wr      (cl-cc/javascript::%js-make-weak-ref target))
+         (dereffed (cl-cc/javascript::%js-weak-ref-deref wr)))
+    (assert-eq target dereffed)))
+
+(deftest js-rt-regexp-escape
+  "%js-regexp-escape escapes regex-special chars in a string."
+  (let ((result (cl-cc/javascript::%js-regexp-escape "a.b+c?")))
+    (assert-string= "a\\.b\\+c\\?" result)))
