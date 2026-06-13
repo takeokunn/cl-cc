@@ -270,8 +270,9 @@ Returns (values superclass-list remaining-stream)."
             (setf current (php-skip-semis current))
             (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
               (return))
-            (multiple-value-bind (slot rest2) (%php-parse-class-body-member current known-vars)
+            (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars)
               (when slot (push slot slots))
+              (dolist (es extra-slots) (push es slots))
               (setf current rest2)))
           (values (make-ast-defclass :name class-name
                                       :superclasses supers
