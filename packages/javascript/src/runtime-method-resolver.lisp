@@ -318,24 +318,37 @@ the table lookup. OBJ and KEY are bound in value-forms."
       (lambda () (%js-weak-ref-deref obj))
       +js-undefined+))
 
+;;; Data table: Function.prototype property name → (lambda (fn) → value).
+;;; All entries share the same interface: a factory that receives the function
+;;; object and returns the resolved property value (a closure or a primitive).
+;;; `(constantly x)` is the identity lift: takes fn, ignores it, returns x.
+(defparameter *js-function-method-table*
+  (list
+   (cons "bind"
+         (lambda (fn)
+           (lambda (this-arg &rest partial-args)
+             (lambda (&rest args)
+               (apply #'%js-funcall fn (list* this-arg (append partial-args args)))))))
+   (cons "call"
+         (lambda (fn)
+           (lambda (this-arg &rest args)
+             (apply #'%js-funcall fn (list* this-arg args)))))
+   (cons "apply"
+         (lambda (fn)
+           (lambda (this-arg args-array)
+             (apply #'%js-funcall fn
+                    (list* this-arg
+                           (if (%js-vec-p args-array) (coerce args-array 'list) nil))))))
+   (cons "name"     (constantly ""))
+   (cons "length"   (constantly 0.0d0))
+   (cons "toString" (constantly (lambda () "function() { [native code] }"))))
+  "Alist: Function.prototype property name → (lambda (fn) → value).")
+
 (defun %js-resolve-function-method (obj key)
-  (cond
-    ((string= key "bind")
-     (lambda (this-arg &rest partial-args)
-       (lambda (&rest args)
-         (apply #'%js-funcall obj (list* this-arg (append partial-args args))))))
-    ((string= key "call")
-     (lambda (this-arg &rest args)
-       (apply #'%js-funcall obj (list* this-arg args))))
-    ((string= key "apply")
-     (lambda (this-arg args-array)
-       (apply #'%js-funcall obj
-              (list* this-arg
-                     (if (%js-vec-p args-array) (coerce args-array 'list) nil)))))
-    ((string= key "name")     "")
-    ((string= key "length")   0.0d0)
-    ((string= key "toString") (lambda () "function() { [native code] }"))
-    (t +js-undefined+)))
+  (let ((entry (assoc key *js-function-method-table* :test #'string=)))
+    (if entry
+        (funcall (cdr entry) obj)
+        +js-undefined+)))
 
 (define-js-type-resolver %js-resolve-bigint-method nil
   "toString"      (lambda (&optional radix)

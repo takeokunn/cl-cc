@@ -138,7 +138,19 @@
      ((:file "js-lexer-tests")
       (:file "js-parser-tests")
       (:file "js-e2e-tests")
-      (:file "js-runtime-tests")))
+      ;; js-runtime-tests.lisp split into 6 focused files:
+      ;;   core:        typeof, coercion, equality, for-of/in, try-catch, bitwise
+      ;;   array:       Array + ES2023 non-mutating variants + TypedArray
+      ;;   string-num:  String + Math + Number methods + predicates + parse*
+      ;;   collections: Set + Map + Iterator + Promise + Generator + BigInt + URI
+      ;;   resolver:    Method dispatch, RegExp, Reflect, Object fallback, bound-method
+      ;;   date-json:   Temporal + Date.prototype + JSON stringify/parse
+      (:file "js-runtime-core-tests")
+      (:file "js-runtime-array-tests")
+      (:file "js-runtime-string-number-tests")
+      (:file "js-runtime-collections-tests")
+      (:file "js-runtime-resolver-tests")
+      (:file "js-runtime-date-json-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
