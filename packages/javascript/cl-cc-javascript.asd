@@ -27,6 +27,7 @@
    (:file "parser-class")
    (:file "parser-class-lower")
    (:file "parser-module")
+   (:file "parser-module-export")
    (:file "parser-pattern")
    (:file "parser-pattern-lower")
    ;; NOTE: there is intentionally no separate ast-lower pass. The parser lowers
