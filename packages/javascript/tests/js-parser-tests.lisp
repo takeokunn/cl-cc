@@ -353,3 +353,81 @@ list (a spread element makes the array literal an ast-apply, not a plain call)."
   (let ((asts (%js-parse "const a = 1; const b = 2; const c = 3;")))
     (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-let-p (first asts)))))
+
+;;; ─── Generator functions ──────────────────────────────────────────────────────
+
+(deftest js-parser-generator-function-star
+  "function* f() { yield 1; } parses to ast-defun with :js-generator declaration."
+  (let ((ast (%js-first "function* gen() { yield 1; }")))
+    (assert-true (cl-cc:ast-defun-p ast))
+    (assert-true (member :js-generator (cl-cc:ast-defun-declarations ast)))))
+
+(deftest js-parser-yield-expr
+  "yield expr lowers to a (%js-yield expr) call inside a generator body."
+  (let* ((ast (%js-first "function* gen() { yield 42; }"))
+         (body (cl-cc:ast-defun-body ast))
+         (generator-call (first body)))
+    ;; body is wrapped in (%js-make-generator (lambda () ...))
+    (assert-string= "%JS-MAKE-GENERATOR" (%js-call-name generator-call))))
+
+(deftest js-parser-yield-star
+  "yield* iter lowers to (%js-yield-from iter)."
+  (let* ((ast (%js-first "function* gen() { yield* [1,2]; }"))
+         (body (cl-cc:ast-defun-body ast)))
+    (assert-true (cl-cc:ast-defun-p ast))
+    (assert-string= "%JS-MAKE-GENERATOR" (%js-call-name (first body)))))
+
+;;; ─── for-of / for-in ──────────────────────────────────────────────────────────
+
+(deftest js-parser-for-of-array
+  "for (const x of arr) {} lowers to an ast-let with %js-iter-values binding."
+  (let* ((ast (%js-first "for (const x of [1,2,3]) {}"))
+         (bindings (cl-cc:ast-let-bindings ast))
+         (iter-val (cdr (first bindings))))
+    ;; outer let binds iter-sym = (%js-iter-values ...)
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-string= "%JS-ITER-VALUES" (%js-call-name iter-val))))
+
+(deftest js-parser-for-in-object
+  "for (const k in obj) {} lowers to an ast-let with %js-iter-keys binding."
+  (let* ((ast (%js-first "for (const k in {a: 1}) {}"))
+         (bindings (cl-cc:ast-let-bindings ast))
+         (iter-val (cdr (first bindings))))
+    ;; outer let binds iter-sym = (%js-iter-keys ...)
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-string= "%JS-ITER-KEYS" (%js-call-name iter-val))))
+
+;;; ─── New expression ───────────────────────────────────────────────────────────
+
+(deftest js-parser-new-expr
+  "new Foo() lowers to (%js-new Foo (%js-make-array))."
+  (let ((ast (%js-first "new Foo();")))
+    (assert-string= "%JS-NEW" (%js-call-name ast))))
+
+(deftest js-parser-new-target
+  "new.target inside a function lowers to (%js-new-target)."
+  (let* ((ast (%js-first "function f() { return new.target; }"))
+         (body (cl-cc:ast-defun-body ast))
+         (ret  (first body)))
+    ;; body contains return; its value is the new.target call
+    (assert-true (cl-cc:ast-defun-p ast))
+    (assert-true (not (null body)))))
+
+;;; ─── Unary operators ──────────────────────────────────────────────────────────
+
+(deftest-each js-parser-unary-ops
+  "Each unary operator is lowered to the expected call name."
+  :cases (("not"    "!x"      "NOT")
+          ("typeof" "typeof x" "%JS-TYPEOF")
+          ("void"   "void 0"   "PROGN")
+          ("delete" "delete x" "%JS-DELETE"))
+  (src expected)
+  (let ((ast (%js-first src)))
+    (cond
+      ((string= expected "PROGN")
+       (assert-true (cl-cc:ast-progn-p ast)))
+      ((string= expected "NOT")
+       (assert-true (cl-cc:ast-call-p ast))
+       (assert-string= "NOT" (%js-call-name ast)))
+      (t
+       (assert-string= expected (%js-call-name ast))))))
