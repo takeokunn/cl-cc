@@ -57,5 +57,6 @@
    (:file "runtime-ops")
    (:file "runtime-temporal")
    (:file "runtime-builtins")
+   (:file "runtime-builtins-globals")
    (:file "runtime-builtins-table")
    (:file "runtime-method-resolver")))
