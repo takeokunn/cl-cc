@@ -23,6 +23,7 @@
    (:file "parser-stmt")
    (:file "parser-stmt-control")
    (:file "parser-class")
+   (:file "parser-class-lower")
    (:file "parser-module")
    (:file "parser-pattern")
    ;; NOTE: there is intentionally no separate ast-lower pass. The parser lowers
