@@ -150,7 +150,7 @@
       (:file "js-e2e-ast-tests")
       (:file "js-e2e-advanced-tests")
       (:file "js-e2e-modern-tests")
-      ;; js-runtime-tests.lisp split into 7 focused files:
+      ;; js-runtime-tests.lisp split into 10 focused files:
       ;;   core:        typeof, coercion, equality, for-of/in, try-catch, bitwise
       ;;   array:       Array + ES2023 non-mutating variants + TypedArray
       ;;   string-num:  String + Math + Number methods + predicates + parse*
@@ -160,6 +160,10 @@
       ;;   object-ops:  Object static methods + destructuring + bitwise/shift + BigInt extras
       ;;   symbol:      Symbol primitive, Symbol.for/keyFor registry, well-known symbols
       ;;   ta-methods:  TypedArray ES2023 non-mutating methods + iterators + hex/base64
+      ;;   misc:        Promise.race/allSettled/finally/withResolvers/try, global
+      ;;                isNaN/isFinite, structuredClone, timer stubs, Iterator.from,
+      ;;                Map.groupBy, Set-from-iterable, Proxy, Math.sumPrecise,
+      ;;                Error.isError, AggregateError, AbortController, URL, TA ctor
       (:file "js-runtime-core-tests")
       (:file "js-runtime-array-tests")
       (:file "js-runtime-string-number-tests")
@@ -168,7 +172,8 @@
       (:file "js-runtime-date-json-tests")
       (:file "js-runtime-object-ops-tests")
       (:file "js-runtime-symbol-tests")
-      (:file "js-runtime-typed-array-methods-tests")))
+      (:file "js-runtime-typed-array-methods-tests")
+      (:file "js-runtime-misc-tests")))
    (:module "prolog-tests"
     :pathname "packages/prolog/tests"
     :serial t
