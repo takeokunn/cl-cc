@@ -21,19 +21,16 @@
 
 (deftest-each js-rt-typeof
   "typeof maps CL values to their JS type strings.
-   null returns \"object\" per the historic JS quirk."
+   null and arrays return \"object\" per ECMAScript."
   :cases (("number"    42                                 "number")
           ("string"    "hi"                               "string")
           ("bool-true" t                                  "boolean")
           ("bool-nil"  nil                                "boolean")
           ("undefined" cl-cc/javascript::+js-undefined+  "undefined")
-          ("null"      cl-cc/javascript::+js-null+        "object"))
+          ("null"      cl-cc/javascript::+js-null+        "object")
+          ("array"     (%jr-arr 1 2)                      "object"))
   (value expected)
   (assert-string= expected (cl-cc/javascript::%js-typeof value)))
-
-(deftest js-rt-typeof-array-is-object
-  "typeof an array is \"object\"."
-  (assert-string= "object" (cl-cc/javascript::%js-typeof (%jr-arr 1 2))))
 
 ;;; ─── ToString ────────────────────────────────────────────────────────────────
 
@@ -168,21 +165,25 @@
 
 ;;; ─── Math ────────────────────────────────────────────────────────────────────
 
-(deftest js-rt-math-unary
-  "Math unary: abs, floor, ceil, sign."
-  (assert-= 5  (cl-cc/javascript::%js-math-abs   -5))
-  (assert-= 3  (cl-cc/javascript::%js-math-floor  3.7d0))
-  (assert-= 4  (cl-cc/javascript::%js-math-ceil   3.2d0))
-  (assert-= -1 (cl-cc/javascript::%js-math-sign  -7))
-  (assert-=  0 (cl-cc/javascript::%js-math-sign   0))
-  (assert-=  1 (cl-cc/javascript::%js-math-sign   7)))
+(deftest-each js-rt-math-unary
+  "Each Math unary function maps one numeric input to the expected output."
+  :cases (("abs-neg"   #'cl-cc/javascript::%js-math-abs    '(-5)     5)
+          ("floor"     #'cl-cc/javascript::%js-math-floor  '(3.7d0)  3)
+          ("ceil"      #'cl-cc/javascript::%js-math-ceil   '(3.2d0)  4)
+          ("sign-neg"  #'cl-cc/javascript::%js-math-sign   '(-7)    -1)
+          ("sign-zero" #'cl-cc/javascript::%js-math-sign   '(0)      0)
+          ("sign-pos"  #'cl-cc/javascript::%js-math-sign   '(7)      1))
+  (fn args expected)
+  (assert-= expected (apply fn args)))
 
-(deftest js-rt-math-binary
-  "Math binary: max, min, pow, sqrt."
-  (assert-= 9     (cl-cc/javascript::%js-math-max  3 9 1))
-  (assert-= 1     (cl-cc/javascript::%js-math-min  3 9 1))
-  (assert-= 8     (cl-cc/javascript::%js-math-pow  2 3))
-  (assert-= 3.0d0 (cl-cc/javascript::%js-math-sqrt 9)))
+(deftest-each js-rt-math-binary
+  "Each Math binary/variadic function applied to args-list yields expected result."
+  :cases (("max"   #'cl-cc/javascript::%js-math-max  '(3 9 1) 9)
+          ("min"   #'cl-cc/javascript::%js-math-min  '(3 9 1) 1)
+          ("pow"   #'cl-cc/javascript::%js-math-pow  '(2 3)   8)
+          ("sqrt"  #'cl-cc/javascript::%js-math-sqrt '(9)     3.0d0))
+  (fn args expected)
+  (assert-= expected (apply fn args)))
 
 ;;; ─── Object ──────────────────────────────────────────────────────────────────
 
@@ -399,21 +400,16 @@
 
 ;;; ─── for-of / for-in ─────────────────────────────────────────────────────────
 
-(deftest js-rt-for-of-array
-  "for-of calls body-fn for each array element in order."
+(deftest-each js-rt-for-of
+  "for-of collects elements in order from different iterable types."
+  :cases (("array"  (%jr-arr 10 20 30)  '(10 20 30))
+          ("string" "hi"                '("h" "i")))
+  (iterable expected)
   (let ((seen nil))
     (cl-cc/javascript::%js-for-of
-     (%jr-arr 10 20 30)
+     iterable
      (lambda (x &rest _) (declare (ignore _)) (push x seen)))
-    (assert-equal '(10 20 30) (nreverse seen))))
-
-(deftest js-rt-for-of-string
-  "for-of iterates a string character by character."
-  (let ((chars nil))
-    (cl-cc/javascript::%js-for-of
-     "hi"
-     (lambda (c &rest _) (declare (ignore _)) (push c chars)))
-    (assert-equal '("h" "i") (nreverse chars))))
+    (assert-equal expected (nreverse seen))))
 
 (deftest js-rt-for-in-object
   "for-in yields enumerable own keys, skipping __proto__ etc."
