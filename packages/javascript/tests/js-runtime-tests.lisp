@@ -829,3 +829,62 @@ nil-valued keys as missing."
   "Accessing .length on an array returns the numeric length."
   (let* ((arr (%jr-arr 1 2 3)))
     (assert-= 3 (cl-cc/javascript::%js-get-prop arr "length"))))
+
+;;; ─── Number format helpers ───────────────────────────────────────────────────
+
+(deftest-each js-rt-strip-trailing-dot
+  "strip-trailing-dot removes a trailing '.' from CL's ~,0F output."
+  :cases (("with-dot"    "8."   "8")
+          ("no-dot"      "3.14" "3.14")
+          ("empty"       ""     "")
+          ("only-dot"    "."    ""))
+  (input expected)
+  (assert-string= expected (cl-cc/javascript::%js-strip-trailing-dot input)))
+
+(deftest-each js-rt-strip-pre-exp-dot
+  "strip-pre-exp-dot removes '.' immediately before the exponent marker."
+  :cases (("dot-e"     "1.e+2" "1e+2")
+          ("dot-E"     "2.E+3" "2E+3")
+          ("no-dot"    "1.2e+3" "1.2e+3")
+          ("no-exp"    "3.14"   "3.14"))
+  (input expected)
+  (assert-string= expected (cl-cc/javascript::%js-strip-pre-exp-dot input)))
+
+(deftest js-rt-bound-method-found
+  "bound-method returns a closure that prepends the receiver."
+  (let* ((table (list (cons "double" (lambda (n) (* 2 n)))))
+         (bound (cl-cc/javascript::%js-bound-method table 5 "double")))
+    (assert-true (functionp bound))
+    (assert-= 10 (funcall bound))))
+
+(deftest js-rt-bound-method-not-found
+  "bound-method returns +js-undefined+ when the method is not in the table."
+  (let* ((table (list (cons "existing" #'identity)))
+         (result (cl-cc/javascript::%js-bound-method table 5 "missing")))
+    (assert-eq cl-cc/javascript::+js-undefined+ result)))
+
+;;; ─── TypedArray basic operations ─────────────────────────────────────────────
+
+(deftest js-rt-typed-array-make-get-set
+  "make-typed-array, ta-get, ta-set round-trip correctly."
+  (let ((ta (cl-cc/javascript::%js-make-typed-array "Int32Array" 3)))
+    (cl-cc/javascript::%js-ta-set ta 0 10)
+    (cl-cc/javascript::%js-ta-set ta 2 99)
+    (assert-= 10 (cl-cc/javascript::%js-ta-get ta 0))
+    (assert-= 0  (cl-cc/javascript::%js-ta-get ta 1))
+    (assert-= 99 (cl-cc/javascript::%js-ta-get ta 2))))
+
+(deftest js-rt-typed-array-length
+  "ta-length struct accessor returns the number of elements."
+  (let ((ta (cl-cc/javascript::%js-make-typed-array "Float64Array" 4)))
+    (assert-= 4 (cl-cc/javascript::js-ta-length ta))))
+
+(deftest-each js-rt-typed-array-types
+  "Various TypedArray types are constructed with the correct length."
+  :cases (("Int8Array"    "Int8Array"    3 3)
+          ("Uint8Array"   "Uint8Array"   5 5)
+          ("Int32Array"   "Int32Array"   2 2)
+          ("Float64Array" "Float64Array" 1 1))
+  (type-name length expected-length)
+  (let ((ta (cl-cc/javascript::%js-make-typed-array type-name length)))
+    (assert-= expected-length (cl-cc/javascript::js-ta-length ta))))
