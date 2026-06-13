@@ -138,66 +138,36 @@ this = the new instance."
 ;;; class's __prototype__ hash-table. This makes instanceof work correctly.
 
 (defun %js-make-error-class (name parent-class)
-  "Create an Error subclass with NAME inheriting from PARENT-CLASS."
+  "Create an Error class with NAME inheriting from PARENT-CLASS (nil = root base).
+Covers both the base Error and all subclasses."
   (let ((klass (%js-make-ht))
         (proto (%js-make-ht)))
-    ;; Set up prototype chain: Error.prototype -> Object.prototype (nil)
     (when (and (%js-ht-p parent-class) (gethash "__prototype__" parent-class))
       (setf (gethash "__proto__" proto) (gethash "__prototype__" parent-class)))
-    ;; Add toString to the prototype
-    (setf (gethash "name" proto) name
+    (setf (gethash "name"    proto) name
+          (gethash "message" proto) ""
+          (gethash "stack"   proto) ""
           (gethash "toString" proto)
           (lambda (&rest _) (declare (ignore _))
-            (let ((this %js-this))
-              (let ((n (if (%js-ht-p this)
-                           (multiple-value-bind (v f) (gethash "name" this)
-                             (if f v name))
-                           name))
-                    (m (if (%js-ht-p this)
-                           (multiple-value-bind (v f) (gethash "message" this)
-                             (if f v ""))
-                           "")))
-                (if (string= m "") n (format nil "~A: ~A" n m))))))
-    ;; Wire class object
-    (setf (gethash "__prototype__" klass) proto
+            (let* ((this %js-this)
+                   (n (if (%js-ht-p this) (gethash "name"    this name) name))
+                   (m (if (%js-ht-p this) (gethash "message" this "")   "")))
+              (if (string= m "") n (format nil "~A: ~A" n m)))))
+    (setf (gethash "__prototype__"   klass) proto
           (gethash "__constructor__" klass)
           (let ((class-name name))
             (lambda (&rest args)
               (let ((msg (if args (%js-to-string (first args)) "")))
-                (let ((%js-this %js-this))
-                  (when (%js-ht-p %js-this)
-                    (setf (gethash "message" %js-this) msg
-                          (gethash "name"    %js-this) class-name
-                          (gethash "stack"   %js-this) (format nil "~A: ~A" class-name msg)))))))
+                (when (%js-ht-p %js-this)
+                  (setf (gethash "message" %js-this) msg
+                        (gethash "name"    %js-this) class-name
+                        (gethash "stack"   %js-this) (format nil "~A: ~A" class-name msg))))))
           (gethash "__super__" klass) parent-class
-          (gethash "name" klass) name)
+          (gethash "name"      klass) name)
     klass))
 
-(defparameter *js-error-class*
-  (let ((klass (%js-make-ht))
-        (proto (%js-make-ht)))
-    (setf (gethash "name" proto) "Error"
-          (gethash "message" proto) ""
-          (gethash "stack" proto) ""
-          (gethash "toString" proto)
-          (lambda (&rest _) (declare (ignore _))
-            (let ((this %js-this))
-              (if (%js-ht-p this)
-                  (let ((n (gethash "name" this "Error"))
-                        (m (gethash "message" this "")))
-                    (if (string= m "") n (format nil "~A: ~A" n m)))
-                  "Error")))
-          (gethash "__prototype__" klass) proto
-          (gethash "__constructor__" klass)
-          (lambda (&rest args)
-            (let ((msg (if args (%js-to-string (first args)) "")))
-              (when (%js-ht-p %js-this)
-                (setf (gethash "message" %js-this) msg
-                      (gethash "name"    %js-this) "Error"
-                      (gethash "stack"   %js-this) (format nil "Error: ~A" msg)))))
-          (gethash "name" klass) "Error")
-    klass)
-  "The Error class object.")
+(defparameter *js-error-class* (%js-make-error-class "Error" nil)
+  "The root JS Error class object.")
 
 (defparameter *js-type-error-class*    (%js-make-error-class "TypeError"    *js-error-class*))
 (defparameter *js-range-error-class*   (%js-make-error-class "RangeError"   *js-error-class*))
@@ -249,6 +219,9 @@ this = the new instance."
      (loop for i below (length iterable) collect (aref iterable i)))
     ((stringp iterable)
      (loop for ch across iterable collect (string ch)))
+    ;; JS Set — iterate in insertion order
+    ((js-set-p iterable)
+     (copy-list (js-set-order iterable)))
     (t
      (%js-iterator-to-array
       (if (%js-ht-p iterable)
