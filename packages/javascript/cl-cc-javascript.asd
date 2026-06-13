@@ -61,4 +61,5 @@
    (:file "runtime-builtins")
    (:file "runtime-builtins-globals")
    (:file "runtime-builtins-table")
+   (:file "runtime-builtins-prelude")
    (:file "runtime-method-resolver")))
