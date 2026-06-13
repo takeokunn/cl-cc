@@ -532,3 +532,158 @@ nil-valued keys as missing."
     (assert-false (cl-cc/javascript::%js-get-prop obj "flag"))
     (assert-eq cl-cc/javascript::+js-undefined+
                (cl-cc/javascript::%js-get-prop obj "absent"))))
+
+;;; ─── ES2023 Array methods ────────────────────────────────────────────────────
+
+(deftest js-rt-array-to-reversed
+  "toReversed returns a new reversed array without mutating the original."
+  (let* ((orig (%jr-arr 1 2 3))
+         (rev  (cl-cc/javascript::%js-array-to-reversed orig)))
+    (assert-equal '(3 2 1) (%jr-list rev))
+    (assert-equal '(1 2 3) (%jr-list orig))))
+
+(deftest js-rt-array-to-sorted
+  "toSorted returns a sorted copy without mutating the original."
+  (let* ((orig (%jr-arr 3 1 2))
+         (srt  (cl-cc/javascript::%js-array-to-sorted orig)))
+    (assert-equal '(1 2 3) (%jr-list srt))
+    (assert-equal '(3 1 2) (%jr-list orig))))
+
+(deftest js-rt-array-with
+  "with(index, value) returns a copy with one element replaced."
+  (let ((result (cl-cc/javascript::%js-array-with (%jr-arr 10 20 30) 1 99)))
+    (assert-equal '(10 99 30) (%jr-list result))))
+
+(deftest js-rt-array-with-negative-index
+  "with(-1, value) replaces the last element."
+  (let ((result (cl-cc/javascript::%js-array-with (%jr-arr 10 20 30) -1 99)))
+    (assert-equal '(10 20 99) (%jr-list result))))
+
+(deftest-each js-rt-array-at
+  "at() supports both positive and negative indices."
+  :cases (("positive"  1   20)
+          ("negative" -1   30)
+          ("oob"       9   :js-undefined))
+  (idx expected)
+  (let ((a (%jr-arr 10 20 30))
+        (undef cl-cc/javascript::+js-undefined+))
+    (let ((got (cl-cc/javascript::%js-array-at a idx)))
+      (if (eq expected :js-undefined)
+          (assert-eq undef got)
+          (assert-= expected got)))))
+
+(deftest js-rt-array-find-last
+  "findLast returns the last element matching the predicate."
+  (let ((result (cl-cc/javascript::%js-array-find-last
+                 (%jr-arr 1 2 3 4)
+                 (lambda (x &rest _) (declare (ignore _)) (evenp x)))))
+    (assert-= 4 result)))
+
+(deftest js-rt-array-find-last-index
+  "findLastIndex returns the index of the last matching element."
+  (let ((result (cl-cc/javascript::%js-array-find-last-index
+                 (%jr-arr 1 2 3 4)
+                 (lambda (x &rest _) (declare (ignore _)) (evenp x)))))
+    (assert-= 3 result)))
+
+(deftest js-rt-array-to-spliced
+  "toSpliced returns a modified copy without mutating the original."
+  (let* ((orig (%jr-arr 1 2 3 4))
+         (result (cl-cc/javascript::%js-array-to-spliced orig 1 2 9 9)))
+    (assert-equal '(1 9 9 4) (%jr-list result))
+    (assert-equal '(1 2 3 4) (%jr-list orig))))
+
+(deftest js-rt-array-of
+  "Array.of creates an array from positional arguments."
+  (assert-equal '(5 6 7) (%jr-list (cl-cc/javascript::%js-array-of 5 6 7))))
+
+;;; ─── Number strict predicates ────────────────────────────────────────────────
+
+(deftest-each js-rt-number-is-nan
+  "Number.isNaN only returns true for actual NaN (not coerced NaN)."
+  :cases (("nan"     cl-cc/javascript::*js-nan-float* t)
+          ("string"  "NaN"                            nil)
+          ("number"  42                               nil))
+  (val expected)
+  (assert-equal expected (cl-cc/javascript::%js-number-is-nan val)))
+
+(deftest-each js-rt-number-is-finite
+  "Number.isFinite returns true only for finite numbers."
+  :cases (("int"      42      t)
+          ("float"    3.14d0  t)
+          ("nan"      cl-cc/javascript::*js-nan-float*  nil)
+          ("inf"      cl-cc/javascript::*js-inf-float*  nil)
+          ("string"   "42"                              nil))
+  (val expected)
+  (assert-equal expected (cl-cc/javascript::%js-number-is-finite val)))
+
+(deftest-each js-rt-number-is-integer
+  "Number.isInteger returns true for integer values only."
+  :cases (("int"    42       t)
+          ("float"  3.0d0    t)
+          ("frac"   3.5d0   nil)
+          ("string" "3"     nil))
+  (val expected)
+  (assert-equal expected (cl-cc/javascript::%js-number-is-integer val)))
+
+;;; ─── parseInt / parseFloat ───────────────────────────────────────────────────
+
+(deftest-each js-rt-parse-int
+  "parseInt parses integers from strings in various radixes."
+  :cases (("decimal"  "42"    10   42)
+          ("hex"      "ff"    16  255)
+          ("binary"   "101"    2    5)
+          ("junk"     "abc"   10    :nan))
+  (str radix expected)
+  (let ((result (cl-cc/javascript::%js-parse-int str radix)))
+    (if (eq expected :nan)
+        (assert-true (cl-cc/javascript::%js-nan-p result))
+        (assert-= expected result))))
+
+(deftest-each js-rt-parse-float
+  "parseFloat parses the longest leading numeric prefix."
+  :cases (("simple"  "3.14"     3.14d0)
+          ("prefix"  "3.14abc"  3.14d0)
+          ("int"     "42"       42.0d0)
+          ("junk"    "abc"      :nan))
+  (str expected)
+  (let ((result (cl-cc/javascript::%js-parse-float str)))
+    (if (eq expected :nan)
+        (assert-true (cl-cc/javascript::%js-nan-p result))
+        (assert-true (< (abs (- expected result)) 1.0d-10)))))
+
+;;; ─── Reflect helpers ─────────────────────────────────────────────────────────
+
+(deftest js-rt-reflect-get-set
+  "Reflect.get and Reflect.set wrap %js-get-prop/%js-set-prop."
+  (let ((obj (cl-cc/javascript::%js-make-object "x" 10)))
+    (assert-= 10 (cl-cc/javascript::%js-reflect-get obj "x"))
+    (cl-cc/javascript::%js-reflect-set obj "x" 42)
+    (assert-= 42 (cl-cc/javascript::%js-reflect-get obj "x"))))
+
+(deftest js-rt-reflect-has
+  "Reflect.has returns true when key exists, nil otherwise."
+  (let ((obj (cl-cc/javascript::%js-make-object "a" 1)))
+    (assert-true  (cl-cc/javascript::%js-reflect-has obj "a"))
+    (assert-false (cl-cc/javascript::%js-reflect-has obj "b"))))
+
+(deftest js-rt-reflect-delete-property
+  "Reflect.deleteProperty removes a key from the object."
+  (let ((obj (cl-cc/javascript::%js-make-object "k" 99)))
+    (cl-cc/javascript::%js-reflect-delete-property obj "k")
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-reflect-get obj "k"))))
+
+(deftest js-rt-object-define-property
+  "Object.defineProperty sets a value key via descriptor."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (desc (cl-cc/javascript::%js-make-object "value" 77)))
+    (cl-cc/javascript::%js-object-define-property obj "y" desc)
+    (assert-= 77 (cl-cc/javascript::%js-reflect-get obj "y"))))
+
+(deftest js-rt-object-get-own-property-descriptor
+  "getOwnPropertyDescriptor returns descriptor object for existing key."
+  (let* ((obj (cl-cc/javascript::%js-make-object "v" 5))
+         (desc (cl-cc/javascript::%js-object-get-own-property-descriptor obj "v")))
+    (assert-= 5 (gethash "value" desc))
+    (assert-true (gethash "writable" desc))))
