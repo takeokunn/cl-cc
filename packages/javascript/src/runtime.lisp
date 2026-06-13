@@ -210,10 +210,14 @@ return 1/0 and mishandle strings/NaN/coercion."
             nil
             (and (funcall num-op na nb) t)))))
 
-(defun %js-lt (a b) "JS a < b."  (%js-relational a b #'<  #'string<))
-(defun %js-gt (a b) "JS a > b."  (%js-relational a b #'>  #'string>))
-(defun %js-le (a b) "JS a <= b." (%js-relational a b #'<= #'string<=))
-(defun %js-ge (a b) "JS a >= b." (%js-relational a b #'>= #'string>=))
+(defmacro define-js-relational-op (name num-op str-op doc)
+  "Emit a JS relational comparison that delegates to %js-relational."
+  `(defun ,name (a b) ,doc (%js-relational a b #',num-op #',str-op)))
+
+(define-js-relational-op %js-lt <  string<  "JS a < b.")
+(define-js-relational-op %js-gt >  string>  "JS a > b.")
+(define-js-relational-op %js-le <= string<= "JS a <= b.")
+(define-js-relational-op %js-ge >= string>= "JS a >= b.")
 
 (defun %js-instanceof (obj constructor)
   "JS instanceof. constructor must be a hash-table with __prototype__."

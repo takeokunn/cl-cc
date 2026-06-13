@@ -11,6 +11,7 @@
   :components
   ((:file "package")
    (:file "lexer")
+   (:file "lexer-number")
    (:file "lexer-template")
    (:file "lexer-regex")
    (:file "parser")
