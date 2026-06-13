@@ -259,3 +259,83 @@
     (if (eq expected :nan)
         (assert-true (cl-cc/javascript::%js-nan-p result))
         (assert-true (< (abs (- expected result)) 1.0d-10)))))
+
+;;; ─── String coverage — uncovered functions ───────────────────────────────────
+
+(deftest js-rt-string-length
+  "String length returns the character count."
+  (assert-= 0 (cl-cc/javascript::%js-string-length ""))
+  (assert-= 5 (cl-cc/javascript::%js-string-length "hello")))
+
+(deftest-each js-rt-string-split-separator
+  "split with a non-empty string separator yields substrings."
+  :cases (("csv"    "a,b,c" ","  '("a" "b" "c"))
+          ("empty"  "a,,b"  ","  '("a" "" "b"))
+          ("no-sep" "abc"   ","  '("abc")))
+  (s sep expected)
+  (assert-equal expected (%jr-list (cl-cc/javascript::%js-string-split s sep))))
+
+(deftest js-rt-string-split-limit
+  "split with a limit caps the number of parts."
+  (let ((parts (%jr-list (cl-cc/javascript::%js-string-split "a,b,c,d" "," 2))))
+    (assert-= 2 (length parts))
+    (assert-string= "a" (first parts))
+    (assert-string= "b" (second parts))))
+
+(deftest-each js-rt-string-match-cases
+  "%js-string-match returns first-match array or +js-null+."
+  :cases (("found"     "hello world" "world"  "world")
+          ("not-found" "hello"       "xyz"    :null))
+  (s pat expected)
+  (let ((result (cl-cc/javascript::%js-string-match s pat)))
+    (if (eq expected :null)
+        (assert-eq cl-cc/javascript::+js-null+ result)
+        (assert-string= expected (aref result 0)))))
+
+(deftest js-rt-string-match-all-multiple
+  "%js-string-match-all returns an array of per-match arrays."
+  (let ((all (cl-cc/javascript::%js-string-match-all "abab" "ab")))
+    (assert-= 2 (length all))
+    (assert-string= "ab" (aref (aref all 0) 0))
+    (assert-string= "ab" (aref (aref all 1) 0))))
+
+(deftest-each js-rt-string-search-index
+  "%js-string-search returns the index of the first match or -1."
+  :cases (("found"     "hello" "ll"  2)
+          ("not-found" "hello" "xyz" -1))
+  (s pat expected)
+  (assert-= expected (cl-cc/javascript::%js-string-search s pat)))
+
+(deftest js-rt-string-normalize
+  "%js-string-normalize is a stub that returns the string unchanged."
+  (assert-string= "cafe" (cl-cc/javascript::%js-string-normalize "cafe"))
+  (assert-string= "cafe" (cl-cc/javascript::%js-string-normalize "cafe" "NFD")))
+
+(deftest-each js-rt-string-locale-compare-order
+  "localeCompare returns -1.0, 0.0, or 1.0 based on lexicographic ordering."
+  :cases (("lt" "a" "b" -1.0d0)
+          ("eq" "x" "x"  0.0d0)
+          ("gt" "b" "a"  1.0d0))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-string-locale-compare a b)))
+
+(deftest js-rt-string-raw-tag
+  "String.raw accepts a raw-parts vector directly and interleaves substitutions."
+  (let* ((raw    (%jr-arr "hello " " world"))
+         (result (cl-cc/javascript::%js-string-raw raw "JS")))
+    (assert-string= "hello JS world" result)))
+
+(deftest-each js-rt-string-substring-cases
+  "substring clamps negative/over-length indices and swaps reversed start/end."
+  :cases (("basic"    "hello" 1 3   "el")
+          ("clamp"    "hello" 0 100 "hello")
+          ("reversed" "hello" 3 1   "el"))
+  (s a b expected)
+  (assert-string= expected (cl-cc/javascript::%js-string-substring s a b)))
+
+(deftest-each js-rt-string-locale-case
+  "toLocaleUpperCase and toLocaleLowerCase are locale-neutral aliases."
+  :cases (("upper" #'cl-cc/javascript::%js-string-to-locale-upper-case "hello" "HELLO")
+          ("lower" #'cl-cc/javascript::%js-string-to-locale-lower-case "HELLO" "hello"))
+  (fn input expected)
+  (assert-string= expected (funcall fn input)))

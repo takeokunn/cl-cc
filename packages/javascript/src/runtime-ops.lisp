@@ -121,8 +121,9 @@
         (t (%make-js-bigint 0))))
 
 (defun %js-bigint-to-string (bi &optional (radix 10))
-  "Display a BigInt as string (without the n suffix at runtime)."
-  (format nil "~vR" radix (js-bigint-value bi)))
+  "Display a BigInt as string (without the n suffix at runtime).
+JS always returns lowercase hex digits, so we normalise via string-downcase."
+  (string-downcase (format nil "~vR" radix (js-bigint-value bi))))
 
 ;;; Extract integer value from a BigInt or plain number.
 (defun %js-bigint-val (x)
