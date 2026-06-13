@@ -91,6 +91,44 @@
                 iter (lambda (a b &rest _) (declare (ignore _)) (+ a b)) 0)))
     (assert-= 10 sum)))
 
+(deftest-each js-rt-iterator-some-every
+  "some returns on first truthy element; every returns on first falsy."
+  :cases (("some-found"    #'cl-cc/javascript::%js-iterator-some  '(1 3 4) #'evenp t)
+          ("some-not"      #'cl-cc/javascript::%js-iterator-some  '(1 3 5) #'evenp nil)
+          ("every-true"    #'cl-cc/javascript::%js-iterator-every '(2 4 6) #'evenp t)
+          ("every-false"   #'cl-cc/javascript::%js-iterator-every '(2 3 6) #'evenp nil))
+  (fn vals pred expected)
+  (let ((iter (cl-cc/javascript::%js-vec-to-iter (apply #'%jr-arr vals))))
+    (assert-equal expected (funcall fn iter (lambda (x &rest _) (declare (ignore _)) (funcall pred x))))))
+
+(deftest js-rt-iterator-find
+  "find returns the first truthy element, or undefined when none match."
+  (let* ((found    (cl-cc/javascript::%js-iterator-find
+                    (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 3 4 5))
+                    (lambda (x &rest _) (declare (ignore _)) (evenp x))))
+         (not-found (cl-cc/javascript::%js-iterator-find
+                     (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 3 5))
+                     (lambda (x &rest _) (declare (ignore _)) (evenp x)))))
+    (assert-= 4 found)
+    (assert-eq cl-cc/javascript::+js-undefined+ not-found)))
+
+(deftest js-rt-iterator-for-each
+  "for-each applies a side-effectful function to each element."
+  (let ((seen nil))
+    (cl-cc/javascript::%js-iterator-for-each
+     (cl-cc/javascript::%js-vec-to-iter (%jr-arr 10 20 30))
+     (lambda (x &rest _) (declare (ignore _)) (push x seen)))
+    (assert-equal '(10 20 30) (nreverse seen))))
+
+(deftest js-rt-iterator-flat-map
+  "flat-map expands each element into a sub-iterator."
+  (let* ((iter   (cl-cc/javascript::%js-vec-to-iter (%jr-arr 1 2 3)))
+         (result (cl-cc/javascript::%js-iterator-to-array
+                  (cl-cc/javascript::%js-iterator-flat-map
+                   iter
+                   (lambda (x &rest _) (declare (ignore _)) (%jr-arr x (* x 10)))))))
+    (assert-equal '(1 10 2 20 3 30) (%jr-list result))))
+
 ;;; ─── Promise built-ins ───────────────────────────────────────────────────────
 
 (deftest js-rt-promise-resolve-await
