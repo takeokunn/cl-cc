@@ -24,142 +24,142 @@ real execution path, unlike the parse-only %js-e2e-parse checks."
       (cl-cc/vm:run-compiled program :output-stream out :state state))
     (string-right-trim '(#\Newline) (get-output-stream-string out))))
 
-(deftest js-e2e-runs-basic-programs
+(defmacro deftest-js-run (name description &rest cases)
+  "Each CASES element is (expected-string source-string).
+Expands to a deftest whose body runs each source and asserts the output."
+  `(deftest ,name ,description
+     ,@(mapcar (lambda (c)
+                 `(assert-string= ,(first c) (%js-run-capture ,(second c))))
+               cases)))
+
+(deftest-js-run js-e2e-runs-basic-programs
   "JavaScript programs execute end-to-end (regression: the prelude bound Symbol/
 Infinity/error classes to host *js-* specials that were never seeded as VM
 globals, so EVERY JS program failed with 'Unbound global variable: *JS-...*')."
-  (assert-string= "hello" (%js-run-capture "console.log(\"hello\");"))
-  (assert-string= "14"    (%js-run-capture "console.log(2+3*4);"))
-  (assert-string= "7"     (%js-run-capture "function f(a,b){return a+b;} console.log(f(3,4));"))
-  (assert-string= "10"    (%js-run-capture "let s=0; for(let i=1;i<=4;i++){s+=i;} console.log(s);")))
+  ("hello" "console.log(\"hello\");")
+  ("14"    "console.log(2+3*4);")
+  ("7"     "function f(a,b){return a+b;} console.log(f(3,4));")
+  ("10"    "let s=0; for(let i=1;i<=4;i++){s+=i;} console.log(s);"))
 
-(deftest js-e2e-runs-arrays-and-closures
+(deftest-js-run js-e2e-runs-arrays-and-closures
   "Array higher-order methods, template literals, and closures run."
-  (assert-string= "2,4,6" (%js-run-capture "console.log([1,2,3].map(x=>x*2).join(\",\"));"))
-  (assert-string= "2,4"   (%js-run-capture "console.log([1,2,3,4].filter(x=>x%2==0).join(\",\"));"))
-  (assert-string= "Hi Bob" (%js-run-capture "let n=\"Bob\"; console.log(`Hi ${n}`);"))
-  (assert-string= "2"     (%js-run-capture "function mk(){let c=0; return ()=>++c;} let f=mk(); f(); console.log(f());")))
+  ("2,4,6"   "console.log([1,2,3].map(x=>x*2).join(\",\"));")
+  ("2,4"     "console.log([1,2,3,4].filter(x=>x%2==0).join(\",\"));")
+  ("Hi Bob"  "let n=\"Bob\"; console.log(`Hi ${n}`);")
+  ("2"       "function mk(){let c=0; return ()=>++c;} let f=mk(); f(); console.log(f());"))
 
-(deftest js-e2e-default-and-rest-params
+(deftest-js-run js-e2e-default-and-rest-params
   "function declarations honor default parameter values and ...rest collection
 (regression: %js-parse-param-list parsed then discarded defaults and mistreated
 ...rest as a positional param)."
-  (assert-string= "5"  (%js-run-capture "function g(x=5){return x;} console.log(g());"))
-  (assert-string= "9"  (%js-run-capture "function g(x=5){return x;} console.log(g(9));"))
-  (assert-string= "13" (%js-run-capture "function f(a,b=10){return a+b;} console.log(f(3));"))
-  (assert-string= "3"  (%js-run-capture "function s(...n){return n.length;} console.log(s(1,2,3));"))
-  (assert-string= "10" (%js-run-capture "function s(...n){return n.reduce((a,b)=>a+b,0);} console.log(s(1,2,3,4));"))
-  (assert-string= "12" (%js-run-capture "function f(a,...rest){return a+rest.length;} console.log(f(10,1,2));")))
+  ("5"  "function g(x=5){return x;} console.log(g());")
+  ("9"  "function g(x=5){return x;} console.log(g(9));")
+  ("13" "function f(a,b=10){return a+b;} console.log(f(3));")
+  ("3"  "function s(...n){return n.length;} console.log(s(1,2,3));")
+  ("10" "function s(...n){return n.reduce((a,b)=>a+b,0);} console.log(s(1,2,3,4));")
+  ("12" "function f(a,...rest){return a+rest.length;} console.log(f(10,1,2));"))
 
-(deftest js-e2e-function-expressions
+(deftest-js-run js-e2e-function-expressions
   "Function expressions execute, including `return' (regression: their body was
 used raw without a (block nil ...), so `return value' silently produced nothing),
 default params, rest params, and IIFEs."
-  (assert-string= "5"  (%js-run-capture "let g=function(x){return x+1;}; console.log(g(4));"))
-  (assert-string= "5"  (%js-run-capture "console.log((function(x){return x+1;})(4));"))
-  (assert-string= "5"  (%js-run-capture "const g=function(x=5){return x;}; console.log(g());"))
-  (assert-string= "13" (%js-run-capture "const f=function(a,b=10){return a+b;}; console.log(f(3));"))
-  (assert-string= "3"  (%js-run-capture "const s=function(...n){return n.length;}; console.log(s(1,2,3));")))
+  ("5"  "let g=function(x){return x+1;}; console.log(g(4));")
+  ("5"  "console.log((function(x){return x+1;})(4));")
+  ("5"  "const g=function(x=5){return x;}; console.log(g());")
+  ("13" "const f=function(a,b=10){return a+b;}; console.log(f(3));")
+  ("3"  "const s=function(...n){return n.length;}; console.log(s(1,2,3));"))
 
-(deftest js-e2e-destructuring-and-sequential-decls
+(deftest-js-run js-e2e-destructuring-and-sequential-decls
   "Array/object destructuring and multi-declarator let bind sequentially
 (regression: ast-let binds in parallel, so a later initializer could not see an
 earlier binding — destructuring's a = tmp[0] could not see tmp = init, and
 `let a=1, b=a+1' gave nothing; %js-finish-let-bindings now expands a multi-binding
 empty let into nested single-binding lets)."
-  (assert-string= "6"   (%js-run-capture "let a=5, b=a+1; console.log(b);"))
-  (assert-string= "30"  (%js-run-capture "let [a,b]=[10,20]; console.log(a+b);"))
-  (assert-string= "123" (%js-run-capture "let [a,b,c]=[1,2,3]; console.log(a*100+b*10+c);"))
-  (assert-string= "3"   (%js-run-capture "let {x,y}={x:1,y:2}; console.log(x+y);"))
-  (assert-string= "2"   (%js-run-capture "let [,b]=[1,2]; console.log(b);"))
-  (assert-string= "Bob30" (%js-run-capture "const {name,age}={name:'Bob',age:30}; console.log(name+age);"))
-  (assert-string= "12"  (%js-run-capture "function f(){ let [a,b]=[3,4]; return a*b; } console.log(f());")))
+  ("6"     "let a=5, b=a+1; console.log(b);")
+  ("30"    "let [a,b]=[10,20]; console.log(a+b);")
+  ("123"   "let [a,b,c]=[1,2,3]; console.log(a*100+b*10+c);")
+  ("3"     "let {x,y}={x:1,y:2}; console.log(x+y);")
+  ("2"     "let [,b]=[1,2]; console.log(b);")
+  ("Bob30" "const {name,age}={name:'Bob',age:30}; console.log(name+age);")
+  ("12"    "function f(){ let [a,b]=[3,4]; return a*b; } console.log(f());"))
 
-(deftest js-e2e-destructuring-rest
+(deftest-js-run js-e2e-destructuring-rest
   "Array and object destructuring rest elements collect into a real JS array /
 object.  Regression: the :rest sentinel was mistaken for a default value, so an
 array rest was a one-element CL list (Array.isArray false, rest.join threw with
 ':JS-UNDEFINED') and an object rest was null.  The array rest now yields a vector
 (map/join/length work) and the object rest a fresh object excluding bound keys."
-  (assert-string= "3,4,5" (%js-run-capture "const [x,y,...r]=[1,2,3,4,5]; console.log(r.join(','));"))
-  (assert-string= "true"  (%js-run-capture "const [x,...r]=[1,2,3]; console.log(Array.isArray(r));"))
-  (assert-string= "4,6,8,10" (%js-run-capture "const [a,...r]=[1,2,3,4,5]; console.log(r.map(n=>n*2).join(','));"))
-  (assert-string= "0"     (%js-run-capture "const [p,...q]=[1]; console.log(q.length);"))
-  (assert-string= "{\"b\":2,\"c\":3}" (%js-run-capture "const {a,...rest}={a:1,b:2,c:3}; console.log(JSON.stringify(rest));"))
-  (assert-string= "{}"    (%js-run-capture "const {m,...n}={m:1}; console.log(JSON.stringify(n));")))
+  ("3,4,5"              "const [x,y,...r]=[1,2,3,4,5]; console.log(r.join(','));")
+  ("true"               "const [x,...r]=[1,2,3]; console.log(Array.isArray(r));")
+  ("4,6,8,10"           "const [a,...r]=[1,2,3,4,5]; console.log(r.map(n=>n*2).join(','));")
+  ("0"                  "const [p,...q]=[1]; console.log(q.length);")
+  ("{\"b\":2,\"c\":3}"  "const {a,...rest}={a:1,b:2,c:3}; console.log(JSON.stringify(rest));")
+  ("{}"                 "const {m,...n}={m:1}; console.log(JSON.stringify(n));"))
 
-(deftest js-e2e-parameter-destructuring
+(deftest-js-run js-e2e-parameter-destructuring
   "Named-function parameters may be destructuring patterns: function f([a,b]) and
 function g({x,y}).  Regression: the pattern was parsed but discarded (the param
 kept only its gensym), so the body never unpacked it; the unbodied let then failed
 to compile and the defun was silently dropped -> 'Undefined function: F'.  Now the
 param gensym is unpacked by a body-prologue let (reusing the var-destructuring
 machinery), including rest, defaults, and multiple destructuring params."
-  (assert-string= "30"  (%js-run-capture "function f([a,b]){return a+b;} console.log(f([10,20]));"))
-  (assert-string= "12"  (%js-run-capture "function f({x,y}){return x*y;} console.log(f({x:3,y:4}));"))
-  (assert-string= "1:2,3" (%js-run-capture "function f([a,...r]){return a+':'+r.join(',');} console.log(f([1,2,3]));"))
-  (assert-string= "{\"b\":2}" (%js-run-capture "function f({a,...rest}){return JSON.stringify(rest);} console.log(f({a:1,b:2}));"))
-  (assert-string= "6"   (%js-run-capture "function f([a,b],{x}){return a+b+x;} console.log(f([1,2],{x:3}));"))
-  (assert-string= "10"  (%js-run-capture "function f({x=10}){return x;} console.log(f({}));"))
-  ;; plain params still work (no regression)
-  (assert-string= "7"   (%js-run-capture "function f(a,b){return a-b;} console.log(f(9,2));")))
+  ("30"  "function f([a,b]){return a+b;} console.log(f([10,20]));")
+  ("12"  "function f({x,y}){return x*y;} console.log(f({x:3,y:4}));")
+  ("1:2,3" "function f([a,...r]){return a+':'+r.join(',');} console.log(f([1,2,3]));")
+  ("{\"b\":2}" "function f({a,...rest}){return JSON.stringify(rest);} console.log(f({a:1,b:2}));")
+  ("6"   "function f([a,b],{x}){return a+b+x;} console.log(f([1,2],{x:3}));")
+  ("10"  "function f({x=10}){return x;} console.log(f({}));")
+  ("7"   "function f(a,b){return a-b;} console.log(f(9,2));"))
 
-(deftest js-e2e-nested-destructuring
+(deftest-js-run js-e2e-nested-destructuring
   "Destructuring patterns nest (array-in-array, object-in-object, mixed) for both
 var declarations and function parameters.  Regression: %js-emit-destructure-
 bindings bound a nested pattern's gensym but never recursed to unpack it, so inner
 names stayed undefined and the binding form failed to compile.  %js-destructure-
 sub-bindings now recurses, building bindings in let* order."
-  (assert-string= "1 2 3" (%js-run-capture "const [a,[b,c]]=[1,[2,3]]; console.log(a,b,c);"))
-  (assert-string= "42"    (%js-run-capture "const {a:{b}}={a:{b:42}}; console.log(b);"))
-  (assert-string= "1 2"   (%js-run-capture "const {p,q:{r}}={p:1,q:{r:2}}; console.log(p,r);"))
-  (assert-string= "1 2 3 4" (%js-run-capture "const [[a,b],[c,d]]=[[1,2],[3,4]]; console.log(a,b,c,d);"))
-  (assert-string= "99"    (%js-run-capture "const {u:{v:{w}}}={u:{v:{w:99}}}; console.log(w);"))
-  ;; nested + rest, nested + default
-  (assert-string= "1 2 3-4" (%js-run-capture "const [a,[b,...c]]=[1,[2,3,4]]; console.log(a,b,c.join('-'));"))
-  (assert-string= "1 9"   (%js-run-capture "const {a,b:{c=9}}={a:1,b:{}}; console.log(a,c);"))
-  ;; nested destructuring in a function parameter
-  (assert-string= "6"     (%js-run-capture "function f([a,[b,c]]){return a+b+c;} console.log(f([1,[2,3]]));"))
-  (assert-string= "3"     (%js-run-capture "function f({data:{items}}){return items.length;} console.log(f({data:{items:[1,2,3]}}));")))
+  ("1 2 3"   "const [a,[b,c]]=[1,[2,3]]; console.log(a,b,c);")
+  ("42"      "const {a:{b}}={a:{b:42}}; console.log(b);")
+  ("1 2"     "const {p,q:{r}}={p:1,q:{r:2}}; console.log(p,r);")
+  ("1 2 3 4" "const [[a,b],[c,d]]=[[1,2],[3,4]]; console.log(a,b,c,d);")
+  ("99"      "const {u:{v:{w}}}={u:{v:{w:99}}}; console.log(w);")
+  ("1 2 3-4" "const [a,[b,...c]]=[1,[2,3,4]]; console.log(a,b,c.join('-'));")
+  ("1 9"     "const {a,b:{c=9}}={a:1,b:{}}; console.log(a,c);")
+  ("6"       "function f([a,[b,c]]){return a+b+c;} console.log(f([1,[2,3]]));")
+  ("3"       "function f({data:{items}}){return items.length;} console.log(f({data:{items:[1,2,3]}}));"))
 
-(deftest js-e2e-arrow-destructuring
+(deftest-js-run js-e2e-arrow-destructuring
   "Arrow-function parameters may be destructuring patterns: ([a,b])=>… and
 ({x,y})=>…, including nesting and the .map(([a,b])=>…) idiom.  Regression: the
 paren contents were parsed as an array/object literal and only plain identifiers
 became params, so the pattern was dropped and the arrow silently produced nothing.
 %js-expr-to-binding-pattern now recovers the pattern from the literal when => is
 seen, reusing the body-prologue destructuring lowering."
-  (assert-string= "11" (%js-run-capture "const f=([a,b])=>a+b; console.log(f([5,6]));"))
-  (assert-string= "12" (%js-run-capture "const g=({x,y})=>x*y; console.log(g({x:3,y:4}));"))
-  (assert-string= "6"  (%js-run-capture "const k=([a,[b,c]])=>a+b+c; console.log(k([1,[2,3]]));"))
-  (assert-string= "7"  (%js-run-capture "const q=({a:{b}})=>b; console.log(q({a:{b:7}}));"))
-  ;; the canonical idiom: destructuring in a .map/.forEach callback
-  (assert-string= "3,7" (%js-run-capture "console.log([[1,2],[3,4]].map(([a,b])=>a+b).join(','));"))
-  (assert-string= "10,20" (%js-run-capture "console.log([{n:1},{n:2}].map(({n})=>n*10).join(','));"))
-  ;; rest INSIDE an arrow pattern: array spread lowers to apply+append, object
-  ;; spread to a fold chain — both reversed by the converter
-  (assert-string= "3" (%js-run-capture "const g=([a,...r])=>r.length; console.log(g([1,2,3,4]));"))
-  (assert-string= "{\"b\":2,\"c\":3}" (%js-run-capture "const m=({a,...rest})=>JSON.stringify(rest); console.log(m({a:1,b:2,c:3}));"))
-  (assert-string= "1:2,3;4:5,6" (%js-run-capture "console.log([[1,2,3],[4,5,6]].map(([a,...rest])=>a+':'+rest.join(',')).join(';'));"))
-  ;; object spread literals (not arrow params) are unaffected by the fold-chain detection
-  (assert-string= "1 2" (%js-run-capture "const o={...{a:1},...{b:2}}; console.log(o.a,o.b);"))
-  ;; plain arrows and parenthesized expressions still parse (no regression)
-  (assert-string= "10" (%js-run-capture "const r=x=>x*2; console.log(r(5));"))
-  (assert-string= "7"  (%js-run-capture "const p=(a,b)=>a-b; console.log(p(9,2));"))
-  (assert-string= "3"  (%js-run-capture "console.log((1,2,3));")))
+  ("11"  "const f=([a,b])=>a+b; console.log(f([5,6]));")
+  ("12"  "const g=({x,y})=>x*y; console.log(g({x:3,y:4}));")
+  ("6"   "const k=([a,[b,c]])=>a+b+c; console.log(k([1,[2,3]]));")
+  ("7"   "const q=({a:{b}})=>b; console.log(q({a:{b:7}}));")
+  ("3,7" "console.log([[1,2],[3,4]].map(([a,b])=>a+b).join(','));")
+  ("10,20" "console.log([{n:1},{n:2}].map(({n})=>n*10).join(','));")
+  ("3"   "const g=([a,...r])=>r.length; console.log(g([1,2,3,4]));")
+  ("{\"b\":2,\"c\":3}" "const m=({a,...rest})=>JSON.stringify(rest); console.log(m({a:1,b:2,c:3}));")
+  ("1:2,3;4:5,6" "console.log([[1,2,3],[4,5,6]].map(([a,...rest])=>a+':'+rest.join(',')).join(';'));")
+  ("1 2"  "const o={...{a:1},...{b:2}}; console.log(o.a,o.b);")
+  ("10"   "const r=x=>x*2; console.log(r(5));")
+  ("7"    "const p=(a,b)=>a-b; console.log(p(9,2));")
+  ("3"    "console.log((1,2,3));"))
 
-(deftest js-e2e-json-and-math-globals
+(deftest-js-run js-e2e-json-and-math-globals
   "JSON and Math are seeded as global objects (regression: they were never added
 to the prelude). JSON.parse worked once its string scanner stopped discarding the
 position via with-output-to-string."
-  (assert-string= "{\"a\":1,\"b\":2}" (%js-run-capture "console.log(JSON.stringify({a:1,b:2}));"))
-  (assert-string= "[1,2,3]"  (%js-run-capture "console.log(JSON.stringify([1,2,3]));"))
-  (assert-string= "5"  (%js-run-capture "let o=JSON.parse('{\"x\":5}'); console.log(o.x);"))
-  (assert-string= "42hi" (%js-run-capture "let p=JSON.parse(JSON.stringify({n:42,s:'hi'})); console.log(p.n+p.s);"))
-  (assert-string= "20" (%js-run-capture "console.log(JSON.parse('[10,20,30]')[1]);"))
-  (assert-string= "7"  (%js-run-capture "console.log(Math.max(3,7,2));"))
-  (assert-string= "4"  (%js-run-capture "console.log(Math.sqrt(16));"))
-  (assert-string= "5"  (%js-run-capture "console.log(Math.abs(-5));")))
+  ("{\"a\":1,\"b\":2}" "console.log(JSON.stringify({a:1,b:2}));")
+  ("[1,2,3]"  "console.log(JSON.stringify([1,2,3]));")
+  ("5"  "let o=JSON.parse('{\"x\":5}'); console.log(o.x);")
+  ("42hi" "let p=JSON.parse(JSON.stringify({n:42,s:'hi'})); console.log(p.n+p.s);")
+  ("20" "console.log(JSON.parse('[10,20,30]')[1]);")
+  ("7"  "console.log(Math.max(3,7,2));")
+  ("4"  "console.log(Math.sqrt(16));")
+  ("5"  "console.log(Math.abs(-5));"))
 
 (deftest js-e2e-try-catch-finally
   "try/catch/finally executes (regression: the try/catch/finally thunks are
@@ -176,58 +176,55 @@ cannot call a vm-closure — every try statement failed)."
   ;; nested try with re-throw
   (assert-string= "outer:inner" (%js-run-capture "try { try { throw 'inner'; } catch(e) { throw 'outer:'+e; } } catch(e) { console.log(e); }")))
 
-(deftest js-e2e-object-spread
+(deftest-js-run js-e2e-object-spread
   "Object spread {...a, k:v} merges own properties with later entries overriding
 earlier ones (regression: a spread entry misaligned the %js-make-object key/value
 pairs). Lowers to a left-to-right fold of %js-object-assign / set."
-  (assert-string= "6"     (%js-run-capture "let a={x:1,y:2}; let b={...a,z:3}; console.log(b.x+b.y+b.z);"))
-  (assert-string= "3"     (%js-run-capture "let a={x:1},c={y:2}; console.log(({...a,...c}).x+({...a,...c}).y);"))
-  (assert-string= "9"     (%js-run-capture "let a={x:1,y:2}; console.log(({...a,y:9}).y);"))
-  (assert-string= "3"     (%js-run-capture "let a={y:2}; let b={x:1,...a}; console.log(b.x+b.y);"))
-  ;; spread makes a shallow copy independent of the source
-  (assert-string= "5,99"  (%js-run-capture "let a={n:5}; let b={...a}; b.n=99; console.log(a.n+','+b.n);")))
+  ("6"    "let a={x:1,y:2}; let b={...a,z:3}; console.log(b.x+b.y+b.z);")
+  ("3"    "let a={x:1},c={y:2}; console.log(({...a,...c}).x+({...a,...c}).y);")
+  ("9"    "let a={x:1,y:2}; console.log(({...a,y:9}).y);")
+  ("3"    "let a={y:2}; let b={x:1,...a}; console.log(b.x+b.y);")
+  ("5,99" "let a={n:5}; let b={...a}; b.n=99; console.log(a.n+','+b.n);"))
 
-(deftest js-e2e-spread-arrays-and-calls
+(deftest-js-run js-e2e-spread-arrays-and-calls
   "...spread expands an iterable in array literals and call arguments (regression:
 the %js-spread marker was left as a single element / argument). Lowers to apply
 over a runtime-appended list."
-  (assert-string= "1,2,3,4" (%js-run-capture "let a=[1,2]; console.log([...a,3,4].join(','));"))
-  (assert-string= "4"   (%js-run-capture "let a=[1,2],c=[3,4]; console.log([...a,...c].length);"))
-  (assert-string= "0,1,2,3" (%js-run-capture "console.log([0,...[1,2],3].join(','));"))
-  (assert-string= "6"   (%js-run-capture "function add(a,b,c){return a+b+c;} console.log(add(...[1,2,3]));"))
-  (assert-string= "1-2-3" (%js-run-capture "function f(a,b,c){return a+'-'+b+'-'+c;} console.log(f(1,...[2,3]));"))
-  (assert-string= "a-b-c" (%js-run-capture "console.log([...'abc'].join('-'));"))
-  (assert-string= "7"   (%js-run-capture "console.log(Math.max(...[3,7,2]));")))
+  ("1,2,3,4" "let a=[1,2]; console.log([...a,3,4].join(','));")
+  ("4"   "let a=[1,2],c=[3,4]; console.log([...a,...c].length);")
+  ("0,1,2,3" "console.log([0,...[1,2],3].join(','));")
+  ("6"   "function add(a,b,c){return a+b+c;} console.log(add(...[1,2,3]));")
+  ("1-2-3" "function f(a,b,c){return a+'-'+b+'-'+c;} console.log(f(1,...[2,3]));")
+  ("a-b-c" "console.log([...'abc'].join('-'));")
+  ("7"   "console.log(Math.max(...[3,7,2]));"))
 
-(deftest js-e2e-division-yields-float
+(deftest-js-run js-e2e-division-yields-float
   "JS / produces an IEEE number, not a CL rational (regression: 5/2 printed
 '5/2'). Integer-valued quotients still print cleanly, and /0 gives Infinity."
-  (assert-string= "2.5"  (%js-run-capture "console.log(5/2);"))
-  (assert-string= "3"    (%js-run-capture "console.log(6/2);"))
-  (assert-string= "3.5"  (%js-run-capture "let a=7,b=2; console.log(a/b);"))
-  (assert-string= "1.25" (%js-run-capture "console.log(10/4/2);"))
-  (assert-string= "4"    (%js-run-capture "let n=[2,4,6]; console.log(n.reduce((a,b)=>a+b,0)/n.length);"))
-  (assert-string= "Inf"  (%js-run-capture "console.log(5/0 === Infinity ? 'Inf' : 'no');")))
+  ("2.5"  "console.log(5/2);")
+  ("3"    "console.log(6/2);")
+  ("3.5"  "let a=7,b=2; console.log(a/b);")
+  ("1.25" "console.log(10/4/2);")
+  ("4"    "let n=[2,4,6]; console.log(n.reduce((a,b)=>a+b,0)/n.length);")
+  ("Inf"  "console.log(5/0 === Infinity ? 'Inf' : 'no');"))
 
-(deftest js-e2e-integer-valued-float-formatting
+(deftest-js-run js-e2e-integer-valued-float-formatting
   "An integer-valued float prints without a decimal point, JS-style (7.0 -> '7'),
 while real decimals are preserved."
-  (assert-string= "7"    (%js-run-capture "console.log(7.0);"))
-  (assert-string= "3.14" (%js-run-capture "console.log(3.14);"))
-  (assert-string= "2.5"  (%js-run-capture "console.log(2.5);"))
-  (assert-string= "4"    (%js-run-capture "console.log(Math.sqrt(16));")))
+  ("7"    "console.log(7.0);")
+  ("3.14" "console.log(3.14);")
+  ("2.5"  "console.log(2.5);")
+  ("4"    "console.log(Math.sqrt(16));"))
 
-(deftest js-e2e-class-this-binding
+(deftest-js-run js-e2e-class-this-binding
   "Class constructors and methods bind `this' to the instance — in both the host
 special and the VM-global %js-this — so this.x reads/writes the receiver
 (regression: this compiled to vm-get-global %js-this which was never set, so any
 class using `this' failed with 'Unbound global variable: %JS-THIS')."
-  (assert-string= "7"  (%js-run-capture "class C{constructor(x){this.x=x;} get(){return this.x;}} console.log(new C(7).get());"))
-  (assert-string= "Bob" (%js-run-capture "class P{constructor(n){this.name=n;}} let p=new P(\"Bob\"); console.log(p.name);"))
-  ;; this.n++ mutates the receiver across calls
-  (assert-string= "2"  (%js-run-capture "class Ctr{constructor(){this.n=0;} inc(){this.n++; return this.n;}} let c=new Ctr(); c.inc(); console.log(c.inc());"))
-  ;; nested method call restores the outer receiver afterwards
-  (assert-string= "10" (%js-run-capture "class B{v(){return 10;}} class A{constructor(){this.b=new B();} go(){return this.b.v();}} console.log(new A().go());")))
+  ("7"   "class C{constructor(x){this.x=x;} get(){return this.x;}} console.log(new C(7).get());")
+  ("Bob" "class P{constructor(n){this.name=n;}} let p=new P(\"Bob\"); console.log(p.name);")
+  ("2"   "class Ctr{constructor(){this.n=0;} inc(){this.n++; return this.n;}} let c=new Ctr(); c.inc(); console.log(c.inc());")
+  ("10"  "class B{v(){return 10;}} class A{constructor(){this.b=new B();} go(){return this.b.v();}} console.log(new A().go());"))
 
 (defun %js-e2e-parse (src)
   "Parse SRC and return the list of top-level AST nodes."
@@ -1193,3 +1190,219 @@ findLast, findLastIndex."
   ;; findLastIndex
   (assert-string= "3"
     (%js-run-capture "console.log([1,2,3,4].findLastIndex(x=>x%2===0));")))
+
+;;; ─── ES2025 Set composition methods ──────────────────────────────────────────
+
+(deftest js-e2e-set-methods-es2025
+  "ES2025 Set composition methods: union, intersection, difference,
+symmetricDifference, isSubsetOf, isSupersetOf, isDisjointFrom."
+  ;; union: all elements from both sets, insertion order A then new from B
+  (assert-string= "1,2,3,4"
+    (%js-run-capture
+     "const a=new Set([1,2,3]),b=new Set([2,3,4]);
+console.log([...a.union(b)].join(','));"))
+  ;; intersection: elements in both (order from A)
+  (assert-string= "2,3"
+    (%js-run-capture
+     "const a=new Set([1,2,3]),b=new Set([2,3,4]);
+console.log([...a.intersection(b)].join(','));"))
+  ;; difference: elements in A but not B
+  (assert-string= "1"
+    (%js-run-capture
+     "const a=new Set([1,2,3]),b=new Set([2,3,4]);
+console.log([...a.difference(b)].join(','));"))
+  ;; symmetricDifference: elements in A or B but not both
+  (assert-string= "1,4"
+    (%js-run-capture
+     "const a=new Set([1,2,3]),b=new Set([2,3,4]);
+console.log([...a.symmetricDifference(b)].join(','));"))
+  ;; isSubsetOf: [1,2] ⊆ [1,2,3]
+  (assert-string= "true"
+    (%js-run-capture
+     "console.log(new Set([1,2]).isSubsetOf(new Set([1,2,3])));"))
+  ;; isSubsetOf: [1,4] ⊄ [1,2,3]
+  (assert-string= "false"
+    (%js-run-capture
+     "console.log(new Set([1,4]).isSubsetOf(new Set([1,2,3])));"))
+  ;; isSupersetOf: [1,2,3] ⊇ [1,2]
+  (assert-string= "true"
+    (%js-run-capture
+     "console.log(new Set([1,2,3]).isSupersetOf(new Set([1,2])));"))
+  ;; isSupersetOf: [1,2] ⊉ [1,2,3]
+  (assert-string= "false"
+    (%js-run-capture
+     "console.log(new Set([1,2]).isSupersetOf(new Set([1,2,3])));"))
+  ;; isDisjointFrom: disjoint sets
+  (assert-string= "true"
+    (%js-run-capture
+     "console.log(new Set([1,2]).isDisjointFrom(new Set([3,4])));"))
+  ;; isDisjointFrom: overlapping sets
+  (assert-string= "false"
+    (%js-run-capture
+     "console.log(new Set([1,2]).isDisjointFrom(new Set([2,3])));")))
+
+;;; ─── ES2025 Iterator.prototype helpers ───────────────────────────────────────
+
+(deftest js-e2e-iterator-helpers-es2025
+  "ES2025 Iterator.prototype helper methods: map, filter, take, drop,
+flatMap, reduce, toArray, forEach, some, every, find.
+arr.values() returns a generator-backed iterator; chaining creates
+new CL-backed iterators — both get the helpers via %js-add-iterator-helpers!."
+  ;; toArray round-trips an array through values()
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "console.log([1,2,3].values().toArray().join(','));"))
+  ;; map doubles every element
+  (assert-string= "2,4,6,8,10"
+    (%js-run-capture
+     "console.log([1,2,3,4,5].values().map(x=>x*2).toArray().join(','));"))
+  ;; filter keeps even numbers
+  (assert-string= "2,4,6"
+    (%js-run-capture
+     "console.log([1,2,3,4,5,6].values().filter(x=>x%2===0).toArray().join(','));"))
+  ;; take limits to first N
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "console.log([1,2,3,4,5].values().take(3).toArray().join(','));"))
+  ;; drop skips first N
+  (assert-string= "3,4,5"
+    (%js-run-capture
+     "console.log([1,2,3,4,5].values().drop(2).toArray().join(','));"))
+  ;; drop more than available → empty (early-exhaustion guard)
+  (assert-string= ""
+    (%js-run-capture
+     "console.log([1,2,3].values().drop(10).toArray().join(','));"))
+  ;; chained filter + map + toArray
+  (assert-string= "1,9,25"
+    (%js-run-capture
+     "console.log([1,2,3,4,5].values().filter(x=>x%2!==0).map(x=>x*x).toArray().join(','));"))
+  ;; reduce with initial value
+  (assert-string= "15"
+    (%js-run-capture
+     "console.log([1,2,3,4,5].values().reduce((acc,x)=>acc+x,0));"))
+  ;; some: true when predicate matches any element
+  (assert-string= "true"
+    (%js-run-capture
+     "console.log([1,3,4,5].values().some(x=>x%2===0));"))
+  ;; some: false when no element matches
+  (assert-string= "false"
+    (%js-run-capture
+     "console.log([1,3,5].values().some(x=>x%2===0));"))
+  ;; every: true when all elements match
+  (assert-string= "true"
+    (%js-run-capture
+     "console.log([2,4,6].values().every(x=>x%2===0));"))
+  ;; every: false when any element fails
+  (assert-string= "false"
+    (%js-run-capture
+     "console.log([2,3,6].values().every(x=>x%2===0));"))
+  ;; find: returns first matching element
+  (assert-string= "4"
+    (%js-run-capture
+     "console.log([1,3,4,6,7].values().find(x=>x%2===0));"))
+  ;; find: returns undefined when none match
+  (assert-string= "undefined"
+    (%js-run-capture
+     "const v=[1,3,5].values().find(x=>x%2===0);
+console.log(v===undefined?'undefined':v);"))
+  ;; forEach accumulates side effects
+  (assert-string= "6"
+    (%js-run-capture
+     "let s=0; [1,2,3].values().forEach(x=>{s+=x;}); console.log(s);"))
+  ;; flatMap flattens one level of nested arrays
+  (assert-string= "1,2,3,4,5"
+    (%js-run-capture
+     "console.log([[1,2],[3,4],[5]].values().flatMap(x=>x).toArray().join(','));")))
+
+;;; ─── ES2025 Iterator helpers on generators ───────────────────────────────────
+
+(deftest js-e2e-generator-iterator-helpers
+  "ES2025 Iterator.prototype helpers work on generator objects.
+Generators created by function* are the most common iterator source."
+  ;; generator filter + map pipeline
+  (assert-string= "20,40"
+    (%js-run-capture
+     "function* gen(n){for(let i=1;i<=n;i++)yield i;}
+const r=gen(5).filter(x=>x%2===0).map(x=>x*10).toArray();
+console.log(r.join(','));"))
+  ;; generator take
+  (assert-string= "1,2,3"
+    (%js-run-capture
+     "function* nums(){yield 1;yield 2;yield 3;yield 4;yield 5;}
+console.log(nums().take(3).toArray().join(','));"))
+  ;; generator reduce (sum)
+  (assert-string= "15"
+    (%js-run-capture
+     "function* range(n){for(let i=1;i<=n;i++)yield i;}
+console.log(range(5).reduce((a,x)=>a+x,0));"))
+  ;; generator some/every
+  (assert-string= "true false"
+    (%js-run-capture
+     "function* vals(){yield 1;yield 3;yield 5;}
+const g=vals();
+function* vals2(){yield 1;yield 3;yield 5;}
+const g2=vals2();
+console.log(g.some(x=>x>2)+' '+g2.every(x=>x%2===0));"))
+  ;; generator drop + filter
+  (assert-string= "4,6"
+    (%js-run-capture
+     "function* nums(){for(let i=1;i<=6;i++)yield i;}
+console.log(nums().drop(2).filter(x=>x%2===0).toArray().join(','));")))
+
+;;; ─── ES2025/2026 static built-ins ────────────────────────────────────────────
+
+(deftest js-e2e-es2026-math-sum-precise
+  "ES2026 Math.sumPrecise: precise summation over an iterable."
+  ;; integer array sum
+  (assert-string= "15"
+    (%js-run-capture "console.log(Math.sumPrecise([1,2,3,4,5]));"))
+  ;; single-element sum
+  (assert-string= "42"
+    (%js-run-capture "console.log(Math.sumPrecise([42]));"))
+  ;; empty sum returns 0
+  (assert-string= "0"
+    (%js-run-capture "console.log(Math.sumPrecise([]));")))
+
+(deftest js-e2e-es2026-error-is-error
+  "ES2026 Error.isError: returns truthy for Error objects, falsy for others."
+  ;; Error objects have a message key → truthy
+  (assert-string= "yes"
+    (%js-run-capture
+     "const e=new Error('oops');
+console.log(Error.isError(e)?'yes':'no');"))
+  ;; numbers are not errors
+  (assert-string= "no"
+    (%js-run-capture "console.log(Error.isError(42)?'yes':'no');"))
+  ;; null is not an error
+  (assert-string= "no"
+    (%js-run-capture "console.log(Error.isError(null)?'yes':'no');")))
+
+(deftest js-e2e-es2024-regexp-escape
+  "ES2024 RegExp.escape: escapes regex metacharacters with a backslash."
+  ;; dot is escaped
+  (assert-string= "Hello\\.World"
+    (%js-run-capture "console.log(RegExp.escape('Hello.World'));"))
+  ;; no special chars → unchanged
+  (assert-string= "hello"
+    (%js-run-capture "console.log(RegExp.escape('hello'));"))
+  ;; question mark escaped
+  (assert-string= "what\\?"
+    (%js-run-capture "console.log(RegExp.escape('what?'));")))
+
+(deftest js-e2e-es2024-map-group-by
+  "ES2024 Map.groupBy: groups iterable elements by a key function into a Map."
+  ;; group numbers into odd/even
+  (assert-string= "2,4,6"
+    (%js-run-capture
+     "const g=Map.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd');
+console.log(g.get('even').join(','));"))
+  (assert-string= "1,3,5"
+    (%js-run-capture
+     "const g=Map.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd');
+console.log(g.get('odd').join(','));"))
+  ;; missing key returns undefined
+  (assert-string= "none"
+    (%js-run-capture
+     "const g=Map.groupBy([1,3,5],x=>'odd');
+const v=g.get('even');
+console.log(v===undefined?'none':v.join(','));")))
