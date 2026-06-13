@@ -15,6 +15,7 @@
    (:file "lexer-template")
    (:file "lexer-regex")
    (:file "parser")
+   (:file "parser-stmt-binding")
    (:file "parser-expr")
    (:file "parser-expr-postfix")
    (:file "parser-expr-primary")
