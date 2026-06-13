@@ -20,30 +20,33 @@
   (format *error-output* "Warning: ~{~A~^ ~}~%" (mapcar #'%js-to-string args))
   +js-undefined+)
 
+;;; Methods with no observable side-effects in our synchronous model.
+(defparameter *%js-console-noop-methods*
+  '("group" "groupEnd" "time" "timeEnd" "count" "countReset" "clear")
+  "console methods that are no-ops (seeded as (constantly +js-undefined+)).")
+
 (defun %js-make-console ()
-  "Construct the JS `console' global object whose methods are the host console
-helpers. Lets compiled JS `console.log(x)' resolve via %js-get-prop + call:
-console is a defvar'd global object, log/error/warn are bridged host functions."
-  (%js-make-object
-   "log"          #'%js-console-log
-   "info"         #'%js-console-log
-   "debug"        #'%js-console-log
-   "error"        #'%js-console-error
-   "warn"         #'%js-console-warn
-   "dir"          (lambda (obj &rest _) (declare (ignore _)) (format t "~A~%" (%js-to-string obj)) +js-undefined+)
-   "table"        (lambda (&rest args) (format t "~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
-   "trace"        (lambda (&rest args) (format t "Trace: ~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
-   "assert"       (lambda (cond &rest args)
-                    (unless (%js-truthy cond)
-                      (format *error-output* "Assertion failed: ~{~A~^ ~}~%" (mapcar #'%js-to-string args)))
-                    +js-undefined+)
-   "group"        (lambda (&rest _) (declare (ignore _)) +js-undefined+)
-   "groupEnd"     (lambda () +js-undefined+)
-   "time"         (lambda (&rest _) (declare (ignore _)) +js-undefined+)
-   "timeEnd"      (lambda (&rest _) (declare (ignore _)) +js-undefined+)
-   "count"        (lambda (&rest _) (declare (ignore _)) +js-undefined+)
-   "countReset"   (lambda (&rest _) (declare (ignore _)) +js-undefined+)
-   "clear"        (lambda () +js-undefined+)))
+  "Construct the JS `console' global object."
+  (let ((obj (%js-make-object
+              "log"     #'%js-console-log
+              "info"    #'%js-console-log
+              "debug"   #'%js-console-log
+              "error"   #'%js-console-error
+              "warn"    #'%js-console-warn
+              "dir"     (lambda (o &rest _) (declare (ignore _))
+                          (format t "~A~%" (%js-to-string o)) +js-undefined+)
+              "table"   (lambda (&rest args)
+                          (format t "~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
+              "trace"   (lambda (&rest args)
+                          (format t "Trace: ~{~A~^ ~}~%" (mapcar #'%js-to-string args)) +js-undefined+)
+              "assert"  (lambda (cond &rest args)
+                          (unless (%js-truthy cond)
+                            (format *error-output* "Assertion failed: ~{~A~^ ~}~%"
+                                    (mapcar #'%js-to-string args)))
+                          +js-undefined+))))
+    (dolist (name *%js-console-noop-methods*)
+      (setf (gethash name obj) (constantly +js-undefined+)))
+    obj))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Promise (simplified synchronous model)
@@ -255,8 +258,8 @@ THUNK is a VM closure so use %js-funcall (not CL:FUNCALL) to re-enter the VM."
                   (lambda (&optional err)
                     (setf (car done-box) t)
                     (%js-throw (or err +js-undefined+))))))
-        ;; @@iterator self-reference makes this both iterable AND iterator
-        (setf (gethash "@@iterator" gen) (lambda () gen))
+        ;; @@iterator + ES2025 Iterator.prototype helpers (.map/.filter/.take/etc.)
+        (%js-add-iterator-helpers! gen)
         gen))))
 
 (defun %js-generator-next (gen &optional (value +js-undefined+))
