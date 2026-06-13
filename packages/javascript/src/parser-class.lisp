@@ -22,46 +22,9 @@
 
 (in-package :cl-cc/javascript)
 
-;;; ─── Token stream helpers (mirrors php-peek / php-consume conventions) ────────
-
-(defun js-tok-type  (tok) (getf tok :type))
-(defun js-tok-value (tok) (getf tok :value))
-
-(defun js-peek       (stream) (car stream))
-(defun js-peek-type  (stream) (when stream (js-tok-type  (car stream))))
-(defun js-peek-value (stream) (when stream (js-tok-value (car stream))))
-
-(defun js-consume (stream)
-  "Return (values token rest)."
-  (values (car stream) (cdr stream)))
-
-(defun js-expect (type stream &optional value)
-  "Consume a token of TYPE (optionally matching VALUE). Signals error on mismatch."
-  (if (and stream
-           (eq (js-peek-type stream) type)
-           (or (null value) (equal (js-peek-value stream) value)))
-      (js-consume stream)
-      (error "JS parse error: expected ~S~@[ ~S~] but got ~S"
-             type value (js-peek stream))))
-
-(defun js-at-eof-p (stream)
-  "Return T when STREAM is exhausted or at :T-EOF."
-  (or (null stream) (eq (js-peek-type stream) :T-EOF)))
-
-(defun js-skip-semis (stream)
-  "Skip zero or more automatic semicolons / explicit semicolons."
-  (loop while (and stream (eq (js-peek-type stream) :T-SEMI))
-        do (setf stream (cdr stream)))
-  stream)
-
 ;;; ─── Symbol helpers ──────────────────────────────────────────────────────────
-
-(defun js-ident-sym (str)
-  "Intern a JS identifier string as a CL symbol in :cl-cc/javascript.
-Preserves CASE (JavaScript is case-sensitive); kept in sync with the canonical
-definition in parser.lisp and with %js-binding-sym."
-  (intern (if (stringp str) str (symbol-name str))
-          :cl-cc/javascript))
+;;; js-tok-type, js-tok-value, js-peek*, js-consume, js-expect, js-at-eof-p,
+;;; js-skip-semis, js-ident-sym — all defined in parser.lisp / parser-stmt.lisp.
 
 (defun js-private-ident-sym (str)
   "Intern a JS private field name (without #) with a %JS-PRIV- prefix."
