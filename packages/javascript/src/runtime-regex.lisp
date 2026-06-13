@@ -30,6 +30,23 @@
 (defun %js-regexp-p (x) (js-regexp-p x))
 
 ;;; -----------------------------------------------------------------------
+;;;  Escape predicate data table
+;;; -----------------------------------------------------------------------
+
+(defparameter *%js-regex-escape-predicates*
+  (list
+   (cons #\d (lambda (c) (digit-char-p c)))
+   (cons #\D (lambda (c) (not (digit-char-p c))))
+   (cons #\w (lambda (c) (or (alphanumericp c) (char= c #\_))))
+   (cons #\W (lambda (c) (not (or (alphanumericp c) (char= c #\_)))))
+   (cons #\s (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return #\Page))))
+   (cons #\S (lambda (c) (not (member c '(#\Space #\Tab #\Newline #\Return #\Page)))))))
+
+(defun %js-regex-escape-predicate (esc)
+  "Return the character predicate for escape \\ESC, or nil for non-class escapes."
+  (cdr (assoc esc *%js-regex-escape-predicates* :test #'char=)))
+
+;;; -----------------------------------------------------------------------
 ;;;  Pattern compilation — translate JS regex to a CL matcher function
 ;;; -----------------------------------------------------------------------
 ;;;
@@ -59,18 +76,10 @@ COMPLEMENT-P inverts the result."
                (cond
                  ((char= ch #\\)
                   (incf pos)
-                  (let ((esc (char pattern pos)))
-                    (push (cond ((char= esc #\d) (lambda (c) (digit-char-p c)))
-                                ((char= esc #\D) (lambda (c) (not (digit-char-p c))))
-                                ((char= esc #\w) (lambda (c) (or (alphanumericp c) (char= c #\_))))
-                                ((char= esc #\W) (lambda (c) (not (or (alphanumericp c) (char= c #\_)))))
-                                ((char= esc #\s) (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return #\Page))))
-                                ((char= esc #\S) (lambda (c) (not (member c '(#\Space #\Tab #\Newline #\Return #\Page)))))
-                                ((char= esc #\n) #\Newline)
-                                ((char= esc #\t) #\Tab)
-                                ((char= esc #\r) #\Return)
-                                (t esc))
-                          chars)
+                  (let* ((esc  (char pattern pos))
+                         (item (or (%js-regex-escape-predicate esc)
+                                   (case esc (#\n #\Newline) (#\t #\Tab) (#\r #\Return) (t esc)))))
+                    (push item chars)
                     (incf pos)))
                  ;; Range a-z
                  ((and (< (+ pos 2) (length pattern))
@@ -151,19 +160,11 @@ COMPLEMENT-P inverts the result."
                            (1+ pos)))
                   ;; Escape sequences
                   ((char= ch #\\)
-                   (let* ((esc (char pat (1+ pos)))
-                          (pred (cond
-                                  ((char= esc #\d) (lambda (c) (digit-char-p c)))
-                                  ((char= esc #\D) (lambda (c) (not (digit-char-p c))))
-                                  ((char= esc #\w) (lambda (c) (or (alphanumericp c) (char= c #\_))))
-                                  ((char= esc #\W) (lambda (c) (not (or (alphanumericp c) (char= c #\_)))))
-                                  ((char= esc #\s) (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return #\Page))))
-                                  ((char= esc #\S) (lambda (c) (not (member c '(#\Space #\Tab #\Newline #\Return #\Page)))))
-                                  ((char= esc #\b) nil) ; word boundary — handled below
-                                  ((char= esc #\n) (lambda (c) (char= c #\Newline)))
-                                  ((char= esc #\t) (lambda (c) (char= c #\Tab)))
-                                  ((char= esc #\r) (lambda (c) (char= c #\Return)))
-                                  (t (let ((lit esc)) (lambda (c) (char= c lit)))))))
+                   (let* ((esc  (char pat (1+ pos)))
+                          (pred (or (%js-regex-escape-predicate esc)
+                                    (when (not (char= esc #\b))  ; word boundary — special
+                                      (let ((lit (case esc (#\n #\Newline) (#\t #\Tab) (#\r #\Return) (t esc))))
+                                        (lambda (c) (char= c lit)))))))
                      (values (lambda (str i groups)
                                (declare (ignore groups))
                                (when (and (< i (length str)) pred

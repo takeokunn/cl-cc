@@ -38,19 +38,12 @@
     (loop for i from start to n
           for end = (funcall fn str i nil)
           when end
-            do (let ((match-str (subseq str i end))
-                     (result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-                 (vector-push-extend match-str result)
-                 ;; Set match metadata
-                 (let ((ht (make-hash-table :test #'equal)))
-                   (setf (gethash "index" ht) (coerce i 'double-float)
-                         (gethash "input" ht) str)
-                   ;; Update lastIndex for global regexps
-                   (when (js-regexp-global-p re)
-                     (setf (js-regexp-last-index re) end))
-                   (return (%js-make-object "index" (coerce i 'double-float)
-                                             "input" str
-                                             "0" match-str))))
+            do (let ((match-str (subseq str i end)))
+                 (when (js-regexp-global-p re)
+                   (setf (js-regexp-last-index re) end))
+                 (return (%js-make-object "index" (coerce i 'double-float)
+                                          "input" str
+                                          "0" match-str)))
           finally (progn
                     (when (js-regexp-global-p re)
                       (setf (js-regexp-last-index re) 0))
