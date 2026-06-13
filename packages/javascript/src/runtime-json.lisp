@@ -6,6 +6,34 @@
 (in-package :cl-cc/javascript)
 
 ;;; -----------------------------------------------------------------------
+;;;  Data tables
+;;; -----------------------------------------------------------------------
+
+(defparameter *%json-string-escape-pairs*
+  '((#\" . "\\\"") (#\\ . "\\\\")
+    (#\Newline . "\\n") (#\Return . "\\r") (#\Tab . "\\t"))
+  "JSON string character escapes: char → escape sequence.")
+
+(defparameter *%json-whitespace-chars*
+  '(#\Space #\Tab #\Newline #\Return)
+  "Characters skipped by the JSON parser between tokens.")
+
+;;; -----------------------------------------------------------------------
+;;;  Helpers
+;;; -----------------------------------------------------------------------
+
+(defun %js-json-escape-char (ch buf)
+  "Write CH to BUF, applying JSON escaping if needed."
+  (let ((esc (cdr (assoc ch *%json-string-escape-pairs* :test #'char=))))
+    (if esc (write-string esc buf) (write-char ch buf))))
+
+(defun %js-json-at-literal-p (str pos literal)
+  "Return true if LITERAL appears verbatim at POS in STR."
+  (let ((end (+ pos (length literal))))
+    (and (<= end (length str))
+         (string= str literal :start1 pos :end1 end))))
+
+;;; -----------------------------------------------------------------------
 ;;;  JSON serialization
 ;;; -----------------------------------------------------------------------
 
@@ -14,7 +42,7 @@
   (when (> depth 50) (return-from %js-json-stringify-value "null"))
   (cond
     ((or (eq val +js-null+) (eq val +js-undefined+) (null val)) "null")
-    ((eq val t)  "true")
+    ((eq val t)   "true")
     ((eq val nil) "false")
     ((%js-float-nan-p val) "null")
     ((%js-float-infinity-p val) "null")
@@ -26,13 +54,7 @@
     ((stringp val)
      (with-output-to-string (s)
        (write-char #\" s)
-       (loop for ch across val do
-         (cond ((char= ch #\") (write-string "\\\"" s))
-               ((char= ch #\\) (write-string "\\\\" s))
-               ((char= ch #\Newline) (write-string "\\n" s))
-               ((char= ch #\Return) (write-string "\\r" s))
-               ((char= ch #\Tab) (write-string "\\t" s))
-               (t (write-char ch s))))
+       (loop for ch across val do (%js-json-escape-char ch s))
        (write-char #\" s)))
     ((%js-vec-p val)
      (format nil "[~{~A~^,~}]"
@@ -63,10 +85,8 @@
     (error () +js-undefined+)))
 
 (defun %js-json-skip-ws (str pos)
-  (loop while (and (< pos (length str))
-                   (member (char str pos) '(#\Space #\Tab #\Newline #\Return)))
-        do (incf pos))
-  pos)
+  (or (position-if-not (lambda (c) (member c *%json-whitespace-chars* :test #'char=)) str :start pos)
+      (length str)))
 
 (defun %js-json-parse-value (str pos)
   "Parse JSON value at POS in STR, returning (values parsed-value new-pos)."
@@ -76,12 +96,9 @@
       ((char= c #\") (%js-json-parse-string str (1+ pos)))
       ((char= c #\{) (%js-json-parse-object str (1+ pos)))
       ((char= c #\[) (%js-json-parse-array str (1+ pos)))
-      ((and (>= (length str) (+ pos 4)) (string= str "null" :start1 pos :end1 (+ pos 4)))
-       (values +js-null+ (+ pos 4)))
-      ((and (>= (length str) (+ pos 4)) (string= str "true" :start1 pos :end1 (+ pos 4)))
-       (values t (+ pos 4)))
-      ((and (>= (length str) (+ pos 5)) (string= str "false" :start1 pos :end1 (+ pos 5)))
-       (values nil (+ pos 5)))
+      ((%js-json-at-literal-p str pos "null")  (values +js-null+ (+ pos 4)))
+      ((%js-json-at-literal-p str pos "true")  (values t         (+ pos 4)))
+      ((%js-json-at-literal-p str pos "false") (values nil        (+ pos 5)))
       ((or (digit-char-p c) (char= c #\-))
        (%js-json-parse-number str pos))
       (t (values +js-undefined+ pos)))))
