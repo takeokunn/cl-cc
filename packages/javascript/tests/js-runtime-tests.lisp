@@ -687,3 +687,50 @@ nil-valued keys as missing."
          (desc (cl-cc/javascript::%js-object-get-own-property-descriptor obj "v")))
     (assert-= 5 (gethash "value" desc))
     (assert-true (gethash "writable" desc))))
+
+;;; ─── Math extended (ES2015+ transcendentals) ─────────────────────────────────
+
+(deftest-each js-rt-math-extended-unary
+  "Math hyperbolic and transcendental unaries map numeric inputs correctly."
+  :cases (("sinh-0"   #'cl-cc/javascript::%js-math-sinh   0     0.0d0)
+          ("cosh-0"   #'cl-cc/javascript::%js-math-cosh   0     1.0d0)
+          ("tanh-0"   #'cl-cc/javascript::%js-math-tanh   0     0.0d0)
+          ("cbrt-8"   #'cl-cc/javascript::%js-math-cbrt   8     2.0d0)
+          ("expm1-0"  #'cl-cc/javascript::%js-math-expm1  0     0.0d0)
+          ("log1p-0"  #'cl-cc/javascript::%js-math-log1p  0     0.0d0))
+  (fn x expected)
+  (assert-true (< (abs (- expected (funcall fn x))) 1.0d-10)))
+
+;;; ─── Map.groupBy ─────────────────────────────────────────────────────────────
+
+(deftest js-rt-map-group-by
+  "Map.groupBy groups iterable items by key-fn result."
+  (let* ((arr (%jr-arr 1 2 3 4 6))
+         (result (cl-cc/javascript::%js-map-group-by
+                  arr
+                  (lambda (x) (if (evenp x) "even" "odd"))))
+         (evens (cl-cc/javascript::%js-map-get result "even"))
+         (odds  (cl-cc/javascript::%js-map-get result "odd")))
+    (assert-= 3 (length evens))
+    (assert-= 2 (length odds))))
+
+;;; ─── Method resolution via get-prop ──────────────────────────────────────────
+
+(deftest js-rt-method-resolution-array
+  "Calling a method through get-prop on an array invokes the correct helper."
+  (let* ((arr (%jr-arr 10 20 30))
+         (join-fn (cl-cc/javascript::%js-get-prop arr "join")))
+    (assert-true (functionp join-fn))
+    (assert-string= "10,20,30" (funcall join-fn ","))))
+
+(deftest js-rt-method-resolution-string
+  "Calling a method through get-prop on a string invokes the correct helper."
+  (let* ((s "hello")
+         (upper-fn (cl-cc/javascript::%js-get-prop s "toUpperCase")))
+    (assert-true (functionp upper-fn))
+    (assert-string= "HELLO" (funcall upper-fn))))
+
+(deftest js-rt-method-resolution-length
+  "Accessing .length on an array returns the numeric length."
+  (let* ((arr (%jr-arr 1 2 3)))
+    (assert-= 3 (cl-cc/javascript::%js-get-prop arr "length"))))
