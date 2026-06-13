@@ -29,7 +29,6 @@
    ;; String / template helpers
    #:%js-template-string
    #:%js-to-string
-   #:%js-concat
 
    ;; Property access / object construction
    #:%js-get-prop

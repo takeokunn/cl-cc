@@ -106,13 +106,20 @@ this = the new instance."
   (let ((privates (and (%js-ht-p obj) (gethash "__private__" obj))))
     (and privates (%js-ht-p privates) privates)))
 
+(defmacro %with-private-ht ((var obj &optional (missing-form '+js-undefined+)) &body body)
+  "Bind VAR to OBJ's __private__ hash-table and run BODY, or return MISSING-FORM."
+  (let ((g (gensym "obj")))
+    `(let* ((,g ,obj)
+            (,var (%js-private-ht ,g)))
+       (if ,var
+           (progn ,@body)
+           ,missing-form))))
+
 (defun %js-class-private-field-get (obj field-name)
   "Read a private field from OBJ."
-  (let ((privates (%js-private-ht obj)))
-    (if privates
-        (multiple-value-bind (v f) (gethash field-name privates)
-          (if f v +js-undefined+))
-        +js-undefined+)))
+  (%with-private-ht (privates obj)
+    (multiple-value-bind (v f) (gethash field-name privates)
+      (if f v +js-undefined+))))
 
 (defun %js-class-private-field-set (obj field-name value)
   "Write a private field on OBJ."
@@ -126,8 +133,8 @@ this = the new instance."
 
 (defun %js-has-private-field (obj field-name)
   "True if OBJ has the named private field."
-  (let ((privates (%js-private-ht obj)))
-    (and privates (nth-value 1 (gethash field-name privates)))))
+  (%with-private-ht (privates obj nil)
+    (nth-value 1 (gethash field-name privates))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Error class hierarchy (ES2015+)

@@ -141,13 +141,15 @@ JS always returns lowercase hex digits, so we normalise via string-downcase."
 (define-js-bigint-binop %js-bigint-bitwise-or  logior)
 (define-js-bigint-binop %js-bigint-bitwise-xor logxor)
 
-(defun %js-bigint-div (a b)
-  (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
-    (if (zerop bv) (error "Division by zero") (%make-js-bigint (truncate av bv)))))
+(defmacro define-js-bigint-dividing-op (name cl-op)
+  "Define a BigInt division/modulo op that throws on zero divisor."
+  `(defun ,name (a b)
+     (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
+       (when (zerop bv) (error "Division by zero"))
+       (%make-js-bigint (,cl-op av bv)))))
 
-(defun %js-bigint-mod (a b)
-  (let ((av (%js-bigint-val a)) (bv (%js-bigint-val b)))
-    (if (zerop bv) (error "Division by zero") (%make-js-bigint (rem av bv)))))
+(define-js-bigint-dividing-op %js-bigint-div truncate)
+(define-js-bigint-dividing-op %js-bigint-mod rem)
 
 (defun %js-bigint-pow (a b)
   (%make-js-bigint (expt (%js-bigint-val a) (%js-bigint-val b))))
@@ -167,45 +169,53 @@ JS always returns lowercase hex digits, so we normalise via string-downcase."
   (%make-js-bigint (- (%js-bigint-val a))))
 
 ;;; ─── URI encoding/decoding ───────────────────────────────────────────────────
+;;;
+;;; Both encode functions share the same percent-encoding loop — they differ
+;;; only in the set of "safe" characters that are passed through unchanged.
+;;; +uri-component-safe-chars+ omits the URI-structure chars that encodeURI
+;;; must preserve.
+
+(defparameter +uri-component-safe-chars+
+  '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\))
+  "Characters that encodeURIComponent leaves unencoded (RFC 3986 unreserved).")
+
+(defparameter +uri-safe-chars+
+  (append +uri-component-safe-chars+
+          '(#\; #\/ #\? #\: #\@ #\& #\= #\+ #\$ #\, #\#))
+  "Characters that encodeURI leaves unencoded (unreserved + URI structure chars).")
+
+(defun %js-percent-encode (str safe-chars)
+  "Percent-encode STR, leaving alphanumerics and SAFE-CHARS unchanged."
+  (with-output-to-string (out)
+    (loop for ch across (%js-to-string str)
+          do (if (or (alphanumericp ch) (member ch safe-chars))
+                 (write-char ch out)
+                 (loop for byte across (sb-ext:string-to-octets (string ch) :external-format :utf-8)
+                       do (format out "%~2,'0X" byte))))))
 
 (defun %js-encode-uri-component (str)
   "JS encodeURIComponent: percent-encode all chars except unreserved."
-  (with-output-to-string (out)
-    (loop for ch across (%js-to-string str)
-          do (if (or (alphanumericp ch)
-                     (member ch '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\))))
-                 (write-char ch out)
-                 (let ((bytes (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
-                   (loop for byte across bytes
-                         do (format out "%~2,'0X" byte)))))))
+  (%js-percent-encode str +uri-component-safe-chars+))
 
 (defun %js-decode-uri-component (str)
   "JS decodeURIComponent: decode percent-encoded string."
-  (let ((s (%js-to-string str))
+  (let ((s     (%js-to-string str))
         (bytes (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
-    (let ((i 0) (n (length s)))
-      (loop while (< i n)
-            do (let ((ch (char s i)))
-                 (if (and (char= ch #\%) (< (+ i 2) n))
-                     (progn
-                       (vector-push-extend (parse-integer s :start (1+ i) :end (+ i 3) :radix 16) bytes)
-                       (incf i 3))
-                     (progn
-                       (let ((b (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
-                         (loop for byte across b do (vector-push-extend byte bytes)))
-                       (incf i)))))
-      (sb-ext:octets-to-string bytes :external-format :utf-8))))
+    (loop with i = 0 and n = (length s)
+          while (< i n)
+          do (let ((ch (char s i)))
+               (if (and (char= ch #\%) (< (+ i 2) n))
+                   (progn (vector-push-extend
+                           (parse-integer s :start (1+ i) :end (+ i 3) :radix 16) bytes)
+                          (incf i 3))
+                   (progn (loop for b across (sb-ext:string-to-octets (string ch) :external-format :utf-8)
+                                do (vector-push-extend b bytes))
+                          (incf i)))))
+    (sb-ext:octets-to-string bytes :external-format :utf-8)))
 
 (defun %js-encode-uri (str)
   "JS encodeURI: encode URI, preserving scheme/path/query chars."
-  (with-output-to-string (out)
-    (loop for ch across (%js-to-string str)
-          do (if (or (alphanumericp ch)
-                     (member ch '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\)
-                                  #\; #\/ #\? #\: #\@ #\& #\= #\+ #\$ #\, #\#)))
-                 (write-char ch out)
-                 (let ((bytes (sb-ext:string-to-octets (string ch) :external-format :utf-8)))
-                   (loop for byte across bytes do (format out "%~2,'0X" byte)))))))
+  (%js-percent-encode str +uri-safe-chars+))
 
 (defun %js-decode-uri (str)
   "JS decodeURI: decode URI but leave reserved chars encoded."

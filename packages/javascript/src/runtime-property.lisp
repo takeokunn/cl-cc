@@ -2,7 +2,7 @@
 ;;;;
 ;;;; %js-get-prop / %js-set-prop / %js-delete / %js-in / optional-chain ops,
 ;;;; plus %js-add / %js-mod / %js-divide / %js-pow / %js-to-string /
-;;;; %js-template-string / %js-concat (arithmetic + coercion used by the above).
+;;;; %js-template-string (arithmetic + coercion used by the above).
 ;;;;
 ;;;; Load order: after runtime.lisp (needs type predicates, method-resolver vars,
 ;;;;             proto-lookup helpers defined there).
@@ -160,7 +160,7 @@ JS `+' is polymorphic, so it cannot lower to the numeric-only make-vm-add; it
 routes here via *js-binop-runtime-helpers*."
   (if (or (stringp a) (stringp b))
       (concatenate 'string (%js-to-string a) (%js-to-string b))
-      (+ a b)))
+      (+ (%js-to-number a) (%js-to-number b))))
 
 (defun %js-mod (a b)
   "JS `%' remainder operator. Like CL REM, the result takes the sign of the
@@ -223,14 +223,6 @@ rational 5/2. Division by zero gives +/-Infinity (or NaN for 0/0), per ECMAScrip
   "Concatenate template literal parts (already evaluated)."
   (apply #'concatenate 'string
          (mapcar #'%js-to-string parts)))
-
-(defun %js-concat (a b)
-  "JS + operator with string coercion."
-  (if (or (stringp a) (stringp b))
-      (concatenate 'string (%js-to-string a) (%js-to-string b))
-      (let ((na (%js-to-number a))
-            (nb (%js-to-number b)))
-        (+ na nb))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Control flow / exceptions and iteration protocol

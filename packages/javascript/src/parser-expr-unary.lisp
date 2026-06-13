@@ -79,7 +79,7 @@ Returns (values ast rest)."
            (let ((parts-list (nreverse segments)))
              (values (if (null (cdr parts-list))
                          (car parts-list)
-                         (reduce (lambda (l r) (%js-call '%js-concat l r))
+                         (reduce (lambda (l r) (%js-call '%js-add l r))
                                  parts-list))
                      rest)))))
       ;; :T-TEMPLATE-START — consumed by the template lexer inline

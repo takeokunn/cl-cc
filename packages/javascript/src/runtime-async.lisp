@@ -8,17 +8,19 @@
 ;;;  Console
 ;;; -----------------------------------------------------------------------
 
-(defun %js-console-log (&rest args)
-  (format t "~{~A~^ ~}~%" (mapcar #'%js-to-string args))
-  +js-undefined+)
+;;; Data table: (stream prefix) for each console output function.
+(defmacro define-js-console-output (name stream &optional prefix)
+  "Define a console output function that formats all args as JS strings."
+  `(defun ,name (&rest args)
+     (format ,stream ,(if prefix
+                          (concatenate 'string prefix "~{~A~^ ~}~%")
+                          "~{~A~^ ~}~%")
+             (mapcar #'%js-to-string args))
+     +js-undefined+))
 
-(defun %js-console-error (&rest args)
-  (format *error-output* "~{~A~^ ~}~%" (mapcar #'%js-to-string args))
-  +js-undefined+)
-
-(defun %js-console-warn (&rest args)
-  (format *error-output* "Warning: ~{~A~^ ~}~%" (mapcar #'%js-to-string args))
-  +js-undefined+)
+(define-js-console-output %js-console-log   t)
+(define-js-console-output %js-console-error *error-output*)
+(define-js-console-output %js-console-warn  *error-output* "Warning: ")
 
 ;;; Methods with no observable side-effects in our synchronous model.
 (defparameter *%js-console-noop-methods*
@@ -116,46 +118,53 @@ THUNK is a VM closure so use %js-funcall (not CL:FUNCALL) to re-enter the VM."
   (%js-funcall on-finally)
   promise)
 
-;;; Ensure PROMISES is a JS vector (convert from iterator/array-like if needed).
+;;; Shared helpers for Promise aggregator functions.
+
 (defun %js-promises-as-vec (promises)
+  "Ensure PROMISES is a JS vector (convert from iterator/array-like if needed)."
   (if (%js-vec-p promises) promises (%js-array-from promises)))
+
+(defmacro %with-promise-vec ((var promises) &body body)
+  "Bind VAR to (%js-promises-as-vec PROMISES) and run BODY."
+  `(let ((,var (%js-promises-as-vec ,promises)))
+     ,@body))
+
+(defun %js-promise-unwrap (p)
+  "Unwrap P's value whether P is a promise struct or a plain value."
+  (if (js-promise-p p) (js-promise-value p) p))
+
+(defun %js-promise-settled-outcome (p)
+  "Build a {status, value/reason} object for Promise.allSettled."
+  (if (and (js-promise-p p) (js-promise-rejected-p p))
+      (%js-make-object "status" "rejected"  "reason" (js-promise-value p))
+      (%js-make-object "status" "fulfilled" "value"  (%js-promise-unwrap p))))
 
 (defun %js-promise-all (promises)
   "Resolve all promises; reject on first rejection."
-  (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (%js-promises-as-vec promises)))
-    (loop for i below (length arr)
-          do (vector-push-extend (%js-await (aref arr i)) results))
-    (%js-promise-resolve results)))
+  (%with-promise-vec (arr promises)
+    (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+      (loop for p across arr
+            do (vector-push-extend (%js-await p) results))
+      (%js-promise-resolve results))))
 
 (defun %js-promise-all-settled (promises)
   "Return array of status objects for all promises."
-  (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (%js-promises-as-vec promises)))
-    (loop for p across arr
-          for outcome = (if (and (js-promise-p p) (js-promise-rejected-p p))
-                            (%js-make-object "status" "rejected"
-                                             "reason" (js-promise-value p))
-                            (%js-make-object "status" "fulfilled"
-                                             "value"  (if (js-promise-p p)
-                                                          (js-promise-value p)
-                                                          p)))
-          do (vector-push-extend outcome results))
-    (%js-promise-resolve results)))
+  (%with-promise-vec (arr promises)
+    (let ((results (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+      (loop for p across arr
+            do (vector-push-extend (%js-promise-settled-outcome p) results))
+      (%js-promise-resolve results))))
 
 (defun %js-promise-any (promises)
   "Resolve with first fulfillment; reject if all reject."
-  (let ((errors (make-array 0 :element-type t :adjustable t :fill-pointer 0))
-        (arr (%js-promises-as-vec promises)))
-    (loop for p across arr
-          do (if (and (js-promise-p p) (js-promise-rejected-p p))
-                 (vector-push-extend (js-promise-value p) errors)
-                 (return-from %js-promise-any
-                   (%js-promise-resolve (if (js-promise-p p)
-                                            (js-promise-value p)
-                                            p)))))
-    (%js-promise-reject
-     (%js-make-object "errors" errors "message" "All promises were rejected"))))
+  (%with-promise-vec (arr promises)
+    (let ((errors (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+      (loop for p across arr
+            do (if (and (js-promise-p p) (js-promise-rejected-p p))
+                   (vector-push-extend (js-promise-value p) errors)
+                   (return-from %js-promise-any (%js-promise-resolve (%js-promise-unwrap p)))))
+      (%js-promise-reject
+       (%js-make-object "errors" errors "message" "All promises were rejected")))))
 
 (defun %js-promise-race (promises)
   "Return the first settled promise."

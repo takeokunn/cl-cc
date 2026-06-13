@@ -354,8 +354,8 @@
   (assert-eq cl-cc/javascript::+js-undefined+
              (cl-cc/javascript::%js-optional-method-call cl-cc/javascript::+js-null+ "double" 5)))
 
-(deftest js-rt-concat-string-coercion
-  "%js-concat coerces to string when either operand is a string."
-  (assert-string= "42"    (cl-cc/javascript::%js-concat 4 "2"))
-  (assert-string= "ab"    (cl-cc/javascript::%js-concat "a" "b"))
-  (assert-=       6       (cl-cc/javascript::%js-concat 4 2)))
+(deftest js-rt-add-string-coercion
+  "%js-add coerces to string when either operand is a string, otherwise numeric add."
+  (assert-string= "42"    (cl-cc/javascript::%js-add 4 "2"))
+  (assert-string= "ab"    (cl-cc/javascript::%js-add "a" "b"))
+  (assert-=       6.0d0   (cl-cc/javascript::%js-add 4 2)))
