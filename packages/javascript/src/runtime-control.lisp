@@ -39,16 +39,11 @@
 
 (defun %js-for-in (obj body-fn)
   "Execute BODY-FN for each enumerable string key in OBJ.
-Skips internal double-underscore keys (__proto__, __class__, etc.)."
+Skips internal runtime keys (__proto__, __class__, __get_X, __set_X, etc.)."
   (when (%js-ht-p obj)
     (maphash (lambda (k v)
                (declare (ignore v))
-               ;; Skip internal/prototype-chain keys (double-underscore prefix+suffix)
-               ;; e.g. __proto__, __class__, __constructor__, __super__, __new__
-               (unless (let ((n (length k)))
-                         (and (> n 4)
-                              (string= k "__" :end1 2)
-                              (string= k "__" :start1 (- n 2))))
+               (unless (%js-internal-key-p k)
                  (%js-funcall body-fn k)))
              obj))
   +js-undefined+)
