@@ -17,6 +17,7 @@
    (:file "parser")
    (:file "parser-stmt-binding")
    (:file "parser-expr")
+   (:file "parser-expr-literal")
    (:file "parser-expr-postfix")
    (:file "parser-expr-primary")
    (:file "parser-stmt")
