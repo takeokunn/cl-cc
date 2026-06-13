@@ -28,7 +28,6 @@
 
 (defun %js-date-now ()
   "Return current time as milliseconds since the Unix epoch (Date.now())."
-  (- (get-universal-time) +js-epoch-offset+) ; × 1000 omitted for simplicity
   (* 1000 (- (get-universal-time) +js-epoch-offset+)))
 
 (defun %js-make-date (&optional (arg +js-undefined+))
@@ -77,6 +76,15 @@
   `(defun ,name (date)
      (* ,scale (+ ,offset (nth ,index (%js-date-to-decoded date))))))
 
+(defmacro %with-date-fields ((date &key (sec (gensym)) (min (gensym)) (hour (gensym))
+                                        (day (gensym)) (month (gensym)) (year (gensym))
+                                        (dow (gensym))) &body body)
+  "Destructure a decoded js-date into named variables (only name what you need)."
+  `(destructuring-bind (,sec ,min ,hour ,day ,month ,year ,dow &rest ,(gensym))
+       (%js-date-to-decoded ,date)
+     (declare (ignorable ,sec ,min ,hour ,day ,month ,year ,dow))
+     ,@body))
+
 ;;; Date.prototype.getFullYear / getUTCFullYear
 (define-js-date-getter %js-date-get-full-year    5)
 (define-js-date-getter %js-date-get-utc-full-year 5)
@@ -118,27 +126,23 @@
   ms)
 
 (defun %js-date-set-full-year (date year &optional month day)
-  (let* ((decoded (%js-date-to-decoded date))
-         (m (if month (+ month 1) (nth 4 decoded)))   ; JS 0-based → CL 1-based
-         (d (or day (nth 3 decoded)))
-         (ut (encode-universal-time 0 0 0 d m year 0)))
-    (setf (js-date-ms date) (* 1000 (- ut +js-epoch-offset+)))
-    (coerce (js-date-ms date) 'double-float)))
+  "Date.prototype.setFullYear — sets year (and optionally month/day), preserving time."
+  (%js-date-rebuild date :year (truncate (%js-to-number year))
+                         :month (and month (not (eq month +js-undefined+))
+                                     (truncate (%js-to-number month)))
+                         :day   (and day   (not (eq day   +js-undefined+))
+                                     (truncate (%js-to-number day)))))
 
 (defun %js-date-rebuild (date &key sec min hour day month year)
-  "Re-encode DATE's ms with the given decoded components overridden (preserving
-sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
-  (let* ((decoded (%js-date-to-decoded date))
-         (frac-ms (mod (js-date-ms date) 1000))
-         (s  (or sec   (nth 0 decoded)))
-         (mn (or min   (nth 1 decoded)))
-         (h  (or hour  (nth 2 decoded)))
-         (d  (or day   (nth 3 decoded)))
-         (m  (if month (+ month 1) (nth 4 decoded)))
-         (y  (or year  (nth 5 decoded)))
-         (ut (encode-universal-time s mn h d m y 0)))
-    (setf (js-date-ms date) (+ (* 1000 (- ut +js-epoch-offset+)) frac-ms))
-    (coerce (js-date-ms date) 'double-float)))
+  "Re-encode DATE's ms with overridden decoded components (sub-second ms preserved).
+MONTH is JS 0-based (converted to CL 1-based internally)."
+  (%with-date-fields (date :sec ds :min dmn :hour dh :day dd :month dm :year dy)
+    (let* ((frac-ms (mod (js-date-ms date) 1000))
+           (ut (encode-universal-time
+                (or sec ds) (or min dmn) (or hour dh) (or day dd)
+                (if month (+ month 1) dm) (or year dy) 0)))
+      (setf (js-date-ms date) (+ (* 1000 (- ut +js-epoch-offset+)) frac-ms))
+      (coerce (js-date-ms date) 'double-float))))
 
 (defun %js-date-set-month (date month &optional day)
   "Date.prototype.setMonth(month[, day]) — MONTH is 0-based."
@@ -173,12 +177,9 @@ sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
 
 (defun %js-date-to-iso-string (date)
   "Date.prototype.toISOString() → 'YYYY-MM-DDTHH:MM:SS.mmmZ'."
-  (let* ((decoded (%js-date-to-decoded date))
-         (sec (nth 0 decoded)) (min (nth 1 decoded)) (hour (nth 2 decoded))
-         (day (nth 3 decoded)) (month (nth 4 decoded)) (year (nth 5 decoded))
-         (ms  (mod (js-date-ms date) 1000)))
+  (%with-date-fields (date :sec sec :min min :hour hour :day day :month month :year year)
     (format nil "~4,'0D-~2,'0D-~2,'0DT~2,'0D:~2,'0D:~2,'0D.~3,'0DZ"
-            year month day hour min sec ms)))
+            year month day hour min sec (mod (js-date-ms date) 1000))))
 
 (defun %js-date-to-string (date)
   "Date.prototype.toString() — simplified."
@@ -186,8 +187,7 @@ sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
 
 (defun %js-date-to-local-date-string (date)
   "Date.prototype.toLocaleDateString() — simplified YYYY/MM/DD."
-  (let* ((decoded (%js-date-to-decoded date))
-         (day (nth 3 decoded)) (month (nth 4 decoded)) (year (nth 5 decoded)))
+  (%with-date-fields (date :day day :month month :year year)
     (format nil "~4,'0D/~2,'0D/~2,'0D" year month day)))
 
 (defun %js-date-to-utc-string (date)
@@ -202,9 +202,7 @@ sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
 
 (defun %js-date-to-date-string (date)
   "Date.prototype.toDateString() → 'Www Mmm DD YYYY'."
-  (let* ((decoded (%js-date-to-decoded date))
-         (day (nth 3 decoded)) (month (nth 4 decoded)) (year (nth 5 decoded))
-         (dow (nth 6 decoded)))
+  (%with-date-fields (date :day day :month month :year year :dow dow)
     (format nil "~A ~A ~2,'0D ~D"
             (aref +js-date-weekday-names+ dow)
             (aref +js-date-month-names+ (1- month))
@@ -212,8 +210,7 @@ sub-second ms). MONTH is JS 0-based (converted to CL 1-based here)."
 
 (defun %js-date-to-time-string (date)
   "Date.prototype.toTimeString() → 'HH:MM:SS GMT+0000 (UTC)'."
-  (let* ((decoded (%js-date-to-decoded date))
-         (sec (nth 0 decoded)) (min (nth 1 decoded)) (hour (nth 2 decoded)))
+  (%with-date-fields (date :sec sec :min min :hour hour)
     (format nil "~2,'0D:~2,'0D:~2,'0D GMT+0000 (Coordinated Universal Time)"
             hour min sec)))
 
