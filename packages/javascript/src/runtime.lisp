@@ -394,13 +394,11 @@ plain own property."
                  (t (%js-proto-method-lookup obj k)))))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
-      ;; Number.prototype / Symbol.prototype methods (toFixed, toString(radix),
-      ;; toPrecision, description, …).  Primitives box to their wrapper prototype
-      ;; for method access; route to the resolver exactly like strings do.  Without
-      ;; this, (123.456).toFixed(2) fell to the +js-undefined+ default and then the
-      ;; call site invoked undefined -> "Undefined function: :JS-UNDEFINED".
-      ((or (numberp obj) (js-symbol-p obj)) (%js-method-ref obj k))
-      (t +js-undefined+))))
+      ;; All remaining types (Number/Symbol/Promise/Map/WeakMap/WeakSet/etc.)
+      ;; delegate to the method resolver.  Struct types like js-promise, js-map,
+      ;; js-weak-map returned +js-undefined+ before this fix — so promise.then /
+      ;; map.get / weakmap.set all failed at the call site.
+      (t (%js-method-ref obj k)))))
 
 (defun %js-set-prop (obj key value)
   "Set property KEY on JS object/array."
@@ -636,6 +634,10 @@ CL-iterator closures, JS iterator objects, generator objects."
      (dolist (k (js-map-order iterable))
        (let ((v (gethash k (js-map-ht iterable) +js-undefined+)))
          (%js-funcall body-fn (%js-make-array k v)))))
+    ;; JS Set → iterate values in insertion order
+    ((typep iterable 'js-set)
+     (dolist (k (js-set-order iterable))
+       (%js-funcall body-fn k)))
     ;; CL closure — treat as an iterator (used by %js-make-cl-iterator)
     ((functionp iterable)
      (%js-advance-cl-iterator iterable body-fn))
