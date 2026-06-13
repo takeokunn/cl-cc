@@ -226,40 +226,42 @@
 
 ;;; ─── Terminal consumers (return a single value, not an iterator) ──────────────
 
+(defmacro %js-doiter ((var iter &optional (done-result '+js-undefined+)) &body body)
+  "Iterate JS iterator ITER, binding VAR to each successive value.
+BODY runs for each element; DONE-RESULT is returned when the iterator exhausts."
+  (let ((done (gensym "done")))
+    `(loop
+       (multiple-value-bind (,var ,done) (%js-iter-next ,iter)
+         (when ,done (return ,done-result))
+         ,@body))))
+
 (defun %js-iterator-reduce (iter fn &optional (init +js-undefined+))
   (let ((acc init) (first-p (eq init +js-undefined+)))
-    (loop
-      (multiple-value-bind (val done) (%js-iter-next iter)
-        (when done (return acc))
-        (if first-p
-            (setf acc val first-p nil)
-            (setf acc (%js-funcall fn acc val)))))))
+    (%js-doiter (val iter acc)
+      (if first-p
+          (setf acc val first-p nil)
+          (setf acc (%js-funcall fn acc val))))))
 
 (defun %js-iterator-to-array (iter)
   (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-    (loop (multiple-value-bind (val done) (%js-iter-next iter)
-            (when done (return result))
-            (vector-push-extend val result)))))
+    (%js-doiter (val iter result)
+      (vector-push-extend val result))))
 
 (defun %js-iterator-for-each (iter fn)
-  (loop (multiple-value-bind (val done) (%js-iter-next iter)
-          (when done (return +js-undefined+))
-          (%js-funcall fn val))))
+  (%js-doiter (val iter +js-undefined+)
+    (%js-funcall fn val)))
 
 (defun %js-iterator-some (iter fn)
-  (loop (multiple-value-bind (val done) (%js-iter-next iter)
-          (when done (return nil))
-          (when (%js-truthy (%js-funcall fn val)) (return t)))))
+  (%js-doiter (val iter nil)
+    (when (%js-truthy (%js-funcall fn val)) (return t))))
 
 (defun %js-iterator-every (iter fn)
-  (loop (multiple-value-bind (val done) (%js-iter-next iter)
-          (when done (return t))
-          (unless (%js-truthy (%js-funcall fn val)) (return nil)))))
+  (%js-doiter (val iter t)
+    (unless (%js-truthy (%js-funcall fn val)) (return nil))))
 
 (defun %js-iterator-find (iter fn)
-  (loop (multiple-value-bind (val done) (%js-iter-next iter)
-          (when done (return +js-undefined+))
-          (when (%js-truthy (%js-funcall fn val)) (return val)))))
+  (%js-doiter (val iter +js-undefined+)
+    (when (%js-truthy (%js-funcall fn val)) (return val))))
 
 ;;; ─── ES2025 Iterator.prototype helpers ────────────────────────────────────────
 

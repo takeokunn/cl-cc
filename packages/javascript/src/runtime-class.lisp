@@ -105,10 +105,15 @@ this = the new instance."
            (%js-run-constructor constructor obj arglist))
          obj)))))
 
+;;; Return the __private__ sub-table for OBJ, or NIL when absent/invalid.
+(defun %js-private-ht (obj)
+  (let ((privates (and (%js-ht-p obj) (gethash "__private__" obj))))
+    (and privates (%js-ht-p privates) privates)))
+
 (defun %js-class-private-field-get (obj field-name)
   "Read a private field from OBJ."
-  (let ((privates (and (%js-ht-p obj) (gethash "__private__" obj))))
-    (if (and privates (%js-ht-p privates))
+  (let ((privates (%js-private-ht obj)))
+    (if privates
         (multiple-value-bind (v f) (gethash field-name privates)
           (if f v +js-undefined+))
         +js-undefined+)))
@@ -116,19 +121,17 @@ this = the new instance."
 (defun %js-class-private-field-set (obj field-name value)
   "Write a private field on OBJ."
   (when (%js-ht-p obj)
-    (let ((privates (gethash "__private__" obj)))
-      (unless (and privates (%js-ht-p privates))
-        (setf privates (%js-make-ht)
-              (gethash "__private__" obj) privates))
+    (let ((privates (or (%js-private-ht obj)
+                        (let ((ht (%js-make-ht)))
+                          (setf (gethash "__private__" obj) ht)
+                          ht))))
       (setf (gethash field-name privates) value)))
   value)
 
 (defun %js-has-private-field (obj field-name)
   "True if OBJ has the named private field."
-  (let ((privates (and (%js-ht-p obj) (gethash "__private__" obj))))
-    (if (and privates (%js-ht-p privates))
-        (nth-value 1 (gethash field-name privates))
-        nil)))
+  (let ((privates (%js-private-ht obj)))
+    (and privates (nth-value 1 (gethash field-name privates)))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Error class hierarchy (ES2015+)
@@ -227,18 +230,5 @@ Example: (define-js-error-subclasses (\"TypeError\" type-error)  ...)
   value)
 
 (defun %js-spread (iterable)
-  "Expand iterable into a list (for use with apply)."
-  (cond
-    ((%js-vec-p iterable)
-     (loop for i below (length iterable) collect (aref iterable i)))
-    ((stringp iterable)
-     (loop for ch across iterable collect (string ch)))
-    ;; JS Set — iterate in insertion order
-    ((js-set-p iterable)
-     (copy-list (js-set-order iterable)))
-    (t
-     (%js-iterator-to-array
-      (if (%js-ht-p iterable)
-          (let ((iter-fn (gethash "@@iterator" iterable)))
-            (if iter-fn (funcall iter-fn) iterable))
-          iterable)))))
+  "Expand iterable into a CL list (for use with apply)."
+  (%js-iter-values iterable))

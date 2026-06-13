@@ -87,19 +87,17 @@ THUNK is a VM closure so use %js-funcall (not CL:FUNCALL) to re-enter the VM."
     (js-exception (c)
       (%js-promise-reject (js-exception-value c)))))
 
+;;; Call HANDLER with VALUE; propagate JS exceptions as a rejected promise.
+(defun %js-promise-apply-handler (value handler)
+  (handler-case
+      (%js-promise-resolve (%js-funcall handler value))
+    (js-exception (c) (%js-promise-reject (js-exception-value c)))))
+
 (defun %js-promise-then (promise on-fulfilled &optional on-rejected)
-  "Chain a promise."
+  "Chain a promise through on-fulfilled / on-rejected callbacks."
   (if (js-promise-rejected-p promise)
-      (if on-rejected
-          (handler-case
-              (%js-promise-resolve (%js-funcall on-rejected (js-promise-value promise)))
-            (js-exception (c) (%js-promise-reject (js-exception-value c))))
-          promise)
-      (if on-fulfilled
-          (handler-case
-              (%js-promise-resolve (%js-funcall on-fulfilled (js-promise-value promise)))
-            (js-exception (c) (%js-promise-reject (js-exception-value c))))
-          promise)))
+      (if on-rejected (%js-promise-apply-handler (js-promise-value promise) on-rejected) promise)
+      (if on-fulfilled (%js-promise-apply-handler (js-promise-value promise) on-fulfilled) promise)))
 
 
 (defun %js-promise-finally (promise on-finally)
@@ -204,23 +202,9 @@ THUNK is a VM closure so use %js-funcall (not CL:FUNCALL) to re-enter the VM."
   value)
 
 (defun %js-yield-from (iterable)
-  "yield* — drain ITERABLE into the active generator."
+  "yield* — drain ITERABLE into the active generator by reusing %js-for-of."
   (when *%js-yield-collector*
-    (cond
-      ;; Already a JS iterator object (has "next")
-      ((%js-ht-p iterable)
-       (let ((next-fn (gethash "next" iterable)))
-         (when next-fn
-           (loop (let* ((result (%js-funcall next-fn))
-                        (done (and (%js-ht-p result) (gethash "done" result))))
-                   (when done (return (and (%js-ht-p result) (gethash "value" result))))
-                   (%js-yield (if (%js-ht-p result) (gethash "value" result) result)))))))
-      ;; Array / vector
-      ((%js-vec-p iterable)
-       (loop for i below (length iterable) do (%js-yield (aref iterable i))))
-      ;; String — iterate characters
-      ((stringp iterable)
-       (loop for ch across iterable do (%js-yield (string ch))))))
+    (%js-for-of iterable #'%js-yield))
   +js-undefined+)
 
 (defun %js-make-generator (body-fn)
