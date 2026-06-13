@@ -87,6 +87,14 @@
       (error "JS pattern parse error: expected ~S~@[ ~S~] but got ~S"
              type value (%js-peek stream))))
 
+(defmacro %js-skip-token! (stream-var)
+  "Advance STREAM-VAR past the current token, discarding it."
+  `(setf ,stream-var (nth-value 1 (%js-consume ,stream-var))))
+
+(defmacro %js-expect! (type stream-var &optional value)
+  "Consume a required token of TYPE from STREAM-VAR; signal error on mismatch."
+  `(setf ,stream-var (nth-value 1 (%js-expect ,type ,stream-var ,value))))
+
 ;;; ─── Identifier helper ───────────────────────────────────────────────────────
 
 (defun %js-ident-sym (str)
@@ -109,12 +117,9 @@
     (let ((default nil))
       (when (and (eq (%js-peek-type stream) :T-OP)
                  (equal (%js-peek-value stream) "="))
-        (multiple-value-bind (_tok rest2) (%js-consume stream)
-          (declare (ignore _tok))
-          (setf stream rest2))
+        (%js-skip-token! stream)
         (multiple-value-bind (dflt rest3) (%js-parse-default-expr stream)
-          (setf default dflt
-                stream rest3)))
+          (setf default dflt stream rest3)))
       (values (list pat default nil) stream))))
 
 (defun js-parse-array-pattern (stream)
@@ -129,49 +134,27 @@
     (loop until done do
       (let ((type (%js-peek-type stream)))
         (cond
-          ;; Closing bracket — done
           ((eq type :T-RBRACKET)
-           (multiple-value-bind (_tok rest) (%js-consume stream)
-             (declare (ignore _tok))
-             (setf stream rest done t)))
-          ;; Rest element: ...pattern
+           (%js-skip-token! stream)
+           (setf done t))
           ((eq type :T-ELLIPSIS)
-           (multiple-value-bind (_tok rest) (%js-consume stream)
-             (declare (ignore _tok))
-             (setf stream rest))
+           (%js-skip-token! stream)
            (multiple-value-bind (pat rest2) (js-parse-binding-pattern stream)
              (setf rest-pattern pat stream rest2))
-           ;; Optional trailing comma
            (when (eq (%js-peek-type stream) :T-COMMA)
-             (multiple-value-bind (_tok rest) (%js-consume stream)
-               (declare (ignore _tok))
-               (setf stream rest)))
-           (multiple-value-bind (_tok rest) (%js-expect :T-RBRACKET stream)
-             (declare (ignore _tok))
-             (setf stream rest done t)))
-          ;; Comma before a pattern — elision (hole) at the current index,
-          ;; then the comma itself is the separator.  We record the hole and
-          ;; loop back to parse the next element.
+             (%js-skip-token! stream))
+           (%js-expect! :T-RBRACKET stream)
+           (setf done t))
           ((eq type :T-COMMA)
-           (multiple-value-bind (_tok rest) (%js-consume stream)
-             (declare (ignore _tok))
-             (setf stream rest))
+           (%js-skip-token! stream)
            (push (list nil nil nil) elements))
-          ;; Normal element with optional default
           (t
            (multiple-value-bind (elem rest) (%js-parse-array-element stream)
              (push elem elements)
              (setf stream rest))
-           ;; After element: consume separator or close
-           (cond
-             ((eq (%js-peek-type stream) :T-COMMA)
-              (multiple-value-bind (_tok rest) (%js-consume stream)
-                (declare (ignore _tok))
-                (setf stream rest)))
-             (t
-              (multiple-value-bind (_tok rest) (%js-expect :T-RBRACKET stream)
-                (declare (ignore _tok))
-                (setf stream rest done t))))))))
+           (if (eq (%js-peek-type stream) :T-COMMA)
+               (%js-skip-token! stream)
+               (progn (%js-expect! :T-RBRACKET stream) (setf done t)))))))
     (values (make-js-binding-pattern
              :kind :array
              :elements (nreverse elements)
@@ -207,75 +190,50 @@
   (let ((properties nil)
         (rest-pattern nil))
     (loop
-      ;; End of object pattern
-      (when (eq (%js-peek-type stream) :T-RBRACE)
-        (multiple-value-bind (_tok rest) (%js-consume stream)
-          (declare (ignore _tok))
-          (setf stream rest))
-        (return))
-      ;; Rest property: ...ident
-      (when (eq (%js-peek-type stream) :T-ELLIPSIS)
-        (multiple-value-bind (_tok rest) (%js-consume stream)
-          (declare (ignore _tok))
-          (setf stream rest))
-        (multiple-value-bind (pat rest2) (js-parse-binding-pattern stream)
-          (setf rest-pattern pat
-                stream rest2))
-        ;; Optional trailing comma
-        (when (eq (%js-peek-type stream) :T-COMMA)
-          (multiple-value-bind (_tok rest) (%js-consume stream)
-            (declare (ignore _tok))
-            (setf stream rest)))
-        (multiple-value-bind (_tok rest) (%js-expect :T-RBRACE stream)
-          (declare (ignore _tok))
-          (setf stream rest))
-        (return))
-      ;; Named property shorthand or renamed binding
-      (multiple-value-bind (key-str key-rest) (%js-parse-property-key-string stream)
-        (setf stream key-rest)
-        (cond
-          ;; key: pattern (rename or nested pattern)
-          ((eq (%js-peek-type stream) :T-COLON)
-           (multiple-value-bind (_tok rest) (%js-consume stream)
-             (declare (ignore _tok))
-             (setf stream rest))
-           (multiple-value-bind (local-pat rest2) (js-parse-binding-pattern stream)
-             (setf stream rest2)
-             (let ((default nil))
-               (when (and (eq (%js-peek-type stream) :T-OP)
-                          (equal (%js-peek-value stream) "="))
-                 (multiple-value-bind (_tok rest3) (%js-consume stream)
-                   (declare (ignore _tok))
-                   (setf stream rest3))
-                 (multiple-value-bind (dflt rest4) (%js-parse-default-expr stream)
-                   (setf default dflt
-                         stream rest4)))
-               (push (list key-str local-pat default nil) properties))))
-          ;; Shorthand {key} or {key = default}
-          (t
-           (let ((local-pat (make-js-binding-pattern
-                             :kind :ident
-                             :name (%js-ident-sym key-str)))
-                 (default nil))
-             (when (and (eq (%js-peek-type stream) :T-OP)
-                        (equal (%js-peek-value stream) "="))
-               (multiple-value-bind (_tok rest) (%js-consume stream)
-                 (declare (ignore _tok))
-                 (setf stream rest))
-               (multiple-value-bind (dflt rest2) (%js-parse-default-expr stream)
-                 (setf default dflt
-                       stream rest2)))
-             (push (list key-str local-pat default nil) properties)))))
-      ;; Consume trailing comma
-      (if (eq (%js-peek-type stream) :T-COMMA)
-          (multiple-value-bind (_tok rest) (%js-consume stream)
-            (declare (ignore _tok))
-            (setf stream rest))
-          (progn
-            (multiple-value-bind (_tok rest) (%js-expect :T-RBRACE stream)
-              (declare (ignore _tok))
-              (setf stream rest))
-            (return))))
+      (cond
+        ;; End of object pattern
+        ((eq (%js-peek-type stream) :T-RBRACE)
+         (%js-skip-token! stream)
+         (return))
+        ;; Rest property: ...ident
+        ((eq (%js-peek-type stream) :T-ELLIPSIS)
+         (%js-skip-token! stream)
+         (multiple-value-bind (pat rest2) (js-parse-binding-pattern stream)
+           (setf rest-pattern pat stream rest2))
+         (when (eq (%js-peek-type stream) :T-COMMA) (%js-skip-token! stream))
+         (%js-expect! :T-RBRACE stream)
+         (return))
+        ;; Named property shorthand or renamed binding
+        (t
+         (multiple-value-bind (key-str key-rest) (%js-parse-property-key-string stream)
+           (setf stream key-rest)
+           (let ((prop (if (eq (%js-peek-type stream) :T-COLON)
+                           ;; key: pattern (rename or nested)
+                           (progn
+                             (%js-skip-token! stream)
+                             (multiple-value-bind (local-pat rest2) (js-parse-binding-pattern stream)
+                               (setf stream rest2)
+                               (let ((default nil))
+                                 (when (and (eq (%js-peek-type stream) :T-OP)
+                                            (equal (%js-peek-value stream) "="))
+                                   (%js-skip-token! stream)
+                                   (multiple-value-bind (dflt rest3) (%js-parse-default-expr stream)
+                                     (setf default dflt stream rest3)))
+                                 (list key-str local-pat default nil))))
+                           ;; Shorthand {key} or {key = default}
+                           (let ((local-pat (make-js-binding-pattern :kind :ident :name (%js-ident-sym key-str)))
+                                 (default nil))
+                             (when (and (eq (%js-peek-type stream) :T-OP)
+                                        (equal (%js-peek-value stream) "="))
+                               (%js-skip-token! stream)
+                               (multiple-value-bind (dflt rest2) (%js-parse-default-expr stream)
+                                 (setf default dflt stream rest2)))
+                             (list key-str local-pat default nil)))))
+             (push prop properties)))
+         ;; Consume trailing comma or closing brace
+         (if (eq (%js-peek-type stream) :T-COMMA)
+             (%js-skip-token! stream)
+             (progn (%js-expect! :T-RBRACE stream) (return))))))
     (values (make-js-binding-pattern
              :kind :object
              :properties (nreverse properties)
@@ -367,34 +325,22 @@
 
 (defun js-parse-binding-pattern (stream)
   "Parse a BindingPattern from STREAM.  Dispatches on the leading token:
-    '[' → ArrayPattern (consumes bracket then calls js-parse-array-pattern)
-    '{' → ObjectPattern (consumes brace   then calls js-parse-object-pattern)
-    ident / keyword that names a variable → ident pattern
-
+    '[' → ArrayPattern  '{' → ObjectPattern  identifier → ident pattern.
   Returns (values js-binding-pattern remaining-stream)."
-  (let ((type (%js-peek-type stream)))
-    (cond
-      ;; Array destructuring pattern
-      ((eq type :T-LBRACKET)
-       (multiple-value-bind (_tok rest) (%js-consume stream)
-         (declare (ignore _tok))
-         (js-parse-array-pattern rest)))
-      ;; Object destructuring pattern
-      ((eq type :T-LBRACE)
-       (multiple-value-bind (_tok rest) (%js-consume stream)
-         (declare (ignore _tok))
-         (js-parse-object-pattern rest)))
-      ;; Simple identifier binding (including JS keywords used as local names,
-      ;; e.g. catch(error) where 'error' might be typed as :T-IDENT)
-      ((eq type :T-IDENT)
-       (multiple-value-bind (tok rest) (%js-consume stream)
-         (values (make-js-binding-pattern
-                  :kind :ident
-                  :name (%js-ident-sym (%js-tok-value tok)))
-                 rest)))
-      (t
-       (error "JS pattern parse error: expected '[', '{', or identifier but got ~S"
-              (%js-peek stream))))))
+  (case (%js-peek-type stream)
+    (:T-LBRACKET
+     (%js-skip-token! stream)
+     (js-parse-array-pattern stream))
+    (:T-LBRACE
+     (%js-skip-token! stream)
+     (js-parse-object-pattern stream))
+    (:T-IDENT
+     (multiple-value-bind (tok rest) (%js-consume stream)
+       (values (make-js-binding-pattern :kind :ident :name (%js-ident-sym (%js-tok-value tok)))
+               rest)))
+    (t
+     (error "JS pattern parse error: expected '[', '{', or identifier but got ~S"
+            (%js-peek stream)))))
 
 
 ;;; AST lowering (%js-build-pattern-let, %js-lower-element, js-lower-binding-pattern)
