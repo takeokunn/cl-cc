@@ -227,3 +227,58 @@
   (let* ((obj    (cl-cc/javascript::%js-make-object))
          (result (cl-cc/javascript::%js-resolve-object-method obj "nonExistent")))
     (assert-eq cl-cc/javascript::+js-undefined+ result)))
+
+;;; ─── Object.is — NaN/zero special cases ─────────────────────────────────────
+
+(deftest-each js-rt-object-is
+  "Object.is(a, b) treats NaN-equal-NaN as true, +0/-0 as distinct."
+  :cases (("nan-nan"   :js-nan        :js-nan        t)   ; NaN is NaN: true
+          ("nan-float" :js-nan        1.0d0          nil)  ; NaN is 1.0: false
+          ("+0/-0"     0.0d0         -0.0d0          nil)  ; +0 is -0: false
+          ("-0/+0"    -0.0d0          0.0d0          nil)  ; -0 is +0: false
+          ("same-num"  3.0d0          3.0d0          t)
+          ("same-str"  "x"            "x"            t)
+          ("diff-str"  "a"            "b"            nil))
+  (a b expected)
+  (assert-equal expected (cl-cc/javascript::%js-object-is a b)))
+
+;;; ─── ToString: float formatting + Infinity + BigInt ──────────────────────────
+
+(deftest-each js-rt-to-string-extended
+  "ToString handles floats (no trailing .0), Infinity, BigInt, and arrays."
+  :cases (("int-float"    7.0d0                            "7")
+          ("float-point"  3.14d0                           "3.14")
+          ("infinity"     cl-cc/javascript::+js-infinity+  "Infinity")
+          ("neg-inf"      cl-cc/javascript::+js-neg-infinity+ "-Infinity")
+          ("float-nan"    cl-cc/javascript::*js-nan-float* "NaN")
+          ("bigint"       (cl-cc/javascript::%make-js-bigint 99) "99"))
+  (value expected)
+  (assert-string= expected (cl-cc/javascript::%js-to-string value)))
+
+;;; ─── Template string joining ─────────────────────────────────────────────────
+
+(deftest js-rt-template-string-join
+  "%js-template-string concatenates parts, coercing each to string."
+  (assert-string= "hello 42 world"
+                  (cl-cc/javascript::%js-template-string '("hello " 42 " world")))
+  (assert-string= "true and false"
+                  (cl-cc/javascript::%js-template-string '(t " and " nil))))
+
+;;; ─── structuredClone / deep-clone ────────────────────────────────────────────
+
+(deftest js-rt-deep-clone-array
+  "%js-deep-clone copies arrays element-by-element (no shared structure)."
+  (let* ((orig  (%jr-arr 1 2 3))
+         (clone (cl-cc/javascript::%js-deep-clone orig)))
+    (assert-true (cl-cc/javascript::%js-vec-p clone))
+    (assert-= (length orig) (length clone))
+    (assert-= 1 (aref clone 0))
+    (assert-false (eq orig clone))))
+
+(deftest js-rt-deep-clone-object
+  "%js-deep-clone copies hash-table objects (no shared structure)."
+  (let* ((orig  (cl-cc/javascript::%js-make-object "x" 10))
+         (clone (cl-cc/javascript::%js-deep-clone orig)))
+    (assert-true (cl-cc/javascript::%js-ht-p clone))
+    (assert-= 10 (gethash "x" clone))
+    (assert-false (eq orig clone))))
