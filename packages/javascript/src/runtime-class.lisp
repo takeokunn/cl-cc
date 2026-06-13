@@ -10,18 +10,14 @@
 
 (defun %js-make-class (&rest args)
   "Build a JS class object. ARGS = (SUPER CTOR name1 fn1 name2 fn2 …): SUPER is
-the parent class object (or nil/undefined), CTOR the constructor fn taking
-(this . args) (or nil/undefined), and the rest alternating method-name strings
-and method fns. Methods live on the class's __prototype__; %js-new links each
-instance's __proto__ to it so method lookup walks the chain, and the prototype's
-own __proto__ is SUPER's prototype (inherited methods). The class lowering emits
-a call to this helper. NOTE: pure &rest (not `super ctor &rest`) — required args
-before &rest marshal incorrectly through the VM host bridge when the rest holds a
-vm-closure, so we mirror %js-make-object's pure-&rest shape.
-
-DORMANT: the class lowering currently emits ast-defclass, not a call to this
-helper (the prototype-model lowering hit an unresolved hang and was reverted).
-Kept as foundation for a future working JS class implementation."
+the parent class object (or nil/undefined), CTOR the constructor fn, and the rest
+alternating method-name strings and method fns. Methods live on __prototype__;
+%js-new links each instance's __proto__ to it for prototype-chain lookup.
+An \"@@static\" marker in the tail separates instance methods from static ones.
+Called at runtime via the :metaclass slot of the ast-defclass node emitted by
+%js-lower-class-to-ast in parser-class-lower.lisp. NOTE: pure &rest shape (not
+`super ctor &rest`) — required args before &rest marshal incorrectly through the
+VM host bridge for vm-closure values."
   (let* ((super (first args))
          (ctor  (second args))
          (rest  (cddr args))

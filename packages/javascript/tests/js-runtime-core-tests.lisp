@@ -202,6 +202,100 @@ accessor slots (regression: old check only matched __X__ form)."
      obj (lambda (k &rest _) (declare (ignore _)) (push k keys)))
     (assert-equal '("a" "b") (sort keys #'string<))))
 
+;;; ─── ToNumber coercions ──────────────────────────────────────────────────────
+
+(deftest-each js-rt-to-number
+  "ToNumber coerces CL values to JS double-floats; strings that cannot parse yield NaN."
+  :cases (("integer"    42                                   42.0d0)
+          ("true"       t                                    1.0d0)
+          ("false"      nil                                  0.0d0)
+          ("null"       cl-cc/javascript::+js-null+          0.0d0)
+          ("empty-str"  ""                                   0.0d0)
+          ("num-str"    "3.14"                               3.14d0)
+          ("int-str"    "42"                                 42.0d0)
+          ("trimmed"    "  7  "                              7.0d0))
+  (value expected)
+  (assert-= expected (cl-cc/javascript::%js-to-number value)))
+
+(deftest js-rt-to-number-nan-str
+  "ToNumber(\"abc\") = NaN."
+  (assert-true (cl-cc/javascript::%js-nan-p (cl-cc/javascript::%js-to-number "abc"))))
+
+;;; ─── typeof: extended types ──────────────────────────────────────────────────
+
+(deftest-each js-rt-typeof-extended
+  "typeof distinguishes host functions, plain hash-tables, and BigInt values."
+  :cases (("function"  (lambda () nil)                         "function")
+          ("object-ht" (cl-cc/javascript::%js-make-ht)         "object")
+          ("bigint"    (cl-cc/javascript::%make-js-bigint 5)   "bigint"))
+  (value expected)
+  (assert-string= expected (cl-cc/javascript::%js-typeof value)))
+
+(deftest js-rt-typeof-callable-object
+  "typeof returns \"function\" for a hash-table whose \"__call__\" slot is set."
+  (let ((fn-obj (cl-cc/javascript::%js-make-ht)))
+    (setf (gethash "__call__" fn-obj) (lambda () nil))
+    (assert-string= "function" (cl-cc/javascript::%js-typeof fn-obj))))
+
+;;; ─── Relational operators ────────────────────────────────────────────────────
+
+(deftest-each js-rt-relational-num
+  "Numeric relational operators (<, >, <=, >=) coerce operands to doubles."
+  :cases (("lt-true"   #'cl-cc/javascript::%js-lt 1 2 t)
+          ("lt-false"  #'cl-cc/javascript::%js-lt 2 1 nil)
+          ("gt-true"   #'cl-cc/javascript::%js-gt 5 3 t)
+          ("gt-false"  #'cl-cc/javascript::%js-gt 3 5 nil)
+          ("le-eq"     #'cl-cc/javascript::%js-le 3 3 t)
+          ("le-less"   #'cl-cc/javascript::%js-le 2 3 t)
+          ("ge-eq"     #'cl-cc/javascript::%js-ge 3 3 t)
+          ("ge-more"   #'cl-cc/javascript::%js-ge 4 3 t))
+  (fn a b expected)
+  (assert-equal expected (funcall fn a b)))
+
+(deftest-each js-rt-relational-string
+  "String relational comparison is lexicographic (code-unit order)."
+  :cases (("lt-abc"   #'cl-cc/javascript::%js-lt "a" "b" t)
+          ("gt-abc"   #'cl-cc/javascript::%js-gt "b" "a" t)
+          ("lt-same"  #'cl-cc/javascript::%js-lt "a" "a" nil)
+          ("le-same"  #'cl-cc/javascript::%js-le "a" "a" t))
+  (fn a b expected)
+  (assert-equal expected (funcall fn a b)))
+
+(deftest js-rt-relational-nan-always-false
+  "Any relational comparison involving NaN returns nil (JS spec)."
+  (let ((nan cl-cc/javascript::+js-nan+))
+    (assert-false (cl-cc/javascript::%js-lt nan 1))
+    (assert-false (cl-cc/javascript::%js-gt nan 1))
+    (assert-false (cl-cc/javascript::%js-le nan 1))
+    (assert-false (cl-cc/javascript::%js-ge nan 1))))
+
+;;; ─── Nullish coalescing ──────────────────────────────────────────────────────
+
+(deftest-each js-rt-nullish-coalesce
+  "?? returns RHS only when LHS is null or undefined; all other falsy values use LHS."
+  :cases (("null-rhs"  cl-cc/javascript::+js-null+       "default" "default")
+          ("undef-rhs" cl-cc/javascript::+js-undefined+  "default" "default")
+          ("false-lhs" nil                               "default" nil)
+          ("zero-lhs"  0                                 "default" 0)
+          ("str-lhs"   "x"                               "default" "x"))
+  (lhs rhs expected)
+  (assert-equal expected (cl-cc/javascript::%js-nullish-coalesce lhs rhs)))
+
+;;; ─── instanceof ──────────────────────────────────────────────────────────────
+
+(deftest js-rt-instanceof-true
+  "instanceof returns true when the constructor's __prototype__ is in the __proto__ chain."
+  (let* ((klass (cl-cc/javascript::%js-make-class nil nil))
+         (obj   (cl-cc/javascript::%js-new klass)))
+    (assert-true (cl-cc/javascript::%js-instanceof obj klass))))
+
+(deftest js-rt-instanceof-false
+  "instanceof returns nil when the prototype chains do not intersect."
+  (let* ((klass-a (cl-cc/javascript::%js-make-class nil nil))
+         (klass-b (cl-cc/javascript::%js-make-class nil nil))
+         (obj     (cl-cc/javascript::%js-new klass-a)))
+    (assert-false (cl-cc/javascript::%js-instanceof obj klass-b))))
+
 ;;; ─── try-catch-finally ───────────────────────────────────────────────────────
 
 (deftest js-rt-try-catch
