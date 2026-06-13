@@ -978,3 +978,52 @@ accessor slots (regression: the old inline check only matched __X__ form)."
     (let* ((descs (cl-cc/javascript::%js-object-get-own-property-descriptors obj))
            (found (nth-value 1 (gethash key descs))))
       (assert-equal should-appear found))))
+
+;;; ─── Temporal helper functions ───────────────────────────────────────────────
+
+(deftest-each js-rt-temporal-pad
+  "%temporal-pad zero-pads integers to the specified width."
+  :cases (("year-4"   2025 4 "2025")
+          ("month-2"  3    2 "03")
+          ("day-2"    15   2 "15")
+          ("narrow"   9    1 "9"))
+  (n width expected)
+  (assert-string= expected (cl-cc/javascript::%temporal-pad n width)))
+
+(deftest-each js-rt-temporal-3way-compare
+  "%temporal-3way-compare returns -1/0/1 for ordered numeric comparison."
+  :cases (("less"    1 2 -1.0d0)
+          ("equal"   5 5  0.0d0)
+          ("greater" 9 3  1.0d0))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%temporal-3way-compare a b)))
+
+(deftest-each js-rt-temporal-parse-iso-fields
+  "%temporal-parse-iso-fields decomposes an ISO-8601 datetime string."
+  :cases (("full"   "2025-06-13T14:30:00" 2025 6 13 14 30 0)
+          ("date-only" "2025-01-01"        2025 1  1  0  0 0))
+  (s exp-y exp-mo exp-d exp-h exp-mi exp-s)
+  (multiple-value-bind (y mo d h mi s) (cl-cc/javascript::%temporal-parse-iso-fields s)
+    (assert-= exp-y  y)
+    (assert-= exp-mo mo)
+    (assert-= exp-d  d)
+    (assert-= exp-h  h)
+    (assert-= exp-mi mi)
+    (assert-= exp-s  s)))
+
+(deftest-each js-rt-temporal-duration-to-seconds
+  "%temporal-duration-to-seconds converts duration hash-tables to total seconds."
+  :cases (("one-hour"   "hours"   1 3600)
+          ("one-minute" "minutes" 1 60)
+          ("one-second" "seconds" 1 1)
+          ("one-day"    "days"    1 86400))
+  (unit n expected)
+  (let ((dur (cl-cc/javascript::%js-make-object unit (coerce n 'double-float))))
+    (assert-= expected (cl-cc/javascript::%temporal-duration-to-seconds dur))))
+
+(deftest js-rt-temporal-parse-time-fields
+  "%temporal-parse-time-fields decomposes an HH:MM:SS string."
+  (multiple-value-bind (h m s) (cl-cc/javascript::%temporal-parse-time-fields "14:30:05")
+    (assert-= 14 h)
+    (assert-= 30 m)
+    (assert-=  5 s)))

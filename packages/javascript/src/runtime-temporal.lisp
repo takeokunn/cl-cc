@@ -26,7 +26,16 @@
      (%temporal-epoch-offset)))
 
 (defun %temporal-pad (n width)
-  (format nil (concatenate 'string "~" (format nil "~D" width) ",'0D") n))
+  (format nil "~v,'0D" width n))
+
+(defun %temporal-3way-compare (a b)
+  "Return -1.0d0, 0.0d0, or 1.0d0 for ordered comparison of numeric A and B."
+  (cond ((< a b) -1.0d0) ((> a b) 1.0d0) (t 0.0d0)))
+
+(defun %temporal-parse-time-fields (s)
+  "Parse a time string \"HH:MM:SS\" into (values hour minute second)."
+  (flet ((field (start end) (if (>= (length s) end) (parse-integer s :start start :end end) 0)))
+    (values (field 0 2) (field 3 5) (field 6 8))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Temporal.Now
@@ -81,8 +90,7 @@
      "equals"            (lambda (other)
                            (= ts (or (gethash "epochSeconds" other) 0)))
      "compare"           (lambda (other)
-                           (let ((o (or (gethash "epochSeconds" other) 0)))
-                             (cond ((< ts o) -1.0d0) ((> ts o) 1.0d0) (t 0.0d0)))))))
+                           (%temporal-3way-compare ts (or (gethash "epochSeconds" other) 0))))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Temporal.PlainDate
@@ -118,9 +126,9 @@
                         (%js-temporal-plain-date ny nm nd))))
      "equals"     (lambda (other) (and (= y (gethash "year" other)) (= m (gethash "month" other)) (= d (gethash "day" other))))
      "compare"    (lambda (other)
-                    (let ((ts1 (%temporal-encode y m d))
-                          (ts2 (%temporal-encode (gethash "year" other) (gethash "month" other) (gethash "day" other))))
-                      (cond ((< ts1 ts2) -1.0d0) ((> ts1 ts2) 1.0d0) (t 0.0d0)))))))
+                    (%temporal-3way-compare
+                     (%temporal-encode y m d)
+                     (%temporal-encode (gethash "year" other) (gethash "month" other) (gethash "day" other)))))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Temporal.PlainTime
@@ -221,16 +229,17 @@
 ;;;  Temporal.Duration
 ;;; -----------------------------------------------------------------------
 
+;;; Seconds-per-unit table for %temporal-duration-to-seconds.
+(defparameter *%temporal-unit-seconds*
+  '(("years" . 31557600) ("months" . 2629800) ("weeks" . 604800)
+    ("days"  . 86400)    ("hours"  . 3600)    ("minutes" . 60) ("seconds" . 1))
+  "Alist mapping Temporal duration field names to their second equivalents.")
+
 (defun %temporal-duration-to-seconds (duration)
   "Convert a Temporal.Duration to total seconds."
   (if (%js-ht-p duration)
-      (+ (* (or (gethash "years"   duration) 0) 31557600)
-         (* (or (gethash "months"  duration) 0) 2629800)
-         (* (or (gethash "weeks"   duration) 0) 604800)
-         (* (or (gethash "days"    duration) 0) 86400)
-         (* (or (gethash "hours"   duration) 0) 3600)
-         (* (or (gethash "minutes" duration) 0) 60)
-         (or (gethash "seconds" duration) 0))
+      (loop for (key . scale) in *%temporal-unit-seconds*
+            sum (* (or (gethash key duration) 0) scale))
       0))
 
 (defun %js-temporal-duration (&key (years 0) (months 0) (weeks 0) (days 0)
@@ -286,29 +295,26 @@
 ;;;  Parse helpers
 ;;; -----------------------------------------------------------------------
 
+(defun %temporal-parse-iso-fields (s)
+  "Parse an ISO-8601 string S into (values year month day hour minute second).
+Fields beyond what S contains default to 0."
+  (flet ((field (start end) (if (>= (length s) end) (parse-integer s :start start :end end) 0)))
+    (values (field 0 4) (field 5 7) (field 8 10) (field 11 13) (field 14 16) (field 17 19))))
+
 (defun %js-temporal-parse-instant (str)
-  (let ((s (%js-to-string str)))
-    (handler-case
-        (let* ((year  (parse-integer s :start 0 :end 4))
-               (month (parse-integer s :start 5 :end 7))
-               (day   (parse-integer s :start 8 :end 10))
-               (hour  (if (>= (length s) 13) (parse-integer s :start 11 :end 13) 0))
-               (min   (if (>= (length s) 16) (parse-integer s :start 14 :end 16) 0))
-               (sec   (if (>= (length s) 19) (parse-integer s :start 17 :end 19) 0)))
-          (%js-temporal-instant (%temporal-encode year month day hour min sec)))
-      (error () (%js-temporal-instant (%temporal-now-unix-seconds))))))
+  (handler-case
+      (multiple-value-bind (y mo d h mi s) (%temporal-parse-iso-fields (%js-to-string str))
+        (%js-temporal-instant (%temporal-encode y mo d h mi s)))
+    (error () (%js-temporal-instant (%temporal-now-unix-seconds)))))
 
 (defun %js-temporal-parse-plain-date (str)
-  (let ((s (%js-to-string str)))
-    (handler-case
-        (let ((year  (parse-integer s :start 0 :end 4))
-              (month (parse-integer s :start 5 :end 7))
-              (day   (parse-integer s :start 8 :end 10)))
-          (%js-temporal-plain-date year month day))
-      (error ()
-        (multiple-value-bind (s mn h d m y) (%temporal-decode (%temporal-now-unix-seconds))
-          (declare (ignore s mn h))
-          (%js-temporal-plain-date y m d))))))
+  (handler-case
+      (multiple-value-bind (y mo d) (%temporal-parse-iso-fields (%js-to-string str))
+        (%js-temporal-plain-date y mo d))
+    (error ()
+      (multiple-value-bind (s mn h d m y) (%temporal-decode (%temporal-now-unix-seconds))
+        (declare (ignore s mn h))
+        (%js-temporal-plain-date y m d)))))
 
 ;;; -----------------------------------------------------------------------
 ;;;  The Temporal global object
