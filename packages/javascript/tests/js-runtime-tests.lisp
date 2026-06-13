@@ -50,22 +50,26 @@
 
 ;;; ─── Equality / truthiness ────────────────────────────────────────────────────
 
-(deftest js-rt-strict-eq
+(deftest-each js-rt-strict-eq
   "=== (strict equality) uses type+value identity."
-  (assert-true  (cl-cc/javascript::%js-strict-eq 3 3))
-  (assert-false (cl-cc/javascript::%js-strict-eq 3 4))
-  (assert-true  (cl-cc/javascript::%js-strict-eq "a" "a"))
-  (assert-false (cl-cc/javascript::%js-strict-eq "a" "b")))
+  :cases (("same-num"  3   3   t)
+          ("diff-num"  3   4   nil)
+          ("same-str"  "a" "a" t)
+          ("diff-str"  "a" "b" nil))
+  (a b expected)
+  (assert-equal expected (cl-cc/javascript::%js-strict-eq a b)))
 
-(deftest js-rt-truthy
-  "Truthiness: 0/\"\"/nil/undefined/null are falsy; everything else is truthy."
-  (assert-true  (cl-cc/javascript::%js-truthy 1))
-  (assert-true  (cl-cc/javascript::%js-truthy "x"))
-  (assert-false (cl-cc/javascript::%js-truthy 0))
-  (assert-false (cl-cc/javascript::%js-truthy ""))
-  (assert-false (cl-cc/javascript::%js-truthy nil))
-  (assert-false (cl-cc/javascript::%js-truthy cl-cc/javascript::+js-undefined+))
-  (assert-false (cl-cc/javascript::%js-truthy cl-cc/javascript::+js-null+)))
+(deftest-each js-rt-truthy
+  "0/\"\"/nil/undefined/null are falsy; everything else is truthy."
+  :cases (("truthy-num"  1                                    t)
+          ("truthy-str"  "x"                                  t)
+          ("falsy-zero"  0                                    nil)
+          ("falsy-str"   ""                                   nil)
+          ("falsy-nil"   nil                                  nil)
+          ("falsy-undef" cl-cc/javascript::+js-undefined+     nil)
+          ("falsy-null"  cl-cc/javascript::+js-null+          nil))
+  (value expected)
+  (assert-equal expected (cl-cc/javascript::%js-truthy value)))
 
 ;;; ─── Array ───────────────────────────────────────────────────────────────────
 
@@ -143,15 +147,19 @@
   (assert-=  2  (cl-cc/javascript::%js-string-index-of  "hello" "l"))
   (assert-= -1  (cl-cc/javascript::%js-string-index-of  "hello" "z")))
 
-(deftest js-rt-string-case
-  "toUpperCase and toLowerCase."
-  (assert-string= "HELLO" (cl-cc/javascript::%js-string-to-upper-case "hello"))
-  (assert-string= "hello" (cl-cc/javascript::%js-string-to-lower-case "HELLO")))
+(deftest-each js-rt-string-case
+  "toUpperCase and toLowerCase normalize character case."
+  :cases (("upper" #'cl-cc/javascript::%js-string-to-upper-case "hello" "HELLO")
+          ("lower" #'cl-cc/javascript::%js-string-to-lower-case "HELLO" "hello"))
+  (fn input expected)
+  (assert-string= expected (funcall fn input)))
 
-(deftest js-rt-string-repeat
+(deftest-each js-rt-string-repeat
   "repeat n times; repeat 0 yields empty string."
-  (assert-string= "ababab" (cl-cc/javascript::%js-string-repeat "ab" 3))
-  (assert-string= ""       (cl-cc/javascript::%js-string-repeat "ab" 0)))
+  :cases (("three-times" "ab" 3 "ababab")
+          ("zero-times"  "ab" 0 ""))
+  (s n expected)
+  (assert-string= expected (cl-cc/javascript::%js-string-repeat s n)))
 
 (deftest js-rt-string-split-empty-sep
   "split with empty separator yields individual characters."
@@ -239,11 +247,13 @@
   (a b expected)
   (assert-= expected (cl-cc/javascript::%js-bitwise-xor a b)))
 
-(deftest js-rt-bitwise-not
+(deftest-each js-rt-bitwise-not
   "Bitwise NOT (~x) inverts all 32 bits and sign-extends."
-  (assert-= -1 (cl-cc/javascript::%js-bitwise-not 0))
-  (assert-=  0 (cl-cc/javascript::%js-bitwise-not -1))
-  (assert-= -2 (cl-cc/javascript::%js-bitwise-not 1)))
+  :cases (("zero"     0  -1)
+          ("neg-one" -1   0)
+          ("one"      1  -2))
+  (x expected)
+  (assert-= expected (cl-cc/javascript::%js-bitwise-not x)))
 
 (deftest-each js-rt-shift-left
   "Left shift << by various amounts."
@@ -260,10 +270,12 @@
   (a b expected)
   (assert-= expected (cl-cc/javascript::%js-shift-right a b)))
 
-(deftest js-rt-unsigned-shift-right
+(deftest-each js-rt-unsigned-shift-right
   "Unsigned right shift >>> always yields a non-negative result."
-  (assert-= 1073741822 (cl-cc/javascript::%js-unsigned-shift-right -8 2))
-  (assert-= 2          (cl-cc/javascript::%js-unsigned-shift-right  8 2)))
+  :cases (("neg"  -8 2 1073741822)
+          ("pos"   8 2 2))
+  (a b expected)
+  (assert-= expected (cl-cc/javascript::%js-unsigned-shift-right a b)))
 
 ;;; ─── Set built-ins ───────────────────────────────────────────────────────────
 
