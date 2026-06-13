@@ -714,6 +714,59 @@ nil-valued keys as missing."
     (assert-= 3 (length evens))
     (assert-= 2 (length odds))))
 
+;;; ─── URI encoding / base64 ───────────────────────────────────────────────────
+
+(deftest-each js-rt-encode-uri-component
+  "encodeURIComponent encodes special chars; spaces become %20."
+  :cases (("space"   "hello world"  "hello%20world")
+          ("slash"   "a/b"          "a%2Fb")
+          ("plain"   "abc123"       "abc123"))
+  (s expected)
+  (assert-string= expected (cl-cc/javascript::%js-encode-uri-component s)))
+
+(deftest js-rt-decode-uri-component
+  "decodeURIComponent undoes percent-encoding."
+  (assert-string= "hello world" (cl-cc/javascript::%js-decode-uri-component "hello%20world")))
+
+(deftest js-rt-btoa-atob-roundtrip
+  "btoa and atob form a roundtrip encoding."
+  (let* ((s "Hello, World!")
+         (encoded (cl-cc/javascript::%js-btoa s))
+         (decoded (cl-cc/javascript::%js-atob encoded)))
+    (assert-string= s decoded)))
+
+;;; ─── Shift operators ─────────────────────────────────────────────────────────
+
+(deftest-each js-rt-shift-ops
+  "Bit-shift operators operate on 32-bit integer representation."
+  :cases (("shl"   #'cl-cc/javascript::%js-shift-left          1  4   16)
+          ("shr"   #'cl-cc/javascript::%js-shift-right         16 2    4)
+          ("ushr"  #'cl-cc/javascript::%js-unsigned-shift-right  4 1    2))
+  (fn a b expected)
+  (assert-= expected (funcall fn a b)))
+
+;;; ─── RegExp public API ───────────────────────────────────────────────────────
+
+(deftest js-rt-regex-test-match
+  "regex-test returns t when the pattern matches."
+  (let ((re (cl-cc/javascript::%js-make-regex "hello")))
+    (assert-true  (cl-cc/javascript::%js-regex-test re "say hello world"))
+    (assert-false (cl-cc/javascript::%js-regex-test re "goodbye"))))
+
+(deftest js-rt-regex-exec-returns-match
+  "regex-exec returns match info object with index and '0' key."
+  (let* ((re (cl-cc/javascript::%js-make-regex "lo"))
+         (m  (cl-cc/javascript::%js-regex-exec re "hello" 0)))
+    (assert-false (eq m cl-cc/javascript::+js-null+))
+    (assert-string= "lo" (gethash "0" m))
+    (assert-= 3 (truncate (gethash "index" m)))))
+
+(deftest js-rt-regex-exec-no-match
+  "regex-exec returns null when there is no match."
+  (let* ((re (cl-cc/javascript::%js-make-regex "xyz"))
+         (m  (cl-cc/javascript::%js-regex-exec re "hello" 0)))
+    (assert-eq cl-cc/javascript::+js-null+ m)))
+
 ;;; ─── Method resolution via get-prop ──────────────────────────────────────────
 
 (deftest js-rt-method-resolution-array
