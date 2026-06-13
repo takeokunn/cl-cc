@@ -41,6 +41,7 @@
    (:file "runtime-property")
    (:file "runtime-control")
    (:file "runtime-array")
+   (:file "runtime-array-es2023")
    (:file "runtime-object")
    (:file "runtime-string")
    (:file "runtime-math")
