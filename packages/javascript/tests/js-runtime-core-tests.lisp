@@ -315,3 +315,67 @@ accessor slots (regression: old check only matched __X__ form)."
      nil
      (lambda () (setf ran t)))
     (assert-true ran)))
+
+;;; ─── JS + operator (add / string-concat) ────────────────────────────────────
+
+(deftest js-rt-add-numeric
+  "%js-add with two numbers returns their sum."
+  (assert-= 7 (cl-cc/javascript::%js-add 3 4)))
+
+(deftest-each js-rt-add-string-concat
+  "%js-add concatenates when at least one operand is a string."
+  :cases (("str-str"  "a"  "b"  "ab")
+          ("num-str"   1   "x"  "1x")
+          ("str-num"  "x"   1   "x1"))
+  (a b expected)
+  (assert-string= expected (cl-cc/javascript::%js-add a b)))
+
+;;; ─── JS /, %, ** arithmetic operators ───────────────────────────────────────
+
+(deftest-each js-rt-arithmetic-ops
+  "Divide, mod, and pow handle JS floating-point semantics."
+  :cases (("div-float" #'cl-cc/javascript::%js-divide 10  4   2.5d0)
+          ("mod-pos"   #'cl-cc/javascript::%js-mod    10  3   1)
+          ("mod-neg"   #'cl-cc/javascript::%js-mod    -5  3  -2)
+          ("pow-two"   #'cl-cc/javascript::%js-pow     2 10 1024))
+  (fn a b expected)
+  (assert-= expected (funcall fn a b)))
+
+(deftest js-rt-divide-by-zero-infinity
+  "1/0 yields +Infinity (IEEE 754); 0/0 yields NaN."
+  (assert-true (cl-cc/javascript::%js-float-infinity-p (cl-cc/javascript::%js-divide 1 0)))
+  (assert-true (cl-cc/javascript::%js-nan-p (cl-cc/javascript::%js-divide 0 0))))
+
+(deftest js-rt-mod-zero-denominator-nan
+  "x % 0 yields NaN."
+  (assert-true (cl-cc/javascript::%js-nan-p (cl-cc/javascript::%js-mod 5 0))))
+
+;;; ─── Property: delete / in / optional-chain ──────────────────────────────────
+
+(deftest js-rt-delete-property
+  "%js-delete removes the named key from an object; absent keys stay undefined."
+  (let ((o (cl-cc/javascript::%js-make-object "a" 1 "b" 2)))
+    (cl-cc/javascript::%js-delete o "a")
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-get-prop o "a"))
+    (assert-= 2 (cl-cc/javascript::%js-get-prop o "b"))))
+
+(deftest-each js-rt-in-operator
+  "%js-in returns t when the key exists, nil otherwise."
+  :cases (("present" "a" t)
+          ("absent"  "z" nil))
+  (key expected)
+  (let ((o (cl-cc/javascript::%js-make-object "a" 1)))
+    (assert-equal expected (cl-cc/javascript::%js-in key o))))
+
+(deftest js-rt-optional-chain-present
+  "a?.b returns the property value when a is a non-null object."
+  (let ((o (cl-cc/javascript::%js-make-object "x" 42)))
+    (assert-= 42 (cl-cc/javascript::%js-optional-chain o "x"))))
+
+(deftest js-rt-optional-chain-null-undefined
+  "a?.b short-circuits to undefined when a is null or undefined."
+  (assert-eq cl-cc/javascript::+js-undefined+
+             (cl-cc/javascript::%js-optional-chain cl-cc/javascript::+js-null+ "x"))
+  (assert-eq cl-cc/javascript::+js-undefined+
+             (cl-cc/javascript::%js-optional-chain cl-cc/javascript::+js-undefined+ "x")))
