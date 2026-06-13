@@ -314,18 +314,10 @@ the table lookup. OBJ and KEY are bound in value-forms."
           (t +js-undefined+)))))
 
 (defun %js-resolve-number-method (obj key)
-  (let ((entry (assoc key *js-number-method-table* :test #'string=)))
-    (when entry
-      (let ((fn (cdr entry)))
-        (lambda (&rest args) (apply fn obj args))))))
+  (%js-bound-method *js-number-method-table* obj key))
 
-(defun %js-resolve-symbol-method (obj key)
-  (let ((entry (assoc key *js-symbol-method-table* :test #'string=)))
-    (cond
-      (entry (let ((fn (cdr entry)))
-               (lambda (&rest args) (apply fn obj args))))
-      ((string= key "description") (%js-symbol-description obj))
-      (t +js-undefined+))))
+(define-js-type-resolver %js-resolve-symbol-method *js-symbol-method-table*
+  "description" (%js-symbol-description obj))
 
 (defun %js-resolve-weak-ref-method (obj key)
   (if (string= key "deref")
@@ -366,27 +358,36 @@ the table lookup. OBJ and KEY are bound in value-forms."
 ;;; -----------------------------------------------------------------------
 ;;;  %js-resolve-method — the *js-method-resolver* implementation
 ;;; -----------------------------------------------------------------------
+;;;
+;;; *js-type-dispatch-table*: alist of (predicate . resolver-fn).
+;;; %js-resolve-method walks the list and delegates to the first matching
+;;; resolver.  To add a new JS type, append one entry here — no changes to
+;;; the dispatcher function are needed.
+
+(defparameter *js-type-dispatch-table*
+  (list (cons #'js-promise-p         #'%js-resolve-promise-method)
+        (cons #'%js-vec-p             #'%js-resolve-array-method)
+        (cons #'stringp               #'%js-resolve-string-method)
+        (cons #'js-map-p              #'%js-resolve-map-method)
+        (cons #'js-date-p             #'%js-resolve-date-method)
+        (cons #'js-typed-array-p      #'%js-resolve-typed-array-method)
+        (cons #'js-regexp-p           #'%js-resolve-regexp-method)
+        (cons #'js-set-p              #'%js-resolve-set-method)
+        (cons #'js-weak-map-p         #'%js-resolve-weak-map-method)
+        (cons #'js-weak-set-p         #'%js-resolve-weak-set-method)
+        (cons #'hash-table-p          #'%js-resolve-object-method)
+        (cons #'numberp               #'%js-resolve-number-method)
+        (cons #'js-symbol-p           #'%js-resolve-symbol-method)
+        (cons #'js-weak-ref-p         #'%js-resolve-weak-ref-method)
+        (cons #'functionp             #'%js-resolve-function-method)
+        (cons #'js-bigint-p           #'%js-resolve-bigint-method))
+  "Dispatch table: (predicate . resolver-fn) pairs for %js-resolve-method.")
 
 (defun %js-resolve-method (obj key)
   "Resolve OBJ.KEY to a bound method closure, or +js-undefined+.
 Installed as *js-method-resolver* so %js-get-prop can offer prototype methods."
-  (cond
-    ((js-promise-p obj)         (%js-resolve-promise-method obj key))
-    ((%js-vec-p obj)            (%js-resolve-array-method obj key))
-    ((stringp obj)              (%js-resolve-string-method obj key))
-    ((js-map-p obj)             (%js-resolve-map-method obj key))
-    ((js-date-p obj)            (%js-resolve-date-method obj key))
-    ((js-typed-array-p obj)     (%js-resolve-typed-array-method obj key))
-    ((js-regexp-p obj)          (%js-resolve-regexp-method obj key))
-    ((js-set-p obj)             (%js-resolve-set-method obj key))
-    ((js-weak-map-p obj)        (%js-resolve-weak-map-method obj key))
-    ((js-weak-set-p obj)        (%js-resolve-weak-set-method obj key))
-    ((hash-table-p obj)         (%js-resolve-object-method obj key))
-    ((numberp obj)              (or (%js-resolve-number-method obj key) +js-undefined+))
-    ((js-symbol-p obj)          (%js-resolve-symbol-method obj key))
-    ((typep obj 'js-weak-ref)   (%js-resolve-weak-ref-method obj key))
-    ((functionp obj)            (%js-resolve-function-method obj key))
-    ((js-bigint-p obj)          (%js-resolve-bigint-method obj key))
-    (t +js-undefined+)))
+  (dolist (entry *js-type-dispatch-table* +js-undefined+)
+    (when (funcall (car entry) obj)
+      (return (funcall (cdr entry) obj key)))))
 
 (setf *js-method-resolver* #'%js-resolve-method)
