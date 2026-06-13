@@ -130,6 +130,107 @@
   (assert-string= "1,2,3" (cl-cc/javascript::%js-array-join (%jr-arr 1 2 3)))
   (assert-string= "1-2-3" (cl-cc/javascript::%js-array-join (%jr-arr 1 2 3) "-")))
 
+(deftest js-rt-array-shift-unshift
+  "shift removes from front; unshift prepends."
+  (let ((a (%jr-arr 1 2 3)))
+    (assert-= 1   (cl-cc/javascript::%js-array-shift a))
+    (assert-equal '(2 3) (%jr-list a))
+    (assert-= 4  (cl-cc/javascript::%js-array-unshift a 0 1))
+    (assert-equal '(0 1 2 3) (%jr-list a))))
+
+(deftest js-rt-array-some-every
+  "some short-circuits on first match; every short-circuits on first mismatch."
+  (let ((pred (lambda (x &rest _) (declare (ignore _)) (evenp x))))
+    (assert-true  (cl-cc/javascript::%js-array-some  (%jr-arr 1 2 3) pred))
+    (assert-false (cl-cc/javascript::%js-array-some  (%jr-arr 1 3 5) pred))
+    (assert-true  (cl-cc/javascript::%js-array-every (%jr-arr 2 4 6) pred))
+    (assert-false (cl-cc/javascript::%js-array-every (%jr-arr 2 3 4) pred))))
+
+(deftest js-rt-array-find-and-find-index
+  "find returns the element; findIndex returns its position."
+  (let ((arr (%jr-arr 1 4 9 16)))
+    (assert-= 4   (cl-cc/javascript::%js-array-find
+                   arr (lambda (x &rest _) (declare (ignore _)) (> x 3))))
+    (assert-= 1   (cl-cc/javascript::%js-array-find-index
+                   arr (lambda (x &rest _) (declare (ignore _)) (> x 3))))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-array-find
+                arr (lambda (x &rest _) (declare (ignore _)) (> x 100))))))
+
+(deftest js-rt-array-slice
+  "slice extracts a sub-array without modifying the original."
+  (let* ((a   (%jr-arr 10 20 30 40))
+         (s1  (cl-cc/javascript::%js-array-slice a 1 3))
+         (s2  (cl-cc/javascript::%js-array-slice a 2)))
+    (assert-equal '(20 30) (%jr-list s1))
+    (assert-equal '(30 40) (%jr-list s2))
+    (assert-= 4 (length a))))    ; original untouched
+
+(deftest js-rt-array-splice-delete-insert
+  "splice removes and optionally inserts elements."
+  (let ((a (%jr-arr 1 2 3 4 5)))
+    (cl-cc/javascript::%js-array-splice a 1 2 9 9)
+    (assert-equal '(1 9 9 4 5) (%jr-list a))))
+
+(deftest js-rt-array-concat
+  "concat merges arrays without modifying the originals."
+  (let* ((a (%jr-arr 1 2))
+         (b (%jr-arr 3 4))
+         (r (cl-cc/javascript::%js-array-concat a b (%jr-arr 5))))
+    (assert-equal '(1 2 3 4 5) (%jr-list r))
+    (assert-= 2 (length a))))   ; originals untouched
+
+(deftest js-rt-array-reverse
+  "reverse mutates and returns the reversed array."
+  (let ((a (%jr-arr 1 2 3)))
+    (let ((r (cl-cc/javascript::%js-array-reverse a)))
+      (assert-equal '(3 2 1) (%jr-list r))
+      (assert-eq a r))))         ; same object
+
+(deftest js-rt-array-sort-default
+  "sort with no comparator uses lexicographic order: \"10\" < \"2\" < \"9\"."
+  (let* ((a (%jr-arr 9 10 2))
+         (r (cl-cc/javascript::%js-array-sort a)))
+    (assert-equal '(10 2 9) (%jr-list r))   ; lexicographic: "10" < "2" < "9"
+    (assert-eq a r)))
+
+(deftest js-rt-array-sort-numeric
+  "sort with numeric comparator sorts numerically."
+  (let* ((a (%jr-arr 10 2 30))
+         (r (cl-cc/javascript::%js-array-sort
+             a (lambda (x y &rest _) (declare (ignore _)) (- x y)))))
+    (assert-equal '(2 10 30) (%jr-list r))))
+
+(deftest js-rt-array-flat
+  "flat flattens one level by default; depth controls levels."
+  (let* ((nested (%jr-arr 1 (%jr-arr 2 3) (%jr-arr 4 (%jr-arr 5)))))
+    (assert-equal '(1 2 3 4 5)       (%jr-list (cl-cc/javascript::%js-array-flat nested 2)))
+    (let ((shallow (%jr-arr 1 (%jr-arr 2 3) (%jr-arr 4 (%jr-arr 5)))))
+      (let ((r (%jr-list (cl-cc/javascript::%js-array-flat shallow 1))))
+        ;; depth 1: [1, 2, 3, 4, [5]] — inner [5] stays nested
+        (assert-= 5 (length r))))))
+
+(deftest js-rt-array-last-index-of
+  "lastIndexOf returns rightmost index of element, -1 if absent."
+  (let ((a (%jr-arr 1 2 3 2 1)))
+    (assert-= 3 (cl-cc/javascript::%js-array-last-index-of a 2))
+    (assert-= -1 (cl-cc/javascript::%js-array-last-index-of a 9))))
+
+(deftest js-rt-array-fill
+  "fill fills a range of the array with a value."
+  (let* ((a (%jr-arr 1 2 3 4 5))
+         (r (cl-cc/javascript::%js-array-fill a 0 1 3)))
+    (assert-equal '(1 0 0 4 5) (%jr-list r))
+    (assert-eq a r)))           ; mutated in place
+
+(deftest js-rt-array-reduce-right
+  "reduceRight folds from right to left."
+  (let ((result (cl-cc/javascript::%js-array-reduce-right
+                 (%jr-arr 1 2 3 4)
+                 (lambda (acc x &rest _) (declare (ignore _)) (cons x acc))
+                 nil)))
+    (assert-equal '(1 2 3 4) result)))
+
 ;;; ─── String ──────────────────────────────────────────────────────────────────
 
 (deftest js-rt-string-slice
@@ -197,6 +298,35 @@
   "charAt and charCodeAt return character and its code."
   (assert-string= "e" (cl-cc/javascript::%js-string-char-at "hello" 1))
   (assert-=      101  (cl-cc/javascript::%js-string-char-code-at "hello" 1)))
+
+(deftest-each js-rt-string-last-index-of
+  "lastIndexOf returns the last occurrence index, or -1 when absent."
+  :cases (("found-mid"  "abcabc" "b" 4)
+          ("found-end"  "aabb"   "b" 3)
+          ("not-found"  "abc"    "z" -1))
+  (s sub expected)
+  (assert-= expected (cl-cc/javascript::%js-string-last-index-of s sub)))
+
+(deftest js-rt-string-concat
+  "concat joins strings without modifying originals."
+  (assert-string= "hello world"
+                  (cl-cc/javascript::%js-string-concat "hello" " " "world")))
+
+(deftest js-rt-string-from-char-code-and-code-point
+  "fromCharCode and fromCodePoint convert numeric codes to strings."
+  (assert-string= "A" (cl-cc/javascript::%js-string-from-char-code 65))
+  (assert-string= "A" (cl-cc/javascript::%js-string-from-code-point 65)))
+
+(deftest js-rt-string-code-point-at
+  "codePointAt returns the code point at the given position."
+  (assert-= 72 (cl-cc/javascript::%js-string-code-point-at "Hello" 0))
+  (assert-= 101 (cl-cc/javascript::%js-string-code-point-at "Hello" 1)))
+
+(deftest js-rt-string-is-well-formed
+  "isWellFormed and toWellFormed handle well-formed strings."
+  (let ((wf "hello"))
+    (assert-true   (cl-cc/javascript::%js-string-is-well-formed wf))
+    (assert-string= wf (cl-cc/javascript::%js-string-to-well-formed wf))))
 
 (deftest-each js-rt-string-replace
   "replace substitutes first occurrence; replaceAll substitutes all."
