@@ -292,3 +292,35 @@
     (assert-true  (functionp next))
     (assert-= 5  (gethash "value" (funcall next)))
     (assert-= 6  (gethash "value" (funcall next)))))
+
+;;; ─── Uncovered array methods ─────────────────────────────────────────────────
+
+(deftest js-rt-array-flat-map
+  "flatMap maps then flattens one level."
+  (let* ((arr    (%jr-arr 1 2 3))
+         (result (cl-cc/javascript::%js-array-flat-map
+                  arr (lambda (x &rest _) (declare (ignore _)) (%jr-arr x (* x 10))))))
+    (assert-equal '(1 10 2 20 3 30) (%jr-list result))))
+
+(deftest js-rt-array-entries
+  "entries returns [[0,v0],[1,v1],...] pairs."
+  (let* ((arr     (%jr-arr "a" "b"))
+         (entries (cl-cc/javascript::%js-array-entries arr)))
+    (assert-= 2 (length entries))
+    (let ((e0 (aref entries 0)))
+      (assert-= 0 (aref e0 0))
+      (assert-string= "a" (aref e0 1)))))
+
+(deftest js-rt-array-keys
+  "keys returns a vector of indices [0, 1, 2, ...]."
+  (let* ((arr  (%jr-arr "x" "y" "z"))
+         (ks   (cl-cc/javascript::%js-array-keys arr)))
+    (assert-equal '(0 1 2) (%jr-list ks))))
+
+(deftest js-rt-array-copy-within
+  "copyWithin copies a section to another position in-place."
+  (let ((arr (%jr-arr 1 2 3 4 5)))
+    (cl-cc/javascript::%js-array-copy-within arr 0 3 5)
+    (assert-= 4 (aref arr 0))
+    (assert-= 5 (aref arr 1))
+    (assert-= 3 (aref arr 2))))
