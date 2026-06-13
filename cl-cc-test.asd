@@ -136,7 +136,11 @@
     :serial t
     :components
      ((:file "js-lexer-tests")
-      (:file "js-parser-tests")
+      ;; js-parser-tests.lisp split into 2 focused files:
+      ;;   decl: helpers + variable/arrow/class declarations
+      ;;   stmt: if/while/for/switch/try/destructuring/generators/new/unary
+      (:file "js-parser-decl-tests")
+      (:file "js-parser-stmt-tests")
       ;; js-e2e-tests.lisp split into 4 focused files:
       ;;   core:     shared helpers + basic programs + destructuring + JSON/Math/operators
       ;;   ast:      parse-only AST shape tests (FizzBuzz, Fibonacci, classes, generators…)
