@@ -24,6 +24,7 @@
    (:file "parser-arrow")
    (:file "parser-stmt")
    (:file "parser-stmt-control")
+   (:file "parser-stmt-flow")
    (:file "parser-class")
    (:file "parser-class-lower")
    (:file "parser-module")
