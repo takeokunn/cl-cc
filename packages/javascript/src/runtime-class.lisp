@@ -169,12 +169,26 @@ Covers both the base Error and all subclasses."
 (defparameter *js-error-class* (%js-make-error-class "Error" nil)
   "The root JS Error class object.")
 
-(defparameter *js-type-error-class*    (%js-make-error-class "TypeError"    *js-error-class*))
-(defparameter *js-range-error-class*   (%js-make-error-class "RangeError"   *js-error-class*))
-(defparameter *js-reference-error-class* (%js-make-error-class "ReferenceError" *js-error-class*))
-(defparameter *js-syntax-error-class*  (%js-make-error-class "SyntaxError"  *js-error-class*))
-(defparameter *js-eval-error-class*    (%js-make-error-class "EvalError"    *js-error-class*))
-(defparameter *js-uri-error-class*     (%js-make-error-class "URIError"     *js-error-class*))
+(defmacro define-js-error-subclasses (&rest name-var-pairs)
+  "Define Error subclasses from (js-name var-base) pairs, all extending *js-error-class*.
+Example: (define-js-error-subclasses (\"TypeError\" type-error)  ...)
+→ (defparameter *js-type-error-class* (%js-make-error-class \"TypeError\" *js-error-class*))"
+  `(progn
+     ,@(mapcar (lambda (pair)
+                 (let* ((js-name (first pair))
+                        (base    (second pair))
+                        (var     (intern (format nil "*JS-~A-CLASS*" (string-upcase base))
+                                         :cl-cc/javascript)))
+                   `(defparameter ,var (%js-make-error-class ,js-name *js-error-class*))))
+               name-var-pairs)))
+
+(define-js-error-subclasses
+  ("TypeError"      type-error)
+  ("RangeError"     range-error)
+  ("ReferenceError" reference-error)
+  ("SyntaxError"    syntax-error)
+  ("EvalError"      eval-error)
+  ("URIError"       uri-error))
 
 (defun %js-make-error-instance (class msg)
   "Create an Error instance with the given CLASS and message MSG."
