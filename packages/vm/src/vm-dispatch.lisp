@@ -48,19 +48,25 @@ Saves and restores call stack around the sub-invocation."
       (vm-maybe-tier-upgrade-closure closure)
       (vm-profile-enter-call state (vm-closure-entry-label closure))
       (vm-bind-closure-args closure state args)
-      (let ((*vm-exec-flat* flat)
-            (*vm-exec-labels* labels))
-        ;; Mini execution loop — run until our frame is popped
-        (loop with pc = entry-pc
-              do (when (or (null pc) (>= pc (length flat)))
-                   (return (vm-reg-get state result-reg)))
-                 (multiple-value-bind (next-pc halt-p result)
-                     (execute-instruction (aref flat pc) state pc labels)
-                   (when halt-p (return (or result (vm-reg-get state result-reg))))
-                   (when (<= (length (vm-call-stack state)) saved-stack-depth)
-                     ;; Our frame was popped — method returned
-                     (return (vm-reg-get state result-reg)))
-                   (setf pc next-pc)))))))
+      (unwind-protect
+           (let ((*vm-exec-flat* flat)
+                 (*vm-exec-labels* labels))
+             ;; Mini execution loop — run until our frame is popped
+             (loop with pc = entry-pc
+                   do (when (or (null pc) (>= pc (length flat)))
+                        (return (vm-reg-get state result-reg)))
+                      (multiple-value-bind (next-pc halt-p result)
+                          (execute-instruction (aref flat pc) state pc labels)
+                        (when halt-p (return (or result (vm-reg-get state result-reg))))
+                        (when (<= (length (vm-call-stack state)) saved-stack-depth)
+                          ;; Our frame was popped — method returned
+                          (return (vm-reg-get state result-reg)))
+                        (setf pc next-pc))))
+        ;; On non-local exit (js-exception / abort), drain any orphaned frames
+        ;; pushed during this sub-invocation so the caller's stack is intact.
+        (loop while (> (length (vm-call-stack state)) saved-stack-depth)
+              do (pop (vm-call-stack state))
+                 (pop (vm-method-call-stack state)))))))
 
 (defun %vm-closure-object-p (value)
   "Return T when VALUE is a VM closure object." 

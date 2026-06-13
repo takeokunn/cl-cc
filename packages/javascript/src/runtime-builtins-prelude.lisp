@@ -56,9 +56,12 @@
     (:var        "ReferenceError"      *js-reference-error-class*)
     (:var        "SyntaxError"         *js-syntax-error-class*)
     ;; Collection constructors
-    (:var        "Map"                 %js-make-map)
-    (:var        "WeakMap"             %js-make-weak-map)
-    (:var        "WeakSet"             %js-make-weak-set)
+    ;; Map/WeakMap/WeakSet/RegExp are defparameter vars, not defun symbols,
+    ;; so (boundp sym) = t and seed-js-runtime-globals seeds them into the VM.
+    (:var        "Map"                 *js-map-global*)
+    (:var        "WeakMap"             *js-weak-map-global*)
+    (:var        "WeakSet"             *js-weak-set-global*)
+    (:var        "RegExp"              *js-regexp-global*)
     ;; Set/timer globals are inline lambdas with no dedicated %js-* symbol;
     ;; look them up via %js-builtin-ref so they stay in sync with *js-builtin-specs*.
     (:builtin    "Set"                 "Set")

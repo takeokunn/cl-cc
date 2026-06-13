@@ -28,7 +28,7 @@
   t)
 
 (defun %js-reflect-apply (fn this-arg args)
-  (apply #'%js-funcall fn this-arg (coerce args 'list)))
+  (%js-call-with-this this-arg fn (coerce args 'list)))
 
 (defun %js-reflect-construct (target args &optional new-target)
   (declare (ignore new-target))

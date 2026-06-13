@@ -112,14 +112,24 @@ DECORATORS — list of AST nodes for class-level decorators"
                                  members))
          (field-inits
           (loop for slot in field-slots
-                for orig-name = (or (getf (ast-imports slot) :js-orig-name)
+                for imports   = (ast-imports slot)
+                for private-p = (getf imports :js-private)
+                for orig-name = (or (getf imports :js-orig-name)
                                     (let ((n (ast-slot-name slot)))
                                       (if n (string-downcase (symbol-name n)) "")))
-                collect (%js-call '%js-set-prop
-                                  (make-ast-var :name '%js-this)
-                                  (make-ast-quote :value orig-name)
-                                  (or (ast-slot-initform slot)
-                                      (make-ast-quote :value +js-undefined+)))))
+                for initform  = (or (ast-slot-initform slot)
+                                    (make-ast-quote :value +js-undefined+))
+                ;; Private fields (#x) must use the private-field-set accessor so
+                ;; they land in the __private__ table, not the public property bag.
+                collect (if private-p
+                            (%js-call '%js-class-private-field-set
+                                      (make-ast-var :name '%js-this)
+                                      (make-ast-quote :value orig-name)
+                                      initform)
+                            (%js-call '%js-set-prop
+                                      (make-ast-var :name '%js-this)
+                                      (make-ast-quote :value orig-name)
+                                      initform))))
          ;; Constructor lambda: explicit ctor gets field inits prepended; a class
          ;; with fields but no explicit ctor gets a synthetic one (forwarding to
          ;; super for a derived class so the parent still initializes).

@@ -169,6 +169,12 @@
 (defun %js-make-weak-ref (target) (make-js-weak-ref :target target))
 (defun %js-weak-ref-deref (wr) (js-weak-ref-target wr))
 
+;;; Prelude constructor values — plain function references wrapped in
+;;; defparameter so seed-js-runtime-globals picks them up (boundp = t)
+;;; and the compiler emits vm-get-global without an "Unbound variable" error.
+(defparameter *js-weak-map-global* #'%js-make-weak-map)
+(defparameter *js-weak-set-global* #'%js-make-weak-set)
+
 ;;; -----------------------------------------------------------------------
 ;;;  FinalizationRegistry (ES2021) — stub (no-op without GC hooks)
 ;;; -----------------------------------------------------------------------

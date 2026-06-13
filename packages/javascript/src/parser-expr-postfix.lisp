@@ -101,22 +101,30 @@ Returns (values ast rest)."
 ;;; ─── Increment / decrement on places (obj.x / arr[i]) ────────────────────────
 
 (defun %js-place-get-prop-p (ast)
-  "True when AST is a (%js-get-prop OBJ KEY) call — an assignable place."
+  "True when AST is an assignable property place — either a public property
+access (%js-get-prop OBJ KEY) or a private field access
+(%js-class-private-field-get OBJ KEY)."
   (and (ast-call-p ast)
        (ast-var-p (ast-call-func ast))
-       (eq (ast-var-name (ast-call-func ast)) '%js-get-prop)
+       (member (ast-var-name (ast-call-func ast))
+               '(%js-get-prop %js-class-private-field-get))
        (= (length (ast-call-args ast)) 2)))
 
 (defun %js-lower-place-incdec (place op return-new-p)
-  "Lower ++/-- applied to a property/element PLACE (a %js-get-prop call).
+  "Lower ++/-- applied to a property/element PLACE.
+PLACE may be a public (%js-get-prop) or private (%js-class-private-field-get) access.
 OP is '+ or '-. RETURN-NEW-P true means prefix (yields updated value); false
 means postfix (yields original). OBJ and KEY are captured in temps so the place
 expression is evaluated exactly once."
-  (let ((obj     (first  (ast-call-args place)))
-        (key     (second (ast-call-args place)))
-        (obj-tmp (gensym "JS-OBJ-"))
-        (key-tmp (gensym "JS-KEY-"))
-        (old-tmp (gensym "JS-OLD-")))
+  (let* ((obj     (first  (ast-call-args place)))
+         (key     (second (ast-call-args place)))
+         (get-fn  (ast-var-name (ast-call-func place)))
+         (set-fn  (if (eq get-fn '%js-class-private-field-get)
+                      '%js-class-private-field-set
+                      '%js-set-prop))
+         (obj-tmp (gensym "JS-OBJ-"))
+         (key-tmp (gensym "JS-KEY-"))
+         (old-tmp (gensym "JS-OLD-")))
     (flet ((bumped ()
              (make-ast-binop :op op
                              :lhs (make-ast-var :name old-tmp)
@@ -126,10 +134,10 @@ expression is evaluated exactly once."
        :body
        (list
         (make-ast-let
-         :bindings (list (cons old-tmp (%js-call '%js-get-prop
+         :bindings (list (cons old-tmp (%js-call get-fn
                                                  (make-ast-var :name obj-tmp)
                                                  (make-ast-var :name key-tmp))))
-         :body (list (%js-call '%js-set-prop
+         :body (list (%js-call set-fn
                                (make-ast-var :name obj-tmp)
                                (make-ast-var :name key-tmp)
                                (bumped))

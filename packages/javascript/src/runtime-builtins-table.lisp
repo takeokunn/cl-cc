@@ -317,6 +317,38 @@
 (defvar *js-builtin-map* (%build-js-builtin-map)
   "Dispatch table from JS built-in name to CL function.")
 
+;;; -----------------------------------------------------------------------
+;;;  Prelude constructor globals for Map and RegExp
+;;;
+;;;  These must be defparameter (not defun) so (boundp sym) = t and
+;;;  seed-js-runtime-globals seeds them into the VM; the compiler then
+;;;  emits vm-get-global without "Unbound variable" errors.
+;;;
+;;;  *js-map-global* is a hash-table (not a bare function) because Map has
+;;;  static methods (Map.groupBy) that JS code accesses via Map.groupBy(...).
+;;; -----------------------------------------------------------------------
+
+(defparameter *js-map-global*
+  (let ((ht (make-hash-table :test #'equal)))
+    (setf (gethash "__new__"  ht) #'%js-make-map
+          (gethash "groupBy"  ht) #'%js-map-group-by)
+    ht)
+  "JS Map constructor object: __new__ for `new Map()', groupBy static method.")
+
+(defparameter *js-regexp-global*
+  (let ((ht (make-hash-table :test #'equal)))
+    (setf (gethash "__new__"  ht) (lambda (pat &optional flags)
+                                    (%js-make-regex (%js-to-string pat)
+                                                    (if (eq flags +js-undefined+)
+                                                        ""
+                                                        (%js-to-string flags))))
+          (gethash "escape"   ht) #'%js-regexp-escape)
+    ht)
+  "JS RegExp constructor object: __new__ for `new RegExp()', escape static method.")
+
+;;; Wire static methods onto class objects after all helpers are defined.
+(setf (gethash "isError" *js-error-class*) #'%js-error-is-error)
+
 (defun %js-builtin-ref (name)
   "Return the host function/value registered for builtin NAME in *js-builtin-map*,
 or +js-undefined+.  Used to bind standalone global builtins to a runtime VALUE so

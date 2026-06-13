@@ -41,9 +41,9 @@
   "Recursively convert JS value VAL to a JSON string (depth limited to 50)."
   (when (> depth 50) (return-from %js-json-stringify-value "null"))
   (cond
-    ((or (eq val +js-null+) (eq val +js-undefined+) (null val)) "null")
-    ((eq val t)   "true")
+    ((or (eq val +js-null+) (eq val +js-undefined+)) "null")
     ((eq val nil) "false")
+    ((eq val t)   "true")
     ((%js-float-nan-p val) "null")
     ((%js-float-infinity-p val) "null")
     ((numberp val)
@@ -128,8 +128,10 @@
                          (char= (char str end) #\.)
                          (member (char str end) '(#\e #\E #\+ #\-))))
           do (incf end))
-    (values (handler-case (coerce (read-from-string (subseq str pos end)) 'double-float)
-              (error () *js-nan-float*))
+    (values (handler-case
+                 (let ((*read-default-float-format* 'double-float))
+                   (read-from-string (subseq str pos end)))
+               (error () *js-nan-float*))
             end)))
 
 (defun %js-json-parse-array (str pos)
