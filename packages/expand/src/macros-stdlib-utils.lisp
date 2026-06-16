@@ -508,21 +508,3 @@
 (our-defmacro directory-namestring (x) `(cl:directory-namestring ,x))
 (our-defmacro translate-pathname (s f to-wildcard) `(cl:translate-pathname ,s ,f ,to-wildcard))
 (our-defmacro wild-pathname-p (x &optional f) (if f `(cl:wild-pathname-p ,x ,f) `(cl:wild-pathname-p ,x)))
-
-;;; ─── with-compilation-unit (ANSI CL) ─────────────────────────────────────────
-;;; Evaluates BODY within a compilation-unit context (stub: no deferred warnings
-;;; since cl-cc processes forms one-at-a-time without deferred warning aggregation).
-
-(our-defmacro with-compilation-unit (options &body body)
-  (let ((_o options))
-    (declare (ignore _o))
-    `(progn ,@body)))
-
-;;; ─── proclaim (ANSI CL) ───────────────────────────────────────────────────────
-;;; proclaim is a function in ANSI CL but we expose it as a no-op macro since
-;;; cl-cc's type inference and optimization pipeline ignores runtime proclamations.
-
-(our-defmacro proclaim (declaration)
-  (let ((_d declaration))
-    (declare (ignore _d))
-    `(values)))

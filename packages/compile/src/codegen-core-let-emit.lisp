@@ -1,14 +1,15 @@
 (in-package :cl-cc/compile)
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;;; Codegen — Let-Binding Classification Predicates, Emitters, and compile-ast
+;;; Codegen — Let-Binding Classification Predicates and Emitters
 ;;;
 ;;; Contains:
 ;;;   Five classification predicates (%let-binding-special-p, %let-noescape-*)
 ;;;   Five binding emitters (%emit-let-*)
-;;;   compile-ast (ast-let) dispatch method — the only public entry point
+;;;   Helper-only support for ast-let lowering
 ;;;
 ;;; AST predicate helpers, sink-if analysis, and the %define-binding-walker
 ;;; macro + generated walkers are in codegen-core-let.lisp (loads before).
+;;; The actual ast-let dispatch and policy live in codegen-core-let-emit-pass.lisp.
 ;;;
 ;;; Load order: after codegen-core-let.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

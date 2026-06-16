@@ -77,6 +77,22 @@ list/tree shapes can share storage under explicit hash-cons opt-in."
 (defgeneric vm-adjust-sequence (sequence size &key initial-element)
   (:documentation "Resize SEQUENCE to SIZE, preserving contents when possible."))
 
+(defmethod vm-sequence-elt ((object sequence) index)
+  (elt object index))
+
+(defmethod vm-sequence-length ((object sequence))
+  (length object))
+
+(defmethod vm-make-sequence-like ((object sequence) size &key (initial-element nil))
+  (make-sequence-like object size :initial-element initial-element))
+
+(defmethod vm-adjust-sequence ((object sequence) size &key (initial-element nil))
+  (let* ((old-size (length object))
+         (copy-size (min old-size size))
+         (new-object (make-sequence-like object size :initial-element initial-element)))
+    (dotimes (index copy-size new-object)
+      (setf (elt new-object index) (elt object index)))))
+
 (defmethod vm-sequence-elt ((sequence list) index)
   (elt sequence index))
 
@@ -106,6 +122,20 @@ list/tree shapes can share storage under explicit hash-cons opt-in."
 
 (defmethod vm-adjust-sequence ((sequence vector) size &key (initial-element nil))
   (adjust-array sequence size :initial-element initial-element))
+
+(defmethod vm-make-sequence-like ((sequence bit-vector) size &key (initial-element 0))
+  (declare (ignore sequence))
+  (make-array size :element-type 'bit :initial-element initial-element))
+
+(defmethod vm-adjust-sequence ((sequence bit-vector) size &key (initial-element 0))
+  (adjust-array sequence size :element-type 'bit :initial-element initial-element))
+
+(defmethod vm-make-sequence-like ((sequence string) size &key (initial-element #\Space))
+  (declare (ignore sequence))
+  (make-string size :initial-element initial-element))
+
+(defmethod vm-adjust-sequence ((sequence string) size &key (initial-element #\Space))
+  (adjust-array sequence size :element-type 'character :initial-element initial-element))
 
 ;;;
 ;;; This file extends the VM with list manipulation instructions including
@@ -173,7 +203,7 @@ list/tree shapes can share storage under explicit hash-cons opt-in."
   "Return true when all runtime entry points needed for managed conses exist."
   (and (%vm-runtime-function "MAKE-RT-HEAP")
        (%vm-runtime-function "RT-GC-ALLOC")
-       (%vm-runtime-function "MAKE-HEADER")
+       (%vm-runtime-function "MAKE-RT-HEADER")
        (%vm-runtime-function "RT-HEAP-SET")
        (%vm-runtime-function "RT-HEAP-REF")
        (%vm-runtime-function "ENCODE-POINTER")
@@ -245,12 +275,13 @@ lets RT-OBJECT-POINTER-SLOTS trace slots 1 and 2 during minor/major GC."
         (let* ((rt-tag-cons (%vm-runtime-value "+RT-TAG-CONS+" t))
                (ptr-tag-cons (%vm-runtime-value "+TAG-CONS+" t))
                (alloc (%vm-runtime-function "RT-GC-ALLOC" t))
-               (make-header (%vm-runtime-function "MAKE-HEADER" t))
+               (make-rt-header (%vm-runtime-function "MAKE-RT-HEADER" t))
                (heap-set (%vm-runtime-function "RT-HEAP-SET" t))
                (encode-pointer (%vm-runtime-function "ENCODE-POINTER" t))
                (object-size 3)
                (addr (funcall alloc heap rt-tag-cons object-size)))
-          (funcall heap-set heap addr (funcall make-header object-size rt-tag-cons 0))
+          (funcall heap-set heap addr
+                   (funcall make-rt-header object-size rt-tag-cons :gc-bits 0))
           (funcall heap-set heap (+ addr 1) car-value)
           (funcall heap-set heap (+ addr 2) cdr-value)
           (let ((boxed (funcall encode-pointer addr ptr-tag-cons)))

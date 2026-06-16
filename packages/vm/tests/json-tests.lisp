@@ -13,7 +13,7 @@
   (let ((json:*json-null* :null))
     (let ((obj (json:parse "{\"a\":1,\"b\":[true,false,null,\"x\"]}")))
       (assert-= 1 (gethash "a" obj))
-      (assert-equal '(t nil :null "x") (gethash "b" obj)))))
+      (assert-equal '(t nil :null "x") (coerce (gethash "b" obj) 'list)))))
 
 (deftest json-stringify-roundtrip
   "json:stringify emits parseable JSON for hash-table objects."
@@ -24,12 +24,12 @@
     (let ((parsed (json:parse (json:stringify table))))
       (assert-equal "cl-cc" (gethash "name" parsed))
       (assert-true (gethash "ok" parsed))
-      (assert-equal '(1 2 3) (gethash "items" parsed)))))
+      (assert-equal '(1 2 3) (coerce (gethash "items" parsed) 'list)))))
 
 (deftest json-streaming-parse-and-stringify
   "json:parse-stream and json:stringify-stream work on arbitrary streams."
   (with-input-from-string (in " [1, 2, 3] ")
-    (assert-equal '(1 2 3) (json:parse-stream in)))
+    (assert-equal '(1 2 3) (coerce (json:parse-stream in) 'list)))
   (let ((out (make-string-output-stream)))
     (json:stringify-stream '("a" "b") out)
     (assert-equal "[\"a\",\"b\"]" (get-output-stream-string out))))

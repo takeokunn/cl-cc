@@ -1,9 +1,9 @@
 ;;;; tests/conformance/number-conformance-tests.lisp
-;;;; ANSI CL Number Tower Conformance Tests (expected-fail for known gaps)
+;;;; ANSI CL Number Tower Conformance Tests
 ;;;;
-;;;; Tests numeric operations that should work per ANSI CL but are
-;;;; fixnum-only in the native x86-64 backend or rely on host SBCL
-;;;; for bignum/ratio/complex arithmetic.
+;;;; Tests numeric operations that should work per ANSI CL. These run as
+;;;; regular conformance tests; native x86-64 bignum lowering remains tracked
+;;;; separately from the VM/runtime arithmetic helpers.
 
 (in-package :cl-cc/test)
 
@@ -23,7 +23,7 @@
   (cl-cc:run-string form-string))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Bignum Operations (fixnum overflow → bignum promotion)
+;;; Bignum Operations (fixnum overflow → bignum promotion)
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-bignum-add-overflow
@@ -63,7 +63,7 @@
     (assert-= 90000000009 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Ratio Operations
+;;; Ratio Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-ratio-division
@@ -109,7 +109,7 @@
     (assert-equal 1/3 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Complex Number Operations
+;;; Complex Number Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-complex-constructor
@@ -145,7 +145,7 @@
     (assert-equal -4 (num-run "(imagpart (conjugate #c(3 4)))"))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Numeric Contagion Rules
+;;; Numeric Contagion Rules
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-contagion-integer-ratio
@@ -163,7 +163,7 @@
     (assert-= 1.0 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Numeric Predicates on Extended Types
+;;; Numeric Predicates on Extended Types
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-bignump-predicate
@@ -188,7 +188,7 @@
     (assert-true result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Native x86-64 Fixnum Boundary
+;;; Native x86-64 Fixnum Boundary
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-native-fixnum-add-overflow
@@ -209,7 +209,7 @@
     (assert-= 1267650600228229401496703205376 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Arithmetic Functions on Extended Types
+;;; Arithmetic Functions on Extended Types
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest num-isqrt-large

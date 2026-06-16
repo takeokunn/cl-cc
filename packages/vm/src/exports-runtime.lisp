@@ -313,7 +313,6 @@
    vm-string-right-trim
    vm-search-string
     vm-string-set
-     *runtime-string-table*
      *rt-string-dedup-table*
     rt-string-dedup
     rt-string-intern
@@ -417,6 +416,10 @@
 ;; Persistent/transient collections (FR-748/FR-749/FR-824)
    persistent-map persistent-map-p persistent-map-count persistent-map-test
    pmap-get pmap-assoc pget conj dissoc
+   pvec pvec-count pvec-get pvec->list pvec-assoc pvec-conj
    transient transient-p transient! conj! persistent!
    transient-hash transient-hash-p assoc! dissoc!
-   lazy-force lazy-take-seq lazy-map lazy-filter))
+   lazy-seq lazy-seq-p make-lazy-seq lazy-force lazy-take-seq
+   lazy-map lazy-filter iterate lazy-range
+   *json-null* json-parse json-parse-stream json-stringify json-stringify-stream
+   regex-scan regex-all-matches regex-replace regex-replace-all regex-split))

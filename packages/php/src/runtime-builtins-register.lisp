@@ -8,9 +8,6 @@
 (defparameter *php-builtin-symbol-registry* (make-hash-table :test #'equal)
   "Map lowercase PHP builtin names to helper symbols for parser lowering.")
 
-(defparameter *php-builtin-registration-order* nil
-  "Builtin names in registration order, used to rebuild `*php-builtin-map*`.")
-
 (defun %php-normalize-builtin-name (name)
   "Normalize PHP builtin NAME for case-insensitive lookup."
   (string-downcase (string name)))
@@ -24,9 +21,6 @@
   (let* ((key (%php-normalize-builtin-name name))
          (symbol (and (symbolp function) function))
          (fn (if symbol (symbol-function symbol) function)))
-    (unless (gethash key *php-builtin-registry*)
-      (setf *php-builtin-registration-order*
-            (append *php-builtin-registration-order* (list key))))
     (setf (gethash key *php-builtin-registry*) fn)
     (when symbol
       (setf (gethash key *php-builtin-symbol-registry*) symbol))
@@ -41,14 +35,6 @@
   "Return the helper symbol registered for PHP builtin NAME, or NIL."
   (gethash (%php-normalize-builtin-name name) *php-builtin-symbol-registry*))
 
-(defun %php-sync-legacy-builtin-map ()
-  "Synchronize legacy `*php-builtin-map*` with the central registry."
-  (when (boundp '*php-builtin-map*)
-    (setf *php-builtin-map*
-          (loop for name in *php-builtin-registration-order*
-                for fn = (%php-lookup-builtin name)
-                when fn collect (cons name fn)))))
-
 (defun %php-register-all-builtins ()
   "Register all supported PHP builtin helpers and return the registry."
   ;; The registry intentionally includes common aliases such as sizeof/count,
@@ -56,7 +42,6 @@
   ;; (%php-register-all-builtins) => *PHP-BUILTIN-REGISTRY*
   (clrhash *php-builtin-registry*)
   (clrhash *php-builtin-symbol-registry*)
-  (setf *php-builtin-registration-order* nil)
 
   ;; Core.
   (%php-register-builtin "count" '%php-count)
@@ -65,6 +50,8 @@
   (%php-register-builtin "empty" '%php-empty)
   (%php-register-builtin "is_null" '%php-is-null)
   (%php-register-builtin "unset" '%php-unset)
+  (%php-register-builtin "compact" '%php-compact)
+  (%php-register-builtin "extract" '%php-extract)
   (%php-register-builtin "print_r" '%php-print-r)
   (%php-register-builtin "var_dump" '%php-var-dump)
   (%php-register-builtin "gettype" '%php-gettype)
@@ -113,6 +100,7 @@
   (%php-register-builtin "strchr" '%php-strchr)
   (%php-register-builtin "str_word_count" '%php-str-word-count)
   (%php-register-builtin "levenshtein" '%php-levenshtein)
+  (%php-register-builtin "grapheme_levenshtein" '%php-grapheme-levenshtein)
   (%php-register-builtin "similar_text" '%php-similar-text)
   (%php-register-builtin "soundex" '%php-soundex)
   (%php-register-builtin "printf" '%php-printf)
@@ -166,10 +154,8 @@
   (%php-register-builtin "quotemeta" '%php-quotemeta)
   (%php-register-builtin "htmlentities" '%php-htmlentities)
   (%php-register-builtin "metaphone" '%php-metaphone)
-  (%php-register-builtin "nl_langinfo" '%php-nl-langinfo)
   ;; HTML/encoding
   (%php-register-builtin "htmlspecialchars_decode" '%php-htmlspecialchars-decode)
-  (%php-register-builtin "html_entity_decode" '%php-html-entity-decode)
   (%php-register-builtin "quoted_printable_encode" '%php-quoted-printable-encode)
   (%php-register-builtin "quoted_printable_decode" '%php-quoted-printable-decode)
   ;; JSON
@@ -222,10 +208,6 @@
   (%php-register-builtin "array_intersect" '%php-array-intersect)
   (%php-register-builtin "array_udiff" '%php-array-udiff)
   (%php-register-builtin "array_uintersect" '%php-array-uintersect)
-  (%php-register-builtin "array_pop" '%php-array-pop)
-  (%php-register-builtin "array_shift" '%php-array-shift)
-  (%php-register-builtin "array_push" '%php-array-push)
-  (%php-register-builtin "array_unshift" '%php-array-unshift)
   (%php-register-builtin "array_column" '%php-array-column)
   (%php-register-builtin "array_combine" '%php-array-combine)
   (%php-register-builtin "array_flip" '%php-array-flip)
@@ -243,7 +225,8 @@
   (%php-register-builtin "shuffle" '%php-shuffle)
   (%php-register-builtin "array_key_first" '%php-array-key-first)
   (%php-register-builtin "array_key_last" '%php-array-key-last)
-  (%php-register-builtin "compact" '%php-compact)
+  (%php-register-builtin "array_first" '%php-array-first)
+  (%php-register-builtin "array_last" '%php-array-last)
   (%php-register-builtin "array_walk_recursive" '%php-array-walk-recursive)
   (%php-register-builtin "natsort" '%php-natsort)
   (%php-register-builtin "natcasesort" '%php-natcasesort)
@@ -273,17 +256,13 @@
   (%php-register-builtin "spl_autoload_unregister" '%php-spl-autoload-unregister)
   (%php-register-builtin "spl_autoload_functions" '%php-spl-autoload-functions)
 
-  ;; extract() — import array keys as variables (returns count; we can't mutate the calling scope)
-  (%php-register-builtin "extract" '%php-extract)
-
-  ;; SPL data structures (stubs returning empty arrays).
-  (%php-register-builtin "SplStack"    (lambda () (%php-make-array)))
-  (%php-register-builtin "SplQueue"    (lambda () (%php-make-array)))
-  (%php-register-builtin "SplDoublyLinkedList" (lambda () (%php-make-array)))
-  (%php-register-builtin "SplMinHeap" (lambda () (%php-make-array)))
-  (%php-register-builtin "SplMaxHeap" (lambda () (%php-make-array)))
-  (%php-register-builtin "SplFixedArray" (lambda (&optional size)
-                                           (%php-array-fill 0 (or size 0) +php-null+)))
+  ;; SPL data structures.
+  (%php-register-builtin "SplStack" '%php-spl-stack)
+  (%php-register-builtin "SplQueue" '%php-spl-queue)
+  (%php-register-builtin "SplDoublyLinkedList" '%php-spl-doubly-linked-list)
+  (%php-register-builtin "SplMinHeap" '%php-spl-min-heap)
+  (%php-register-builtin "SplMaxHeap" '%php-spl-max-heap)
+  (%php-register-builtin "SplFixedArray" '%php-spl-fixed-array)
 
   ;; Math.
   (%php-register-builtin "abs" '%php-abs)
@@ -300,24 +279,21 @@
   (%php-register-builtin "fdiv" '%php-fdiv)
   (%php-register-builtin "array_is_list" '%php-array-is-list)
   (%php-register-builtin "pi" '%php-pi)
-  (%php-register-builtin "sin" (lambda (x) (sin (coerce x 'double-float))))
-  (%php-register-builtin "cos" (lambda (x) (cos (coerce x 'double-float))))
-  (%php-register-builtin "tan" (lambda (x) (tan (coerce x 'double-float))))
-  (%php-register-builtin "log" (lambda (x &optional (base nil))
-                                 (if base (/ (log (coerce x 'double-float)) (log (coerce base 'double-float)))
-                                     (log (coerce x 'double-float)))))
-  (%php-register-builtin "exp" (lambda (x) (exp (coerce x 'double-float))))
+  (%php-register-builtin "sin" '%php-sin)
+  (%php-register-builtin "cos" '%php-cos)
+  (%php-register-builtin "tan" '%php-tan)
+  (%php-register-builtin "log" '%php-log)
+  (%php-register-builtin "exp" '%php-exp)
   (%php-register-builtin "fmod" '%php-fmod)
-  (%php-register-builtin "intdiv" '%php-intdiv)
   (%php-register-builtin "number_format" '%php-number-format)
   (%php-register-builtin "base_convert" '%php-base-convert)
-  (%php-register-builtin "asin"  (lambda (x) (asin  (coerce x 'double-float))))
-  (%php-register-builtin "acos"  (lambda (x) (acos  (coerce x 'double-float))))
-  (%php-register-builtin "atan"  (lambda (x) (atan  (coerce x 'double-float))))
+  (%php-register-builtin "asin"  '%php-asin)
+  (%php-register-builtin "acos"  '%php-acos)
+  (%php-register-builtin "atan"  '%php-atan)
   (%php-register-builtin "atan2" '%php-atan2)
-  (%php-register-builtin "sinh"  (lambda (x) (sinh  (coerce x 'double-float))))
-  (%php-register-builtin "cosh"  (lambda (x) (cosh  (coerce x 'double-float))))
-  (%php-register-builtin "tanh"  (lambda (x) (tanh  (coerce x 'double-float))))
+  (%php-register-builtin "sinh"  '%php-sinh)
+  (%php-register-builtin "cosh"  '%php-cosh)
+  (%php-register-builtin "tanh"  '%php-tanh)
   (%php-register-builtin "log10" '%php-log10)
   (%php-register-builtin "log2"  '%php-log2)
   (%php-register-builtin "hypot" '%php-hypot)
@@ -329,12 +305,12 @@
   (%php-register-builtin "bindec"  '%php-bindec)
   (%php-register-builtin "octdec"  '%php-octdec)
   (%php-register-builtin "hexdec"  '%php-hexdec)
-  (%php-register-builtin "is_nan"      (lambda (x) (and (floatp x) (not (= x x)))))
+  (%php-register-builtin "is_nan"      '%php-is-nan)
   (%php-register-builtin "is_finite"   '%php-is-finite)
   (%php-register-builtin "is_infinite" '%php-is-infinite)
   (%php-register-builtin "lcg_value" '%php-lcg-value)
-  (%php-register-builtin "mt_srand"  (lambda (&optional seed) (when seed (setf *random-state* (make-random-state t)))))
-  (%php-register-builtin "srand"     (lambda (&optional seed) (when seed (setf *random-state* (make-random-state t)))))
+  (%php-register-builtin "mt_srand"  '%php-mt-srand)
+  (%php-register-builtin "srand"     '%php-srand)
 
   ;; Regex
   (%php-register-builtin "preg_match" '%php-preg-match)
@@ -381,10 +357,11 @@
   (%php-register-builtin "floatval" '%php-floatval)
   (%php-register-builtin "strval" '%php-strval)
   (%php-register-builtin "boolval" '%php-boolval)
+  (%php-register-builtin "filter_var" '%php-filter-var)
   (%php-register-builtin "settype" '%php-settype)
+  (%php-seed-by-ref-param-registry *php-by-ref-param-registry*)
   (%php-register-builtin "get_debug_type" '%php-gettype)
-  ;; array_is_list is registered by SYMBOL above (a lambda-registered builtin
-  ;; fails dispatch with "Undefined function").
+  ;; array_is_list resolves through the symbol registry used by builtin dispatch.
 
   ;; File I/O.
   (%php-register-builtin "file_get_contents" '%php-file-get-contents)
@@ -439,21 +416,31 @@
   (%php-register-builtin "phpversion" '%php-php-version)
   (%php-register-builtin "ini_get" '%php-ini-get)
   (%php-register-builtin "ini_set" '%php-ini-set)
+  (%php-register-builtin "get_error_handler" '%php-get-error-handler)
   (%php-register-builtin "set_error_handler" '%php-set-error-handler)
-  (%php-register-builtin "set_exception_handler" '%php-set-exception-handler)
+  (%php-register-builtin "restore_error_handler" '%php-restore-error-handler)
+  (%php-register-builtin "get_exception_handler" '%php-get-exception-handler)
+  (%php-register-builtin "restore_exception_handler" '%php-restore-exception-handler)
   (%php-register-builtin "error_reporting" '%php-error-reporting)
+  (%php-register-builtin "opcache_is_script_cached_in_file_cache" '%php-opcache-is-script-cached-in-file-cache)
+  (%php-register-builtin "curl_share_init_persistent" '%php-curl-share-init-persistent)
   (%php-register-builtin "trigger_error" '%php-trigger-error)
   (%php-register-builtin "user_error" '%php-trigger-error)
   (%php-register-builtin "exit" '%php-exit)
   (%php-register-builtin "die" '%php-die)
   (%php-register-builtin "sleep" '%php-sleep)
   (%php-register-builtin "usleep" '%php-usleep)
+  (%php-register-builtin "nl_langinfo" '%php-nl-langinfo)
+  (%php-register-builtin "locale_is_right_to_left" '%php-locale-is-right-to-left)
   (%php-register-builtin "ob_start" '%php-ob-start)
   (%php-register-builtin "ob_end_clean" '%php-ob-end-clean)
   (%php-register-builtin "ob_get_clean" '%php-ob-get-clean)
   (%php-register-builtin "ob_get_contents" '%php-ob-get-contents)
-  (%php-register-builtin "header" '%php-header)
   (%php-register-builtin "http_response_code" '%php-http-response-code)
+  (%php-register-builtin "header" '%php-header)
+  (%php-register-builtin "headers_list" '%php-headers-list)
+  (%php-register-builtin "headers_sent" '%php-headers-sent)
+  (%php-register-builtin "scanf" '%php-scanf)
 
   ;; String misc.
   (%php-register-builtin "parse_str" '%php-parse-str)
@@ -479,7 +466,6 @@
   (%php-register-builtin "get_class_methods" '%php-get-class-methods)
 
   ;; Array extras.
-  (%php-register-builtin "each" '%php-each)
   (%php-register-builtin "reset" '%php-reset)
   (%php-register-builtin "end" '%php-end)
   (%php-register-builtin "current" '%php-current)
@@ -488,79 +474,16 @@
   (%php-register-builtin "key" '%php-key)
 
   ;; Output / misc.
-  (%php-register-builtin "echo" (lambda (&rest args) (dolist (a args) (write-string (%php-stringify a))) nil))
-  (%php-register-builtin "print" (lambda (arg) (write-string (%php-stringify arg)) 1))
-  ;; Registered by SYMBOL (not a lambda): builtin dispatch resolves to a function
-  ;; symbol to bridge, so the lambda-registered var_export failed with "Undefined
-  ;; function" when actually called.
+  (%php-register-builtin "echo" '%php-echo)
+  (%php-register-builtin "print" '%php-print)
+  ;; Registered by symbol so builtin dispatch resolves directly to the helper.
   (%php-register-builtin "var_export" '%php-var-export)
   (%php-register-builtin "serialize" '%php-serialize)
   (%php-register-builtin "unserialize" '%php-unserialize)
 
-  ;; Misc. globals / constants
-  (%php-register-builtin "PHP_EOL" (lambda () (string #\Newline)))
-  (%php-register-builtin "PHP_OS" (lambda () "Linux"))
-  (%php-register-builtin "PHP_OS_FAMILY" (lambda () "Linux"))
-  (%php-register-builtin "PHP_MAJOR_VERSION" (lambda () 8))
-  (%php-register-builtin "PHP_MINOR_VERSION" (lambda () 4))
-  (%php-register-builtin "PHP_RELEASE_VERSION" (lambda () 0))
-  (%php-register-builtin "PHP_VERSION" (lambda () "8.4.0"))
-  (%php-register-builtin "PHP_MAXPATHLEN" (lambda () 4096))
-  (%php-register-builtin "M_PI" (lambda () pi))
-  (%php-register-builtin "M_E"  (lambda () (exp 1.0d0)))
-  (%php-register-builtin "M_LN2" (lambda () (log 2.0d0)))
-  (%php-register-builtin "M_LN10" (lambda () (log 10.0d0)))
-  (%php-register-builtin "M_LOG2E" (lambda () (log (exp 1.0d0) 2.0d0)))
-  (%php-register-builtin "M_SQRT2" (lambda () (sqrt 2.0d0)))
-  (%php-register-builtin "STDIN" (lambda () nil))
-  (%php-register-builtin "STDOUT" (lambda () nil))
-  (%php-register-builtin "STDERR" (lambda () nil))
-  (%php-register-builtin "E_ALL" (lambda () 32767))
-  (%php-register-builtin "E_WARNING" (lambda () 2))
-  (%php-register-builtin "E_NOTICE" (lambda () 8))
-  (%php-register-builtin "E_ERROR" (lambda () 1))
-  (%php-register-builtin "SORT_REGULAR" (lambda () 0))
-  (%php-register-builtin "SORT_NUMERIC" (lambda () 1))
-  (%php-register-builtin "SORT_STRING" (lambda () 2))
-  (%php-register-builtin "SORT_ASC" (lambda () 4))
-  (%php-register-builtin "SORT_DESC" (lambda () 3))
-  (%php-register-builtin "ARRAY_FILTER_USE_BOTH" (lambda () 1))
-  (%php-register-builtin "ARRAY_FILTER_USE_KEY" (lambda () 2))
-  (%php-register-builtin "STR_PAD_RIGHT" (lambda () 1))
-  (%php-register-builtin "STR_PAD_LEFT" (lambda () 0))
-  (%php-register-builtin "STR_PAD_BOTH" (lambda () 2))
-  (%php-register-builtin "ENT_QUOTES" (lambda () 3))
-  (%php-register-builtin "ENT_HTML5" (lambda () 48))
-  (%php-register-builtin "JSON_PRETTY_PRINT" (lambda () 128))
-  (%php-register-builtin "JSON_UNESCAPED_UNICODE" (lambda () 256))
-  (%php-register-builtin "JSON_UNESCAPED_SLASHES" (lambda () 64))
-  (%php-register-builtin "JSON_THROW_ON_ERROR" (lambda () 4194304))
-  (%php-register-builtin "FILE_APPEND" (lambda () 8))
-  (%php-register-builtin "LOCK_EX" (lambda () 2))
-  (%php-register-builtin "SEEK_SET" (lambda () 0))
-  (%php-register-builtin "SEEK_CUR" (lambda () 1))
-  (%php-register-builtin "SEEK_END" (lambda () 2))
-  (%php-register-builtin "T_STRING" (lambda () 319))
-  (%php-register-builtin "true" (lambda () t))
-  (%php-register-builtin "false" (lambda () nil))
-  (%php-register-builtin "null" (lambda () +php-null+))
-  (%php-register-builtin "INF" (lambda () #.most-positive-double-float))
-  (%php-register-builtin "NAN" (lambda () #.most-positive-double-float))
-
-  ;; Additional type/string utilities
-  (%php-register-builtin "chr" '%php-chr)
-  (%php-register-builtin "ord" '%php-ord)
-  (%php-register-builtin "number_format" '%php-number-format)
-  (%php-register-builtin "sprintf" '%php-sprintf)
-  (%php-register-builtin "printf" '%php-printf)
+  ;; Additional string utilities.
   (%php-register-builtin "sscanf" '%php-sscanf)
-  (%php-register-builtin "scanf" (lambda (fmt &rest _) (declare (ignore fmt _)) (%php-make-array)))
 
-  ;; Additional math
-  (%php-register-builtin "max" '%php-max)
-  (%php-register-builtin "min" '%php-min)
-  (%php-register-builtin "pow" '%php-pow)
-  (%php-register-builtin "abs" '%php-abs)
   ;; CSPRNG
   (%php-register-builtin "random_int" '%php-random-int)
   (%php-register-builtin "random_bytes" '%php-random-bytes)
@@ -592,7 +515,6 @@
   (%php-register-builtin "bcscale" '%php-bcscale)
   (%php-register-builtin "bcsqrt" '%php-bcsqrt)
 
-  (%php-sync-legacy-builtin-map)
   *php-builtin-registry*)
 
 (eval-when (:load-toplevel :execute)

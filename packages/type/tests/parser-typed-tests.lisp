@@ -9,6 +9,11 @@
 
 (in-suite parser-suite)
 
+(defmacro assert-type-expected-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── Row types: Record / Variant ─────────────────────────────────────────
 
 (deftest parse-record-closed
@@ -128,9 +133,9 @@
           ("no-declare"   nil '((+ x 1)))
           ("nil-body"     nil nil))
   (expected body)
-  (if expected
-      (assert-true (type-equal-p type-int (cl-cc/type:extract-return-type body)))
-      (assert-null (cl-cc/type:extract-return-type body))))
+  (assert-type-expected-case expected
+    (assert-true (type-equal-p type-int (cl-cc/type:extract-return-type body)))
+    (assert-null (cl-cc/type:extract-return-type body))))
 
 ;;; ─── Typed AST nodes ─────────────────────────────────────────────────────
 
@@ -163,9 +168,9 @@
           ("values-type"    t   '(values fixnum string))
           ("unknown-symbol" nil 'my-random-thing))
   (expected form)
-  (if expected
-      (assert-true  (cl-cc/type:looks-like-type-specifier-p form))
-      (assert-false (cl-cc/type:looks-like-type-specifier-p form))))
+  (assert-type-expected-case expected
+    (assert-true  (cl-cc/type:looks-like-type-specifier-p form))
+    (assert-false (cl-cc/type:looks-like-type-specifier-p form))))
 
 ;;; ─── parse-type-specifier-maybe ──────────────────────────────────────────
 
@@ -174,9 +179,9 @@
   :cases (("known"   t   'fixnum)
           ("unknown" nil 'my-random-thing))
   (expected form)
-  (if expected
-      (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier-maybe form)))
-      (assert-null (cl-cc/type::parse-type-specifier-maybe form))))
+  (assert-type-expected-case expected
+    (assert-true (type-equal-p type-int (cl-cc/type::parse-type-specifier-maybe form)))
+    (assert-null (cl-cc/type::parse-type-specifier-maybe form))))
 
 ;;; ─── make-type-arrow ─────────────────────────────────────────────────────
 

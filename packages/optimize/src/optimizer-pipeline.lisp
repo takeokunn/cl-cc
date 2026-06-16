@@ -562,16 +562,6 @@ not fusing across intervening writes to the multiply destination or operands."
       (flush-block)
       result)))
 
-(defun opt-pass-fma-synthesis (instructions)
-  "Compatibility wrapper for the FR-099 FMA recognition pass."
-  (opt-pass-fma-recognition instructions))
-
-(defun opt-pass-allocation-sinking (instructions)
-  "FR-020 wrapper for branch-local allocation sinking."
-  (let ((cfg (cfg-build instructions))
-        (alias-facts (opt-compute-heap-aliases instructions)))
-    (opt-sink-allocations instructions cfg alias-facts)))
-
 ;;; Single source of truth: ordered keyword → function pairs.
 ;;; *opt-convergence-passes* and *opt-pass-registry* are both derived from this.
 (defparameter *opt-pass-table*
@@ -598,7 +588,7 @@ not fusing across intervening writes to the multiply destination or operands."
       (:div-by-const              . ,#'%maybe-run-div-by-const)
       (:bitwidth-reduction        . ,#'%maybe-run-bitwidth-reduction)
       (:idiom-recognition         . ,#'%maybe-run-idiom-recognition)
-      (:fma-synthesis             . ,#'opt-pass-fma-synthesis)
+      (:fma-recognition           . ,#'opt-pass-fma-recognition)
       (:bswap-recognition         . ,#'opt-pass-bswap-recognition)
       (:rotate-recognition        . ,#'opt-pass-rotate-recognition)
       (:fill-recognition          . ,#'opt-pass-fill-recognition)
@@ -632,10 +622,14 @@ not fusing across intervening writes to the multiply destination or operands."
     (:loop-unroll               . ,#'%maybe-run-loop-unroll)
     (:loop-rotation             . ,#'opt-pass-loop-rotation)
     (:loop-rotate               . ,#'%maybe-run-loop-rotate)
-      (:loop-peeling              . ,#'opt-pass-loop-peeling)
+      (:loop-peeling              . ,#'opt-pass-loop-peel)
       (:loop-peel                 . ,#'%maybe-run-loop-peel)
       (:prefetch-insertion        . ,#'opt-pass-prefetch-insertion)
-      (:allocation-sinking        . ,#'opt-pass-allocation-sinking)
+      (:allocation-sinking
+       . ,#'(lambda (instructions)
+              (let ((cfg (cfg-build instructions))
+                    (alias-facts (opt-compute-heap-aliases instructions)))
+                (opt-sink-allocations instructions cfg alias-facts))))
      (:code-sinking              . ,#'opt-pass-code-sinking)
     (:unreachable               . ,#'opt-pass-unreachable)
     (:dead-basic-blocks         . ,#'opt-pass-dead-basic-blocks)
@@ -662,7 +656,6 @@ not fusing across intervening writes to the multiply destination or operands."
         (:branch-weights            . ,#'opt-analyze-branch-weights)
         (:path-profiling            . ,#'%maybe-run-path-profiling)
         (:dce                       . ,#'opt-pass-dce)
-       (:fma-recognition           . ,#'opt-pass-fma-recognition)
        (:optimization-remarks      . ,#'%maybe-run-optimization-remarks)
        (:abstract-interpretation   . ,#'%maybe-run-abstract-interpretation)
        (:translation-validation    . ,#'%maybe-run-translation-validation)
@@ -691,7 +684,7 @@ not fusing across intervening writes to the multiply destination or operands."
          :bounds-check-elim
        :sequence-fusion
      :demand-analysis
-        :fma-synthesis
+        :fma-recognition
         :iv-strength-reduce
         :div-by-const
         :bitwidth-reduction
@@ -769,4 +762,3 @@ the e-graph engine.")
   (mapcar (lambda (k) (gethash k *opt-pass-registry*))
           *opt-default-convergence-pass-keys*)
   "Ordered default pass functions derived from `*opt-default-convergence-pass-keys*`.")
-

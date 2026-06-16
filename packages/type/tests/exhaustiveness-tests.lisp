@@ -7,6 +7,11 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+(defmacro assert-exhaustiveness-expected-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── typecase-arm-subsumed-p ──────────────────────────────────────────────
 
 (deftest-each exhaustiveness-arm-subsumed-p-cases
@@ -22,9 +27,9 @@
           ("symbol-not-in"     'symbol  '(integer string)        nil)
           ("int-no-arms"       'integer nil                       nil))
   (arm-type covered expected)
-  (if expected
-      (assert-true  (cl-cc/type:typecase-arm-subsumed-p arm-type covered))
-      (assert-false (cl-cc/type:typecase-arm-subsumed-p arm-type covered))))
+  (assert-exhaustiveness-expected-case expected
+    (assert-true  (cl-cc/type:typecase-arm-subsumed-p arm-type covered))
+    (assert-false (cl-cc/type:typecase-arm-subsumed-p arm-type covered))))
 
 ;;; ─── check-typecase-exhaustiveness ───────────────────────────────────────
 
@@ -35,9 +40,9 @@
   (arms expected-exhaustive)
   (multiple-value-bind (exhaustive-p unreachable warnings)
       (cl-cc/type:check-typecase-exhaustiveness arms)
-    (if expected-exhaustive
-        (assert-true  exhaustive-p)
-        (assert-false exhaustive-p))
+    (assert-exhaustiveness-expected-case expected-exhaustive
+      (assert-true  exhaustive-p)
+      (assert-false exhaustive-p))
     (assert-null unreachable)
     (assert-null warnings)))
 
@@ -73,9 +78,9 @@
   (arms expected-exhaustive)
   (multiple-value-bind (exhaustive-p unreachable warnings)
       (cl-cc/type:check-typecase-exhaustiveness arms)
-    (if expected-exhaustive
-        (assert-true  exhaustive-p)
-        (assert-false exhaustive-p))
+    (assert-exhaustiveness-expected-case expected-exhaustive
+      (assert-true  exhaustive-p)
+      (assert-false exhaustive-p))
     (assert-null unreachable)
     (assert-null warnings)))
 

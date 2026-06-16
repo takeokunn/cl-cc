@@ -43,7 +43,6 @@
     #:*print-escape* #:*print-gensym* #:*print-array*
     #:*trace-output* #:*debugger-hook* #:*break-on-signals*
     #:*features* #:*load-pathname* #:*load-truename* #:*compile-file-pathname* #:*compile-file-truename*
-    #:*default-external-format*
     #:stream-external-format #:break #:inspect #:describe
     #:invoke-debugger #:step #:ed #:open #:close #:write-char #:read-char #:write-string #:read-line #:write-line #:terpri #:fresh-line #:finish-output #:force-output #:clear-output #:clear-input #:listen #:peek-char #:unread-char #:read-byte #:write-byte #:file-position #:file-length #:probe-file #:delete-file #:rename-file #:directory #:truename #:file-write-date #:DRIBBLE #:TRACE #:UNTRACE)
   (:export

@@ -57,8 +57,8 @@
           ("progn-with-let"   3  "(progn (let ((x 2)) x) (let ((y 3)) y))")))
 
 (deftest vm-exec-progn-empty
-  "Empty progn signals an error (not yet supported)."
-  (assert-signals error (run-string "(progn)")))
+  "Empty progn returns NIL."
+  (assert-null (run-string "(progn)")))
 
 ;;; Print Tests
 
@@ -185,6 +185,32 @@
   (let* ((program (compilation-result-program (compile-string "(+ 1 2)")))
          (inst-count (length (vm-program-instructions program))))
     (assert-true (> inst-count 0))))
+
+(in-suite cl-cc-unit-suite)
+
+(deftest reflect-optimization-settings
+  "Optimization reflection should read the live SBCL policy without warning."
+  (let ((warning-seen nil))
+    (handler-bind ((warning
+                     (lambda (condition)
+                       (declare (ignore condition))
+                       (setf warning-seen t)
+                       (let ((restart (find-restart 'muffle-warning)))
+                         (when restart
+                           (invoke-restart restart))))))
+      (let* ((settings (cl-cc/compile::reflect-optimization-settings))
+             (policy (symbol-value (find-symbol "*POLICY*" "SB-C")))
+             (policy-quality (find-symbol "POLICY-QUALITY" "SB-C"))
+             (expected (loop for quality in '(speed safety debug compilation-speed space)
+                             collect (cons quality (funcall policy-quality policy quality)))))
+        (assert-false warning-seen)
+        (assert-equal expected settings)
+        (assert-true (every (lambda (entry)
+                              (and (symbolp (car entry))
+                                   (integerp (cdr entry))))
+                            settings))))))
+
+(in-suite cl-cc-integration-suite)
 
 ;;; CPS Transformation Tests
 

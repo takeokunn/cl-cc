@@ -115,10 +115,6 @@ Precedence levels: 1=comma 2=assign 4=ternary 5=?? 6=|| 7=&& 8=| 9=^ 10=&
                      ;; helper (the global binding still serves indirect/value use).
                      ("structuredClone" . %js-structured-clone)
                      ("queueMicrotask" . %js-queue-microtask)
-                     ("setTimeout" . %js-set-timeout)
-                     ("setInterval" . %js-set-interval)
-                     ("clearTimeout" . %js-clear-timer)
-                     ("clearInterval" . %js-clear-timer)
                      ;; Symbol(desc) constructs a symbol; Symbol.iterator (member
                      ;; access on the global) is unaffected.
                      ("Symbol" . %js-make-symbol)
@@ -150,7 +146,6 @@ defaults Number()=0, String()=\"\", Boolean()=false."
   (cond
     ((member helper '(%js-parse-int %js-parse-float
                       %js-structured-clone %js-queue-microtask
-                      %js-set-timeout %js-set-interval %js-clear-timer
                       %js-make-symbol
                       %js-encode-uri-component %js-decode-uri-component
                       %js-encode-uri %js-decode-uri %js-btoa %js-atob
@@ -375,4 +370,3 @@ Returns (values arg-list rest)."
 ;;;   %js-lower-place-incdec, js-parse-postfix, template-literal parsers,
 ;;;   js-parse-unary, %js-template-parts-and-rest, %js-parse-tagged-template,
 ;;;   %js-parse-template-literal
-

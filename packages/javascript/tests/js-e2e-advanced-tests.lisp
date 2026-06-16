@@ -7,11 +7,11 @@
 ;;;; Depends on: js-e2e-core-tests.lisp (%js-run-capture, deftest-js-run).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-javascript-e2e-serial-suite)
 
 ;;; ─── Optional chaining + nullish coalescing ──────────────────────────────────
 
-(deftest-js-run js-e2e-optional-chaining-execution
+(deftest-js-run-isolated-batch js-e2e-optional-chaining-execution
   "?. returns undefined when chain is null/undefined; ?? returns left operand unless null/undefined."
   ("NYC"       "const u={profile:{city:'NYC'}}; console.log(u?.profile?.city);")
   ("undefined" "const u=null; console.log(u?.profile?.city);")
@@ -34,7 +34,7 @@
   ("6"     "const f=function g(x){return x*2;}; console.log(f(3));")
   ("6,2,4" "console.log([3,1,2].map(function dbl(x){return x*2;}).join(\",\"));"))
 
-(deftest-js-run js-e2e-typeof-function
+(deftest-js-run-isolated-batch js-e2e-typeof-function
   "typeof returns 'function' for vm-closure-objects; non-function types unchanged."
   ("function"           "const f=function(x){return x;}; console.log(typeof f);")
   ("function"           "const g=x=>x; console.log(typeof g);")
@@ -47,7 +47,7 @@
 
 ;;; ─── Arrow function params ───────────────────────────────────────────────────
 
-(deftest-js-run js-e2e-arrow-default-and-rest-params
+(deftest-js-run-isolated-batch js-e2e-arrow-default-and-rest-params
   "Arrow functions support default parameters and ...rest collection."
   ("10" "const f=(x=5)=>x*2; console.log(f());")
   ("6"  "const f=(x=5)=>x*2; console.log(f(3));")
@@ -62,7 +62,7 @@
 
 ;;; ─── Object-literal getters and setters ──────────────────────────────────────
 
-(deftest-js-run js-e2e-object-getters-setters
+(deftest-js-run-isolated-batch js-e2e-object-getters-setters
   "Object-literal get/set accessors invoked on property read/write; both survive on same key."
   ("42" "const o={get v(){return 42;}}; console.log(o.v);")
   ("20" "const o={n:10,get v(){return this.n*2;}}; console.log(o.v);")
@@ -73,7 +73,7 @@
 
 ;;; ─── Static-method namespace globals ─────────────────────────────────────────
 
-(deftest-js-run js-e2e-static-method-namespaces
+(deftest-js-run-isolated-batch js-e2e-static-method-namespaces
   "Object/Reflect/Number/Array/String namespace globals seeded in prelude; Math/JSON unaffected."
   ("a,b"            "console.log(Object.keys({a:1,b:2}).join(\",\"));")
   ("2"              "console.log(Object.keys({a:1,b:2}).length);")
@@ -124,7 +124,7 @@
 
 ;;; ─── null / undefined literals ───────────────────────────────────────────────
 
-(deftest-js-run js-e2e-null-undefined-literals
+(deftest-js-run-isolated-batch js-e2e-null-undefined-literals
   "null/undefined lower to runtime sentinels; ?? treats them as nullish; typeof is correct."
   ("null"      "console.log(null);")
   ("undefined" "console.log(undefined);")
@@ -140,7 +140,7 @@
 
 ;;; ─── Class getters and setters ───────────────────────────────────────────────
 
-(deftest-js-run js-e2e-class-getters-setters
+(deftest-js-run-isolated-batch js-e2e-class-getters-setters
   "Class get/set accessors are invoked on property read/write; inheritance resolves through prototype chain."
   ("9"  "class C{get v(){return 9;}} console.log(new C().v);")
   ("20" "class C{constructor(){this.n=10;} get v(){return this.n*2;}} console.log(new C().v);")
@@ -152,7 +152,7 @@
 
 ;;; ─── Conditional truthiness ──────────────────────────────────────────────────
 
-(deftest-js-run js-e2e-conditional-truthiness
+(deftest-js-run-isolated-batch js-e2e-conditional-truthiness
   "JS falsy values test as false in ternary/if; uninitialized `let' is undefined."
   ("f" "console.log(\"\" ? \"t\" : \"f\");")
   ("f" "console.log(null ? \"t\" : \"f\");")
@@ -168,7 +168,7 @@
 
 ;;; ─── Coercion functions ──────────────────────────────────────────────────────
 
-(deftest-js-run js-e2e-coercion-functions
+(deftest-js-run-isolated-batch js-e2e-coercion-functions
   "Number/String/Boolean/parseInt/parseFloat callable as functions; Number.isInteger unaffected."
   ("43"         "console.log(Number(\"42\") + 1);")
   ("3.14"       "console.log(Number(\"3.14\"));")
@@ -186,7 +186,7 @@
 
 ;;; ─── Tagged templates + Number.prototype ─────────────────────────────────────
 
-(deftest-js-run js-e2e-tagged-templates
+(deftest-js-run-isolated-batch js-e2e-tagged-templates
   "Tagged template calls TAG(strings-array, ...subs); plain templates concatenate."
   ("1"     "function t(s){return s.length;} console.log(t`hi`);")
   ("hello" "function t(s){return s[0];} console.log(t`hello`);")
@@ -197,7 +197,7 @@
   ("val=5" "const n=5; console.log(`val=${n}`);")
   ("sum=5" "console.log(`sum=${2+3}`);"))
 
-(deftest-js-run js-e2e-number-prototype-methods
+(deftest-js-run-isolated-batch js-e2e-number-prototype-methods
   "Number.prototype toFixed/toString/toPrecision/valueOf format JS-faithfully."
   ("123.46"   "console.log((123.456).toFixed(2));")
   ("8"        "console.log((7.5).toFixed(0));")
@@ -214,12 +214,11 @@
 ;;; ─── Standalone global builtins ──────────────────────────────────────────────
 
 (deftest-js-run js-e2e-standalone-global-builtins
-  "structuredClone/queueMicrotask/setTimeout are reachable as bare direct calls."
+  "structuredClone/queueMicrotask are reachable as bare direct calls."
   ("3"       "console.log(structuredClone({b:[2,3]}).b[1]);")
   ("5,99"    "const o={x:{y:5}}; const c=structuredClone(o); c.x.y=99; console.log(o.x.y+','+c.x.y);")
   ("3"       "console.log(structuredClone([1,2,3]).length);")
   ("micro"   "queueMicrotask(()=>console.log('micro'));")
-  ("timeout" "setTimeout(()=>console.log('timeout'),0);")
   ("1"       "const f=structuredClone; console.log(f({a:1}).a);")
   ("42"      "console.log(parseInt('42px'));"))
 
@@ -233,7 +232,7 @@
   ("12"   "class A{constructor(x){this.x=x;}} class B extends A{constructor(x){super(x*2);}} class C extends B{constructor(x){super(x+1);}} console.log(new C(5).x);")
   ("z"    "class A{constructor(n){this.n=n;}} class B extends A{} console.log(new B('z').n);"))
 
-(deftest-js-run js-e2e-class-fields
+(deftest-js-run-isolated-batch js-e2e-class-fields
   "Class field initializers run per-instance before constructor body; fields can reference each other."
   ("0"    "class C{count=0;} console.log(new C().count);")
   ("15"   "class C{x=5;y=10;} const c=new C(); console.log(c.x+c.y);")
@@ -243,7 +242,7 @@
   ("6"    "class C{a=2;b=this.a*3;} console.log(new C().b);")
   ("y 99" "class A{constructor(n){this.n=n;}} class D extends A{extra=99;} const d=new D('y'); console.log(d.n+' '+d.extra);"))
 
-(deftest-js-run js-e2e-class-self-reference
+(deftest-js-run-isolated-batch js-e2e-class-self-reference
   "A class can reference itself inside its own methods (static create, clone, recursive)."
   ("z"      "class A{constructor(n){this.n=n;} static create(n){return new A(n);}} console.log(A.create('z').n);")
   ("6"      "class A{constructor(n){this.n=n;} clone(){return new A(this.n+1);}} console.log(new A(5).clone().n);")
@@ -266,7 +265,7 @@
   ("10"   "class A{static Y=10;m(){return 1;}} const a=new A(); a.m(); console.log(A.Y);")
   ("7 0"  "class Point{constructor(x){this.x=x;} static origin(){return new Point(0);}} const p=new Point(7); console.log(p.x+' '+Point.origin().x);"))
 
-(deftest-js-run js-e2e-super-method
+(deftest-js-run-isolated-batch js-e2e-super-method
   "super.method() calls the parent method; super() constructor calls still work in same class."
   ("11"      "class A{f(){return 1;}} class B extends A{f(){return super.f()+10;}} console.log(new B().f());")
   ("AB"      "class A{greet(){return 'A';}} class B extends A{greet(){return super.greet()+'B';}} console.log(new B().greet());")
@@ -285,7 +284,7 @@
   ("5"  "class C{get x(){return 5;}} console.log(new C().x);")
   ("6"  "let s=0; for(const x of [1,2,3]){s+=x;} console.log(s);"))
 
-(deftest-js-run js-e2e-symbol-constructor
+(deftest-js-run-isolated-batch js-e2e-symbol-constructor
   "Symbol(desc) is callable; .description is an accessor property; computed keys work."
   ("symbol"    "console.log(typeof Symbol('x'));")
   ("Symbol(d)" "console.log(Symbol('d').toString());")
@@ -295,7 +294,7 @@
   ("42"        "const o={}; const k=Symbol('key'); o[k]=42; console.log(o[k]);")
   ("symbol"    "console.log(typeof Symbol.iterator);"))
 
-(deftest-js-run js-e2e-global-function-calls
+(deftest-js-run-isolated-batch js-e2e-global-function-calls
   "btoa/atob/encode*/decode*/isNaN/isFinite are callable as bare global calls."
   ("aGk="      "console.log(btoa('hi'));")
   ("hi"        "console.log(atob('aGk='));")

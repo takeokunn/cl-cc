@@ -15,7 +15,7 @@
          (condition (cl-cc/vm::make-vm-unbound-variable
                      state 'pritn
                      :source-location loc
-                     :source-text "(defun f ()\n  pritn\n  42)"
+                     :source-text (format nil "(defun f ()~%  pritn~%  42)")
                      :suggestions '(print))))
     (let ((text (format nil "~A" condition)))
       (assert-true (search "foo.lisp:2:4" text))
@@ -37,15 +37,15 @@
 
 (deftest restart-ui-describes-and-invokes-vm-restart-interactively
   "FR-945: VM restart records expose descriptions and interactive invocation."
-  (let ((called nil)
-        (restart (cl-cc/vm::make-vm-restart 'use-value
-                                            (lambda (value)
-                                              (setf called value)))))
-    (setf (cl-cc/vm::vm-restart-description restart) "Use supplied value")
-    (setf (cl-cc/vm::vm-restart-interactive-function restart) (lambda () (list 42)))
-    (assert-equal "Use supplied value" (cl-cc/vm:describe-restart restart))
-    (cl-cc/vm:vm-invoke-restart-interactively restart)
-    (assert-= 42 called)))
+  (let ((called 0))
+    (let ((restart (cl-cc/vm::make-vm-restart 'use-value
+                                              (lambda (value)
+                                                (setf called value)))))
+      (setf (cl-cc/vm::vm-restart-description restart) "Use supplied value")
+      (setf (cl-cc/vm::vm-restart-interactive-function restart) (lambda () (list 42)))
+      (assert-equal "Use supplied value" (cl-cc/vm:describe-restart restart))
+      (cl-cc/vm:vm-invoke-restart-interactively restart)
+      (assert-= 42 called))))
 
 (deftest trace-helpers-log-call-and-return
   "FR-1085: vm-with-trace logs call and return lines with nesting depth."

@@ -83,6 +83,14 @@
   :make-like-key (initial-element)
   :make-like-form (make-array size :initial-element initial-element))
 
+(define-builtin-sequence-methods bit-vector
+  :length-form   (cl:length object)
+  :elt-form      (cl:aref object index)
+  :setf-elt-form (setf (cl:aref object index) value)
+  :subseq-form   (cl:subseq object start end)
+  :make-like-key ((initial-element 0))
+  :make-like-form (make-array size :element-type 'bit :initial-element initial-element))
+
 (define-builtin-sequence-methods string
   :length-form   (cl:length object)
   :elt-form      (cl:char object index)
@@ -203,4 +211,3 @@
     ((typep object 'structure-object)
      (copy-structure object))
     (t object)))
-

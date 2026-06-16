@@ -1,7 +1,7 @@
 ;;;; tests/unit/optimize/optimizer-loop-transforms-tests.lisp
 ;;;; Unit tests for loop optimization passes: rotation, peeling, unrolling.
 ;;;;
-;;;; Covers: opt-pass-loop-rotation, opt-pass-loop-peeling, opt-pass-loop-unrolling.
+;;;; Covers: opt-pass-loop-rotation, opt-pass-loop-peel, opt-pass-loop-unrolling.
 
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
@@ -56,7 +56,7 @@ Pattern: count :i from 0 to LIM by 1, accumulating in :sum."
 (deftest-each loop-passes-noop-on-nonmatching-shape
   "Loop optimization passes leave non-matching control-flow shapes unchanged in length."
   :cases (("rotation" #'cl-cc/optimize::opt-pass-loop-rotation)
-          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peeling))
+          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peel))
   (pass)
   (let* ((insts (list (make-vm-label :name "A")
                       (make-vm-const :dst :r0 :value 1)
@@ -69,9 +69,9 @@ Pattern: count :i from 0 to LIM by 1, accumulating in :sum."
 ;;; ─── Loop peeling ─────────────────────────────────────────────────────────
 
 (deftest loop-peeling-duplicates-first-iteration-for-simple-while
-  "opt-pass-loop-peeling duplicates first iteration for simple while shape."
+  "opt-pass-loop-peel duplicates first iteration for simple while shape."
   (let* ((insts (%loop-transforms-make-while-loop-insts))
-         (out (cl-cc/optimize::opt-pass-loop-peeling insts))
+         (out (cl-cc/optimize::opt-pass-loop-peel insts))
          (jz-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-jump-zero)) out))
          (add-count (count-if (lambda (i) (typep i 'cl-cc/vm::vm-add)) out)))
     (assert-= 2 jz-count)
@@ -175,7 +175,7 @@ Pattern: count :i from 0 to LIM by 1, accumulating in :sum."
 (deftest-each cfg-natural-loop-transforms-detected
   "CFG-based loop rotation and peeling detect single-latch natural loops."
   :cases (("rotation" #'cl-cc/optimize::opt-pass-loop-rotation 0 1)
-          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peeling  1 2))
+          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peel  1 2))
   (pass expected-jumps-to-lh expected-adds)
   (let* ((insts (list (make-vm-const :dst :one :value 1)
                       (make-vm-jump :label "Lh")

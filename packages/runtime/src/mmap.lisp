@@ -188,12 +188,6 @@
   (declare (ignore region advice start end))
   t)
 
-(defun rt-mmap-file (&rest args) (apply #'mmap-file args))
-(defun rt-mmap-array (region) (mmap-array region))
-(defun rt-mmap-close (region) (mmap-close region))
-(defun rt-mmap-sync (region &rest args) (apply #'mmap-sync region args))
-(defun rt-mmap-advice (region advice &rest args) (apply #'mmap-advice region advice args))
-
 (defun rt-allocate-code-memory (size)
   (rt-mmap nil size (logior +rt-prot-read+ +rt-prot-write+ +rt-prot-exec+)
            +rt-map-anonymous+ nil 0))

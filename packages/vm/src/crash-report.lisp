@@ -25,11 +25,12 @@
   (unless *crash-handler-installed*
     ;; Hook for unhandled errors in non-debugger threads
     (setf sb-ext:*invoke-debugger-hook*
-          (lambda (condition hook)
-            (declare (ignore hook))
-            (when (typep condition 'serious-condition)
-              (save-crash-dump condition))
-            (sb-debug:invoke-default-debugger condition)))
+	    (lambda (condition hook)
+	      (declare (ignore hook))
+	      (when (typep condition 'serious-condition)
+	        (save-crash-dump condition))
+	      (let ((sb-ext:*invoke-debugger-hook* nil))
+	        (invoke-debugger condition))))
     (setf *crash-handler-installed* t)))
 
 ;;; ──── Crash dump saving ────
@@ -72,8 +73,10 @@ File: crash-YYYYMMDD-HHMMSS.cl-cc-dump"
   "Capture the current call stack as a backtrace."
   (let ((frames nil))
     (ignore-errors
-      (dolist (frame (sb-debug:backtrace-as-list))
-        (push frame frames)))
+      (let ((backtrace-as-list (find-symbol "BACKTRACE-AS-LIST" "SB-DEBUG")))
+        (when (and backtrace-as-list (fboundp backtrace-as-list))
+          (dolist (frame (funcall backtrace-as-list))
+            (push frame frames)))))
     frames))
 
 (defun capture-registers ()
@@ -93,8 +96,13 @@ x86-64: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8-R15, RIP."
 
 (defun capture-thread-context ()
   "Capture per-thread state."
-  (list (list :thread-name (sb-thread:thread-name sb-thread:*current-thread*)
-              :thread-id (sb-thread:thread-os-thread sb-thread:*current-thread*))))
+  (let ((thread sb-thread:*current-thread*)
+        (thread-os-thread (find-symbol "THREAD-OS-THREAD" "SB-THREAD")))
+    (list (list :thread-name (sb-thread:thread-name thread)
+                :thread-id (and thread-os-thread
+                                (fboundp thread-os-thread)
+                                (ignore-errors
+                                  (funcall thread-os-thread thread)))))))
 
 ;;; ──── Serialization ────
 (defun write-crash-report (report stream)
@@ -113,24 +121,29 @@ x86-64: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8-R15, RIP."
   (format stream "~%Thread Context: ~S~%" (cr-thread-context report)))
 
 ;;; ──── Signal handler for C-level crashes ────
+(defun %signal-number (name)
+  (let ((symbol (find-symbol name "SB-UNIX")))
+    (and symbol
+         (boundp symbol)
+         (symbol-value symbol))))
+
+(defun %install-signal-handler (signal-number name)
+  (when signal-number
+    (sb-sys:enable-interrupt
+     signal-number
+     (lambda (signal info context)
+       (declare (ignore signal info context))
+       (format *error-output* "~&;; ~A received~%" name)
+       (save-crash-dump (make-condition 'simple-error
+                                         :format-control name
+                                         :format-arguments nil))))))
+
 (defun install-signal-handlers ()
   "Install signal handlers for SIGSEGV and SIGABRT."
-  (sb-sys:enable-interrupt
-   sb-unix:sigsegv
-   (lambda (signal info context)
-     (declare (ignore signal info context))
-     (format *error-output* "~&;; SIGSEGV received~%")
-     (save-crash-dump (make-condition 'simple-error
-                                       :format-control "SIGSEGV"
-                                       :format-arguments nil))))
-  (sb-sys:enable-interrupt
-   sb-unix:sigabrt
-   (lambda (signal info context)
-     (declare (ignore signal info context))
-     (format *error-output* "~&;; SIGABRT received~%")
-     (save-crash-dump (make-condition 'simple-error
-                                       :format-control "SIGABRT"
-                                       :format-arguments nil)))))
+  (%install-signal-handler (%signal-number "SIGSEGV") "SIGSEGV")
+  (%install-signal-handler (or (%signal-number "SIGABRT")
+                               (%signal-number "SIGIOT"))
+                           "SIGABRT"))
 
 ;;; ──── CLI analysis command integration ────
 (defun analyze-crash-dump (pathname)

@@ -18,9 +18,9 @@ let
   '';
 
   pbtSanitize = ''
-    if [ -z "''${CLCC_PBT_COUNT:-}" ] || ! printf '%s' "$CLCC_PBT_COUNT" | grep -Eq '^[0-9]+$'; then
-      CLCC_PBT_COUNT=3
-    fi
+    case "''${CLCC_PBT_COUNT:-}" in
+      ""|*[!0-9]*) CLCC_PBT_COUNT=3 ;;
+    esac
     export CLCC_PBT_COUNT
   '';
 
@@ -50,6 +50,7 @@ let
       enablePbtSanitize ? false,
       enableFaslCacheCleaner ? false,
       enableCwdGuard ? true,
+      forwardArgs ? false,
       extraTimeoutSeconds ? 120,
       extraSbclFlags ? [ ],
       trailingScript ? "",
@@ -69,6 +70,8 @@ let
         sys: "--eval ${lib.escapeShellArg "(asdf:load-system ${sys}${forceFlag})"}"
       ) loadAsdSystems;
       disableTranslationsFlag = lib.optionalString disableOutputTranslations "--eval '(asdf:disable-output-translations)'";
+      forwardArgsFlag = lib.optionalString forwardArgs '' \
+          --end-toplevel-options "$@"'';
       dispatchExport = lib.optionalString (
         enableDispatchSemFix && pkgs.stdenv.isDarwin && dispatchSemFix != null
       ) ''export DYLD_INSERT_LIBRARIES="${dispatchSemFix}/lib/libdispatch_sem_fix.dylib"'';
@@ -81,8 +84,8 @@ let
         ${extraEnv}
         export CLCC_TEST_TIMEOUT="''${CLCC_TEST_TIMEOUT:-10}"
         export CLCC_SUITE_TIMEOUT="''${CLCC_SUITE_TIMEOUT:-600}"
-        if ! printf '%s' "$CLCC_TEST_TIMEOUT"  | grep -Eq '^[1-9][0-9]*$'; then CLCC_TEST_TIMEOUT=10;  fi
-        if ! printf '%s' "$CLCC_SUITE_TIMEOUT" | grep -Eq '^[1-9][0-9]*$'; then CLCC_SUITE_TIMEOUT=600; fi
+        case "$CLCC_TEST_TIMEOUT" in ""|0|*[!0-9]*) CLCC_TEST_TIMEOUT=10 ;; esac
+        case "$CLCC_SUITE_TIMEOUT" in ""|0|*[!0-9]*) CLCC_SUITE_TIMEOUT=600 ;; esac
         shell_timeout=$((CLCC_SUITE_TIMEOUT + ${toString extraTimeoutSeconds}))
         ${pkgs.coreutils}/bin/timeout --kill-after=30 "$shell_timeout" ${rlwrapPrefix}${sbclBin} ${sbclFlags} ${lib.concatStringsSep " " extraSbclFlags} \
           --non-interactive \
@@ -91,7 +94,7 @@ let
           ${disableTranslationsFlag} \
           ${lib.optionalString loadProjectAsd "--load cl-cc.asd"} \
           ${loadSystemEvals} \
-          ${joinEvals lispPostLoadEvalForms}
+          ${joinEvals lispPostLoadEvalForms}${forwardArgsFlag}
         ${trailingScript}
       '';
     in
@@ -116,6 +119,7 @@ let
       enableDispatchSemFix = true;
       enablePbtSanitize = true;
       enableFaslCacheCleaner = false;
+      forwardArgs = true;
       # Load the pre-compiled core image (save-lisp-and-die snapshot).
       # The core has :cl-cc, :cl-cc-cli, :cl-cc-testing-framework pre-loaded and
       # warm-stdlib-cache pre-initialized, so the heavy ASDF loading is skipped.
@@ -154,6 +158,10 @@ let
         # captured by the closure; %with-isolated-macro-environment identity-rebinds
         # *macro-eval-fn* so all threads share the same mutex.
         ''(let ((lock (sb-thread:make-mutex :name "macro-eval-lock"))) (setf cl-cc/expand:*macro-eval-fn* (lambda (form) (sb-thread:with-mutex (lock) (eval form)))))''
+        # The core image is produced in a Nix build sandbox, so the baked stdlib
+        # disk-cache path may point under /nix/var/nix/builds. Rebase it to the
+        # caller's runtime HOME before the optional warm step.
+        ''(let ((home (uiop:getenv "HOME"))) (when home (setf cl-cc/pipeline::*stdlib-cache-directory* (merge-pathnames #P".cache/cl-cc/" (uiop:ensure-directory-pathname (pathname home))))))''
         # Pre-warm BOTH stdlib caches in the main thread (single-threaded, safe).
         # The core bakes *stdlib-expanded-cache-eval-fn* = #'our-eval and a
         # *stdlib-vm-snapshot* compiled under our-eval.  After the *macro-eval-fn*
@@ -164,9 +172,32 @@ let
         # safepoint windows can deadlock threads waiting on watchdog-lock.
         # warm-stdlib-cache rebuilds both caches under *macro-eval-fn* = #'eval
         # so workers see cache HITs and bypass both rebuild paths entirely.
-        ''(handler-case (progn (format t "# warming stdlib cache~%") (cl-cc:warm-stdlib-cache) (format t "# stdlib cache ready~%")) (error (e) (format *error-output* "~&FATAL: stdlib cache warm failed: ~A~%" e) (uiop:quit 1)))''
         ''(format t "# starting fast test plan (unit)~%")''
-        ''(handler-case (uiop:symbol-call :cl-cc/test (quote run-tests)) (error (e) (format t "~&not ok - run-tests fatal error: ~A~%" e) (format *error-output* "~&FATAL: ~A~%" e) (uiop:quit 1)))''
+        ''(let* ((args (uiop:command-line-arguments))
+                 (filter (loop for rest on args
+                               when (and (string= (first rest) "--filter") (second rest))
+                                 collect (second rest)))
+                 (warm-env (uiop:getenv "CLCC_WARM_STDLIB"))
+                 (warm-stdlib (and (not (member "--no-warm-stdlib" args :test #'string=))
+                                   (not (and warm-env
+                                             (member (string-downcase warm-env)
+                                                     '("0" "false" "no" "off")
+                                                     :test #'string=))))))
+            (handler-case
+                (progn
+                  (if warm-stdlib
+                      (progn
+                        (format t "# warming stdlib cache~%")
+                        (cl-cc:warm-stdlib-cache)
+                        (format t "# stdlib cache ready~%"))
+                      (format t "# stdlib cache warm skipped~%"))
+                  (uiop:symbol-call :cl-cc/test (quote run-tests)
+                                    :filter filter
+                                    :warm-stdlib warm-stdlib))
+              (error (e)
+                (format t "~&not ok - run-tests fatal error: ~A~%" e)
+                (format *error-output* "~&FATAL: ~A~%" e)
+                (uiop:quit 1))))''
       ];
     };
 

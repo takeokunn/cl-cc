@@ -38,7 +38,7 @@
 
 (defun %wb-write-marked-header (heap addr size tag)
   "Write a marked (black) object header at ADDR."
-  (let* ((h  (cl-cc/runtime:make-header size tag 0))
+  (let* ((h  (cl-cc/runtime:make-rt-header size tag :gc-bits 0))
          (hm (cl-cc/runtime:header-set-mark h)))
     (cl-cc/runtime:rt-heap-set-header heap addr hm)))
 
@@ -46,7 +46,7 @@
   "Write an unmarked object header at ADDR."
   (cl-cc/runtime:rt-heap-set-header
    heap addr
-   (cl-cc/runtime:make-header size tag 0)))
+   (cl-cc/runtime:make-rt-header size tag :gc-bits 0)))
 
 ;;; ------------------------------------------------------------
 ;;; Test: Write actually stores the value

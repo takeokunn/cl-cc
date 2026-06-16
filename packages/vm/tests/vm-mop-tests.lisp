@@ -80,6 +80,17 @@
     (assert-eq 'standard (cl-cc/vm::method-combination-type
                           (cl-cc/vm::generic-function-method-combination gf)))))
 
+(deftest fr-930-satiating-gfs-p-introspection
+  "FR-930: satiating-gfs-p reports generic-function dispatch saturation state."
+  :timeout 10
+  (let ((gf (cl-cc/vm::ensure-generic-function 'mop-satiated :lambda-list '(x))))
+    (assert-false (cl-cc/vm::satiating-gfs-p))
+    (assert-false (cl-cc/vm::satiating-gfs-p gf))
+    (setf (gethash :__satiated__ gf) t)
+    (assert-true (cl-cc/vm::satiating-gfs-p gf))
+    (setf (gethash :__satiated__ gf) nil)
+    (assert-false (cl-cc/vm::satiating-gfs-p gf))))
+
 (deftest fr-930-compute-applicable-methods
   "FR-930: compute-applicable-methods selects applicable descriptors."
   :timeout 10

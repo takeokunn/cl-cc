@@ -22,6 +22,11 @@
   "Lower an s-expression to an AST node."
   (cl-cc/parse:lower-sexp-to-ast sexp))
 
+(defmacro assert-parse-boolean-case (expected form)
+  `(if ,expected
+       (assert-true ,form)
+       (assert-false ,form)))
+
 ;;; ─── parse-source ───────────────────────────────────────────────────────────
 
 (deftest-each parser-parse-source-integer
@@ -124,7 +129,7 @@
 ;;; ─── parse-compiler-lambda-list ─────────────────────────────────────────────
 
 (deftest-each parser-lambda-list-parsing
-  "parse-compiler-lambda-list: required-only, &optional, &rest, &key, and empty lists."
+  "parse-compiler-lambda-list: required-only, &optional, &rest, &key, &aux, and empty lists."
   :cases (("required-only"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
@@ -160,6 +165,19 @@
                (assert-null rest-param)
                (assert-= 1 (length key-params))
                (assert-eq 'size (first (first key-params))))))
+          ("aux"
+           (lambda ()
+             (multiple-value-bind (required optional rest-param key-params aux-params)
+                 (cl-cc/parse:parse-compiler-lambda-list '(x &aux (y 1) z))
+               (assert-equal '(x) required)
+               (assert-null optional)
+               (assert-null rest-param)
+               (assert-null key-params)
+               (assert-= 2 (length aux-params))
+               (assert-eq 'y (first (first aux-params)))
+               (assert-= 1 (second (first aux-params)))
+               (assert-eq 'z (first (second aux-params)))
+               (assert-null (second (second aux-params))))))
           ("empty"
            (lambda ()
              (multiple-value-bind (required optional rest-param key-params)
@@ -178,10 +196,12 @@
   :cases (("optional" '(x &optional y) t)
           ("rest"     '(x &rest args)  t)
           ("key"      '(x &key y)      t)
+          ("aux"      '(x &aux y)      t)
           ("simple"   '(x y z)         nil)
           ("empty"    '()              nil))
   (lambda-list expected)
-  (assert-equal expected (if (cl-cc/parse:lambda-list-has-extended-p lambda-list) t nil)))
+  (assert-parse-boolean-case expected
+    (cl-cc/parse:lambda-list-has-extended-p lambda-list)))
 
 ;;; ─── lower-sexp-to-ast: atoms ────────────────────────────────────────────────
 
@@ -235,4 +255,3 @@
   (let ((node (lower input)))
     (assert-true (cl-cc/ast:ast-quote-p node))
     (assert-equal input (cl-cc/ast:ast-quote-value node))))
-

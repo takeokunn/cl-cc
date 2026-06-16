@@ -189,7 +189,7 @@
           cl-cc:sexp->instruction
           ;; Prolog
           cl-cc:unify
-          cl-cc:substitute-variables
+          cl-cc:logic-substitute
           cl-cc:logic-var-p
           ;; CLOS AST
           cl-cc:ast-defclass

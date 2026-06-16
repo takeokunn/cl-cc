@@ -57,7 +57,7 @@
           :instruction->sexp :sexp->instruction :vm-dst :vm-src :vm-lhs :vm-rhs
           :vm-value :vm-car-reg :vm-cdr-reg :vm-cons-reg :vm-val-reg
           :vm-closure-reg :vm-closure-index :unify :unify-failed-p
-          :substitute-variables :logic-var-p))
+          :logic-substitute :logic-var-p))
 
   (setf cl-user::*cl-cc-pbt-exports*
         '(#:defproperty #:defgenerator #:for-all #:check

@@ -303,12 +303,15 @@ failing at compile time."
     dst))
 
 (defmethod compile-ast ((node ast-progn) ctx)
-  (let ((tail (ctx-tail-position ctx))
-        (last nil))
-    (loop for rest on (ast-progn-forms node)
-          do (setf (ctx-tail-position ctx) (if (null (cdr rest)) tail nil))
-             (setf last (compile-ast (car rest) ctx)))
-    last))
+  (let ((forms (ast-progn-forms node)))
+    (if forms
+        (let ((tail (ctx-tail-position ctx))
+              (last nil))
+          (loop for rest on forms
+                do (setf (ctx-tail-position ctx) (if (null (cdr rest)) tail nil))
+                   (setf last (compile-ast (car rest) ctx)))
+          last)
+        (%emit-constant ctx nil))))
 
 (defmethod compile-ast ((node ast-print) ctx)
   (setf (ctx-tail-position ctx) nil)

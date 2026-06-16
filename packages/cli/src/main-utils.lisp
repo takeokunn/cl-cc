@@ -298,7 +298,7 @@ Returns a parsed-args structure."
   "Bind FR-809 command-line arguments in CLI, runtime, and VM state."
   (let ((args (copy-list argv)))
     (setf *command-line-arguments* args)
-    (dolist (name '("*COMMAND-LINE-ARGUMENTS*" "*COMMAND-LINE-ARGS*" "*SCRIPT-ARGV*"))
+    (dolist (name '("*COMMAND-LINE-ARGUMENTS*" "*COMMAND-LINE-ARGS*"))
       (%set-vm-global-if-package :cl-cc/vm name args vm-state)
       (%set-vm-global-if-package :cl-cc name args vm-state))
     args))
@@ -334,7 +334,7 @@ Returns a parsed-args structure."
 
 (defun %source-with-script-bindings (source argv)
   "Wrap SOURCE with script argv initialization and optional CL-CC:MAIN call."
-  (format nil "(progn~%  (defparameter cl-cc:*script-argv* '~S)~%  (defparameter cl-cc:*command-line-arguments* cl-cc:*script-argv*)~%  ~A~%  (when (fboundp 'cl-cc:main) (funcall #'cl-cc:main cl-cc:*script-argv*)))~%"
+  (format nil "(progn~%  (defparameter cl-cc:*command-line-arguments* '~S)~%  ~A~%  (when (fboundp 'cl-cc:main) (funcall #'cl-cc:main)))~%"
           argv source))
 
 ;;; FR-917: Reproducible build support stub

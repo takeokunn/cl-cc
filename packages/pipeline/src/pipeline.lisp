@@ -611,6 +611,46 @@ non-%php- aliases."
                           (string= "%PHP-" name :end2 5))))
           (cl-cc/vm:vm-register-host-bridge sym (fdefinition sym)))))))
 
+(defvar *js-runtime-bridge-symbols-cache* nil)
+(defvar *js-runtime-global-symbols-cache* nil)
+
+(defun %js-runtime-bridge-symbols ()
+  (or *js-runtime-bridge-symbols-cache*
+      (let ((pkg (find-package :cl-cc/javascript)))
+        (when pkg
+          (setf *js-runtime-bridge-symbols-cache*
+                (let (symbols)
+                  (do-symbols (sym pkg)
+                    (when (and (eq (symbol-package sym) pkg)
+                               (fboundp sym)
+                               (not (macro-function sym))
+                               (not (special-operator-p sym))
+                               (let ((name (symbol-name sym)))
+                                 (and (>= (length name) 4)
+                                      (string= "%JS-" name :end2 4))))
+                      (push sym symbols)))
+                  (nreverse symbols)))))))
+
+(defun %js-runtime-global-symbols ()
+  (or *js-runtime-global-symbols-cache*
+      (let ((pkg (find-package :cl-cc/javascript)))
+        (when pkg
+          (setf *js-runtime-global-symbols-cache*
+                (let (symbols)
+                  (do-symbols (sym pkg)
+                    (when (and (eq (symbol-package sym) pkg)
+                               (boundp sym)
+                               (let ((name (symbol-name sym)))
+                                 (and (>= (length name) 4)
+                                      ;; *JS-* specials (Symbol/Infinity/error classes/...) and
+                                      ;; %JS-* special vars like %js-this (so `this' at top
+                                      ;; level resolves to undefined rather than erroring; a
+                                      ;; method call overrides it with the receiver).
+                                      (or (string= "*JS-" name :end2 4)
+                                          (string= "%JS-" name :end2 4)))))
+                      (push sym symbols)))
+                  (nreverse symbols)))))))
+
 (defun %register-js-runtime-bridges ()
   "Register JavaScript runtime helpers as VM host bridge functions.
 
@@ -619,17 +659,12 @@ cl-cc/javascript::%js-* helpers (%js-get-prop, %js-make-array, %js-console-log,
 %js-make-console, …). Register every fbound, non-macro %JS-* function whose home
 package is :cl-cc/javascript so compiled JS can call them through the VM host
 bridge — the same package-derived whitelist used for PHP."
-  (let ((pkg (find-package :cl-cc/javascript)))
-    (when pkg
-      (do-symbols (sym pkg)
-        (when (and (eq (symbol-package sym) pkg)
-                   (fboundp sym)
-                   (not (macro-function sym))
-                   (not (special-operator-p sym))
-                   (let ((name (symbol-name sym)))
-                     (and (>= (length name) 4)
-                          (string= "%JS-" name :end2 4))))
-          (cl-cc/vm:vm-register-host-bridge sym (fdefinition sym))))
+  (when (find-package :cl-cc/javascript)
+    (dolist (sym (%js-runtime-bridge-symbols))
+      (when (and (fboundp sym)
+                 (not (macro-function sym))
+                 (not (special-operator-p sym)))
+        (cl-cc/vm:vm-register-host-bridge sym (fdefinition sym))))
       ;; Route JS callbacks (Array.map/filter/reduce/sort) back through the VM
       ;; when the callback is a compiled-JS closure; host functions still go via
       ;; APPLY. Host array methods call (%js-funcall fn ...) → *js-apply-fn*; this
@@ -670,7 +705,7 @@ bridge — the same package-derived whitelist used for PHP."
                             (setf (gethash 'cl-cc/javascript::%js-this gv) prev)
                             (remhash 'cl-cc/javascript::%js-this gv))))
                     (let ((cl-cc/javascript::%js-this this))
-                      (funcall cl-cc/javascript::*js-apply-fn* fn args)))))))))
+                      (funcall cl-cc/javascript::*js-apply-fn* fn args))))))))
 
 (defun seed-js-runtime-globals (state)
   "Seed JavaScript runtime special variables into STATE's VM globals.
@@ -682,21 +717,11 @@ so without seeding EVERY JS program fails at runtime with
 'Unbound global variable: *JS-...*'. Mirror the package-derived function-bridge
 whitelist: copy every bound *JS-…* special in :cl-cc/javascript into STATE's
 globals so the prelude resolves."
-  (let ((pkg (find-package :cl-cc/javascript)))
-    (when (and pkg state)
-      (do-symbols (sym pkg)
-        (when (and (eq (symbol-package sym) pkg)
-                   (boundp sym)
-                   (let ((name (symbol-name sym)))
-                     (and (>= (length name) 4)
-                          ;; *JS-* specials (Symbol/Infinity/error classes/…) and
-                          ;; %JS-* special vars like %js-this (so `this' at top
-                          ;; level resolves to undefined rather than erroring; a
-                          ;; method call overrides it with the receiver).
-                          (or (string= "*JS-" name :end2 4)
-                              (string= "%JS-" name :end2 4)))))
-          (setf (gethash sym (cl-cc/vm:vm-global-vars state))
-                (symbol-value sym)))))))
+  (when (and (find-package :cl-cc/javascript) state)
+    (dolist (sym (%js-runtime-global-symbols))
+      (when (boundp sym)
+        (setf (gethash sym (cl-cc/vm:vm-global-vars state))
+              (symbol-value sym))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Public compilation API

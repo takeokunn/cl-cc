@@ -147,9 +147,9 @@ an upper input but is also bounded by the container cap when present."
 
 Pure CL implements heap ASLR as a logical word offset into the managed
 SIMPLE-VECTOR.  Native backends can map the same interface to
-mmap(MAP_FIXED_NOREPLACE).  For backwards-compatible deterministic heap
-construction, implicit calls return 0 unless *RT-HEAP-RANDOMIZE* is true;
-explicit SIZE calls return a fresh Pure CL random offset in [0, SIZE)."
+mmap(MAP_FIXED_NOREPLACE).  Implicit calls return 0 unless
+*RT-HEAP-RANDOMIZE* is true; explicit SIZE calls return a fresh Pure CL random
+offset in [0, SIZE)."
   (let ((max-offset (max 1 (min size #x1000000))))
     (if (or size-supplied-p *rt-heap-randomize*)
         (random max-offset)
@@ -359,15 +359,12 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
 ;;; FR-266 compressed object header (one 64-bit word):
 ;;;   [ type-tag:8 | gc-bits:4 | shape-id:20 | size:32 ]
 ;;;
-;;; The public RT-HEADER-* accessors expose those bitfields directly.  The older
-;;; HEADER-* API remains as a compatibility alias: HEADER-TAG maps to TYPE-TAG,
-;;; HEADER-AGE maps to GC-BITS, and HEADER-SIZE maps to SIZE.
+;;; The RT-HEADER-* accessors expose those bitfields directly.
 ;;;
-;;; MARK/GRAY are transient collector flags used by the existing mark-sweep
-;;; implementation.  They are kept as compatibility bits outside the compressed
-;;; payload so the FR-266 fields retain their exact widths; native runtimes can
-;;; lower them to side metadata or use the 4 GC bits according to their collector
-;;; encoding.
+;;; MARK/GRAY are transient collector flags used by the mark-sweep
+;;; implementation.  They live outside the compressed payload so the FR-266
+;;; fields retain their exact widths; native runtimes can lower them to side
+;;; metadata or use the 4 GC bits according to their collector encoding.
 
 ;;; Size field: bits 31..0
 (defconstant +header-size-shift+    0)
@@ -410,10 +407,9 @@ mprotect(PROT_NONE) plus sigaltstack/signal handling."
   "Construct a FR-266 compressed runtime object header.
 
 SIZE is the object size in heap words, including the header word.  TYPE-TAG is
-an 8-bit runtime type tag.  GC-BITS is the 4-bit collector field used by the
-compatibility HEADER-AGE accessor.  SHAPE-ID embeds the FR-214 object-shape id in
-the header, replacing the need for a per-object class pointer in compact object
-layouts."
+an 8-bit runtime type tag.  GC-BITS is the 4-bit collector field.  SHAPE-ID
+embeds the FR-214 object-shape id in the header, replacing the need for a
+per-object class pointer in compact object layouts."
   (check-type size (integer 0 #xffffffff))
   (check-type type-tag (integer 0 #xff))
   (check-type gc-bits (integer 0 #xf))
@@ -422,13 +418,6 @@ layouts."
           (ash (logand gc-bits #xF) +header-gc-bits-shift+)
           (ash (logand shape-id +header-shape-id-max+) +header-shape-id-shift+)
           (logand size #xFFFFFFFF)))
-
-(defun make-header (size type-tag &optional (age 0) (shape-id 0))
-  "Compatibility constructor for a compressed FR-266 header.
-
-AGE maps to the 4-bit GC-BITS field.  Optional SHAPE-ID embeds the FR-214 shape
-id when available; callers that do not know a shape retain shape id 0."
-  (make-rt-header size type-tag :gc-bits age :shape-id shape-id))
 
 (defun rt-header-size (header-word)
   "Extract the 32-bit object size field from compressed header HEADER-WORD."
@@ -447,18 +436,16 @@ id when available; callers that do not know a shape retain shape id 0."
   (logand (ash (logand header-word +header-shape-id-mask+) (- +header-shape-id-shift+))
           +header-shape-id-max+))
 
-(defun header-size (header-word)
-  "Extract the object size in words from header HEADER-WORD."
-  (rt-header-size header-word))
-
-(defun header-tag (header-word)
-  "Extract the type tag (0-7) from header HEADER-WORD."
-  (rt-header-type-tag header-word))
-
-(defun header-age (header-word)
-  "Extract the age (0-3) from header HEADER-WORD.
-   Age occupies bits 53..52; mark (bit 55) and gray (bit 54) are masked out."
+(defun rt-header-age (header-word)
+  "Extract the age (0-3) from compressed header HEADER-WORD."
   (logand (rt-header-gc-bits header-word) #x3))
+
+(defun rt-header-increment-age (header-word)
+  "Return a new header with age incremented by 1, capped at 3."
+  (let* ((current-age (rt-header-age header-word))
+         (new-age (min 3 (1+ current-age))))
+    (logior (logand header-word (lognot +header-age-mask+))
+            (ash new-age +header-age-shift+))))
 
 (defun header-marked-p (header-word)
   "Return true if the mark bit is set in header HEADER-WORD."
@@ -498,13 +485,6 @@ id when available; callers that do not know a shape retain shape id 0."
   "Extract the forwarding destination address from forwarding pointer HEADER-WORD.
    Only valid when (header-forwarding-p header-word) is true."
   (cdr header-word))
-
-(defun header-increment-age (header-word)
-  "Return a new header with age incremented by 1, capped at 3."
-  (let* ((current-age (header-age header-word))
-         (new-age (min 3 (1+ current-age))))
-    (logior (logand header-word (lognot +header-age-mask+))
-            (ash new-age +header-age-shift+))))
 
 ;;; ------------------------------------------------------------
 ;;; make-rt-heap Factory
@@ -821,7 +801,7 @@ place and the updated value is returned, amortizing stale-pointer repair."
 
 (defun rt-heap-object-size (heap addr)
   "Return the size in words of the object at absolute word address ADDR."
-  (header-size (rt-heap-object-header heap addr)))
+  (rt-header-size (rt-heap-object-header heap addr)))
 
 (defun rt-heap-occupancy-pct (heap)
   "Return total young+old heap occupancy as a percentage.

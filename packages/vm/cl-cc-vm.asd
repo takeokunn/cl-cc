@@ -36,6 +36,7 @@
    (:file "vm-dispatch-gf-call")
    (:file "vm-execute")
     (:file "vm-execute-mv")
+    (:file "vm-sequence")
     (:file "vm-clos")
     (:file "vm-clos-mop")
     (:file "vm-ic")
@@ -100,6 +101,8 @@
      (:file "phases-154-156")
      (:file "phases-157-160")
       (:file "persistent")
+      (:file "json")
+      (:file "regex")
       (:file "runtime-stdlib-2-completion")
       (:file "runtime-stdlib-3")
        (:file "vm-bytecode-stdlib3")
@@ -108,6 +111,7 @@
         (:file "vm-debug")
         (:file "vm-ryu")
        (:file "vm-terminal")
+       (:file "crash-report")
        (:file "vm-serialize")))
 
 ;;;; ---------------------------------------------------------------------
@@ -171,9 +175,10 @@
       (:file "runtime-stdlib-3-debug-tests")
       (:file "runtime-stdlib-3-io-tests")
       (:file "crash-report-tests"))
-  ;; NOTE: run-tests invokes the canonical cl-cc-suite (unit + integration + e2e),
-  ;; not a VM-subset. There is intentionally one test entry point; suite filtering
-  ;; is done via keyword args to run-tests, not via per-package ASDF systems.
+  ;; NOTE: run-tests invokes the canonical fast plan, excluding integration,
+  ;; e2e, conformance, and documentation/evidence suites by taxonomy. There is
+  ;; intentionally one test entry point; suite filtering is done via keyword args
+  ;; to run-tests, not via per-package ASDF systems.
   :perform (asdf:test-op (o c)
              (declare (ignore o c))
              (uiop:symbol-call :cl-cc/test '#:run-tests)))

@@ -7,6 +7,16 @@
 
 (in-suite cl-cc-unit-suite)
 
+(defun %grammar-symbol-name-tree (form)
+  (cond
+    ((null form) nil)
+    ((symbolp form) (symbol-name form))
+    ((consp form)
+     (cons (%grammar-symbol-name-tree (car form))
+           (%grammar-symbol-name-tree (cdr form))))
+    ((vectorp form) (map 'vector #'%grammar-symbol-name-tree form))
+    (t form)))
+
 ;;; ─── parse-cl-source: special form dispatch ────────────────────────────────
 
 (deftest-each grammar-special-form-kinds
@@ -81,3 +91,10 @@
     (assert-true (consp sexp))
     (assert-eq 'quote (car sexp))
     (assert-equal "X" (symbol-name (second sexp)))))
+
+(deftest grammar-cst-to-sexp-quasiquote
+  "parse-cl-source -> cst-to-sexp preserves quasiquote, unquote, and unquote-splicing."
+  (let* ((node (parse-first-form "`(a ,x ,@xs)"))
+         (sexp (cl-cc:cst-to-sexp node)))
+    (assert-equal '("QUASIQUOTE" ("A" ("UNQUOTE" "X") ("UNQUOTE-SPLICING" "XS")))
+                  (%grammar-symbol-name-tree sexp))))

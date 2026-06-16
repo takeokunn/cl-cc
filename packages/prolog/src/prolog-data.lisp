@@ -12,6 +12,13 @@
     (when prolog-when-handler))
   "Data table of built-in Prolog predicates and their CPS handlers.")
 
+(defun make-builtin-predicate-table (specs &optional (table (make-hash-table :test 'eq)))
+  "Build a built-in predicate dispatch table from SPECS."
+  (dolist (spec specs table)
+    (destructuring-bind (name handler) spec
+      (setf (gethash name table)
+            (symbol-function handler)))))
+
 (defparameter *prolog-declarative-rule-specs*
   '((((member ?x (cons ?x ?rest))))
     (((member ?x (cons ?y ?rest)))
@@ -116,14 +123,11 @@
   "Comparison operators whose cmp forms always infer BOOLEAN-TYPE in Prolog rules.")
 
 ;;; Data-driven type inference rule specifications.
-;;; Each entry is (RESULT-TYPE EXPR-KIND OPERATOR-LIST).
-;;; The macro DEFINE-PROLOG-TYPE-RULES-FROM-SPEC generates def-rule forms
-;;; from this table, keeping type rules data-only while the logic lives in
-;;; the macro expander.
+;;; Each entry is (RESULT-TYPE EXPR-KIND OPERATOR-LIST).  The rule file reads
+;;; this table directly and registers the corresponding def-rule forms.
 
 (defparameter *prolog-type-rule-specs*
   `((integer-type binop ,*prolog-integer-binop-type-operators*)
     (boolean-type cmp   ,*prolog-comparison-type-operators*))
   "Data table for generating Prolog type inference rules.
-Each entry: (RESULT-TYPE EXPR-KIND OPERATOR-LIST).
-The macro define-prolog-type-rules-from-spec expands this into def-rule forms.")
+Each entry: (RESULT-TYPE EXPR-KIND OPERATOR-LIST).")

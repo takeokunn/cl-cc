@@ -58,6 +58,18 @@ T-TYPE.  Returns (values name-string rest)."
            (values bare rest))))
       (t (error "PHP parse error: expected member name but got ~S" (php-peek stream))))))
 
+(defun %php-void-cast-start-p (stream)
+  "Return true when STREAM starts with PHP 8.5's `(void)` cast prefix."
+  (and (eq (php-peek-type stream) :T-LPAREN)
+       (eq (php-peek-type (cdr stream)) :T-TYPE)
+       (eq (php-peek-value (cdr stream)) :VOID)
+       (eq (php-peek-type (cddr stream)) :T-RPAREN)))
+
+(defun %php-void-cast-ast (expr)
+  "Evaluate EXPR for side effects and return PHP null, matching `(void) EXPR`."
+  (make-ast-progn
+   :forms (list expr (make-ast-quote :value +php-null+))))
+
 ;;; ─── Expression Parser ──────────────────────────────────────────────────────
 
 (defun php-parse-primary (stream known-vars)
@@ -116,14 +128,20 @@ T-TYPE.  Returns (values name-string rest)."
                                                (php-resolve-qualified-name qualified-name :function))
                                               rest known-vars)
                   (values call rest2 kv2))
-                ;; Bare identifier: a predefined constant (PHP_EOL, M_PI, …)
-                ;; lowers to its literal value; anything else stays an ast-var so
-                ;; user define()/const values still resolve at runtime.
-                (multiple-value-bind (value found) (%php-lookup-constant const-name)
-                  (if found
-                      (values (make-ast-quote :value value) rest known-vars)
-                      (values (make-ast-var :name (php-ident-sym const-name))
-                              rest known-vars)))))))
+                ;; Bare identifier: dynamic predefined constants lower to their
+                ;; runtime helper; literal predefined constants lower to values.
+                ;; Anything else stays an ast-var so user define()/const values
+                ;; still resolve at runtime.
+                (multiple-value-bind (helper dynamic-found)
+                    (%php-lookup-dynamic-constant const-name)
+                  (if dynamic-found
+                      (values (make-ast-call :func (make-ast-var :name helper) :args nil)
+                              rest known-vars)
+                      (multiple-value-bind (value found) (%php-lookup-constant const-name)
+                        (if found
+                            (values (make-ast-quote :value value) rest known-vars)
+                            (values (make-ast-var :name (php-ident-sym const-name))
+                                    rest known-vars)))))))))
       ;; self:: / static:: / parent:: — class-relative static access.  These lex
       ;; as T-TYPE keywords (:SELF/:STATIC/:PARENT).  Only meaningful immediately
       ;; before :: ; resolve to the enclosing class object (a global var) so the
@@ -183,6 +201,40 @@ gensym-named class and makes an instance of it."
                                         collect (cons (intern (format nil "ARG~D" i) :keyword) a)))))
          current kv)))))
 
+(defparameter *php-spl-builtin-classes*
+  '("SPLSTACK" "SPLQUEUE" "SPLDOUBLYLINKEDLIST" "SPLMINHEAP" "SPLMAXHEAP"
+    "SPLFIXEDARRAY"))
+
+(defun %php-spl-builtin-class-p (class-name)
+  (member (string-upcase (symbol-name class-name))
+          *php-spl-builtin-classes*
+          :test #'string=))
+
+(defun %php-spl-new-ast (class-name args)
+  (make-ast-call
+   :func (make-ast-var :name 'cl-cc/php::%php-spl-new)
+   :args (cons (make-ast-quote :value (symbol-name class-name)) args)))
+
+(defun %php-fiber-class-p (class-name)
+  (string= (string-upcase (symbol-name class-name)) "FIBER"))
+
+(defun %php-fiber-class-ast-p (obj)
+  (and (ast-var-p obj)
+       (%php-fiber-class-p (ast-var-name obj))))
+
+(defun %php-closure-class-ast-p (obj)
+  (and (ast-var-p obj)
+       (string= (string-upcase (symbol-name (ast-var-name obj))) "CLOSURE")))
+
+(defun %php-locale-class-ast-p (obj)
+  (and (ast-var-p obj)
+       (string= (string-upcase (symbol-name (ast-var-name obj))) "LOCALE")))
+
+(defun %php-fiber-new-ast (args)
+  (make-ast-call
+   :func (make-ast-var :name 'cl-cc/php::%php-fiber-make)
+   :args args))
+
 (defun php-parse-new (stream known-vars)
   "Parse 'new ClassName(args)' or 'new class [(args)] [extends/implements] { ... }'."
   (multiple-value-bind (tok rest) (php-consume stream) ; consume 'new'
@@ -194,6 +246,12 @@ gensym-named class and makes an instance of it."
     (multiple-value-bind (qualified-name rest2) (php-parse-qualified-name rest)
       (let ((class-name (php-ident-sym (php-resolve-qualified-name qualified-name :class))))
         (multiple-value-bind (args rest3 kv3) (php-parse-arglist rest2 known-vars)
+          (when (%php-spl-builtin-class-p class-name)
+            (return-from php-parse-new
+              (values (%php-spl-new-ast class-name args) rest3 kv3)))
+          (when (%php-fiber-class-p class-name)
+            (return-from php-parse-new
+              (values (%php-fiber-new-ast args) rest3 kv3)))
           ;; new C(args): allocate the instance (properties default-init from their
           ;; initforms), then run __construct($this, args) via %php-construct, and
           ;; yield the instance. (Previously the args were passed as :ARGn CLOS
@@ -228,23 +286,32 @@ gensym-named class and makes an instance of it."
 ;;; Yields the ORIGINAL value (captures it in a gensym) then mutates $var.
 
 (defparameter *php-postfix-incdec-ops*
-  '(("++" . +) ("--" . -))
-  "Maps postfix operator string to the CL arithmetic symbol.")
+  '(("++" . cl-cc/php::%php-add) ("--" . cl-cc/php::%php-sub))
+  "Maps postfix operator string to the PHP arithmetic helper symbol.")
 
-(defun %php-lower-postfix-incdec (op obj)
+(defun %php-lower-postfix-incdec (op obj &optional (var-known t))
   "Lower PHP postfix OP on OBJ: capture the old value, adjust the place by ±1, and
 yield the OLD value. Handles a $variable, an object property ($o->p), and an array
-element ($a[k]); other targets are returned unchanged."
-  (let ((arith-op (cdr (assoc op *php-postfix-incdec-ops* :test #'equal))))
+element ($a[k]); other targets are returned unchanged. VAR-KNOWN applies to
+simple variables: when NIL, introduce the variable from PHP's null-as-zero
+increment/decrement base instead of reading an unbound Lisp variable."
+  (let ((arith-helper (cdr (assoc op *php-postfix-incdec-ops* :test #'equal))))
     (flet ((plus1 (val-ast)
-             (make-ast-binop :op arith-op :lhs val-ast :rhs (make-ast-int :value 1))))
+             (%php-call arith-helper val-ast (make-ast-int :value 1))))
       (cond
         ((ast-var-p obj)
-         (let ((tmp (gensym "PHP-POSTFIX-")) (var-sym (ast-var-name obj)))
-           (make-ast-let
-            :bindings (list (cons tmp (make-ast-var :name var-sym)))
-            :body (list (make-ast-setq :var var-sym :value (plus1 (make-ast-var :name tmp)))
-                        (make-ast-var :name tmp)))))
+         (let ((var-sym (ast-var-name obj)))
+           (if var-known
+               (let ((tmp (gensym "PHP-POSTFIX-")))
+                 (make-ast-let
+                  :bindings (list (cons tmp (make-ast-var :name var-sym)))
+                  :body (list (make-ast-setq :var var-sym
+                                             :value (plus1 (make-ast-var :name tmp)))
+                              (make-ast-var :name tmp))))
+               (%php-variable-init-expression-marker
+                var-sym
+                (plus1 (make-ast-int :value 0))
+                (%php-null-quote)))))
         ;; $o->p++ : bind the receiver once, read the old slot value, write +1, then
         ;; yield the old value. Nested lets give sequential (let*) scoping.
         ((ast-slot-value-p obj)
@@ -278,6 +345,16 @@ element ($a[k]); other targets are returned unchanged."
                                                     (make-ast-var :name old))))))))))
         (t obj)))))
 
+(defun %php-method-call-with-args (func method user-args &optional receiver-arg)
+  "Lower PHP method call arguments, including named and spread arguments.
+RECEIVER-ARG is the implicit $this argument for instance calls; named argument
+ordering only applies to user-visible parameters."
+  (let ((lowering-result
+          (if (%php-args-have-named-p user-args)
+              (%php-reorder-named-args-for-call method user-args)
+              (%php-static-call-lowering-result user-args))))
+    (%php-emit-lowered-call func lowering-result :receiver-arg receiver-arg)))
+
 (defun php-parse-postfix (stream known-vars)
   "Parse postfix expressions: method calls, property access, array access."
   (multiple-value-bind (obj rest kv) (php-parse-primary stream known-vars)
@@ -298,11 +375,13 @@ element ($a[k]); other targets are returned unchanged."
                        (let ((recv (gensym "PHP-RECV-")))
                          (setf obj (make-ast-let
                                     :bindings (list (cons recv obj))
-                                    :body (list (make-ast-call
-                                                 :func (make-ast-slot-value
-                                                        :object (make-ast-var :name recv)
-                                                        :slot prop)
-                                                 :args (cons (make-ast-var :name recv) args))))
+                                    :body (list (%php-method-call-with-args
+                                                 (make-ast-slot-value
+                                                  :object (make-ast-var :name recv)
+                                                  :slot prop)
+                                                 prop
+                                                 args
+                                                 (make-ast-var :name recv))))
                                rest rest4
                                kv kv4)))
                      (setf obj (make-ast-slot-value :object obj :slot prop)
@@ -332,10 +411,12 @@ element ($a[k]); other targets are returned unchanged."
                                   :body (list (make-ast-if
                                                :cond null-check
                                                :then (make-ast-quote :value +php-null+)
-                                               :else (make-ast-call
-                                                      :func (make-ast-slot-value
-                                                             :object recv-var :slot prop)
-                                                      :args (cons recv-var args)))))
+                                               :else (%php-method-call-with-args
+                                                      (make-ast-slot-value
+                                                       :object recv-var :slot prop)
+                                                      prop
+                                                      args
+                                                      recv-var))))
                              rest rest4
                              kv kv4))
                      (setf obj (make-ast-let
@@ -360,20 +441,38 @@ element ($a[k]); other targets are returned unchanged."
                                     (%php-call 'cl-cc/php::%php-enum-from obj (first args)))
                                    ((string= (symbol-name member) "TRYFROM")
                                     (%php-call 'cl-cc/php::%php-enum-try-from obj (first args)))
+                                   ((and (%php-closure-class-ast-p obj)
+                                         (string= (symbol-name member) "GETCURRENT"))
+                                    (when args
+                                      (error "PHP parse error: Closure::getCurrent() expects no arguments"))
+                                    (%php-call 'cl-cc/php::%php-current-closure))
+                                   ((and (%php-locale-class-ast-p obj)
+                                         (string= (symbol-name member) "ISRIGHTTOLEFT"))
+                                    (unless (= (length args) 1)
+                                      (error "PHP parse error: Locale::isRightToLeft() expects exactly 1 argument"))
+                                    (%php-call 'cl-cc/php::%php-locale-is-right-to-left
+                                               (first args)))
+                                   ((and (%php-fiber-class-ast-p obj)
+                                         (string= (symbol-name member) "SUSPEND"))
+                                    (apply #'%php-call 'cl-cc/php::%php-fiber-suspend args))
                                    (t
-                                    (make-ast-call
-                                     :func (make-ast-slot-value :object obj :slot member)
-                                     :args args)))
+                                    (%php-method-call-with-args
+                                     (make-ast-slot-value :object obj :slot member)
+                                     member
+                                     args)))
                              rest rest4
                              kv kv4))
                      (setf obj (make-ast-slot-value :object obj :slot member)
                            rest rest3))))))
           ;; Postfix ++/-- — yield the ORIGINAL value, then adjust by ±1.
-          ;; Only simple $var targets are mutated; complex lvalues are left unchanged.
           ((and (eq type :T-OP) (member (php-peek-value rest) '("++" "--") :test #'equal))
            (multiple-value-bind (tok rest2) (php-consume rest)
-             (setf obj (%php-lower-postfix-incdec (php-tok-value tok) obj)
-                   rest rest2)))
+             (let* ((var-sym (and (ast-var-p obj) (ast-var-name obj)))
+                    (var-known (or (null var-sym) (member var-sym kv))))
+               (setf obj (%php-lower-postfix-incdec (php-tok-value tok) obj var-known)
+                     rest rest2)
+               (when (and var-sym (not var-known))
+                 (push var-sym kv)))))
           ;; Array access: $a[0] or $a[$i]
            ((eq type :T-LBRACKET)
             (multiple-value-bind (tok rest2) (php-consume rest)
@@ -443,7 +542,8 @@ element ($a[k]); other targets are returned unchanged."
     ("=="  . cl-cc/php::%php-eq-loose)
     ("===" . cl-cc/php::%php-eq-strict)
     ("!="  . cl-cc/php::%php-neq-loose)
-    ("!==" . cl-cc/php::%php-neq-strict))
+    ("!==" . cl-cc/php::%php-neq-strict)
+    ("|>"  . cl-cc/php::%php-pipe))
   "Alist mapping PHP binary operator strings to runtime helper symbols.")
 
 (defun %php-binary-op-ast (op lhs rhs)
@@ -481,18 +581,26 @@ element ($a[k]); other targets are returned unchanged."
             (values (%php-call 'expt lhs rhs) rest3 kv3)))
         (values lhs rest kv))))
 
-(defun php-lower-prefix-incdec (op operand)
+(defun php-lower-prefix-incdec (op operand &optional (var-known t))
   "Lower PHP prefix ++/-- on OPERAND, yielding the NEW value (unlike postfix,
 which yields the original). OP is \"++\" or \"--\". A simple $var is set in
 place; array elements ($arr[i]) and object properties ($obj->p) lower through
-the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
+the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1). VAR-KNOWN applies
+to simple variables and avoids reading an unbound variable on first use."
   (let ((cop (if (equal op "++") "+=" "-=")))
     (cond
       ((ast-var-p operand)
-       (make-ast-setq :var (ast-var-name operand)
-                      :value (make-ast-binop :op (if (equal op "++") '+ '-)
-                                             :lhs operand
-                                             :rhs (make-ast-int :value 1))))
+       (let ((value (%php-call (if (equal op "++")
+                                   'cl-cc/php::%php-add
+                                   'cl-cc/php::%php-sub)
+                               (if var-known operand (make-ast-int :value 0))
+                               (make-ast-int :value 1))))
+         (if var-known
+             (make-ast-setq :var (ast-var-name operand) :value value)
+             (%php-variable-init-expression-marker
+              (ast-var-name operand)
+              value
+              operand))))
       ((%php-array-ref-call-p operand)
        (%php-lower-compound-assign cop operand (make-ast-int :value 1) :array))
       ((ast-slot-value-p operand)
@@ -502,27 +610,46 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
         (format nil "PHP prefix ~A is only supported on a $variable, array element, or property" op)
         operand)))))
 
+(defun %php-lower-error-suppression (expr)
+  "Lower PHP @EXPR by temporarily setting error_reporting to 0."
+  (let ((old-level (gensym "PHP-ERROR-REPORTING-")))
+    (make-ast-let
+     :bindings (list (cons old-level
+                           (%php-call 'cl-cc/php::%php-error-reporting
+                                      (make-ast-int :value 0))))
+     :body (list
+            (make-ast-unwind-protect
+             :protected expr
+             :cleanup (list (%php-call 'cl-cc/php::%php-error-reporting
+                                       (make-ast-var :name old-level))))))))
+
 (defun php-parse-unary (stream known-vars)
   "Parse unary expressions: prefix ++/--, !, -, +, ~."
   (cond
+    ((%php-void-cast-start-p stream)
+      (let ((rest (cdddr stream)))
+        (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
+          (values (%php-void-cast-ast expr) rest2 kv2))))
     ((%php-reference-token-p stream)
-      ;; PHP reference operator (&expr): cl-cc uses value semantics, so a
-      ;; reference lowers to the referenced value itself. This makes reference
-      ;; assignment ($b = &$a), foreach (... as &$v), and by-ref arguments parse
-      ;; and run with value semantics — true aliasing is not modelled.
+      ;; PHP reference operator (&expr): keep an internal marker so assignment
+      ;; lowering can model $b = &$a with the same ref-box machinery used by
+      ;; by-reference params and foreach.
       (multiple-value-bind (tok rest) (php-consume stream)
         (declare (ignore tok))
         (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
-          (values expr rest2 kv2))))
+          (values (%php-reference-marker expr) rest2 kv2))))
     ;; Prefix ++ / -- : increment/decrement the place, then yield the new value
     ((and (eq (php-peek-type stream) :T-OP)
           (member (php-peek-value stream) '("++" "--") :test #'equal))
       (multiple-value-bind (op-tok rest) (php-consume stream)
         (multiple-value-bind (operand rest2 kv2) (php-parse-postfix rest known-vars)
-          (values (php-lower-prefix-incdec (php-tok-value op-tok) operand)
-                  rest2 kv2))))
+          (let* ((var-sym (and (ast-var-p operand) (ast-var-name operand)))
+                 (var-known (or (null var-sym) (member var-sym kv2)))
+                 (new-kv (if (and var-sym (not var-known)) (cons var-sym kv2) kv2)))
+            (values (php-lower-prefix-incdec (php-tok-value op-tok) operand var-known)
+                    rest2 new-kv)))))
     ((and (eq (php-peek-type stream) :T-OP)
-           (member (php-peek-value stream) '("!" "-" "+" "~") :test #'equal))
+           (member (php-peek-value stream) '("!" "-" "+" "~" "@") :test #'equal))
       (multiple-value-bind (tok rest) (php-consume stream)
         (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
           (values (cond
@@ -535,9 +662,12 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
                      (make-ast-if :cond (%php-truthy-call expr)
                                   :then (make-ast-quote :value nil)
                                   :else (make-ast-quote :value t)))
-                    (t
-                     (make-ast-call :func (make-ast-var :name (intern (php-tok-value tok)))
-                                    :args (list expr))))
+                    ((equal "+" (php-tok-value tok))
+                     (%php-call 'cl-cc/php::%php-unary-plus expr))
+                    ((equal "-" (php-tok-value tok))
+                     (%php-call 'cl-cc/php::%php-unary-minus expr))
+                    ((equal "@" (php-tok-value tok))
+                     (%php-lower-error-suppression expr)))
                   rest2 kv2))))
      (t
       (php-parse-power stream known-vars))))
@@ -574,7 +704,8 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
 (define-php-binop-levels
   (php-parse-mul        ("*" "/" "%")               php-parse-unary)
   (php-parse-add        ("+" "-")                   php-parse-mul)
-  (php-parse-shift      ("<<" ">>")                 php-parse-add)
+  (php-parse-pipe       ("|>")                       php-parse-add)
+  (php-parse-shift      ("<<" ">>")                 php-parse-pipe)
   (php-parse-concat     (".")                        php-parse-shift)
   (php-parse-relational ("<" ">" "<=" ">=" "<=>")   php-parse-concat)
   (php-parse-cmp        ("==" "===" "!=" "!==")     php-parse-relational)
@@ -629,9 +760,14 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
                       (new-kv (if already-known kv3 (cons var-sym kv3))))
                  (values
                   (if (equal op "=")
-                      (if already-known
-                          (make-ast-setq :var var-sym :value val)
-                          (make-ast-let :bindings (list (cons var-sym val)) :body nil))
+                      (if (%php-reference-marker-p val)
+                          (let ((source (%php-reference-marker-expr val)))
+                            (unless (ast-var-p source)
+                              (error "PHP parse error: reference assignment only supports variable sources"))
+                            (%php-reference-assignment-marker var-sym (ast-var-name source)))
+                          (if already-known
+                              (make-ast-setq :var var-sym :value val)
+                              (make-ast-let :bindings (list (cons var-sym val)) :body nil)))
                       (%php-lower-compound-assign op lhs val :var already-known))
                   rest3
                   new-kv)))
@@ -657,7 +793,7 @@ the compound-assign place machinery (++ ≡ += 1, -- ≡ -= 1)."
                            (%php-lower-compound-assign op lhs val :property))
                        rest3 kv3))
               ;; List/array destructuring assignment: [$a, $b] = expr (and the
-              ;; legacy list($a, $b) = expr, which lowers to the same array LHS).
+              ;; list($a, $b) = expr, which lowers to the same array LHS).
               ((and (equal op "=") (%php-array-literal-call-p lhs))
                (values (%php-lower-list-assign lhs val) rest3 kv3))
               (t

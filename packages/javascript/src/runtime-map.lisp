@@ -7,18 +7,24 @@
 ;;; -----------------------------------------------------------------------
 ;;;
 ;;; JS Map preserves insertion order and accepts any value as a key.
-;;; We represent it as a struct holding an alist (preserves order) and
-;;; a hash-table (O(1) lookups). The alist stores (key . value) pairs
-;;; in insertion order; the hash-table maps keys → tail-of-alist for O(1)
-;;; mutation. For correctness we use #'equal on primitive keys and #'eq
-;;; for object keys — CL's #'equal handles this correctly for the common
-;;; string/number/symbol case.
+;;; We represent it as a struct holding insertion order plus a hash-table.
+;;; ECMAScript Map key matching uses SameValueZero: NaN matches NaN, +0 and -0
+;;; match, and objects use identity.  CL hash-table tests cannot express that
+;;; exactly, so public Map operations canonicalize through the insertion-order
+;;; keys before touching the hash-table.
 
 (defstruct (js-map (:conc-name js-map-))
   (ht (make-hash-table :test #'equal))   ; key → value
   (order nil))                           ; insertion-order list of keys
 
 (defun %js-map-p (x) (js-map-p x))
+
+(defun %js-map-find-key (m key)
+  "Return the stored key in M matching KEY by SameValueZero, plus found-p."
+  (loop for stored-key in (js-map-order m)
+        when (%js-same-value-zero stored-key key)
+          return (values stored-key t)
+        finally (return (values nil nil))))
 
 (defun %js-make-map (&optional pairs)
   "Create a JS Map, optionally seeded from an iterable of [key,val] pairs."
@@ -34,28 +40,33 @@
 (defun %js-map-set (m key value)
   "Set KEY → VALUE in Map M, preserving insertion order."
   (let ((ht (js-map-ht m)))
-    (unless (nth-value 1 (gethash key ht))
-      (setf (js-map-order m) (nconc (js-map-order m) (list key))))
-    (setf (gethash key ht) value))
+    (multiple-value-bind (stored-key found-p) (%js-map-find-key m key)
+      (if found-p
+          (setf (gethash stored-key ht) value)
+          (progn
+            (setf (js-map-order m) (nconc (js-map-order m) (list key)))
+            (setf (gethash key ht) value)))))
   m)
 
 (defun %js-map-get (m key)
   "Return value at KEY in Map M, or undefined."
-  (multiple-value-bind (v f) (gethash key (js-map-ht m))
-    (if f v +js-undefined+)))
+  (multiple-value-bind (stored-key found-p) (%js-map-find-key m key)
+    (if found-p
+        (gethash stored-key (js-map-ht m))
+        +js-undefined+)))
 
 (defun %js-map-has (m key)
   "True if Map M has KEY."
-  (nth-value 1 (gethash key (js-map-ht m))))
+  (nth-value 1 (%js-map-find-key m key)))
 
 (defun %js-map-delete (m key)
   "Remove KEY from Map M; return true if it existed."
-  (multiple-value-bind (v f) (gethash key (js-map-ht m))
-    (declare (ignore v))
-    (when f
-      (remhash key (js-map-ht m))
-      (setf (js-map-order m) (delete key (js-map-order m) :test #'equal)))
-    f))
+  (multiple-value-bind (stored-key found-p) (%js-map-find-key m key)
+    (when found-p
+      (remhash stored-key (js-map-ht m))
+      (setf (js-map-order m)
+            (delete stored-key (js-map-order m) :test #'%js-same-value-zero)))
+    found-p))
 
 (defun %js-map-clear (m)
   "Remove all entries from Map M."
@@ -65,7 +76,7 @@
 
 (defun %js-map-size (m)
   "Return the number of entries in Map M."
-  (hash-table-count (js-map-ht m)))
+  (length (js-map-order m)))
 
 (defmacro %define-js-map-iterator (name docstring &body value-expr)
   "Define a Map iterator that yields VALUE-EXPR (with K and V bound to key/value)."
@@ -160,13 +171,18 @@
     f))
 
 ;;; -----------------------------------------------------------------------
-;;;  WeakRef (ES2021) — stub
+;;;  WeakRef (ES2021) — deterministic host-backed model
 ;;; -----------------------------------------------------------------------
 
 (defstruct (js-weak-ref (:conc-name js-weak-ref-))
   target)
 
-(defun %js-make-weak-ref (target) (make-js-weak-ref :target target))
+(defun %js-make-weak-ref (target)
+  "Create a WeakRef.
+Portable CL does not expose ECMAScript-style weak reachability guarantees here,
+so deref remains deterministic while the wrapper is alive."
+  (make-js-weak-ref :target target))
+
 (defun %js-weak-ref-deref (wr) (js-weak-ref-target wr))
 
 ;;; Prelude constructor values — plain function references wrapped in
@@ -176,21 +192,41 @@
 (defparameter *js-weak-set-global* #'%js-make-weak-set)
 
 ;;; -----------------------------------------------------------------------
-;;;  FinalizationRegistry (ES2021) — stub (no-op without GC hooks)
+;;;  FinalizationRegistry (ES2021) — deterministic registration model
 ;;; -----------------------------------------------------------------------
 
 (defstruct (js-finalization-registry (:conc-name js-finreg-))
-  callback)
+  callback
+  (registrations nil))
+
+(defstruct (js-finalization-registration (:conc-name js-finreg-entry-))
+  target
+  held-value
+  unregister-token)
 
 (defun %js-make-finalization-registry (callback)
   (make-js-finalization-registry :callback callback))
 
-(defun %js-finreg-register (reg target held-value &optional unregister-token)
-  "Register TARGET with held-value HELD-VALUE (no-op in this implementation)."
-  (declare (ignore reg target held-value unregister-token))
+(defun %js-finreg-register (reg target held-value &optional (unregister-token +js-undefined+))
+  "Register TARGET with HELD-VALUE.
+Cleanup callbacks are not run by this portable runtime, but registrations are
+tracked so unregister has observable ECMAScript-compatible state."
+  (push (make-js-finalization-registration
+         :target target
+         :held-value held-value
+         :unregister-token unregister-token)
+        (js-finreg-registrations reg))
   +js-undefined+)
 
 (defun %js-finreg-unregister (reg token)
-  "Unregister entries associated with TOKEN (no-op)."
-  (declare (ignore reg token))
-  nil)
+  "Remove all registrations associated with TOKEN, returning true if any existed."
+  (let ((removed nil))
+    (setf (js-finreg-registrations reg)
+          (remove-if (lambda (entry)
+                       (let ((stored (js-finreg-entry-unregister-token entry)))
+                         (when (and (not (eq stored +js-undefined+))
+                                    (%js-same-value-zero stored token))
+                           (setf removed t)
+                           t)))
+                     (js-finreg-registrations reg)))
+    removed))

@@ -20,7 +20,17 @@
           software-version
           room
           apropos
-          apropos-list))
+          apropos-list
+          vm-boundp
+          vm-fboundp
+          vm-makunbound
+          vm-fdefinition
+          vm-random
+          vm-make-random-state
+          vm-get-universal-time
+          vm-get-internal-real-time
+          vm-get-internal-run-time
+          vm-decode-universal-time))
 
 ;;; Phase 3+: FR-1202 Environment Predicates and FR-1205 Random
 

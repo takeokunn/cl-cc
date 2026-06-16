@@ -56,17 +56,16 @@
                     :source-location source-location)
    stream))
 
-(unless (fboundp 'opt-pass-optimization-remarks)
-  (defun opt-pass-optimization-remarks (instructions)
-    "Emit an analysis optimization remark when remark reporting is enabled.
+(defun opt-pass-optimization-remarks (instructions)
+  "Emit an analysis optimization remark when remark reporting is enabled.
 
 This framework pass intentionally leaves INSTRUCTIONS unchanged.  The main
 pipeline owns per-pass changed/missed remarks; this pass provides a stable pass
 entry so users can request a final optimization-remarks stage explicitly."
-    (when (and (boundp '*optimization-report-stream*)
-               *optimization-report-stream*)
-      (emit-opt-remark *optimization-report-stream*
-                       :type :analysis
-                       :pass-name "optimization-remarks"
-                       :description "optimizer remarks pass completed"))
-    instructions))
+  (when (and (boundp '*optimization-report-stream*)
+             *optimization-report-stream*)
+    (emit-opt-remark *optimization-report-stream*
+                     :type :analysis
+                     :pass-name "optimization-remarks"
+                     :description "optimizer remarks pass completed"))
+  instructions)

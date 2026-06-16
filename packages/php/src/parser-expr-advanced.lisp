@@ -60,13 +60,62 @@ values list; the pieces are appended into one flat argument list for apply."
                        (make-ast-call :func (make-ast-var :name 'list) :args (list a))))
                  args)))
 
+(defun %php-callable-by-ref-indices (node)
+  "Return by-reference parameter indices carried by a literal PHP callable.
+Closure lowering wraps lambdas in ast-let capture forms, so unwrap that shell
+only for metadata discovery; the original call target is still emitted."
+  (cond
+    ((ast-lambda-p node)
+     (loop for decl in (ast-lambda-declarations node)
+           when (and (consp decl)
+                     (eq (first decl) :php-by-ref-indices))
+             return (second decl)))
+    ((and (ast-let-p node)
+          (consp (ast-let-body node))
+          (null (cdr (ast-let-body node))))
+     (%php-callable-by-ref-indices (first (ast-let-body node))))
+    (t nil)))
+
+(defun %php-strip-callable-by-ref-metadata (node)
+  "Remove PHP parser-only callable metadata before the AST reaches codegen."
+  (cond
+    ((ast-lambda-p node)
+     (make-ast-lambda
+      :params (ast-lambda-params node)
+      :optional-params (ast-lambda-optional-params node)
+      :rest-param (ast-lambda-rest-param node)
+      :key-params (ast-lambda-key-params node)
+      :declarations (remove-if (lambda (decl)
+                                 (and (consp decl)
+                                      (eq (first decl) :php-by-ref-indices)))
+                               (ast-lambda-declarations node))
+      :body (ast-lambda-body node)
+      :env (ast-lambda-env node)))
+    ((and (ast-let-p node)
+          (consp (ast-let-body node))
+          (null (cdr (ast-let-body node))))
+     (make-ast-let
+      :bindings (ast-let-bindings node)
+      :declarations (ast-let-declarations node)
+      :body (list (%php-strip-callable-by-ref-metadata (first (ast-let-body node))))))
+    (t node)))
+
 (defun %php-call-with-spread (func-node args)
   "Build a PHP call of FUNC-NODE with ARGS, expanding any (...expr) spread args
 via apply. FUNC-NODE is a value expression (e.g. a closure variable). When no
-spread is present this is an ordinary ast-call."
-  (if (%php-args-have-spread-p args)
-      (make-ast-apply :func func-node :args (list (%php-spread-arglist-expr args)))
-      (make-ast-call :func func-node :args args)))
+spread is present this is an ordinary ast-call unless a literal callable marks
+by-reference parameters."
+  (let ((by-ref-indices (%php-callable-by-ref-indices func-node)))
+    (cond
+      ((%php-args-have-spread-p args)
+       (make-ast-apply :func func-node :args (list (%php-spread-arglist-expr args))))
+      (by-ref-indices
+       (%php-lower-by-ref-call
+        (%php-strip-callable-by-ref-metadata func-node)
+        args
+        by-ref-indices))
+      (t
+       (make-ast-call :func func-node :args args)))))
 
 (defun %php-helper-var (name)
   "Return an AST variable for a PHP runtime helper NAME."
@@ -77,6 +126,667 @@ spread is present this is an ordinary ast-call."
   (make-ast-call :func (make-ast-var :name '%php-unsupported)
                  :args (append (list (make-ast-quote :value message))
                                (when expr (list expr)))))
+
+(defvar *php-by-ref-param-registry* (make-hash-table :test #'equal)
+  "Maps PHP function name strings to lists of by-reference parameter indices (0-based).")
+
+(defparameter *php-named-param-registry* (make-hash-table :test #'equal)
+  "Maps PHP function name strings to parameter metadata for named-argument lowering.")
+
+(defun %php-param-name (param)
+  "Return the symbol named by an AST callable parameter slot."
+  (if (consp param) (first param) param))
+
+(defun %php-param-string-name (param)
+  "Return PARAM's PHP-visible variable name without the leading dollar."
+  (symbol-name (%php-param-name param)))
+
+(defun %php-register-named-callable-params (fn-sym params param-defaults variadic-param)
+  "Record top-level PHP function parameter metadata for named-argument calls."
+  (setf (gethash (symbol-name fn-sym) *php-named-param-registry*)
+        (list :params params
+              :defaults param-defaults
+              :variadic variadic-param)))
+
+(defun %php-named-arg-call-p (node)
+  "Return true when NODE is a named-argument marker emitted by php-parse-arglist."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-named-arg)))))
+
+(defun %php-args-have-named-p (args)
+  "Return true when ARGS contains a named-argument marker."
+  (some #'%php-named-arg-call-p args))
+
+(defun %php-named-arg-name (node)
+  "Return the PHP parameter name carried by a named-argument marker."
+  (let ((name-node (first (ast-call-args node))))
+    (when (ast-quote-p name-node)
+      (ast-quote-value name-node))))
+
+(defun %php-named-arg-value (node)
+  "Return the expression carried by a named-argument marker."
+  (second (ast-call-args node)))
+
+(defun %php-param-index-by-name (name params)
+  "Return NAME's zero-based position in PARAMS, or NIL when unknown."
+  (position name params
+            :test (lambda (needle param)
+                    (let ((param-name (%php-param-string-name param)))
+                      (or (string= needle param-name)
+                          ;; The lexer normalises some identifier tokens; keep
+                          ;; lowering usable for those parse paths while exact
+                          ;; case remains preferred.
+                          (string-equal needle param-name))))))
+
+(defun %php-default-for-param (param defaults)
+  "Return PARAM's default AST from DEFAULTS, if any."
+  (cdr (assoc (%php-param-name param) defaults :test #'eq)))
+
+(defun %php-array-constructor-call-p (node)
+  "Return true when NODE is a %php-array constructor call."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) 'cl-cc/php::%php-array)))))
+
+(defun %php-array-auto-entry-p (entry)
+  "Return true when ENTRY is an auto-indexed PHP array literal entry."
+  (let ((elements (and (ast-list-p entry) (ast-list-elements entry))))
+    (and (= (length elements) 3)
+         (ast-quote-p (first elements))
+         (not (ast-quote-value (first elements)))
+         (not (%php-spread-call-p (third elements))))))
+
+(defun %php-spread-static-width (arg)
+  "Return ARG's unpacked width when it is a literal positional spread.
+The second value is true when the width is known. This deliberately accepts
+only auto-indexed array literals because string-key unpacking becomes named
+arguments in PHP and needs runtime-aware argument merging."
+  (unless (%php-spread-call-p arg)
+    (return-from %php-spread-static-width (values nil nil)))
+  (let ((expr (first (ast-call-args arg))))
+    (if (and (%php-array-constructor-call-p expr)
+             (every #'%php-array-auto-entry-p (ast-call-args expr)))
+        (values (length (ast-call-args expr)) t)
+        (values nil nil))))
+
+(defun %php-runtime-call-arg-descriptor (arg)
+  "Build a runtime descriptor for a PHP call argument."
+  (cond
+    ((%php-named-arg-call-p arg)
+     (%php-call 'list
+                (make-ast-quote :value :named)
+                (make-ast-quote :value (%php-named-arg-name arg))
+                (%php-named-arg-value arg)))
+    ((%php-spread-call-p arg)
+     (%php-call 'list
+                (make-ast-quote :value :spread)
+                (first (ast-call-args arg))))
+    (t
+     (%php-call 'list
+                (make-ast-quote :value :pos)
+                arg))))
+
+(defun %php-dynamic-named-spread-arglist-expr (fn-sym params defaults args)
+  "Build a runtime argument-list expression for named args after dynamic spread."
+  (apply #'%php-call
+         'cl-cc/php::%php-call-args-with-named-spread
+         (make-ast-quote :value fn-sym)
+         (make-ast-quote :value (mapcar #'%php-param-string-name params))
+         (make-ast-quote :value (mapcar (lambda (param)
+                                           (not (null (%php-default-for-param
+                                                       param defaults))))
+                                         params))
+         (apply #'%php-call
+                'list
+                (mapcar (lambda (param)
+                        (or (%php-default-for-param param defaults)
+                              (make-ast-quote :value nil)))
+                        params))
+         (mapcar #'%php-runtime-call-arg-descriptor args)))
+
+(defstruct (%php-named-call-state (:conc-name %php-named-call-state-))
+  fn-sym params defaults slots filled positional-index last-index seen-named
+  extra-args)
+
+(defun %php-make-named-call-state (fn-sym metadata)
+  "Create mutable lowering state for named-argument reordering."
+  (let ((params (getf metadata :params))
+        (defaults (getf metadata :defaults)))
+    (when params
+      (make-%php-named-call-state
+       :fn-sym fn-sym
+       :params params
+       :defaults defaults
+       :slots (make-array (length params) :initial-element nil)
+       :filled (make-array (length params) :initial-element nil)
+       :positional-index 0
+       :last-index -1
+       :seen-named nil
+       :extra-args nil))))
+
+(defun %php-named-call-state-dynamic-arglist-expr (state args)
+  "Build the runtime arglist expression for STATE when static lowering fails."
+  (%php-dynamic-named-spread-arglist-expr
+   (%php-named-call-state-fn-sym state)
+   (%php-named-call-state-params state)
+   (%php-named-call-state-defaults state)
+   args))
+
+(defun %php-add-named-call-arg (state arg)
+  "Add a named call ARG to STATE."
+  (setf (%php-named-call-state-seen-named state) t)
+  (let* ((name (%php-named-arg-name arg))
+         (params (%php-named-call-state-params state))
+         (index (and name (%php-param-index-by-name name params))))
+    (unless index
+      (error "Unknown named argument ~A for PHP function ~A"
+             name (%php-named-call-state-fn-sym state)))
+    (when (aref (%php-named-call-state-filled state) index)
+      (error "Duplicate named argument ~A for PHP function ~A"
+             name (%php-named-call-state-fn-sym state)))
+    (setf (aref (%php-named-call-state-slots state) index) (%php-named-arg-value arg)
+          (aref (%php-named-call-state-filled state) index) t
+          (%php-named-call-state-last-index state)
+          (max (%php-named-call-state-last-index state) index)))
+  state)
+
+(defun %php-add-spread-call-arg (state arg args)
+  "Add a spread ARG to STATE, falling back to a runtime list when needed."
+  (when (%php-named-call-state-seen-named state)
+    (error "PHP spread argument after named argument in call to ~A"
+           (%php-named-call-state-fn-sym state)))
+  (multiple-value-bind (width known-width-p) (%php-spread-static-width arg)
+    (unless known-width-p
+      (return-from %php-add-spread-call-arg
+        (values nil (%php-named-call-state-dynamic-arglist-expr state args))))
+    (cond
+      ((zerop width) nil)
+      ((< (%php-named-call-state-positional-index state)
+          (length (%php-named-call-state-params state)))
+       (dotimes (offset width)
+         (let ((index (+ (%php-named-call-state-positional-index state) offset)))
+           (when (and (< index (length (%php-named-call-state-params state)))
+                      (aref (%php-named-call-state-filled state) index))
+             (error "Duplicate PHP argument for parameter ~A in call to ~A"
+                    (%php-param-string-name (nth index (%php-named-call-state-params state)))
+                    (%php-named-call-state-fn-sym state)))))
+       (setf (aref (%php-named-call-state-slots state)
+                   (%php-named-call-state-positional-index state))
+             arg
+             (aref (%php-named-call-state-filled state)
+                   (%php-named-call-state-positional-index state))
+             t
+             (%php-named-call-state-last-index state)
+             (max (%php-named-call-state-last-index state)
+                  (min (1- (length (%php-named-call-state-params state)))
+                       (+ (%php-named-call-state-positional-index state)
+                          width -1))))
+       (loop for index from (1+ (%php-named-call-state-positional-index state))
+             below (min (length (%php-named-call-state-params state))
+                        (+ (%php-named-call-state-positional-index state) width))
+             do (setf (aref (%php-named-call-state-filled state) index)
+                      :php-spread-covered))
+       (incf (%php-named-call-state-positional-index state) width))
+      (t
+       (push arg (%php-named-call-state-extra-args state)))))
+  (values state nil))
+
+(defun %php-add-positional-call-arg (state arg)
+  "Add a positional call ARG to STATE."
+  (if (< (%php-named-call-state-positional-index state)
+         (length (%php-named-call-state-params state)))
+      (progn
+        (setf (aref (%php-named-call-state-slots state)
+                    (%php-named-call-state-positional-index state))
+              arg
+              (aref (%php-named-call-state-filled state)
+                    (%php-named-call-state-positional-index state))
+              t
+              (%php-named-call-state-last-index state)
+              (max (%php-named-call-state-last-index state)
+                   (%php-named-call-state-positional-index state)))
+        (incf (%php-named-call-state-positional-index state)))
+      (push arg (%php-named-call-state-extra-args state)))
+  state)
+
+(defun %php-finalize-named-call-state (state)
+  "Return the statically reordered arguments accumulated in STATE."
+  (append
+   (loop for i from 0 to (%php-named-call-state-last-index state)
+         for param = (nth i (%php-named-call-state-params state))
+         unless (eq (aref (%php-named-call-state-filled state) i) :php-spread-covered)
+           collect (cond
+                     ((aref (%php-named-call-state-filled state) i)
+                      (aref (%php-named-call-state-slots state) i))
+                     ((%php-default-for-param param (%php-named-call-state-defaults state)))
+                     (t (error "Missing required PHP argument ~A in call to ~A"
+                               (%php-param-string-name param)
+                               (%php-named-call-state-fn-sym state)))))
+   (nreverse (%php-named-call-state-extra-args state))))
+
+(defun %php-reorder-named-args-for-call (fn-sym args)
+  "Lower PHP named arguments for known functions.
+Returns an explicit lowering result that carries either a static argument list
+or a runtime arglist expression."
+  (let ((state (%php-make-named-call-state
+                fn-sym
+                (gethash (symbol-name fn-sym) *php-named-param-registry*))))
+    (unless state
+      (return-from %php-reorder-named-args-for-call
+        (%php-static-call-lowering-result args)))
+    (dolist (arg args)
+      (multiple-value-bind (continue-p arglist-expr)
+          (cond
+            ((%php-named-arg-call-p arg)
+             (values (%php-add-named-call-arg state arg) nil))
+            ((%php-spread-call-p arg)
+             (%php-add-spread-call-arg state arg args))
+            (t
+             (when (%php-named-call-state-seen-named state)
+               (error "PHP positional argument after named argument in call to ~A"
+                      fn-sym))
+             (values (%php-add-positional-call-arg state arg) nil)))
+        (unless continue-p
+          (return-from %php-reorder-named-args-for-call
+            (%php-runtime-call-lowering-result arglist-expr)))))
+    (%php-static-call-lowering-result (%php-finalize-named-call-state state))))
+
+(defun %php-shadow-ref-vars (ref-vars bound-vars)
+  "Remove BOUND-VARS from REF-VARS for recursive body rewriting."
+  (set-difference ref-vars (mapcar #'%php-param-name bound-vars) :test #'eq))
+
+(defun %php-rewrite-ref-vars (node-or-list ref-vars)
+  "Rewrite reads/writes of REF-VARS so PHP by-reference locals use ref boxes."
+  (labels ((walk-list (forms refs)
+             (mapcar (lambda (form) (walk form refs)) forms))
+           (walk-bindings (bindings refs)
+             (mapcar (lambda (binding)
+                       (cons (car binding) (walk (cdr binding) refs)))
+                     bindings))
+           (walk-initargs (initargs refs)
+             (loop for (key . value) in initargs
+                   collect (cons key (walk value refs))))
+           (call (name &rest args)
+             (apply #'%php-call name args))
+           (ref-var-p (sym refs)
+             (member sym refs :test #'eq))
+           (walk (node refs)
+             (cond
+               ((null node) nil)
+               ((listp node) (walk-list node refs))
+               ((ast-var-p node)
+                (let ((name (ast-var-name node)))
+                  (if (ref-var-p name refs)
+                      (call 'cl-cc/php::%php-deref node)
+                      node)))
+               ((ast-setq-p node)
+                (let ((var (ast-setq-var node))
+                      (value (walk (ast-setq-value node) refs)))
+                  (if (ref-var-p var refs)
+                      (call 'cl-cc/php::%php-ref-set! (make-ast-var :name var) value)
+                      (make-ast-setq :var var :value value))))
+               ((ast-binop-p node)
+                (make-ast-binop :op (ast-binop-op node)
+                                :lhs (walk (ast-binop-lhs node) refs)
+                                :rhs (walk (ast-binop-rhs node) refs)))
+               ((ast-if-p node)
+                (make-ast-if :cond (walk (ast-if-cond node) refs)
+                             :then (walk (ast-if-then node) refs)
+                             :else (walk (ast-if-else node) refs)))
+               ((ast-progn-p node)
+                (make-ast-progn :forms (walk-list (ast-progn-forms node) refs)))
+               ((ast-print-p node)
+                (make-ast-print :expr (walk (ast-print-expr node) refs)))
+               ((ast-let-p node)
+                (let* ((bindings (ast-let-bindings node))
+                       (ref-bindings (remove-if-not (lambda (binding)
+                                                      (ref-var-p (car binding) refs))
+                                                    bindings))
+                       (plain-bindings (remove-if (lambda (binding)
+                                                    (ref-var-p (car binding) refs))
+                                                  bindings))
+                       (body-refs (%php-shadow-ref-vars refs (mapcar #'car plain-bindings)))
+                       (ref-sets (mapcar (lambda (binding)
+                                           (call 'cl-cc/php::%php-ref-set!
+                                                 (make-ast-var :name (car binding))
+                                                 (walk (cdr binding) refs)))
+                                         ref-bindings)))
+                  (if ref-bindings
+                      (make-ast-progn
+                       :forms (append
+                               ref-sets
+                               (if plain-bindings
+                                   (list (make-ast-let
+                                          :bindings (walk-bindings plain-bindings refs)
+                                          :declarations (ast-let-declarations node)
+                                          :body (walk-list (ast-let-body node) body-refs)))
+                                   (walk-list (ast-let-body node) refs))))
+                      (make-ast-let :bindings (walk-bindings bindings refs)
+                                    :declarations (ast-let-declarations node)
+                                    :body (walk-list (ast-let-body node) body-refs)))))
+               ((ast-lambda-p node)
+                (let ((body-refs (%php-shadow-ref-vars
+                                  refs
+                                  (append (ast-lambda-params node)
+                                          (ast-lambda-optional-params node)
+                                          (ast-lambda-key-params node)
+                                          (when (ast-lambda-rest-param node)
+                                            (list (ast-lambda-rest-param node)))))))
+                  (make-ast-lambda :params (ast-lambda-params node)
+                                   :optional-params (ast-lambda-optional-params node)
+                                   :rest-param (ast-lambda-rest-param node)
+                                   :key-params (ast-lambda-key-params node)
+                                   :declarations (ast-lambda-declarations node)
+                                   :body (walk-list (ast-lambda-body node) body-refs)
+                                   :env (ast-lambda-env node))))
+               ((ast-defun-p node)
+                (let ((body-refs (%php-shadow-ref-vars
+                                  refs
+                                  (append (ast-defun-params node)
+                                          (ast-defun-optional-params node)
+                                          (ast-defun-key-params node)
+                                          (when (ast-defun-rest-param node)
+                                            (list (ast-defun-rest-param node)))))))
+                  (make-ast-defun :name (ast-defun-name node)
+                                  :params (ast-defun-params node)
+                                  :optional-params (ast-defun-optional-params node)
+                                  :rest-param (ast-defun-rest-param node)
+                                  :key-params (ast-defun-key-params node)
+                                  :declarations (ast-defun-declarations node)
+                                  :documentation (ast-defun-documentation node)
+                                  :body (walk-list (ast-defun-body node) body-refs))))
+               ((ast-call-p node)
+                (make-ast-call :func (walk (ast-call-func node) refs)
+                               :args (walk-list (ast-call-args node) refs)))
+               ((ast-apply-p node)
+                (make-ast-apply :func (walk (ast-apply-func node) refs)
+                                :args (walk-list (ast-apply-args node) refs)))
+               ((ast-block-p node)
+                (make-ast-block :name (ast-block-name node)
+                                :body (walk-list (ast-block-body node) refs)))
+               ((ast-return-from-p node)
+                (make-ast-return-from :name (ast-return-from-name node)
+                                      :value (walk (ast-return-from-value node) refs)))
+               ((ast-tagbody-p node)
+                (make-ast-tagbody
+                 :tags (mapcar (lambda (tag)
+                                  (if (typep tag 'cl-cc/ast:ast-node)
+                                      (walk tag refs)
+                                      tag))
+                                (ast-tagbody-tags node))))
+               ((ast-values-p node)
+                (make-ast-values :forms (walk-list (ast-values-forms node) refs)))
+               ((ast-multiple-value-call-p node)
+                (make-ast-multiple-value-call :func (walk (ast-mv-call-func node) refs)
+                                              :args (walk-list (ast-mv-call-args node) refs)))
+               ((ast-multiple-value-prog1-p node)
+                (make-ast-multiple-value-prog1 :first (walk (ast-mv-prog1-first node) refs)
+                                               :forms (walk-list (ast-mv-prog1-forms node) refs)))
+               ((ast-multiple-value-bind-p node)
+                (let ((body-refs (%php-shadow-ref-vars refs (ast-mvb-vars node))))
+                  (make-ast-multiple-value-bind :vars (ast-mvb-vars node)
+                                                :values-form (walk (ast-mvb-values-form node) refs)
+                                                :body (walk-list (ast-mvb-body node) body-refs))))
+               ((ast-catch-p node)
+                (make-ast-catch :tag (walk (ast-catch-tag node) refs)
+                                :body (walk-list (ast-catch-body node) refs)))
+               ((ast-throw-p node)
+                (make-ast-throw :tag (walk (ast-throw-tag node) refs)
+                                :value (walk (ast-throw-value node) refs)))
+               ((ast-unwind-protect-p node)
+                (make-ast-unwind-protect :protected (walk (ast-unwind-protected node) refs)
+                                         :cleanup (walk-list (ast-unwind-cleanup node) refs)))
+               ((ast-handler-case-p node)
+                (make-ast-handler-case :form (walk (ast-handler-case-form node) refs)
+                                       :clauses (mapcar (lambda (clause)
+                                                          (destructuring-bind (types var body) clause
+                                                            (list types var
+                                                                  (walk-list body
+                                                                             (%php-shadow-ref-vars refs
+                                                                                                    (when var (list var)))))))
+                                                        (ast-handler-case-clauses node))))
+               ((ast-list-p node)
+                (make-ast-list :elements (walk-list (ast-list-elements node) refs)))
+               ((ast-the-p node)
+                (make-ast-the :type (ast-the-type node)
+                              :value (walk (ast-the-value node) refs)))
+               ((ast-make-instance-p node)
+                (make-ast-make-instance :class (walk (ast-make-instance-class node) refs)
+                                        :initargs (walk-initargs (ast-make-instance-initargs node) refs)))
+               ((ast-slot-value-p node)
+                (make-ast-slot-value :object (walk (ast-slot-value-object node) refs)
+                                     :slot (ast-slot-value-slot node)))
+               ((ast-set-slot-value-p node)
+                (make-ast-set-slot-value :object (walk (ast-set-slot-value-object node) refs)
+                                         :slot (ast-set-slot-value-slot node)
+                                         :value (walk (ast-set-slot-value-value node) refs)))
+               ((ast-set-gethash-p node)
+                (make-ast-set-gethash :key (walk (ast-set-gethash-key node) refs)
+                                      :table (walk (ast-set-gethash-table node) refs)
+                                      :value (walk (ast-set-gethash-value node) refs)))
+               (t node))))
+    (walk node-or-list ref-vars)))
+
+(defun %php-reference-marker (expr)
+  "Mark a parsed &EXPR reference operand until assignment lowering sees it."
+  (%php-call '%php-reference-marker expr))
+
+(defun %php-reference-marker-p (node)
+  "Return true when NODE is the internal &EXPR marker."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) '%php-reference-marker)))))
+
+(defun %php-reference-marker-expr (node)
+  "Return the referenced expression stored in a reference marker."
+  (first (ast-call-args node)))
+
+(defun %php-reference-assignment-marker (dest source)
+  "Mark $DEST = &$SOURCE until statement-sequence lowering can create aliases."
+  (%php-call '%php-reference-assignment-marker
+             (make-ast-var :name dest)
+             (make-ast-var :name source)))
+
+(defun %php-reference-assignment-marker-p (node)
+  "Return true when NODE is the internal reference-assignment marker."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) '%php-reference-assignment-marker)))))
+
+(defun %php-reference-assignment-dest (node)
+  "Return the destination symbol for a reference-assignment marker."
+  (ast-var-name (first (ast-call-args node))))
+
+(defun %php-reference-assignment-source (node)
+  "Return the source symbol for a reference-assignment marker."
+  (ast-var-name (second (ast-call-args node))))
+
+(defun %php-variable-init-expression-marker (var value result)
+  "Mark a PHP expression that first initializes VAR before yielding RESULT."
+  (%php-call '%php-variable-init-expression-marker
+             (make-ast-var :name var)
+             value
+             result))
+
+(defun %php-variable-init-expression-marker-p (node)
+  "Return true when NODE is the internal first-use variable init marker."
+  (and (ast-call-p node)
+       (let ((func (ast-call-func node)))
+         (and (ast-var-p func)
+              (eq (ast-var-name func) '%php-variable-init-expression-marker)))))
+
+(defun %php-variable-init-expression-var (node)
+  "Return the variable symbol stored in a first-use init marker."
+  (ast-var-name (first (ast-call-args node))))
+
+(defun %php-variable-init-expression-value (node)
+  "Return the initialization value stored in a first-use init marker."
+  (second (ast-call-args node)))
+
+(defun %php-variable-init-expression-result (node)
+  "Return the expression result stored in a first-use init marker."
+  (third (ast-call-args node)))
+
+(defun %php-hoist-variable-init-expressions (node)
+  "Rewrite first-use variable init markers and return hoisted VAR/VALUE pairs.
+
+Markers can appear inside a larger expression, for example `echo (++$x).$x`.
+The hoisted empty-body lets are emitted before the current statement so
+php-finish-let-bindings scopes them over the rewritten statement and the rest of
+the PHP block."
+  (let ((bindings nil))
+    (labels ((walk-list (forms)
+               (mapcar #'walk forms))
+             (walk-bindings (pairs)
+               (mapcar (lambda (pair)
+                         (cons (car pair) (walk (cdr pair))))
+                       pairs))
+             (walk-initargs (initargs)
+               (loop for (key . value) in initargs
+                     collect (cons key (walk value))))
+             (walk (form)
+               (cond
+                 ((null form) nil)
+                 ((listp form) (walk-list form))
+                 ((%php-variable-init-expression-marker-p form)
+                  (let ((value (walk (%php-variable-init-expression-value form))))
+                    (push (cons (%php-variable-init-expression-var form) value)
+                          bindings))
+                  (walk (%php-variable-init-expression-result form)))
+                 ((ast-binop-p form)
+                  (make-ast-binop :op (ast-binop-op form)
+                                  :lhs (walk (ast-binop-lhs form))
+                                  :rhs (walk (ast-binop-rhs form))))
+                 ((ast-if-p form)
+                  (make-ast-if :cond (walk (ast-if-cond form))
+                               :then (walk (ast-if-then form))
+                               :else (walk (ast-if-else form))))
+                 ((ast-progn-p form)
+                  (make-ast-progn :forms (walk-list (ast-progn-forms form))))
+                 ((ast-print-p form)
+                  (make-ast-print :expr (walk (ast-print-expr form))))
+                 ((ast-let-p form)
+                  (make-ast-let :bindings (walk-bindings (ast-let-bindings form))
+                                :declarations (ast-let-declarations form)
+                                :body (walk-list (ast-let-body form))))
+                 ((ast-setq-p form)
+                  (make-ast-setq :var (ast-setq-var form)
+                                 :value (walk (ast-setq-value form))))
+                 ((ast-call-p form)
+                  (make-ast-call :func (walk (ast-call-func form))
+                                 :args (walk-list (ast-call-args form))))
+                 ((ast-apply-p form)
+                  (make-ast-apply :func (walk (ast-apply-func form))
+                                  :args (walk-list (ast-apply-args form))))
+                 ((ast-block-p form)
+                  (make-ast-block :name (ast-block-name form)
+                                  :body (walk-list (ast-block-body form))))
+                 ((ast-return-from-p form)
+                  (make-ast-return-from :name (ast-return-from-name form)
+                                        :value (walk (ast-return-from-value form))))
+                 ((ast-values-p form)
+                  (make-ast-values :forms (walk-list (ast-values-forms form))))
+                 ((ast-multiple-value-call-p form)
+                  (make-ast-multiple-value-call :func (walk (ast-mv-call-func form))
+                                                :args (walk-list (ast-mv-call-args form))))
+                 ((ast-multiple-value-prog1-p form)
+                  (make-ast-multiple-value-prog1 :first (walk (ast-mv-prog1-first form))
+                                                 :forms (walk-list (ast-mv-prog1-forms form))))
+                 ((ast-multiple-value-bind-p form)
+                  (make-ast-multiple-value-bind :vars (ast-mvb-vars form)
+                                                :values-form (walk (ast-mvb-values-form form))
+                                                :body (walk-list (ast-mvb-body form))))
+                 ((ast-catch-p form)
+                  (make-ast-catch :tag (walk (ast-catch-tag form))
+                                  :body (walk-list (ast-catch-body form))))
+                 ((ast-throw-p form)
+                  (make-ast-throw :tag (walk (ast-throw-tag form))
+                                  :value (walk (ast-throw-value form))))
+                 ((ast-unwind-protect-p form)
+                  (make-ast-unwind-protect :protected (walk (ast-unwind-protected form))
+                                           :cleanup (walk-list (ast-unwind-cleanup form))))
+                 ((ast-handler-case-p form)
+                  (make-ast-handler-case
+                   :form (walk (ast-handler-case-form form))
+                   :clauses (mapcar (lambda (clause)
+                                      (destructuring-bind (types var body) clause
+                                        (list types var (walk-list body))))
+                                    (ast-handler-case-clauses form))))
+                 ((ast-list-p form)
+                  (make-ast-list :elements (walk-list (ast-list-elements form))))
+                 ((ast-the-p form)
+                  (make-ast-the :type (ast-the-type form)
+                                :value (walk (ast-the-value form))))
+                 ((ast-make-instance-p form)
+                  (make-ast-make-instance :class (walk (ast-make-instance-class form))
+                                          :initargs (walk-initargs
+                                                     (ast-make-instance-initargs form))))
+                 ((ast-slot-value-p form)
+                  (make-ast-slot-value :object (walk (ast-slot-value-object form))
+                                       :slot (ast-slot-value-slot form)))
+                 ((ast-set-slot-value-p form)
+                  (make-ast-set-slot-value :object (walk (ast-set-slot-value-object form))
+                                           :slot (ast-set-slot-value-slot form)
+                                           :value (walk (ast-set-slot-value-value form))))
+                 ((ast-set-gethash-p form)
+                  (make-ast-set-gethash :key (walk (ast-set-gethash-key form))
+                                        :table (walk (ast-set-gethash-table form))
+                                        :value (walk (ast-set-gethash-value form))))
+                 (t form))))
+      (values (walk node) (nreverse bindings)))))
+
+(defun %php-bind-or-set (var value bound-vars)
+  "Bind VAR to VALUE when new in this sequence, otherwise assign it."
+  (if (member var bound-vars :test #'eq)
+      (make-ast-setq :var var :value value)
+      (make-ast-let :bindings (list (cons var value)) :body nil)))
+
+(defun %php-form-bound-vars (form)
+  "Return variables newly introduced by FORM at the current statement level."
+  (if (and (ast-let-p form) (null (ast-let-body form)))
+      (mapcar #'car (ast-let-bindings form))
+      nil))
+
+(defun %php-lower-reference-assignments (forms known-vars)
+  "Lower $b = &$a aliases over a statement sequence using PHP ref boxes."
+  (let ((out nil)
+        (bound-vars (copy-list known-vars))
+        (ref-vars nil))
+    (dolist (form forms)
+      (if (%php-reference-assignment-marker-p form)
+          (let* ((dest (%php-reference-assignment-dest form))
+                 (source (%php-reference-assignment-source form)))
+            (unless (member source ref-vars :test #'eq)
+              (push (%php-bind-or-set
+                     source
+                     (%php-call 'cl-cc/php::%php-make-ref
+                                (if (member source bound-vars :test #'eq)
+                                    (make-ast-var :name source)
+                                    (%php-null-quote)))
+                     bound-vars)
+                    out)
+              (pushnew source bound-vars :test #'eq)
+              (pushnew source ref-vars :test #'eq))
+            (push (%php-bind-or-set dest (make-ast-var :name source) bound-vars) out)
+            (pushnew dest bound-vars :test #'eq)
+            (pushnew dest ref-vars :test #'eq))
+          (multiple-value-bind (hoisted-form init-bindings)
+              (%php-hoist-variable-init-expressions form)
+            (dolist (binding init-bindings)
+              (push (%php-bind-or-set (car binding) (cdr binding) bound-vars) out)
+              (pushnew (car binding) bound-vars :test #'eq))
+            (let ((lowered (if ref-vars
+                               (%php-rewrite-ref-vars hoisted-form ref-vars)
+                               hoisted-form)))
+            (dolist (var (%php-form-bound-vars hoisted-form))
+              (pushnew var bound-vars :test #'eq))
+              (push lowered out)))))
+    (nreverse out)))
 
 ;;; ─── String / Exception Helpers ─────────────────────────────────────────────
 
@@ -178,8 +888,9 @@ the call whose third argument is a by-reference out-parameter."
   "Lower preg_match($p,$s,$m) / preg_match_all($p,$s,$m) so $matches is populated
 in the caller's variable: assign $m = the matches array (a helper returns it BY
 VALUE — the VM copies host structs across the bridge, so a ref box cannot
-propagate), then yield the match count.  Pattern/subject are bound to temps so
-each is evaluated once and the two helper calls never share arg AST nodes."
+propagate), then yield the match count.  Pattern/subject and optional
+flags/offset are bound to temps so each is evaluated once and the two helper
+calls never share arg AST nodes."
   (let* ((name (string-downcase (%php-strip-leading-namespace-separator qualified-name)))
          (all-p (string= name "preg_match_all"))
          (matches-sym (if all-p 'cl-cc/php::%php-preg-match-all-matches
@@ -188,51 +899,360 @@ each is evaluated once and the two helper calls never share arg AST nodes."
          (matches-var (cl-cc/ast:ast-var-name (third args)))
          (pat-tmp (gensym "PHP-PREG-PAT-"))
          (subj-tmp (gensym "PHP-PREG-SUBJ-"))
-         (count-tmp (gensym "PHP-PREG-COUNT-")))
+         (flags-p (>= (length args) 4))
+         (offset-p (>= (length args) 5))
+         (flags-tmp (and flags-p (gensym "PHP-PREG-FLAGS-")))
+         (offset-tmp (and offset-p (gensym "PHP-PREG-OFFSET-")))
+         (count-tmp (gensym "PHP-PREG-COUNT-"))
+         (bindings (append (list (cons pat-tmp (first args))
+                                 (cons subj-tmp (second args)))
+                           (when flags-p (list (cons flags-tmp (fourth args))))
+                           (when offset-p (list (cons offset-tmp (fifth args))))))
+         (count-args (cond
+                       (offset-p (list (make-ast-var :name pat-tmp)
+                                       (make-ast-var :name subj-tmp)
+                                       (%php-null-quote)
+                                       (if flags-p (make-ast-var :name flags-tmp) (make-ast-int :value 0))
+                                       (make-ast-var :name offset-tmp)))
+                       (flags-p (list (make-ast-var :name pat-tmp)
+                                      (make-ast-var :name subj-tmp)
+                                      (%php-null-quote)
+                                      (make-ast-var :name flags-tmp)))
+                       (t (list (make-ast-var :name pat-tmp)
+                                (make-ast-var :name subj-tmp)))))
+         (matches-args (cond
+                         (offset-p (list (make-ast-var :name pat-tmp)
+                                         (make-ast-var :name subj-tmp)
+                                         (if flags-p (make-ast-var :name flags-tmp) (make-ast-int :value 0))
+                                         (make-ast-var :name offset-tmp)))
+                         (flags-p (list (make-ast-var :name pat-tmp)
+                                        (make-ast-var :name subj-tmp)
+                                        (make-ast-var :name flags-tmp)))
+                         (t (list (make-ast-var :name pat-tmp)
+                                  (make-ast-var :name subj-tmp))))))
     (make-ast-let
-     :bindings (list (cons pat-tmp (first args)) (cons subj-tmp (second args)))
+     :bindings bindings
      :body (list
             (make-ast-let
              :bindings (list (cons count-tmp
                                    (make-ast-call :func (make-ast-var :name count-sym)
-                                                  :args (list (make-ast-var :name pat-tmp)
-                                                              (make-ast-var :name subj-tmp)))))
+                                                  :args count-args)))
              :body (list
                     (make-ast-setq
                      :var matches-var
                      :value (make-ast-call :func (make-ast-var :name matches-sym)
-                                           :args (list (make-ast-var :name pat-tmp)
-                                                       (make-ast-var :name subj-tmp))))
+                                           :args matches-args))
                     (make-ast-var :name count-tmp)))))))
+
+(defun %php-sscanf-out-param-call-p (qualified-name args)
+  "True when this is sscanf($str,$fmt,$a,...) with variable out-params."
+  (and (>= (length args) 3)
+       (every (lambda (arg) (typep arg 'cl-cc/ast:ast-var)) (cddr args))
+       (string= (string-downcase
+                 (%php-strip-leading-namespace-separator qualified-name))
+                "sscanf")))
+
+(defun %php-scanf-out-param-call-p (qualified-name args)
+  "True when this is scanf($fmt,$a,...) with variable out-params."
+  (and (>= (length args) 2)
+       (every (lambda (arg) (typep arg 'cl-cc/ast:ast-var)) (cdr args))
+       (string= (string-downcase
+                 (%php-strip-leading-namespace-separator qualified-name))
+                "scanf")))
+
+(defun %php-lower-scanf-like-out-param (values-helper helper-args out-args temp-prefix)
+  "Lower scanf-family out-params into one parse, assignments, then count."
+  (let ((values-tmp (gensym temp-prefix))
+        (out-vars (mapcar #'cl-cc/ast:ast-var-name out-args)))
+    (make-ast-let
+     :bindings (list (cons values-tmp
+                           (make-ast-call
+                            :func (make-ast-var :name values-helper)
+                            :args helper-args)))
+     :body (append
+            (loop for var in out-vars
+                  for idx from 0
+                  collect (make-ast-setq
+                           :var var
+                           :value (make-ast-call
+                                   :func (make-ast-var :name 'cl-cc/php::%php-array-ref)
+                                        :args (list (make-ast-var :name values-tmp)
+                                                    (make-ast-quote :value idx)))))
+            (list (make-ast-call
+                   :func (make-ast-var :name 'cl-cc/php::%php-count)
+                   :args (list (make-ast-var :name values-tmp))))))))
+
+(defun %php-lower-sscanf-out-param (args)
+  "Lower sscanf($str,$fmt,$a,...) into caller out-param assignments."
+  (%php-lower-scanf-like-out-param 'cl-cc/php::%php-sscanf-values
+                                   (list (first args) (second args))
+                                   (cddr args)
+                                   "PHP-SSCANF-VALUES-"))
+
+(defun %php-lower-scanf-out-param (args)
+  "Lower scanf($fmt,$a,...) into caller out-param assignments."
+  (%php-lower-scanf-like-out-param 'cl-cc/php::%php-scanf-values
+                                   (list (first args))
+                                   (cdr args)
+                                   "PHP-SCANF-VALUES-"))
+
+(defun %php-by-ref-indices-for-name (name)
+  "Return by-reference parameter indices registered for NAME."
+  (when name
+    (let ((key (princ-to-string name)))
+      (or (gethash key *php-by-ref-param-registry*)
+          (gethash (string-upcase key) *php-by-ref-param-registry*)
+          (gethash (string-downcase key) *php-by-ref-param-registry*)))))
+
+(defun %php-by-ref-indices-for-call (fn-sym)
+  "Return by-reference parameter indices registered for the function FN-SYM."
+  (%php-by-ref-indices-for-name (symbol-name fn-sym)))
+
+(defun %php-by-ref-indices-for-function (qualified-name fn-sym fallback-name)
+  "Return by-reference indices for a function before or after builtin lowering."
+  (or (%php-by-ref-indices-for-call fn-sym)
+      (%php-by-ref-indices-for-call fallback-name)
+      (%php-by-ref-indices-for-name
+       (%php-simple-function-spelling qualified-name))))
+
+(defun %php-lower-by-ref-call (func-node args by-ref-indices)
+  "Lower a call with by-reference parameters.
+
+Variable actuals are boxed before the call and written back after the callee
+returns. Non-variable actuals still receive a temporary ref box so the callee
+can run, matching PHP's local mutation behavior for the callee body."
+  (let ((box-bindings nil)
+        (call-args nil)
+        (writebacks nil))
+    (loop for arg in args
+          for idx from 0
+          do (if (member idx by-ref-indices :test #'=)
+                 (let ((box-sym (gensym "PHP-BY-REF-ARG-")))
+                   (push (cons box-sym
+                               (%php-call 'cl-cc/php::%php-make-ref arg))
+                         box-bindings)
+                   (push (make-ast-var :name box-sym) call-args)
+                   (when (ast-var-p arg)
+                     (push (make-ast-setq
+                            :var (ast-var-name arg)
+                            :value (%php-call 'cl-cc/php::%php-deref
+                                              (make-ast-var :name box-sym)))
+                           writebacks)))
+                 (push arg call-args)))
+    (let ((call-node (make-ast-call :func func-node
+                                    :args (nreverse call-args))))
+      (if box-bindings
+          (let ((result-sym (gensym "PHP-BY-REF-RESULT-")))
+            (make-ast-let
+             :bindings (nreverse box-bindings)
+             :body (list
+                    (make-ast-let
+                     :bindings (list (cons result-sym call-node))
+                     :body (append (nreverse writebacks)
+                                   (list (make-ast-var :name result-sym)))))))
+          call-node))))
+
+(defun %php-emit-lowered-function-call (fn-sym args by-ref-indices)
+  "Emit a lowered PHP function call from ARGS."
+  (let ((func (make-ast-var :name fn-sym)))
+    (%php-emit-lowered-call func
+                            (if (%php-args-have-named-p args)
+                                (%php-reorder-named-args-for-call fn-sym args)
+                                (%php-static-call-lowering-result args))
+                            :by-ref-indices by-ref-indices)))
+
+(defun %php-compact-static-names-from-node (node)
+  "Return static compact() variable names described by NODE.
+The second value is true when NODE was fully understood."
+  (cond
+    ((and (ast-quote-p node)
+          (stringp (ast-quote-value node)))
+     (values (list (ast-quote-value node)) t))
+    ((%php-array-constructor-call-p node)
+     (let ((names nil)
+           (supported-p t))
+       (dolist (entry (ast-call-args node))
+         (let* ((elements (and (ast-list-p entry) (ast-list-elements entry)))
+                (value (and (= (length elements) 3) (third elements))))
+           (if value
+               (multiple-value-bind (entry-names entry-supported-p)
+                   (%php-compact-static-names-from-node value)
+                 (if entry-supported-p
+                     (setf names (append names entry-names))
+                     (setf supported-p nil)))
+               (setf supported-p nil))))
+       (values names supported-p)))
+    (t
+     (values nil nil))))
+
+(defun %php-compact-static-names (args)
+  "Return all static variable names requested by a compact() call."
+  (let ((names nil)
+        (supported-p t))
+    (dolist (arg args)
+      (multiple-value-bind (arg-names arg-supported-p)
+          (%php-compact-static-names-from-node arg)
+        (if arg-supported-p
+            (setf names (append names arg-names))
+            (setf supported-p nil))))
+    (values names supported-p)))
+
+(defun %php-lower-static-compact-call (args known-vars)
+  "Lower compact('x', ['y']) into an array literal capturing visible variables."
+  (multiple-value-bind (names supported-p) (%php-compact-static-names args)
+    (when supported-p
+      (%php-array-call
+       (loop for name in names
+             for var-sym = (php-var-sym name)
+             when (member var-sym known-vars :test #'eq)
+               collect (%php-array-entry t
+                                         (make-ast-quote :value name)
+                                         (make-ast-var :name var-sym)))))))
+
+(defun %php-lower-isset-call (args fn-sym)
+  "Lower isset($x) so the variable operand is not evaluated before boundp."
+  (when (= (length args) 1)
+    (let ((arg (first args)))
+      (when (ast-var-p arg)
+        (make-ast-call :func (make-ast-var :name fn-sym)
+                       :args (list (make-ast-quote :value (ast-var-name arg))))))))
+
+(defun %php-lower-empty-call (args empty-fn-sym known-vars)
+  "Lower empty($x) without evaluating an obviously unbound variable operand."
+  (when (= (length args) 1)
+    (let ((arg (first args)))
+      (when (ast-var-p arg)
+        (if (member (ast-var-name arg) known-vars :test #'eq)
+            (make-ast-call :func (make-ast-var :name empty-fn-sym)
+                           :args (list arg))
+            (make-ast-quote :value t))))))
+
+(defun %php-valid-extract-name-p (name)
+  "Return true when NAME can become a PHP variable name."
+  (and (stringp name)
+       (plusp (length name))
+       (let ((first (char name 0)))
+         (or (alpha-char-p first) (char= first #\_)))
+       (loop for ch across name
+             always (or (alphanumericp ch) (char= ch #\_)))))
+
+(defun %php-static-extract-bindings-from-node (node)
+  "Return variable bindings for extract() when NODE is a static array literal."
+  (when (%php-array-constructor-call-p node)
+    (let ((bindings nil)
+          (supported-p t))
+      (dolist (entry (ast-call-args node))
+        (let* ((elements (and (ast-list-p entry) (ast-list-elements entry)))
+               (key-present-p (and (= (length elements) 3)
+                                   (ast-quote-p (first elements))
+                                   (ast-quote-value (first elements))))
+               (key-node (and key-present-p (second elements)))
+               (value-node (and (= (length elements) 3) (third elements))))
+          (cond
+            ((not (= (length elements) 3))
+             (setf supported-p nil))
+            ((not key-present-p)
+             nil)
+            ((and (ast-quote-p key-node)
+                  (%php-valid-extract-name-p (ast-quote-value key-node)))
+             (let* ((var-sym (php-var-sym (ast-quote-value key-node)))
+                    (cell (assoc var-sym bindings :test #'eq)))
+               (if cell
+                   (setf (cdr cell) value-node)
+                   (setf bindings (append bindings (list (cons var-sym value-node)))))))
+            (t
+             nil))))
+      (when supported-p bindings))))
+
+(defun %php-lower-static-extract-call (args)
+  "Lower extract(['x' => 1]) into first-class PHP variable bindings."
+  (when (= (length args) 1)
+    (let ((bindings (%php-static-extract-bindings-from-node (first args))))
+      (when bindings
+        (make-ast-let :bindings bindings :body nil)))))
+
+(defun %php-static-extract-bound-vars (args)
+  "Return the variables introduced by a statically lowered extract() call."
+  (let ((bindings (and (= (length args) 1)
+                       (%php-static-extract-bindings-from-node (first args)))))
+    (mapcar #'car bindings)))
+
+(defun %php-global-builtin-function-name (qualified-name fallback-name)
+  "Return the PHP builtin spelling for QUALIFIED-NAME when it is global."
+  (when (%php-global-builtin-function-p qualified-name fallback-name)
+    (%php-simple-function-spelling qualified-name)))
+
+(defun %php-syntax-like-builtin-kind (builtin-name)
+  "Classify syntax-like builtin names that need special lowering."
+  (cond
+    ((null builtin-name) nil)
+    ((string= builtin-name "isset") :isset)
+    ((string= builtin-name "empty") :empty)
+    ((string= builtin-name "compact") :compact)
+    ((string= builtin-name "extract") :extract)
+    (t nil)))
 
 (defun %php-parse-function-call (qualified-name fallback-name stream known-vars)
   "Parse a PHP function call and lower known builtins to runtime helpers."
   (multiple-value-bind (args rest kv) (php-parse-arglist stream known-vars)
-    (let ((fn-sym (or (and (%php-global-builtin-function-p
-                            qualified-name fallback-name)
-                           (%php-builtin-helper-symbol
-                            (%php-simple-function-spelling qualified-name)))
-                      fallback-name)))
+    (let* ((builtin-name (%php-global-builtin-function-name qualified-name
+                                                            fallback-name))
+           (builtin-kind (%php-syntax-like-builtin-kind builtin-name))
+           (fn-sym (or (and builtin-name
+                            (%php-builtin-helper-symbol builtin-name))
+                       fallback-name))
+           (by-ref-indices
+             (%php-by-ref-indices-for-function qualified-name fn-sym fallback-name)))
       (values (cond
                 ;; preg_match($p,$s,$m): $matches is a by-reference out-param.
                 ((%php-preg-match-out-param-call-p qualified-name args)
                  (%php-lower-preg-match-out-param qualified-name args))
+                ;; sscanf($s,$fmt,$a,...): parse once, assign out-params, return count.
+                ((%php-sscanf-out-param-call-p qualified-name args)
+                 (%php-lower-sscanf-out-param args))
+                ;; scanf($fmt,$a,...): read stdin once, assign out-params, return count.
+                ((%php-scanf-out-param-call-p qualified-name args)
+                 (%php-lower-scanf-out-param args))
+                ;; isset($x) is PHP syntax: the variable must not be evaluated
+                ;; before the runtime helper checks whether it is bound.
+                ((eq builtin-kind :isset)
+                 (or (%php-lower-isset-call args fn-sym)
+                     (make-ast-call :func (make-ast-var :name fn-sym)
+                                    :args args)))
+                ;; empty($x) is also syntax-like in PHP: an undefined variable
+                ;; is empty and must not be evaluated before that decision.
+                ((eq builtin-kind :empty)
+                 (or (%php-lower-empty-call args fn-sym kv)
+                     (make-ast-call :func (make-ast-var :name fn-sym)
+                                    :args args)))
+                ;; compact('x', ['y']): requires caller variables, so static
+                ;; name lists are lowered before the ordinary builtin path.
+                ((eq builtin-kind :compact)
+                 (or (%php-lower-static-compact-call args kv)
+                     (make-ast-call :func (make-ast-var :name fn-sym)
+                                    :args args)))
+                ;; extract(['x' => 1]) mutates the caller's variable table. For
+                ;; static array literals, lower it into ordinary PHP bindings.
+                ((eq builtin-kind :extract)
+                 (or (%php-lower-static-extract-call args)
+                     (make-ast-call :func (make-ast-var :name fn-sym)
+                                    :args args)))
                 ;; f(...): first-class callable — a forwarding closure, not a call.
                 ((and (= (length args) 1) (%php-fcc-marker-p (first args)))
                  (%php-build-fcc-closure fn-sym))
-                ;; f(...$args): pass the function NAME symbol to apply so it
-                ;; resolves as a function, spreading the runtime argument list.
-                ((%php-args-have-spread-p args)
-                 (make-ast-apply :func fn-sym
-                                 :args (list (%php-spread-arglist-expr args))))
-                (t (make-ast-call :func (make-ast-var :name fn-sym) :args args)))
-              rest kv))))
+                (t (%php-emit-lowered-function-call fn-sym
+                                                   args
+                                                   by-ref-indices)))
+              rest
+              (if (eq builtin-kind :extract)
+                  (append (%php-static-extract-bound-vars args) kv)
+                  kv)))))
 
 ;;; ─── Null-coalesce / Elvis Lowering ─────────────────────────────────────────
 
 (defun %php-not-null-cond (expr)
-  "Build (not (eq EXPR null)) as an AST expression."
-  (%php-call 'not (%php-call 'eq expr (%php-null-quote))))
+  "Build (not (%php-null-p EXPR)) as an AST expression."
+  (%php-call 'not (%php-call 'cl-cc/php::%php-null-p expr)))
 
 (defun %php-lower-null-coalesce (lhs rhs)
   "Lower LHS ?? RHS without evaluating LHS twice."
@@ -281,10 +1301,10 @@ each is evaluated once and the two helper calls never share arg AST nodes."
 
 (defun %php-parse-arrow-function (stream known-vars)
   "Parse fn(params) => expr and lower it to captured ast-lambda."
-  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices
+  (multiple-value-bind (params rest param-types _param-attrs by-ref-indices
                         param-defaults variadic-param)
       (php-parse-param-list stream)
-    (declare (ignore param-types _param-attrs _by-ref-indices))
+    (declare (ignore param-types _param-attrs))
     (multiple-value-bind (return-type rest2) (php-parse-return-type rest)
       (declare (ignore return-type))
       (unless (and (eq (php-peek-type rest2) :T-OP)
@@ -298,14 +1318,22 @@ each is evaluated once and the two helper calls never share arg AST nodes."
                                           known-vars))
           (multiple-value-bind (required optionals)
               (%php-split-params-by-defaults params param-defaults)
-            (multiple-value-bind (rest-param wrapped-body)
-                (%php-variadic-rest-binding variadic-param (list body))
-              (let* ((captures (%php-arrow-captures body params known-vars))
-                     (lambda (make-ast-lambda :params required
-                                              :optional-params optionals
-                                              :rest-param rest-param
-                                              :body wrapped-body)))
-                (values (%php-capture-wrapper captures lambda) rest4 kv4)))))))))
+            (let* ((by-ref-params (mapcar (lambda (idx) (nth idx params)) by-ref-indices))
+                   (callable-body (if by-ref-params
+                                      (%php-rewrite-ref-vars (list body) by-ref-params)
+                                      (list body))))
+              (multiple-value-bind (rest-param wrapped-body)
+                  (%php-variadic-rest-binding variadic-param callable-body)
+                (let* ((captures (%php-arrow-captures body params known-vars))
+                       (lambda (make-ast-lambda
+                                :params required
+                                :optional-params optionals
+                                :rest-param rest-param
+                                :declarations (when by-ref-indices
+                                                (list (list :php-by-ref-indices
+                                                            by-ref-indices)))
+                                :body wrapped-body)))
+                  (values (%php-capture-wrapper captures lambda) rest4 kv4))))))))))
 
 (defun %php-parse-closure-use-list (stream)
   "Parse optional PHP closure use($x, &$y) and return (captures by-ref-set rest).
@@ -335,10 +1363,12 @@ Captures is a list of variable symbols; by-ref-set is a hash-table of the by-ref
 (defun %php-parse-anonymous-function (stream known-vars)
   "Parse function(params) use($x, &$y) { body } as an ast-lambda with captures.
 By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
-  (multiple-value-bind (params rest param-types _param-attrs _by-ref-indices
+  (let* ((returns-by-ref (%php-reference-token-p stream))
+         (stream (if returns-by-ref (cdr stream) stream)))
+  (multiple-value-bind (params rest param-types _param-attrs by-ref-indices
                         param-defaults variadic-param)
       (php-parse-param-list stream)
-    (declare (ignore param-types _param-attrs _by-ref-indices))
+    (declare (ignore param-types _param-attrs))
     (multiple-value-bind (captures by-ref rest2) (%php-parse-closure-use-list rest)
       (multiple-value-bind (return-type rest3) (php-parse-return-type rest2)
         (declare (ignore return-type))
@@ -346,27 +1376,44 @@ By-reference captures (&$var) are wrapped in ref boxes so mutations propagate."
             (php-parse-block rest3 (append params captures
                                            (when variadic-param (list variadic-param))
                                            known-vars))
-          ;; For by-ref captures, wrap them in ref boxes so mutations propagate.
           (multiple-value-bind (required optionals)
               (%php-split-params-by-defaults params param-defaults)
-          (multiple-value-bind (rest-param wrapped-body)
-              (%php-variadic-rest-binding variadic-param (%php-callable-body body-stmts))
-          (let* ((ref-bindings
-                  (when (> (hash-table-count by-ref) 0)
-                    (remove nil
-                            (mapcar (lambda (sym)
-                                      (when (gethash sym by-ref)
-                                        (cons sym (%php-call 'cl-cc/php::%php-make-ref
-                                                             (make-ast-var :name sym)))))
-                                    captures))))
-                 (lambda-ast (make-ast-lambda :params required
-                                              :optional-params optionals
-                                              :rest-param rest-param
-                                              :body wrapped-body))
-                 (wrapped (if ref-bindings
-                              (make-ast-let :bindings ref-bindings :body (list lambda-ast))
-                              lambda-ast)))
-            (values (%php-capture-wrapper captures wrapped) rest4 kv4)))))))))
+            (let* ((ref-captures (remove-if-not (lambda (sym) (gethash sym by-ref))
+                                                captures))
+                   (by-ref-params (mapcar (lambda (idx) (nth idx params)) by-ref-indices))
+                   (ref-vars (remove-duplicates (append ref-captures by-ref-params)
+                                                :test #'eq))
+                   (callable-body (%php-callable-body body-stmts))
+                   (callable-body (if ref-vars
+                                      (%php-rewrite-ref-vars callable-body ref-vars)
+                                      callable-body)))
+              (multiple-value-bind (rest-param wrapped-body)
+                  (%php-variadic-rest-binding variadic-param callable-body)
+                (let* ((ref-bindings
+                        (when (> (hash-table-count by-ref) 0)
+                          (remove nil
+                                  (mapcar (lambda (sym)
+                                            (when (gethash sym by-ref)
+                                              (cons sym
+                                                    (%php-call 'cl-cc/php::%php-make-ref
+                                                               (make-ast-var :name sym)))))
+                                          captures))))
+                       (lambda-ast
+                        (make-ast-lambda
+                         :params required
+                         :optional-params optionals
+                         :rest-param rest-param
+                         :declarations (append (when by-ref-indices
+                                                 (list (list :php-by-ref-indices
+                                                             by-ref-indices)))
+                                               (when returns-by-ref
+                                                 (list (list :php-returns-by-ref t))))
+                         :body wrapped-body))
+                       (wrapped (if ref-bindings
+                                    (make-ast-let :bindings ref-bindings
+                                                  :body (list lambda-ast))
+                                    lambda-ast)))
+              (values (%php-capture-wrapper captures wrapped) rest4 kv4)))))))))))
 
 ;;; ─── Yield Handlers ─────────────────────────────────────────────────────────
 
@@ -484,30 +1531,29 @@ failed to compile and the whole match produced nothing."
 
 ;;; ─── Compound Assignment Lowering ────────────────────────────────────────────
 ;;;
-;;; Data table maps PHP compound-assignment operator string to a 2-arg builder fn.
-;;; Entries that lower to ast-binop use inline lambdas; entries that call PHP
-;;; runtime helpers use %php-call.  The fallback signals an error.
+;;; Data table maps PHP compound-assignment operator strings to runtime helper
+;;; symbols.  Lowering logic stays in %PHP-COMPOUND-VALUE.
 
 (defparameter *php-compound-op-table*
-  (list (cons "+="  (lambda (l r) (make-ast-binop :op '+ :lhs l :rhs r)))
-        (cons "-="  (lambda (l r) (make-ast-binop :op '- :lhs l :rhs r)))
-        (cons "*="  (lambda (l r) (make-ast-binop :op '* :lhs l :rhs r)))
-        (cons "/="  (lambda (l r) (make-ast-binop :op '/ :lhs l :rhs r)))
-        (cons ".="  (lambda (l r) (%php-call 'cl-cc/php::%php-concat l r)))
-        (cons "%="  (lambda (l r) (%php-call 'cl-cc/php::%php-modulo l r)))
-        (cons "**=" (lambda (l r) (%php-call 'expt l r)))
-        (cons "&="  (lambda (l r) (%php-call 'cl-cc/php::%php-bitwise-and l r)))
-        (cons "|="  (lambda (l r) (%php-call 'cl-cc/php::%php-bitwise-or l r)))
-        (cons "^="  (lambda (l r) (%php-call 'cl-cc/php::%php-bitwise-xor l r)))
-        (cons "<<=" (lambda (l r) (%php-call 'cl-cc/php::%php-shift-left l r)))
-        (cons ">>=" (lambda (l r) (%php-call 'cl-cc/php::%php-shift-right l r))))
-  "Alist mapping PHP compound-assignment operator strings to 2-arg value builders.")
+  '(("+="  . cl-cc/php::%php-add)
+    ("-="  . cl-cc/php::%php-sub)
+    ("*="  . cl-cc/php::%php-mul)
+    ("/="  . cl-cc/php::%php-div)
+    (".="  . cl-cc/php::%php-concat)
+    ("%="  . cl-cc/php::%php-modulo)
+    ("**=" . expt)
+    ("&="  . cl-cc/php::%php-bitwise-and)
+    ("|="  . cl-cc/php::%php-bitwise-or)
+    ("^="  . cl-cc/php::%php-bitwise-xor)
+    ("<<=" . cl-cc/php::%php-shift-left)
+    (">>=" . cl-cc/php::%php-shift-right))
+  "Alist mapping PHP compound-assignment operator strings to runtime helper symbols.")
 
 (defun %php-compound-value (op lhs rhs)
   "Return the read-modify-write value for PHP compound assignment OP."
   (let ((entry (assoc op *php-compound-op-table* :test #'equal)))
     (if entry
-        (funcall (cdr entry) lhs rhs)
+        (%php-call (cdr entry) lhs rhs)
         (error "PHP parse error: unsupported compound assignment operator ~S" op))))
 
 (defun %php-nullish-cond (value)
@@ -680,7 +1726,8 @@ VAL per element, which is correct for the common variable RHS."
 (defun %php-array-append-call (array)
   "Lower ARRAY[] (empty subscript) to an append-target marker. This is only a
 valid assignment LHS; the assignment parser turns `$a[] = v' into a push. Using []
-to read is a PHP fatal error, modelled by the %php-array-append-target stub."
+to read is a PHP fatal error, represented here by the %php-array-append-target
+marker."
   (make-ast-call :func (%php-helper-var 'cl-cc/php::%php-array-append-target)
                  :args (list array)))
 
@@ -708,7 +1755,7 @@ to read is a PHP fatal error, modelled by the %php-array-append-target stub."
                  :args entries))
 
 (defun %php-parse-array-expr (stream known-vars &key (open :T-LBRACKET) (close :T-RBRACKET))
-  "Parse PHP short array [..] or legacy array(..) syntax."
+  "Parse PHP array literals written as [..] or array(..)."
   (multiple-value-bind (tok rest) (php-expect open stream)
     (declare (ignore tok))
     (if (eq (php-peek-type rest) close)
@@ -773,21 +1820,51 @@ to read is a PHP fatal error, modelled by the %php-array-append-target stub."
 ;;; keyword-led expressions.  It lives here because all its targets (%php-parse-
 ;;; arrow-function, %php-parse-match-expression, etc.) are defined in this file.
 
+(defun %php-clone-expression-ast (expr &optional overrides)
+  "Lower a PHP clone expression, optionally applying PHP 8.5 clone-with overrides."
+  (let ((clone-sym (gensym "PHP-CLONE-")))
+    (make-ast-let
+     :bindings (list (cons clone-sym
+                           (make-ast-call
+                            :func (make-ast-var :name 'cl-cc/php::%php-clone)
+                            :args (list expr))))
+     :body (append
+            (list
+             (make-ast-if
+              :cond (make-ast-call
+                     :func (make-ast-var :name 'cl-cc/php::%php-has-method)
+                     :args (list (make-ast-var :name clone-sym)
+                                 (make-ast-quote :value (php-ident-sym "__clone"))))
+              :then (make-ast-call
+                     :func (make-ast-slot-value
+                            :object (make-ast-var :name clone-sym)
+                            :slot (php-ident-sym "__clone"))
+                     :args (list (make-ast-var :name clone-sym)))
+              :else (make-ast-quote :value nil)))
+            (when overrides
+              (list
+               (make-ast-call
+                :func (make-ast-var :name 'cl-cc/php::%php-clone-with)
+                :args (list (make-ast-var :name clone-sym) overrides))))
+            (list (make-ast-var :name clone-sym))))))
+
 (defun %php-parse-keyword-expr (stream kw known-vars)
   "Dispatch keyword-led expression to the appropriate handler."
   (multiple-value-bind (tok rest) (php-consume stream)
     (declare (ignore tok))
     (case kw
       (:clone
-       (let ((fn (make-ast-var :name 'clone)))
-         (if (and (eq (php-peek-type rest) :T-LPAREN)
-                  (eq (php-peek-type (cdr rest)) :T-ELLIPSIS))
-             (values (make-ast-quote :value nil)
-                     (cdddr rest) known-vars)
-             (values (make-ast-call :func fn
-                                     :args (list (nth-value 0 (php-parse-unary rest known-vars))))
-                     (nth-value 1 (php-parse-unary rest known-vars))
-                     known-vars))))
+       (if (and (eq (php-peek-type rest) :T-LPAREN)
+                (eq (php-peek-type (cdr rest)) :T-ELLIPSIS))
+           (values (make-ast-quote :value nil)
+                   (cdddr rest) known-vars)
+           (if (eq (php-peek-type rest) :T-LPAREN)
+               (multiple-value-bind (args rest2 kv2) (php-parse-arglist rest known-vars)
+                 (unless (= (length args) 2)
+                   (error "PHP parse error: clone-with expects object and override array"))
+                 (values (%php-clone-expression-ast (first args) (second args)) rest2 kv2))
+               (multiple-value-bind (expr rest2 kv2) (php-parse-unary rest known-vars)
+                 (values (%php-clone-expression-ast expr) rest2 kv2)))))
       (:fn
        (%php-parse-arrow-function rest known-vars))
       (:match

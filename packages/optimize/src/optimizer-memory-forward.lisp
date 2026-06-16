@@ -305,49 +305,6 @@ loads in-place."
          (when (%available-store-clobber-inst-p inst)
            (clrhash state)))))))
 
-(defun %available-store-rewrite-block (block entry-state alias-roots)
-  "Rewrite store-to-load pairs inside BLOCK using ENTRY-STATE as the incoming facts."
-  (let ((state  (%available-store-copy-state entry-state))
-        (result nil))
-    (labels ((emit (inst)
-               (push inst result)))
-      (dolist (inst (bb-instructions block) (nreverse result))
-        (typecase inst
-          (vm-get-global
-           (let* ((key         (%available-store-location-key inst alias-roots))
-                  (store       (and key (gethash key state)))
-                  (replacement (and store (%available-store-forwarded-load inst store)))
-                  (dst         (cl-cc/vm::vm-get-global-dst inst)))
-             (if replacement
-                 (progn
-                   (emit replacement)
-                   (%available-store-kill-dependent-on-reg state dst :exclude-key key))
-                 (progn
-                   (%available-store-kill-dependent-on-reg state dst)
-                   (emit inst)))))
-          (vm-slot-read
-           (let* ((key         (%available-store-location-key inst alias-roots))
-                  (store       (and key (gethash key state)))
-                  (replacement (and store (%available-store-forwarded-load inst store)))
-                  (dst         (cl-cc/vm::vm-slot-read-dst inst)))
-             (if replacement
-                 (progn
-                   (emit replacement)
-                   (%available-store-kill-dependent-on-reg state dst :exclude-key key))
-                 (progn
-                   (%available-store-kill-dependent-on-reg state dst)
-                   (emit inst)))))
-          ((or vm-set-global vm-slot-write)
-           (%available-store-remember-store state inst alias-roots)
-           (emit inst))
-          (t
-           (let ((dst (opt-inst-dst inst)))
-             (when dst
-               (%available-store-kill-dependent-on-reg state dst)))
-           (when (%available-store-clobber-inst-p inst)
-             (clrhash state))
-           (emit inst)))))))
-
 (defun %opt-pass-store-to-load-forward-cfg (instructions)
   "Forward stores to loads across basic blocks when the CFG proves the store available."
   (let* ((cfg         (cfg-build instructions))
@@ -389,4 +346,3 @@ incoming path to the load's basic block."
     (if (= (length (cfg-blocks cfg)) 1)
         (%opt-pass-store-to-load-forward-linear instructions)
         (%opt-pass-store-to-load-forward-cfg instructions))))
-

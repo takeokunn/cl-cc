@@ -61,12 +61,6 @@
   "Atomically CAS the value of SYMBOL."
   (sb-ext:compare-and-swap (symbol-value symbol) old new))
 
-;; ── Process exit ──────────────────────────────────────────────────────────
-
-(defun rt-quit (&optional (code 0))
-  "Exit the process with CODE."
-  (sb-ext:exit :code code))
-
 ;; ── Timeout macro ─────────────────────────────────────────────────────────
 
 (defmacro rt-with-timeout ((seconds &body timeout-forms) &body body)

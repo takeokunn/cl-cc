@@ -22,6 +22,7 @@
   :cases (("list-nonempty" (list 1 2 3))
           ("list-empty"    nil)
           ("vector"        #(10 20))
+          ("bit-vector"    #*1010)
           ("string"        "hello"))
   (object)
   (assert-true (cl-cc/vm::sequence-protocol-p object)))
@@ -44,6 +45,7 @@
   :cases (("list-3"   (list 1 2 3)  3)
           ("list-0"   nil            0)
           ("vector-2" #(10 20)       2)
+          ("bit-vector-4" #*1010      4)
           ("string-5" "hello"        5)
           ("string-0" ""             0))
   (seq expected)
@@ -54,6 +56,7 @@
   :cases (("list-0"   (list :a :b :c) 0 :a)
           ("list-2"   (list :a :b :c) 2 :c)
           ("vector-1" #(10 20 30)     1 20)
+          ("bit-vector-2" #*101       2 1)
           ("string-0" "xyz"           0 #\x)
           ("string-2" "xyz"           2 #\z))
   (seq index expected)
@@ -74,6 +77,14 @@
     (assert-= 77 (cl:aref vec 0))
     (assert-= 20 (cl:aref vec 1))))
 
+(deftest setf-elt-bit-vector-mutates
+  "(setf elt) on a bit-vector destructively updates the bit."
+  (let ((vec (make-array 3 :element-type 'bit :initial-contents '(1 0 1))))
+    (setf (cl-cc/vm::elt vec 1) 1)
+    (assert-= 1 (cl:aref vec 0))
+    (assert-= 1 (cl:aref vec 1))
+    (assert-= 1 (cl:aref vec 2))))
+
 (deftest setf-elt-string-mutates
   "(setf elt) on a string destructively updates the character."
   (let ((str (copy-seq "abc")))
@@ -87,7 +98,13 @@
           ("vector-0-2" #(10 20 30)         0 2 #(10 20))
           ("string-1-3" "abcd"              1 3 "bc"))
   (seq start end expected)
-  (assert-equal expected (cl-cc/vm::subseq seq start end)))
+  (assert-true (equalp expected (cl-cc/vm::subseq seq start end))))
+
+(deftest subseq-bit-vector-preserves-bit-vector
+  "subseq on a bit-vector returns a bit-vector slice."
+  (let ((result (cl-cc/vm::subseq #*10110 1 4)))
+    (assert-true (typep result 'bit-vector))
+    (assert-true (equalp #*011 result))))
 
 ;;; ── 3. make-sequence-like ─────────────────────────────────────────────────
 
@@ -111,6 +128,15 @@
     (assert-true (vectorp result))
     (assert-= 3 (cl:length result))
     (assert-true (every (lambda (element) (eq :x element)) result))))
+
+(deftest make-sequence-like-bit-vector-preserves-element-type
+  "make-sequence-like on a bit-vector creates a bit-vector with bit defaults."
+  (let ((defaulted (cl-cc/vm::make-sequence-like #*1 3))
+        (ones (cl-cc/vm::make-sequence-like #*0 3 :initial-element 1)))
+    (assert-true (typep defaulted 'bit-vector))
+    (assert-true (equalp #*000 defaulted))
+    (assert-true (typep ones 'bit-vector))
+    (assert-true (equalp #*111 ones))))
 
 ;;; ── 4. copy-instance paths ────────────────────────────────────────────────
 
@@ -145,16 +171,12 @@
 
 (deftest copy-instance-standard-object-is-shallow
   "copy-instance on a standard-object preserves slot values shallowly."
-  (let* ((shared-list (list 1 2 3))
-         (object (make-instance 'cl-cc/vm::sequence))
+  (let* ((object (make-instance 'cl-cc/vm::sequence))
          (copy nil))
     ;; sequence has no slots — just verify it round-trips without error
     (setf copy (cl-cc/vm::copy-instance object))
     (assert-false (eq object copy))
-    (assert-true (typep copy 'cl-cc/vm::sequence))
-    ;; The shared-list is not referenced by sequence slots, but the copy
-    ;; must be a distinct object
-    (declare (ignore shared-list))))
+    (assert-true (typep copy 'cl-cc/vm::sequence))))
 
 ;;; ── 5. copy-structure dispatch branches ──────────────────────────────────
 

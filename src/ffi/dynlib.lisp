@@ -8,40 +8,23 @@
 (defstruct dl-lib (name "" :type string) (handle nil) (loaded nil))
 (defvar *loaded-libs* (make-hash-table :test #'equal))
 (defun %load-shared-object (path)
-  #+sbcl
-  (sb-alien:load-shared-object path)
-  #-sbcl
-  (error "Dynamic library loading is not implemented for this Lisp host: ~A"
-         (lisp-implementation-type)))
+  (sb-alien:load-shared-object path))
 
 (defun %foreign-symbol-address (name)
-  #+sbcl
-  (sb-sys:find-dynamic-foreign-symbol-address name)
-  #-sbcl
-  (declare (ignore name))
-  #-sbcl
-  (error "Foreign symbol lookup is not implemented for this Lisp host: ~A"
-         (lisp-implementation-type)))
+  (sb-sys:find-dynamic-foreign-symbol-address name))
 
 (defun %make-foreign-function (name address)
-  #+sbcl
   (declare (ignore name))
-  #+sbcl
   (let ((symbol-address address))
     (lambda (&rest args)
       (let ((alien (sb-alien:sap-alien (sb-sys:int-sap symbol-address)
                                        (function sb-alien:int))))
-        (apply #'sb-alien:alien-funcall alien args))))
-  #-sbcl
-  (declare (ignore name address))
-  #-sbcl
-  (error "Foreign function calls are not implemented for this Lisp host: ~A"
-         (lisp-implementation-type)))
+        (apply #'sb-alien:alien-funcall alien args)))))
 
 (defun load-shared-library (path &key (if-not-found :error))
   (let ((ex (gethash path *loaded-libs*))) (when ex (return-from load-shared-library ex)))
   (let ((resolved (or (probe-file path) (probe-file (format nil "~A.dylib" path)) (probe-file (format nil "~A.so" path)) (probe-file (format nil "/usr/lib/~A" path)) (probe-file (format nil "/usr/local/lib/~A" path))
-                      #+sbcl path)))
+                      path)))
     (if resolved
         (let ((resolved-path (etypecase resolved
                                (pathname (namestring resolved))

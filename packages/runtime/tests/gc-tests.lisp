@@ -36,23 +36,23 @@
   "Write a freshly made header at ADDR."
   (cl-cc/runtime:rt-heap-set-header
    heap addr
-   (cl-cc/runtime:make-header size tag age)))
+   (cl-cc/runtime:make-rt-header size tag :gc-bits age)))
 
 ;;; ------------------------------------------------------------
 ;;; Test 1: gc-header-basics
 ;;; ------------------------------------------------------------
 
 (deftest-each gc-header-field-roundtrip
-  "make-header round-trips size, tag, and age fields independently."
-  :cases (("size" (cl-cc/runtime:make-header 7 1 0) #'cl-cc/runtime:header-size 7)
-          ("tag"  (cl-cc/runtime:make-header 3 5 0) #'cl-cc/runtime:header-tag  5)
-           ("age"  (cl-cc/runtime:make-header 3 1 2) #'cl-cc/runtime:header-age  2))
+  "make-rt-header round-trips size, tag, and age fields independently."
+  :cases (("size" (cl-cc/runtime:make-rt-header 7 1 :gc-bits 0) #'cl-cc/runtime:rt-header-size 7)
+          ("tag"  (cl-cc/runtime:make-rt-header 3 5 :gc-bits 0) #'cl-cc/runtime:rt-header-type-tag  5)
+           ("age"  (cl-cc/runtime:make-rt-header 3 1 :gc-bits 2) #'cl-cc/runtime:rt-header-age  2))
   (h accessor expected)
   (assert-= expected (funcall accessor h)))
 
 (deftest gc-header-bit-toggles
   "mark and gray bits: set makes true; clear makes false; fresh header is false."
-  (let ((h (cl-cc/runtime:make-header 3 1 0)))
+  (let ((h (cl-cc/runtime:make-rt-header 3 1 :gc-bits 0)))
     ;; mark bit
     (let* ((hm (cl-cc/runtime:header-set-mark h))
            (hu (cl-cc/runtime:header-clear-mark hm)))
@@ -68,7 +68,7 @@
 
 (deftest-each gc-header-forwarding-cases
   "Forwarding pointer: regular header is not forwarding; make-forwarding-ptr round-trips address."
-  :cases (("not-forwarding" nil  nil (cl-cc/runtime:make-header 3 1 0) nil)
+  :cases (("not-forwarding" nil  nil (cl-cc/runtime:make-rt-header 3 1 :gc-bits 0) nil)
           ("forwarding-ptr" t    nil nil                            42))
   (expect-fwd fwd-ptr plain-header target-addr)
   (if expect-fwd
@@ -77,14 +77,14 @@
         (assert-= target-addr (cl-cc/runtime:header-forwarding-ptr fwd)))
       (assert-false (cl-cc/runtime:header-forwarding-p plain-header))))
 
-(deftest-each gc-header-increment-age
-  "header-increment-age increments by 1 normally; caps at 3."
+(deftest-each rt-header-increment-age
+  "rt-header-increment-age increments by 1 normally; caps at 3."
   :cases (("increment" 1  2)
           ("cap-at-3"  3  3))
   (start-age expected)
-  (let* ((h  (cl-cc/runtime:make-header 3 1 start-age))
-         (h2 (cl-cc/runtime:header-increment-age h)))
-    (assert-= expected (cl-cc/runtime:header-age h2))))
+  (let* ((h  (cl-cc/runtime:make-rt-header 3 1 :gc-bits start-age))
+         (h2 (cl-cc/runtime:rt-header-increment-age h)))
+    (assert-= expected (cl-cc/runtime:rt-header-age h2))))
 
 ;;; ------------------------------------------------------------
 ;;; Test 2: gc-heap-creation
@@ -114,7 +114,7 @@
     (let ((addr2 (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
       (assert-= 3 addr2))))
 
-(deftest gc-alloc-header-size-readable
+(deftest rt-alloc-header-size-readable
   "After writing a header, rt-heap-object-size returns the correct size."
   (let* ((heap (%make-small-heap))
          (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3)))
@@ -168,7 +168,7 @@
         (cl-cc/runtime:rt-gc-minor-collect heap)
         (let* ((new-addr (cdr root))
                (new-hdr  (cl-cc/runtime:rt-heap-object-header heap new-addr)))
-          (assert-= cl-cc/runtime:+rt-tag-string+ (cl-cc/runtime:header-tag new-hdr)))
+          (assert-= cl-cc/runtime:+rt-tag-string+ (cl-cc/runtime:rt-header-type-tag new-hdr)))
         (cl-cc/runtime:rt-gc-remove-root heap root)))))
 
 ;;; ------------------------------------------------------------
@@ -186,7 +186,7 @@
       ;; very next minor GC will promote it.
       (cl-cc/runtime:rt-heap-set-header
        heap addr
-       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 3))
+       (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 3))
       (let ((root (cons nil addr)))
         (cl-cc/runtime:rt-gc-add-root heap root)
         (cl-cc/runtime:rt-gc-minor-collect heap)

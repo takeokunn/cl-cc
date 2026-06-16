@@ -3,7 +3,7 @@
 ;;;; Verifies FR coverage and evidence file existence.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-documentation-suite)
 
 ;;; ─── FR table ──────────────────────────────────────────────────────────────────
 ;; Each entry: (fr-id (target-files) difficulty)

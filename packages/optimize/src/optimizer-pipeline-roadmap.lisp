@@ -359,7 +359,7 @@ Evidence anchors include functions and special variables."
       "packages/optimize/src/cfg.lisp"
       "packages/optimize/src/ssa.lisp"
       "packages/optimize/tests/optimizer-flow-tests.lisp")
-     (opt-pass-loop-rotation opt-pass-loop-peeling
+     (opt-pass-loop-rotation opt-pass-loop-peel
       opt-pass-loop-unrolling opt-pass-branch-correlation
       opt-pass-tail-duplication cfg-split-critical-edges
       ssa-eliminate-trivial-phis

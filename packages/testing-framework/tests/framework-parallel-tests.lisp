@@ -113,16 +113,18 @@
       (setf *suite-registry* (persist-remove *suite-registry* root)))))
 
 (deftest-each canonical-suite-taxonomy-matches-runner-contract
-  "The canonical runner exposes unit, integration, and e2e suites under the root taxonomy."
+  "The canonical runner exposes its top-level test classes under the root taxonomy."
   :cases (("unit"        'cl-cc-unit-suite)
           ("integration" 'cl-cc-integration-suite)
-          ("e2e"         'cl-cc-e2e-suite))
+          ("e2e"         'cl-cc-e2e-suite)
+          ("conformance" 'cl-cc-conformance-suite)
+          ("docs"        'cl-cc-documentation-suite))
   (suite-name)
   (assert-eq 'cl-cc-suite
              (getf (persist-lookup *suite-registry* suite-name) :parent)))
 
 (deftest run-tests-excludes-non-unit-suites-by-default
-  "The canonical runner keeps integration and E2E tests outside the fast default plan."
+  "The canonical runner keeps non-fast suites outside the default plan."
   (let ((captured nil)
         (saved-suites *suite-registry*))
     (unwind-protect
@@ -136,20 +138,57 @@
                                       :before-each '()
                                       :after-each '())))
            (with-replaced-function (run-suite
-                                    (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites &allow-other-keys)
+                                    (lambda (suite-name &key parallel random warm-stdlib tags exclude-tags exclude-suites filter &allow-other-keys)
                                       (setf captured (list :suite-name suite-name
                                                            :parallel parallel
                                                            :random random
                                                            :warm-stdlib warm-stdlib
                                                            :tags tags
                                                            :exclude-tags exclude-tags
-                                                           :exclude-suites exclude-suites))
+                                                           :exclude-suites exclude-suites
+                                                           :filter filter))
                                       0))
-              (assert-equal 0 (run-tests :parallel nil :random nil))
+              (assert-equal 0 (run-tests :parallel nil :random nil :filter "static"))
               (assert-eq 'cl-cc-suite (getf captured :suite-name))
+              (assert-string= "static" (getf captured :filter))
+              (assert-true (getf captured :warm-stdlib))
               (assert-true (member 'cl-cc-integration-suite (getf captured :exclude-suites)))
-              (assert-true (member 'cl-cc-e2e-suite (getf captured :exclude-suites)))))
+              (assert-true (member 'cl-cc-e2e-suite (getf captured :exclude-suites)))
+              (assert-true (member 'cl-cc-conformance-suite (getf captured :exclude-suites)))
+              (assert-true (member 'cl-cc-documentation-suite (getf captured :exclude-suites)))))
       (setf *suite-registry* saved-suites))))
+
+(deftest run-tests-forwards-warm-stdlib-option
+  "run-tests lets the Nix app skip pre-warming for focused non-stdlib runs."
+  (let ((captured nil))
+    (with-replaced-function (run-suite
+                             (lambda (suite-name &key warm-stdlib &allow-other-keys)
+                               (setf captured (list :suite-name suite-name
+                                                    :warm-stdlib warm-stdlib))
+                               0))
+      (assert-equal 0 (run-tests :parallel nil :random nil :warm-stdlib nil))
+      (assert-eq 'cl-cc-suite (getf captured :suite-name))
+      (assert-false (getf captured :warm-stdlib)))))
+
+(deftest test-name-filter-matches-substrings-case-insensitively
+  "The fast-runner filter matches test names by case-insensitive substring."
+  (let ((tests (list (list :name 'php-e2e-static-members)
+                     (list :name 'js-rt-array))))
+    (assert-equal '(php-e2e-static-members)
+                  (mapcar (lambda (test) (getf test :name))
+                          (%filter-tests-by-name tests "STATIC")))))
+
+(deftest test-name-filter-supports-comma-and-repeated-filters
+  "Comma-separated and repeated filters narrow names with AND semantics."
+  (let ((tests (list (list :name 'php-e2e-array-pad-key-policy)
+                     (list :name 'php-e2e-array-column-index-key)
+                     (list :name 'js-rt-array-to-spliced))))
+    (assert-equal '(php-e2e-array-pad-key-policy)
+                  (mapcar (lambda (test) (getf test :name))
+                          (%filter-tests-by-name tests "php,array-pad")))
+    (assert-equal '(js-rt-array-to-spliced)
+                  (mapcar (lambda (test) (getf test :name))
+                          (%filter-tests-by-name tests '("js" "spliced"))))))
 
 (deftest run-tests-does-not-load-e2e-system-implicitly
   "run-tests only dispatches the already-loaded fast suite taxonomy."
@@ -183,7 +222,9 @@
       (assert-equal 0 (run-tests :parallel nil :random nil))
       (assert-eq 'cl-cc-suite (first captured))
       (assert-true (member 'cl-cc-integration-suite (second captured)))
-      (assert-true (member 'cl-cc-e2e-suite (second captured))))))
+      (assert-true (member 'cl-cc-e2e-suite (second captured)))
+      (assert-true (member 'cl-cc-conformance-suite (second captured)))
+      (assert-true (member 'cl-cc-documentation-suite (second captured))))))
 
 (deftest detect-flaky-reports-inconsistent-statuses
   "%detect-flaky prints a summary when a test passes in only some repeated runs."

@@ -6,7 +6,7 @@
 ;;;;   optimize-backend-roadmap doc parsing and evidence coverage.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-documentation-suite)
 
 (deftest optimize-formal-tooling-superopt-abstract-and-translation-validation
   "FR-750/751/752: formal tooling has concrete superopt, AI, and translation-validation behavior."

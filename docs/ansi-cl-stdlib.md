@@ -459,7 +459,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | `provide`                  | ✅               | macros-stdlib.lisp: `(provide module)` adds string to `*modules*` if not present                |
 | `require`                  | ✅               | FR-680: `pathnames` 指定時は `(dolist (p pathnames) (our-load p))` 実行; 未指定時は `warn`      |
 | `*modules*` / `*features*` | ✅               | FR-642 resolved: both vm-state and vm2-state initialize `*features*` to `(:common-lisp :cl-cc)` |
-| `with-compilation-unit`    | ✅               | macros-stdlib.lisp — (progn body...)                                                            |
+| `with-compilation-unit`    | ❌               | 削除済み。警告集約のスタブ実装は廃止                                                      |
 | ASDF 統合                  | ✅ (`cl-cc.asd`) |
 
 #### FR-574: ロード・コンパイル制御変数 — ✅ COMPLETE
@@ -501,7 +501,7 @@ Cons/lists, arrays, strings, sequences, hash tables, filesystem, streams/I/O, pr
 | 機能                   | 状態 | 備考                                                        |
 | ---------------------- | ---- | ----------------------------------------------------------- |
 | `declare` (基本型宣言) | ✅   |
-| `proclaim`             | ✅   | macros-stdlib.lisp                                          |
+| `proclaim`             | ❌   | 削除済み。互換スタブは廃止                                  |
 | `*compiler-policy*`    | ✅   | stdlib-source.lisp defvar                                   |
 | `locally` 宣言伝播     | ✅   | macros-stdlib.lisp — strips leading declare, wraps in progn |
 | `compiler-let`         | ✅   | macros-stdlib.lisp — acts as let at runtime                 |

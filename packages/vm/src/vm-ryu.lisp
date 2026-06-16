@@ -16,9 +16,9 @@
          (expt 5 (- k (1- (length %ryu-pow5-table)))))))
 
 (defun %ryu-special-p (d)
-  (cond ((not (<= (abs d) most-positive-double-float))
+  (cond ((not (= d d)) :nan)
+        ((not (<= (abs d) most-positive-double-float))
          (if (minusp d) :neg-inf :inf))
-        ((not (= d d)) :nan)
         (t nil)))
 
 (defun vm-ryu-double-to-string (d)
@@ -51,10 +51,51 @@
   "Convert single-float to shortest decimal."
   (vm-ryu-double-to-string (coerce f 'double-float)))
 
+(defun %ryu-zero-exponent-suffix-p (suffix)
+  (let ((digits (string-left-trim '(#\+ #\-) suffix)))
+    (and (plusp (length digits))
+         (every (lambda (char) (char= char #\0)) digits))))
+
+(defun %ryu-normalize-host-float-string (string)
+  (let ((marker (position-if (lambda (char)
+                               (find char "dDfFsSlL" :test #'char=))
+                             string)))
+    (if (not marker)
+        string
+        (let ((suffix (subseq string (1+ marker))))
+          (if (%ryu-zero-exponent-suffix-p suffix)
+              (subseq string 0 marker)
+              (concatenate 'string
+                           (subseq string 0 marker)
+                           "e"
+                           suffix))))))
+
+(defun %ryu-trim-float-zeros (string)
+  (let ((dot (position #\. string)))
+    (if dot
+        (let ((end (length string)))
+          (loop while (and (> end (1+ dot))
+                           (char= (char string (1- end)) #\0))
+                do (decf end))
+          (if (and (> end dot) (char= (char string (1- end)) #\.))
+              (subseq string 0 (1- end))
+              (subseq string 0 end)))
+        string)))
+
 (defun vm-ryu-float-to-string (val &optional (mode :shortest))
-  (declare (ignore mode))
-  (let ((*read-default-float-format* (type-of val)))
-    (prin1-to-string val)))
+  (let ((special (%ryu-special-p val)))
+    (when special
+      (return-from vm-ryu-float-to-string
+        (ecase special (:inf "+inf.0") (:neg-inf "-inf.0") (:nan "+nan.0")))))
+  (ecase mode
+    (:shortest
+     (let ((*read-default-float-format* (type-of val)))
+       (%ryu-normalize-host-float-string (prin1-to-string val))))
+    (:exponential
+     (%ryu-normalize-host-float-string
+      (string-downcase (format nil "~E" val))))
+    (:fixed
+     (%ryu-trim-float-zeros (format nil "~,12F" val)))))
 
 (defun vm-float-to-string (value &key (mode :shortest) (precision 6))
   "Primary float-to-string for the format system."

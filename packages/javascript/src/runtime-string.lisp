@@ -21,14 +21,17 @@
 (defun %js-string-index-of (s sub &optional (from 0))
   "JS String.prototype.indexOf."
   (let* ((n (length s))
-         (st (if (< from 0) 0 (min from n)))
+         (st (max 0 (min (%js-array-to-integer from) n)))
          (found (search sub s :start2 st)))
     (if found found -1)))
 
 (defun %js-string-last-index-of (s sub &optional (from nil))
   "JS String.prototype.lastIndexOf."
   (let* ((n (length s))
-         (end (if (null from) n (min n (+ (or from n) (length sub)))))
+         (pos (if (or (null from) (eq from +js-undefined+))
+                  n
+                  (max 0 (min (%js-array-to-integer from) n))))
+         (end (min n (+ pos (length sub))))
          (found (search sub s :from-end t :end2 end)))
     (if found found -1)))
 
@@ -197,10 +200,16 @@
   (apply #'%js-string-from-char-code codes))
 
 (defun %js-string-normalize (s &optional (form "NFC"))
-  "JS String.prototype.normalize. Simplified: returns S unchanged (NFC is the
-common Lisp string encoding; full Unicode normalization is not yet implemented)."
-  (declare (ignore form))
-  s)
+  "JS String.prototype.normalize for NFC, NFD, NFKC, and NFKD."
+  (let* ((form-name (if (eq form +js-undefined+) "NFC" (%js-to-string form)))
+         (normalization-form (cond
+                               ((string= form-name "NFC") :nfc)
+                               ((string= form-name "NFD") :nfd)
+                               ((string= form-name "NFKC") :nfkc)
+                               ((string= form-name "NFKD") :nfkd)
+                               (t (error "JS RangeError: invalid normalization form ~A"
+                                         form-name)))))
+    (sb-unicode:normalize-string (%js-to-string s) normalization-form)))
 
 (defun %js-string-to-well-formed (s)
   "ES2024 String.prototype.toWellFormed — replace lone surrogates with U+FFFD.

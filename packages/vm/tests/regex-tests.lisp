@@ -21,7 +21,10 @@
   "regex:scan supports character classes, negated classes, escapes, ^, and $."
   (assert-equal "abc123" (regex:match-string (regex:scan "^[a-z]+\\d+$" "abc123")))
   (assert-equal "foo_bar" (regex:match-string (regex:scan "\\w+" "!foo_bar!")))
-  (assert-equal " \t" (regex:match-string (regex:scan "\\s+" "x \t y")))
+  (assert-equal (concatenate 'string " " (string #\Tab) " ")
+                (regex:match-string
+                 (regex:scan "\\s+"
+                             (concatenate 'string "x " (string #\Tab) " y"))))
   (assert-equal "xy" (regex:match-string (regex:scan "[^0-9]+" "123xy9"))))
 
 (deftest regex-all-matches

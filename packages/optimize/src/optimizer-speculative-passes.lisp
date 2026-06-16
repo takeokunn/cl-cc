@@ -342,13 +342,6 @@ leaving control-flow and induction update in place."
           :register-pressure pressure
           :instruction-budget budget)))
 
-(defun %opt-loop-header-compatible-p (left right)
-  (and (equal (instruction->sexp (second left))
-              (instruction->sexp (second right)))
-       (typep (third left) 'vm-jump-zero)
-       (typep (third right) 'vm-jump-zero)
-       (eq (vm-reg (third left)) (vm-reg (third right)))))
-
 (defun opt-pass-loop-fusion-fission (instructions)
   "Apply conservative loop fusion/fission on canonical loops.
 

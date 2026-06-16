@@ -1,7 +1,10 @@
 ;;;; packages/javascript/src/runtime-collections.lisp — JS Set and Iterator built-ins
 ;;;;
-;;;; Set is represented as a js-set struct with a hash-table (for O(1) membership
-;;;; tests) and an insertion-order list (for deterministic for-of iteration).
+;;;; Set is represented as a js-set struct with a hash-table and an
+;;;; insertion-order list (for deterministic for-of iteration). Public Set
+;;;; operations canonicalize through the insertion-order values because
+;;;; ECMAScript membership uses SameValueZero, which CL hash-table tests cannot
+;;;; express exactly for NaN.
 ;;;; Iterators are represented as closures or JS objects with a "next" method.
 
 (in-package :cl-cc/javascript)
@@ -11,8 +14,8 @@
 ;;; -----------------------------------------------------------------------
 
 ;;; JS Set is represented as a struct with:
-;;;   HT    — CL hash-table (key → t) for O(1) has/delete
-;;;   ORDER — list of keys in insertion order (used by for-of / keys / values)
+;;;   HT    — CL hash-table (key → t) for canonical stored values
+;;;   ORDER — list of values in insertion order (used by for-of / keys / values)
 (defstruct (js-set (:conc-name js-set-))
   (ht    (make-hash-table :test #'equal :size 8) :type hash-table)
   (order nil))
@@ -26,22 +29,31 @@
   (dolist (k (js-set-order src))
     (%js-set-add target k)))
 
+(defun %js-set-find-value (s val)
+  "Return the stored set value matching VAL by SameValueZero, plus found-p."
+  (loop for stored-value in (js-set-order s)
+        when (%js-same-value-zero stored-value val)
+          return (values stored-value t)
+        finally (return (values nil nil))))
+
 (defun %js-set-add (s val)
-  (unless (nth-value 1 (gethash val (js-set-ht s)))
+  (unless (nth-value 1 (%js-set-find-value s val))
     (setf (gethash val (js-set-ht s)) t)
     (setf (js-set-order s) (append (js-set-order s) (list val))))
   s)
 
 (defun %js-set-delete (s val)
-  (multiple-value-bind (v found) (gethash val (js-set-ht s))
-    (declare (ignore v))
-    (when found
-      (remhash val (js-set-ht s))
-      (setf (js-set-order s) (delete val (js-set-order s) :test #'equal :count 1)))
-    found))
+  (multiple-value-bind (stored-value found-p) (%js-set-find-value s val)
+    (when found-p
+      (remhash stored-value (js-set-ht s))
+      (setf (js-set-order s)
+            (delete stored-value (js-set-order s)
+                    :test #'%js-same-value-zero
+                    :count 1)))
+    found-p))
 
 (defun %js-set-has (s val)
-  (nth-value 1 (gethash val (js-set-ht s))))
+  (nth-value 1 (%js-set-find-value s val)))
 
 (defun %js-set-clear (s)
   (clrhash (js-set-ht s))
@@ -49,7 +61,7 @@
   +js-undefined+)
 
 (defun %js-set-size (s)
-  (hash-table-count (js-set-ht s)))
+  (length (js-set-order s)))
 
 (defun %js-set-keys (s)
   "Return a vector of the set's values in insertion order."
@@ -68,6 +80,28 @@
   (dolist (k (js-set-order s))
     (%js-funcall fn k k s))
   +js-undefined+)
+
+(defun %js-set-like-size (obj)
+  (if (js-set-p obj)
+      (%js-set-size obj)
+      (%js-to-number (%js-get-prop obj "size"))))
+
+(defun %js-set-like-has (obj value)
+  (if (js-set-p obj)
+      (%js-set-has obj value)
+      (%js-truthy (%js-funcall (%js-get-prop obj "has") value))))
+
+(defun %js-set-like-keys (obj)
+  (if (js-set-p obj)
+      (copy-list (js-set-order obj))
+      (let ((size (%js-set-like-size obj))
+            (keys nil))
+        (declare (ignore size))
+        (%js-for-of (%js-funcall (%js-get-prop obj "keys"))
+                    (lambda (value)
+                      (push value keys)
+                      +js-undefined+))
+        (nreverse keys))))
 
 ;;; Data-driven set operations
 ;;; (define-js-set-predicate name stop-condition result-if-stopped default-result)
@@ -92,37 +126,38 @@
   "New set: union of A and B (insertion order: A first, then new elements from B)."
   (let ((result (%js-make-set)))
     (%js-set-copy-all result a)
-    (%js-set-copy-all result b)
+    (dolist (k (%js-set-like-keys b))
+      (%js-set-add result k))
     result))
 
 (define-js-set-filter-op %js-set-intersection
   "New set: elements in both A and B (order from A)."
-  (%js-set-has b k))
+  (%js-set-like-has b k))
 
 (define-js-set-filter-op %js-set-difference
   "New set: elements in A but not in B."
-  (not (%js-set-has b k)))
+  (not (%js-set-like-has b k)))
 
 (defun %js-set-symmetric-difference (a b)
   "New set: elements in A or B but not both."
   (let ((result (%js-make-set)))
     (dolist (k (js-set-order a))
-      (unless (%js-set-has b k) (%js-set-add result k)))
-    (dolist (k (js-set-order b))
+      (unless (%js-set-like-has b k) (%js-set-add result k)))
+    (dolist (k (%js-set-like-keys b))
       (unless (%js-set-has a k) (%js-set-add result k)))
     result))
 
 (define-js-set-predicate %js-set-is-subset-of
-  (not (nth-value 1 (gethash k (js-set-ht b)))) nil t)
+  (not (%js-set-like-has b k)) nil t)
 
 (define-js-set-predicate %js-set-is-disjoint-from
-  (nth-value 1 (gethash k (js-set-ht b))) nil t)
+  (%js-set-like-has b k) nil t)
 
 ;;; isSupersetOf(A, B) means every element of B is in A — must iterate B, not A.
 ;;; The macro always iterates A, so this is a plain defun instead.
 (defun %js-set-is-superset-of (a b)
-  (dolist (k (js-set-order b) t)
-    (unless (nth-value 1 (gethash k (js-set-ht a)))
+  (dolist (k (%js-set-like-keys b) t)
+    (unless (%js-set-has a k)
       (return nil))))
 
 ;;; -----------------------------------------------------------------------

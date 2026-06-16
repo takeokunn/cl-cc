@@ -142,6 +142,74 @@ list (a spread element makes the array literal an ast-apply, not a plain call)."
   (let ((asts (cl-cc/javascript:parse-js-module "export const val = 1;")))
     (assert-true (>= (length asts) 1))))
 
+(deftest js-parser-export-const-preserves-declaration-ast
+  "export const keeps the same ast-let initializer shape as a normal declaration."
+  (let* ((ast (first (cl-cc/javascript:parse-js-module "export const val = 1 + 2;")))
+         (args (cl-cc:ast-call-args ast))
+         (decl (second args))
+         (names (fourth args))
+         (binding (first (cl-cc:ast-let-bindings decl))))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%JS-EXPORT" (%js-call-name ast))
+    (assert-true (cl-cc:ast-let-p decl))
+    (assert-equal :const (first (cl-cc:ast-let-declarations decl)))
+    (assert-equal '("val") (cl-cc:ast-quote-value names))
+    (assert-string= "val" (symbol-name (car binding)))
+    (assert-true (cl-cc:ast-call-p (cdr binding)))
+    (assert-false (string= "%JS-EXPR" (%js-call-name (cdr binding))))))
+
+(deftest js-parser-export-object-destructuring-names
+  "export const {x, y: z, ...rest} records only source-level export names."
+  (let* ((ast (first (cl-cc/javascript:parse-js-module
+                      "export const {x, y: z, ...rest} = obj;")))
+         (args (cl-cc:ast-call-args ast))
+         (names (fourth args)))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%JS-EXPORT" (%js-call-name ast))
+    (assert-equal '("x" "z" "rest") (cl-cc:ast-quote-value names))))
+
+(deftest js-parser-export-array-destructuring-names
+  "export const [x, , y = 1, ...rest] records only source-level export names."
+  (let* ((ast (first (cl-cc/javascript:parse-js-module
+                      "export const [x, , y = 1, ...rest] = arr;")))
+         (args (cl-cc:ast-call-args ast))
+         (names (fourth args)))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%JS-EXPORT" (%js-call-name ast))
+    (assert-equal '("x" "y" "rest") (cl-cc:ast-quote-value names))))
+
+(deftest js-parser-export-function-preserves-body-ast
+  "export function keeps parameters and parsed body instead of a placeholder."
+  (let* ((ast (first (cl-cc/javascript:parse-js-module
+                      "export function add(a, b) { return a + b; }")))
+         (args (cl-cc:ast-call-args ast))
+         (decl (second args))
+         (names (fourth args)))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%JS-EXPORT" (%js-call-name ast))
+    (assert-true (cl-cc:ast-defun-p decl))
+    (assert-string= "add" (symbol-name (cl-cc:ast-defun-name decl)))
+    (assert-equal '("add") (cl-cc:ast-quote-value names))
+    (assert-equal '("a" "b")
+                  (mapcar #'symbol-name (cl-cc:ast-defun-params decl)))
+    (assert-false (and (= 1 (length (cl-cc:ast-defun-body decl)))
+                       (cl-cc:ast-quote-p (first (cl-cc:ast-defun-body decl)))
+                       (eq :stub (cl-cc:ast-quote-value
+                                  (first (cl-cc:ast-defun-body decl))))))))
+
+(deftest js-parser-import-meta-expression
+  "import.meta lowers to a runtime metadata object."
+  (let* ((ast (first (cl-cc/javascript:parse-js-module "const meta = import.meta;")))
+         (val (cdr (first (cl-cc:ast-let-bindings ast)))))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-string= "%JS-IMPORT-META" (%js-call-name val))))
+
+(deftest js-parser-dynamic-import-expression-statement
+  "import(specifier) at statement start parses as dynamic import, not a declaration."
+  (let ((ast (%js-first "import('./dep.js');")))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%JS-IMPORT" (%js-call-name ast))))
+
 ;;; ─── Using declaration (ES2025) ───────────────────────────────────────────────
 
 (deftest js-parser-using-declaration

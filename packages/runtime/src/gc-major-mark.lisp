@@ -214,7 +214,7 @@ the major-GC mark queue."
              (%rt-gc-grey-object heap queue-cell addr))
            (scan-young-object (addr)
              (let ((h (rt-heap-object-header heap addr)))
-               (when (and (integerp h) (> (header-size h) 0))
+               (when (and (integerp h) (> (rt-header-size h) 0))
                  (dolist (offset (rt-object-pointer-slots heap addr))
                     (let ((child (%rt-gc-pointer-address
                                   heap (rt-heap-ref heap (+ addr offset)))))
@@ -272,7 +272,7 @@ Returns T if invariant holds, or (values nil violating-addr) if violated."
                   (rt-old-addr-p heap addr)
                   (let ((h (rt-heap-object-header heap addr)))
                     (and (integerp h)
-                         (plusp (header-size h))
+                         (plusp (rt-header-size h))
                          (not (header-marked-p h))
                          (not (header-gray-p h)))))))
     (loop with addr = (rt-heap-old-base heap)
@@ -281,7 +281,7 @@ Returns T if invariant holds, or (values nil violating-addr) if violated."
               (cond
                 ((header-forwarding-p h)
                  (incf addr 1))
-                ((or (not (integerp h)) (zerop (header-size h)))
+                ((or (not (integerp h)) (zerop (rt-header-size h)))
                  (return t))
                 ((header-marked-p h)
                  (dolist (offset (rt-object-pointer-slots heap addr))
@@ -290,9 +290,9 @@ Returns T if invariant holds, or (values nil violating-addr) if violated."
                      (when (white-object-p child)
                        (return-from rt-gc-verify-tri-color-invariant
                          (values nil addr)))))
-                 (incf addr (header-size h)))
+                 (incf addr (rt-header-size h)))
                 (t
-                 (incf addr (header-size h))))))
+                 (incf addr (rt-header-size h))))))
     t))
 
 (defun %rt-gc-drain-major-mark-work (heap queue-cell)

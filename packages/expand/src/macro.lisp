@@ -247,7 +247,7 @@ Supports both host functions and descriptor-backed expanders."
       (let ((macro-fn (lookup-macro (car form))))
         (if macro-fn
             (let ((expanded (invoke-registered-expander macro-fn form env)))
-              (if (equal expanded form)
+              (if (%same-expansion-p expanded form)
                   (%step-cache-and-return form env form nil)
                   (%step-cache-and-return form env expanded t)))
             (%step-cache-and-return form env form nil)))

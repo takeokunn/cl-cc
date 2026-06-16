@@ -52,7 +52,10 @@
    (:file "codegen-fold")
    (:file "codegen-fold-eval")
    (:file "codegen-fold-optimize")
+   (:file "codegen-mcdc")
    (:file "codegen")
+   (:file "reflection")
+   (:file "codegen-bookkeeping")
    (:file "codegen-calls")
    ;; FR-860/FR-861 numeric contagion and inline dispatch planning
    (:file "codegen-numeric-hints")

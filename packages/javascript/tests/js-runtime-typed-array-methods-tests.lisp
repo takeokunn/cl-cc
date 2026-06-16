@@ -19,6 +19,13 @@
           do (cl-cc/javascript::%js-ta-set ta i v))
     ta))
 
+(defun %make-float64-ta (&rest values)
+  "Build a Float64Array TypedArray filled with VALUES."
+  (let ((ta (cl-cc/javascript::%js-make-typed-array "Float64Array" (length values))))
+    (loop for v in values for i from 0
+          do (cl-cc/javascript::%js-ta-set ta i v))
+    ta))
+
 (defun %ta-to-list (ta)
   "Convert a TypedArray's buffer to a CL list of numbers."
   (loop for i below (cl-cc/javascript::js-ta-length ta)
@@ -134,6 +141,48 @@
   (let ((ta (apply #'%make-int32-ta values)))
     (assert-= expected (cl-cc/javascript::%js-ta-last-index-of ta target))))
 
+(deftest js-rt-ta-search-from-index-coercion
+  "TypedArray includes/indexOf/lastIndexOf honor coerced fromIndex bounds."
+  (let ((ta (%make-int32-ta 1 2 3 2 1)))
+    (assert-true (cl-cc/javascript::%js-ta-includes ta 2 "-4"))
+    (assert-false (cl-cc/javascript::%js-ta-includes ta 2 4))
+    (assert-= 3 (cl-cc/javascript::%js-ta-index-of ta 2 2.8d0))
+    (assert-= -1 (cl-cc/javascript::%js-ta-index-of ta 1 99))
+    (assert-= 1.0d0 (cl-cc/javascript::%js-ta-last-index-of ta 2 -3.2d0))
+    (assert-= -1.0d0 (cl-cc/javascript::%js-ta-last-index-of ta 1 -99))
+    (assert-= 0.0d0 (cl-cc/javascript::%js-ta-last-index-of
+                     ta 1 cl-cc/javascript::+js-undefined+))))
+
+(deftest js-rt-ta-includes-same-value-zero
+  "TypedArray.includes uses SameValueZero, so NaN matches NaN."
+  (let ((ta (%make-float64-ta cl-cc/javascript::*js-nan-float* -0.0d0)))
+    (assert-true (cl-cc/javascript::%js-ta-includes ta cl-cc/javascript::+js-nan+))
+    (assert-true (cl-cc/javascript::%js-ta-includes ta 0.0d0))))
+
+(deftest js-rt-ta-index-of-does-not-match-nan
+  "TypedArray.indexOf/lastIndexOf do not match NaN."
+  (let ((ta (%make-float64-ta cl-cc/javascript::*js-nan-float*)))
+    (assert-= -1 (cl-cc/javascript::%js-ta-index-of ta cl-cc/javascript::+js-nan+))
+    (assert-= -1.0d0 (cl-cc/javascript::%js-ta-last-index-of ta cl-cc/javascript::+js-nan+))))
+
+(deftest js-rt-ta-float64-preserves-fractional-values
+  "Float64Array element coercion preserves fractional values."
+  (let ((ta (%make-float64-ta 1.5d0)))
+    (assert-= 1.5d0 (cl-cc/javascript::%js-ta-get ta 0))))
+
+(deftest js-rt-ta-float16-rounds-to-binary16
+  "Float16Array stores values rounded to IEEE binary16 precision."
+  (let ((ta (cl-cc/javascript::%js-make-typed-array "Float16Array" 3)))
+    (cl-cc/javascript::%js-ta-set ta 0 1.337d0)
+    (cl-cc/javascript::%js-ta-set ta 1 5.05d0)
+    (cl-cc/javascript::%js-ta-set ta 2 65520.0d0)
+    (assert-string= "Float16Array" (cl-cc/javascript::js-ta-type-name ta))
+    (assert-= 2 (cl-cc/javascript::js-ta-element-size ta))
+    (assert-= 1.3369140625d0 (cl-cc/javascript::%js-ta-get ta 0))
+    (assert-= 5.05078125d0 (cl-cc/javascript::%js-ta-get ta 1))
+    (assert-true (cl-cc/javascript::%js-float-infinity-p
+                  (cl-cc/javascript::%js-ta-get ta 2)))))
+
 ;;; ─── values / keys / entries iterators ──────────────────────────────────────
 
 (deftest js-rt-ta-values-iterator
@@ -214,3 +263,19 @@
     (assert-= 1 (cl-cc/javascript::%js-ta-get result 0))
     (assert-= 2 (cl-cc/javascript::%js-ta-get result 1))
     (assert-= 3 (cl-cc/javascript::%js-ta-get result 2))))
+
+(deftest js-rt-uint8-set-from-hex
+  "Uint8Array.setFromHex() decodes into the receiver and reports read/written counts."
+  (let* ((ta (%make-u8-ta 0 0 0 9))
+         (result (cl-cc/javascript::%js-uint8-set-from-hex ta "000fff")))
+    (assert-equal '(0 15 255 9) (%ta-to-list ta))
+    (assert-= 6.0d0 (gethash "read" result))
+    (assert-= 3.0d0 (gethash "written" result))))
+
+(deftest js-rt-uint8-set-from-base64
+  "Uint8Array.setFromBase64() decodes into the receiver and reports read/written counts."
+  (let* ((ta (%make-u8-ta 0 0 0 9))
+         (result (cl-cc/javascript::%js-uint8-set-from-base64 ta "AQID")))
+    (assert-equal '(1 2 3 9) (%ta-to-list ta))
+    (assert-= 4.0d0 (gethash "read" result))
+    (assert-= 3.0d0 (gethash "written" result))))

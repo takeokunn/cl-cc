@@ -48,6 +48,15 @@ long-lived CL-CC/TEST package during canonical full-suite runs."
            ,@body)
        (ignore-errors (delete-file ,var)))))
 
+(defmacro %with-selfhost-features (&body body)
+  "Execute BODY with the self-hosting feature flag present in *FEATURES*."
+  `(let ((original-features (copy-list cl:*features*)))
+     (unwind-protect
+          (progn
+            (pushnew :cl-cc-self-hosting cl:*features*)
+            ,@body)
+       (setf cl:*features* original-features))))
+
 (defun %asdf-source-files (sys-name project-prefix)
   "Return project-relative CL source file paths for SYS-NAME, in ASDF load order."
   (let ((sys (asdf:find-system sys-name nil)))
@@ -92,7 +101,8 @@ Computed at call time so the result is path-independent across compile/load cont
 (defparameter *selfhost-representative-files*
   '("packages/parse/src/cst.lisp"
     "packages/prolog/src/prolog-data.lisp"
-    "packages/prolog/src/prolog.lisp"
+    "packages/prolog/src/prolog-unification.lisp"
+    "packages/prolog/src/prolog-rules.lisp"
     "packages/parse/src/lexer.lisp"
     "packages/cps/src/cps.lisp"
     "packages/optimize/src/optimizer.lisp"

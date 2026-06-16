@@ -47,10 +47,9 @@ it returns a copy-on-write VM-COW-VECTOR wrapper that would leak into user code.
            (loop for ,di from ,(or start1 0) below ,dlim
                  for ,si from ,(or start2 0) below ,slim
                  do (aset ,d ,di (aref ,s ,si)))
-           (loop for ,dp on (nthcdr ,(or start1 0) ,d)
-                 for ,sp on (nthcdr ,(or start2 0) ,s)
-                 repeat (min (- ,dlim ,(or start1 0)) (- ,slim ,(or start2 0)))
-                 do (rplaca ,dp (car ,sp))))
+           (loop for ,di from ,(or start1 0) below ,dlim
+                 for ,si from ,(or start2 0) below ,slim
+                 do (setf (elt ,d ,di) (elt ,s ,si))))
        ,d)))
 
 ;; MISMATCH (FR-506): first position where sequences differ

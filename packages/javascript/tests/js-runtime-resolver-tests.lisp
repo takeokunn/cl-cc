@@ -133,11 +133,12 @@
 
 (deftest-each js-rt-resolve-typed-array-props
   "TypedArray resolver returns numeric properties from struct slots."
-  :cases (("length"      "length"     3)
-          ("byteLength"  "byteLength" 12)
-          ("byteOffset"  "byteOffset" 0))
-  (key expected)
-  (let* ((ta  (cl-cc/javascript::%js-make-typed-array "Int32Array" 3))
+  :cases (("int32-length"      "Int32Array"   3 "length"     3)
+          ("int32-byte-length" "Int32Array"   3 "byteLength" 12)
+          ("int32-byte-offset" "Int32Array"   3 "byteOffset" 0)
+          ("f16-byte-length"   "Float16Array" 3 "byteLength" 6))
+  (type-name length key expected)
+  (let* ((ta  (cl-cc/javascript::%js-make-typed-array type-name length))
          (val (cl-cc/javascript::%js-resolve-typed-array-method ta key)))
     (assert-= expected val)))
 
@@ -156,6 +157,13 @@
   (let* ((bi (cl-cc/javascript::%make-js-bigint 7))
          (fn (cl-cc/javascript::%js-resolve-bigint-method bi "valueOf")))
     (assert-eq bi (funcall fn))))
+
+;;; ─── String resolver ───────────────────────────────────────────────────────
+
+(deftest js-rt-string-resolver-rejects-deprecated-substr
+  "String.prototype.substr is intentionally absent from the method resolver."
+  (assert-eq cl-cc/javascript::+js-undefined+
+             (cl-cc/javascript::%js-resolve-string-method "abcdef" "substr")))
 
 ;;; ─── String char-iter via get-prop ──────────────────────────────────────────
 

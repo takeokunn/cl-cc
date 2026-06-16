@@ -76,9 +76,9 @@ has neither signal.  Young objects without an access bit are treated as :WARM."
                      (let ((h (rt-heap-object-header heap addr)))
                        (cond
                          ((header-forwarding-p h) (incf addr 1))
-                         ((and (integerp h) (> (header-size h) 0))
-                          (let ((size (header-size h)))
-                            (funcall visitor addr h (header-tag h) size)
+                         ((and (integerp h) (> (rt-header-size h) 0))
+                          (let ((size (rt-header-size h)))
+                            (funcall visitor addr h (rt-header-type-tag h) size)
                             (incf addr size)))
                          (t (return)))))))
     (walk-range (rt-heap-young-from-base heap) (rt-heap-young-free heap))

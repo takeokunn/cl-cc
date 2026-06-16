@@ -46,6 +46,7 @@
     :components
     ((:file "vm-instructions-tests")
      (:file "list-tests")
+     (:file "list-alist-tests")
      (:file "list-coerce-tests")
      (:file "array-tests")
      (:file "vm-execute-tests")
@@ -53,6 +54,7 @@
       (:file "vm-call-tests")
       (:file "primitives-tests")
       (:file "primitives-typep-tests")
+      (:file "vm-bignum-tests")
       (:file "vm-transcendental-tests")
      (:file "vm-numeric-tests")
      (:file "vm-extensions-tests")
@@ -75,13 +77,21 @@
      (:file "hash-tests")
      (:file "symbols-tests")
      (:file "strings-tests")
+     (:file "vm-sequence-tests")
      (:file "format-tests")
       (:file "io-tests")
       (:file "io-runners-tests")
       (:file "string-builder-tests")
+      (:file "persistent-tests")
+      (:file "json-tests")
+      (:file "regex-tests")
        (:file "runtime-stdlib-2-vm-tests")
+       (:file "runtime-stdlib-2-completion-tests")
        (:file "runtime-stdlib-3-tests")
        (:file "runtime-stdlib-3-numeric-tests")
+       (:file "runtime-stdlib-3-debug-tests")
+       (:file "runtime-stdlib-3-io-tests")
+       (:file "crash-report-tests")
        (:file "vm-mop-tests")))
     (:module "ast-tests"
      :pathname "packages/ast/tests"
@@ -128,8 +138,8 @@
       (:file "php-compile-tests")
       (:file "php-grammar-tests")
       (:file "php-grammar-stmt-tests")
-      (:file "php-traits-tests")
-      (:file "php-interfaces-tests")
+     (:file "php-traits-tests")
+     (:file "php-interfaces-tests")
       (:file "php84-tests")))
    (:module "javascript-tests"
     :pathname "packages/javascript/tests"
@@ -178,7 +188,8 @@
     :pathname "packages/prolog/tests"
     :serial t
     :components
-    ((:file "prolog-data-tests")
+    ((:file "test-support")
+     (:file "prolog-data-tests")
      (:file "prolog-peephole-tests")
      (:file "dcg-tests")
      (:file "prolog-tests")))
@@ -548,6 +559,7 @@
      (:file "runtime-clos-tests")
      (:file "runtime-advanced-tests")
       (:file "runtime-io-tests")
+      (:file "runtime-serialize-tests")
       (:file "gc-tests")
       (:file "gc-fr-tests")
       (:file "gc-stats-tests")

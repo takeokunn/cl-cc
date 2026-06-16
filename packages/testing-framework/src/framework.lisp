@@ -173,6 +173,11 @@ those for ~99% silent passes was the dominant runtime cost."
   :parent cl-cc-suite
   :parallel nil)
 
+(defsuite cl-cc-documentation-suite
+  :description "Documentation, roadmap, and implementation evidence checks"
+  :parent cl-cc-suite
+  :parallel nil)
+
 (in-suite cl-cc-suite)
 
 ;;; Test selection, fixture discovery, advanced reporting, and execution helpers

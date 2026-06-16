@@ -27,7 +27,7 @@
   "Write a header at ADDR and return the address."
   (cl-cc/runtime:rt-heap-set-header
    heap addr
-   (cl-cc/runtime:make-header size tag age))
+   (cl-cc/runtime:make-rt-header size tag :gc-bits age))
   addr)
 
 ;;; ------------------------------------------------------------
@@ -196,11 +196,11 @@
 
 (deftest fr-266-compressed-object-header-is-one-word
   "FR-266: Object headers pack size/tag/age metadata into one unsigned 64-bit word."
-  (let ((header (cl-cc/runtime:make-header 42 cl-cc/runtime:+rt-tag-cons+ 2)))
+  (let ((header (cl-cc/runtime:make-rt-header 42 cl-cc/runtime:+rt-tag-cons+ :gc-bits 2)))
     (assert-true (typep header '(unsigned-byte 64)))
-    (assert-= 42 (cl-cc/runtime:header-size header))
-    (assert-= cl-cc/runtime:+rt-tag-cons+ (cl-cc/runtime:header-tag header))
-    (assert-= 2 (cl-cc/runtime:header-age header))))
+    (assert-= 42 (cl-cc/runtime:rt-header-size header))
+    (assert-= cl-cc/runtime:+rt-tag-cons+ (cl-cc/runtime:rt-header-type-tag header))
+    (assert-= 2 (cl-cc/runtime:rt-header-age header))))
 
 (deftest fr-184-weak-reference-and-finalizer-evidence
   "FR-184: Weak references clear unreachable referents and finalizers run for unmarked objects."
@@ -216,10 +216,10 @@
          (cl-cc/runtime::*rt-finalization-queue* nil))
     (cl-cc/runtime:rt-heap-set-header
      heap (cl-cc/runtime:rt-heap-old-base heap)
-     (cl-cc/runtime:make-header 1 cl-cc/runtime:+rt-tag-cons+ 0))
+     (cl-cc/runtime:make-rt-header 1 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
     (cl-cc/runtime::%rt-gc-process-weak-references heap marked)
     (assert-null (cl-cc/runtime:rt-ref-get weak))
-    (cl-cc/runtime:rt-register-finalizer object-addr (lambda (obj) (setf finalized obj)))
+    (cl-cc/runtime:register-finalizer object-addr (lambda (obj) (setf finalized obj)))
     (cl-cc/runtime::%rt-gc-process-finalizers heap marked)
     ;; After GC processing, object is queued but not yet executed
     (assert-equal (list object-addr) cl-cc/runtime::*rt-finalization-queue*)
@@ -325,11 +325,11 @@
   "FR-730: Weak pointers do not keep an unreachable heap referent alive."
   (let* ((heap (%make-small-heap-fr))
          (addr (cl-cc/runtime:rt-gc-alloc heap cl-cc/runtime:+rt-tag-cons+ 3))
-         (weak (cl-cc/runtime:make-weak-pointer addr))
+         (weak (cl-cc/runtime:rt-make-weak-pointer addr))
          (cl-cc/runtime::*rt-reference-registry* (list weak)))
     (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
-    (cl-cc/runtime::%rt-gc-process-weak-pointers heap (%gc-fr-marked-set))
-    (assert-false (cl-cc/runtime:weak-pointer-value weak))))
+    (cl-cc/runtime::%rt-gc-process-weak-references heap (%gc-fr-marked-set))
+    (assert-false (cl-cc/runtime:rt-weak-pointer-value weak))))
 
 (deftest fr-730-weak-pointer-keeps-marked-referent
   "FR-730: Weak pointer values survive when the strong graph marks their referent."
@@ -363,7 +363,7 @@
          (cl-cc/runtime:*pending-finalizers* nil)
          (cl-cc/runtime:*rt-finalization-queue* nil))
     (%fr-write-object heap addr 3 cl-cc/runtime:+rt-tag-cons+)
-    (cl-cc/runtime:rt-register-finalizer addr (lambda (obj) (push obj seen)))
+    (cl-cc/runtime:register-finalizer addr (lambda (obj) (push obj seen)))
     (cl-cc/runtime::%rt-gc-process-finalizers heap (%gc-fr-marked-set))
     (assert-equal (list addr) cl-cc/runtime:*rt-finalization-queue*)
     (assert-= 1 (cl-cc/runtime:rt-run-pending-finalizers))
@@ -503,7 +503,7 @@
       (cl-cc/runtime:rt-gc-tlab-retire-all heap)
       (assert-true (cl-cc/runtime:rt-tlab-retired-p tlab))
       (assert-true (> (cl-cc/runtime:rt-tlab-waste-bytes tlab) 0))
-      (assert-= 5 (cl-cc/runtime:header-size
+      (assert-= 5 (cl-cc/runtime:rt-header-size
                    (cl-cc/runtime:rt-heap-object-header heap free-before))))))
 
 (deftest fr-345-tlab-allocation-returns-zero-filled-words

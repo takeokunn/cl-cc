@@ -6,9 +6,7 @@
           *random-state*
           random
           vm-random-state
-          vm-random-state-p
-          vm-make-random-state
-          vm-random))
+          vm-random-state-p))
 
 (defconstant +mt19937-n+ 624)
 (defconstant +mt19937-m+ 397)
@@ -70,9 +68,6 @@
 (defparameter *random-state* (%vm-mt-seed 5489)
   "Default VM random state used by RANDOM.")
 
-(defparameter *vm-random-state* *random-state*
-  "Compatibility alias for the default VM random state.")
-
 (defun %vm-random-time-seed ()
   (%vm-u32 (logxor (get-universal-time)
                    (get-internal-real-time)
@@ -102,11 +97,3 @@ Integer LIMIT returns an integer in [0,LIMIT). Float LIMIT returns a float in
          (coerce (* (coerce limit 'double-float) (%vm-random-unit state))
                  (type-of limit)))
         (t (error "Invalid random limit: ~S" limit))))
-
-(defun vm-make-random-state (&optional state)
-  "Compatibility wrapper for MAKE-RANDOM-STATE."
-  (make-random-state state))
-
-(defun vm-random (limit &optional (state *random-state*))
-  "Compatibility wrapper for RANDOM."
-  (random limit state))

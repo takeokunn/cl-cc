@@ -128,8 +128,9 @@
             :cl-cc/php)))
 
 (defun php-ident-sym (str)
-  "Convert PHP identifier string to a CL symbol."
-  (intern (string-upcase (if (stringp str) str (symbol-name str)))))
+  "Convert PHP identifier string to a CL-CC/PHP symbol."
+  (intern (string-upcase (if (stringp str) str (symbol-name str)))
+          :cl-cc/php))
 
 (defvar *php-current-namespace* nil
   "Current PHP namespace name for subsequent top-level AST nodes.")
@@ -216,16 +217,19 @@ names are namespace-relative."
 (defun %php-qualified-name-segment-string (tok)
   "Return TOK's text as a PHP qualified-name segment."
   (let ((value (php-tok-value tok)))
-    (cond ((stringp value) value)
-          ((symbolp value) (string-downcase (symbol-name value)))
-          (t (princ-to-string value)))))
+    (let ((text (cond ((stringp value) value)
+                      ((symbolp value) (string-downcase (symbol-name value)))
+                      (t (princ-to-string value)))))
+      (when (position #\\ text)
+        (error "PHP parse error: qualified-name segment contains namespace separator: ~S"
+               text))
+      text)))
 
 (defun php-parse-qualified-name (stream &key allow-empty)
   "Parse a PHP qualified name from STREAM.
-Returns (values name rest). Supports tokenized names (Foo T-BACKSLASH Bar) and
-legacy lexer output where a single T-IDENT may already contain backslashes. A
-trailing backslash before a non-segment token is left unconsumed for group-use
-syntax such as Foo\\{Bar, Baz}."
+Returns (values name rest). Names must be tokenized as segments separated by
+T-BACKSLASH. A trailing backslash before a non-segment token is left unconsumed
+for group-use syntax such as Foo\\{Bar, Baz}."
   (let ((current stream)
         (absolute-p nil)
         (segments nil))

@@ -227,8 +227,8 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
 
 (define-fr-loaded-test runtime-subsystem-tlab-loaded
   "FR-550: Thread-local allocation buffers (TLAB) are loaded."
-  cl-cc/runtime:rt-tlab-alloc
-  cl-cc/runtime:rt-tlab-retire)
+  cl-cc/runtime:rt-gc-tlab-alloc
+  cl-cc/runtime:rt-gc-tlab-retire-all)
 
 (define-fr-loaded-test runtime-subsystem-context-loaded
   "FR-412: Context propagation is loaded."
@@ -292,8 +292,8 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
 
 (define-fr-existence-test runtime-subsystem-random-loaded
   "FR-611: RNG is loaded in VM."
-  (:f cl-cc/vm:vm-random)
-  (:s "VM-MAKE-RANDOM-STATE" :cl-cc/vm))
+  (:f cl-cc/vm:make-vm-random)
+  (:f cl-cc/vm:make-vm-make-random-state))
 
 (define-fr-existence-test runtime-subsystem-environment-loaded
   "FR-612: Environment introspection is loaded in VM."
@@ -528,6 +528,38 @@ Each check is (:f sym) fboundp / (:b sym) boundp / (:s pkg sym) find-symbol."
       (assert-= 0 (cl-cc/runtime::rt-ebr-collect local))
       (assert-= 1 (cl-cc/runtime::rt-ebr-collect local))
       (assert-equal '(:old-node) freed))))
+
+(deftest runtime-subsystem-hazard-retire-defers-protected-objects
+  "FR-321: Hazard pointers defer protected objects and reclaim them after clear."
+  (let ((freed nil)
+        (thread sb-thread:*current-thread*)
+        (protected (list :protected))
+        (unprotected (list :unprotected)))
+    (flet ((free-object (object)
+             (push object freed)))
+      (cl-cc/runtime::rt-hp-init #'free-object)
+      (unwind-protect
+           (progn
+             (cl-cc/runtime:rt-hp-register-thread 2 thread)
+             (cl-cc/runtime:rt-hp-protect 0 protected thread)
+             (cl-cc/runtime::rt-hp-retire-object protected
+                                                  :thread thread
+                                                  :free-fn #'free-object
+                                                  :threshold 1)
+             (assert-equal nil freed)
+             (cl-cc/runtime::rt-hp-retire-object unprotected
+                                                  :thread thread
+                                                  :free-fn #'free-object
+                                                  :threshold 1)
+             (assert-equal (list unprotected) freed)
+             (assert-equal (list protected)
+                           (gethash thread cl-cc/runtime::*hazard-retired*))
+             (cl-cc/runtime::rt-hp-clear 0 thread)
+             (assert-= 1 (cl-cc/runtime::rt-hp-reclaim
+                          :thread thread
+                          :free-fn #'free-object))
+             (assert-equal (list protected unprotected) freed))
+        (cl-cc/runtime::rt-hp-init)))))
 
 (deftest runtime-subsystem-spsc-preserves-single-producer-consumer-semantics
   "FR-462: SPSC queue preserves ordered single-producer/single-consumer handoff."

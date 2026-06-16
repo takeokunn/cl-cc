@@ -177,6 +177,21 @@
   (assert-true (equalp #(1 2 0 0)
                        (cl-cc/vm::vm-adjust-sequence #(1 2) 4 :initial-element 0))))
 
+(deftest vm-extensible-sequence-specialized-builtins-preserve-type
+  "The VM sequence protocol preserves specialized built-in sequence families."
+  (let ((bits (cl-cc/vm::vm-make-sequence-like #*1 3))
+        (more-bits (cl-cc/vm::vm-adjust-sequence #*10 4 :initial-element 1))
+        (string (cl-cc/vm::vm-make-sequence-like "x" 3))
+        (more-string (cl-cc/vm::vm-adjust-sequence "ab" 4 :initial-element #\c)))
+    (assert-true (typep bits 'bit-vector))
+    (assert-true (equalp #*000 bits))
+    (assert-true (typep more-bits 'bit-vector))
+    (assert-true (equalp #*1011 more-bits))
+    (assert-true (stringp string))
+    (assert-equal "   " string)
+    (assert-true (stringp more-string))
+    (assert-equal "abcc" more-string)))
+
 (defclass test-sequence ()
   ((payload :initarg :payload :accessor test-sequence-payload)))
 
@@ -190,6 +205,26 @@
   (declare (ignore sequence))
   (make-instance 'test-sequence :payload (make-array size :initial-element initial-element)))
 
+(defclass vm-protocol-backed-sequence (cl-cc/vm::sequence)
+  ((payload :initarg :payload :accessor vm-protocol-backed-sequence-payload)))
+
+(defmethod cl-cc/vm::length ((sequence vm-protocol-backed-sequence))
+  (length (vm-protocol-backed-sequence-payload sequence)))
+
+(defmethod cl-cc/vm::elt ((sequence vm-protocol-backed-sequence) index)
+  (aref (vm-protocol-backed-sequence-payload sequence) index))
+
+(defmethod (setf cl-cc/vm::elt) (value (sequence vm-protocol-backed-sequence) index)
+  (setf (aref (vm-protocol-backed-sequence-payload sequence) index) value))
+
+(defmethod cl-cc/vm::make-sequence-like ((sequence vm-protocol-backed-sequence)
+                                          size
+                                          &key
+                                          initial-element)
+  (declare (ignore sequence))
+  (make-instance 'vm-protocol-backed-sequence
+                 :payload (make-array size :initial-element initial-element)))
+
 (deftest vm-extensible-sequence-user-extension
   "User-defined sequence types can extend the partial protocol via methods."
   (let* ((seq (make-instance 'test-sequence :payload #(10 20 30)))
@@ -198,6 +233,22 @@
     (assert-= 3 (cl-cc/vm::vm-sequence-length seq))
     (assert-= 2 (cl-cc/vm::vm-sequence-length like))
     (assert-= 7 (cl-cc/vm::vm-sequence-elt like 0))))
+
+(deftest vm-extensible-sequence-delegates-to-standard-protocol
+  "VM sequence helpers delegate to the FR-838 length/elt/make-sequence-like protocol."
+  (let* ((seq (make-instance 'vm-protocol-backed-sequence :payload #(10 20 30)))
+         (like (cl-cc/vm::vm-make-sequence-like seq 2 :initial-element 7))
+         (grown (cl-cc/vm::vm-adjust-sequence seq 5 :initial-element 9)))
+    (assert-= 3 (cl-cc/vm::vm-sequence-length seq))
+    (assert-= 20 (cl-cc/vm::vm-sequence-elt seq 1))
+    (assert-true (typep like 'vm-protocol-backed-sequence))
+    (assert-= 2 (cl-cc/vm::vm-sequence-length like))
+    (assert-= 7 (cl-cc/vm::vm-sequence-elt like 0))
+    (assert-true (typep grown 'vm-protocol-backed-sequence))
+    (assert-= 5 (cl-cc/vm::vm-sequence-length grown))
+    (assert-= 10 (cl-cc/vm::vm-sequence-elt grown 0))
+    (assert-= 30 (cl-cc/vm::vm-sequence-elt grown 2))
+    (assert-= 9 (cl-cc/vm::vm-sequence-elt grown 3))))
 
 (deftest vm-instructions-use-extensible-sequence-protocol
   "vm-length and vm-nth dispatch through the extensible sequence protocol."
@@ -209,3 +260,14 @@
     (exec1 (cl-cc:make-vm-nth :dst 3 :index 2 :list 1) s)
     (assert-= 3 (cl-cc:vm-reg-get s 0))
     (assert-= 20 (cl-cc:vm-reg-get s 3))))
+
+(deftest vm-instructions-use-standard-extensible-sequence-protocol
+  "vm-length and vm-nth work for subclasses of cl-cc/vm::sequence."
+  (let ((s (make-test-vm))
+        (seq (make-instance 'vm-protocol-backed-sequence :payload #(10 20 30))))
+    (cl-cc:vm-reg-set s 1 seq)
+    (cl-cc:vm-reg-set s 2 2)
+    (exec1 (cl-cc:make-vm-length :dst 0 :src 1) s)
+    (exec1 (cl-cc:make-vm-nth :dst 3 :index 2 :list 1) s)
+    (assert-= 3 (cl-cc:vm-reg-get s 0))
+    (assert-= 30 (cl-cc:vm-reg-get s 3))))

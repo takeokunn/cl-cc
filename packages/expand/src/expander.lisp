@@ -51,6 +51,14 @@ Contract: handler receives the full form and returns a fully-expanded form."
         (error "~A" message)
         (warn "~A" message))))
 
+(defun %expand-compiler-macro-call (name form)
+  "Return a compiler-macro expansion for NAME/FORM when it changes FORM."
+  (let ((compiler-macro (lookup-compiler-macro name)))
+    (when compiler-macro
+      (let ((expanded (invoke-registered-expander compiler-macro form nil)))
+        (unless (equal expanded form)
+          expanded)))))
+
 (define-expander-for pragma (form)
   "Consume compiler pragma forms. Unknown pragmas warn unless -Werror is active."
   (let ((name (second form)))
@@ -96,14 +104,11 @@ Dispatch order: (1) atoms — symbol macros expanded, others pass through;
             (if (equal expanded form)
                 form
                 expanded)))
-          ((and (symbolp (car form))
-                (lookup-compiler-macro (car form)))
-            (let ((expanded (invoke-registered-expander
-                             (lookup-compiler-macro (car form))
-                             form nil)))
-              (if (equal expanded form)
-                  form
-                  (compiler-macroexpand-all expanded))))
+          ((let ((compiler-macro-expansion
+                   (and (symbolp (car form))
+                        (%expand-compiler-macro-call (car form) form))))
+             compiler-macro-expansion)
+           (compiler-macroexpand-all compiler-macro-expansion))
           (t
             (multiple-value-bind (transformed transformed-p)
                 (deftransform-expand-1 form nil)

@@ -55,9 +55,9 @@
 
 ;;; Boolean Operations
 
-(define-vm-unary-instruction  vm-not :not "Logical not. Returns 1 if SRC is 0, 0 otherwise.")
-(define-vm-binary-instruction vm-and :and "Logical and. Returns 1 if both LHS and RHS are non-zero, 0 otherwise.")
-(define-vm-binary-instruction vm-or  :or  "Logical or. Returns 1 if either LHS or RHS is non-zero, 0 otherwise.")
+(define-vm-unary-instruction  vm-not :not "Logical NOT over VM falsey values. Returns T when SRC is NIL or numeric zero.")
+(define-vm-binary-instruction vm-and :and "Logical AND over VM falsey values.")
+(define-vm-binary-instruction vm-or  :or  "Logical OR over VM falsey values.")
 
 ;;; General Type Predicate
 

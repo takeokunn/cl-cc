@@ -24,8 +24,8 @@
                        (let ((h (rt-heap-object-header heap addr)))
                          (cond
                            ((header-forwarding-p h) (incf addr 1))
-                           ((and (integerp h) (> (header-size h) 0))
-                            (let ((size (header-size h)))
+                           ((and (integerp h) (> (rt-header-size h) 0))
+                            (let ((size (rt-header-size h)))
                               (dolist (offset (rt-object-pointer-slots heap addr))
                                 (let ((slot (+ addr offset)))
                                   (rt-heap-set heap slot

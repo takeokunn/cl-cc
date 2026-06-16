@@ -9,6 +9,11 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-coverage-unstable-unit-suite)
 
+(defmacro assert-egraph-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── Saturation ──────────────────────────────────────────────────────────
 
 (deftest egraph-saturate-empty-graph-terminates-at-iter-0
@@ -154,9 +159,9 @@
   (query-op expected)
   (let* ((eg (make-test-egraph))
          (id (cl-cc/optimize:egraph-add eg 'const)))
-    (if expected
-        (assert-true  (cl-cc/optimize::egraph-class-has-op-p eg id query-op))
-        (assert-false (cl-cc/optimize::egraph-class-has-op-p eg id query-op)))))
+    (assert-egraph-boolean-case expected
+      (assert-true  (cl-cc/optimize::egraph-class-has-op-p eg id query-op))
+      (assert-false (cl-cc/optimize::egraph-class-has-op-p eg id query-op)))))
 
 (deftest-each egraph-class-const-value-cases
   "egraph-class-const-value: returns ec-data for a const node; nil for a non-const node."
@@ -168,9 +173,9 @@
     (when set-data-p
       (let ((cls (gethash (cl-cc/optimize:egraph-find eg id) (cl-cc:eg-classes eg))))
         (setf (cl-cc:ec-data cls) 99)))
-    (if expected
-        (assert-= expected (cl-cc/optimize::egraph-class-const-value eg id))
-        (assert-null (cl-cc/optimize::egraph-class-const-value eg id)))))
+    (assert-egraph-boolean-case expected
+      (assert-= expected (cl-cc/optimize::egraph-class-const-value eg id))
+      (assert-null (cl-cc/optimize::egraph-class-const-value eg id)))))
 
 ;;; ─── vm-inst-to-enode-op ─────────────────────────────────────────────────
 

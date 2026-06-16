@@ -15,7 +15,10 @@
   :components
   ((:file "package")
    (:file "prolog-data")
-   (:file "prolog")
+   (:file "prolog-unification")
+   (:file "prolog-rules")
    (:file "prolog-builtins")
    (:file "prolog-solver")
-   (:file "dcg")))
+   (:file "dcg-rules")
+   (:file "dcg-builtins")
+   (:file "dcg-query")))

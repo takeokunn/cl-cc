@@ -41,6 +41,8 @@
 ;;; Advanced feature registry / representation tests
 ;;; ─────────────────────────────────────────────────────────────────────────
 
+(in-suite cl-cc-documentation-suite)
+
 (deftest advanced-feature-registry-covers-doc-fr-list
   "The advanced feature registry covers every represented docs/type-advanced.md FR id."
   (let ((expected-ids (%advanced-doc-fr-ids))
@@ -143,6 +145,8 @@
           (assert-false (cl-cc/type:type-advanced-semantics-implemented-p feature-id)))
       (setf (gethash feature-id table) saved))
     (assert-true (cl-cc/type:type-advanced-semantics-implemented-p feature-id))))
+
+(in-suite cl-cc-unit-suite)
 
 (deftest advanced-feature-contract-registry-rejects-unknown-and-missing-contracts
   "Unknown FR ids and registry entries with no explicit contract are rejected at construction time."

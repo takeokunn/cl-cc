@@ -11,17 +11,75 @@
 (defvar +php-null+ '%php-null%
   "PHP null sentinel distinct from CL nil.")
 
+(defun %php-seed-by-ref-param-registry
+    (&optional (registry (make-hash-table :test #'equal)))
+  "Seed REGISTRY with builtin functions that take parameters by reference."
+  (setf (gethash (symbol-name '%php-settype) registry) '(0))
+  (setf (gethash "settype" registry) '(0))
+  (setf (gethash "SETTYPE" registry) '(0))
+  registry)
+
+(defparameter *php-by-ref-param-registry*
+  (%php-seed-by-ref-param-registry)
+  "Maps PHP function name strings to lists of by-reference parameter indices (0-based).")
+
 (defun %php-null-p (x)
   "Return true when X is the PHP null sentinel."
   (eq x +php-null+))
 
+(defun %php-current-closure ()
+  "Return the currently executing PHP Closure, or PHP null outside a closure."
+  (let ((state cl-cc/vm:*vm-state*))
+    (if state
+        (let* ((depth (length (cl-cc/vm:vm-call-stack state)))
+               (stack (cl-cc/vm::vm-current-closure-stack state)))
+          (loop while (and stack (> (caar stack) depth))
+                do (pop stack))
+          (setf (cl-cc/vm::vm-current-closure-stack state) stack)
+          (or (loop for (entry-depth . closure) in stack
+                    for tag = (and (cl-cc/vm::%vm-closure-object-p closure)
+                                   (cl-cc/vm::vm-closure-dispatch-tag closure))
+                    when (and (= entry-depth depth)
+                              (cl-cc/vm::%vm-closure-object-p closure)
+                              (not (and (consp tag) (eq (car tag) :known-function))))
+                      return closure)
+              +php-null+))
+        +php-null+)))
+
 ;;; ─── Predefined constants ──────────────────────────────────────────────────
-;;; PHP magic/predefined constants (PHP_EOL, M_PI, STR_PAD_LEFT, SORT_*, …) are
-;;; referenced BARE — `echo PHP_EOL;`, `str_pad($s,3,'0',STR_PAD_LEFT)` — not as
-;;; calls.  The parser (php-parse-primary) consults this table and lowers a hit
-;;; to a literal; a miss stays an ast-var so user define()/const values still
-;;; resolve at runtime.  (Previously these were zero-arg lambda builtins that
-;;; were never invoked, so every bare reference read as an undefined var → "".)
+;;; PHP magic/predefined constants (PHP_EOL, M_PI, STR_PAD_LEFT, SORT_*, ...)
+;;; are referenced bare, e.g. `echo PHP_EOL;` or
+;;; `str_pad($s, 3, "0", STR_PAD_LEFT)`. The parser (php-parse-primary)
+;;; consults this table and lowers a hit to a literal; a miss stays an ast-var
+;;; so user define()/const values still resolve at runtime.
+(defparameter +php-nl-langinfo-items+
+  '(("CODESET" 1 "UTF-8")
+    ("ABDAY_1" 2 "Sun") ("ABDAY_2" 3 "Mon") ("ABDAY_3" 4 "Tue")
+    ("ABDAY_4" 5 "Wed") ("ABDAY_5" 6 "Thu") ("ABDAY_6" 7 "Fri")
+    ("ABDAY_7" 8 "Sat")
+    ("DAY_1" 9 "Sunday") ("DAY_2" 10 "Monday") ("DAY_3" 11 "Tuesday")
+    ("DAY_4" 12 "Wednesday") ("DAY_5" 13 "Thursday")
+    ("DAY_6" 14 "Friday") ("DAY_7" 15 "Saturday")
+    ("ABMON_1" 16 "Jan") ("ABMON_2" 17 "Feb") ("ABMON_3" 18 "Mar")
+    ("ABMON_4" 19 "Apr") ("ABMON_5" 20 "May") ("ABMON_6" 21 "Jun")
+    ("ABMON_7" 22 "Jul") ("ABMON_8" 23 "Aug") ("ABMON_9" 24 "Sep")
+    ("ABMON_10" 25 "Oct") ("ABMON_11" 26 "Nov") ("ABMON_12" 27 "Dec")
+    ("MON_1" 28 "January") ("MON_2" 29 "February") ("MON_3" 30 "March")
+    ("MON_4" 31 "April") ("MON_5" 32 "May") ("MON_6" 33 "June")
+    ("MON_7" 34 "July") ("MON_8" 35 "August") ("MON_9" 36 "September")
+    ("MON_10" 37 "October") ("MON_11" 38 "November") ("MON_12" 39 "December")
+    ("AM_STR" 40 "AM") ("PM_STR" 41 "PM")
+    ("D_T_FMT" 42 "%a %b %e %H:%M:%S %Y")
+    ("D_FMT" 43 "%m/%d/%y")
+    ("T_FMT" 44 "%H:%M:%S")
+    ("T_FMT_AMPM" 45 "%I:%M:%S %p")
+    ("ERA" 46 "") ("ERA_D_T_FMT" 47 "") ("ERA_D_FMT" 48 "")
+    ("ERA_T_FMT" 49 "") ("ALT_DIGITS" 50 "")
+    ("YESEXPR" 51 "^[yY]") ("NOEXPR" 52 "^[nN]")
+    ("YESSTR" 53 "") ("NOSTR" 54 "")
+    ("CRNCYSTR" 55 "") ("RADIXCHAR" 56 ".") ("THOUSEP" 57 ","))
+  "Deterministic nl_langinfo item table used by PHP constants and runtime.")
+
 (defparameter *php-predefined-constants*
   (let ((h (make-hash-table :test #'equal)))
     (flet ((c (name value) (setf (gethash name h) value)))
@@ -34,11 +92,13 @@
       (c "PHP_FLOAT_MIN" least-positive-normalized-double-float)
       (c "PHP_FLOAT_EPSILON" 2.220446049250313d-16)
       (c "PHP_FLOAT_DIG" 15)
-      (c "PHP_VERSION" "8.4.0")
-      (c "PHP_VERSION_ID" 80400)
+      (c "PHP_VERSION" "8.5.0")
+      (c "PHP_VERSION_ID" 80500)
       (c "PHP_MAJOR_VERSION" 8)
-      (c "PHP_MINOR_VERSION" 4)
+      (c "PHP_MINOR_VERSION" 5)
       (c "PHP_RELEASE_VERSION" 0)
+      (c "PHP_BUILD_DATE" "1970-01-01T00:00:00+00:00")
+      (c "PHP_BUILD_PROVIDER" "cl-cc")
       (c "PHP_OS" "Linux")
       (c "PHP_OS_FAMILY" "Linux")
       (c "PHP_MAXPATHLEN" 4096)
@@ -73,6 +133,13 @@
       ;; count / array_filter
       (c "COUNT_NORMAL" 0) (c "COUNT_RECURSIVE" 1)
       (c "ARRAY_FILTER_USE_BOTH" 1) (c "ARRAY_FILTER_USE_KEY" 2)
+      ;; filter
+      (c "FILTER_DEFAULT" 516) (c "FILTER_UNSAFE_RAW" 516)
+      (c "FILTER_VALIDATE_INT" 257) (c "FILTER_VALIDATE_BOOLEAN" 258)
+      (c "FILTER_VALIDATE_FLOAT" 259)
+      (c "FILTER_VALIDATE_URL" 273) (c "FILTER_VALIDATE_EMAIL" 274)
+      (c "FILTER_NULL_ON_FAILURE" 134217728)
+      (c "FILTER_THROW_ON_FAILURE" 268435456)
       ;; str_pad
       (c "STR_PAD_RIGHT" 1) (c "STR_PAD_LEFT" 0) (c "STR_PAD_BOTH" 2)
       ;; htmlspecialchars
@@ -92,9 +159,32 @@
       (c "PREG_PATTERN_ORDER" 1) (c "PREG_SET_ORDER" 2) (c "PREG_OFFSET_CAPTURE" 256)
       ;; round modes
       (c "PHP_ROUND_HALF_UP" 1) (c "PHP_ROUND_HALF_DOWN" 2)
-      (c "PHP_ROUND_HALF_EVEN" 3) (c "PHP_ROUND_HALF_ODD" 4))
+      (c "PHP_ROUND_HALF_EVEN" 3) (c "PHP_ROUND_HALF_ODD" 4)
+      ;; locale / nl_langinfo
+      (dolist (item +php-nl-langinfo-items+)
+        (c (first item) (second item))))
     h)
   "Name (case-sensitive string) → value for PHP predefined constants.")
+
+(defparameter *php-dynamic-predefined-constants*
+  (let ((h (make-hash-table :test #'equal)))
+    (flet ((c (name helper) (setf (gethash name h) helper)))
+      (c "STDIN" '%php-stdin)
+      (c "STDOUT" '%php-stdout)
+      (c "STDERR" '%php-stderr))
+    h)
+  "Name (case-sensitive string) → zero-arg runtime helper symbol for dynamic PHP predefined constants.")
+
+(defun %php-lookup-dynamic-constant (name)
+  "Return (values HELPER T) when NAME is a dynamic predefined PHP constant,
+else (values NIL NIL)."
+  (multiple-value-bind (helper found) (gethash name *php-dynamic-predefined-constants*)
+    (if found
+        (values helper t)
+        (let ((sep (position (code-char 92) name :from-end t)))
+          (if sep
+              (gethash (subseq name (1+ sep)) *php-dynamic-predefined-constants*)
+              (values nil nil))))))
 
 (defun %php-lookup-constant (name)
   "Return (values VALUE T) when NAME is a predefined PHP constant, else
@@ -113,6 +203,12 @@
   (check-type ht hash-table)
   (null (gethash +php-array-order-key+ ht)))
 
+(defun %php-object-table-p (x)
+  "Return true when X is a PHP object represented as a property table."
+  (and (hash-table-p x)
+       (or (nth-value 1 (gethash "__class__" x))
+           (nth-value 1 (gethash :__class__ x)))))
+
 (defun %php-value-type (x)
   "Return the PHP runtime value type keyword for X."
   (cond ((%php-null-p x) :null)
@@ -122,6 +218,7 @@
         ((integerp x) :int)
         ((floatp x) :float)
         ((stringp x) :string)
+        ((%php-object-table-p x) :object)
         ((hash-table-p x) :array)
         (t (type-of x))))
 
@@ -163,6 +260,14 @@
       (setf (php-ref-value ref) new-value)
       new-value))
 
+(defun %php-pipe (value callable)
+  "Apply PHP 8.5 pipe operator VALUE |> CALLABLE."
+  (let ((fn (%php-callable-function callable)))
+    (if fn
+        (funcall fn value)
+        (%php-throw 'type-error
+                    "Pipe operator RHS must be a valid callable"))))
+
 ;;; -----------------------------------------------------------------------
 ;;;  foreach by-reference iteration
 ;;; -----------------------------------------------------------------------
@@ -171,15 +276,16 @@
   "Iterate PHP ordered array ARR calling BODY-FN(box key) for each element.
 BODY-FN receives a ref box wrapping the current value and the key.
 After BODY-FN returns the box is written back to the array (mutations propagate)."
-  (when (hash-table-p arr)
-    (dolist (key (gethash +php-array-order-key+ arr))
-      (let* ((current-val (gethash key arr +php-null+))
-             (box (%php-make-ref current-val)))
-        (funcall body-fn box key)
-        ;; Write back mutations
-        (let ((new-val (%php-deref box)))
-          (unless (eq new-val current-val)
-            (setf (gethash key arr) new-val))))))
+  (let ((fn (%php-callable-function body-fn)))
+    (when (and fn (hash-table-p arr))
+      (dolist (key (gethash +php-array-order-key+ arr))
+        (let* ((current-val (gethash key arr +php-null+))
+               (box (%php-make-ref current-val)))
+          (funcall fn box key)
+          ;; Write back mutations
+          (let ((new-val (%php-deref box)))
+            (unless (eq new-val current-val)
+              (setf (gethash key arr) new-val)))))))
   +php-null+)
 
 ;;; -----------------------------------------------------------------------
@@ -206,6 +312,35 @@ executes in the right VM context."
          (and (hash-table-p class)
               (cl-cc/vm::%vm-slot-vector-index class name-sym)
               t))))
+
+(defun %php-clone (instance)
+  "Return PHP's shallow object clone. The parser is responsible for invoking a
+class-defined __clone method on the copied object so the call stays inside the
+normal VM method-dispatch path."
+  (handler-case
+      (cl-cc/vm::copy-instance instance)
+    (error (condition)
+      (error "Cannot clone non-object value ~S: ~A" instance condition))))
+
+(defun %php-clone-with-slot (property)
+  "Map a PHP clone-with property key to the VM slot symbol used by class fields."
+  (intern (string-upcase (%php-stringify property)) (find-package :cl-cc/php)))
+
+(defun %php-clone-with (instance overrides)
+  "Apply PHP 8.5 clone-with property OVERRIDES to already-cloned INSTANCE."
+  (unless (hash-table-p overrides)
+    (%php-throw 'type-error "clone-with overrides must be an array"))
+  (dolist (pair (%php-array-pairs overrides) instance)
+    (let* ((slot (%php-clone-with-slot (car pair)))
+           (class (and (cl-cc/vm::%vm-vector-instance-p instance)
+                       (aref instance 0)))
+           (index (and class
+                       (cl-cc/vm::%vm-slot-vector-index class slot))))
+      (unless (and index (< index (length instance)))
+        (%php-throw 'error
+                    (format nil "The slot ~S is missing from the cloned object"
+                            slot)))
+      (setf (aref instance index) (cdr pair)))))
 
 (defun %php-generator-p (x) (php-generator-p x))
 
@@ -428,6 +563,14 @@ preserved), otherwise numeric addition with operand coercion."
   (if (and (hash-table-p a) (hash-table-p b))
       (%php-array-union a b)
       (+ (%php-numeric a) (%php-numeric b))))
+
+(defun %php-unary-plus (value)
+  "PHP unary + with the same numeric coercion used by arithmetic operands."
+  (%php-numeric value))
+
+(defun %php-unary-minus (value)
+  "PHP unary - with the same numeric coercion used by arithmetic operands."
+  (- (%php-numeric value)))
 
 (defun %php-sub (a b) "PHP - with operand coercion." (- (%php-numeric a) (%php-numeric b)))
 (defun %php-mul (a b) "PHP * with operand coercion." (* (%php-numeric a) (%php-numeric b)))
@@ -781,12 +924,3 @@ etc. work). The previous CL list broke count()/array builtins."
     (if (%php-null-p case)
         (%php-throw 'value-error (format nil "No enum case for value ~S" value))
         case)))
-
-(defparameter *php-builtin-map*
-  `(("count" . ,#'%php-count)
-    ("strlen" . ,#'%php-strlen)
-    ("strtolower" . ,#'%php-strtolower)
-    ("strtoupper" . ,#'%php-strtoupper)
-    ("isset" . ,#'%php-isset)
-    ("array_key_exists" . ,#'%php-array-key-exists))
-  "Map PHP builtin names to runtime helper functions.")

@@ -121,7 +121,6 @@ Each side exit spawns a child trace."
 ;;; ──── Trace memory allocation ────
 (defun allocate-trace-memory (size)
   "Allocate SIZE bytes of executable memory for a compiled trace."
-  #+sbcl
   (sb-posix:mmap nil (max size 4096)
                  (logior sb-posix:prot-read
                          sb-posix:prot-write
@@ -129,5 +128,3 @@ Each side exit spawns a child trace."
                  (logior sb-posix:map-private
                          sb-posix:map-anonymous)
                  -1 0)
-  #-sbcl
-  (error "allocate-trace-memory requires SBCL"))

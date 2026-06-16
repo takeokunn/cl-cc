@@ -48,21 +48,17 @@ AArch64: LDR Wzr, [safepoint-address] (4 bytes)."
 (defun init-safepoint-page ()
   "Allocate and protect the safepoint polling page.
 The GC makes this page unreadable to trigger SEGV at safepoints."
-  #+sbcl
   (let ((page (sb-posix:mmap nil 4096
                               (logior sb-posix:prot-read sb-posix:prot-write)
                               (logior sb-posix:map-private sb-posix:map-anonymous)
                               -1 0)))
     (setf *safepoint-page-address* (sb-sys:sap-int page))
     (sb-posix:mprotect page 4096 sb-posix:prot-none) ; start protected
-    page)
-  #-sbcl
-  (setf *safepoint-page-address* 0))
+    page))
 
 (defun arm-safepoint ()
   "Make the safepoint page readable (arm the safepoint mechanism)."
   (when *safepoint-page-address*
-    #+sbcl
     (sb-posix:mprotect (sb-sys:int-sap *safepoint-page-address*)
                        4096
                        (logior sb-posix:prot-read))
@@ -71,7 +67,6 @@ The GC makes this page unreadable to trigger SEGV at safepoints."
 (defun disarm-safepoint ()
   "Make the safepoint page unreadable (disarm — no polls trigger)."
   (when *safepoint-page-address*
-    #+sbcl
     (sb-posix:mprotect (sb-sys:int-sap *safepoint-page-address*)
                        4096
                        sb-posix:prot-none)
@@ -105,5 +100,4 @@ The GC makes this page unreadable to trigger SEGV at safepoints."
 ;;; ──── Atomic increment helper ────
 (defun atomic-incf (place)
   "Atomically increment PLACE by 1. Uses SBCL atomic-incf if available."
-  #+sbcl (sb-ext:atomic-incf place)
-  #-sbcl (incf place))
+  (sb-ext:atomic-incf place))

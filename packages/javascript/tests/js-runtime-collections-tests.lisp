@@ -10,6 +10,22 @@
 
 ;;; ─── Set built-ins ───────────────────────────────────────────────────────────
 
+(defun %jr-set-like (&rest values)
+  (let ((entries (make-array (length values)
+                             :element-type t
+                             :adjustable t
+                             :fill-pointer (length values)
+                             :initial-contents values)))
+    (cl-cc/javascript::%js-make-object
+     "size" (length values)
+     "has" (lambda (candidate &rest _)
+             (declare (ignore _))
+             (loop for value across entries
+                   thereis (cl-cc/javascript::%js-same-value-zero value candidate)))
+     "keys" (lambda (&rest _)
+              (declare (ignore _))
+              entries))))
+
 (deftest js-rt-set-basic
   "add/has/delete/size/clear on a set."
   (let ((s (%jr-set 1 2 3)))
@@ -21,6 +37,27 @@
     (cl-cc/javascript::%js-set-clear s)
     (assert-= 0 (cl-cc/javascript::%js-set-size s))))
 
+(deftest js-rt-set-same-value-zero-values
+  "Set values use SameValueZero: NaN matches NaN, and +0/-0 are one value."
+  (let ((nan-a cl-cc/javascript::*js-nan-float*)
+        (nan-b cl-cc/javascript::+js-nan+)
+        (s (cl-cc/javascript::%js-make-set)))
+    (cl-cc/javascript::%js-set-add s nan-a)
+    (assert-true (cl-cc/javascript::%js-set-has s nan-b))
+    (cl-cc/javascript::%js-set-add s nan-b)
+    (assert-= 1 (cl-cc/javascript::%js-set-size s))
+    (assert-true (cl-cc/javascript::%js-set-delete s nan-b))
+    (assert-= 0 (cl-cc/javascript::%js-set-size s))
+    (cl-cc/javascript::%js-set-add s 0.0d0)
+    (cl-cc/javascript::%js-set-add s -0.0d0)
+    (assert-= 1 (cl-cc/javascript::%js-set-size s))
+    (assert-true (cl-cc/javascript::%js-set-has s 0.0d0))
+    (assert-true (cl-cc/javascript::%js-set-has s -0.0d0))
+    (let ((with-nan (%jr-set nan-b 1)))
+      (cl-cc/javascript::%js-set-add s nan-a)
+      (assert-false (cl-cc/javascript::%js-set-is-disjoint-from s with-nan))
+      (assert-true (cl-cc/javascript::%js-set-is-superset-of s (%jr-set nan-b -0.0d0))))))
+
 (deftest js-rt-set-union
   "union produces a set containing elements of both."
   (let* ((a (%jr-set 1 2))
@@ -29,6 +66,14 @@
     (assert-= 3 (cl-cc/javascript::%js-set-size u))
     (assert-true (cl-cc/javascript::%js-set-has u 1))
     (assert-true (cl-cc/javascript::%js-set-has u 3))))
+
+(deftest js-rt-set-union-set-like
+  "union accepts a set-like object with size/has/keys."
+  (let* ((a (%jr-set 1 2))
+         (b (%jr-set-like 2 3))
+         (u (cl-cc/javascript::%js-set-union a b)))
+    (assert-equal '(1 2 3)
+                  (%jr-list (cl-cc/javascript::%js-set-keys u)))))
 
 (deftest js-rt-set-intersection
   "intersection contains only elements in both."
@@ -47,6 +92,20 @@
     (assert-= 2 (cl-cc/javascript::%js-set-size d))
     (assert-false (cl-cc/javascript::%js-set-has d 2))))
 
+(deftest js-rt-set-filter-ops-set-like
+  "intersection/difference/symmetricDifference accept set-like objects."
+  (let* ((a (%jr-set 1 2 3))
+         (b (%jr-set-like 2 4))
+         (intersection (cl-cc/javascript::%js-set-intersection a b))
+         (difference (cl-cc/javascript::%js-set-difference a b))
+         (symmetric (cl-cc/javascript::%js-set-symmetric-difference a b)))
+    (assert-equal '(2)
+                  (%jr-list (cl-cc/javascript::%js-set-keys intersection)))
+    (assert-equal '(1 3)
+                  (%jr-list (cl-cc/javascript::%js-set-keys difference)))
+    (assert-equal '(1 3 4)
+                  (%jr-list (cl-cc/javascript::%js-set-keys symmetric)))))
+
 (deftest js-rt-set-subset-disjoint
   "is-subset-of and is-disjoint-from."
   (let ((a (%jr-set 1 2))
@@ -56,6 +115,19 @@
     (assert-false (cl-cc/javascript::%js-set-is-subset-of   b a))
     (assert-true  (cl-cc/javascript::%js-set-is-disjoint-from a c))
     (assert-false (cl-cc/javascript::%js-set-is-disjoint-from a b))))
+
+(deftest js-rt-set-predicates-set-like
+  "Set predicates accept set-like objects."
+  (let ((a (%jr-set 1 2))
+        (b (%jr-set-like 1 2 3))
+        (c (%jr-set 1 2 3))
+        (d (%jr-set-like 2 3))
+        (e (%jr-set-like 4 5))
+        (f (%jr-set-like 2 5)))
+    (assert-true (cl-cc/javascript::%js-set-is-subset-of a b))
+    (assert-true (cl-cc/javascript::%js-set-is-superset-of c d))
+    (assert-true (cl-cc/javascript::%js-set-is-disjoint-from a e))
+    (assert-false (cl-cc/javascript::%js-set-is-disjoint-from a f))))
 
 ;;; ─── Iterator helpers ────────────────────────────────────────────────────────
 
@@ -202,6 +274,25 @@
     (cl-cc/javascript::%js-map-delete m "k")
     (assert-= 0 (cl-cc/javascript::%js-map-size m))))
 
+(deftest js-rt-map-same-value-zero-keys
+  "Map keys use SameValueZero: NaN matches NaN, and +0/-0 are one key."
+  (let ((nan-a cl-cc/javascript::*js-nan-float*)
+        (nan-b cl-cc/javascript::+js-nan+)
+        (m (cl-cc/javascript::%js-make-map)))
+    (cl-cc/javascript::%js-map-set m nan-a "first")
+    (assert-true (cl-cc/javascript::%js-map-has m nan-b))
+    (assert-string= "first" (cl-cc/javascript::%js-map-get m nan-b))
+    (cl-cc/javascript::%js-map-set m nan-b "second")
+    (assert-= 1 (cl-cc/javascript::%js-map-size m))
+    (assert-string= "second" (cl-cc/javascript::%js-map-get m nan-a))
+    (assert-true (cl-cc/javascript::%js-map-delete m nan-b))
+    (assert-= 0 (cl-cc/javascript::%js-map-size m))
+    (cl-cc/javascript::%js-map-set m 0.0d0 "zero")
+    (cl-cc/javascript::%js-map-set m -0.0d0 "neg-zero")
+    (assert-= 1 (cl-cc/javascript::%js-map-size m))
+    (assert-string= "neg-zero" (cl-cc/javascript::%js-map-get m 0.0d0))
+    (assert-string= "neg-zero" (cl-cc/javascript::%js-map-get m -0.0d0))))
+
 (deftest js-rt-map-for-each-order
   "Map.forEach visits entries in insertion order."
   (let ((m    (cl-cc/javascript::%js-make-map))
@@ -312,12 +403,14 @@ plain number via truncate — the key invariant behind define-js-bigint-binop."
 ;;; ─── AggregateError / WeakRef / RegExp.escape ────────────────────────────────
 
 (deftest js-rt-aggregate-error-make
-  "%js-make-aggregate-error creates an object with message and errors."
+  "%js-make-aggregate-error creates an AggregateError instance with message and errors."
   (let* ((errs (%jr-arr "e1" "e2"))
          (obj  (cl-cc/javascript::%js-make-aggregate-error errs "some errors")))
     (assert-string= "some errors"    (gethash "message" obj))
     (assert-string= "AggregateError" (gethash "name"    obj))
-    (assert-eq errs                  (gethash "errors"  obj))))
+    (assert-eq errs                  (gethash "errors"  obj))
+    (assert-true (cl-cc/javascript::%js-instanceof
+                  obj cl-cc/javascript::*js-aggregate-error-class*))))
 
 (deftest js-rt-weak-ref-make-deref
   "%js-make-weak-ref / %js-weak-ref-deref round-trips the target."
@@ -326,11 +419,21 @@ plain number via truncate — the key invariant behind define-js-bigint-binop."
          (dereffed (cl-cc/javascript::%js-weak-ref-deref wr)))
     (assert-eq target dereffed)))
 
+(deftest js-rt-weak-ref-deref-method
+  "WeakRef.prototype.deref resolves to a bound method."
+  (let* ((target (cl-cc/javascript::%js-make-object "k" 1))
+         (wr     (cl-cc/javascript::%js-make-weak-ref target))
+         (deref  (cl-cc/javascript::%js-get-prop wr "deref")))
+    (assert-eq target (funcall deref))))
+
 (deftest js-rt-regexp-escape
-  "%js-regexp-escape escapes regex-special chars in a string."
-  (let ((result (cl-cc/javascript::%js-regexp-escape "a.b+c?")))
-    (assert-true (cl-cc/javascript::%js-string-includes result "\\."))
-    (assert-true (cl-cc/javascript::%js-string-includes result "\\+"))))
+  "%js-regexp-escape follows the ES2025 escaping rules."
+  (assert-string= "\\x61\\.b\\+c\\?"
+                  (cl-cc/javascript::%js-regexp-escape "a.b+c?"))
+  (assert-string= "\\x66oo\\x2Dbar"
+                  (cl-cc/javascript::%js-regexp-escape "foo-bar"))
+  (assert-string= "\\x20\\n\\t"
+                  (cl-cc/javascript::%js-regexp-escape (format nil " ~%~C" #\Tab))))
 
 ;;; ─── Map iterators — keys / values / entries ─────────────────────────────────
 
@@ -394,12 +497,31 @@ plain number via truncate — the key invariant behind define-js-bigint-binop."
     (cl-cc/javascript::%js-weak-set-delete ws obj)
     (assert-false (cl-cc/javascript::%js-weak-set-has ws obj))))
 
-;;; ─── FinalizationRegistry (stub) ─────────────────────────────────────────────
+;;; ─── FinalizationRegistry ────────────────────────────────────────────────────
 
-(deftest js-rt-finalization-registry-stub
-  "FinalizationRegistry register/unregister are no-ops returning undefined/nil."
-  (let* ((reg (cl-cc/javascript::%js-make-finalization-registry (lambda (hv) (declare (ignore hv)))))
-         (tgt (cl-cc/javascript::%js-make-object)))
+(deftest js-rt-finalization-registry-register-unregister
+  "FinalizationRegistry tracks unregister tokens deterministically."
+  (let* ((reg    (cl-cc/javascript::%js-make-finalization-registry (lambda (hv) (declare (ignore hv)))))
+         (tgt    (cl-cc/javascript::%js-make-object))
+         (token  (cl-cc/javascript::%js-make-object "token" t))
+         (token2 (cl-cc/javascript::%js-make-object "token" 2)))
     (assert-eq cl-cc/javascript::+js-undefined+
-               (cl-cc/javascript::%js-finreg-register reg tgt "held"))
-    (assert-false (cl-cc/javascript::%js-finreg-unregister reg "token"))))
+               (cl-cc/javascript::%js-finreg-register reg tgt "held" token))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-finreg-register reg tgt "held-again" token))
+    (assert-eq cl-cc/javascript::+js-undefined+
+               (cl-cc/javascript::%js-finreg-register reg tgt "held-without-token"))
+    (assert-false (cl-cc/javascript::%js-finreg-unregister reg token2))
+    (assert-true  (cl-cc/javascript::%js-finreg-unregister reg token))
+    (assert-false (cl-cc/javascript::%js-finreg-unregister reg token))))
+
+(deftest js-rt-finalization-registry-methods
+  "FinalizationRegistry.prototype register/unregister resolve to bound methods."
+  (let* ((reg        (cl-cc/javascript::%js-make-finalization-registry (lambda (hv) (declare (ignore hv)))))
+         (tgt        (cl-cc/javascript::%js-make-object))
+         (token      (cl-cc/javascript::%js-make-object))
+         (register   (cl-cc/javascript::%js-get-prop reg "register"))
+         (unregister (cl-cc/javascript::%js-get-prop reg "unregister")))
+    (assert-eq cl-cc/javascript::+js-undefined+ (funcall register tgt "held" token))
+    (assert-true  (funcall unregister token))
+    (assert-false (funcall unregister token))))

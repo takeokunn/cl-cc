@@ -35,7 +35,8 @@
           ("absent"   :no-such-feature nil))
   (feature expected)
   (let ((*features* '(:sbcl :common-lisp)))
-    (assert-equal expected (if (cl-cc/parse::lex-feature-present-p feature) t nil))))
+    (assert-parse-boolean-case expected
+      (cl-cc/parse::lex-feature-present-p feature))))
 
 (deftest lex-feature-present-p-or-any-present
   "lex-feature-present-p: :or succeeds when any member is present; fails when none are."

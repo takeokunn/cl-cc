@@ -7,16 +7,8 @@
 
 (defvar *builtin-predicates*)
 
-(defun %make-symbol-dispatch-table (specs)
-  "Build an EQ hash table from SPECS of the shape (symbol handler-symbol).
-
-The specs stay data-only in prolog-data.lisp; this helper resolves handler
-symbols into callable functions when the builtin table is constructed." 
-  (let ((table (make-hash-table :test 'eq)))
-    (dolist (spec specs table)
-      (destructuring-bind (name handler) spec
-        (setf (gethash name table)
-              (symbol-function handler))))))
+(declaim (ftype function subst-for-eval eval-lisp-condition
+                      solve-conjunction solve-goal our-eval))
 
 (defun prolog-cut-handler (args env k)
   (declare (ignore args))
@@ -45,18 +37,32 @@ symbols into callable functions when the builtin table is constructed."
   (when (eval-lisp-condition (first args) env)
     (funcall k env)))
 
-(defun %goal-predicate-and-args (goal)
-  "Return GOAL's predicate and arg list.
-GOAL may be a prolog-goal object or a raw list form."
-  (if (prolog-goal-p goal)
-      (values (goal-predicate goal) (goal-args goal))
-      (values (car goal) (cdr goal))))
+(defun subst-for-eval (form env)
+  "Like logic-substitute, but wraps substituted non-self-evaluating symbols in
+   (quote ...) so they survive CL eval, and skips (quote ...) forms."
+  (cond
+    ((logic-var-p form)
+     (let ((val (logic-substitute form env)))
+       (if (logic-var-p val)
+           val
+           (if (and (symbolp val) val (not (keywordp val)))
+               `(quote ,val)
+               val))))
+    ((and (consp form) (eq (car form) 'quote))
+     form)
+    ((consp form)
+     (cons (subst-for-eval (car form) env)
+           (subst-for-eval (cdr form) env)))
+    (t form)))
 
-(defun %atomic-cut-goal-p (goal)
-  "Return true when GOAL denotes the cut operator as a bare atom."
-  (and (symbolp goal)
-       (not (prolog-goal-p goal))
-       (string= (symbol-name goal) "!")))
+(defun eval-lisp-condition (condition env)
+  "Evaluate a Lisp condition embedded in Prolog rules."
+  (handler-case
+      (let ((substituted (subst-for-eval condition env)))
+        (typecase substituted
+          (cons (our-eval substituted))
+          (t substituted)))
+    (error () nil)))
 
 (defun %invoke-builtin-goal (predicate args env k)
   "Invoke the built-in predicate handler for PREDICATE, if one exists."
@@ -65,32 +71,6 @@ GOAL may be a prolog-goal object or a raw list form."
       (funcall builtin args env k)
       t)))
 
-(defun %solve-prolog-rule (rule args env k)
-  "Attempt to solve RULE against ARGS and call K for each matching environment."
-  (let* ((fresh-rule (rename-variables rule))
-         (head (rule-head fresh-rule))
-         (body (rule-body fresh-rule))
-         (new-env (unify args (cdr head) env)))
-    (unless (unify-failed-p new-env)
-      (handler-case
-          (let ((result (if body
-                            (solve-conjunction body new-env k)
-                            (funcall k new-env))))
-            (when (eq result :cut)
-              (return-from %solve-prolog-rule :cut)))
-        (prolog-cut ()
-          (return-from %solve-prolog-rule :cut))))))
-
-(defun %make-builtin-predicates ()
-  "Build the built-in predicate dispatch hash table from *builtin-predicate-specs*.
-*builtin-predicate-specs* is defined in prolog-data.lisp, which loads before this file."
-  (%make-symbol-dispatch-table *builtin-predicate-specs*))
-
 (eval-when (:load-toplevel :execute)
-  (setf *builtin-predicates* (%make-builtin-predicates)))
-
-;;; Declarative built-in predicates and type rules.
-;;; Each macro generates def-rule forms from data tables in prolog-data.lisp.
-
-(define-prolog-declarative-rules)
-(define-prolog-type-rules-from-spec)
+  (setf *builtin-predicates*
+        (make-builtin-predicate-table *builtin-predicate-specs*)))

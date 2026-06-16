@@ -41,8 +41,6 @@
    #:*symbol-macro-table*
     #:*compiler-macro-table*
     #:*deftransform-table*
-    #:*macroexpand-step-cache*
-    #:*macroexpand-all-cache*
     #:register-deftransform
     #:lookup-deftransform
     #:deftransform
@@ -55,7 +53,6 @@
 
    ;; --- expander.lisp --- compiler macro expansion --------------------
     #:compiler-macroexpand-all
-    #:pragma
 
    ;; --- control-flow macros ------------------------------------------
     #:dolist
@@ -74,12 +71,6 @@
    #:lambda-list-has-typed-p
    #:strip-typed-params
    #:lambda-list-info-environment
-
-   ;; --- FR-351 MC/DC coverage support ---------------------------------
-    #:*mcdc-coverage-enabled*
-    #:*mcdc-coverage-data*
-    #:%mcdc-eval-and
-    #:%mcdc-eval-or
 
    ;; --- macros used via run-string (need umbrella re-export) ---------
    #:defun/c
@@ -104,13 +95,7 @@
    #:memoize-stats
    #:memoize-clear
    #:*memoize-registry*
-    ;; --- FR-153 / FR-241: macro expansion memoization + tracing ----------
-    #:*enable-macro-memoization*
-    #:*macro-expansion-cache*
-    #:clear-macro-expansion-cache
-    #:*trace-macros*
-    #:*macro-expand-depth*
-    ;; --- FR-130: perfect hash tables (exported for testing) -------------
+   ;; --- FR-130: perfect hash tables (exported for testing) -------------
     #:*compiler-special-forms-table*
     #:*all-builtin-names-table*
     #:*binary-builtins-table*

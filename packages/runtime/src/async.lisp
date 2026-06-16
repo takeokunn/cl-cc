@@ -56,26 +56,18 @@
   `(lambda ,lambda-list
      (rt-async ,@body)))
 
-(defmacro async-lambda (lambda-list &body body)
-  "Alias for RT-ASYNC-LAMBDA."
-  `(rt-async-lambda ,lambda-list ,@body))
-
 (defmacro rt-async-defun (name lambda-list &body body)
   "Define NAME as an async function returning a future."
   `(defun ,name ,lambda-list
      (rt-async ,@body)))
 
-(defmacro async-defun (name lambda-list &body body)
-  "Alias for RT-ASYNC-DEFUN."
-  `(rt-async-defun ,name ,lambda-list ,@body))
-
 (defun %rt-await-form-p (form)
-  (and (consp form) (member (car form) '(rt-await await) :test #'eq)))
+  (and (consp form) (eq (car form) 'rt-await)))
 
 (defun rt-async-cps-transform (form continuation)
   "Transform a small async expression FORM into continuation-passing style.
 This helper is intentionally conservative: it handles atoms, PROGN, LET, IF,
-and AWAIT forms, and leaves other function calls in direct style after their
+and RT-AWAIT forms, and leaves other function calls in direct style after their
 arguments have been transformed by the compiler front-end."
   (cond
     ((%rt-await-form-p form)
@@ -128,11 +120,3 @@ arguments have been transformed by the compiler front-end."
 (defun rt-async-recv (channel)
   "Asynchronously receive from CHANNEL, returning a future."
   (rt-async (rt-channel-recv channel)))
-
-(defmacro await (future-form &key timeout)
-  "Alias for RT-AWAIT."
-  `(rt-await ,future-form :timeout ,timeout))
-
-(defmacro async (&body body)
-  "Alias for RT-ASYNC."
-  `(rt-async ,@body))

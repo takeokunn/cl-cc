@@ -852,26 +852,250 @@ force-broken into WIDTH-sized pieces (otherwise it overflows its own line)."
                    (when (not (char= (char s (+ i 3)) #\=))
                      (write-char (code-char b2) out))))))))
 
+(defparameter +php-md5-shift-amounts+
+  #(7 12 17 22 7 12 17 22 7 12 17 22 7 12 17 22
+    5 9 14 20 5 9 14 20 5 9 14 20 5 9 14 20
+    4 11 16 23 4 11 16 23 4 11 16 23 4 11 16 23
+    6 10 15 21 6 10 15 21 6 10 15 21 6 10 15 21))
+
+(defparameter +php-md5-round-constants+
+  #(#xd76aa478 #xe8c7b756 #x242070db #xc1bdceee
+    #xf57c0faf #x4787c62a #xa8304613 #xfd469501
+    #x698098d8 #x8b44f7af #xffff5bb1 #x895cd7be
+    #x6b901122 #xfd987193 #xa679438e #x49b40821
+    #xf61e2562 #xc040b340 #x265e5a51 #xe9b6c7aa
+    #xd62f105d #x02441453 #xd8a1e681 #xe7d3fbc8
+    #x21e1cde6 #xc33707d6 #xf4d50d87 #x455a14ed
+    #xa9e3e905 #xfcefa3f8 #x676f02d9 #x8d2a4c8a
+    #xfffa3942 #x8771f681 #x6d9d6122 #xfde5380c
+    #xa4beea44 #x4bdecfa9 #xf6bb4b60 #xbebfbc70
+    #x289b7ec6 #xeaa127fa #xd4ef3085 #x04881d05
+    #xd9d4d039 #xe6db99e5 #x1fa27cf8 #xc4ac5665
+    #xf4292244 #x432aff97 #xab9423a7 #xfc93a039
+    #x655b59c3 #x8f0ccc92 #xffeff47d #x85845dd1
+    #x6fa87e4f #xfe2ce6e0 #xa3014314 #x4e0811a1
+    #xf7537e82 #xbd3af235 #x2ad7d2bb #xeb86d391))
+
+(defun %php-u32 (value)
+  (logand value #xffffffff))
+
+(defun %php-rol32 (value count)
+  (let ((value (%php-u32 value)))
+    (%php-u32 (logior (ash value count)
+                      (ash value (- count 32))))))
+
+(defun %php-string-bytes (value)
+  "Return VALUE as a vector of PHP string bytes."
+  (let* ((string (%php-stringify value))
+         (bytes (make-array (length string) :element-type '(unsigned-byte 8))))
+    (loop for i from 0 below (length string)
+          do (setf (aref bytes i) (logand (char-code (char string i)) #xff)))
+    bytes))
+
+(defun %php-byte-vector-hex (bytes)
+  (let ((alphabet "0123456789abcdef"))
+    (with-output-to-string (out)
+      (loop for byte across bytes
+            for value = (logand byte #xff)
+            do (write-char (char alphabet (ash value -4)) out)
+               (write-char (char alphabet (logand value #x0f)) out)))))
+
+(defun %php-digest-result (bytes raw)
+  (if raw
+      (with-output-to-string (out)
+        (loop for byte across bytes
+              do (write-char (code-char byte) out)))
+      (%php-byte-vector-hex bytes)))
+
+(defun %php-md5-padding (input)
+  (let* ((length (length input))
+         (bit-length (* length 8))
+         (padded-length (+ length 1 8)))
+    (loop while (/= (mod padded-length 64) 0)
+          do (incf padded-length))
+    (let ((bytes (make-array padded-length
+                             :element-type '(unsigned-byte 8)
+                             :initial-element 0)))
+      (replace bytes input)
+      (setf (aref bytes length) #x80)
+      (loop for i from 0 below 8
+            do (setf (aref bytes (+ (- padded-length 8) i))
+                     (logand (ash bit-length (* -8 i)) #xff)))
+      bytes)))
+
+(defun %php-read-u32-le (bytes index)
+  (%php-u32 (logior (aref bytes index)
+                    (ash (aref bytes (+ index 1)) 8)
+                    (ash (aref bytes (+ index 2)) 16)
+                    (ash (aref bytes (+ index 3)) 24))))
+
+(defun %php-write-u32-le (bytes index value)
+  (let ((value (%php-u32 value)))
+    (loop for i from 0 below 4
+          do (setf (aref bytes (+ index i))
+                   (logand (ash value (* -8 i)) #xff)))))
+
+(defun %php-md5-bytes (input)
+  (let ((a0 #x67452301)
+        (b0 #xefcdab89)
+        (c0 #x98badcfe)
+        (d0 #x10325476)
+        (bytes (%php-md5-padding input)))
+    (loop for offset from 0 below (length bytes) by 64
+          do (let ((words (make-array 16)))
+               (loop for i from 0 below 16
+                     do (setf (aref words i)
+                              (%php-read-u32-le bytes (+ offset (* i 4)))))
+               (let ((a a0)
+                     (b b0)
+                     (c c0)
+                     (d d0))
+                 (loop for i from 0 below 64
+                       do (multiple-value-bind (f g)
+                              (cond ((< i 16)
+                                     (values (%php-u32 (logior (logand b c)
+                                                               (logand (lognot b) d)))
+                                             i))
+                                    ((< i 32)
+                                     (values (%php-u32 (logior (logand d b)
+                                                               (logand (lognot d) c)))
+                                             (mod (+ (* 5 i) 1) 16)))
+                                    ((< i 48)
+                                     (values (%php-u32 (logxor b c d))
+                                             (mod (+ (* 3 i) 5) 16)))
+                                    (t
+                                     (values (%php-u32 (logxor c (logior b (lognot d))))
+                                             (mod (* 7 i) 16))))
+                            (let ((new-b (%php-u32
+                                          (+ b (%php-rol32
+                                                (+ a f
+                                                   (aref +php-md5-round-constants+ i)
+                                                   (aref words g))
+                                                (aref +php-md5-shift-amounts+ i))))))
+                              (setf a d
+                                    d c
+                                    c b
+                                    b new-b))))
+                 (setf a0 (%php-u32 (+ a0 a))
+                       b0 (%php-u32 (+ b0 b))
+                       c0 (%php-u32 (+ c0 c))
+                       d0 (%php-u32 (+ d0 d))))))
+    (let ((digest (make-array 16 :element-type '(unsigned-byte 8))))
+      (%php-write-u32-le digest 0 a0)
+      (%php-write-u32-le digest 4 b0)
+      (%php-write-u32-le digest 8 c0)
+      (%php-write-u32-le digest 12 d0)
+      digest)))
+
+(defun %php-sha1-padding (input)
+  (let* ((length (length input))
+         (bit-length (* length 8))
+         (padded-length (+ length 1 8)))
+    (loop while (/= (mod padded-length 64) 0)
+          do (incf padded-length))
+    (let ((bytes (make-array padded-length
+                             :element-type '(unsigned-byte 8)
+                             :initial-element 0)))
+      (replace bytes input)
+      (setf (aref bytes length) #x80)
+      (loop for i from 0 below 8
+            do (setf (aref bytes (- padded-length 1 i))
+                     (logand (ash bit-length (* -8 i)) #xff)))
+      bytes)))
+
+(defun %php-read-u32-be (bytes index)
+  (%php-u32 (logior (ash (aref bytes index) 24)
+                    (ash (aref bytes (+ index 1)) 16)
+                    (ash (aref bytes (+ index 2)) 8)
+                    (aref bytes (+ index 3)))))
+
+(defun %php-write-u32-be (bytes index value)
+  (let ((value (%php-u32 value)))
+    (loop for i from 0 below 4
+          do (setf (aref bytes (+ index i))
+                   (logand (ash value (* -8 (- 3 i))) #xff)))))
+
+(defun %php-sha1-bytes (input)
+  (let ((h0 #x67452301)
+        (h1 #xefcdab89)
+        (h2 #x98badcfe)
+        (h3 #x10325476)
+        (h4 #xc3d2e1f0)
+        (bytes (%php-sha1-padding input)))
+    (loop for offset from 0 below (length bytes) by 64
+          do (let ((words (make-array 80 :initial-element 0)))
+               (loop for i from 0 below 16
+                     do (setf (aref words i)
+                              (%php-read-u32-be bytes (+ offset (* i 4)))))
+               (loop for i from 16 below 80
+                     do (setf (aref words i)
+                              (%php-rol32 (logxor (aref words (- i 3))
+                                                  (aref words (- i 8))
+                                                  (aref words (- i 14))
+                                                  (aref words (- i 16)))
+                                          1)))
+               (let ((a h0)
+                     (b h1)
+                     (c h2)
+                     (d h3)
+                     (e h4))
+                 (loop for i from 0 below 80
+                       do (multiple-value-bind (f k)
+                              (cond ((< i 20)
+                                     (values (%php-u32 (logior (logand b c)
+                                                               (logand (lognot b) d)))
+                                             #x5a827999))
+                                    ((< i 40)
+                                     (values (%php-u32 (logxor b c d))
+                                             #x6ed9eba1))
+                                    ((< i 60)
+                                     (values (%php-u32 (logior (logand b c)
+                                                               (logand b d)
+                                                               (logand c d)))
+                                             #x8f1bbcdc))
+                                    (t
+                                     (values (%php-u32 (logxor b c d))
+                                             #xca62c1d6)))
+                            (let ((temp (%php-u32 (+ (%php-rol32 a 5)
+                                                     f e k (aref words i)))))
+                              (setf e d
+                                    d c
+                                    c (%php-rol32 b 30)
+                                    b a
+                                    a temp))))
+                 (setf h0 (%php-u32 (+ h0 a))
+                       h1 (%php-u32 (+ h1 b))
+                       h2 (%php-u32 (+ h2 c))
+                       h3 (%php-u32 (+ h3 d))
+                       h4 (%php-u32 (+ h4 e))))))
+    (let ((digest (make-array 20 :element-type '(unsigned-byte 8))))
+      (%php-write-u32-be digest 0 h0)
+      (%php-write-u32-be digest 4 h1)
+      (%php-write-u32-be digest 8 h2)
+      (%php-write-u32-be digest 12 h3)
+      (%php-write-u32-be digest 16 h4)
+      digest)))
+
 (defun %php-md5 (str &optional raw)
-  "PHP md5: return MD5 hash (simplified — returns a placeholder)."
-  (declare (ignore raw))
-  ;; Real MD5 would require a crypto library; return a deterministic placeholder
-  (let ((s (%php-stringify str)))
-    (format nil "~32,'0X" (mod (loop for ch across s sum (char-code ch)) #x100000000000000000000000000000000))))
+  "PHP md5: return the MD5 hash of STR."
+  (%php-digest-result (%php-md5-bytes (%php-string-bytes str)) raw))
 
 (defun %php-sha1 (str &optional raw)
-  "PHP sha1: simplified placeholder."
-  (declare (ignore raw))
-  (let ((s (%php-stringify str)))
-    (format nil "~40,'0X" (mod (loop for ch across s sum (* (char-code ch) 31)) #x10000000000000000000000000000000000000000))))
+  "PHP sha1: return the SHA1 hash of STR."
+  (%php-digest-result (%php-sha1-bytes (%php-string-bytes str)) raw))
 
 (defun %php-crc32 (str)
-  "PHP crc32: CRC-32 checksum (simplified)."
+  "PHP crc32: CRC-32 checksum."
   (let ((crc #xFFFFFFFF))
-    (loop for ch across (%php-stringify str)
-          do (setf crc (logxor (ash crc -8)
-                               (logand (logxor (logand crc #xFF) (char-code ch)) #xFF))))
-    (logxor crc #xFFFFFFFF)))
+    (loop for byte across (%php-string-bytes str)
+          do (setf crc (logxor crc byte))
+             (loop repeat 8
+                   do (setf crc
+                            (%php-u32
+                             (if (logbitp 0 crc)
+                                 (logxor (ash crc -1) #xedb88320)
+                                 (ash crc -1))))))
+    (%php-u32 (logxor crc #xFFFFFFFF))))
 
 (defun %php-urlencode (str)
   "PHP urlencode: percent-encode a string."
@@ -1016,9 +1240,7 @@ escapes (CL has no \\t escape), so it read as the letters \"trnfv\" — which me
 
 (defun %php-bin2hex (string)
   "PHP bin2hex: convert STRING to hex representation."
-  (with-output-to-string (out)
-    (loop for ch across (%php-stringify string)
-          do (format out "~2,'0x" (char-code ch)))))
+  (%php-byte-vector-hex (%php-string-bytes string)))
 
 (defun %php-hex2bin (hex)
   "PHP hex2bin: convert HEX string to binary string."
@@ -1111,11 +1333,9 @@ escapes (CL has no \\t escape), so it read as the letters \"trnfv\" — which me
 
 ;;; ─── Edit distance / similarity ──────────────────────────────────────────────
 
-(defun %php-levenshtein (s1 s2)
-  "PHP levenshtein: edit distance between S1 and S2."
-  (let* ((a (%php-stringify s1))
-         (b (%php-stringify s2))
-         (m (length a))
+(defun %php-edit-distance (a b)
+  "Return the Levenshtein distance between two sequences A and B."
+  (let* ((m (length a))
          (n (length b))
          (dp (make-array (list (1+ m) (1+ n)) :initial-element 0)))
     (dotimes (i (1+ m)) (setf (aref dp i 0) i))
@@ -1123,12 +1343,47 @@ escapes (CL has no \\t escape), so it read as the letters \"trnfv\" — which me
     (loop for i from 1 to m do
       (loop for j from 1 to n do
         (setf (aref dp i j)
-              (if (char= (char a (1- i)) (char b (1- j)))
+              (if (equal (elt a (1- i)) (elt b (1- j)))
                   (aref dp (1- i) (1- j))
                   (1+ (min (aref dp (1- i) j)
                            (aref dp i (1- j))
                            (aref dp (1- i) (1- j))))))))
     (aref dp m n)))
+
+(defun %php-levenshtein (s1 s2)
+  "PHP levenshtein: edit distance between S1 and S2."
+  (%php-edit-distance (%php-stringify s1) (%php-stringify s2)))
+
+(defun %php-combining-mark-p (ch)
+  "Return true when CH is in a common Unicode combining mark block."
+  (let ((code (char-code ch)))
+    (or (<= #x0300 code #x036F)
+        (<= #x1AB0 code #x1AFF)
+        (<= #x1DC0 code #x1DFF)
+        (<= #x20D0 code #x20FF)
+        (<= #xFE20 code #xFE2F))))
+
+(defun %php-grapheme-clusters (string)
+  "Split STRING into pragmatic Unicode grapheme clusters for Intl helpers."
+  (let ((clusters nil)
+        (current nil))
+    (labels ((flush-current ()
+               (when current
+                 (push (coerce (nreverse current) 'string) clusters)
+                 (setf current nil))))
+      (loop for ch across (%php-stringify string) do
+        (if (and current (%php-combining-mark-p ch))
+            (push ch current)
+            (progn
+              (flush-current)
+              (setf current (list ch)))))
+      (flush-current))
+    (coerce (nreverse clusters) 'vector)))
+
+(defun %php-grapheme-levenshtein (s1 s2)
+  "PHP 8.5 grapheme_levenshtein: edit distance by grapheme clusters."
+  (%php-edit-distance (%php-grapheme-clusters s1)
+                      (%php-grapheme-clusters s2)))
 
 (defun %php-similar-text (s1 s2 &optional percent-var)
   "PHP similar_text: compute similarity between S1 and S2."
@@ -1535,8 +1790,3 @@ character in MASK."
   (declare (ignore phonemes))
   (let ((s (string-upcase (%php-stringify str))))
     (remove-if-not (lambda (c) (and (alpha-char-p c) (not (find c "AEIOU")))) s)))
-
-(defun %php-nl-langinfo (item)
-  "PHP nl_langinfo: locale information (stub returning empty string)."
-  (declare (ignore item))
-  "")

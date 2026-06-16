@@ -156,7 +156,7 @@
           ("nil-input"   nil nil))
   (expected name)
   (if expected
-      (assert-true  (cl-cc/type::default-numeric-typeclass-p name))
+      (assert-true (cl-cc/type::default-numeric-typeclass-p name))
       (assert-false (cl-cc/type::default-numeric-typeclass-p name))))
 
 ;;; ─── has-typeclass-instance-p ──────────────────────────────────────────────
@@ -250,5 +250,3 @@
   (param-val)
   (let ((param (or param-val (fresh-type-var :name "TestVar"))))
     (assert-true (stringp (cl-cc/type::%typeclass-param-name param)))))
-
-

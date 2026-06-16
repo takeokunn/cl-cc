@@ -18,6 +18,12 @@
 (a hash-table tagged __accessor__ carrying KIND and FN)."
   (and (%js-ht-p v) (gethash "__accessor__" v)))
 
+(defun %js-to-property-key (key)
+  "Coerce KEY to the runtime storage key for a JS property."
+  (if (%js-symbol-p key)
+      (%js-symbol-as-key key)
+      (%js-to-string key)))
+
 (defun %js-object-put-entry (ht k v)
   "Store K -> V in object HT.  A get/set accessor descriptor is routed to the
 internal __get_K / __set_K slot (so a getter and setter on the same key both
@@ -33,7 +39,7 @@ plain own property."
 
 (defun %js-get-prop (obj key)
   "Get property KEY from JS object/array/string."
-  (let ((k (%js-to-string key)))
+  (let ((k (%js-to-property-key key)))
     (cond
       ((%js-vec-p obj)
        (cond
@@ -54,21 +60,23 @@ plain own property."
                 +js-undefined+)))
          (t (%js-method-ref obj k))))
       ((%js-ht-p obj)
-       (let ((getter (gethash (concatenate 'string "__get_" k) obj)))
-         (if getter
-             ;; Accessor property (get v(){...} / Object.defineProperty getter):
-             ;; invoke the getter with `this' = OBJ and return its result.
-             (%js-call-with-this obj getter nil)
-             (multiple-value-bind (val found) (gethash k obj)
-               (cond
-                 ;; An own callable property is a method: return it bound to OBJ so
-                 ;; `this' inside an object-literal method (let o={m(){return this.x}})
-                 ;; resolves to the receiver, matching o.m() semantics.
-                 ((and found (funcall *js-callable-p* val))
-                  (let ((method val) (receiver obj))
-                    (lambda (&rest args) (%js-call-with-this receiver method args))))
-                 (found val)
-                 (t (%js-proto-method-lookup obj k)))))))
+       (if (%js-proxy-object-p obj)
+           (%js-proxy-get obj k obj)
+           (let ((getter (gethash (concatenate 'string "__get_" k) obj)))
+             (if getter
+                 ;; Accessor property (get v(){...} / Object.defineProperty getter):
+                 ;; invoke the getter with `this' = OBJ and return its result.
+                 (%js-call-with-this obj getter nil)
+                 (multiple-value-bind (val found) (gethash k obj)
+                   (cond
+                     ;; An own callable property is a method: return it bound to OBJ so
+                     ;; `this' inside an object-literal method (let o={m(){return this.x}})
+                     ;; resolves to the receiver, matching o.m() semantics.
+                     ((and found (funcall *js-callable-p* val))
+                      (let ((method val) (receiver obj))
+                        (lambda (&rest args) (%js-call-with-this receiver method args))))
+                     (found val)
+                     (t (%js-proto-method-lookup obj k))))))))
       ((eq obj +js-null+) (error "JS TypeError: Cannot read properties of null"))
       ((eq obj +js-undefined+) (error "JS TypeError: Cannot read properties of undefined"))
       ;; All remaining types (Number/Symbol/Promise/Map/WeakMap/WeakSet/etc.)
@@ -79,7 +87,7 @@ plain own property."
 
 (defun %js-set-prop (obj key value)
   "Set property KEY on JS object/array."
-  (let ((k (%js-to-string key)))
+  (let ((k (%js-to-property-key key)))
     (cond
       ((%js-vec-p obj)
        (cond
@@ -95,6 +103,8 @@ plain own property."
          (t nil)))
       ((%js-ht-p obj)
        (cond
+         ((%js-proxy-object-p obj)
+          (%js-proxy-set obj k value obj))
          ;; Defining an accessor (object-literal get/set, or assignment of an
          ;; accessor descriptor): route the fn to __get_K/__set_K so a getter and
          ;; setter on the same key coexist instead of overwriting each other.
@@ -107,21 +117,36 @@ plain own property."
                             (%js-proto-accessor-lookup obj (concatenate 'string "__set_" k)))))
             (if setter
                 (%js-call-with-this obj setter (list value))
-                (setf (gethash k obj) value))))))
+                (multiple-value-bind (_old present-p) (gethash k obj)
+                  (declare (ignore _old))
+                  (unless (or (%js-object-frozen-p obj)
+                              (and (not present-p)
+                                   (not (%js-object-extensible-p obj))))
+                    (setf (gethash k obj) value))))))))
       (t nil)))
   value)
 
 (defun %js-delete (obj key)
   "JS delete operator."
-  (let ((k (%js-to-string key)))
-    (when (%js-ht-p obj)
-      (remhash k obj)))
-  t)
+  (let ((k (%js-to-property-key key)))
+    (cond
+      ((%js-proxy-object-p obj)
+       (%js-proxy-delete-property obj k))
+      ((%js-ht-p obj)
+       (if (and (or (%js-object-sealed-p obj)
+                    (%js-object-frozen-p obj))
+                (nth-value 1 (gethash k obj)))
+           nil
+           (progn
+             (remhash k obj)
+             t)))
+      (t t))))
 
 (defun %js-in (key obj)
   "JS 'key in obj'."
-  (let ((k (%js-to-string key)))
+  (let ((k (%js-to-property-key key)))
     (cond
+      ((%js-proxy-object-p obj) (%js-proxy-has obj k))
       ((%js-ht-p obj) (nth-value 1 (gethash k obj)))
       ((%js-vec-p obj)
        (or (string= k "length")
@@ -210,6 +235,7 @@ rational 5/2. Division by zero gives +/-Infinity (or NaN for 0/0), per ECMAScrip
                ;; order left "7." because "7.0" does not end in ".".)
                (string-right-trim "." (string-right-trim "0" s))))))
     ((numberp x)            (format nil "~A" x))
+    ((typep x 'js-symbol)   (%js-symbol-as-key x))
     ((%js-ht-p x)           "[object Object]")
     ((%js-vec-p x)
      (let ((parts (loop for i below (length x)
@@ -230,4 +256,3 @@ rational 5/2. Division by zero gives +/-Infinity (or NaN for 0/0), per ECMAScrip
 ;;; js-exception, %js-throw, %js-try-catch-finally, %js-for-in,
 ;;; %js-advance-iterator, %js-advance-cl-iterator, %js-for-of,
 ;;; %js-iter-values, and %js-iter-keys are in runtime-control.lisp.
-

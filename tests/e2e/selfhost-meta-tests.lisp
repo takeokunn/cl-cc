@@ -119,14 +119,12 @@
   (handler-bind ((warning #'muffle-warning))
     (let* ((files (selfhost-all-source-files))
            (ok 0))
-      (pushnew :cl-cc-self-hosting cl:*features*)
-      (unwind-protect
-           (cl-cc:with-fresh-repl-state
-             (let ((cl-cc:*skip-optimizer-passes* t))
-               (dolist (f files)
-                  (cl-cc::our-load f)
-                  (incf ok))))
-        (setf cl:*features* (remove :cl-cc-self-hosting cl:*features*)))
+      (%with-selfhost-features
+        (cl-cc:with-fresh-repl-state
+          (let ((cl-cc:*skip-optimizer-passes* t))
+            (dolist (f files)
+              (cl-cc::our-load f)
+              (incf ok)))))
       (assert-eql (length files) ok))))
 
 

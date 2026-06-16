@@ -144,15 +144,16 @@
         (when (and (stringp (first body-forms)) (rest body-forms))
           (setf body-forms (rest body-forms)))
         (if (lambda-list-has-extended-p raw-params)
-            (multiple-value-bind (required optional rest-param key-params)
+            (multiple-value-bind (required optional rest-param key-params aux-params)
                 (%lower-extended-params raw-params)
-              (make-ast-lambda :params (%apply-type-bindings-to-params required type-bindings)
-                               :optional-params optional
-                               :rest-param rest-param
-                               :key-params key-params
-                               :declarations declarations
-                               :body (mapcar #'lower-sexp-to-ast body-forms)
-                               :source-file sf :source-line sl :source-column sc))
+              (let ((lowered-body (mapcar #'lower-sexp-to-ast body-forms)))
+                (make-ast-lambda :params (%apply-type-bindings-to-params required type-bindings)
+                                 :optional-params optional
+                                 :rest-param rest-param
+                                 :key-params key-params
+                                 :declarations declarations
+                                 :body (%wrap-body-with-aux-bindings aux-params lowered-body sf sl sc)
+                                 :source-file sf :source-line sl :source-column sc)))
             (progn
               (unless (every #'symbolp raw-params)
                 (error "lambda parameters must be symbols"))

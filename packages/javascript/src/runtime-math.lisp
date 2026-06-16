@@ -111,6 +111,37 @@
 (defun %js-math-fround (x)
   (coerce (coerce (%js-to-number x) 'single-float) 'double-float))
 
+(defun %js-round-half-even (x)
+  (multiple-value-bind (whole frac) (floor x)
+    (cond ((< frac 0.5d0) whole)
+          ((> frac 0.5d0) (1+ whole))
+          ((evenp whole) whole)
+          (t (1+ whole)))))
+
+(defun %js-f16round-number (x)
+  (let* ((n (%js-to-number x))
+         (d (coerce n 'double-float)))
+    (cond
+      ((%js-float-nan-p d) d)
+      ((%js-float-infinity-p d) d)
+      ((zerop d) d)
+      (t
+       (let* ((sign (if (minusp d) -1.0d0 1.0d0))
+              (abs-n (abs d))
+              (rounded
+                (if (< abs-n (scale-float 1.0d0 -14))
+                    (* (%js-round-half-even (/ abs-n (scale-float 1.0d0 -24)))
+                       (scale-float 1.0d0 -24))
+                    (let* ((exp (floor (log abs-n 2.0d0)))
+                           (step (scale-float 1.0d0 (- exp 10))))
+                      (* (%js-round-half-even (/ abs-n step)) step)))))
+         (cond ((zerop rounded) (* sign 0.0d0))
+               ((> rounded 65504.0d0) (if (plusp sign) *js-inf-float* *js-neg-inf-float*))
+               (t (* sign rounded))))))))
+
+(defun %js-math-f16round (x)
+  (%js-f16round-number x))
+
 (defun %js-math-imul (a b)
   "32-bit integer multiply, sign-extended."
   (let* ((ia (logand (truncate (%js-to-number a)) #xFFFFFFFF))

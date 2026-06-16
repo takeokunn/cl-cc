@@ -214,6 +214,30 @@ reconstructed and delegated to the host FORMAT for full ANSI semantics."
   (assert-equal "1.50 and 2.56"
                 (cl-cc/vm::%vm-format-render-to-string "~,2f and ~,2f" (list 1.5 2.555))))
 
+;;; ─── ~( ~) case conversion (ANSI) ─────────────────────────────────────────
+
+(deftest fmt-case-conversion-directive
+  "~(...~) renders its body and applies ANSI case conversion modifiers."
+  (flet ((f (control &rest args)
+           (cl-cc/vm::%vm-format-render-to-string control args)))
+    (assert-equal "hello world" (f "~(~A~)" "HELLO WORLD"))
+    (assert-equal "Hello World" (f "~:(~A~)" "hello world"))
+    (assert-equal "Hello world" (f "~@(~A~)" "hello world"))
+    (assert-equal "HELLO WORLD" (f "~:@(~A~)" "hello world"))
+    (assert-equal "item 1: alpha" (f "~(ITEM ~D: ~A~)" 1 "ALPHA"))))
+
+;;; ─── ~T tabulation after rendered directives ──────────────────────────────
+
+(deftest fmt-tab-column-after-rendered-directives
+  "~T uses the current output column after directives rendered by helper paths."
+  (flet ((f (control &rest args)
+           (cl-cc/vm::%vm-format-render-to-string control args)))
+    (assert-equal "12  !" (f "~D~4T!" 12))
+    (assert-equal "A   !" (f "~C~4T!" #\A))
+    (assert-equal "1.5   !" (f "~F~6T!" 1.5))
+    (assert-equal "forty-two   !" (f "~R~12T!" 42))
+    (assert-equal "    x   !" (f "~5<~A~>~8T!" "x"))))
+
 ;;; ─── ~{ ~} iteration with ~^ separator (ANSI) ──────────────────────────────
 
 (deftest fmt-iteration-caret-separator

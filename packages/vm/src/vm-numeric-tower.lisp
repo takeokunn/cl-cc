@@ -562,7 +562,8 @@ representation and applies signs after quotient/remainder construction."
     (sqrt (+ (* r r) (* i i)))))
 
 (defun vm-complex-phase (number)
-  (atan (vm-imagpart number) (vm-realpart number)))
+  (atan (coerce (vm-imagpart number) 'double-float)
+        (coerce (vm-realpart number) 'double-float)))
 
 (defun vm-complex-exp (number)
   "Complex exponential using Euler's formula."

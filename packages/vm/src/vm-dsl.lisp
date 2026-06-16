@@ -93,6 +93,8 @@ SHAPE is one of:
                :documentation "Stack of (return-pc . saved-env) for function calls")
    (closure-env :initform nil :accessor vm-closure-env
                 :documentation "Current closure's captured environment")
+   (current-closure-stack :initform nil :accessor vm-current-closure-stack
+                          :documentation "Stack of (call-depth . closure) entries for currently executing closures.")
    (heap :initform (make-hash-table :test #'eql) :reader vm-state-heap
          :documentation "Heap storage for allocated objects keyed by address")
    (heap-counter :initform 0 :accessor vm-heap-counter

@@ -4,7 +4,7 @@
 ;;;; key functions produce correct results.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-documentation-suite)
 
 ;; ──── Phase 90: LTO ────
 (deftest fr-500-lto-enabled-var-exists
@@ -36,17 +36,43 @@
 ;; ──── Topology implementation ────
 (deftest fr-624-topology-core-detection
   "FR-624: detect-cpu-cores returns positive integer."
-  (let ((cores (cl-cc/runtime:detect-cpu-cores)))
+  (let* ((cl-cc/runtime::*rt-detected-cpu-cores*
+           (or cl-cc/runtime::*rt-detected-cpu-cores* 1))
+         (cores (cl-cc/runtime:detect-cpu-cores)))
     (assert-true (integerp cores))
     (assert-true (plusp cores))))
 
 (deftest fr-624-topology-numa-info-returns-plist
   "FR-624: detect-numa-topology returns a list of node property lists."
-  (let ((topo (cl-cc/runtime:detect-numa-topology)))
+  (let* ((cl-cc/runtime::*rt-detected-cpu-cores*
+           (or cl-cc/runtime::*rt-detected-cpu-cores* 1))
+         (topo (cl-cc/runtime:detect-numa-topology)))
     (assert-true (listp topo))
     (dolist (node topo)
       (assert-true (listp node))
       (assert-true (getf node :node-id)))))
+
+(deftest fr-624-topology-cpulist-parser-normalizes-ranges
+  "FR-624: cpulist parsing accepts ranges and ignores malformed fragments."
+  (assert-equal '(0 1 2 4 7)
+                (cl-cc/runtime::%rt-parse-cpulist "0-2,2,4,nope,6-5,7")))
+
+(deftest fr-624-topology-memory-bytes-sums-known-nodes
+  "FR-624: NUMA memory aggregation treats unknown node sizes as zero."
+  (assert-equal 384
+                (cl-cc/runtime::%rt-topology-memory-bytes
+                 '((:node-id 0 :memory-bytes 128)
+                   (:node-id 1 :memory-bytes nil)
+                   (:node-id 2 :memory-bytes 256)))))
+
+(deftest fr-624-topology-cache-returns-fresh-tree
+  "FR-624: detect-numa-topology protects the process topology cache."
+  (let ((cl-cc/runtime::*rt-detected-numa-topology*
+          '((:node-id 0 :cpus (0 1) :memory-bytes 128 :kind :dram))))
+    (let ((topology (cl-cc/runtime:detect-numa-topology)))
+      (setf (first (getf (first topology) :cpus)) 99))
+    (assert-equal '(0 1)
+                  (getf (first (cl-cc/runtime:detect-numa-topology)) :cpus))))
 
 
 

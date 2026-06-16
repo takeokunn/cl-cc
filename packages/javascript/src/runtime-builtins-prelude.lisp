@@ -38,6 +38,7 @@
     (:namespace  "Array"               "Array")
     (:namespace  "String"              "String")
     (:namespace  "Promise"             "Promise")
+    (:namespace  "Iterator"            "Iterator")
     (:namespace  "Intl"                "Intl")
     (:call       "globalThis"          %js-make-object)
     (:var        "Temporal"            *js-temporal-global*)
@@ -55,6 +56,7 @@
     (:var        "RangeError"          *js-range-error-class*)
     (:var        "ReferenceError"      *js-reference-error-class*)
     (:var        "SyntaxError"         *js-syntax-error-class*)
+    (:var        "AggregateError"      *js-aggregate-error-class*)
     ;; Collection constructors
     ;; Map/WeakMap/WeakSet/RegExp are defparameter vars, not defun symbols,
     ;; so (boundp sym) = t and seed-js-runtime-globals seeds them into the VM.
@@ -65,6 +67,20 @@
     ;; Set/timer globals are inline lambdas with no dedicated %js-* symbol;
     ;; look them up via %js-builtin-ref so they stay in sync with *js-builtin-specs*.
     (:builtin    "Set"                 "Set")
+    (:builtin    "AbortController"     "AbortController")
+    (:builtin    "AbortSignal"         "AbortSignal")
+    (:builtin    "Int8Array"           "Int8Array")
+    (:builtin    "Uint8Array"          "Uint8Array")
+    (:builtin    "Uint8ClampedArray"   "Uint8ClampedArray")
+    (:builtin    "Int16Array"          "Int16Array")
+    (:builtin    "Uint16Array"         "Uint16Array")
+    (:builtin    "Int32Array"          "Int32Array")
+    (:builtin    "Uint32Array"         "Uint32Array")
+    (:builtin    "Float16Array"        "Float16Array")
+    (:builtin    "Float32Array"        "Float32Array")
+    (:builtin    "Float64Array"        "Float64Array")
+    (:builtin    "BigInt64Array"       "BigInt64Array")
+    (:builtin    "BigUint64Array"      "BigUint64Array")
     ;; Numeric parsing globals
     (:var        "parseInt"            %js-parse-int)
     (:var        "parseFloat"          %js-parse-float)
@@ -73,10 +89,7 @@
     ;; Standalone global builtins — bound via %js-builtin-ref (inline lambdas)
     (:builtin    "structuredClone"     "structuredClone")
     (:builtin    "queueMicrotask"      "queueMicrotask")
-    (:builtin    "setTimeout"          "setTimeout")
-    (:builtin    "setInterval"         "setInterval")
-    (:builtin    "clearTimeout"        "clearTimeout")
-    (:builtin    "clearInterval"       "clearInterval"))
+    (:builtin    "crypto"              "crypto"))
   "Declarative prelude table: (kind js-name cl-symbol) emitted as defvar AST nodes
 before every compiled JS program so standard globals are available.")
 

@@ -70,13 +70,10 @@
         (values (make-ast-slot-def :name case-name
                                    :type enum-type
                                    :initform (%php-enum-case-initform class-name case-name value)
-                                    :allocation :class
-                                    :imports (list :php-enum-case t
-                                                   :php-enum-value value
-                                                   :php-attributes (mapcar (lambda (attribute)
-                                                                             (setf (php-attribute-target-type attribute) :constant)
-                                                                             attribute)
-                                                                           attributes)))
+                                   :allocation :class
+                                   :imports (append (list :php-enum-case t
+                                                          :php-enum-value value)
+                                                    (%php-attribute-metadata attributes :constant)))
                 (php-skip-semis current)
                 (list :name case-name :value value))))))
 
@@ -108,26 +105,27 @@
         (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
           (return))
         (multiple-value-bind (attributes after-attributes) (%php-parse-attributes current)
-          (setf current after-attributes)
-        (if (and enum-p (%php-keyword-p current :case))
-            (multiple-value-bind (slot rest2 case-meta)
-                (%php-parse-enum-case current known-vars class-name enum-type attributes)
-              (push slot slots)
-              (push case-meta enum-cases)
-              (setf current rest2))
-            (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars)
-              (when slot
-                ;; Enum methods are stored CLASS-allocated (on the enum class
-                ;; object) so $case->method() resolves through the case's
-                ;; __class__ link; they remain instance methods — $this (= the
-                ;; case) is still prepended because they are not `static'.
-                (when (and enum-p (ast-slot-def-p slot)
-                           (ast-defun-p (ast-slot-initform slot)))
-                  (setf (ast-slot-allocation slot) :class))
-                (push slot slots))
-              ;; Constructor property promotion generates extra property slots.
-              (dolist (es extra-slots) (push es slots))
-              (setf current rest2)))))
+          (if (and enum-p (%php-keyword-p after-attributes :case))
+              (progn
+                (setf current after-attributes)
+                (multiple-value-bind (slot rest2 case-meta)
+                    (%php-parse-enum-case current known-vars class-name enum-type attributes)
+                  (push slot slots)
+                  (push case-meta enum-cases)
+                  (setf current rest2)))
+              (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars)
+                (when slot
+                  ;; Enum methods are stored CLASS-allocated (on the enum class
+                  ;; object) so $case->method() resolves through the case's
+                  ;; __class__ link; they remain instance methods — $this (= the
+                  ;; case) is still prepended because they are not `static'.
+                  (when (and enum-p (ast-slot-def-p slot)
+                             (ast-defun-p (ast-slot-initform slot)))
+                    (setf (ast-slot-allocation slot) :class))
+                  (push slot slots))
+                ;; Constructor property promotion generates extra property slots.
+                (dolist (es extra-slots) (push es slots))
+                (setf current rest2)))))
       (let* ((slots-rev (nreverse slots))
              (defclass (make-ast-defclass :name class-name
                                           :superclasses supers
@@ -139,6 +137,8 @@
         (when (eq kind :trait)
           (setf (gethash (string-upcase (symbol-name class-name)) *php-trait-registry*)
                 slots-rev))
+        (unless (eq kind :trait)
+          (%php-record-class-trait-uses class-name slots-rev))
         (values
          ;; For enums, follow the class def with a call that links each case
          ;; singleton to the class (__class__) so method dispatch works.
@@ -230,6 +230,57 @@
     (values imports
             (%php-consume-expected :T-SEMI current))))
 
+;;; ─── Declare parsing helpers ───────────────────────────────────────────────
+
+(defun %php-skip-declare-directives (stream)
+  "Skip the parenthesized directive list after declare and return the next token."
+  (let ((current (%php-consume-expected :T-LPAREN stream))
+        (depth 1))
+    (loop
+      (when (php-at-eof-p current)
+        (error "PHP parse error: unterminated declare directive list"))
+      (let ((type (php-peek-type current)))
+        (cond
+          ((eq type :T-LPAREN)
+           (incf depth)
+           (setf current (cdr current)))
+          ((eq type :T-RPAREN)
+           (decf depth)
+           (setf current (cdr current))
+           (when (zerop depth)
+             (return)))
+          (t
+           (setf current (cdr current))))))
+    current))
+
+(defun %php-declare-body-ast (forms)
+  "Return the AST node representing a declare body form list."
+  (cond ((rest forms) (make-ast-progn :forms forms))
+        ((first forms))
+        (t (make-ast-progn :forms nil))))
+
+(defun %php-parse-declare-alternative-body (stream known-vars)
+  "Parse declare(...): stmt* enddeclare; and return its body forms."
+  (let ((current (%php-consume-expected :T-COLON stream))
+        (stmts nil)
+        (kv known-vars))
+    (loop
+      (setf current (php-skip-semis current))
+      (cond
+        ((php-at-eof-p current)
+         (error "PHP parse error: unterminated declare alternative syntax"))
+        ((%php-keyword-p current :enddeclare)
+         (return))
+        (t
+         (multiple-value-bind (stmt rest2 kv2) (php-parse-statement current kv)
+           (when stmt (push stmt stmts))
+           (setf current rest2
+                 kv kv2)))))
+    (values (php-finish-let-bindings
+             (%php-lower-reference-assignments (nreverse stmts) known-vars))
+            (php-skip-semis (cdr current))
+            kv)))
+
 ;;; ─── Registered statement parsers ───────────────────────────────────────
 
 (define-php-stmt-parser :echo (rest known-vars)
@@ -247,12 +298,9 @@
       (unless (and current (eq (php-peek-type current) :T-COMMA))
         (return))
       (setf current (cdr current)))
-    ;; echo emits its arguments verbatim with NO trailing newline.  ast-print
-    ;; lowers to vm-print ("~A~%"), which appended a spurious newline after
-    ;; every echo; route through princ (vm-princ, no newline/no escaping)
-    ;; instead.  The builtin registry keys on symbol-name ("PRINC"), so this
-    ;; reuses the proven CL princ -> vm-princ codegen path.
-    (values (%php-call 'princ
+    ;; echo emits its arguments verbatim with NO trailing newline. Route through
+    ;; the PHP output helper so ob_start/ob_get_* can capture emitted text.
+    (values (%php-call 'cl-cc/php::%php-output-write
                        (apply #'%php-call 'cl-cc/php::%php-concat (nreverse exprs)))
             (php-skip-semis current) kv)))
 
@@ -321,21 +369,21 @@
                           rest kv))))))))))
 
 (defun %php-lower-foreach-by-ref (arr-expr var-sym body-stmts loop-tag &optional key-sym)
-  "Lower 'foreach ($arr as &$val)' — BODY-FN receives a ref box; writes back."
+  "Lower 'foreach ($arr as &$val)' -- BODY-FN receives a ref box; writes back."
+  (declare (ignore loop-tag))
   (let ((box-sym (gensym "FOREACH-BOX-"))
         (key-param (gensym "FOREACH-KEY-")))
     (%php-call 'cl-cc/php::%php-foreach-by-ref
                arr-expr
                (make-ast-lambda
                 :params (list box-sym key-param)
-                :body (list (make-ast-let
-                             :bindings (append
-                                        (when key-sym (list (cons key-sym (make-ast-var :name key-param))))
-                                        (list (cons var-sym (make-ast-var :name box-sym))))
-                             :body (list (%php-lower-while-with-label
-                                          (make-ast-quote :value t)
-                                          body-stmts
-                                          loop-tag))))))))
+                :body (list
+                       (make-ast-let
+                        :bindings (append
+                                   (when key-sym
+                                     (list (cons key-sym (make-ast-var :name key-param))))
+                                   (list (cons var-sym (make-ast-var :name box-sym))))
+                        :body (%php-rewrite-ref-vars body-stmts (list var-sym))))))))
 
 (define-php-stmt-parser :foreach (rest known-vars)
   (let ((rest2 (%php-consume-expected :T-LPAREN rest)))
@@ -390,6 +438,12 @@
                                   :value (make-ast-quote :value +php-null+))
                    forms)
              (setf kv (remove (ast-var-name target) kv2 :test #'eq)))
+            ((ast-slot-value-p target)
+             (push (make-ast-set-slot-value
+                    :object (ast-slot-value-object target)
+                    :slot (ast-slot-value-slot target)
+                    :value (make-ast-quote :value +php-null+))
+                   forms))
             (t
              (error "PHP parse error: unsupported unset target ~S" target)))
           (setf current rest2)
@@ -489,7 +543,24 @@
 (define-php-stmt-parser :require-once (rest known-vars) (%php-parse-include-like rest known-vars 'require-once))
 
 (define-php-stmt-parser :declare (rest known-vars)
-  (values (make-ast-progn :forms nil) (%php-skip-to-stmt-end rest) known-vars))
+  (let ((after-directives (%php-skip-declare-directives rest)))
+    (cond
+      ((eq (php-peek-type after-directives) :T-SEMI)
+       (values (make-ast-progn :forms nil)
+               (php-skip-semis after-directives)
+               known-vars))
+      ((eq (php-peek-type after-directives) :T-COLON)
+       (multiple-value-bind (body rest2 kv2)
+           (%php-parse-declare-alternative-body after-directives known-vars)
+         (values (%php-declare-body-ast body)
+                 (php-skip-semis rest2)
+                 kv2)))
+      (t
+       (multiple-value-bind (body rest2 kv2)
+           (%php-parse-statement-body after-directives known-vars)
+         (values (%php-declare-body-ast body)
+                 (php-skip-semis rest2)
+                 kv2))))))
 
 (define-php-stmt-parser :goto (rest known-vars)
   (multiple-value-bind (label-tok rest2) (php-expect :T-IDENT rest)
@@ -520,11 +591,49 @@
       (setf *php-current-imports* (append *php-current-imports* imports))
       (values nil rest2 known-vars))))
 
+(defun %php-parse-top-level-const (stream known-vars)
+  "Parse PHP top-level const declarations."
+  (let ((current stream)
+        (forms nil))
+    (loop
+      (multiple-value-bind (qualified-name after-name)
+          (php-parse-qualified-name current)
+        (unless qualified-name
+          (error "PHP parse error: expected constant name after const"))
+        (unless (and (eq (php-peek-type after-name) :T-OP)
+                     (equal (php-peek-value after-name) "="))
+          (error "PHP parse error: expected = after const name ~A" qualified-name))
+        (multiple-value-bind (value after-value kv2)
+            (php-parse-expr (cdr after-name) known-vars)
+          (setf known-vars kv2
+                current after-value)
+          (push (make-ast-defvar
+                 :name (php-ident-sym
+                        (php-resolve-qualified-name qualified-name :const))
+                 :value value
+                 :kind 'defparameter
+                 :imports (list :php-constant t))
+                forms)))
+      (if (eq (php-peek-type current) :T-COMMA)
+          (setf current (cdr current))
+          (return)))
+    (setf current (%php-consume-expected :T-SEMI current))
+    (values (if (rest forms)
+                (make-ast-progn :forms (nreverse forms))
+                (first forms))
+            (php-skip-semis current)
+            known-vars)))
+
+(define-php-stmt-parser :const (rest known-vars)
+  (%php-parse-top-level-const rest known-vars))
+
 (define-php-stmt-parser :trait (rest known-vars) (%php-parse-classlike rest known-vars :kind :trait))
 (define-php-stmt-parser :interface (rest known-vars) (%php-parse-classlike rest known-vars :kind :interface))
 (define-php-stmt-parser :enum (rest known-vars) (%php-parse-classlike rest known-vars :enum-p t))
 
 (define-php-stmt-parser :function (rest known-vars)
+  (let* ((returns-by-ref (%php-reference-token-p rest))
+         (rest (if returns-by-ref (cdr rest) rest)))
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((fn-name (php-ident-sym
                     (php-resolve-qualified-name (php-tok-value name-tok) :function))))
@@ -536,6 +645,7 @@
           (when by-ref-indices
             (setf (gethash (symbol-name fn-name) *php-by-ref-param-registry*)
                   by-ref-indices))
+          (%php-register-named-callable-params fn-name params param-defaults variadic-param)
           ;; Parameters with `= default` become &optional params so a call that
           ;; omits them binds the default instead of leaving them unset.
           (multiple-value-bind (required optionals)
@@ -548,7 +658,8 @@
                                          :params required
                                          :optional-params optionals
                                          :declarations (%php-function-declarations
-                                                        param-types return-type param-attributes nil :function)
+                                                        param-types return-type param-attributes nil
+                                                        :function returns-by-ref)
                                          :body nil)
                         (php-skip-semis rest) known-vars)
                 (multiple-value-bind (body-stmts rest _)
@@ -556,13 +667,21 @@
                                                   (when variadic-param (list variadic-param))
                                                   known-vars))
                   (declare (ignore _))
-                  (multiple-value-bind (rest-param wrapped-body)
-                      (%php-variadic-rest-binding variadic-param (%php-callable-body body-stmts))
+                  (let* ((by-ref-params (remove nil
+                                                (mapcar (lambda (idx) (nth idx params))
+                                                        by-ref-indices)))
+                         (callable-body (%php-callable-body body-stmts))
+                         (callable-body (if by-ref-params
+                                            (%php-rewrite-ref-vars callable-body by-ref-params)
+                                            callable-body)))
+                    (multiple-value-bind (rest-param wrapped-body)
+                        (%php-variadic-rest-binding variadic-param callable-body)
                     (values (make-ast-defun :name fn-name
                                              :params required
                                              :optional-params optionals
                                              :rest-param rest-param
                                              :declarations (%php-function-declarations
-                                                            param-types return-type param-attributes nil :function)
+                                                            param-types return-type param-attributes nil
+                                                            :function returns-by-ref)
                                              :body wrapped-body)
-                            rest known-vars))))))))))
+                            rest known-vars))))))))))))

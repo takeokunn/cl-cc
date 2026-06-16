@@ -52,7 +52,7 @@
   (assert-equal "1.5" (cl-cc/vm:vm-float-to-string 1.5d0))
   (assert-true (search "e" (cl-cc/vm:vm-float-to-string 1000.0d0 :mode :exponential)))
   (assert-equal "+inf.0" (cl-cc/vm:vm-float-to-string sb-ext:double-float-positive-infinity))
-  (assert-equal "+nan.0" (cl-cc/vm:vm-float-to-string sb-ext:double-float-quiet-nan)))
+  (assert-equal "+nan.0" (cl-cc/vm:vm-float-to-string (sb-kernel:make-double-float #x7FF80000 0))))
 
 (deftest stdlib3-terminal-ansi-and-size
   "Terminal helpers emit ANSI sequences and return plausible dimensions."

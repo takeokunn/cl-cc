@@ -119,6 +119,26 @@
     (cl-cc/runtime:rt-export sym pkg)
     (assert-true (member sym (gethash :exports pkg) :test #'eq))))
 
+(deftest rt-use-unuse-package-maintains-inherited-symbols
+  "rt-use-package de-duplicates use-list entries and rt-unuse-package rebuilds inherited symbols."
+  (let ((cl-cc/runtime:*rt-package-registry* (make-hash-table :test #'equal)))
+    (let* ((lib (cl-cc/runtime:rt-make-package "RT-USE-LIB"))
+           (user (cl-cc/runtime:rt-make-package "RT-USE-USER"))
+           (sym (cl-cc/runtime:rt-intern "EXPORTED" lib)))
+      (cl-cc/runtime:rt-export sym lib)
+      (assert-true (cl-cc/runtime::rt-use-package lib user))
+      (multiple-value-bind (found status)
+          (cl-cc/runtime::rt-find-symbol "EXPORTED" user)
+        (assert-eq sym found)
+        (assert-eq :inherited status))
+      (assert-true (cl-cc/runtime::rt-use-package lib user))
+      (assert-= 1 (length (gethash :use-list user)))
+      (cl-cc/runtime::rt-unuse-package lib user)
+      (multiple-value-bind (found status)
+          (cl-cc/runtime::rt-find-symbol "EXPORTED" user)
+        (assert-eq nil found)
+        (assert-eq nil status)))))
+
 ;;; ─── rt-peek-char ───────────────────────────────────────────────────────────
 
 (deftest rt-peek-char-does-not-advance

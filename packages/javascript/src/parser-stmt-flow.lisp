@@ -212,6 +212,12 @@
       ((and (eq type :T-USING)
             (eq (js-peek-type (cdr stream)) :T-IDENT))
        (js-parse-using-decl (cdr stream)))
+      ;; import(...) and import.meta are expressions even at statement start.
+      ;; Other leading import forms remain module import declarations.
+      ((and (eq type :T-IMPORT)
+            (member (js-peek-type (cdr stream)) '(:T-LPAREN :T-DOT)))
+       (multiple-value-bind (expr rest) (js-parse-expr stream)
+         (values expr (js-skip-semis rest))))
       ;; Labelled statement: ident : stmt — requires colon lookahead
       ;; break LABEL → (return-from label-block); continue LABEL → (go continue-tag)
       ((and (eq type :T-IDENT)

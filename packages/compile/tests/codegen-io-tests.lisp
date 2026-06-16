@@ -64,6 +64,25 @@
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-write-to-string-inst))
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-concatenate))))
 
+(deftest phase2-format-static-repeat-literal-lowering
+  "static repeat literal directives lower without vm-format-inst."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "a~2%~3~~2|z"))
+                 ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-concatenate))))
+
+(deftest phase2-format-static-empty-string-lowering
+  "empty static format output lowers without vm-format-inst."
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "~0%"))
+                 ctx)
+    (assert-null (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))))
+
 (deftest phase2-format-static-fallbacks
   "dynamic format strings and unsupported static directives still use vm-format-inst."
   (let ((ctx (make-ctx-with-vars 'fmt)))
@@ -84,6 +103,13 @@
     (compile-ast (make-call 'format
                             (make-var 'nil)
                             (make-quoted "~A ~A")
+                            (make-int 1))
+                 ctx)
+    (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst)))
+  (let ((ctx (make-codegen-ctx)))
+    (compile-ast (make-call 'format
+                            (make-var 'nil)
+                            (make-quoted "~2A")
                             (make-int 1))
                  ctx)
     (assert-true (codegen-find-inst ctx 'cl-cc/vm::vm-format-inst))))

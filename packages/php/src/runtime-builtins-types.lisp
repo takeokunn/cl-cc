@@ -139,3 +139,113 @@ are allowed; trailing junk is ignored."
 (defun %php-boolval (value)
   "Convert VALUE to a PHP boolean."
   (%php-truthy value))
+
+(defconstant +php-filter-unsafe-raw+ 516)
+(defconstant +php-filter-validate-int+ 257)
+(defconstant +php-filter-validate-boolean+ 258)
+(defconstant +php-filter-validate-float+ 259)
+(defconstant +php-filter-validate-url+ 273)
+(defconstant +php-filter-validate-email+ 274)
+(defconstant +php-filter-null-on-failure+ 134217728)
+(defconstant +php-filter-throw-on-failure+ 268435456)
+
+(defun %php-filter-failed-exception-symbol ()
+  (intern "FILTER\\FILTERFAILEDEXCEPTION" :cl-cc/php))
+
+(defun %php-filter-int-value (value)
+  (cond
+    ((and (integerp value) (not (typep value 'boolean))) value)
+    ((floatp value)
+     (and (= value (truncate value)) (truncate value)))
+    ((stringp value)
+     (let ((text (string-trim '(#\Space #\Tab #\Newline #\Return) value)))
+       (and (> (length text) 0)
+            (multiple-value-bind (parsed position)
+                (parse-integer text :junk-allowed t)
+              (and parsed (= position (length text)) parsed)))))
+    (t nil)))
+
+(defun %php-filter-boolean-value (value)
+  (cond
+    ((eq value t) t)
+    ((null value) nil)
+    ((and (integerp value) (= value 1)) t)
+    ((and (integerp value) (= value 0)) nil)
+    ((stringp value)
+     (let ((text (string-downcase
+                  (string-trim '(#\Space #\Tab #\Newline #\Return) value))))
+       (cond ((member text '("1" "true" "on" "yes") :test #'string=) t)
+             ((member text '("0" "false" "off" "no" "") :test #'string=) nil)
+             (t :php-filter-failure))))
+    (t :php-filter-failure)))
+
+(defun %php-filter-float-value (value)
+  (cond
+    ((numberp value) (float value))
+    ((stringp value)
+     (let* ((text (string-trim '(#\Space #\Tab #\Newline #\Return) value))
+            (*read-eval* nil))
+       (and (> (length text) 0)
+            (multiple-value-bind (parsed position)
+                (ignore-errors (read-from-string text))
+              (and (numberp parsed) (= position (length text)) (float parsed))))))
+    (t nil)))
+
+(defun %php-filter-email-value (value)
+  (when (stringp value)
+    (let ((at (position #\@ value)))
+      (and at
+           (> at 0)
+           (< at (1- (length value)))
+           (position #\. value :start (1+ at))
+           (not (find #\Space value))
+           value))))
+
+(defun %php-filter-url-value (value)
+  (when (stringp value)
+    (let ((lower (string-downcase value)))
+      (and (or (uiop:string-prefix-p "http://" lower)
+               (uiop:string-prefix-p "https://" lower))
+           (> (length value) (length "https://"))
+           value))))
+
+(defun %php-filter-failure (flags)
+  (cond
+    ((not (zerop (logand flags +php-filter-throw-on-failure+)))
+     (%php-throw (%php-filter-failed-exception-symbol)
+                 "filter_var(): validation failed"))
+    ((not (zerop (logand flags +php-filter-null-on-failure+))) +php-null+)
+    (t nil)))
+
+(defun %php-filter-var (value &optional (filter +php-filter-unsafe-raw+) (options 0))
+  "Filter VALUE using a compact subset of PHP filter_var() semantics."
+  (let ((flags (cond ((integerp options) options)
+                     ((hash-table-p options)
+                      (let ((raw (or (gethash "flags" options)
+                                     (gethash :flags options)
+                                     0)))
+                        (if (integerp raw) raw 0)))
+                     (t 0))))
+    (when (and (not (zerop (logand flags +php-filter-null-on-failure+)))
+               (not (zerop (logand flags +php-filter-throw-on-failure+))))
+      (%php-throw 'value-error
+                  "filter_var(): Argument #3 ($options) cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE"))
+    (let ((result
+            (case filter
+              ((516) value)
+              ((257) (%php-filter-int-value value))
+              ((258) (%php-filter-boolean-value value))
+              ((259) (%php-filter-float-value value))
+              ((273) (%php-filter-url-value value))
+              ((274) (%php-filter-email-value value))
+              (otherwise value))))
+      (cond
+        ((eq result :php-filter-failure)
+         (%php-filter-failure flags))
+        ((and (null result)
+              (not (member filter
+                           (list +php-filter-unsafe-raw+
+                                 +php-filter-validate-boolean+)
+                           :test #'=)))
+         (%php-filter-failure flags))
+        (t result)))))

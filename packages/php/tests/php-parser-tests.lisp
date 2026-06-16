@@ -29,19 +29,55 @@
     (cl-cc/php:php-check-supported-forms
      (cl-cc/php:parse-php-source src))))
 
-;;; ─── :echo handler → princ call (no trailing newline) ────────────────────
+;;; ─── :echo handler → output helper call (no trailing newline) ────────────
 
-(deftest php-parser-echo-lowers-to-princ-call
-  "echo expr; lowers to a PRINC call (vm-princ, no trailing newline — ast-print
-would append ~%) wrapping a %php-concat call (echo applies PHP string conversion
-to each value); the concat's first arg is the echoed expr."
+(deftest php-parser-echo-lowers-to-output-write-call
+  "echo expr; lowers to a %php-output-write call (no trailing newline, output
+buffer aware) wrapping a %php-concat call (echo applies PHP string conversion to
+each value); the concat's first arg is the echoed expr."
   (let ((ast (%php-first "<?php echo 42;")))
     (assert-true (cl-cc:ast-call-p ast))
-    (assert-string= "PRINC" (%php-call-name ast))
+    (assert-string= "%PHP-OUTPUT-WRITE" (%php-call-name ast))
     (let ((expr (first (cl-cc:ast-call-args ast))))
       (assert-true (cl-cc:ast-call-p expr))
       (assert-string= "%PHP-CONCAT" (%php-call-name expr))
       (assert-true (typep (first (cl-cc:ast-call-args expr)) 'cl-cc:ast-int)))))
+
+(deftest php-parser-reference-assignment-lowers-to-ref-box
+  "$b = &$a boxes $a, binds $b to the same box, and dereferences later reads."
+  (let* ((ast (%php-first "<?php $a=1; $b=&$a; echo $b;"))
+         (body (cl-cc:ast-let-body ast))
+         (box-set (first body))
+         (alias-let (second body))
+         (echo (first (cl-cc:ast-let-body alias-let)))
+         (concat (first (cl-cc:ast-call-args echo)))
+         (deref (first (cl-cc:ast-call-args concat))))
+    (assert-true (cl-cc:ast-let-p ast))
+    (assert-true (cl-cc:ast-setq-p box-set))
+    (assert-string= "%PHP-MAKE-REF" (%php-call-name (cl-cc:ast-setq-value box-set)))
+    (assert-true (cl-cc:ast-let-p alias-let))
+    (assert-true (cl-cc:ast-var-p (cdr (first (cl-cc:ast-let-bindings alias-let)))))
+    (assert-string= "%PHP-DEREF" (%php-call-name deref))))
+
+(deftest php-parser-settype-lowers-first-arg-by-reference
+  "settype($x, ...) boxes the first argument and writes it back after the call."
+  (let ((found-box nil)
+        (found-writeback nil))
+    (labels ((walk (node)
+               (when (cl-cc:ast-call-p node)
+                 (when (string= "%PHP-MAKE-REF" (%php-call-name node))
+                   (setf found-box t)))
+               (when (cl-cc:ast-setq-p node)
+                 (when (string= (symbol-name (cl-cc:ast-setq-var node)) "x")
+                   (setf found-writeback t)))
+               (when (typep node 'cl-cc:ast-node)
+                 (dolist (child (cl-cc:ast-children node))
+                   (when child
+                     (walk child))))))
+      (dolist (ast (cl-cc/php:parse-php-source "<?php $x=5; settype($x,'string');"))
+        (walk ast)))
+    (assert-true found-box)
+    (assert-true found-writeback)))
 
 ;;; ─── :return handler → ast-return-from ───────────────────────────────────
 
@@ -138,6 +174,12 @@ and the loop producing no output.)"
     (assert-= 2 (length slots))
     (assert-true (every #'cl-cc:ast-slot-def-p slots))))
 
+(deftest php-parser-bare-defclass-is-rejected
+  "A raw ast-defclass without a PHP kind marker is rejected by support checks."
+  (assert-signals error
+    (cl-cc/php:php-check-supported-forms
+     (list (cl-cc:make-ast-defclass)))))
+
 ;;; ─── Expression statement (dispatch fallthrough) ─────────────────────────
 
 (deftest php-parser-expression-statement-assign
@@ -171,7 +213,7 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
     (assert-= 3 (length asts))
     (assert-true (every (lambda (a)
                           (and (cl-cc:ast-call-p a)
-                               (string= "PRINC" (%php-call-name a))))
+                               (string= "%PHP-OUTPUT-WRITE" (%php-call-name a))))
                         asts))))
 
 ;;; ─── Characterization tests for unsupported PHP support gaps ───────────────
@@ -231,6 +273,17 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
       (assert-true (cl-cc:ast-call-p call))
       (assert-true (search "ISSET" (%php-call-name call))))))
 
+(deftest php-parser-empty-variable-syntax-lowering
+  "empty($x) should avoid evaluating an undefined variable operand."
+  (let ((value (%php-first-binding-value "<?php $result = empty($x);")))
+    (assert-true (cl-cc:ast-quote-p value))
+    (assert-eq t (cl-cc:ast-quote-value value)))
+  (let* ((let-x (%php-first "<?php $x = 0; $result = empty($x);"))
+         (let-result (first (cl-cc:ast-let-body let-x)))
+         (value (cdr (first (cl-cc:ast-let-bindings let-result)))))
+    (assert-true (cl-cc:ast-call-p value))
+    (assert-true (search "EMPTY" (%php-call-name value)))))
+
 (deftest php-parser-match-strict-comparison
   "match should use strict equality, not EQUAL."
   (let ((ast (%php-first "<?php $x = match($v) { 1 => 'one', 2 => 'two' };")))
@@ -280,6 +333,8 @@ After php-finish-let-bindings the 3 assignments nest into one top-level let chai
   "Binary/unary operators lower to named PHP helper functions via %php-first-binding-value."
   :cases (("modulo"         "<?php $r = 7 % 4;"         "%PHP-MODULO")
           ("bitwise-not"    "<?php $r = ~1;"             "%PHP-BITWISE-NOT")
+          ("unary-plus"     "<?php $r = +'7';"           "%PHP-UNARY-PLUS")
+          ("unary-minus"    "<?php $r = -'7';"           "%PHP-UNARY-MINUS")
           ("spaceship"      "<?php $r = $a <=> $b;"      "%PHP-SPACESHIP")
           ("str-interp"     "<?php $s = \"Hello $name\";" "%PHP-CONCAT")
           ("braced-interp"  "<?php $s = \"Hello {$name}\";" "%PHP-CONCAT")
@@ -465,7 +520,7 @@ so the block is the second arg of the %php-generator-exit call."
                    (cl-cc:ast-quote-value (first (cl-cc:ast-list-elements entry)))))
             (cl-cc:ast-call-args value)))))
 
-(deftest php-parser-legacy-array-literal
+(deftest php-parser-array-function-style-literal
   "Characterization: array(1,2,3) should preserve PHP array literal semantics."
   (let ((value (%php-first-binding-value "<?php $xs = array(1, 2, 3);")))
     (assert-true (cl-cc:ast-call-p value))
@@ -495,8 +550,9 @@ so the block is the second arg of the %php-generator-exit call."
     (let ((setq (first (cl-cc:ast-let-body compound))))
       (assert-true (cl-cc:ast-setq-p setq))
       (assert-string= "x" (symbol-name (cl-cc:ast-setq-var setq)))
-      (assert-true (cl-cc:ast-binop-p (cl-cc:ast-setq-value setq)))
-      (assert-eq '+ (cl-cc:ast-binop-op (cl-cc:ast-setq-value setq))))))
+      (let ((value (cl-cc:ast-setq-value setq)))
+        (assert-true (cl-cc:ast-call-p value))
+        (assert-string= "%PHP-ADD" (%php-call-name value))))))
 
 (deftest php-parser-compound-assignment-array-element
   "$arr[0] += 1 lowers to an array-set around an array-ref read."
@@ -506,9 +562,10 @@ so the block is the second arg of the %php-generator-exit call."
       (assert-true (cl-cc:ast-call-p set-call))
       (assert-string= "%PHP-ARRAY-SET" (%php-call-name set-call))
       (let ((value (third (cl-cc:ast-call-args set-call))))
-        (assert-true (cl-cc:ast-binop-p value))
+        (assert-true (cl-cc:ast-call-p value))
+        (assert-string= "%PHP-ADD" (%php-call-name value))
         (assert-string= "%PHP-ARRAY-REF"
-                        (%php-call-name (cl-cc:ast-binop-lhs value)))))))
+                        (%php-call-name (first (cl-cc:ast-call-args value))))))))
 
 (deftest php-parser-null-coalescing-assignment-variable
   "$x ??= 42 on a KNOWN variable lowers to a null-checking conditional
@@ -529,7 +586,9 @@ RHS directly, a different and simpler shape.)"
     (let ((slot-set (first (cl-cc:ast-let-body ast))))
       (assert-true (cl-cc:ast-set-slot-value-p slot-set))
       (assert-string= "COUNT" (symbol-name (cl-cc:ast-set-slot-value-slot slot-set)))
-      (assert-true (cl-cc:ast-binop-p (cl-cc:ast-set-slot-value-value slot-set))))))
+      (let ((value (cl-cc:ast-set-slot-value-value slot-set)))
+        (assert-true (cl-cc:ast-call-p value))
+        (assert-string= "%PHP-MUL" (%php-call-name value))))))
 
 (deftest php-parser-all-compound-assignment-operators-parse
   "Every PHP compound assignment operator on a KNOWN variable parses as a
@@ -550,21 +609,42 @@ undefined-var introduce path."
     (assert-string= "%PHP-ARRAY-UNSET" (%php-call-name ast))
     (assert-= 2 (length (cl-cc:ast-call-args ast)))))
 
+(deftest php-parser-unset-object-property-lowering
+  "unset($o->x) lowers to a property write of PHP null."
+  (let ((ast (%php-first "<?php unset($o->x);")))
+    (assert-true (cl-cc:ast-set-slot-value-p ast))
+    (assert-string= "X" (symbol-name (cl-cc:ast-set-slot-value-slot ast)))
+    (assert-true (cl-cc:ast-quote-p (cl-cc:ast-set-slot-value-value ast)))))
+
+(deftest php-parser-declare-block-keeps-body
+  "declare(ticks=...) { ... } is a directive wrapper; the parser must keep the body."
+  (let ((ast (%php-first "<?php declare(ticks=1) { echo 'a'; echo 'b'; }")))
+    (assert-true (cl-cc:ast-progn-p ast))
+    (assert-= 2 (length (cl-cc:ast-progn-forms ast)))
+    (assert-true (every #'cl-cc:ast-call-p (cl-cc:ast-progn-forms ast)))))
+
+(deftest php-parser-declare-alternative-keeps-body
+  "declare(ticks=...): ... enddeclare; is a directive wrapper; the body remains ordered."
+  (let ((ast (%php-first "<?php declare(ticks=1): echo 'a'; echo 'b'; enddeclare;")))
+    (assert-true (cl-cc:ast-progn-p ast))
+    (assert-= 2 (length (cl-cc:ast-progn-forms ast)))
+    (assert-true (every #'cl-cc:ast-call-p (cl-cc:ast-progn-forms ast)))))
+
 (deftest php-parser-close-tag-is-accepted
   "A closing ?> tag terminates PHP mode without becoming an expression token."
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; ?>")))
     (assert-= 1 (length asts))
     (assert-true (cl-cc:ast-call-p (first asts)))
-    (assert-string= "PRINC" (%php-call-name (first asts)))))
+    (assert-string= "%PHP-OUTPUT-WRITE" (%php-call-name (first asts)))))
 
 (deftest php-parser-inline-html-between-tags
-  "Inline HTML after ?> lowers to verbatim (princ, no newline) output before the
+  "Inline HTML after ?> lowers to verbatim, output-buffer-aware output before the
 next PHP block."
   (let ((asts (cl-cc/php:parse-php-source "<?php echo 1; ?>hello<?php echo 2;")))
     (assert-= 3 (length asts))
     (assert-true (every (lambda (a)
                           (and (cl-cc:ast-call-p a)
-                               (string= "PRINC" (%php-call-name a))))
+                               (string= "%PHP-OUTPUT-WRITE" (%php-call-name a))))
                         asts))))
 
 (deftest php-parser-namespace-use-metadata-preservation
@@ -574,6 +654,12 @@ next PHP block."
     (assert-string= "App\\Lib" (cl-cc:ast-namespace (first asts)))
     (assert-equal '((:type :class :name "Vendor\\Thing" :alias "Thing"))
                   (cl-cc:ast-imports (first asts)))))
+
+(deftest php-parser-qualified-name-rejects-single-token-namespace-separators
+  "Qualified names require explicit T-BACKSLASH separator tokens."
+  (assert-signals error
+    (cl-cc/php::php-parse-qualified-name
+     (list (cl-cc/php::make-php-token :T-IDENT "Vendor\\Thing")))))
 
 (deftest php-parser-braced-namespace-and-group-use-metadata
   "Braced namespaces and grouped function/const imports annotate enclosed forms."
@@ -594,6 +680,18 @@ make-instance is the first binding's value; falls back to VALUE itself."
   (if (cl-cc:ast-make-instance-p value)
       value
       (cdr (first (cl-cc:ast-let-bindings value)))))
+
+(deftest php-parser-clone-lowers-to-runtime-helper
+  "clone $obj lowers to a shallow-copy helper followed by an optional __clone call."
+  (let* ((value (%php-first-binding-value "<?php $b = clone $a;"))
+         (copy-call (cdr (first (cl-cc:ast-let-bindings value))))
+         (body (cl-cc:ast-let-body value)))
+    (assert-true (cl-cc:ast-let-p value))
+    (assert-true (cl-cc:ast-call-p copy-call))
+    (assert-eq 'cl-cc/php::%php-clone
+               (cl-cc:ast-var-name (cl-cc:ast-call-func copy-call)))
+    (assert-true (cl-cc:ast-if-p (first body)))
+    (assert-true (cl-cc:ast-var-p (second body)))))
 
 (deftest php-parser-use-alias-resolves-new-class-name
   "A class import alias resolves `new Alias()` to the imported fully-qualified class name."
@@ -722,27 +820,63 @@ After php-finish-let-bindings, $x let wraps $y let in its body."
                   ("static" . "static")
                   ("?int" . "?int")
                   ("int|string|null" . "int|string|null")
-                  ("Countable&Iterator" . "countable&iterator")))
+                  ("Countable&Iterator" . "countable&iterator")
+                  ("(Countable&Iterator)|Traversable" . "(countable&iterator)|traversable")
+                  ("Countable|(Iterator&Traversable)" . "countable|(iterator&traversable)")))
     (let* ((source (format nil "<?php function f(): ~A { return 1; }" (car case)))
            (ast (%php-first source)))
       (assert-equal (cdr case)
                     (getf (cl-cc:ast-defun-declarations ast) :php-return-type)))))
 
-(deftest php-parser-reference-operator-is-unsupported
-  "A reference expression must not silently compile as a by-value expression."
-  (%php-assert-full-source-unsupported "<?php $x = &$y;"))
+(deftest php-parser-function-return-by-reference-metadata
+  "PHP function &name(...) parses and records the return-by-reference marker."
+  (let* ((ast (%php-first "<?php function &current_item(): mixed { return $item; }"))
+         (decls (cl-cc:ast-defun-declarations ast)))
+    (assert-true (cl-cc:ast-defun-p ast))
+    (assert-equal "mixed" (getf decls :php-return-type))
+    (assert-true (getf decls :php-returns-by-ref))))
 
-(deftest php-parser-trait-is-unsupported
-  "Traits must not silently compile as ordinary CLOS classes."
+(deftest php-parser-anonymous-function-return-by-reference-metadata
+  "PHP function &() closure syntax parses and records the return-by-reference marker."
+  (let* ((value (%php-first-binding-value "<?php $f = function &() { return $item; };"))
+         (lambda (if (cl-cc:ast-let-p value)
+                     (first (cl-cc:ast-let-body value))
+                     value))
+         (decls (cl-cc:ast-lambda-declarations lambda)))
+    (assert-true (cl-cc:ast-lambda-p lambda))
+    (assert-true (member '(:php-returns-by-ref t) decls :test #'equal))))
+
+(deftest php-parser-dnf-type-annotation-preservation
+  "PHP 8.2 DNF type annotations are preserved on callables and class members."
+  (let* ((fn (%php-first "<?php function f((A&B)|C $x): D|(E&F) { return $x; }"))
+         (class (%php-first "<?php class Box { public (A&B)|C $value; const D|(E&F) KIND = 1; }"))
+         (decls (cl-cc:ast-defun-declarations fn))
+         (slots (cl-cc:ast-defclass-slots class)))
+    (assert-equal '(("x" . "(a&b)|c"))
+                  (mapcar (lambda (entry)
+                            (cons (symbol-name (car entry)) (cdr entry)))
+                          (getf decls :php-param-types)))
+    (assert-equal "d|(e&f)" (getf decls :php-return-type))
+    (assert-equal '("(a&b)|c" "d|(e&f)") (mapcar #'cl-cc:ast-slot-type slots))))
+
+(deftest php-parser-reference-parameter-and-foreach-are-supported
+  "By-reference function parameters and foreach values parse as supported forms."
+  (dolist (src '("<?php function f(&$x) { return $x; }"
+                 "<?php foreach ($items as &$item) { echo $item; }"))
+    (let ((asts (cl-cc/php:parse-php-source src)))
+      (assert-true (cl-cc/php:php-check-supported-forms asts)))))
+
+(deftest php-parser-trait-is-supported-by-check
+  "Traits parse as trait class-like declarations and pass support checks."
   (let ((ast (%php-first "<?php trait T { public $x; }")))
     (assert-eq :trait (cl-cc:ast-defclass-php-kind ast))
-    (assert-signals error (cl-cc/php:php-check-supported-forms (list ast)))))
+    (assert-true (cl-cc/php:php-check-supported-forms (list ast)))))
 
-(deftest php-parser-interface-is-unsupported
-  "Interfaces must not silently compile as concrete classes."
+(deftest php-parser-interface-is-supported-by-check
+  "Interfaces parse as interface class-like declarations and pass support checks."
   (let ((ast (%php-first "<?php interface I {}")))
     (assert-eq :interface (cl-cc:ast-defclass-php-kind ast))
-    (assert-signals error (cl-cc/php:php-check-supported-forms (list ast)))))
+    (assert-true (cl-cc/php:php-check-supported-forms (list ast)))))
 
 (deftest php-parser-unit-enum-cases
   "Unit enums parse as PHP enum defclasses with singleton case class slots."
@@ -803,13 +937,14 @@ Enum defclass is first; $x/$y/$z assignments nest (php-finish-let-bindings)."
     (assert-string= "%PHP-ENUM-TRY-FROM" (%php-call-name try-from-call))
     (assert-string= "%PHP-ENUM-CASES" (%php-call-name cases-call))))
 
-(deftest-each php-parser-reference-syntax-rejected
-  "All by-reference PHP syntax is rejected with a parse error."
+(deftest-each php-parser-reference-syntax-is-supported
+  "By-reference parameter, foreach value, and closure capture syntax parse and pass support checks."
   :cases (("closure-use-ref"    "<?php $fn = function() use (&$x) { return $x; };")
           ("function-ref-param" "<?php function f(&$x) { return $x; }")
           ("foreach-ref-value"  "<?php foreach ($items as &$item) { echo $item; }"))
   (src)
-  (assert-signals error (%php-first src)))
+  (let ((asts (cl-cc/php:parse-php-source src)))
+    (assert-true (cl-cc/php:php-check-supported-forms asts))))
 
 (deftest php-parser-class-typed-properties
   "Characterization: class typed properties should preserve their declared PHP types on slot definitions."
@@ -818,6 +953,23 @@ Enum defclass is first; $x/$y/$z assignments nest (php-finish-let-bindings)."
     (assert-= 3 (length slots))
     (assert-equal '("int" "?string" "int|float") (mapcar #'cl-cc:ast-slot-type slots))
     (assert-true (member :readonly (getf (cl-cc:ast-imports (third slots)) :php-modifiers)))))
+
+(deftest php-parser-readonly-class-marks-instance-properties
+  "PHP 8.2 readonly class declarations mark instance properties, not static members or methods."
+  (let* ((ast (%php-first "<?php readonly class User { public int $id; public static int $count; public function name() { return 1; } }"))
+         (slots (cl-cc:ast-defclass-slots ast)))
+    (labels ((slot (name)
+               (find name slots
+                     :key (lambda (slot)
+                            (symbol-name (cl-cc:ast-slot-name slot)))
+                     :test #'string=)))
+      (let ((id (slot "ID"))
+            (count (slot "COUNT"))
+            (name (slot "NAME")))
+        (assert-true (getf (cl-cc:ast-imports id) :readonly-p))
+        (assert-true (member :readonly (getf (cl-cc:ast-imports id) :php-modifiers)))
+        (assert-false (getf (cl-cc:ast-imports count) :readonly-p))
+        (assert-false (getf (cl-cc:ast-imports name) :readonly-p))))))
 
 (deftest php-parser-class-typed-constants
   "PHP class constants preserve optional type annotations as class-scoped metadata slots."
@@ -832,6 +984,22 @@ Enum defclass is first; $x/$y/$z assignments nest (php-finish-let-bindings)."
                            (and (eq :class (cl-cc:ast-slot-allocation slot))
                                 (getf (cl-cc:ast-imports slot) :php-class-constant)))
                          slots))))
+
+(deftest php-parser-multiple-class-constants-in-one-declaration
+  "PHP class const declarations may contain several constants sharing one optional type."
+  (let* ((ast (%php-first "<?php class C { public const int FOO = 1, BAR = 2; }"))
+         (slots (cl-cc:ast-defclass-slots ast)))
+    (assert-= 2 (length slots))
+    (assert-equal '("FOO" "BAR")
+                  (mapcar (lambda (slot)
+                            (symbol-name (cl-cc:ast-slot-name slot)))
+                          slots))
+    (assert-equal '("int" "int") (mapcar #'cl-cc:ast-slot-type slots))
+    (assert-true (every (lambda (slot)
+                          (and (eq :class (cl-cc:ast-slot-allocation slot))
+                               (member :public (getf (cl-cc:ast-imports slot) :php-modifiers))
+                               (getf (cl-cc:ast-imports slot) :php-class-constant)))
+                        slots))))
 
 (defun %php-node-attributes (node)
   "Return PHP attribute metadata attached to NODE."
@@ -903,6 +1071,23 @@ precede a parameter's type in __construct."
           ("named-mixed"   "<?php foo('pos', name: 'x');"       #'cl-cc:ast-call-p))
   (src pred)
   (assert-true (funcall pred (%php-first src))))
+
+(deftest php-parser-named-args-after-dynamic-spread
+  "Named arguments after dynamic spread lower to apply instead of an unsupported
+parser error."
+  (let* ((asts (cl-cc/php:parse-php-source
+                "<?php function f($a,$b,$c) { return $c; } f(...$args, c: 3);"))
+         (call (second asts)))
+    (assert-true (cl-cc:ast-apply-p call))))
+
+(deftest php-parser-named-argument-metadata-is-source-local
+  "Named-argument parameter metadata from one parse must not affect later sources."
+  (cl-cc/php:parse-php-source
+   "<?php function foo($value) { return $value; } echo foo(value: 'x');")
+  (let ((ast (%php-first "<?php foo(name: 'x');")))
+    (assert-true (cl-cc:ast-call-p ast))
+    (assert-string= "%PHP-NAMED-ARG"
+                    (%php-call-name (first (cl-cc:ast-call-args ast))))))
 
 (deftest php-parser-first-class-callable
   "strlen(...) parses as a first-class callable reference."

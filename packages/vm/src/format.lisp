@@ -197,7 +197,8 @@
     (%vm-format-write stream
                       (if atsignp
                           (if (eql value 1) "y" "ies")
-                          (if (eql value 1) "" "s")))))
+                          (if (eql value 1) "" "s"))
+                      ctx)))
 
 (defun %vm-format-write-directive (ctx colonp atsignp stream)
   "Implement FORMAT ~W through WRITE, honoring the common pretty/readable flags."
@@ -209,7 +210,8 @@
       (%vm-format-write stream
                         (vm-write-object-to-string value
                                                    :escape *print-escape*
-                                                   :circle *print-circle*)))))
+                                                   :circle *print-circle*)
+                        ctx))))
 
 (defun %vm-format-peek-arg (ctx)
   (let ((index (%vm-format-context-index ctx)))
@@ -281,7 +283,7 @@ separators and ~a~^~a stopped after the first arg.)"
               do (write-char comma out)
             do (write-char (cl:char digits i) out)))))
 
-(defun %vm-format-integer (value radix colonp atsignp params stream)
+(defun %vm-format-integer (value radix colonp atsignp params stream &optional ctx)
   (let* ((mincol (%vm-format-param params 0 nil))
          (padchar (%vm-format-param params 1 #\Space))
          (comma-char (%vm-format-param params 2 #\,))
@@ -294,7 +296,7 @@ separators and ~a~^~a stopped after the first arg.)"
          (grouped (if colonp
                       (%vm-format-group-digits signed comma-char comma-interval)
                       signed)))
-    (%vm-format-pad stream grouped mincol padchar nil)))
+    (%vm-format-pad stream grouped mincol padchar nil ctx)))
 
 (defparameter +vm-format-small-cardinals+
   #("zero" "one" "two" "three" "four" "five" "six" "seven" "eight" "nine"
@@ -348,12 +350,12 @@ separators and ~a~^~a stopped after the first arg.)"
               do (write-string (cdr pair) out)
                  (decf n (car pair)))))))
 
-(defun %vm-format-radix (value colonp atsignp params stream)
+(defun %vm-format-radix (value colonp atsignp params stream &optional ctx)
   (let ((radix (%vm-format-param params 0 nil)))
     (cond
-      (radix (%vm-format-integer value radix colonp atsignp (cdr params) stream))
-      (atsignp (%vm-format-write stream (%vm-format-roman value colonp)))
-      (t (%vm-format-write stream (%vm-format-english value colonp))))))
+      (radix (%vm-format-integer value radix colonp atsignp (cdr params) stream ctx))
+      (atsignp (%vm-format-write stream (%vm-format-roman value colonp) ctx))
+      (t (%vm-format-write stream (%vm-format-english value colonp) ctx)))))
 
 (defun %vm-format-params-prefix (params)
   "Render PARAMS (already resolved to integers/characters/nil) as a directive
@@ -371,7 +373,7 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
                          (progn (cl:write-char #\' s) (cl:write-char p s))
                          (princ p s))))))))
 
-(defun %vm-format-float (directive value params stream)
+(defun %vm-format-float (directive value params stream &optional ctx)
   ;; With explicit parameters (~w,dF, ~,2$, ...), reconstruct the directive and
   ;; delegate to the host FORMAT, which implements the full ANSI width/decimals/
   ;; scale/pad semantics — the VM shortest/fixed printer ignored them entirely
@@ -385,7 +387,8 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
        (cl:format nil
                   (concatenate 'string "~" (%vm-format-params-prefix params)
                                (string directive))
-                  value))
+                  value)
+       ctx)
       (let ((mode (case directive
                     (#\F :fixed)
                     (#\E :exponential)
@@ -395,7 +398,8 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
         (%vm-format-write stream
                           (if (fboundp 'vm-float-to-string)
                               (vm-float-to-string value :mode mode)
-                              (princ-to-string value))))))
+                              (princ-to-string value))
+                          ctx))))
 
 (defun %vm-format-character-name (ch)
   (or (char-name ch) (string ch)))
@@ -403,17 +407,35 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
 (defun %vm-format-character-readable (ch)
   (concatenate 'string "#\\" (%vm-format-character-name ch)))
 
-(defun %vm-format-character (char colonp atsignp stream)
+(defun %vm-format-character (char colonp atsignp stream &optional ctx)
   (let ((ch (if (characterp char) char (code-char char))))
     (cond
-      ((and colonp atsignp) (%vm-format-write stream (%vm-format-character-readable ch)))
-      (colonp (%vm-format-write stream (%vm-format-character-name ch)))
-      (atsignp (%vm-format-write stream (%vm-format-character-readable ch)))
-    (t (cl:write-char ch stream)))))
+      ((and colonp atsignp) (%vm-format-write stream (%vm-format-character-readable ch) ctx))
+      (colonp (%vm-format-write stream (%vm-format-character-name ch) ctx))
+      (atsignp (%vm-format-write stream (%vm-format-character-readable ch) ctx))
+    (t (%vm-format-write stream (string ch) ctx)))))
+
+(defun %vm-format-capitalize-first-word (string)
+  (let ((result (string-downcase string))
+        (converted nil))
+    (loop for i below (cl:length result)
+          for ch = (cl:char result i)
+          when (and (not converted) (alphanumericp ch))
+            do (setf (cl:char result i) (char-upcase ch)
+                     converted t))
+    result))
+
+(defun %vm-format-convert-case (string colonp atsignp)
+  "Apply ANSI FORMAT ~( case conversion modifiers to STRING."
+  (cond
+    ((and colonp atsignp) (string-upcase string))
+    (colonp (string-capitalize string))
+    (atsignp (%vm-format-capitalize-first-word string))
+    (t (string-downcase string))))
 
 (defun %vm-format-directive-char-p (char)
   (or (cl:alpha-char-p char)
-      (cl:find char "%&~*?[]{}<>^/;$|_I")))
+      (cl:find char "%&~*?[]{}<>()^/;$|_I")))
 
 (defun %vm-format-parse-param-token (token ctx)
   (cond
@@ -467,6 +489,7 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
     (#\[ #\])
     (#\{ #\})
     (#\< #\>)
+    (#\( #\))
     (t (error "No matching close directive for ~A" open))))
 
 (defun %vm-format-find-section-end (format-string start open)
@@ -555,20 +578,26 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
                               (declare (ignore _))
               (cl:write-char #\~ stream)
                                (incf (%vm-format-context-column ctx))))
-                        (#\D (%vm-format-integer (%vm-format-next-arg ctx) 10 colonp atsignp params stream))
-                        (#\B (%vm-format-integer (%vm-format-next-arg ctx) 2 colonp atsignp params stream))
-                        (#\O (%vm-format-integer (%vm-format-next-arg ctx) 8 colonp atsignp params stream))
-                        (#\X (%vm-format-integer (%vm-format-next-arg ctx) 16 colonp atsignp params stream))
-                       (#\R (%vm-format-radix (%vm-format-next-arg ctx) colonp atsignp params stream))
-                       ((#\F #\E #\G #\$) (%vm-format-float dir (%vm-format-next-arg ctx) params stream))
-                        (#\C (%vm-format-character (%vm-format-next-arg ctx) colonp atsignp stream))
+                        (#\D (%vm-format-integer (%vm-format-next-arg ctx) 10 colonp atsignp params stream ctx))
+                        (#\B (%vm-format-integer (%vm-format-next-arg ctx) 2 colonp atsignp params stream ctx))
+                        (#\O (%vm-format-integer (%vm-format-next-arg ctx) 8 colonp atsignp params stream ctx))
+                        (#\X (%vm-format-integer (%vm-format-next-arg ctx) 16 colonp atsignp params stream ctx))
+                       (#\R (%vm-format-radix (%vm-format-next-arg ctx) colonp atsignp params stream ctx))
+                       ((#\F #\E #\G #\$) (%vm-format-float dir (%vm-format-next-arg ctx) params stream ctx))
+                        (#\C (%vm-format-character (%vm-format-next-arg ctx) colonp atsignp stream ctx))
                         (#\P (%vm-format-plural ctx colonp atsignp stream))
                         (#\W (%vm-format-write-directive ctx colonp atsignp stream))
                         (#\T (let* ((colnum (or (%vm-format-param params 0 1) 1))
-                                     (colinc (or (%vm-format-param params 1 1) 1))
+                                     (colinc (max 1 (or (%vm-format-param params 1 1) 1)))
                                      (current (%vm-format-context-column ctx))
-                                      (target (if atsignp (+ current colnum) (max 0 (1- colnum))))
-                                     (spaces (if (>= current target) 0 (- target current))))
+                                     (spaces (if atsignp
+                                                 colnum
+                                                 (if (< current colnum)
+                                                     (- colnum current)
+                                                     (let ((offset (mod (- current colnum) colinc)))
+                                                       (if (zerop offset)
+                                                           colinc
+                                                           (- colinc offset)))))))
                                   (dotimes (_ spaces) (declare (ignore _))
                      (cl:write-char #\Space stream))
                                   (setf (%vm-format-context-column ctx) (+ current spaces))))
@@ -666,11 +695,23 @@ nils are dropped; a nil between non-nils becomes an empty field (its default)."
                        (#\< (multiple-value-bind (section-end after-section)
                                 (%vm-format-find-section-end format-string next #\<)
                                (let* ((body (cl:subseq format-string next section-end))
+                                      (saved-column (%vm-format-context-column ctx))
                                      (text (with-output-to-string (out)
                                              (%vm-format-render body ctx out))))
+                                (setf (%vm-format-context-column ctx) saved-column)
                                 (%vm-format-pad stream text (%vm-format-param params 0 0)
                                                 (%vm-format-param params 1 #\Space)
-                                                atsignp))
+                                                atsignp ctx))
+                              (setf next after-section)))
+                       (#\( (multiple-value-bind (section-end after-section)
+                                (%vm-format-find-section-end format-string next #\()
+                              (let* ((body (cl:subseq format-string next section-end))
+                                     (saved-column (%vm-format-context-column ctx))
+                                     (text (with-output-to-string (out)
+                                             (%vm-format-render body ctx out)))
+                                     (converted (%vm-format-convert-case text colonp atsignp)))
+                                (setf (%vm-format-context-column ctx) saved-column)
+                                (%vm-format-write stream converted ctx))
                               (setf next after-section)))
                        (#\^ (when (%vm-format-escape-terminate-p params ctx)
                               (return-from %vm-format-render (values ctx t))))

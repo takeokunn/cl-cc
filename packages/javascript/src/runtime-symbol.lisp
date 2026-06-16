@@ -42,6 +42,9 @@
 (defparameter *js-symbol-registry* (make-hash-table :test #'equal)
   "Global symbol registry mapping string keys to js-symbol instances.")
 
+(defparameter *js-symbol-storage-key-registry* (make-hash-table :test #'equal)
+  "Runtime storage-key registry mapping encoded property keys back to symbols.")
+
 (defun %js-symbol-for (key)
   "Symbol.for(key) — returns the registered symbol for KEY, creating it if absent."
   (let ((k (%js-to-string key)))
@@ -145,7 +148,19 @@
 
 (defun %js-symbol-as-key (sym)
   "Convert a JS symbol to its hash-table storage key (string form)."
-  (format nil "__sym_~A__" (js-symbol-key sym)))
+  (let ((key (format nil "__sym_~A__" (js-symbol-key sym))))
+    (setf (gethash key *js-symbol-storage-key-registry*) sym)
+    key))
+
+(defun %js-symbol-storage-key-p (key)
+  "True when KEY is an encoded Symbol property key known to this runtime."
+  (and (stringp key)
+       (nth-value 1 (gethash key *js-symbol-storage-key-registry*))))
+
+(defun %js-symbol-from-storage-key (key)
+  "Return the Symbol object encoded by KEY, or undefined if KEY is not a symbol key."
+  (multiple-value-bind (sym found) (gethash key *js-symbol-storage-key-registry*)
+    (if found sym +js-undefined+)))
 
 ;;; -----------------------------------------------------------------------
 ;;;  Make the Symbol global object (callable + static methods)

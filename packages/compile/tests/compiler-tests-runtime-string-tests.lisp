@@ -57,6 +57,8 @@
   :cases (("t-is-true"    t   "t")
           ("not-nil"      t   "(not nil)")
           ("nil-is-nil"   nil "nil")
+          ("not-zero"     nil "(not 0)")
+          ("not-eq-false" t   "(not (eq 1 2))")
           ("not-1"        nil "(not 1)")
           ("not-t"        nil "(not t)")))
 

@@ -8,6 +8,11 @@
 
 (in-suite subtyping-suite)
 
+(defmacro assert-subtyping-expected-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── is-subtype-p — extended reflexivity and hierarchy ───────────────────────
 
 (deftest-each is-subtype-reflexive
@@ -30,9 +35,9 @@
           ("number<t"         'number  't        t)
           ("int not<string"   'fixnum  'string   nil))
   (name1 name2 expected)
-  (if expected
-      (assert-true  (cl-cc/type:type-name-subtype-p name1 name2))
-      (assert-false (cl-cc/type:type-name-subtype-p name1 name2))))
+  (assert-subtyping-expected-case expected
+    (assert-true  (cl-cc/type:type-name-subtype-p name1 name2))
+    (assert-false (cl-cc/type:type-name-subtype-p name1 name2))))
 
 (deftest-each is-subtype-of-top-type
   "Every primitive type is a subtype of type-any."
@@ -55,9 +60,9 @@
           ("bool not in"           type-bool    nil))
   (tp expected)
   (let ((u (make-type-union (list type-int type-string))))
-    (if expected
-        (assert-true  (cl-cc/type:is-subtype-p tp u))
-        (assert-false (cl-cc/type:is-subtype-p tp u)))))
+    (assert-subtyping-expected-case expected
+      (assert-true  (cl-cc/type:is-subtype-p tp u))
+      (assert-false (cl-cc/type:is-subtype-p tp u)))))
 
 (deftest is-subtype-function-contravariant-params
   "(A->B) <: (C->D) iff C <: A (contravariant params)."

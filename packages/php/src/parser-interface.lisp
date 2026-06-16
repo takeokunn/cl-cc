@@ -25,20 +25,28 @@ CONSTANTS is a list of slot-def AST nodes representing interface constants."
   "Parse an abstract method signature: [modifiers] function name(params): type;
 Returns (values method-sig-plist remaining-stream)."
   (let ((current (cdr stream)))            ; consume :function keyword
+    (let ((returns-by-ref (%php-reference-token-p current)))
+      (when returns-by-ref
+        (setf current (cdr current)))
     (multiple-value-bind (name-tok rest) (php-expect :T-IDENT current)
       (let ((method-name (php-ident-sym (php-tok-value name-tok))))
-        (multiple-value-bind (params rest2 param-types param-attributes _by-ref)
+        (multiple-value-bind (params rest2 param-types param-attributes by-ref-indices
+                              param-defaults variadic-param)
             (php-parse-param-list rest)
-          (declare (ignore param-attributes _by-ref))
           (multiple-value-bind (return-type rest3)
               (php-parse-return-type rest2)
             (values (list :name method-name
                           :params params
                           :param-types param-types
+                          :param-attributes param-attributes
+                          :by-ref-indices by-ref-indices
+                          :param-defaults param-defaults
+                          :variadic-param variadic-param
                           :return-type return-type
+                          :returns-by-ref returns-by-ref
                           :modifiers modifiers
                           :attributes attributes)
-                    (php-skip-semis rest3))))))))
+                    (php-skip-semis rest3)))))))))
 
 (defun %php-parse-interface-body (stream known-vars)
   "Parse the body of an interface { abstract-methods constants }.
@@ -65,9 +73,11 @@ Returns (values method-sigs constants remaining-stream)."
             ;; const [TYPE] NAME = value;
             ((and (eq (php-peek-type current) :T-KEYWORD)
                   (eq (php-peek-value current) :const))
-             (multiple-value-bind (slot rest2)
+             (multiple-value-bind (slot rest2 extra-slots)
                  (%php-parse-class-constant current modifiers known-vars attributes)
                (push slot constants)
+               (dolist (extra-slot extra-slots)
+                 (push extra-slot constants))
                (setf current rest2)))
             (t
              (error "PHP interface: unsupported member near token ~S" (php-peek current)))))))

@@ -200,7 +200,6 @@ Lambda lists, dynamic variables, numeric I/O, regex, source location, serializat
   - `unused-variable-warning` — `declare (ignore ...)` なしで未使用変数
   - `unreachable-code-note` — DCEで除去されたコードの通知
   - `*compiler-warning-policy*` — 警告→エラー変換ポリシー
-  - `with-compilation-unit` との統合（複数ファイルの警告を集約して最後に報告）
 - **根拠**: SBCL compiler notes / GCC `-Wall`。コード品質向上の基盤
 - **難易度**: Medium
 

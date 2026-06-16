@@ -362,7 +362,7 @@ Round (banker's rounding) returns q=4 r=-1 for 7/2 (halfway, nearest even)."
   (assert-equal t (%run-unary-inst #'cl-cc:make-vm-not nil)))
 
 (deftest prim-not-zero-returns-true
-  "vm-not of 0 returns T; cl-cc treats 0 as false (vm-falsep), unlike standard CL."
+  "vm-not follows VM falsey semantics: nil and numeric zero are false."
   (assert-equal t (%run-unary-inst #'cl-cc:make-vm-not 0)))
 
 (deftest prim-not-integer-returns-nil
@@ -370,16 +370,18 @@ Round (banker's rounding) returns q=4 r=-1 for 7/2 (halfway, nearest even)."
   (assert-null (%run-unary-inst #'cl-cc:make-vm-not 42)))
 
 (deftest-each prim-and-cases
-  "vm-and: both truthy → t; any nil → nil."
+  "vm-and: both VM-truthy -> t; any VM-falsey -> nil."
   :cases (("both-true"  1   2   t)
+          ("zero-false" 0   2   nil)
           ("one-false"  1   nil nil))
   (lhs rhs expected)
   (assert-equal expected (%run-binary-inst #'cl-cc:make-vm-and lhs rhs)))
 
 (deftest-each prim-or-cases
-  "vm-or: both nil → nil; any truthy → t."
+  "vm-or: both VM-falsey -> nil; any VM-truthy -> t."
   :cases (("both-false"  nil nil nil)
-           ("one-true"    nil 42  t))
+          ("zero-false"  nil 0   nil)
+          ("one-true"    nil 42  t))
   (lhs rhs expected)
   (assert-equal expected (%run-binary-inst #'cl-cc:make-vm-or lhs rhs)))
 

@@ -139,10 +139,15 @@
 ;;; Setf Places Tests
 
 (deftest-each compile-setf-places
-  "setf on car/cdr/first/nth returns and mutates the correct value."
+  "setf on list places returns and mutates the correct value."
   :cases (("car"         99 "(let ((pair (cons 1 2))) (setf (car pair) 99) (car pair))")
           ("cdr"         99 "(let ((pair (cons 1 2))) (setf (cdr pair) 99) (cdr pair))")
           ("first"       42 "(let ((lst (list 1 2 3))) (setf (first lst) 42) (first lst))")
+          ("rest"        42 "(let ((lst (list 1 2 3))) (setf (rest lst) (list 42)) (car (cdr lst)))")
+          ("second"      99 "(let ((lst (list 10 20 30))) (setf (second lst) 99) (car (cdr lst)))")
+          ("cadr"        88 "(let ((lst (list 10 20 30))) (setf (cadr lst) 88) (car (cdr lst)))")
+          ("cddr"        77 "(let ((lst (list 10 20 30))) (setf (cddr lst) (list 77)) (car (cdr (cdr lst))))")
+          ("caddr"       66 "(let ((lst (list 10 20 30))) (setf (caddr lst) 66) (car (cdr (cdr lst))))")
           ("nth"         99 "(let ((lst (list 10 20 30))) (setf (nth 1 lst) 99) (nth 1 lst))")
           ("returns-val" 42 "(let ((pair (cons 1 2))) (setf (car pair) 42))"))
   (expected form)

@@ -79,8 +79,11 @@
     (assert-equal expected-name (cl-cc/ast:ast-function-name node))))
 
 (deftest lower-function-lambda
-  "lower-sexp-to-ast: (function (lambda ...)) signals error (not yet supported)"
-  (assert-signals error (lower '(function (lambda (x) x)))))
+  "lower-sexp-to-ast: (function (lambda ...)) produces an ast-lambda."
+  (let ((node (lower '(function (lambda (x) x)))))
+    (assert-true (cl-cc/ast:ast-lambda-p node))
+    (assert-equal '(x) (cl-cc::ast-lambda-params node))
+    (assert-= 1 (length (cl-cc::ast-lambda-body node)))))
 
 (deftest-each lower-type-only
   "lower-sexp-to-ast: forms whose only check is the AST node type predicate."

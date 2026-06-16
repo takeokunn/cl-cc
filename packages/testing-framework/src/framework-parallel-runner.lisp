@@ -146,6 +146,39 @@ FASLs); warm-cache runs complete in well under a minute."
   (loop for p in plists for i from 1
         collect (append p (list :number i))))
 
+(defun %normalize-test-filters (filter)
+  "Return non-empty test name filters from FILTER.
+FILTER may be NIL, a string, or a list of strings. Commas split a single CLI
+argument so `--filter php,array` narrows the test set without shell quoting."
+  (labels ((parts (value)
+             (when value
+               (remove ""
+                       (mapcar (lambda (part)
+                                 (string-trim '(#\Space #\Tab #\Newline #\Return) part))
+                               (uiop:split-string (princ-to-string value)
+                                                  :separator '(#\,)))
+                       :test #'string=))))
+    (cond
+      ((null filter) nil)
+      ((listp filter) (mapcan #'parts filter))
+      (t (parts filter)))))
+
+(defun %test-name-matches-filters-p (name filters)
+  (and name
+       (every (lambda (filter)
+                (search filter (symbol-name name) :test #'char-equal))
+              filters)))
+
+(defun %filter-tests-by-name (tests filter)
+  "Return TESTS whose :NAME contains every filter token, case-insensitively."
+  (let ((filters (%normalize-test-filters filter)))
+    (if (null filters)
+        tests
+        (remove-if-not
+         (lambda (test)
+           (%test-name-matches-filters-p (getf test :name) filters))
+         tests))))
+
 (defun %effective-worker-count (ordered-tests parallel workers)
   "Return the effective worker count for ORDERED-TESTS.
 Serial runs, serial-only batches, and single-worker requests all collapse to 1.
@@ -172,6 +205,7 @@ CL_CC_TEST_WORKERS)."
                                (tags nil)
                                (exclude-tags nil)
                                (exclude-suites nil)
+                               (filter nil)
                                (coverage nil)
                                (warm-stdlib t)
                                (quit-p t))
@@ -242,7 +276,9 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
     ;; rather than the main thread, disabling per-test timeout enforcement.
     ;; The semaphore-based killer above handles the suite deadline reliably.
     (unwind-protect
-         (let ((*parallel-suite-deadline* suite-deadline))
+         (let ((*parallel-suite-deadline* suite-deadline)
+               (*suite-fixture-cache* (make-hash-table :test #'eq))
+               (*suite-parallel-cache* (make-hash-table :test #'eq)))
            ;; Reseed from wall-clock time before generating the random seed.
            ;; The nix core image has a fixed *random-state* that always produces
            ;; seed 1193941380623146742, which triggers a pre-existing deadlock at
@@ -254,9 +290,13 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
                     (mod (get-internal-real-time) most-positive-fixnum))))
            (let* ((actual-seed     (or seed (random most-positive-fixnum)))
                   (*random-state*  (sb-ext:seed-random-state actual-seed))
-                  (tests-plists    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites))
+                  (tests-plists    (%filter-tests-by-name
+                                    (%collect-all-suite-tests suite-name tags exclude-tags exclude-suites)
+                                    filter))
                   (n               (length tests-plists))
                   (test-vec        (coerce (%number-tests tests-plists) 'vector)))
+             (when filter
+               (format t "# Filtering tests by name: ~A (~D selected)~%" filter n))
              (when random (%fisher-yates-shuffle test-vec))
              (let* ((ordered-tests     (%order-tests-for-dependencies (coerce test-vec 'list)))
                     (effective-workers (%effective-worker-count ordered-tests parallel workers)))
@@ -292,12 +332,15 @@ When QUIT-P is true, exits via uiop:quit; otherwise returns whether any test fai
                        (tags nil)
                        (exclude-tags nil)
                        (exclude-suites nil)
+                       (filter nil)
+                       (warm-stdlib t)
                        (parallel t)
                        (random nil)
                        (coverage nil))
   "Run the canonical fast CL-CC test plan.
-Integration and end-to-end tests are run explicitly by suite taxonomy, not by
-naming anything slow or auto-loading an auxiliary system.
+Integration, end-to-end, conformance, and documentation/evidence checks are run
+explicitly by suite taxonomy, not by naming anything slow or auto-loading an
+auxiliary system.
 When COVERAGE is true, sb-cover instrumentation is enabled and a coverage
 report is written to *coverage-report-directory* (default: ./coverage/)."
   (when coverage
@@ -306,13 +349,17 @@ report is written to *coverage-report-directory* (default: ./coverage/)."
        (run-suite 'cl-cc-suite
                   :parallel parallel
                   :random random
-                  :warm-stdlib t
+                  :warm-stdlib warm-stdlib
                   :tags tags
                   :exclude-tags exclude-tags
+                  :filter filter
                   :coverage coverage
                   :exclude-suites (remove-duplicates
                                    (append exclude-suites
-                                           '(cl-cc-integration-suite cl-cc-e2e-suite))
+                                           '(cl-cc-integration-suite
+                                             cl-cc-e2e-suite
+                                             cl-cc-conformance-suite
+                                             cl-cc-documentation-suite))
                                    :test #'eq))
     (when coverage
       (disable-coverage)

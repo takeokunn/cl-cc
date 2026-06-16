@@ -39,6 +39,7 @@
    ;; former ast-lower.lisp was dead, uncalled, and inconsistent — removed.
    (:file "runtime")
    (:file "runtime-property")
+   (:file "runtime-symbol")
    (:file "runtime-control")
    (:file "runtime-array")
    (:file "runtime-array-es2023")
@@ -49,7 +50,6 @@
    (:file "runtime-collections")
    (:file "runtime-async")
    (:file "runtime-map")
-   (:file "runtime-symbol")
    (:file "runtime-date")
    (:file "runtime-regex")
    (:file "runtime-regex-api")

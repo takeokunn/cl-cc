@@ -41,7 +41,7 @@
     "default" "try" "catch" "finally" "use" "namespace" "list" "as" "in"
     "instanceof" "insteadof" "print" "yield" "from" "fn" "const" "unset"
     "include" "require" "include_once" "require_once"
-    "declare" "goto" "clone" "array")
+    "declare" "enddeclare" "goto" "clone" "array")
   "PHP reserved keywords (lowercased).")
 
 (defvar *php-type-keywords*

@@ -428,7 +428,7 @@ turn into clean test failures rather than blocking the parallel worker thread."
                  (= (slot-value copy 'x) 10)
                  (= (slot-value copy 'y) 20))
             :ok
-            :bad)))")))
+            :bad)))"))
 
 ;;; Apply a 10-second timeout to all mop-* tests AFTER they are all registered.
 ;;; TDD RED-phase tests may call undefined VM functions that can hang the VM

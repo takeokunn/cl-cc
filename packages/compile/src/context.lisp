@@ -493,6 +493,7 @@ clobbered. Returns ARG's result register."
     cl-cc/ast:ast-go
     cl-cc/ast:ast-defvar
     cl-cc/ast:ast-defclass
+    cl-cc/ast:ast-set-slot-value
     cl-cc/ast:ast-call
     cl-cc/ast:ast-lambda
     cl-cc/ast:ast-apply

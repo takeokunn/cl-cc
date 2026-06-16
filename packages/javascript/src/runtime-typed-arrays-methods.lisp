@@ -1,7 +1,8 @@
 ;;;; packages/javascript/src/runtime-typed-arrays-methods.lisp — ES2023+ TypedArray methods
 ;;;;
 ;;;; ES2023 non-mutating methods (toReversed, toSorted, with, at, findLast, etc.)
-;;;; ES2025 Uint8Array hex/base64 encoding (toHex, toBase64, fromHex, fromBase64)
+;;;; ES2025 Uint8Array hex/base64 encoding
+;;;; (toHex, toBase64, fromHex, fromBase64, setFromHex, setFromBase64)
 ;;;; *js-typed-array-methods* dispatch table (references fns from both files)
 ;;;;
 ;;;; Load order: after runtime-typed-arrays.lisp (needs struct, coerce helpers,
@@ -132,12 +133,20 @@
             do (setf (aref (js-ta-buffer ta) i) v))))
   ta)
 
-(defun %js-ta-last-index-of (ta val)
+(defun %js-ta-last-index-of (ta val &optional (from-index nil from-index-supplied-p))
   "TypedArray.prototype.lastIndexOf()."
-  (let ((target (%js-ta-coerce-element (js-ta-type-name ta) val)))
-    (loop for i from (1- (js-ta-length ta)) downto 0
-          when (= (aref (js-ta-buffer ta) i) target) return (coerce i 'double-float)
-          finally (return -1.0d0))))
+  (let* ((target (%js-ta-coerce-element (js-ta-type-name ta) val))
+         (n (js-ta-length ta))
+         (end (if from-index-supplied-p
+                  (let ((i (%js-array-to-integer from-index)))
+                    (if (< i 0) (+ n i) (min i (1- n))))
+                  (1- n))))
+    (if (< end 0)
+        -1.0d0
+        (loop for i from end downto 0
+              when (= (aref (js-ta-buffer ta) i) target)
+                return (coerce i 'double-float)
+              finally (return -1.0d0)))))
 
 (defun %js-ta-values (ta)
   "TypedArray.prototype.values() — returns an iterator."
@@ -228,6 +237,29 @@
       (loop for b across bytes for i from 0 do (setf (aref (js-ta-buffer ta) i) b))
       ta)))
 
+(defun %js-uint8-copy-decoded-into (target decoded)
+  (let ((written (min (js-ta-length target) (js-ta-length decoded))))
+    (dotimes (i written)
+      (%js-ta-set target i (aref (js-ta-buffer decoded) i)))
+    written))
+
+(defun %js-uint8-set-from-hex (ta hex-str)
+  "Uint8Array.prototype.setFromHex(string) — ES2025."
+  (let* ((s (%js-to-string hex-str))
+         (decoded (%js-uint8-from-hex s))
+         (written (%js-uint8-copy-decoded-into ta decoded)))
+    (%js-make-object "read" (coerce (* written 2) 'double-float)
+                     "written" (coerce written 'double-float))))
+
+(defun %js-uint8-set-from-base64 (ta b64-str &optional opts)
+  "Uint8Array.prototype.setFromBase64(string) — ES2025."
+  (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return)
+                         (%js-to-string b64-str)))
+         (decoded (%js-uint8-from-base64 s opts))
+         (written (%js-uint8-copy-decoded-into ta decoded)))
+    (%js-make-object "read" (coerce (length s) 'double-float)
+                     "written" (coerce written 'double-float))))
+
 (defparameter *js-typed-array-method-table*
   (list (cons "set"           #'%js-ta-set-from)
         (cons "subarray"      #'%js-ta-subarray)
@@ -261,5 +293,7 @@
         (cons "@@iterator"    #'%js-ta-values)
         ;; ES2025 Uint8Array hex/base64
         (cons "toHex"         #'%js-uint8-to-hex)
-        (cons "toBase64"      #'%js-uint8-to-base64))
+        (cons "toBase64"      #'%js-uint8-to-base64)
+        (cons "setFromHex"    #'%js-uint8-set-from-hex)
+        (cons "setFromBase64" #'%js-uint8-set-from-base64))
   "TypedArray.prototype method dispatch.")

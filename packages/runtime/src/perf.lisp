@@ -104,19 +104,17 @@ Returns the counter value or NIL if not enabled."
         val))))
 
 (defmacro rt-with-perf-counters ((&rest counter-types) &body body)
-  `(progn
-     (dolist (ct ',counter-types) (rt-perf-enable-counter ct))
+  `(let ((enabled-counters
+          (loop for ct in ',counter-types
+                collect (rt-perf-enable-counter ct))))
      (unwind-protect
-         (progn ,@body)
+         (progn
+           (unless (every (lambda (counter)
+                            (and counter (rt-perf-counter-enabled counter)))
+                          enabled-counters)
+             (error 'perf-counters-unsupported))
+           ,@body)
        (dolist (ct ',counter-types) (rt-perf-disable-counter ct)))))
-
-(defmacro with-perf-counters ((&rest counter-types) &body body)
-  "Public alias. Signals perf-counters-unsupported when hardware counter
-support is unavailable (default)."
-  (declare (ignore counter-types))
-  `(progn
-     (signal 'perf-counters-unsupported)
-     ,@body))
 
 (define-condition perf-counters-unsupported (condition) ()
   (:report (lambda (c s) (declare (ignore c))

@@ -141,7 +141,7 @@ or a compact pair like (:element-type . :fixnum)."
      5 = array:   slots 2..size-1 are elements (all potential pointers)
      6 = string:  no pointer slots (packed character data)
      7 = other:   slots 1..size-1 are all pointers"
-  (let ((tag  (header-tag  (rt-heap-object-header heap addr)))
+  (let ((tag  (rt-header-type-tag  (rt-heap-object-header heap addr)))
         (size (rt-heap-object-size heap addr)))
     (case tag
       (1  ; cons: car=slot1, cdr=slot2

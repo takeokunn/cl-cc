@@ -85,10 +85,17 @@ spread as positional arguments."
               (%php-array-set result (%php-array-next-auto-index result) (cdr pair))
               (%php-array-set result (car pair) (cdr pair))))))))
 
-(defun %php-array-keys (array)
-  "Return ARRAY keys as a PHP array."
+(defun %php-array-keys (array &optional (filter-value nil filter-supplied-p) strict)
+  "Return ARRAY keys as a PHP array, optionally filtered by value."
   ;; (%php-array-values-list (%php-array-keys (%php-array (list t "a" 1)))) => ("a")
-  (%php-list-to-array (%php-array-ordered-keys array)))
+  (let ((result (%php-array)))
+    (when (hash-table-p array)
+      (dolist (pair (%php-array-pairs array) result)
+        (when (or (not filter-supplied-p)
+                  (if (%php-truthy strict)
+                      (%php-eq-strict filter-value (cdr pair))
+                      (%php-eq-loose filter-value (cdr pair))))
+          (%php-array-set result (%php-array-next-auto-index result) (car pair)))))))
 
 (defun %php-array-values (array)
   "Return ARRAY values as a reindexed PHP array."
@@ -160,14 +167,20 @@ time, so this only fires on misuse."
                    (%php-eq-loose needle (cdr pair)))
             return (car pair))))
 
+(defun %php-array-copy-with-key-policy (result key value preserve-keys)
+  "Copy VALUE into RESULT using PHP's numeric-key reindexing policy."
+  (%php-array-set result
+                  (if (or (%php-truthy preserve-keys) (not (integerp key)))
+                      key
+                      (%php-array-next-auto-index result))
+                  value))
+
 (defun %php-array-reverse (array &optional preserve-keys)
   "Return ARRAY values in reverse order."
   ;; (%php-array-values-list (%php-array-reverse (%php-list-to-array '(1 2)))) => (2 1)
   (let ((result (%php-array)))
     (dolist (pair (reverse (%php-array-pairs array)) result)
-      (if (%php-truthy preserve-keys)
-          (%php-array-set result (car pair) (cdr pair))
-          (%php-array-set result (%php-array-next-auto-index result) (cdr pair))))))
+      (%php-array-copy-with-key-policy result (car pair) (cdr pair) preserve-keys))))
 
 (defun %php-array-slice (array offset &optional length preserve-keys)
   "Return a slice of ARRAY as a PHP array."
@@ -180,36 +193,65 @@ time, so this only fires on misuse."
          (slice (subseq pairs start end))
          (result (%php-array)))
     (dolist (pair slice result)
-      (if (%php-truthy preserve-keys)
-          (%php-array-set result (car pair) (cdr pair))
-          (%php-array-set result (%php-array-next-auto-index result) (cdr pair))))))
+      (%php-array-copy-with-key-policy result (car pair) (cdr pair) preserve-keys))))
 
 (defun %php-array-unique (array)
   "Return ARRAY with duplicate values removed, preserving first keys."
   (let ((result (%php-array))
         (seen nil))
     (dolist (pair (%php-array-pairs array) result)
-      (unless (some (lambda (value) (%php-eq-loose value (cdr pair))) seen)
+      (unless (some (lambda (value) (%php-array-value-string= value (cdr pair))) seen)
         (push (cdr pair) seen)
         (%php-array-set result (car pair) (cdr pair))))))
 
-(defun %php-array-map (callback array)
-  "Apply CALLBACK to each ARRAY value and return a reindexed PHP array."
-  (let ((fn (%php-callable-function callback))
-        (result (%php-array)))
-    (when (and fn (hash-table-p array))
-      (dolist (value (%php-array-values-list array))
-        (%php-array-set result (%php-array-next-auto-index result)
-                        (funcall fn value))))
-    result))
+(defun %php-array-map (callback array &rest more-arrays)
+  "Apply CALLBACK across one or more PHP arrays.
+PHP preserves keys only when exactly one array is supplied; multiple arrays are
+zipped by position and reindexed. A null callback returns the original values
+for one array and row arrays for multiple arrays."
+  (let* ((arrays (cons array more-arrays))
+         (fn (and (not (%php-null-p callback))
+                  (%php-callable-function callback)))
+         (result (%php-array)))
+    (cond
+      ((some (lambda (arr) (not (hash-table-p arr))) arrays)
+       result)
+      ((null more-arrays)
+       (dolist (pair (%php-array-pairs array) result)
+         (%php-array-set result (car pair)
+                         (if fn (funcall fn (cdr pair)) (cdr pair)))))
+      (t
+       (let* ((lists (mapcar #'%php-array-values-list arrays))
+              (limit (if lists (apply #'max (mapcar #'length lists)) 0)))
+         (loop for i below limit
+               for args = (mapcar (lambda (lst)
+                                     (if (< i (length lst)) (nth i lst) +php-null+))
+                                   lists)
+               do (if fn
+                      (%php-array-set result (%php-array-next-auto-index result)
+                                      (apply fn args))
+                      (let ((row (%php-array)))
+                        (dolist (arg args)
+                          (%php-array-set row (%php-array-next-auto-index row) arg))
+                        (%php-array-set result (%php-array-next-auto-index result) row))))
+         result)))))
 
-(defun %php-array-filter (array &optional callback)
-  "Filter ARRAY values by CALLBACK or PHP truthiness."
+(defun %php-array-filter (array &optional callback (mode 0))
+  "Filter ARRAY values by CALLBACK or PHP truthiness.
+
+MODE follows PHP's array_filter flags:
+0 = pass value, ARRAY_FILTER_USE_BOTH(1) = pass value and key,
+ARRAY_FILTER_USE_KEY(2) = pass key."
   (let ((fn (and callback (not (%php-null-p callback)) (%php-callable-function callback)))
         (result (%php-array)))
     (when (hash-table-p array)
       (dolist (pair (%php-array-pairs array))
-        (let ((keep (if fn (funcall fn (cdr pair)) (%php-truthy (cdr pair)))))
+        (let ((keep (if fn
+                        (case mode
+                          (1 (funcall fn (cdr pair) (car pair)))
+                          (2 (funcall fn (car pair)))
+                          (otherwise (funcall fn (cdr pair))))
+                        (%php-truthy (cdr pair)))))
           (when (%php-truthy keep)
             (%php-array-set result (car pair) (cdr pair))))))
     result))
@@ -223,11 +265,43 @@ time, so this only fires on misuse."
         (setf acc (funcall fn acc value))))
     acc))
 
-(defun %php-sort-pairs-by (array key-fn &key descending preserve-keys)
+(defun %php-sort-flag-type (sort-flags)
+  "Return the comparison mode selected by PHP SORT_* flags."
+  (case sort-flags
+    (1 :numeric)                         ; SORT_NUMERIC
+    (2 :string)                          ; SORT_STRING
+    (otherwise :regular)))               ; SORT_REGULAR/default
+
+(defun %php-sort-compare-values (a b sort-type)
+  "Return -1, 0, or 1 comparing A and B for PHP array sorting."
+  (case sort-type
+    (:numeric
+     (let ((na (%php-numeric a))
+           (nb (%php-numeric b)))
+       (cond ((< na nb) -1) ((> na nb) 1) (t 0))))
+    (:string
+     (let ((sa (%php-stringify a))
+           (sb (%php-stringify b)))
+       (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0))))
+    (otherwise
+     (cond
+       ((and (numberp a) (numberp b))
+        (cond ((< a b) -1) ((> a b) 1) (t 0)))
+       (t (%php-sort-compare-values a b :string))))))
+
+(defun %php-sort-pairs-by (array key-fn &key descending preserve-keys sort-flags)
   "Sort ARRAY by KEY-FN and return T after mutating ARRAY."
-  (let ((pairs (stable-sort (copy-list (%php-array-pairs array))
-                            (if descending #'string> #'string<)
-                            :key (lambda (pair) (%php-stringify (funcall key-fn pair))))))
+  (let* ((sort-type (%php-sort-flag-type sort-flags))
+         (pairs (stable-sort
+                 (copy-list (%php-array-pairs array))
+                 (lambda (left right)
+                   (let ((comparison (%php-sort-compare-values
+                                      (funcall key-fn left)
+                                      (funcall key-fn right)
+                                      sort-type)))
+                     (if descending
+                         (> comparison 0)
+                         (< comparison 0)))))))
     (clrhash array)
     (setf (gethash +php-array-order-key+ array) nil
           (gethash +php-array-next-index-key+ array) 0)
@@ -236,21 +310,21 @@ time, so this only fires on misuse."
                       (if preserve-keys (car pair) (%php-array-next-auto-index array))
                       (cdr pair)))))
 
-(defun %php-sort (array)
+(defun %php-sort (array &optional sort-flags)
   "Sort ARRAY values ascending, reindexing numeric keys."
-  (%php-sort-pairs-by array #'cdr))
+  (%php-sort-pairs-by array #'cdr :sort-flags sort-flags))
 
-(defun %php-rsort (array)
+(defun %php-rsort (array &optional sort-flags)
   "Sort ARRAY values descending, reindexing numeric keys."
-  (%php-sort-pairs-by array #'cdr :descending t))
+  (%php-sort-pairs-by array #'cdr :descending t :sort-flags sort-flags))
 
-(defun %php-asort (array)
+(defun %php-asort (array &optional sort-flags)
   "Sort ARRAY by value ascending, preserving keys."
-  (%php-sort-pairs-by array #'cdr :preserve-keys t))
+  (%php-sort-pairs-by array #'cdr :preserve-keys t :sort-flags sort-flags))
 
-(defun %php-ksort (array)
+(defun %php-ksort (array &optional sort-flags)
   "Sort ARRAY by key ascending, preserving key/value associations."
-  (%php-sort-pairs-by array #'car :preserve-keys t))
+  (%php-sort-pairs-by array #'car :preserve-keys t :sort-flags sort-flags))
 
 (defun %php-range (start end &optional (step 1))
   "Return a PHP array containing values from START to END by STEP."
@@ -357,32 +431,32 @@ updated and the sort appeared to do nothing."
          (target (abs size))
          (result (%php-make-array)))
     (if (>= current-size target)
-        ;; No padding needed — copy as-is
+        ;; array_pad returns a copy; integer keys are reindexed, string keys survive.
         (dolist (pair pairs result)
-          (%php-array-set result (car pair) (cdr pair)))
+          (%php-array-copy-with-key-policy result (car pair) (cdr pair) nil))
         (let ((pad-count (- target current-size)))
           (if (< size 0)
-              ;; Pad at beginning
               (progn
-                (dotimes (i pad-count)
-                  (%php-array-set result i value))
-                (loop for i from pad-count for pair in pairs
-                      do (%php-array-set result i (cdr pair))))
-              ;; Pad at end
+                (dotimes (_ pad-count)
+                  (%php-array-set result (%php-array-next-auto-index result) value))
+                (dolist (pair pairs)
+                  (%php-array-copy-with-key-policy result (car pair) (cdr pair) nil)))
               (progn
-                (loop for i from 0 for pair in pairs
-                      do (%php-array-set result i (cdr pair)))
-                (dotimes (i pad-count)
-                  (%php-array-set result (+ current-size i) value))))
+                (dolist (pair pairs)
+                  (%php-array-copy-with-key-policy result (car pair) (cdr pair) nil))
+                (dotimes (_ pad-count)
+                  (%php-array-set result (%php-array-next-auto-index result) value))))
           result))))
 
 (defun %php-array-count-values (array)
   "PHP array_count_values: count occurrences of each value."
   (let ((result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
-      (let* ((v (%php-stringify (cdr pair)))
-             (current (%php-array-ref result v)))
-        (%php-array-set result v (if (%php-null-p current) 1 (1+ current)))))
+      (let ((value (cdr pair)))
+        (when (or (integerp value) (stringp value))
+          (let* ((v (%php-stringify value))
+                 (current (%php-array-ref result v)))
+            (%php-array-set result v (if (%php-null-p current) 1 (1+ current)))))))
     result))
 
 (defun %php-array-sum (array)
@@ -401,12 +475,21 @@ updated and the sort appeared to do nothing."
         (when (numberp v) (setf product (* product v)))))
     product))
 
+(defun %php-array-value-string= (a b)
+  "Compare array values using PHP's string representation rule."
+  (string= (%php-stringify a) (%php-stringify b)))
+
+(defun %php-array-assoc-pair-match-p (array key value)
+  "Return true when ARRAY contains KEY with a PHP array-comparable VALUE."
+  (and (%php-array-key-exists array key)
+       (%php-array-value-string= (%php-array-ref array key) value)))
+
 (defun %php-array-diff (array &rest arrays)
   "PHP array_diff: elements in first not in others (by value)."
   (let* ((others (loop for a in arrays append (mapcar #'cdr (%php-array-pairs a))))
          (result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
-      (unless (member (cdr pair) others :test #'equal)
+      (unless (member (cdr pair) others :test #'%php-array-value-string=)
         (%php-array-set result (car pair) (cdr pair))))
     result))
 
@@ -415,7 +498,9 @@ updated and the sort appeared to do nothing."
   (let* ((others (loop for a in arrays collect (mapcar #'cdr (%php-array-pairs a))))
          (result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
-      (when (every (lambda (other) (member (cdr pair) other :test #'equal)) others)
+      (when (every (lambda (other)
+                     (member (cdr pair) other :test #'%php-array-value-string=))
+                   others)
         (%php-array-set result (car pair) (cdr pair))))
     result))
 
@@ -453,20 +538,20 @@ by the last argument (a user comparison callback)."
 
 (defun %php-array-column (input column-key &optional index-key)
   "PHP array_column: extract values from COLUMN-KEY across rows, optionally indexed by INDEX-KEY."
-  (let ((result (%php-make-array)))
+  (let ((result (%php-make-array))
+        (all-columns-p (or (null column-key) (%php-null-p column-key)))
+        (indexed-p (and index-key (not (%php-null-p index-key)))))
     (dolist (pair (%php-array-pairs input))
-      (let* ((row (cdr pair))
-             (val (if (hash-table-p row)
-                      (if (or (null column-key) (%php-null-p column-key))
-                          row
-                          (%php-array-ref row column-key))
-                      row))
-             (key (if (and index-key (not (%php-null-p index-key)) (hash-table-p row))
-                      (%php-array-ref row index-key)
-                      nil)))
-        (if key
-            (%php-array-set result key val)
-            (%php-array-set result (%php-array-next-auto-index result) val))))
+      (let ((row (cdr pair)))
+        (when (and (hash-table-p row)
+                   (or all-columns-p (%php-array-key-present-p row column-key)))
+          (let ((value (if all-columns-p row (%php-array-ref row column-key)))
+                (has-index-p (and indexed-p (%php-array-key-present-p row index-key))))
+            (%php-array-set result
+                            (if has-index-p
+                                (%php-array-ref row index-key)
+                                (%php-array-next-auto-index result))
+                            value)))))
     result))
 
 (defun %php-array-combine (keys values)
@@ -482,7 +567,9 @@ by the last argument (a user comparison callback)."
   "PHP array_flip: exchange keys and values."
   (let ((result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
-      (%php-array-set result (cdr pair) (car pair)))
+      (let ((value (cdr pair)))
+        (when (or (integerp value) (stringp value))
+          (%php-array-set result value (car pair)))))
     result))
 
 ;;; ─── array_fill / array_fill_keys ────────────────────────────────────────────
@@ -537,13 +624,19 @@ by the last argument (a user comparison callback)."
 
 ;;; ─── Additional sorts ────────────────────────────────────────────────────────
 
-(defun %php-krsort (array)
+(defun %php-krsort (array &optional sort-flags)
   "PHP krsort: sort ARRAY by key descending."
-  (%php-sort-pairs-by array #'car :preserve-keys t :descending t))
+  (%php-sort-pairs-by array #'car
+                      :preserve-keys t
+                      :descending t
+                      :sort-flags sort-flags))
 
-(defun %php-arsort (array)
+(defun %php-arsort (array &optional sort-flags)
   "PHP arsort: sort ARRAY by value descending, preserving keys."
-  (%php-sort-pairs-by array #'cdr :preserve-keys t :descending t))
+  (%php-sort-pairs-by array #'cdr
+                      :preserve-keys t
+                      :descending t
+                      :sort-flags sort-flags))
 
 ;;; ─── array_diff_key / array_intersect_key ────────────────────────────────────
 
@@ -572,8 +665,7 @@ by the last argument (a user comparison callback)."
   (let ((result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
       (unless (some (lambda (a)
-                      (let ((v (%php-array-ref a (car pair))))
-                        (and (not (%php-null-p v)) (equal v (cdr pair)))))
+                      (%php-array-assoc-pair-match-p a (car pair) (cdr pair)))
                     arrays)
         (%php-array-set result (car pair) (cdr pair))))
     result))
@@ -582,7 +674,9 @@ by the last argument (a user comparison callback)."
   "PHP array_intersect_assoc: key+value pairs in ARRAY also in all others."
   (let ((result (%php-make-array)))
     (dolist (pair (%php-array-pairs array))
-      (when (every (lambda (a) (equal (%php-array-ref a (car pair)) (cdr pair))) arrays)
+      (when (every (lambda (a)
+                     (%php-array-assoc-pair-match-p a (car pair) (cdr pair)))
+                   arrays)
         (%php-array-set result (car pair) (cdr pair))))
     result))
 
@@ -628,10 +722,6 @@ by the last argument (a user comparison callback)."
           do (%php-array-set array (%php-array-next-auto-index array) v))
     t))
 
-(defun %php-compact (&rest var-names)
-  "PHP compact: create array from variable names (returns empty — context-dependent)."
-  (%php-make-array))
-
 (defun %php-array-key-first (array)
   "PHP array_key_first: return the first key of ARRAY."
   (let ((pairs (%php-array-pairs array)))
@@ -641,6 +731,16 @@ by the last argument (a user comparison callback)."
   "PHP array_key_last: return the last key of ARRAY."
   (let ((pairs (%php-array-pairs array)))
     (if pairs (car (car (last pairs))) +php-null+)))
+
+(defun %php-array-first (array)
+  "PHP array_first: return the first value of ARRAY."
+  (let ((pairs (%php-array-pairs array)))
+    (if pairs (cdr (first pairs)) +php-null+)))
+
+(defun %php-array-last (array)
+  "PHP array_last: return the last value of ARRAY."
+  (let ((pairs (%php-array-pairs array)))
+    (if pairs (cdr (car (last pairs))) +php-null+)))
 
 (defun %php-array-find (arr callback)
   "Return the first element of ARR for which CALLBACK returns true, or PHP null.
@@ -684,31 +784,83 @@ PHP 8.4: array_all(). Returns true for an empty array."
 
 (defun %php-array-map-multi (callback &rest arrays)
   "PHP array_map with multiple arrays: maps CALLBACK over parallel elements."
-  (if (null callback)
-      ;; null callback: zip arrays into sub-arrays
-      (let ((result (%php-make-array))
-            (lists (mapcar #'%php-array-values-list arrays)))
-        (loop for i from 0 below (apply #'min (mapcar #'length lists))
-              do (let ((row (%php-make-array)))
-                   (dolist (lst lists)
-                     (%php-array-set row (%php-array-next-auto-index row) (nth i lst)))
-                   (%php-array-set result i row)))
-        result)
-      ;; normal multi-array map
-      (let ((result (%php-make-array))
-            (fn (%php-callable-function callback))
-            (lists (mapcar #'%php-array-values-list arrays)))
-        (when fn
-          (loop for i from 0 below (apply #'min (mapcar #'length lists))
-                do (%php-array-set result i (apply fn (mapcar (lambda (lst) (nth i lst)) lists)))))
-        result)))
+  (if arrays
+      (apply #'%php-array-map callback arrays)
+      (%php-array)))
 
-;;; ─── array_multisort (simplified) ──────────────────────────────────────────
+;;; ─── array_multisort ────────────────────────────────────────────────────────
+
+(defun %php-array-multisort-spec (array)
+  "Build an internal array_multisort spec for ARRAY."
+  (vector array nil :regular))
+
+(defun %php-array-multisort-apply-flag (spec flag)
+  "Apply an array_multisort sort/order FLAG to SPEC."
+  (case flag
+    (3 (setf (aref spec 1) t))          ; SORT_DESC
+    (4 (setf (aref spec 1) nil))        ; SORT_ASC
+    (0 (setf (aref spec 2) :regular))   ; SORT_REGULAR
+    (1 (setf (aref spec 2) :numeric))   ; SORT_NUMERIC
+    (2 (setf (aref spec 2) :string))    ; SORT_STRING
+    (otherwise spec))
+  spec)
+
+(defun %php-array-multisort-parse-specs (array rest)
+  "Parse PHP's array_multisort argument stream into array specs."
+  (let ((specs (list (%php-array-multisort-spec array))))
+    (dolist (arg rest (nreverse specs))
+      (cond
+        ((hash-table-p arg)
+         (push (%php-array-multisort-spec arg) specs))
+        ((and (integerp arg) specs)
+         (%php-array-multisort-apply-flag (first specs) arg))))))
+
+(defun %php-array-multisort-compare-values (a b sort-type)
+  "Return -1, 0, or 1 comparing A and B for array_multisort SORT-TYPE."
+  (%php-sort-compare-values a b sort-type))
+
+(defun %php-array-multisort-pair-value (pairs index)
+  "Return PAIRS[INDEX]'s value, or PHP null when absent."
+  (let ((pair (nth index pairs)))
+    (if pair (cdr pair) +php-null+)))
 
 (defun %php-array-multisort (array &rest rest)
-  "PHP array_multisort: sort array (simplified, ignores extra flags)."
-  (declare (ignore rest))
-  (%php-sort array))
+  "PHP array_multisort: lexicographically sort arrays together in place."
+  (let* ((specs (%php-array-multisort-parse-specs array rest))
+         (pairs-by-array (mapcar (lambda (spec) (%php-array-pairs (aref spec 0))) specs))
+         (lengths (mapcar #'length pairs-by-array)))
+    (unless (and specs (every (lambda (len) (= len (first lengths))) lengths))
+      (return-from %php-array-multisort nil))
+    (labels ((index< (left right)
+               (loop for spec in specs
+                     for pairs in pairs-by-array
+                     for comparison = (%php-array-multisort-compare-values
+                                        (%php-array-multisort-pair-value pairs left)
+                                        (%php-array-multisort-pair-value pairs right)
+                                        (aref spec 2))
+                     when (/= comparison 0)
+                       return (if (aref spec 1)
+                                  (> comparison 0)
+                                  (< comparison 0))
+                     finally (return nil))))
+      (let ((indices (stable-sort (loop for i below (first lengths) collect i)
+                                  #'index<)))
+        (loop for spec in specs
+              for pairs in pairs-by-array
+              for target = (aref spec 0)
+              do (progn
+                   (clrhash target)
+                   (setf (gethash +php-array-order-key+ target) nil
+                         (gethash +php-array-next-index-key+ target) 0)
+                   (dolist (index indices)
+                     (let* ((pair (nth index pairs))
+                            (key (car pair)))
+                       (%php-array-set target
+                                       (if (integerp key)
+                                           (%php-array-next-auto-index target)
+                                           key)
+                                       (cdr pair)))))))
+        t)))
 
 ;;; ─── array_key_exists alias + in_array strict ──────────────────────────────
 

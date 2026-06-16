@@ -34,8 +34,7 @@
 
 (deftest fr-020-allocation-sinking-exists
   "FR-020: Allocation sinking pass is fbound in the optimizer pipeline."
-  (assert-true (or (fboundp 'cl-cc/optimize:opt-sink-allocations)
-                   (fboundp 'cl-cc/optimize::opt-pass-allocation-sinking))))
+  (assert-true (fboundp 'cl-cc/optimize:opt-sink-allocations)))
 
 ;;; ------------------------------------------------------------
 ;;; FR-090: Safepoint Dominance Pruning

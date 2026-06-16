@@ -10,6 +10,8 @@
 (defsuite printer-suite :description "Type pretty-printer tests"
   :parent cl-cc-unit-suite)
 
+(defmacro assert-when-present (value form)
+  `(when ,value ,form))
 
 (in-suite printer-suite)
 ;;; ─── type-to-string: basic types ───────────────────────────────────────────
@@ -51,9 +53,9 @@
   (params ret effects expected-sub expected-sub2)
   (let ((s (type-to-string (make-type-arrow params ret :effects effects))))
     (assert-true (search "->" s))
-    (when expected-sub  (assert-true (search expected-sub  s)))
-    (when expected-sub2 (assert-true (search expected-sub2 s)))
-    (when effects       (assert-true (search "IO" s)))  ))
+    (assert-when-present expected-sub  (assert-true (search expected-sub  s)))
+    (assert-when-present expected-sub2 (assert-true (search expected-sub2 s)))
+    (assert-when-present effects       (assert-true (search "IO" s)))))
 
 (deftest-each printer-container-type-delimiters
   "Product uses comma, variant uses <, and type-app uses ( as its primary delimiter."
@@ -76,7 +78,8 @@
          (r (make-type-record :fields fields :row-var rv))
          (s (type-to-string r)))
     (assert-true (search expected-bracket s))
-    (when expected-field (assert-true (search expected-field (string-downcase s))))))
+    (assert-when-present expected-field
+      (assert-true (search expected-field (string-downcase s))))))
 
 (deftest-each printer-binary-separator-types
   "Union includes | separator; intersection includes & separator."
@@ -197,7 +200,7 @@
           ("frobnitz-list"  nil '(frobnitz fixnum)))
   (expected form)
   (if expected
-      (assert-true  (cl-cc/type:looks-like-type-specifier-p form))
+      (assert-true (cl-cc/type:looks-like-type-specifier-p form))
       (assert-false (cl-cc/type:looks-like-type-specifier-p form))))
 
 (deftest-each printer-arrow-mult-table

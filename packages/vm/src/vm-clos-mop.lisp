@@ -160,6 +160,8 @@ with no argument returns T if any GF has been satiated in the current session."
       (and (vm-generic-function-p gf) (gethash :__satiated__ gf) t)
       nil))
 
+(vm-register-host-bridge 'satiating-gfs-p #'satiating-gfs-p)
+
 (defun method-combination-type (method-combination)
   "Return METHOD-COMBINATION's type designator."
   (if (hash-table-p method-combination)

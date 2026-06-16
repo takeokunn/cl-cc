@@ -211,8 +211,9 @@ selfhost REPL path (run-string-repl) to cover the REPL-specific code path."
   "Reader macros #:, #+, #-, and #. compile and evaluate correctly."
   (assert-true
     (run-string "(symbolp (quote #:foo))"))
-  (assert-eq :yes
-    (run-string "#+sbcl :yes"))
+  (%with-selfhost-features
+    (assert-eq :yes
+      (run-string "#+cl-cc-self-hosting :yes")))
   (assert-eq :yes
     (run-string "#-nonexistent-feature :yes"))
   (assert-eq :fallback

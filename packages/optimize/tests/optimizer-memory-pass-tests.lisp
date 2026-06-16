@@ -19,6 +19,11 @@
     (loop for (k v) on entries by #'cddr do (setf (gethash k ht) v))
     ht))
 
+(defmacro assert-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 (deftest-each must-alias-cases
   "opt-must-alias-p: true iff both registers share the same canonical root."
   :cases (("same-root"    :r0 :r1  '(:r0 :root0 :r1 :root0) t)
@@ -26,7 +31,7 @@
           ("unknown-root" :r0 :r1  '(:r0 :root0)             nil))
   (reg-a reg-b entries expected)
   (let ((alias (apply #'%make-alias-table entries)))
-    (if expected
+    (assert-boolean-case expected
         (assert-true  (cl-cc/optimize:opt-must-alias-p reg-a reg-b alias))
         (assert-false (cl-cc/optimize:opt-must-alias-p reg-a reg-b alias)))))
 
@@ -37,7 +42,7 @@
           ("diff-known-roots" :r0 :r1  '(:r0 :root0 :r1 :root1)  nil))
   (reg-a reg-b entries expected)
   (let ((alias (apply #'%make-alias-table entries)))
-    (if expected
+    (assert-boolean-case expected
         (assert-true  (cl-cc/optimize:opt-may-alias-p reg-a reg-b alias))
         (assert-false (cl-cc/optimize:opt-may-alias-p reg-a reg-b alias)))))
 
@@ -367,10 +372,10 @@ With refinement, infeasible then-edge is excluded and load forwards from x=1."
       (setf (gethash :r1 intervals) (cl-cc/optimize::opt-make-interval rhs-val rhs-val)))
     (cl-cc/optimize::%opt-update-interval-binop
      inst intervals (symbol-function fn-sym))
-     (if expected-found
-         (assert-= expected-lo
-                   (cl-cc/optimize::opt-interval-lo (gethash :r2 intervals)))
-         (assert-false (nth-value 1 (gethash :r2 intervals))))))
+    (assert-boolean-case expected-found
+        (assert-= expected-lo
+                  (cl-cc/optimize::opt-interval-lo (gethash :r2 intervals)))
+        (assert-false (nth-value 1 (gethash :r2 intervals))))))
 
 (deftest optimize-instructions-rewrites-logand-one-eq-zero-to-evenp
   "The fold pipeline recognizes low-bit equality tests and rewrites them to vm-evenp."
@@ -424,7 +429,7 @@ With refinement, infeasible then-edge is excluded and load forwards from x=1."
           ("slot-write-no-match"
            (make-vm-slot-write :obj-reg :r1 :slot-name 's :value-reg :r2) :r0 nil))
   (inst reg expected)
-  (if expected
+  (assert-boolean-case expected
       (assert-true  (cl-cc/optimize::%mps-pending-uses-reg-p inst reg))
       (assert-false (cl-cc/optimize::%mps-pending-uses-reg-p inst reg))))
 

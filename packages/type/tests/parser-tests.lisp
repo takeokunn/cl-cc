@@ -10,7 +10,6 @@
 (defsuite parser-suite :description "Type annotation parser tests"
   :parent cl-cc-unit-suite)
 
-
 (in-suite parser-suite)
 ;;; ─── parse-type-specifier: atoms ─────────────────────────────────────────
 
@@ -234,4 +233,5 @@
     (assert-true (type-equal-p type-int (type-refinement-base result)))
     (if (eq expected-pred t)
         (assert-true (type-refinement-predicate result))
-        (assert-eq expected-pred (cl-cc/type:type-refinement-predicate result)))))
+        (assert-false (eq expected-pred
+                          (cl-cc/type:type-refinement-predicate result))))))

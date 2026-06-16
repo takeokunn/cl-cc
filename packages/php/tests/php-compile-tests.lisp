@@ -1,6 +1,11 @@
 (in-package :cl-cc/test)
 
-(in-suite cl-cc-unit-suite)
+(defsuite cl-cc-php-e2e-suite
+  :description "PHP end-to-end VM execution tests"
+  :parent cl-cc-e2e-suite
+  :parallel nil)
+
+(in-suite cl-cc-php-e2e-suite)
 
 (defun %php-run-capture (source)
   "Compile PHP SOURCE to VM and run it, returning everything it echoed as a
@@ -24,7 +29,19 @@ plain $var was mutated), yielding the OLD value, including $this->n++ in a metho
   (assert-string= "2"  (%php-run-capture "<?php $a=[0]; $a[0]++; $a[0]++; echo $a[0];"))
   ;; postfix yields the old element value (single echo: ast-print adds a newline
   ;; per statement, so combine with '.')
-  (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];")))
+  (assert-string= "5-6" (%php-run-capture "<?php $a=[5]; $old=$a[0]++; echo $old.'-'.$a[0];"))
+  ;; PHP ++/-- use PHP numeric coercion for numeric strings, null and booleans.
+  (assert-string= "7-8" (%php-run-capture "<?php $x='7'; $old=$x++; echo $old.'-'.$x;"))
+  (assert-string= "1"   (%php-run-capture "<?php $x=null; ++$x; echo $x;"))
+  (assert-string= "0"   (%php-run-capture "<?php $x=true; --$x; echo $x;")))
+
+(deftest php-e2e-incdec-undefined-variable
+  "Prefix and postfix ++/-- on an undefined variable introduce the variable
+instead of reading an unbound Lisp symbol."
+  (assert-string= "1"    (%php-run-capture "<?php $x++; echo $x;"))
+  (assert-string= "1:1"  (%php-run-capture "<?php echo (++$x).':'.$x;"))
+  (assert-string= "-1"   (%php-run-capture "<?php $x--; echo $x;"))
+  (assert-string= "-1:-1" (%php-run-capture "<?php echo (--$x).':'.$x;")))
 
 (deftest php-e2e-echo-no-trailing-newline-multi
   "Separate newline-less echos do NOT get a newline between them (regression:
@@ -46,6 +63,70 @@ expected value is built with FORMAT ~% rather than written \"p\\nq\"."
 (deftest php-e2e-inline-html-verbatim
   "Inline HTML between ?> and <?php is emitted verbatim with no injected newline."
   (assert-string= "1hello2" (%php-run-capture "<?php echo 1; ?>hello<?php echo 2;")))
+
+(deftest php-e2e-declare-directives
+  "declare directives are compile-time wrappers here; statement and block bodies still run."
+  (assert-string= "7" (%php-run-capture "<?php declare(strict_types=1); echo 7;"))
+  (assert-string= "ABC" (%php-run-capture "<?php declare(ticks=1) { echo 'A'; echo 'B'; } echo 'C';"))
+  (assert-string= "XY" (%php-run-capture "<?php declare(ticks=1) echo 'X'; echo 'Y';"))
+  (assert-string= "ABC" (%php-run-capture "<?php declare(ticks=1): echo 'A'; echo 'B'; enddeclare; echo 'C';")))
+
+(deftest php-e2e-output-buffering-builtins
+  "Output buffering captures PHP output helpers until the active buffer is read or discarded."
+  (assert-string= "ab"
+                  (%php-run-capture "<?php ob_start(); echo 'a'; $s=ob_get_clean(); echo $s; echo 'b';"))
+  (assert-string= "xy"
+                  (%php-run-capture "<?php ob_start(); echo 'x'; $s=ob_get_contents(); ob_end_clean(); echo $s.'y';"))
+  (assert-string= "ab"
+                  (%php-run-capture "<?php ob_start(); echo 'a'; ob_start(); echo 'x'; ob_end_clean(); echo 'b'; echo ob_get_clean();"))
+  (assert-string= "html!"
+                  (%php-run-capture "<?php ob_start(); ?>html<?php $s=ob_get_clean(); echo $s.'!';")))
+
+(deftest php-e2e-ini-get-set-and-error-reporting
+  "ini_get/ini_set keep mutable configuration values and error_reporting()
+shares the same error_reporting setting."
+  (assert-string= "UTF-8" (%php-run-capture "<?php echo ini_get('default_charset');"))
+  (assert-string= "UTF-8:Shift_JIS"
+                  (%php-run-capture "<?php $old=ini_set('default_charset','Shift_JIS'); echo $old.':'.ini_get('default_charset'); ini_set('default_charset',$old);"))
+  (assert-string= "32767:0:0"
+                  (%php-run-capture "<?php error_reporting(32767); $old=error_reporting(0); echo $old.':'.error_reporting().':'.ini_get('error_reporting'); error_reporting($old);"))
+  (assert-string= "32767:5:5"
+                  (%php-run-capture "<?php error_reporting(32767); $old=ini_set('error_reporting','5'); echo $old.':'.error_reporting().':'.ini_get('error_reporting'); error_reporting($old);"))
+  (assert-string= "false" (%php-run-capture "<?php echo ini_get('definitely_missing')===false?'false':'value';")))
+
+(deftest php-e2e-error-and-exception-handler-registration
+  "set_error_handler / restore_error_handler keep a PHP-visible handler stack,
+route trigger_error through valid callbacks, and expose exception handler state."
+  (assert-string= "H:512:boom"
+                  (%php-run-capture "<?php function h($errno,$errstr,$file,$line){ echo 'H:'.$errno.':'.$errstr; return true; } set_error_handler('h', E_USER_WARNING); trigger_error('boom', E_USER_WARNING); restore_error_handler();"))
+  (assert-string= "masked"
+                  (%php-run-capture "<?php function only_notice($errno,$errstr){ echo 'handled'; return true; } set_error_handler('only_notice', E_USER_NOTICE); trigger_error('masked', E_USER_WARNING); restore_error_handler();"))
+  (assert-string= "h1:two"
+                  (%php-run-capture "<?php function h1($errno,$errstr){ echo 'one'; return true; } function h2($errno,$errstr){ echo 'two'; return true; } set_error_handler('h1'); $old=set_error_handler('h2'); echo $old.':'; trigger_error('x', E_USER_NOTICE); restore_error_handler(); restore_error_handler();"))
+  (assert-string= "eh:ok"
+                  (%php-run-capture "<?php function eh($e){ echo 'e'; } set_exception_handler('eh'); $old=set_exception_handler(function($e){ echo 'x'; }); echo $old.':ok'; restore_exception_handler(); restore_exception_handler();")))
+
+(deftest php-e2e-error-suppression-operator
+  "The @ operator evaluates the expression and restores error_reporting(), while
+masking user-level errors from both the default reporter and custom handlers."
+  (assert-string= "ok"
+                  (%php-run-capture "<?php @trigger_error('hidden', E_USER_NOTICE); echo 'ok';"))
+  (assert-string= "ok"
+                  (%php-run-capture "<?php function h($errno,$errstr){ echo 'handler'; return true; } set_error_handler('h'); @trigger_error('hidden', E_USER_NOTICE); restore_error_handler(); echo 'ok';"))
+  (assert-string= "1:32767"
+                  (%php-run-capture "<?php error_reporting(E_ALL); $v=@trigger_error('hidden', E_USER_NOTICE); echo $v.':'.error_reporting();")))
+
+(deftest php-e2e-date-default-timezone-and-ini
+  "date_default_timezone_set/get share date.timezone and affect date(), while
+gmdate() remains UTC."
+  (assert-string= "UTC:Asia/Tokyo:Asia/Tokyo:09:00:00:00:0"
+                  (%php-run-capture "<?php $old=date_default_timezone_get(); date_default_timezone_set('UTC'); $prev=date_default_timezone_get(); date_default_timezone_set('Asia/Tokyo'); echo $prev.':'.date_default_timezone_get().':'.ini_get('date.timezone').':'.date('H:i',0).':'.gmdate('H:i',0).':'.date('U',0); date_default_timezone_set($old);"))
+  (assert-string= "Asia/Tokyo:UTC:UTC"
+                  (%php-run-capture "<?php $old=date_default_timezone_get(); date_default_timezone_set('Asia/Tokyo'); $prev=ini_set('date.timezone','UTC'); echo $prev.':'.date_default_timezone_get().':'.ini_get('date.timezone'); date_default_timezone_set($old);"))
+  (assert-string= "false:UTC"
+                  (%php-run-capture "<?php $old=date_default_timezone_get(); date_default_timezone_set('UTC'); echo (date_default_timezone_set('No/Such_Zone')?'true':'false').':'.date_default_timezone_get(); date_default_timezone_set($old);"))
+  (assert-string= "0:32400:1970-01-01 09:00"
+                  (%php-run-capture "<?php $old=date_default_timezone_get(); date_default_timezone_set('Asia/Tokyo'); echo strtotime('1970-01-01 09:00:00').':'.mktime(18,0,0,1,1,1970).':'.date('Y-m-d H:i',0); date_default_timezone_set($old);")))
 
 (deftest php-e2e-heredoc-nowdoc
   "Heredoc <<<EOT interpolates $vars and {$expr} like a double-quoted string;
@@ -112,6 +193,13 @@ instance-allocated and ClassName::member found nothing on the class object
   (assert-string= "25" (%php-run-capture "<?php class M{ static function sq($x){ return $x*$x; } } echo M::sq(5);"))
   ;; static property read
   (assert-string= "5"  (%php-run-capture "<?php class C{ static $n=5; } echo C::$n;"))
+  ;; static property write paths share the same slot-value target lowering as
+  ;; instance properties.
+  (assert-string= "7"  (%php-run-capture "<?php class C{ static $n=1; } C::$n=7; echo C::$n;"))
+  (assert-string= "7"  (%php-run-capture "<?php class C{ static $n=2; } C::$n += 5; echo C::$n;"))
+  (assert-string= "1:2" (%php-run-capture "<?php class C{ static $n=1; } echo C::$n++; echo ':'.C::$n;"))
+  (assert-string= "2:2" (%php-run-capture "<?php class C{ static $n=1; } echo ++C::$n; echo ':'.C::$n;"))
+  (assert-string= "3:3" (%php-run-capture "<?php class C{ static $n=1; static function inc(){ self::$n += 2; return self::$n; } } echo C::inc().':'.C::$n;"))
   ;; class constant still works alongside a static property in the same class
   (assert-string= "3|5" (%php-run-capture "<?php class C{ const PI=3; static $n=5; } echo C::PI.'|'.C::$n;"))
   ;; one static method consuming another's result, both by class name
@@ -150,6 +238,13 @@ the class rejected). A class with no __construct is unaffected."
   (assert-string= "10"   (%php-run-capture "<?php class C{ public $x; function __construct($v){ $this->x=$v; } function dbl(){ return $this->x*2; } } $o=new C(5); echo $o->dbl();"))
   ;; a class with no constructor still constructs and uses property defaults
   (assert-string= "5"    (%php-run-capture "<?php class C{ public $x=5; } $o=new C(); echo $o->x;")))
+
+(deftest php-e2e-clone-object
+  "clone makes a shallow object copy and invokes __clone on the copied instance."
+  (assert-string= "1:9"
+    (%php-run-capture "<?php class C{ public $x=1; } $a=new C(); $b=clone $a; $b->x=9; echo $a->x.':'.$b->x;"))
+  (assert-string= "4:14"
+    (%php-run-capture "<?php class C{ public $x; function __construct($x){ $this->x=$x; } function __clone(){ $this->x=$this->x+10; } } $a=new C(4); $b=clone $a; echo $a->x.':'.$b->x;")))
 
 (deftest php-e2e-constructor-promotion
   "PHP 8.0 constructor property promotion: `public $x` in __construct parameter
@@ -215,6 +310,42 @@ foreach path used to assume a CL list and errored on the hash-table array)."
                   (%php-run-capture
                    "<?php $o=''; foreach (['a'=>1,'b'=>2,'c'=>3] as $k=>$v){ $o=$o.$k.'='.$v.';'; } echo $o;")))
 
+(deftest php-e2e-foreach-by-reference-mutates-array
+  "foreach ($arr as &$v) writes body mutations back to the iterated array."
+  (assert-string= "10,20"
+                  (%php-run-capture
+                   "<?php $a=[1,2]; foreach ($a as &$v) { $v=$v*10; } echo $a[0].','.$a[1];"))
+  (assert-string= "3"
+                  (%php-run-capture
+                   "<?php $a=[1=>2]; foreach ($a as $k=>&$v) { $v=$k+$v; } echo $a[1];")))
+
+(deftest php-e2e-by-reference-function-parameter
+  "A user function declared with &$x can mutate the caller's variable."
+  (assert-string= "2"
+                  (%php-run-capture
+                   "<?php function inc(&$x) { $x=$x+1; } $n=1; inc($n); echo $n;")))
+
+(deftest php-e2e-by-reference-function-metadata-is-source-local
+  "By-reference parameter metadata from one source must not affect later sources."
+  (assert-string= "2"
+                  (%php-run-capture
+                   "<?php function f(&$x) { $x=$x+1; } $n=1; f($n); echo $n;"))
+  (assert-string= "15"
+                  (%php-run-capture
+                   "<?php function f($a,$b=10) { return $a+$b; } echo f(5);"))
+  (assert-string= "x:3"
+                  (%php-run-capture
+                   "<?php function f($a,...$rest) { return $a.':'.count($rest); } echo f('x',1,2,3);")))
+
+(deftest php-e2e-reference-assignment-aliases-variables
+  "$b = &$a aliases both variable names to the same PHP reference box."
+  (assert-string= "2"
+                  (%php-run-capture
+                   "<?php $a=1; $b=&$a; $a=2; echo $b;"))
+  (assert-string= "3,3"
+                  (%php-run-capture
+                   "<?php $a=1; $b=&$a; $b=3; echo $a.','.$b;")))
+
 (deftest php-e2e-generator-yield-foreach
   "A function containing yield becomes a generator; foreach drains its values."
   (assert-string= "6" (%php-run-capture
@@ -230,6 +361,18 @@ foreach path used to assume a CL list and errored on the hash-table array)."
   (assert-string= "0,1,2,3,"
                   (%php-run-capture
                    "<?php function inner(){ yield 1; yield 2; } function outer(){ yield 0; yield from inner(); yield 3; } $o=''; foreach (outer() as $v){ $o=$o.$v.','; } echo $o;")))
+
+(deftest php-e2e-fiber-object-methods
+  "new Fiber(callback) returns an object whose instance methods dispatch via PHP syntax."
+  (assert-string= "42:42:1"
+                  (%php-run-capture
+                   "<?php $f = new Fiber(function(){ return 42; }); echo $f->start().':'.$f->getReturn().':'.($f->isTerminated()?1:0);")))
+
+(deftest php-e2e-fiber-suspend
+  "Fiber::suspend(value) returns the first suspended value from start()."
+  (assert-string= "pause:1"
+                  (%php-run-capture
+                   "<?php $f = new Fiber(function(){ return Fiber::suspend('pause'); }); echo $f->start().':'.($f->isSuspended()?1:0);")))
 
 (deftest php-e2e-dynamic-closure-call
   "Calling a closure held in a variable, $f(args), invokes it (postfix LPAREN
@@ -255,12 +398,180 @@ inline-array-literal register-clobber edge case."
                   (%php-run-capture
                    "<?php $f=function($x){ return $x*10; }; $a=[1,2,3]; $r=array_map($f,$a); echo $r[0].','.$r[1].','.$r[2];")))
 
+(deftest php-e2e-array-map-preserves-single-array-keys
+  "array_map preserves keys when exactly one array is supplied."
+  (assert-string= "7,8"
+                  (%php-run-capture
+                   "<?php $r=array_map(null,['x'=>7,'y'=>8]); echo $r['x'].','.$r['y'];")))
+
+(deftest php-e2e-array-map-multiple-arrays
+  "array_map zips multiple arrays by position and passes parallel values to the callback."
+  (assert-string= "11,22,33"
+                  (%php-run-capture
+                   "<?php $f=function($a,$b){ return $a+$b; }; $r=array_map($f,[1,2,3],[10,20,30]); echo $r[0].','.$r[1].','.$r[2];")))
+
+(deftest php-e2e-array-map-multiple-arrays-pads-missing-with-null
+  "array_map uses the longest input array and passes null for missing parallel values."
+  (assert-string= "1a,2null"
+                  (%php-run-capture
+                   "<?php $f=function($a,$b){ return $a.($b===null?'null':$b); }; $r=array_map($f,[1,2],['a']); echo $r[0].','.$r[1];")))
+
+(deftest php-e2e-array-map-null-callback-zips
+  "array_map(null, ...) returns positional row arrays when multiple arrays are supplied."
+  (assert-string= "1a,2b"
+                  (%php-run-capture
+                   "<?php $r=array_map(null,[1,2],['a','b']); echo $r[0][0].$r[0][1].','.$r[1][0].$r[1][1];")))
+
+(deftest php-e2e-array-map-null-callback-pads-missing-with-null
+  "array_map(null, ...) also uses the longest input array and pads missing values with null."
+  (assert-string= "[[1,\"a\"],[2,null]]"
+                  (%php-run-capture
+                   "<?php $r=array_map(null,[1,2],['a']); echo json_encode($r);")))
+
+(deftest php-e2e-array-slice-preserves-string-keys
+  "array_slice reindexes integer keys by default but keeps string keys."
+  (assert-string= "1,2,3"
+                  (%php-run-capture
+                   "<?php $r=array_slice(['x'=>1,5=>2,'y'=>3],0); echo $r['x'].','.$r[0].','.$r['y'];")))
+
+(deftest php-e2e-array-reverse-preserves-string-keys
+  "array_reverse reindexes integer keys by default but keeps string keys."
+  (assert-string= "3,2,1"
+                  (%php-run-capture
+                   "<?php $r=array_reverse(['a'=>1,4=>2,'b'=>3]); echo $r['b'].','.$r[0].','.$r['a'];")))
+
+(deftest php-e2e-array-column-basic-and-index
+  "array_column extracts present columns and uses index_key only when present on the row."
+  (assert-string= "Ada,Linus"
+                  (%php-run-capture
+                   "<?php $rows=[['id'=>10,'name'=>'Ada'],['id'=>20,'name'=>'Linus']]; $r=array_column($rows,'name','id'); echo $r[10].','.$r[20];"))
+  (assert-string= "Ada,Linus"
+                  (%php-run-capture
+                   "<?php $rows=[['name'=>'Ada'],['id'=>20,'name'=>'Linus']]; $r=array_column($rows,'name','id'); echo $r[0].','.$r[20];")))
+
+(deftest php-e2e-array-column-skips-missing-column
+  "array_column skips rows that do not contain the requested column_key."
+  (assert-string= "2:Ada:Grace"
+                  (%php-run-capture
+                   "<?php $rows=[['name'=>'Ada'],['id'=>20],['name'=>'Grace']]; $r=array_column($rows,'name'); echo count($r).':'.$r[0].':'.$r[1];")))
+
+(deftest php-e2e-array-column-null-column-returns-rows
+  "array_column with null column_key returns whole rows and can index them."
+  (assert-string= "Ada,Bob"
+                  (%php-run-capture
+                   "<?php $rows=[['id'=>'a','name'=>'Ada'],['id'=>'b','name'=>'Bob']]; $r=array_column($rows,null,'id'); echo $r['a']['name'].','.$r['b']['name'];")))
+
+(deftest php-e2e-array-keys-filters-values
+  "array_keys supports filter_value and strict comparison."
+  (assert-string= "a,b"
+                  (%php-run-capture
+                   "<?php $r=array_keys(['a'=>1,'b'=>'1','c'=>2], 1); echo implode(',', $r);"))
+  (assert-string= "a"
+                  (%php-run-capture
+                   "<?php $r=array_keys(['a'=>1,'b'=>'1','c'=>2], 1, true); echo implode(',', $r);"))
+  (assert-string= "x"
+                  (%php-run-capture
+                   "<?php $r=array_keys(['x'=>null,'y'=>0], null, true); echo implode(',', $r);")))
+
+(deftest php-e2e-array-search-strict-and-miss
+  "array_search distinguishes loose and strict matches and returns PHP false when absent."
+  (assert-string= "s:i:false"
+                  (%php-run-capture
+                   "<?php $a=['s'=>'1','i'=>1]; echo array_search(1,$a).':'.array_search(1,$a,true).':'.(array_search(2,$a)===false?'false':'bad');"))
+  (assert-string= "zero"
+                  (%php-run-capture
+                   "<?php $a=[0=>'needle']; echo array_search('needle',$a)===0?'zero':'bad';")))
+
+(deftest php-e2e-in-array-strict
+  "in_array uses loose comparison by default and strict comparison when requested."
+  (assert-string= "loose:strict"
+                  (%php-run-capture
+                   "<?php $a=['1']; echo (in_array(1,$a)?'loose':'x').':'.(in_array(1,$a,true)?'bad':'strict');")))
+
+(deftest php-e2e-array-unique-compares-values-as-strings
+  "array_unique uses PHP string representation comparison by default."
+  (assert-string= "{\"a\":0,\"c\":false}"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_unique(['a'=>0,'b'=>'0','c'=>false,'d'=>null,'e'=>'']));")))
+
+(deftest php-e2e-array-count-values-counts-only-ints-and-strings
+  "array_count_values only counts integer and string values."
+  (assert-string= "{\"1\":2,\"x\":2}"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_count_values([1,'1',true,null,1.5,'x','x']));")))
+
+(deftest php-e2e-array-flip-skips-non-key-values
+  "array_flip only flips integer and string values."
+  (assert-string= "{\"x\":\"a\",\"1\":\"b\"}"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_flip(['a'=>'x','b'=>1,'c'=>true,'d'=>null,'e'=>1.5]));")))
+
+(deftest php-e2e-array-diff-compares-values-as-strings
+  "array_diff compares values by PHP string representation."
+  (assert-string= "[\"x\"]"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_values(array_diff([0,'0','x'], ['0'])));")))
+
+(deftest php-e2e-array-intersect-compares-values-as-strings
+  "array_intersect compares values by PHP string representation."
+  (assert-string= "[0,\"0\"]"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_values(array_intersect([0,'0','x'], ['0'])));")))
+
+(deftest php-e2e-array-diff-assoc-compares-values-as-strings
+  "array_diff_assoc compares matching-key values by PHP string representation."
+  (assert-string= "{\"b\":\"x\"}"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_diff_assoc(['a'=>0,'b'=>'x'], ['a'=>'0']));")))
+
+(deftest php-e2e-array-intersect-assoc-compares-values-as-strings
+  "array_intersect_assoc compares matching-key values by PHP string representation."
+  (assert-string= "{\"a\":0}"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_intersect_assoc(['a'=>0,'b'=>'x'], ['a'=>'0','b'=>'y']));")))
+
+(deftest php-e2e-array-diff-assoc-matches-explicit-null
+  "array_diff_assoc treats an explicit null value as a present matching pair."
+  (assert-string= "[]"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_diff_assoc(['a'=>null], ['a'=>null]));")))
+
+(deftest php-e2e-array-intersect-assoc-distinguishes-missing-key-from-null
+  "array_intersect_assoc requires the key to exist when the first value is null."
+  (assert-string= "[]"
+                  (%php-run-capture
+                   "<?php echo json_encode(array_intersect_assoc(['a'=>null], []));")))
+
 (deftest php-e2e-array-filter-closure
   "array_filter invokes a PHP closure predicate per element (closure is the last
 arg, so the inline-closure + array-literal register-clobber does not apply)."
   (assert-string= "3"
                   (%php-run-capture
                    "<?php $f=array_filter([0,1,0,2], function($x){ return $x; }); $s=0; foreach($f as $v){ $s=$s+$v; } echo $s;")))
+
+(deftest php-e2e-array-filter-mode-flags
+  "array_filter supports ARRAY_FILTER_USE_KEY and ARRAY_FILTER_USE_BOTH callback modes."
+  (assert-string= "a,c"
+                  (%php-run-capture
+                   "<?php $f=array_filter(['a'=>1,'b'=>2,'c'=>3], fn($k)=>$k!='b', ARRAY_FILTER_USE_KEY); echo implode(',', array_keys($f));"))
+  (assert-string= "b,c"
+                  (%php-run-capture
+                   "<?php $f=array_filter(['a'=>1,'b'=>2,'c'=>3], fn($v,$k)=>$v>1 && $k!='a', ARRAY_FILTER_USE_BOTH); echo implode(',', array_keys($f));"))
+  (assert-string= "2"
+                  (%php-run-capture
+                   "<?php $f=array_filter(['x'=>0,'y'=>2], null, ARRAY_FILTER_USE_KEY); echo implode(',', $f);")))
+
+(deftest php-e2e-array-pad-key-policy
+  "array_pad preserves string keys and reindexes integer keys while padding."
+  (assert-string= "x:1|0:2|1:0|2:0|"
+                  (%php-run-capture
+                   "<?php $r=array_pad(['x'=>1,4=>2],4,0); $o=''; foreach($r as $k=>$v){ $o=$o.$k.':'.$v.'|'; } echo $o;"))
+  (assert-string= "0:0|1:0|x:1|2:2|"
+                  (%php-run-capture
+                   "<?php $r=array_pad(['x'=>1,4=>2],-4,0); $o=''; foreach($r as $k=>$v){ $o=$o.$k.':'.$v.'|'; } echo $o;"))
+  (assert-string= "x:1|0:2|"
+                  (%php-run-capture
+                   "<?php $r=array_pad(['x'=>1,4=>2],2,0); $o=''; foreach($r as $k=>$v){ $o=$o.$k.':'.$v.'|'; } echo $o;")))
 
 (deftest php-e2e-equality-operators
   "== / != / === / !== compile and evaluate (regression: these lowered to an
@@ -325,6 +636,39 @@ discarded the default tokens, so omitted args were left unset / 0)."
   (assert-string= "6"  (%php-run-capture "<?php function f($a=1,$b=2,$c=3){ return $a+$b+$c; } echo f();"))
   (assert-string= "15" (%php-run-capture "<?php function f($a=1,$b=2,$c=3){ return $a+$b+$c; } echo f(10);")))
 
+(deftest php-e2e-named-arguments
+  "Named arguments are lowered to positional calls for user-defined PHP functions."
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php function join3($a,$b,$c){ return $a.$b.$c; } echo join3(c:'C', a:'A', b:'B');"))
+  (assert-string= "A2C"
+                  (%php-run-capture
+                   "<?php function f($a='A',$b='B',$c='C'){ return $a.$b.$c; } echo f(c:'C', b:2);"))
+  (assert-string= "XBC"
+                  (%php-run-capture
+                   "<?php function f($a='A',$b='B',$c='C'){ return $a.$b.$c; } echo f('X', c:'C');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php function join3($a,$b,$c){ return $a.$b.$c; } echo join3(...['A'], b:'B', c:'C');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php function join3($a,$b,$c){ return $a.$b.$c; } echo join3(...['A','B'], c:'C');"))
+  (assert-string= "XBC"
+                  (%php-run-capture
+                   "<?php function f($a='A',$b='B',$c='C'){ return $a.$b.$c; } echo f(...['X'], c:'C');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php class C{ function join3($a,$b,$c){ return $a.$b.$c; } } $c=new C(); echo $c->join3(c:'C', a:'A', b:'B');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php class C{ function join3($a,$b,$c){ return $a.$b.$c; } } $c=new C(); echo $c?->join3(c:'C', a:'A', b:'B');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php class C{ static function join3($a,$b,$c){ return $a.$b.$c; } } echo C::join3(c:'C', a:'A', b:'B');"))
+  (assert-string= "ABC"
+                  (%php-run-capture
+                   "<?php class C{ function join3($a,$b,$c){ return $a.$b.$c; } } $c=new C(); echo $c->join3(...['A'], b:'B', c:'C');")))
+
 (deftest php-e2e-default-arguments-all-callable-forms
   "Defaults work in closures, arrow functions, and methods, not just named functions."
   (assert-string= "9"  (%php-run-capture "<?php $f=function($x=9){ return $x; }; echo $f();"))
@@ -332,6 +676,12 @@ discarded the default tokens, so omitted args were left unset / 0)."
   (assert-string= "16" (%php-run-capture "<?php $f=fn($x=8)=>$x*2; echo $f();"))
   (assert-string= "5"  (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m();"))
   (assert-string= "20" (%php-run-capture "<?php class C{ function m($x=5){ return $x; } } $c=new C(); echo $c->m(20);")))
+
+(deftest php-e2e-by-reference-parameters-literal-callables
+  "Anonymous and arrow function literals preserve by-reference parameters for
+immediate calls."
+  (assert-string= "5" (%php-run-capture "<?php $n=1; (function (&$x) { $x = $x + 4; })($n); echo $n;"))
+  (assert-string= "3" (%php-run-capture "<?php $n=2; (fn(&$x)=>++$x)($n); echo $n;")))
 
 (deftest php-e2e-array-append
   "$a[] = v appends to an array (regression: $a[] hit a parse error on the empty
@@ -370,6 +720,16 @@ list."
   (assert-string= "6"  (%php-run-capture "<?php function add3($a,$b,$c){ return $a+$b+$c; } $x=[1,2,3]; echo add3(...$x);"))
   (assert-string= "xyz" (%php-run-capture "<?php function f($a,$b,$c){ return $a.$b.$c; } $r=['y','z']; echo f('x',...$r);"))
   (assert-string= "3"  (%php-run-capture "<?php $a=[3,1,2]; echo max(...$a);")))
+
+(deftest php-e2e-named-args-after-dynamic-spread
+  "Named arguments after a runtime-width spread are merged using function
+parameter metadata."
+  (assert-string= "abc"
+                  (%php-run-capture
+                   "<?php function j($a,$b,$c){ return $a.$b.$c; } $args=['a','b']; echo j(...$args, c:'c');"))
+  (assert-string= "axc"
+                  (%php-run-capture
+                   "<?php function j($a,$b='x',$c='z'){ return $a.$b.$c; } $args=['a']; echo j(...$args, c:'c');")))
 
 (deftest php-e2e-spread-composes-with-variadic-and-closures
   "Spread expands into a variadic collector, and works on dynamic closure calls."
@@ -517,6 +877,15 @@ through to the default."
   ;; writing then reading a no-default property still works
   (assert-string= "9"   (%php-run-capture "<?php class C{public $x;} $o=new C(); $o->x=9; echo $o->x;")))
 
+(deftest php-e2e-unset-object-property
+  "unset($o->x) resets the property to PHP null in the current object model."
+  (assert-string= "null"
+                  (%php-run-capture "<?php class C{public $x=7;} $o=new C(); unset($o->x); echo is_null($o->x)?'null':'set';"))
+  (assert-string= "D"
+                  (%php-run-capture "<?php class C{public $x='x';} $o=new C(); unset($o->x); echo $o->x ?? 'D';"))
+  (assert-string= "1:null:0"
+                  (%php-run-capture "<?php class C{public $x=1; public $y=2;} $o=new C(); $a=[9]; unset($a[0], $o->y); echo $o->x.':'.(is_null($o->y)?'null':'set').':'.count($a);")))
+
 (deftest php-e2e-nullish-coalescing-assignment
   "$x ??= v assigns only when $x is PHP null, for variables, object properties
 and array elements.  Regression: %php-nullish-cond built an (ast-binop :op 'or)
@@ -547,6 +916,9 @@ and dropped the whole program."
   (assert-string= "y"  (%php-run-capture "<?php $a ??= 'y'; echo $a;"))
   ;; the known-variable path is unaffected
   (assert-string= "8"  (%php-run-capture "<?php $a=5; $a += 3; echo $a;"))
+  (assert-string= "10" (%php-run-capture "<?php $a='7'; $a += '3'; echo $a;"))
+  (assert-string= "8"  (%php-run-capture "<?php $a='10'; $a -= true; $a -= '1'; echo $a;"))
+  (assert-string= "6"  (%php-run-capture "<?php $a='3'; $a *= '2'; echo $a;"))
   (assert-string= "xy" (%php-run-capture "<?php $s='x'; $s .= 'y'; echo $s;")))
 
 (deftest php-e2e-arithmetic-operand-coercion
@@ -559,6 +931,10 @@ null + 3, '5' + 3, true + 1 all signalled `not of type NUMBER'."
   (assert-string= "2.5" (%php-run-capture "<?php echo '1.5' + 1;"))
   (assert-string= "2"   (%php-run-capture "<?php echo true + 1;"))
   (assert-string= "5"   (%php-run-capture "<?php echo 2 - -3;"))
+  (assert-string= "7"   (%php-run-capture "<?php echo +'7';"))
+  (assert-string= "-7"  (%php-run-capture "<?php echo -'7';"))
+  (assert-string= "0"   (%php-run-capture "<?php echo -null;"))
+  (assert-string= "-1"  (%php-run-capture "<?php echo -true;"))
   ;; pure-number arithmetic, precedence, compound and loops are unaffected
   (assert-string= "5"   (%php-run-capture "<?php echo 2 + 3;"))
   (assert-string= "14"  (%php-run-capture "<?php echo 2 + 3 * 4;"))
@@ -587,11 +963,8 @@ rational."
 
 (deftest php-e2e-var-dump-and-export
   "var_dump PRINTS a type-annotated dump (it does not return a string), and
-var_export prints a re-parseable representation.  Regressions: var_dump built
-its string with with-output-to-string and returned it (so nothing was printed)
-and used the raw CL float form; var_export was registered as a lambda, so the
-builtin dispatch (which bridges a function SYMBOL) failed with 'Undefined
-function'."
+var_export prints a re-parseable representation through symbol-registered
+builtins."
   (assert-string= "int(42)"        (%php-run-capture "<?php var_dump(42);"))
   (assert-string= "string(2) \"hi\"" (%php-run-capture "<?php var_dump('hi');"))
   (assert-string= "bool(true)"     (%php-run-capture "<?php var_dump(true);"))
@@ -746,7 +1119,7 @@ registered by named %php- symbol."
   ;; base_convert: lowercase digits, both directions
   (assert-string= "11111111" (%php-run-capture "<?php echo base_convert('ff',16,2);"))
   (assert-string= "ff" (%php-run-capture "<?php echo base_convert('255',10,16);"))
-  ;; is_finite / is_infinite (also lambda-registered; same dispatch bug)
+  ;; is_finite / is_infinite dispatch through symbol-registered builtins.
   (assert-string= "y" (%php-run-capture "<?php echo is_finite(1.5)?'y':'n';"))
   (assert-string= "y" (%php-run-capture "<?php echo is_infinite(fdiv(1,0))?'y':'n';")))
 
@@ -758,7 +1131,7 @@ consults *php-predefined-constants* and lowers a hit to its literal value."
   (assert-string= "9223372036854775807" (%php-run-capture "<?php echo PHP_INT_MAX;"))
   (assert-string= "8"       (%php-run-capture "<?php echo PHP_INT_SIZE;"))
   (assert-string= "3.14159" (%php-run-capture "<?php echo round(M_PI,5);"))
-  (assert-string= "8.4.0"   (%php-run-capture "<?php echo PHP_VERSION;"))
+  (assert-string= "8.5.0"   (%php-run-capture "<?php echo PHP_VERSION;"))
   (assert-string= "2"       (%php-run-capture "<?php echo SORT_STRING;"))
   ;; PHP_EOL is a real newline
   (assert-string= "y" (%php-run-capture "<?php echo PHP_EOL===\"\\n\"?'y':'n';"))
@@ -770,11 +1143,18 @@ consults *php-predefined-constants* and lowers a hit to its literal value."
   ;; an UNKNOWN bare identifier still lowers to a var (no crash, empty value)
   (assert-string= "" (%php-run-capture "<?php echo NOT_A_REAL_CONSTANT_XYZ;")))
 
+(deftest php-e2e-predefined-constants-are-not-functions
+  "Predefined constants resolve through the constant table, not the builtin
+function registry."
+  (assert-string= "absent:absent:absent"
+                  (%php-run-capture
+                   "<?php echo function_exists('PHP_EOL')?'present':'absent'; echo ':'; echo function_exists('SORT_STRING')?'present':'absent'; echo ':'; echo function_exists('null')?'present':'absent';")))
+
 (deftest php-e2e-call-user-func
   "call_user_func / call_user_func_array over Closure, builtin-name, and
 USER-function-name callables.  String callables for USER functions previously
 failed ('Invalid function designator') because the resolver only checked the
-builtin table; now %php-callable-user-function matches the VM function registry
+builtin registry; now %php-callable-user-function matches the VM function registry
 by package-independent SYMBOL-NAME."
   ;; user function by string name
   (assert-string= "25" (%php-run-capture "<?php function sq($x){return $x*$x;} echo call_user_func('sq',5);"))
@@ -808,12 +1188,39 @@ builtin-name and user-function-name comparators.  stable-sort matches PHP 8.0+."
   ;; stable: equal comparands keep insertion order
   (assert-string= "cab" (%php-run-capture "<?php $g=[['k'=>1,'v'=>'a'],['k'=>1,'v'=>'b'],['k'=>0,'v'=>'c']]; usort($g, fn($x,$y)=>$x['k']-$y['k']); echo $g[0]['v'].$g[1]['v'].$g[2]['v'];")))
 
+(deftest php-e2e-array-multisort-syncs-arrays-and-flags
+  "array_multisort lexicographically sorts multiple arrays with flags."
+  (assert-string= "1,2,2|c,a,b"
+                  (%php-run-capture
+                   "<?php $a=[2,2,1]; $b=['b','a','c']; array_multisort($a, SORT_ASC, SORT_NUMERIC, $b, SORT_ASC, SORT_STRING); echo implode(',',$a).'|'.implode(',',$b);"))
+  (assert-string= "10,2,1|b,c,a"
+                  (%php-run-capture
+                   "<?php $a=[1,10,2]; $b=['a','b','c']; array_multisort($a, SORT_DESC, SORT_NUMERIC, $b); echo implode(',',$a).'|'.implode(',',$b);"))
+  (assert-string= "third,first|0,1"
+                  (%php-run-capture
+                   "<?php $a=['first'=>2,'third'=>1]; $b=[20,10]; array_multisort($a, $b); echo implode(',',array_keys($a)).'|'.implode(',',array_keys($b));")))
+
+(deftest php-e2e-sort-builtins-honor-sort-flags
+  "sort/rsort/asort/arsort/ksort/krsort accept SORT_* flags and mutate arrays in place."
+  (assert-string= "1,2,10"
+                  (%php-run-capture
+                   "<?php $a=['10','2','1']; sort($a, SORT_NUMERIC); echo implode(',',$a);"))
+  (assert-string= "1,10,2"
+                  (%php-run-capture
+                   "<?php $a=['10','2','1']; sort($a, SORT_STRING); echo implode(',',$a);"))
+  (assert-string= "10,2,1|2,10,1"
+                  (%php-run-capture
+                   "<?php $a=['10','2','1']; rsort($a, SORT_NUMERIC); echo implode(',',$a); $b=['10','2','1']; rsort($b, SORT_STRING); echo '|'.implode(',',$b);"))
+  (assert-string= "c,b,a|b,a,c"
+                  (%php-run-capture
+                   "<?php $a=['a'=>'10','b'=>'2','c'=>'1']; asort($a, SORT_NUMERIC); echo implode(',',array_keys($a)); $b=['a'=>'10','b'=>'2','c'=>'1']; arsort($b, SORT_STRING); echo '|'.implode(',',array_keys($b));"))
+  (assert-string= "1,10,2|2,10,1"
+                  (%php-run-capture
+                   "<?php $a=[10=>'a',2=>'b',1=>'c']; ksort($a, SORT_STRING); echo implode(',',array_keys($a)); $b=[10=>'a',2=>'b',1=>'c']; krsort($b, SORT_STRING); echo '|'.implode(',',array_keys($b));")))
+
 (deftest php-e2e-serialize-unserialize
-  "serialize/unserialize produce and parse PHP's native serialization format.
-They were registered as LAMBDA stubs (serialize only handled strings;
-unserialize just stringified) and, being non-CL-named, also failed dispatch
-('Undefined function: SERIALIZE').  Now proper recursive %php-serialize /
-%php-unserialize registered by symbol."
+  "serialize/unserialize produce and parse PHP's native serialization format
+through recursive symbol-registered helpers."
   ;; scalars
   (assert-string= "i:42;"        (%php-run-capture "<?php echo serialize(42);"))
   (assert-string= "s:5:\"hello\";" (%php-run-capture "<?php echo serialize('hello');"))
@@ -847,6 +1254,27 @@ classes (\\d \\w \\s) never matched."
   (assert-string= "H" (%php-run-capture "<?php echo \"\\u{48}\";"))         ; unicode
   (assert-string= "1" (%php-run-capture "<?php echo strlen(\"\\t\");")))    ; tab
 
+(deftest php-e2e-md5-sha1-builtins
+  "md5/sha1 return PHP-compatible digests, including raw binary output."
+  (assert-string= "900150983cd24fb0d6963f7d28e17f72"
+                  (%php-run-capture "<?php echo md5('abc');"))
+  (assert-string= "d41d8cd98f00b204e9800998ecf8427e"
+                  (%php-run-capture "<?php echo md5('');"))
+  (assert-string= "900150983cd24fb0d6963f7d28e17f72"
+                  (%php-run-capture "<?php echo bin2hex(md5('abc', true));"))
+  (assert-string= "a9993e364706816aba3e25717850c26c9cd0d89d"
+                  (%php-run-capture "<?php echo sha1('abc');"))
+  (assert-string= "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+                  (%php-run-capture "<?php echo sha1('');"))
+  (assert-string= "a9993e364706816aba3e25717850c26c9cd0d89d"
+                  (%php-run-capture "<?php echo bin2hex(sha1('abc', true));")))
+
+(deftest php-e2e-crc32-builtin
+  "crc32 returns PHP-compatible IEEE CRC-32 integer values."
+  (assert-string= "0" (%php-run-capture "<?php echo crc32('');"))
+  (assert-string= "891568578" (%php-run-capture "<?php echo crc32('abc');"))
+  (assert-string= "2356372769" (%php-run-capture "<?php echo crc32('foo');")))
+
 (deftest php-e2e-preg-replace-callback
   "preg_replace_callback / _array.  preg_replace_callback called a non-existent
 %php-regex-search and never stripped the /.../ delimiters, so every call raised
@@ -859,8 +1287,12 @@ the wrong arity (separate patterns/callbacks args instead of one map)."
   (assert-string= "XX34" (%php-run-capture "<?php echo preg_replace_callback('/\\d/', fn($m)=>'X', '1234', 2);"))
   ;; works with the double-quoted pattern too (escape-preservation fix)
   (assert-string= "a2b4" (%php-run-capture "<?php echo preg_replace_callback(\"/\\d/\", fn($m)=>$m[0]*2, 'a1b2');"))
+  ;; callback receives capture groups as $matches[1..]
+  (assert-string= "x:12 y:34" (%php-run-capture "<?php echo preg_replace_callback('/(\\w+)=(\\d+)/', fn($m)=>$m[1].':'.$m[2], 'x=12 y=34');"))
+  (assert-string= "4-2" (%php-run-capture "<?php echo preg_replace_callback('/((\\d)(\\d))/', fn($m)=>$m[2].'-'.$m[3], '42');"))
   ;; preg_replace_callback_array: a single [pattern => callback] map
-  (assert-string= "LNLN" (%php-run-capture "<?php echo preg_replace_callback_array(['/\\d/'=>fn($m)=>'N','/[a-z]/'=>fn($m)=>'L'], 'a1b2');")))
+  (assert-string= "LNLN" (%php-run-capture "<?php echo preg_replace_callback_array(['/\\d/'=>fn($m)=>'N','/[a-z]/'=>fn($m)=>'L'], 'a1b2');"))
+  (assert-string= "1a 2b" (%php-run-capture "<?php echo preg_replace_callback_array(['/(\\w)(\\d)/'=>fn($m)=>$m[2].$m[1]], 'a1 b2');")))
 
 (deftest php-e2e-preg-capture-groups
   "Capture groups in the regex engine: $1/$2/${1}/\\1/$0 backreferences in
@@ -894,7 +1326,10 @@ bridge)."
   (assert-string= "0" (%php-run-capture "<?php echo preg_match('/\\d/', 'abc', $m);"))
   ;; preg_match_all populates $matches in PREG_PATTERN_ORDER
   (assert-string= "1,2,3" (%php-run-capture "<?php preg_match_all('/(\\d)/', '1a2b3', $m); echo implode(',', $m[1]);"))
-  (assert-string= "12,34" (%php-run-capture "<?php preg_match_all('/\\d+/', 'a12b34', $m); echo implode(',', $m[0]);")))
+  (assert-string= "12,34" (%php-run-capture "<?php preg_match_all('/\\d+/', 'a12b34', $m); echo implode(',', $m[0]);"))
+  ;; optional offset is preserved by the out-param lowering for both helpers
+  (assert-string= "1:2" (%php-run-capture "<?php $r=preg_match('/\\d/', 'a1b2c3', $m, 0, 3); echo $r.':'.$m[0];"))
+  (assert-string= "2,3" (%php-run-capture "<?php preg_match_all('/(\\d)/', 'a1b2c3', $m, 0, 3); echo implode(',', $m[1]);")))
 
 (deftest php-e2e-ucwords-delimiters
   "ucwords uppercases the first letter of each word.  The default delimiter set
@@ -1073,17 +1508,226 @@ errored on an array, a string, or mixed types."
 
 (deftest php-e2e-symbol-registered-builtins
   "Builtins that were registered as LAMBDAs (non-CL-named) and so hit 'Undefined
-function' when called — iterator_to_array/iterator_count, lcg_value, extract,
-settype, sscanf, spl_autoload_*, class_implements/parents/uses — are now named
-%php-* helpers registered by symbol and are callable."
+function' when called — iterator_to_array/iterator_count, lcg_value,
+settype, sscanf, spl_autoload_register/unregister/functions,
+class_implements/parents/uses, echo/print — are now named %php-* helpers registered by
+symbol and are callable."
+  (cl-cc/php::%php-register-all-builtins)
+  (assert-eq 'cl-cc/php::%php-echo (cl-cc/php::%php-lookup-builtin-symbol "echo"))
+  (assert-eq 'cl-cc/php::%php-print (cl-cc/php::%php-lookup-builtin-symbol "print"))
+  (assert-string= "ab"
+                  (with-output-to-string (out)
+                    (let ((*standard-output* out))
+                      (funcall (cl-cc/php::%php-lookup-builtin "echo") "a" "b"))))
+  (assert-string= "c1"
+                  (with-output-to-string (out)
+                    (let ((*standard-output* out))
+                      (princ (funcall (cl-cc/php::%php-lookup-builtin "print") "c")))))
   (assert-string= "2" (%php-run-capture "<?php function g(){yield 1;yield 2;} echo count(iterator_to_array(g()));"))
   (assert-string= "3" (%php-run-capture "<?php function g(){yield 1;yield 2;yield 3;} echo iterator_count(g());"))
   (assert-string= "f" (%php-run-capture "<?php echo is_float(lcg_value())?'f':'n';"))
-  (assert-string= "2" (%php-run-capture "<?php echo extract(['x'=>5,'y'=>6]);"))
   (assert-string= "ok" (%php-run-capture "<?php $x=5; echo settype($x,'string')?'ok':'f';"))
   (assert-string= "arr" (%php-run-capture "<?php echo is_array(sscanf('a b','%s %s'))?'arr':'x';"))
   (assert-string= "arr" (%php-run-capture "<?php class C{} echo is_array(class_implements(new C()))?'arr':'x';"))
-  (assert-string= "t" (%php-run-capture "<?php echo spl_autoload_register(function($c){})?'t':'f';")))
+  (assert-string= "tu" (%php-run-capture "<?php $loader=function($c){}; echo spl_autoload_register($loader)?'t':'f'; echo spl_autoload_unregister($loader)?'u':'n';")))
+
+(deftest php-e2e-math-builtins-are-symbol-registered
+  "Math builtins resolve through named helper symbols."
+  (dolist (name '("sin" "cos" "tan" "log" "exp" "asin" "acos" "atan"
+                  "sinh" "cosh" "tanh" "is_nan" "mt_srand" "srand"))
+    (assert-true (cl-cc/php::%php-lookup-builtin-symbol name)))
+  (assert-string= "1" (%php-run-capture "<?php echo round(sin('1.5707963267948966'));"))
+  (assert-string= "3" (%php-run-capture "<?php echo round(log('8', '2'));")))
+
+(deftest php-e2e-deprecated-each-is-absent
+  "PHP each() is intentionally absent from the builtin registry."
+  (assert-string= "absent"
+                  (%php-run-capture
+                   "<?php echo function_exists('each')?'present':'absent';")))
+
+(deftest php-e2e-nl-langinfo-locale-metadata
+  "nl_langinfo() exposes deterministic locale metadata and predefined item constants."
+  (assert-string= "present:UTF-8:Sun:Monday:Dec:December:.:,"
+                  (%php-run-capture
+                   "<?php echo function_exists('nl_langinfo')?'present':'absent';
+echo ':'.nl_langinfo(CODESET);
+echo ':'.nl_langinfo(ABDAY_1);
+echo ':'.nl_langinfo(DAY_2);
+echo ':'.nl_langinfo(ABMON_12);
+echo ':'.nl_langinfo(MON_12);
+echo ':'.nl_langinfo(RADIXCHAR);
+echo ':'.nl_langinfo(THOUSEP);")))
+
+(deftest php-e2e-header-response-model
+  "header()/headers_list()/headers_sent() maintain a deterministic CLI response model."
+  (assert-string= "present:present:present"
+                  (%php-run-capture
+                   "<?php echo function_exists('header')?'present':'absent';
+echo ':'.(function_exists('headers_list')?'present':'absent');
+echo ':'.(function_exists('headers_sent')?'present':'absent');"))
+  (let ((cl-cc/php::*php-http-response-code* 200)
+        (cl-cc/php::*php-http-headers* nil)
+        (cl-cc/php::*php-output-started-p* nil))
+    (assert-string= "200:404:false"
+                    (%php-run-capture
+                     "<?php $old = http_response_code(201);
+header('HTTP/1.1 404 Not Found');
+echo $old.':'.http_response_code().':'.(headers_sent()?'true':'false');")))
+  (let ((cl-cc/php::*php-http-response-code* 200)
+        (cl-cc/php::*php-http-headers* nil)
+        (cl-cc/php::*php-output-started-p* nil))
+    (assert-string= "[\"X-Test: b\",\"Set-Cookie: a=1\",\"Set-Cookie: b=2\"]"
+                    (%php-run-capture
+                     "<?php header('X-Test: a');
+header('X-Test: b');
+header('Set-Cookie: a=1', false);
+header('Set-Cookie: b=2', false);
+echo json_encode(headers_list());"))))
+
+(deftest php-e2e-extract-static-array-literal
+  "extract() is exposed and static array literals bind caller variables."
+  (assert-string= "present"
+                  (%php-run-capture
+                   "<?php echo function_exists('extract')?'present':'absent';"))
+  (assert-string= "1:two:3:n"
+                  (%php-run-capture
+                   "<?php extract(['a'=>1,'b'=>'two','_c'=>3,'bad-key'=>4,5=>6]); echo $a.':'.$b.':'.$_c.':'.(isset($bad)?'y':'n');"))
+  (assert-string= "new"
+                  (%php-run-capture
+                   "<?php $a='old'; extract(['a'=>'new']); echo $a;")))
+
+(deftest php-e2e-empty-undefined-variable
+  "empty($x) treats an undefined variable as empty without evaluating it first."
+  (assert-string= "empty"
+                  (%php-run-capture
+                   "<?php echo empty($missing)?'empty':'set';"))
+  (assert-string= "empty:set:empty"
+                  (%php-run-capture
+                   "<?php $a=0; $b='value'; $c=null; echo (empty($a)?'empty':'set').':'.(empty($b)?'empty':'set').':'.(empty($c)?'empty':'set');")))
+
+(deftest php-e2e-spl-autoload-default-loader-is-absent
+  "spl_autoload() is not exposed until include-path backed class loading exists."
+  (assert-string= "absent"
+                  (%php-run-capture
+                   "<?php echo function_exists('spl_autoload')?'present':'absent';")))
+
+(deftest php-e2e-scanf-reads-standard-input
+  "scanf reads standard input with the sscanf parser and supports out-params."
+  (assert-string= "present"
+                  (%php-run-capture
+                   "<?php echo function_exists('scanf')?'present':'absent';"))
+  (let ((*standard-input* (make-string-input-stream "12 bob 3.5")))
+    (assert-string= "12:bob:3.5"
+                    (%php-run-capture
+                     "<?php $v=scanf('%d %s %f'); echo $v[0].':'.$v[1].':'.$v[2];")))
+  (let ((*standard-input* (make-string-input-stream "42-ada")))
+    (assert-string= "2:42:ada"
+                    (%php-run-capture
+                     "<?php $r=scanf('%d-%s',$id,$name); echo $r.':'.$id.':'.$name;"))))
+
+(deftest php-e2e-standard-stream-constants-are-backed-by-streams
+  "STDIN/STDOUT/STDERR are real stream handles."
+  (assert-string= "in:out:err"
+                  (%php-run-capture
+                   "<?php echo (STDIN===null?'bad':'in'); echo ':'; fwrite(STDOUT,'out'); echo ':'; echo (STDERR===null?'bad':'err');")))
+
+(deftest php-e2e-compact-captures-static-visible-variables
+  "compact() captures visible variables for static string/name-list arguments."
+  (assert-string= "present"
+                  (%php-run-capture
+                   "<?php echo function_exists('compact')?'present':'absent';"))
+  (assert-string= "Ada:36"
+                  (%php-run-capture
+                   "<?php $name='Ada'; $age=36; $r=compact('name','age','missing'); echo $r['name'].':'.$r['age'];"))
+  (assert-string= "yes"
+                  (%php-run-capture
+                   "<?php $x='yes'; $r=compact(['x']); echo $r['x'];"))
+  (assert-string= "ok:7"
+                  (%php-run-capture
+                   "<?php $x='ok'; $y=7; $r=compact(['x',['y']]); echo $r['x'].':'.$r['y'];")))
+
+(deftest php-e2e-settype-mutates-variable
+  "settype mutates its first argument by reference."
+  (assert-string= "string:5"
+                  (%php-run-capture
+                   "<?php $x=5; settype($x,'string'); echo gettype($x).':'.$x;"))
+  (assert-string= "integer:12"
+                  (%php-run-capture
+                   "<?php $x='12abc'; settype($x,'integer'); echo gettype($x).':'.$x;"))
+  (assert-string= "boolean:false"
+                  (%php-run-capture
+                   "<?php $x='0'; settype($x,'bool'); echo gettype($x).':'.($x?'true':'false');"))
+  (assert-string= "NULL:"
+                  (%php-run-capture
+                   "<?php $x='value'; settype($x,'null'); echo gettype($x).':'.$x;"))
+  (assert-string= "array:7"
+                  (%php-run-capture
+                   "<?php $x=7; settype($x,'array'); echo gettype($x).':'.$x[0];"))
+  (assert-string= "object:stdClass:7"
+                  (%php-run-capture
+                   "<?php $x=7; settype($x,'object'); echo gettype($x).':'.get_class($x).':'.$x->scalar;"))
+  (assert-string= "object:stdClass:ada"
+                  (%php-run-capture
+                   "<?php $x=['name'=>'ada']; settype($x,'object'); echo gettype($x).':'.get_class($x).':'.$x->name;"))
+  (assert-string= "fail:9"
+                  (%php-run-capture
+                   "<?php $x=9; echo settype($x,'bogus')?'ok':'fail'; echo ':'.$x;")))
+
+(deftest php-e2e-sscanf-format-parsing
+  "sscanf parses common PHP scanf directives and lowers out-params to caller
+assignments."
+  (assert-string= "12:bob:3.5"
+                  (%php-run-capture
+                   "<?php $v=sscanf('12 bob 3.5','%d %s %f'); echo $v[0].':'.$v[1].':'.$v[2];"))
+  (assert-string= "2:12:bob"
+                  (%php-run-capture
+                   "<?php $r=sscanf('12-bob','%d-%s',$id,$name); echo $r.':'.$id.':'.$name;"))
+  (assert-string= "ab:cd"
+                  (%php-run-capture
+                   "<?php $v=sscanf('abcdef','%2c%2s'); echo $v[0].':'.$v[1];"))
+  (assert-string= "255:8"
+                  (%php-run-capture
+                   "<?php $v=sscanf('ff 010','%x %i'); echo $v[0].':'.$v[1];"))
+  (assert-string= "1:42:"
+                  (%php-run-capture
+                   "<?php $r=sscanf('42 nope','%d:%s',$n,$s); echo $r.':'.$n.':'.$s;")))
+
+(deftest php-e2e-spl-autoload-registry
+  "SPL autoload registration keeps PHP-visible callback state."
+  (assert-string= "RP:2:clcc_loader_b:clcc_loader_a:U:clcc_loader_b,:missing"
+                  (%php-run-capture
+                   "<?php function clcc_loader_a($c){} function clcc_loader_b($c){} spl_autoload_unregister('clcc_loader_a'); spl_autoload_unregister('clcc_loader_b'); echo spl_autoload_register('clcc_loader_a')?'R':'F'; echo spl_autoload_register('clcc_loader_b', true, true)?'P':'F'; $list=spl_autoload_functions(); echo ':'.count($list).':'.$list[0].':'.$list[1]; echo ':'.(spl_autoload_unregister('clcc_loader_a')?'U':'N'); $list=spl_autoload_functions(); $found=''; foreach($list as $fn){$found.=$fn.',';} echo ':'.$found; echo ':'.(spl_autoload_unregister('clcc_loader_a')?'again':'missing'); spl_autoload_unregister('clcc_loader_b');")))
+
+(deftest php-e2e-class-reflection-builtins
+  "class_implements/class_parents/class_uses reflect compiler class metadata
+as PHP-visible arrays."
+  (assert-string= "REFLIFACEBREFLIFACEI"
+                  (%php-run-capture
+                   "<?php interface ReflIfaceI{} interface ReflIfaceB extends ReflIfaceI{} class ReflImpl implements ReflIfaceB{} $s=''; foreach(class_implements(new ReflImpl()) as $v){$s.=$v;} echo $s;"))
+  (assert-string= "REFLMIDREFLBASE"
+                  (%php-run-capture
+                   "<?php class ReflBase{} class ReflMid extends ReflBase{} class ReflLeaf extends ReflMid{} $s=''; foreach(class_parents(new ReflLeaf()) as $v){$s.=$v;} echo $s;"))
+  (assert-string= "REFLSTRINGBASE"
+                  (%php-run-capture
+                   "<?php class ReflStringBase{} class ReflStringChild extends ReflStringBase{} $s=''; foreach(class_parents('ReflStringChild') as $v){$s.=$v;} echo $s;"))
+  (assert-string= "REFLTRAITTREFLTRAITU"
+                  (%php-run-capture
+                   "<?php trait ReflTraitT{} trait ReflTraitU{} class ReflTraitUser{use ReflTraitT,ReflTraitU;} $s=''; foreach(class_uses(new ReflTraitUser()) as $v){$s.=$v;} echo $s;")))
+
+(deftest php-e2e-spl-data-structures
+  "SPL data structures created with new expose stateful methods."
+  (assert-string= "ba1SplStackY"
+                  (%php-run-capture
+                   "<?php $s=new SplStack(); $s->push('a'); $s->push('b'); echo $s->pop().$s->top().$s->count().get_class($s); echo method_exists($s,'push')?'Y':'N';"))
+  (assert-string= "ab1"
+                  (%php-run-capture
+                   "<?php $q=new SplQueue(); $q->enqueue('a'); $q->enqueue('b'); echo $q->dequeue().$q->bottom().$q->count();"))
+  (assert-string= "xy3z"
+                  (%php-run-capture
+                   "<?php $f=new SplFixedArray(2); $f->offsetSet(0,'x'); $f->offsetSet(1,'y'); $f->setSize(3); $f->offsetSet(2,'z'); echo $f->offsetGet(0).$f->offsetGet(1).$f->getSize().$f->offsetGet(2);"))
+  (assert-string= "13"
+                  (%php-run-capture
+                   "<?php $min=new SplMinHeap(); $max=new SplMaxHeap(); foreach([3,1,2] as $v){$min->insert($v);$max->insert($v);} echo $min->extract().$max->extract();")))
 
 (deftest php-e2e-intval-base
   "intval(string, base) parses in the given base; the base argument was ignored,

@@ -11,6 +11,12 @@
 
 
 (in-suite multiplicity-suite)
+
+(defmacro assert-multiplicity-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── multiplicity-p ─────────────────────────────────────────────────────────
 
 (deftest-each mult-valid-grades
@@ -130,7 +136,8 @@
           ("nil-invalid"  nil    nil)
           ("int-invalid"  1      nil))
   (val expected)
-  (if expected
+  (assert-multiplicity-boolean-case
+      expected
       (assert-true  (cl-cc/type:multiplicity-p val))
       (assert-false (cl-cc/type:multiplicity-p val))))
 
@@ -181,7 +188,8 @@
           ("ω≰1"  :omega :one   nil)
           ("ω≰0"  :omega :zero  nil))
   (a b expected)
-  (if expected
+  (assert-multiplicity-boolean-case
+      expected
       (assert-true  (mult-leq a b))
       (assert-false (mult-leq a b))))
 

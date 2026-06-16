@@ -53,10 +53,12 @@
     ("Math.hypot"              . ,#'%js-math-hypot)
     ("Math.clz32"              . ,#'%js-math-clz32)
     ("Math.fround"             . ,#'%js-math-fround)
+    ("Math.f16round"           . ,#'%js-math-f16round)
     ("Math.imul"               . ,#'%js-math-imul)
     ;; Array
     ("Array.isArray"           . ,#'%js-array-is-array)
     ("Array.from"              . ,#'%js-array-from)
+    ("Array.fromAsync"         . ,#'%js-array-from-async)
     ("Array.of"                . ,#'%js-array-of)
     ;; Object
     ("Object.keys"             . ,#'%js-object-keys)
@@ -64,7 +66,7 @@
     ("Object.entries"          . ,#'%js-object-entries)
     ("Object.assign"           . ,#'%js-object-assign)
     ("Object.create"           . ,#'%js-object-create)
-    ("Object.freeze"           . ,(lambda (obj) obj))
+    ("Object.freeze"           . ,#'%js-object-freeze)
     ("Object.fromEntries"      . ,#'%js-object-from-entries)
     ("Object.hasOwn"           . ,#'%js-object-has-own)
     ("Object.is"               . ,#'%js-object-is)
@@ -135,6 +137,7 @@
     ("Uint16Array"         . ,(%js-make-typed-array-ctor "Uint16Array"))
     ("Int32Array"          . ,(%js-make-typed-array-ctor "Int32Array"))
     ("Uint32Array"         . ,(%js-make-typed-array-ctor "Uint32Array"))
+    ("Float16Array"        . ,(%js-make-typed-array-ctor "Float16Array"))
     ("Float32Array"        . ,(%js-make-typed-array-ctor "Float32Array"))
     ("Float64Array"        . ,(%js-make-typed-array-ctor "Float64Array"))
     ;; ES2020 BigInt typed arrays
@@ -147,15 +150,15 @@
     ("Reflect.set"                      . ,#'%js-reflect-set)
     ("Reflect.has"                      . ,#'%js-reflect-has)
     ("Reflect.deleteProperty"           . ,#'%js-reflect-delete-property)
-    ("Reflect.ownKeys"                  . ,#'%js-object-keys)
+    ("Reflect.ownKeys"                  . ,#'%js-object-own-keys)
     ("Reflect.apply"                    . ,#'%js-reflect-apply)
     ("Reflect.construct"                . ,#'%js-reflect-construct)
     ("Reflect.defineProperty"           . ,#'%js-reflect-define-property)
     ("Reflect.getOwnPropertyDescriptor" . ,#'%js-reflect-get-own-property-descriptor)
-    ("Reflect.getPrototypeOf"           . ,(lambda (_target) (declare (ignore _target)) +js-null+))
-    ("Reflect.setPrototypeOf"           . ,(lambda (target _proto) (declare (ignore target _proto)) t))
-    ("Reflect.isExtensible"             . ,(lambda (_target) (declare (ignore _target)) t))
-    ("Reflect.preventExtensions"        . ,(lambda (_target) (declare (ignore _target)) t))
+    ("Reflect.getPrototypeOf"           . ,#'%js-object-get-prototype-of)
+    ("Reflect.setPrototypeOf"           . ,#'%js-reflect-set-prototype-of)
+    ("Reflect.isExtensible"             . ,#'%js-object-extensible-p)
+    ("Reflect.preventExtensions"        . ,#'%js-reflect-prevent-extensions)
     ;; BigInt (ES2020) — arbitrary-precision integers
     ("BigInt"                  . ,#'%js-bigint)
     ("BigInt.asIntN"           . ,#'%js-bigint-as-int-n)
@@ -171,25 +174,21 @@
     ;; TextEncoder/TextDecoder
     ("TextEncoder"             . ,(lambda (&rest _) (declare (ignore _)) (%js-make-text-encoder)))
     ("TextDecoder"             . ,(lambda (&optional encoding &rest _) (declare (ignore _)) (%js-make-text-decoder encoding)))
-    ;; eval stub (returns undefined — full dynamic eval not supported)
-    ("eval"                    . ,(lambda (x) (declare (ignore x)) +js-undefined+))
     ;; Object property descriptor ops
     ("Object.defineProperty"            . ,#'%js-object-define-property)
     ("Object.defineProperties"          . ,#'%js-object-define-properties)
     ("Object.getOwnPropertyDescriptor"  . ,#'%js-object-get-own-property-descriptor)
-    ("Object.getOwnPropertyNames"      . ,#'%js-object-keys)
-    ("Object.getOwnPropertySymbols"    . ,(lambda (_obj) (declare (ignore _obj)) (%js-make-array)))
+    ("Object.getOwnPropertyNames"      . ,#'%js-object-get-own-property-names)
+    ("Object.getOwnPropertySymbols"    . ,#'%js-object-get-own-property-symbols)
     ;; ES2017: Object.getOwnPropertyDescriptors (plural)
     ("Object.getOwnPropertyDescriptors" . ,#'%js-object-get-own-property-descriptors)
-    ("Object.seal"       . ,(lambda (obj) obj))
-    ("Object.preventExtensions" . ,(lambda (obj) obj))
-    ("Object.isExtensible" . ,(lambda (_obj) (declare (ignore _obj)) t))
-    ("Object.isFrozen"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
-    ("Object.isSealed"   . ,(lambda (_obj) (declare (ignore _obj)) nil))
-    ("Object.setPrototypeOf" . ,(lambda (obj _proto) (declare (ignore _proto)) obj))
-    ("Object.getPrototypeOf" . ,(lambda (_obj) (declare (ignore _obj)) +js-null+))
-    ;; Function constructor stub
-    ("Function"          . ,(lambda (&rest _) (declare (ignore _)) (lambda (&rest __) (declare (ignore __)) +js-undefined+)))
+    ("Object.seal"       . ,#'%js-object-seal)
+    ("Object.preventExtensions" . ,#'%js-object-prevent-extensions)
+    ("Object.isExtensible" . ,#'%js-object-extensible-p)
+    ("Object.isFrozen"   . ,#'%js-object-frozen-p)
+    ("Object.isSealed"   . ,#'%js-object-sealed-p)
+    ("Object.setPrototypeOf" . ,#'%js-object-set-prototype-of)
+    ("Object.getPrototypeOf" . ,#'%js-object-get-prototype-of)
     ;; ES2024: Iterator.from (TC39 iterator protocol)
     ("Iterator.from"     . ,#'%js-iterator-from-iterable)
     ;; ES2025: Promise.try
@@ -218,9 +217,6 @@
                                              (if (%js-vec-p arr)
                                                  (format nil "~{~A~^,~}" (coerce arr 'list))
                                                  (%js-to-string arr))))
-    ;; Array extra statics
-    ("Array.fromAsync"   . ,(lambda (iter &optional map-fn _this) (declare (ignore _this))
-                               (%js-promise-resolve (%js-array-from iter map-fn))))
     ;; Number extra constants
     ("Number.POSITIVE_INFINITY" . ,(lambda () *js-inf-float*))
     ("Number.NEGATIVE_INFINITY" . ,(lambda () *js-neg-inf-float*))
@@ -235,8 +231,6 @@
     ("Math.PI"     . ,(lambda () pi))
     ("Math.SQRT1_2" . ,(lambda () (sqrt 0.5d0)))
     ("Math.SQRT2"   . ,(lambda () (sqrt 2.0d0)))
-    ;; ES2022: AggregateError
-    ("AggregateError"          . ,#'%js-make-aggregate-error)
     ;; console extras
     ("console.table"    . ,(lambda (&rest args)
                               (format t "~{~A~^ ~}~%" (mapcar #'%js-to-string args))
@@ -261,12 +255,12 @@
     ;; globalThis extras
     ("Atomics"           . ,(lambda () +js-undefined+))
     ("SharedArrayBuffer" . ,(lambda (n) (%js-make-typed-array "Uint8Array" n)))
-    ;; URL / URLSearchParams stubs
+    ;; URL / URLSearchParams
     ("URL"               . ,#'%js-make-url)
     ("URLSearchParams"   . ,#'%js-make-url-search-params)
     ;; AbortController / AbortSignal
-    ("AbortController"   . ,#'%js-make-abort-controller)
-    ("AbortSignal"       . ,(lambda () (%js-make-object "aborted" nil "reason" +js-undefined+)))
+    ("AbortController"   . ,(%js-make-abort-controller-constructor))
+    ("AbortSignal"       . ,(%js-make-abort-signal-constructor))
     ;; Performance API extras
     ("performance"       . ,(%js-make-object "now" (lambda ()
                                                       (coerce (- (get-internal-real-time) 0) 'double-float))
@@ -278,12 +272,8 @@
     ("crypto"            . ,(%js-make-crypto))
     ;; structuredClone
     ("structuredClone"         . ,#'%js-structured-clone)
-    ;; queueMicrotask / setTimeout stubs (synchronous in our model)
+    ;; queueMicrotask is synchronous in our single-threaded model.
     ("queueMicrotask"          . ,#'%js-queue-microtask)
-    ("setTimeout"              . ,#'%js-set-timeout)
-    ("clearTimeout"            . ,#'%js-clear-timer)
-    ("setInterval"             . ,#'%js-set-interval)
-    ("clearInterval"           . ,#'%js-clear-timer)
     ;; RegExp constructor
     ("RegExp"                  . ,(lambda (pattern &optional flags)
                                     (%js-make-regex (%js-to-string pattern)
@@ -305,7 +295,8 @@
     ("ReferenceError"          . ,*js-reference-error-class*)
     ("SyntaxError"             . ,*js-syntax-error-class*)
     ("EvalError"               . ,*js-eval-error-class*)
-    ("URIError"                . ,*js-uri-error-class*))
+    ("URIError"                . ,*js-uri-error-class*)
+    ("AggregateError"          . ,*js-aggregate-error-class*))
   "Alist of (name . function) specs used to build *js-builtin-map*.")
 
 (defun %build-js-builtin-map ()
@@ -389,4 +380,3 @@ and never references a helper that does not exist."
 (defun %js-make-json ()
   "Construct the JS JSON global object (stringify / parse)."
   (%js-make-namespace-object "JSON"))
-

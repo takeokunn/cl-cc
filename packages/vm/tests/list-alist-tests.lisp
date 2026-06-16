@@ -33,15 +33,15 @@
 ;;; ─── equal / nconc / copy-list / copy-tree / subst ──────────────────────────
 
 (deftest-each vm-list-equal-cases
-  "vm-equal: truthy for structurally equal trees; nil for different trees."
-  :cases (("equal"     '(a (b c)) '(a (b c)) t)
-          ("not-equal" '(a b)     '(a c)     nil))
-  (lhs rhs expected-bool)
+  "vm-equal returns 1 for structurally equal trees and 0 for different trees."
+  :cases (("equal"     '(a (b c)) '(a (b c)) 1)
+          ("not-equal" '(a b)     '(a c)     0))
+  (lhs rhs expected)
   (let ((s (make-test-vm)))
     (cl-cc:vm-reg-set s 1 lhs)
     (cl-cc:vm-reg-set s 2 rhs)
     (exec1 (cl-cc:make-vm-equal :dst 0 :lhs 1 :rhs 2) s)
-    (assert-equal expected-bool (and (cl-cc:vm-reg-get s 0) t))))
+    (assert-= expected (cl-cc:vm-reg-get s 0))))
 
 (deftest vm-list-nconc-joins
   "vm-nconc destructively concatenates two lists."
@@ -71,7 +71,7 @@
       (cl-cc:vm-reg-set s 1 orig)
       (exec1 (cl-cc:make-vm-copy-list :dst 0 :src 1) s)
       (cl-cc:vm-reg-set s 2 99)
-      (exec1 (cl-cc:make-vm-rplaca :cons-reg 0 :val-reg 2) s)
+      (exec1 (cl-cc:make-vm-rplaca :cons 0 :val 2) s)
       (assert-= 1 (first orig))
       (assert-= 99 (car (cl-cc:vm-reg-get s 0))))))
 

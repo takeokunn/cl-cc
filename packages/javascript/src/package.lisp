@@ -87,9 +87,9 @@
    ;; Module system
    #:%js-new
    #:%js-import
+   #:%js-import-meta
    #:%js-export
    #:%js-debugger
-   #:%js-import-meta
    #:%js-new-target
 
    ;; Operator helpers (bitwise, shift, unary, increment)
@@ -109,7 +109,6 @@
    ;; Class / accessor helpers
    #:%js-accessor
    #:%js-make-regex
-   #:%js-field-init
    #:%js-assign-pattern
 
    ;; Resource management
@@ -158,6 +157,7 @@
    #:%js-math-sign
    #:%js-math-clz32
    #:%js-math-fround
+   #:%js-math-f16round
    #:%js-math-imul
    #:%js-math-random
 
@@ -191,6 +191,7 @@
    #:%js-array-entries
    #:%js-array-keys
    #:%js-array-from
+   #:%js-array-from-async
    #:%js-array-is-array
 
    ;; Object built-ins

@@ -40,6 +40,10 @@
     #:%php-bitwise-xor
     #:%php-bitwise-not
     #:%php-isset
+    #:%php-compact
+    #:%php-extract
+    #:%php-clone
+    #:%php-clone-with
     #:%php-array-key-exists
      #:%php-yield
      #:%php-yield-from
@@ -55,7 +59,6 @@
        #:%php-enum-try-from
        #:%php-enum-case-value
        #:php-exception
-    #:*php-builtin-map*
    #:php-check-supported-forms
    #:*php-trait-registry*
    #:%php-parse-trait-decl
@@ -66,11 +69,21 @@
    #:%php-fiber-start
    #:%php-fiber-resume
    #:%php-fiber-suspend
+   #:%php-array-first
+   #:%php-array-last
    #:%php-array-find
    #:%php-array-find-key
    #:%php-array-any
    #:%php-array-all
    #:%php-callable-ref
+   #:%php-pipe
+   #:%php-get-error-handler
+   #:%php-get-exception-handler
+   #:%php-current-closure
+   #:%php-locale-is-right-to-left
+   #:%php-opcache-is-script-cached-in-file-cache
+   #:%php-curl-share-init-persistent
+   #:%php-filter-var
    ;; Reference / by-ref semantics
    #:php-ref-p
    #:%php-ref-p
@@ -78,6 +91,7 @@
    #:%php-deref
    #:%php-ref-set!
    #:*php-by-ref-param-registry*
+   #:*php-named-param-registry*
    ;; foreach by-reference
    #:%php-foreach-by-ref
    ;; Generator (yield/yield-from/send)

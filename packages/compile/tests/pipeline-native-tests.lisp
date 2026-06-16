@@ -8,7 +8,7 @@
 
 (defsuite pipeline-native-suite
   :description "Serial tests for native pipeline helpers that temporarily replace global functions."
-  :parent cl-cc-unit-suite
+  :parent cl-cc-integration-suite
   :parallel nil)
 
 (in-suite pipeline-native-suite)

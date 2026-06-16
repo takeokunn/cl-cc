@@ -144,6 +144,15 @@
      s 0 nil)
     (assert-= 42 (cl-cc:vm-reg-get s :R3))))
 
+(deftest vm-raw-slot-write-prefers-existing-symbol-slot
+  "%vm-raw-slot-write updates the readable symbol slot before string fallback."
+  (let ((obj-ht (make-hash-table :test #'equal)))
+    (setf (gethash 'n obj-ht) 1
+          (gethash "n" obj-ht) 0)
+    (cl-cc/vm::%vm-raw-slot-write nil nil obj-ht 'n 7)
+    (assert-= 7 (gethash 'n obj-ht))
+    (assert-= 0 (gethash "n" obj-ht))))
+
 (deftest vm-slot-read-signals-error-when-unbound
   "vm-slot-read signals an error when the slot key has been removed from the instance HT."
   (let ((s (make-clos-vm)))
@@ -371,6 +380,18 @@
         (cl-cc/vm::%vm-class-slots-of obj-ht)
       (assert-eq class-ht c-ht)
       (assert-equal '(shared-slot) c-slots))))
+
+(deftest vm-class-slots-of-routes-class-object-to-itself
+  "%vm-class-slots-of treats a class HT as the storage owner for its class slots."
+  (let ((class-ht (make-hash-table :test #'eq)))
+    (setf (gethash :__class-slots__ class-ht) '(shared-slot)
+          (gethash 'shared-slot class-ht) 1)
+    (multiple-value-bind (c-ht c-slots)
+        (cl-cc/vm::%vm-class-slots-of class-ht)
+      (assert-eq class-ht c-ht)
+      (assert-equal '(shared-slot) c-slots))
+    (cl-cc/vm::%vm-raw-slot-write class-ht '(shared-slot) class-ht 'shared-slot 7)
+    (assert-= 7 (cl-cc/vm::%vm-raw-slot-read class-ht '(shared-slot) class-ht 'shared-slot))))
 
 (deftest vm-apply-initarg-instance-slot
   "%vm-apply-initarg stores the value in the instance HT for a non-class-slot."

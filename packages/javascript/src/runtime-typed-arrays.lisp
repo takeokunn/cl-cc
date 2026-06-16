@@ -3,7 +3,8 @@
 ;;;; TypedArrays are backed by CL arrays of the appropriate element type.
 ;;;; Supported: Int8Array, Uint8Array, Uint8ClampedArray,
 ;;;;            Int16Array, Uint16Array, Int32Array, Uint32Array,
-;;;;            Float32Array, Float64Array, BigInt64Array, BigUint64Array.
+;;;;            Float16Array, Float32Array, Float64Array,
+;;;;            BigInt64Array, BigUint64Array.
 ;;;;
 ;;;; Each TypedArray is a struct wrapping a CL array + a type tag.
 
@@ -34,6 +35,7 @@
     ("Uint16Array"        :uint16  2 (unsigned-byte 16)  0                    65535)
     ("Int32Array"         :int32   4 (signed-byte 32)   -2147483648           2147483647)
     ("Uint32Array"        :uint32  4 (unsigned-byte 32)  0                    4294967295)
+    ("Float16Array"       :float16 2 double-float        nil                  nil)
     ("Float32Array"       :float32 4 single-float        nil                  nil)
     ("Float64Array"       :float64 8 double-float         nil                  nil)
     ;; ES2020 BigInt typed arrays (backed by signed-byte 64 / unsigned-byte 64)
@@ -46,30 +48,47 @@
   (if (or (null min) (null max)) val
       (max min (min max (truncate val)))))
 
+(defun %js-ta-type-tag (type)
+  "Return the internal TypedArray type tag for TYPE, accepting names or tags."
+  (if (keywordp type)
+      type
+      (let ((spec (find type *js-typed-array-specs* :test #'string= :key #'car)))
+        (if spec (second spec) :uint8))))
+
+(defun %js-ta-integer-number (val)
+  "Coerce VAL through JS numeric conversion for integer TypedArray storage."
+  (let ((n (%js-to-number val)))
+    (if (or (%js-nan-p n) (%js-float-infinity-p n))
+        0
+        (truncate n))))
+
 (defun %js-ta-coerce-element (type-tag val)
   "Coerce VAL to the appropriate element type for TYPE-TAG."
-  (let ((n (truncate (%js-to-number val))))
-    (case type-tag
-      (:int8    (let ((x (logand n #xFF)))
-                  (if (>= x 128) (- x 256) x)))
-      (:uint8   (logand n #xFF))
-      (:uint8c  (%js-ta-clamp n 0 255))
-      (:int16   (let ((x (logand n #xFFFF)))
-                  (if (>= x 32768) (- x 65536) x)))
-      (:uint16  (logand n #xFFFF))
-      (:int32   (let ((x (logand n #xFFFFFFFF)))
-                  (if (>= x 2147483648) (- x 4294967296) x)))
-      (:uint32  (logand n #xFFFFFFFF))
-      (:float32 (coerce (%js-to-number val) 'single-float))
-      (:float64 (coerce (%js-to-number val) 'double-float))
-      (:bigint64
-       (let ((v (if (js-bigint-p val) (js-bigint-value val) (truncate (%js-to-number val)))))
-         (let ((x (logand v #xFFFFFFFFFFFFFFFF)))
-           (if (>= x 9223372036854775808) (- x 18446744073709551616) x))))
-      (:biguint64
-       (let ((v (if (js-bigint-p val) (js-bigint-value val) (truncate (%js-to-number val)))))
-         (logand v #xFFFFFFFFFFFFFFFF)))
-      (t n))))
+  (case (%js-ta-type-tag type-tag)
+    (:float16 (%js-f16round-number val))
+    (:float32 (coerce (%js-to-number val) 'single-float))
+    (:float64 (coerce (%js-to-number val) 'double-float))
+    (:bigint64
+     (let ((v (if (js-bigint-p val) (js-bigint-value val) (%js-ta-integer-number val))))
+       (let ((x (logand v #xFFFFFFFFFFFFFFFF)))
+         (if (>= x 9223372036854775808) (- x 18446744073709551616) x))))
+    (:biguint64
+     (let ((v (if (js-bigint-p val) (js-bigint-value val) (%js-ta-integer-number val))))
+       (logand v #xFFFFFFFFFFFFFFFF)))
+    (t
+     (let ((n (%js-ta-integer-number val)))
+       (case (%js-ta-type-tag type-tag)
+         (:int8    (let ((x (logand n #xFF)))
+                     (if (>= x 128) (- x 256) x)))
+         (:uint8   (logand n #xFF))
+         (:uint8c  (%js-ta-clamp n 0 255))
+         (:int16   (let ((x (logand n #xFFFF)))
+                     (if (>= x 32768) (- x 65536) x)))
+         (:uint16  (logand n #xFFFF))
+         (:int32   (let ((x (logand n #xFFFFFFFF)))
+                     (if (>= x 2147483648) (- x 4294967296) x)))
+         (:uint32  (logand n #xFFFFFFFF))
+         (t n))))))
 
 (defun %js-make-typed-array (type-name &optional (arg +js-undefined+))
   "Construct a TypedArray of TYPE-NAME.
@@ -172,16 +191,23 @@ ARG can be: length (integer), another TypedArray, an array, or an iterable."
       (setf (aref result i) (coerce (aref (js-ta-buffer ta) i) 'double-float)))
     result))
 
-(defun %js-ta-index-of (ta search-element)
+(defun %js-ta-index-of (ta search-element &optional (from-index 0))
   "TypedArray.prototype.indexOf."
-  (let ((target (%js-ta-coerce-element (js-ta-type-name ta) search-element)))
-    (loop for i below (js-ta-length ta)
+  (let* ((target (%js-ta-coerce-element (js-ta-type-name ta) search-element))
+         (n (js-ta-length ta))
+         (start (%js-array-relative-start from-index n)))
+    (loop for i from start below n
           when (= (aref (js-ta-buffer ta) i) target) return i
           finally (return -1))))
 
-(defun %js-ta-includes (ta search-element)
+(defun %js-ta-includes (ta search-element &optional (from-index 0))
   "TypedArray.prototype.includes."
-  (not (= -1 (%js-ta-index-of ta search-element))))
+  (let* ((target (%js-ta-coerce-element (js-ta-type-name ta) search-element))
+         (n (js-ta-length ta))
+         (start (%js-array-relative-start from-index n)))
+    (loop for i from start below n
+          when (%js-same-value-zero (aref (js-ta-buffer ta) i) target) return t
+          finally (return nil))))
 
 (defun %js-ta-join (ta &optional (sep ","))
   "TypedArray.prototype.join."

@@ -95,12 +95,11 @@ interpreter."
               (error () inst)))
           program))
 
-(unless (fboundp 'opt-run-compiler-fuzz)
-  (defun opt-run-compiler-fuzz (&key (trials 100)
-                                     (seed 753)
-                                     (max-program-length 16)
-                                     (optimizer #'optimize-instructions))
-    "Run FR-753 compiler fuzzing and return a result plist.
+(defun opt-run-compiler-fuzz (&key (trials 100)
+                                   (seed 753)
+                                   (max-program-length 16)
+                                   (optimizer #'optimize-instructions))
+  "Run FR-753 compiler fuzzing and return a result plist.
 
 Each trial generates a random valid straight-line IR program, interprets it,
 optimizes it with OPTIMIZER, and interprets the optimized program.  Any optimizer
@@ -108,25 +107,25 @@ error or semantic mismatch is reported in the returned plist instead of signalin
 so the harness can be used from CI or the REPL without destabilizing the default
 test plan.  This is an explicit tool and is not wired into the default optimizer
 pipeline."
-    (let ((state (%opt-fuzz-random-state seed))
-          (executed 0))
-      (loop repeat (max 0 trials)
-            do (incf executed)
-               (let* ((program (opt-generate-random-ir-program
-                                :state state
-                                :max-program-length max-program-length))
-                      (expected (multiple-value-list (opt-fuzz-interpret-ir program))))
-                 (multiple-value-bind (optimized error)
-                     (%opt-fuzz-try-optimizer program optimizer)
-                   (when error
+  (let ((state (%opt-fuzz-random-state seed))
+        (executed 0))
+    (loop repeat (max 0 trials)
+          do (incf executed)
+             (let* ((program (opt-generate-random-ir-program
+                              :state state
+                              :max-program-length max-program-length))
+                    (expected (multiple-value-list (opt-fuzz-interpret-ir program))))
+               (multiple-value-bind (optimized error)
+                   (%opt-fuzz-try-optimizer program optimizer)
+                 (when error
+                   (return-from opt-run-compiler-fuzz
+                     (list :ok nil :kind :optimizer-error :trial executed
+                           :error error :program (%opt-fuzz-program-sexps program))))
+                 (let ((actual (multiple-value-list (opt-fuzz-interpret-ir optimized))))
+                   (unless (equal expected actual)
                      (return-from opt-run-compiler-fuzz
-                       (list :ok nil :kind :optimizer-error :trial executed
-                             :error error :program (%opt-fuzz-program-sexps program))))
-                   (let ((actual (multiple-value-list (opt-fuzz-interpret-ir optimized))))
-                     (unless (equal expected actual)
-                       (return-from opt-run-compiler-fuzz
-                         (list :ok nil :kind :semantic-mismatch :trial executed
-                               :expected expected :actual actual
-                               :program (%opt-fuzz-program-sexps program)
-                               :optimized (%opt-fuzz-program-sexps optimized))))))))
-      (list :ok t :trials executed :seed seed))))
+                       (list :ok nil :kind :semantic-mismatch :trial executed
+                             :expected expected :actual actual
+                             :program (%opt-fuzz-program-sexps program)
+                             :optimized (%opt-fuzz-program-sexps optimized))))))))
+    (list :ok t :trials executed :seed seed)))

@@ -30,13 +30,13 @@
 (deftest runtime-metrics-prometheus-output
   "FR-792: counters, gauges, histograms export Prometheus text."
   :timeout 5
-  (let ((counter (cl-cc/runtime:make-counter :requests :labels '(:route "/")))
-        (gauge (cl-cc/runtime:make-gauge :workers))
-        (histogram (cl-cc/runtime:make-histogram :latency '(0.1d0 1.0d0))))
-    (cl-cc/runtime:increment! counter 3)
-    (cl-cc/runtime:set-gauge! gauge 7)
-    (cl-cc/runtime:observe! histogram 0.05d0)
-    (cl-cc/runtime:observe! histogram 2.0d0)
+  (let ((counter (cl-cc/runtime:rt-make-counter :requests :labels '(:route "/")))
+        (gauge (cl-cc/runtime:rt-make-gauge :workers))
+        (histogram (cl-cc/runtime:rt-make-histogram :latency '(0.1d0 1.0d0))))
+    (cl-cc/runtime:rt-counter-increment! counter 3)
+    (cl-cc/runtime:rt-gauge-set! gauge 7)
+    (cl-cc/runtime:rt-histogram-observe! histogram 0.05d0)
+    (cl-cc/runtime:rt-histogram-observe! histogram 2.0d0)
     (let ((text (cl-cc/runtime:prometheus-text-format (list counter gauge histogram))))
       (assert-true (search "# TYPE requests counter" text))
       (assert-true (search "requests{route=\"/\"} 3" text))
@@ -52,7 +52,7 @@
     (assert-true (integerp tsc))
     (assert-= 0 aux))
   (assert-signals cl-cc/runtime:perf-counters-unsupported
-    (cl-cc/runtime:with-perf-counters (:cycles)
+    (cl-cc/runtime:rt-with-perf-counters (:cycles)
       :unreachable)))
 
 (deftest runtime-arena-allocator-bulk-reset

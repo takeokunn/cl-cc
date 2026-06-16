@@ -6,7 +6,7 @@
 ;;;;   sidecar contradictions, and per-cluster implementation evidence.
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-documentation-suite)
 
 ;;; ─── Optimize roadmap evidence and helper contracts ───────────────────────
 

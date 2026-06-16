@@ -73,8 +73,7 @@ KIND documents the compiler/VM position: :FUNCTION-ENTRY, :LOOP-BACK-EDGE,
 inside WITHOUT-GCING), the request stays pending.  Otherwise a minor collection
 is serviced after briefly marking THREAD-ID as safe."
   (declare (ignore kind))
-  (when (fboundp 'rt-process-pending-signals)
-    (rt-process-pending-signals))
+  (rt-process-pending-signals)
   (when *rt-preemption-pending*
     (when *rt-preemption-yield-hook*
       (funcall *rt-preemption-yield-hook* thread-id))

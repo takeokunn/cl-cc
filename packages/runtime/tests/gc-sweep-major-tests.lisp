@@ -27,10 +27,10 @@
     (cl-cc/runtime:rt-heap-set-header
      heap live-addr
      (cl-cc/runtime:header-set-mark
-      (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0)))
+      (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0)))
     (cl-cc/runtime:rt-heap-set-header
      heap dead-addr
-     (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+     (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
     ;; Advance old-free past both objects
     (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 6))
     ;; Sweep
@@ -51,11 +51,11 @@
     (cl-cc/runtime:rt-heap-set-header
      heap old-base
      (cl-cc/runtime:header-set-mark
-      (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0)))
+      (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0)))
     (cl-cc/runtime:rt-heap-set-header
      heap (+ old-base 3)
      (cl-cc/runtime:header-set-mark
-      (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0)))
+      (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0)))
     (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 6))
     (cl-cc/runtime::%gc-sweep-old-space heap)
     (assert-= 0 (cl-cc/runtime:rt-heap-words-collected heap))
@@ -93,7 +93,7 @@
       ;; Place an unmarked object in old space with no root
       (cl-cc/runtime:rt-heap-set-header
        heap old-base
-       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+       (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
       (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 3))
       ;; Run major GC — object is unreachable, should be collected
       (cl-cc/runtime:rt-gc-major-collect heap)
@@ -108,7 +108,7 @@
       ;; Place live object in old space
       (cl-cc/runtime:rt-heap-set-header
        heap old-base
-       (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+       (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
       (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 3))
       ;; Register root pointing directly into old space
       (let ((root (cons nil old-base)))
@@ -117,7 +117,7 @@
         ;; Live object must still have a readable header
         (let ((hdr (cl-cc/runtime:rt-heap-object-header heap old-base)))
           (assert-true (integerp hdr))
-          (assert-= 3 (cl-cc/runtime:header-size hdr)))
+          (assert-= 3 (cl-cc/runtime:rt-header-size hdr)))
         (cl-cc/runtime:rt-gc-remove-root heap root)))))
 
 (deftest gc-major-collect-stats-major-count
@@ -169,9 +169,9 @@
            (a old-base)
            (b (+ old-base 3)))
       (cl-cc/runtime:rt-heap-set-header
-       heap a (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+       heap a (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
       (cl-cc/runtime:rt-heap-set-header
-       heap b (cl-cc/runtime:make-header 3 cl-cc/runtime:+rt-tag-cons+ 0))
+       heap b (cl-cc/runtime:make-rt-header 3 cl-cc/runtime:+rt-tag-cons+ :gc-bits 0))
       (setf (cl-cc/runtime:rt-heap-old-free heap) (+ old-base 6))
       (setf (cl-cc/runtime:rt-heap-satb-queue heap) (list a b))
       (cl-cc/runtime:rt-gc-configure-concurrent-mode

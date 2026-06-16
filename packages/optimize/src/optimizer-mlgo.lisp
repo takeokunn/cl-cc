@@ -70,18 +70,6 @@ Features are instruction count, call count, loop depth, and argument count."
          (benefit (opt-mlgo-inline-benefit features)))
     (max 1 (min max-threshold (+ base-threshold (round benefit))))))
 
-(defun opt-ml-inline-score-plan (&key features model-version)
-  "Compatibility hook used by optimizer-inline-cost.lisp.
-The plan intentionally has no external ML dependency and is safe when called
-through an FBOUNDP guard."
-  (declare (ignore model-version))
-  (let ((score (opt-mlgo-inline-benefit
-                (list :instruction-count (if (member :small-body features) 4 20)
-                      :call-count (if (member :call-heavy features) 4 0)
-                      :loop-depth (if (member :hot-loop features) 2 0)
-                      :arg-count 0))))
-    (list :score score :model :mlgo-linear)))
-
 (defun opt-pass-mlgo-inline (instructions)
   "Run inlining with the MLGO benefit model when explicitly enabled."
   (if *mlgo-enabled*

@@ -18,6 +18,12 @@
 (defconstant +rt-affinity-mask-bytes+ 128
   "Bytes reserved for Linux cpu_set_t-compatible affinity masks.")
 
+(defvar *rt-detected-cpu-cores* nil
+  "Cached runtime-visible CPU core count for this process.")
+
+(defvar *rt-detected-numa-topology* nil
+  "Cached NUMA topology for this process.")
+
 (defun %rt-file-lines (path)
   (ignore-errors
     (with-open-file (stream path :direction :input :if-does-not-exist nil)
@@ -46,6 +52,12 @@
     (let ((value (parse-integer (%rt-trim string) :junk-allowed t)))
       (when (and value (plusp value)) value))))
 
+#+darwin
+(defun %rt-darwin-run-program-environment ()
+  (list (format nil "PATH=~a"
+                (or (sb-ext:posix-getenv "PATH")
+                    "/usr/bin:/bin:/usr/sbin:/sbin"))))
+
 (defun %rt-run-program-output (program args)
   (ignore-errors
     (let ((out (make-string-output-stream)))
@@ -53,26 +65,43 @@
                                          :search t
                                          :output out
                                          :error nil
-                                         :wait t)))
+                                         :wait t
+                                         #+darwin :environment
+                                         #+darwin (%rt-darwin-run-program-environment))))
         (when (and process (zerop (sb-ext:process-exit-code process)))
           (%rt-trim (get-output-stream-string out)))))))
+
+(defun %rt-parse-non-negative-integer (string &key start end)
+  (ignore-errors
+    (let ((value (parse-integer string
+                                :start (or start 0)
+                                :end end
+                                :junk-allowed t)))
+      (when (and value (<= 0 value)) value))))
+
+(defun %rt-parse-cpu-token (token)
+  (let ((cpu (%rt-parse-non-negative-integer (%rt-trim token))))
+    (when cpu (list cpu))))
+
+(defun %rt-parse-cpu-range-token (token dash)
+  (let ((start (%rt-parse-non-negative-integer token :end dash))
+        (end (%rt-parse-non-negative-integer token :start (1+ dash))))
+    (when (and start end (<= start end))
+      (loop for cpu from start to end collect cpu))))
+
+(defun %rt-parse-cpulist-token (token)
+  (let* ((piece (%rt-trim token))
+         (dash (position #\- piece)))
+    (cond
+      ((zerop (length piece)) nil)
+      (dash (%rt-parse-cpu-range-token piece dash))
+      (t (%rt-parse-cpu-token piece)))))
 
 (defun %rt-parse-cpulist (text)
   (when text
     (remove-duplicates
      (loop for part in (%rt-split-string (%rt-trim text) #\,)
-           append (let* ((piece (%rt-trim part))
-                         (dash (position #\- piece)))
-                    (cond
-                      ((zerop (length piece)) nil)
-                      (dash
-                       (let ((start (parse-integer piece :end dash :junk-allowed t))
-                             (end (parse-integer piece :start (1+ dash) :junk-allowed t)))
-                         (when (and start end (<= start end))
-                           (loop for cpu from start to end collect cpu))))
-                      (t
-                       (let ((cpu (parse-integer piece :junk-allowed t)))
-                         (when cpu (list cpu)))))))
+           append (%rt-parse-cpulist-token part))
      :test #'eql)))
 
 (defun %rt-format-cpulist (cpus)
@@ -107,16 +136,22 @@
    (or (%rt-run-program-output "/usr/sbin/sysctl" '("-n" "hw.ncpu"))
        (%rt-run-program-output "sysctl" '("-n" "hw.ncpu")))))
 
+(defun %rt-detect-cpu-cores-uncached ()
+  (or #+linux (or (%rt-linux-cpu-count-from-proc)
+                  (%rt-linux-cpu-count-from-getconf))
+      #+darwin (%rt-darwin-cpu-count)
+      1))
+
 (defun detect-cpu-cores ()
   "Detect the number of online CPU cores visible to the runtime.
 
 Linux hosts prefer /proc/cpuinfo and fall back to getconf/nproc. macOS hosts
 query sysctl hw.ncpu. Unsupported hosts return 1. The return value is always a
-positive integer."
-  (or #+linux (or (%rt-linux-cpu-count-from-proc)
-                  (%rt-linux-cpu-count-from-getconf))
-      #+darwin (%rt-darwin-cpu-count)
-      1))
+positive integer. The result is cached because host topology is stable during a
+compiler process and external detection can be expensive under Nix wrappers."
+  (or *rt-detected-cpu-cores*
+      (setf *rt-detected-cpu-cores*
+            (%rt-detect-cpu-cores-uncached))))
 
 (defun %rt-linux-node-id-from-path (pathname)
   (let* ((directory (pathname-directory pathname))
@@ -135,6 +170,18 @@ positive integer."
                       (kb (parse-integer after :junk-allowed t)))
                  (return (and kb (* kb 1024)))))))
 
+(defun %rt-topology-node-id (node)
+  (getf node :node-id))
+
+(defun %rt-node-memory-bytes-or-zero (node)
+  (or (getf node :memory-bytes) 0))
+
+(defun %rt-sort-topology-nodes (nodes)
+  (sort nodes #'< :key #'%rt-topology-node-id))
+
+(defun %rt-topology-memory-bytes (nodes)
+  (reduce #'+ nodes :key #'%rt-node-memory-bytes-or-zero :initial-value 0))
+
 (defun %rt-linux-numa-from-sysfs ()
   (let ((nodes
           (loop for cpulist-path in (directory "/sys/devices/system/node/node*/cpulist")
@@ -145,7 +192,7 @@ positive integer."
                                 :cpus (sort cpus #'<)
                                 :memory-bytes (%rt-linux-node-memory-bytes node-id)
                                 :kind :dram))))
-    (when nodes (sort nodes #'< :key (lambda (node) (getf node :node-id))))))
+    (when nodes (%rt-sort-topology-nodes nodes))))
 
 (defun %rt-linux-numa-from-numactl ()
   (let ((output (%rt-run-program-output "numactl" '("--hardware"))))
@@ -155,14 +202,11 @@ positive integer."
           (when (and (search "node " line) (search " cpus:" line))
             (let* ((tokens (remove "" (%rt-split-string (%rt-trim line) #\Space) :test #'string=))
                    (node-id (parse-integer (second tokens) :junk-allowed t))
-                   (cpus (mapcan (lambda (token)
-                                   (let ((cpu (parse-integer token :junk-allowed t)))
-                                     (when cpu (list cpu))))
-                                 (cdddr tokens))))
+                   (cpus (mapcan #'%rt-parse-cpu-token (cdddr tokens))))
               (when (and node-id cpus)
                 (push (list :node-id node-id :cpus cpus :memory-bytes nil :kind :dram)
                       nodes)))))
-        (when nodes (sort nodes #'< :key (lambda (node) (getf node :node-id))))))))
+        (when nodes (%rt-sort-topology-nodes nodes))))))
 
 (defun %rt-default-numa-topology ()
   (list (list :node-id 0
@@ -170,16 +214,24 @@ positive integer."
               :memory-bytes nil
               :kind :dram)))
 
+(defun %rt-detect-numa-topology-uncached ()
+  (or #+linux (or (%rt-linux-numa-from-sysfs)
+                  (%rt-linux-numa-from-numactl))
+      (%rt-default-numa-topology)))
+
 (defun detect-numa-topology ()
   "Detect NUMA topology as a list of node property lists.
 
 Each node contains :NODE-ID, :CPUS, :MEMORY-BYTES, and :KIND. Linux reads
 /sys/devices/system/node/node*/cpulist and falls back to numactl --hardware.
 macOS reports one DRAM node because Darwin exposes no NUMA topology. Unsupported
-hosts return a single default node covering all detected CPUs."
-  (or #+linux (or (%rt-linux-numa-from-sysfs)
-                  (%rt-linux-numa-from-numactl))
-      (%rt-default-numa-topology)))
+hosts return a single default node covering all detected CPUs. The detected
+topology is cached and returned as a fresh tree so callers cannot mutate the
+process cache."
+  (copy-tree
+   (or *rt-detected-numa-topology*
+       (setf *rt-detected-numa-topology*
+             (%rt-detect-numa-topology-uncached)))))
 
 #+(and sbcl linux)
 (defun %rt-affinity-vector->cpus (mask)
@@ -206,7 +258,25 @@ hosts return a single default node covering all detected CPUs."
   (sb-alien:with-alien ((alien-mask (array sb-alien:unsigned-char #.+rt-affinity-mask-bytes+)))
     (loop for i below +rt-affinity-mask-bytes+
           do (setf (sb-alien:deref alien-mask i) (aref mask i)))
-    (funcall function (sb-alien:addr alien-mask))))
+    (funcall function mask (sb-alien:addr alien-mask))))
+
+#+(and sbcl linux)
+(defun %rt-copy-affinity-mask-from-alien (mask alien-mask)
+  (loop for i below +rt-affinity-mask-bytes+
+        do (setf (aref mask i) (sb-alien:deref alien-mask i)))
+  mask)
+
+#+(and sbcl linux)
+(defun %rt-get-affinity-with-alien-mask (mask alien-mask)
+  (when (zerop (%rt-sched-getaffinity 0 +rt-affinity-mask-bytes+ alien-mask))
+    (%rt-affinity-vector->cpus
+     (%rt-copy-affinity-mask-from-alien mask alien-mask))))
+
+#+(and sbcl linux)
+(defun %rt-set-affinity-with-alien-mask (mask alien-mask)
+  (declare (ignore mask))
+  (when (zerop (%rt-sched-setaffinity 0 +rt-affinity-mask-bytes+ alien-mask))
+    (get-cpu-affinity-mask)))
 
 (defun %rt-linux-affinity-from-status ()
   (loop for line in (%rt-file-lines "/proc/self/status")
@@ -227,11 +297,7 @@ warning because portable thread affinity is not exposed by the host runtime."
     (or (ignore-errors
           (%rt-with-affinity-alien-mask
            mask
-           (lambda (alien-mask)
-             (when (zerop (%rt-sched-getaffinity 0 +rt-affinity-mask-bytes+ alien-mask))
-               (loop for i below +rt-affinity-mask-bytes+
-                     do (setf (aref mask i) (sb-alien:deref alien-mask i)))
-               (%rt-affinity-vector->cpus mask)))))
+           #'%rt-get-affinity-with-alien-mask))
         (%rt-linux-affinity-from-status)))
   #-(and sbcl linux)
   (progn
@@ -251,9 +317,7 @@ CPU bitmask compatible with this runtime API."
     (or (ignore-errors
           (%rt-with-affinity-alien-mask
            mask
-           (lambda (alien-mask)
-             (when (zerop (%rt-sched-setaffinity 0 +rt-affinity-mask-bytes+ alien-mask))
-               (get-cpu-affinity-mask)))))
+           #'%rt-set-affinity-with-alien-mask))
         (progn
           (warn "sched_setaffinity failed; CPU affinity was not changed.")
           nil)))
@@ -279,9 +343,12 @@ CPU bitmask compatible with this runtime API."
                         :bytes (* sectors 512)
                         :source :sysfs)))
 
+(defun %rt-hbm-line-p (line)
+  (search "hbm" line :test #'char-equal))
+
 (defun %rt-linux-hbm-present-p ()
   (or (directory "/sys/devices/system/node/node*/memory_side_cache/index*")
-      (some (lambda (line) (search "hbm" line :test #'char-equal))
+      (some #'%rt-hbm-line-p
             (append (%rt-file-lines "/proc/meminfo") nil))))
 
 (defun memory-tier-info ()
@@ -297,9 +364,7 @@ host information when possible."
     (progn
       (push (list :tier :dram
                   :bytes (or (%rt-linux-memory-total-bytes)
-                             (reduce #'+ (mapcar (lambda (node)
-                                                   (or (getf node :memory-bytes) 0))
-                                                 (detect-numa-topology))))
+                             (%rt-topology-memory-bytes (detect-numa-topology)))
                   :nodes (detect-numa-topology)
                   :source :linux)
             tiers)
@@ -319,10 +384,6 @@ host information when possible."
                     :bytes nil
                     :nodes (detect-numa-topology)
                     :source :fallback)))))
-
-(defun rt-cpu-count ()
-  "Return the runtime-visible online CPU count. Compatibility wrapper for DETECT-CPU-CORES."
-  (detect-cpu-cores))
 
 (defun rt-cpu-topology ()
   "Return runtime CPU and NUMA topology information as a property list."

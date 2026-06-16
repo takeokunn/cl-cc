@@ -16,16 +16,16 @@
           ((not (integerp h))
            ;; Non-integer, non-cons header — stop
            (return))
-          ((zerop (header-size h))
+          ((zerop (rt-header-size h))
            ;; Zero size header (uninitialized region) — stop
            (return))
           ((header-marked-p h)
            ;; Live object: clear mark bit and advance
            (rt-heap-set-header heap addr (header-clear-mark h))
-           (incf addr (header-size h)))
+           (incf addr (rt-header-size h)))
           (t
              ;; Dead object: reclaim to segregated free-list
-             (let ((size (header-size h)))
+             (let ((size (rt-header-size h)))
                (dolist (hook *rt-gc-death-hooks*)
                  (funcall hook heap addr size))
                (rt-free-list-insert heap size addr)
@@ -53,13 +53,13 @@
       (let ((h (rt-heap-object-header heap addr)))
         (cond
           ((header-forwarding-p h) (incf addr 1))
-          ((or (not (integerp h)) (zerop (header-size h)))
+          ((or (not (integerp h)) (zerop (rt-header-size h)))
            (setf addr limit))
           ((header-marked-p h)
            (rt-heap-set-header heap addr (header-clear-mark h))
-           (incf addr (header-size h)))
+           (incf addr (rt-header-size h)))
           (t
-           (let ((size (header-size h)))
+           (let ((size (rt-header-size h)))
              (dolist (hook *rt-gc-death-hooks*)
                (funcall hook heap addr size))
              (rt-free-list-insert heap size addr)
@@ -147,10 +147,10 @@ Returns a plist describing the compaction result."
               (cond
                 ((header-forwarding-p h)
                  (incf addr 1))
-                ((or (not (integerp h)) (zerop (header-size h)))
+                ((or (not (integerp h)) (zerop (rt-header-size h)))
                  (setf addr old-free))
                 ((header-marked-p h)
-                 (let* ((size (header-size h))
+                 (let* ((size (rt-header-size h))
                         (pinned (rt-object-pinned-p heap addr))
                         (new-addr (if pinned addr compact-cursor)))
                    (unless (= new-addr addr)
@@ -166,7 +166,7 @@ Returns a plist describing the compaction result."
                               (+ new-addr size)))
                    (incf addr size)))
                 (t
-                 (let ((size (header-size h)))
+                 (let ((size (rt-header-size h)))
                    (incf dead-words size)
                    (incf addr size))))))
     (let ((new-old-free compact-cursor))
@@ -183,8 +183,8 @@ Returns a plist describing the compaction result."
                          (let ((h (rt-heap-object-header heap a)))
                            (cond
                              ((header-forwarding-p h) (incf a 1))
-                             ((and (integerp h) (> (header-size h) 0))
-                              (let ((size (header-size h)))
+                             ((and (integerp h) (> (rt-header-size h) 0))
+                              (let ((size (rt-header-size h)))
                                 (dolist (offset (rt-object-pointer-slots heap a))
                                   (let ((slot (+ a offset)))
                                     (rt-heap-set heap slot
@@ -220,10 +220,10 @@ Returns a plist describing the compaction result."
                 (cond
                   ((header-forwarding-p h)
                    (incf addr 1))
-                  ((or (not (integerp h)) (zerop (header-size h)))
+                  ((or (not (integerp h)) (zerop (rt-header-size h)))
                    (setf addr old-free))
                   ((header-marked-p h)
-                   (let ((size (header-size h))
+                   (let ((size (rt-header-size h))
                          (new-addr (gethash addr forwarding addr)))
                      (unless (= new-addr addr)
                        ;; Copy words from old location to new location
@@ -245,7 +245,7 @@ Returns a plist describing the compaction result."
                      (incf addr size)))
                   (t
                    ;; Dead — skip
-                   (incf addr (header-size h))))))
+                   (incf addr (rt-header-size h))))))
       ;; Phase 4: Update metadata
       (setf (rt-heap-old-free heap) new-old-free)
       ;; Clear card table (all old→young relationships must be re-recorded)

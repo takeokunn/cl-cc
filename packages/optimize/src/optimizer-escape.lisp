@@ -131,17 +131,14 @@ chains are handled transitively."
     (%opt-escape-propagate graph escaped reasons)
     (values alloc-roots escaped graph reasons)))
 
-(defun %opt-mark-stack-allocation-compatible (inst root kind)
-  "Record stack allocation intent in both FR-516 and legacy FR-18 side tables."
+(defun %opt-mark-stack-allocation (inst root kind)
+  "Record FR-516 stack allocation intent in the optimize metadata table."
   (let ((metadata (list :stack-allocation t
                         :replacement-op :vm-stack-alloc
                         :allocation-kind kind
                         :root-reg root
                         :reason :non-escaping-fr-516)))
-    (setf (gethash inst *opt-escape-analysis-metadata*) metadata)
-    (let ((legacy-symbol (find-symbol "*OPT-STACK-ALLOCATION-METADATA*" :cl-cc/optimize)))
-      (when (and legacy-symbol (boundp legacy-symbol))
-        (setf (gethash inst (symbol-value legacy-symbol)) metadata)))))
+    (setf (gethash inst *opt-escape-analysis-metadata*) metadata)))
 
 (defun opt-pass-escape-analysis (instructions)
   "FR-516: mark heap allocations that do not escape function scope.
@@ -156,6 +153,6 @@ all unproven or potentially escaping objects."
     (declare (ignore _graph reasons))
     (maphash (lambda (root inst)
                (unless (gethash root escaped)
-                 (%opt-mark-stack-allocation-compatible inst root (opt-heap-root-kind inst))))
+                 (%opt-mark-stack-allocation inst root (opt-heap-root-kind inst))))
              alloc-roots))
   instructions)

@@ -3,6 +3,26 @@
 
 (defvar *setf-compound-place-handlers* (make-hash-table :test 'eq))
 
+(defparameter *bootstrap-setf-nth-list-accessor-indices*
+  '((second . 1)
+    (third  . 2)
+    (fourth . 3)
+    (fifth  . 4)
+    (sixth  . 5)
+    (seventh . 6)
+    (eighth . 7)
+    (ninth  . 8)
+    (tenth  . 9)))
+
+(defun %bootstrap-setf-nth-list-accessor-index (head)
+  (cdr (assoc head *bootstrap-setf-nth-list-accessor-indices* :test #'eq)))
+
+(defun %bootstrap-setf-cdr-chain (base count)
+  (loop with form = base
+        repeat count
+        do (setf form (list 'cdr form))
+        finally (return form)))
+
 ;; CHECK-TYPE macro
 (defun %make-type-error (datum expected-type)
   "Construct a TYPE-ERROR condition with DATUM and EXPECTED-TYPE."
@@ -49,6 +69,14 @@
      (let ((v (gensym "V")))
        `(let ((,v ,value))
           (rplaca (nthcdr ,(second place) ,(third place)) ,v)
+          ,v)))
+    ((and (consp place) (%bootstrap-setf-nth-list-accessor-index (car place)))
+     (let ((v (gensym "V")))
+       `(let ((,v ,value))
+          (rplaca ,(%bootstrap-setf-cdr-chain
+                    (second place)
+                    (%bootstrap-setf-nth-list-accessor-index (car place)))
+                  ,v)
           ,v)))
      ((and (consp place) (member (car place) '(aref elt)))
       (let ((v (gensym "V")))

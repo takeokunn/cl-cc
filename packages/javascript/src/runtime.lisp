@@ -195,6 +195,13 @@ type symbol cannot be named at read time — resolve it by name at runtime."
     ((and (numberp a) (numberp b)) (= a b))
     (t (equal a b))))
 
+(defun %js-same-value-zero (a b)
+  "ECMAScript SameValueZero equality for Map/Set-style key matching."
+  (cond
+    ((and (%js-nan-p a) (%js-nan-p b)) t)
+    ((and (numberp a) (numberp b)) (= a b))
+    (t (%js-strict-eq a b))))
+
 (defun %js-relational (a b num-op str-op)
   "JS Abstract Relational Comparison core, returning a JS boolean (t/nil).
 When both operands are strings they compare lexicographically by code unit

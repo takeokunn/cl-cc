@@ -17,9 +17,6 @@
     `(let ((,result (cl-cc:apply-prolog-peephole ,instructions)))
        (assert-false (member ,pattern ,result :test #'equal)))))
 
-(defmacro assert-prolog-peephole-case (input expected)
-  `(assert-prolog-peephole-equal ,input ,expected))
-
 (deftest prolog-type-of-integer-const
   "type-of/3: integer constant has type (integer-type)."
   (let ((result (cl-cc:query-one '(type-of (const 42) nil ?t))))
@@ -61,7 +58,7 @@
           ("num-eq-same"   '((:num-eq :r12 :r4 :r4) (:const :r13 6)) '((:const :r12 1) (:const :r13 6)))
           ("logxor-same"   '((:logxor :r14 :r5 :r5) (:const :r15 7)) '((:const :r14 0) (:const :r15 7))))
   (input expected)
-  (assert-prolog-peephole-case input expected))
+  (assert-prolog-peephole-equal input expected))
 
 (deftest-each prolog-peephole-same-reg-identities
   "Peephole: same-register comparison/bitwise identities collapse locally."
@@ -71,7 +68,7 @@
           ("logand" '((:logand :r9 :r10 :r10) (:const :r11 4))  '((:move :r9 :r10) (:const :r11 4)))
           ("logior" '((:logior :r12 :r13 :r13) (:const :r14 5)) '((:move :r12 :r13) (:const :r14 5))))
   (input expected)
-  (assert-prolog-peephole-case input expected))
+  (assert-prolog-peephole-equal input expected))
 
 (deftest-each prolog-peephole-negated-comparisons
   "Peephole: compare followed by logical not collapses to the inverse comparison."
@@ -80,7 +77,7 @@
           ("le->gt" '((:le :r8 :r9 :r10) (:not :r11 :r8))    '((:gt :r11 :r9 :r10)))
           ("ge->lt" '((:ge :r12 :r13 :r14) (:not :r15 :r12)) '((:lt :r15 :r13 :r14))))
   (input expected)
-  (assert-prolog-peephole-case input expected))
+  (assert-prolog-peephole-equal input expected))
 
 (deftest prolog-peephole-empty-input
   "Peephole: empty instruction list returns empty."

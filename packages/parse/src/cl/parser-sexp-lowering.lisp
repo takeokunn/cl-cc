@@ -34,6 +34,15 @@ Each handler is a lambda (node source-file source-line source-column)."
         (list 'dolist (list 'head (list 'quote heads))
               (list 'setf (list 'gethash 'head '*list-lowering-table*) 'fn))))
 
+(defun %list-lowering-handler (head)
+  "Return the registered lowerer for HEAD, accepting package-local spellings."
+  (or (gethash head *list-lowering-table*)
+      (when (symbolp head)
+        (multiple-value-bind (parse-head status)
+            (find-symbol (symbol-name head) :cl-cc/parse)
+          (declare (ignore status))
+          (and parse-head (gethash parse-head *list-lowering-table*))))))
+
 ;;; ── Setf simple-place rewrite table ─────────────────────────────────────────
 ;;;
 ;;; Maps place-head → (runtime-fn num-place-args).
@@ -49,6 +58,8 @@ Each handler is a lambda (node source-file source-line source-column)."
     (fill-pointer     %set-fill-pointer  1)
     (car              rplaca             1)
     (cdr              rplacd             1)
+    (first            rplaca             1)
+    (rest             rplacd             1)
     (bit              rt-bit-set         2)
     (sbit             rt-bit-set         2)
     (char             rt-string-set      2)
@@ -61,10 +72,34 @@ Complex places (slot-value, gethash, getf) are handled separately in %lower-setf
 
 ;;; Shared helpers ─────────────────────────────────────────────────────────────
 
+(defun %lower-aux-params (aux-params)
+  "Lower &aux init forms into let-compatible binding pairs."
+  (mapcar (lambda (aux)
+            (cons (first aux)
+                  (if (second aux)
+                      (lower-sexp-to-ast (second aux))
+                      (make-ast-quote :value nil))))
+          aux-params))
+
+(defun %wrap-body-with-aux-bindings (aux-bindings body-asts sf sl sc)
+  "Wrap BODY-ASTS in nested single-binding LET nodes for sequential &aux init."
+  (if (null aux-bindings)
+      body-asts
+      (labels ((%wrap-aux-bindings (bindings)
+                 (make-ast-let
+                  :bindings (list (first bindings))
+                  :body (if (rest bindings)
+                            (list (%wrap-aux-bindings (rest bindings)))
+                            body-asts)
+                  :source-file sf
+                  :source-line sl
+                  :source-column sc)))
+        (list (%wrap-aux-bindings aux-bindings)))))
+
 (defun %lower-extended-params (raw-params)
   "Parse an extended lambda list, lowering default-value sexps to AST.
-Returns (values required lowered-optional rest-param lowered-key)."
-  (multiple-value-bind (required optional rest-param key-params)
+Returns (values required lowered-optional rest-param lowered-key lowered-aux)."
+  (multiple-value-bind (required optional rest-param key-params aux-params)
       (parse-compiler-lambda-list raw-params)
     (values required
             (mapcar (lambda (opt)
@@ -78,7 +113,8 @@ Returns (values required lowered-optional rest-param lowered-key)."
                              (when (second kp) (lower-sexp-to-ast (second kp)))
                              (third kp)   ; FR-696: preserve supplied-p name
                              (fourth kp))) ; ANSI &key: preserve explicit keyword name
-                     key-params))))
+                     key-params)
+            (%lower-aux-params aux-params))))
 
 (defun %extract-leading-type-declarations (forms)
   "Extract leading (declare (type ...)) forms from FORMS.
@@ -152,7 +188,7 @@ are preserved in the stripped forms and declarations are extracted after it."
 
 (defun lower-list-to-ast (node &key source-file source-line source-column)
   "Dispatch a list-form NODE to its registered handler, or lower as a call."
-  (let ((handler (gethash (car node) *list-lowering-table*)))
+  (let ((handler (%list-lowering-handler (car node))))
     (if handler
         (funcall handler node source-file source-line source-column)
         ;; Default: treat as function call

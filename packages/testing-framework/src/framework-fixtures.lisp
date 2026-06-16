@@ -47,21 +47,39 @@
   (clrhash target)
   (maphash (lambda (k v)
              (setf (gethash k target) (funcall copy-value v)))
-           snapshot)
+            snapshot)
   target)
+
+(defmacro with-restored-hash-table ((place &key (copy-value #'identity)) &body body)
+  "Run BODY while restoring PLACE to its original contents afterward."
+  (let ((table (gensym "TABLE"))
+        (saved (gensym "SAVED")))
+    `(let* ((,table ,place)
+            (,saved (%snapshot-hash-table ,table :copy-value ,copy-value)))
+       (unwind-protect
+            (progn ,@body)
+         (%restore-hash-table ,table ,saved :copy-value ,copy-value)))))
+
+(defmacro with-cleared-hash-table ((place &key (copy-value #'identity)) &body body)
+  "Run BODY with PLACE cleared, restoring its prior contents afterward."
+  (let ((table (gensym "TABLE")))
+    `(let ((,table ,place))
+       (with-restored-hash-table (,table :copy-value ,copy-value)
+         (clrhash ,table)
+         ,@body))))
 
 ;;; ------------------------------------------------------------
 ;;; Global cache isolation fixtures
 ;;; ------------------------------------------------------------
 
 (defbefore :each (cl-cc-suite)
-  (cl-cc/vm:vm-clear-hash-cons-table))
+  (cl-cc/vm::vm-clear-hash-cons-table))
 
 (defbefore :each (cl-cc-suite)
-  (when (boundp 'cl-cc/expand:*macroexpand-step-cache*)
-    (clrhash cl-cc/expand:*macroexpand-step-cache*))
-  (when (boundp 'cl-cc/expand:*macroexpand-all-cache*)
-    (clrhash cl-cc/expand:*macroexpand-all-cache*)))
+  (when (boundp 'cl-cc/expand::*macroexpand-step-cache*)
+    (clrhash cl-cc/expand::*macroexpand-step-cache*))
+  (when (boundp 'cl-cc/expand::*macroexpand-all-cache*)
+    (clrhash cl-cc/expand::*macroexpand-all-cache*)))
 
 ;;; ------------------------------------------------------------
 ;;; Test fixtures
@@ -84,23 +102,10 @@ surface."
          (reset-repl-state)
          (setf *package* ,saved-package)))))
 
-(defun %snapshot-prolog-db (&key (copy-value #'identity))
-  "Snapshot the Prolog rule database using COPY-VALUE for each rule bucket."
-  (%snapshot-hash-table cl-cc/prolog:*prolog-rules* :copy-value copy-value))
-
-(defun %restore-prolog-db (snapshot &key (copy-value #'identity))
-  "Restore the Prolog rule database from SNAPSHOT using COPY-VALUE per bucket."
-  (%restore-hash-table cl-cc/prolog:*prolog-rules* snapshot :copy-value copy-value))
-
 (defmacro with-fresh-prolog (&body body)
   "Run BODY with an empty Prolog rule database and restore the prior state."
-  (let ((saved (gensym "SAVED")))
-    `(let ((,saved (%snapshot-prolog-db)))
-       (cl-cc:clear-prolog-database)
-       (unwind-protect
-           (progn ,@body)
-         (cl-cc:clear-prolog-database)
-         (%restore-prolog-db ,saved)))))
+  `(with-cleared-hash-table (cl-cc/prolog:*prolog-rules*)
+     ,@body))
 
 (defun make-test-vm ()
   "Create a fresh VM I/O state for instruction-level testing."

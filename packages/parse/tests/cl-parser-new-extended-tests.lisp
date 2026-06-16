@@ -104,6 +104,21 @@
     (assert-null rest-param)
     (assert-= 1 (length key-params))))
 
+(deftest parser-lambda-list-aux-after-key
+  "parse-compiler-lambda-list: &aux entries are accepted after keyword parameters."
+  (multiple-value-bind (required optional rest-param key-params aux-params)
+      (cl-cc/parse:parse-compiler-lambda-list '(x &key verbose &aux (count 0) flag))
+    (assert-equal '(x) required)
+    (assert-null optional)
+    (assert-null rest-param)
+    (assert-= 1 (length key-params))
+    (assert-eq 'verbose (first (first key-params)))
+    (assert-= 2 (length aux-params))
+    (assert-eq 'count (first (first aux-params)))
+    (assert-= 0 (second (first aux-params)))
+    (assert-eq 'flag (first (second aux-params)))
+    (assert-null (second (second aux-params)))))
+
 (deftest parser-lambda-list-body-treated-as-rest
   "parse-compiler-lambda-list: &body stores its parameter as rest-param."
   (multiple-value-bind (required optional rest-param key-params)
@@ -146,3 +161,26 @@
   (let* ((sexp (parse-one source))
          (node (lower sexp)))
     (assert-true (funcall pred node))))
+
+(deftest lower-lambda-aux-wraps-body
+  "lower-sexp-to-ast: lambda &aux params are lowered into nested let bodies."
+  (let* ((node (lower '(lambda (x &aux (y 1) z) (+ x y))))
+         (outer (first (cl-cc::ast-lambda-body node)))
+         (inner (first (cl-cc/ast:ast-let-body outer))))
+    (assert-true (cl-cc/ast:ast-lambda-p node))
+    (assert-true (cl-cc/ast:ast-let-p outer))
+    (assert-eq 'y (car (first (cl-cc/ast:ast-let-bindings outer))))
+    (assert-true (cl-cc/ast:ast-int-p (cdr (first (cl-cc/ast:ast-let-bindings outer)))))
+    (assert-true (cl-cc/ast:ast-let-p inner))
+    (assert-eq 'z (car (first (cl-cc/ast:ast-let-bindings inner))))
+    (assert-true (cl-cc/ast:ast-quote-p (cdr (first (cl-cc/ast:ast-let-bindings inner)))))
+    (assert-= 1 (length (cl-cc/ast:ast-let-body inner)))))
+
+(deftest lower-defun-aux-wraps-block-body
+  "lower-sexp-to-ast: defun &aux params wrap the implicit block body."
+  (let* ((node (lower '(defun f (x &aux (y 1)) (+ x y))))
+         (outer (first (cl-cc::ast-defun-body node))))
+    (assert-true (cl-cc/ast:ast-defun-p node))
+    (assert-true (cl-cc/ast:ast-let-p outer))
+    (assert-eq 'y (car (first (cl-cc/ast:ast-let-bindings outer))))
+    (assert-= 1 (length (cl-cc/ast:ast-let-body outer)))))

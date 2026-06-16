@@ -85,17 +85,16 @@ recognizes source-like RESET forms and lowers SHIFT occurrences by CPS rewriting
   (loop for current = form then next
         for next = (%dc-walk current)
         until (equal current next)
-        finally (return current)))
+        finally (return next)))
 
-(unless (fboundp 'opt-pass-delimited-continuations)
-  (defun opt-pass-delimited-continuations (instructions)
-    "FR-677 explicit pass for delimited continuations.
+(defun opt-pass-delimited-continuations (instructions)
+  "FR-677 explicit pass for delimited continuations.
 
 VM instruction streams are returned unchanged.  Source-like S-expression callers
 can run the pass explicitly to lower RESET/SHIFT into continuation-passing direct
 forms.  This pass is registered by ASDF/package exports only and is not part of
 the default optimizer convergence pipeline."
-    (if (and (consp instructions)
-             (not (every (lambda (x) (typep x 'vm-instruction)) instructions)))
-        (opt-delimited-continuations-form instructions)
-        instructions)))
+  (if (and (consp instructions)
+           (not (every (lambda (x) (typep x 'vm-instruction)) instructions)))
+      (opt-delimited-continuations-form instructions)
+      instructions))

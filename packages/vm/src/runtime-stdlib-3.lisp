@@ -73,9 +73,6 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
 (defparameter *command-line-arguments* *command-line-args*
   "Stable script-visible command-line arguments after the script name.")
 
-(defparameter *script-argv* *command-line-arguments*
-  "Compatibility alias for script-mode argv.")
-
 (defun getenv (name)
   "Return environment variable NAME, preserving vm-getenv taint marking."
   (vm-getenv name))
@@ -89,10 +86,6 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
 (defun exit (&optional (code 0))
   "Exit the hosting process with CODE."
   (uiop:quit code))
-
-(defun quit (&optional (code 0))
-  "Compatibility alias for EXIT."
-  (exit code))
 
 ;;; ── FR-1066: SBCL-compatible implementation surface ───────────────────────
 
@@ -166,9 +159,7 @@ for STREAM-EXTERNAL-FORMAT and supplies *DEFAULT-EXTERNAL-FORMAT* when omitted."
           setenv
           *command-line-args*
           *command-line-arguments*
-          *script-argv*
           exit
-          quit
           *features*
           lisp-implementation-type
           lisp-implementation-version

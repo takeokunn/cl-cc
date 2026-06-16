@@ -254,7 +254,3 @@ from L1/L2 tile sizes and preserves the original executable loop body."
                                        do (push (aref vec k) out))
                                  (setf i (1+ (opt-loop-exit-index outer)))))))))
           (if changed (nreverse out) instructions)))))
-
-(unless (fboundp 'opt-pass-loop-tile)
-  (defun opt-pass-loop-tile (instructions)
-    instructions))

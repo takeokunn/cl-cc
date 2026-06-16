@@ -1,5 +1,7 @@
 (in-package :cl-cc/php)
 
+(declaim (ftype function %php-call))
+
 (defun %php-assignment-op (stream)
   "Return the PHP assignment operator string at STREAM, or NIL."
   (when (eq (php-peek-type stream) :T-OP)
@@ -17,6 +19,60 @@
   "Return true when STREAM begins with PHP's single ampersand token."
   (and (eq (php-peek-type stream) :T-OP)
        (equal "&" (php-peek-value stream))))
+
+(defstruct (%php-call-lowering-result (:conc-name %php-call-lowering-result-))
+  static-args
+  runtime-arglist-expr
+  runtime-p)
+
+(defun %php-call-lowering-result-args (lowering-result &optional receiver-arg)
+  "Return lowered call arguments for LOWERING-RESULT.
+
+The first value is T when the call must stay dynamic and evaluate a runtime
+arglist expression. The second value is the runtime arglist expression or the
+final static argument list. RECEIVER-ARG, when non-NIL, is prepended for method
+calls."
+  (if (%php-call-lowering-result-runtime-p lowering-result)
+      (let ((runtime-arglist-expr
+              (%php-call-lowering-result-runtime-arglist-expr lowering-result)))
+        (values t (if receiver-arg
+                      (%php-call 'append
+                                 (%php-call 'list receiver-arg)
+                                 runtime-arglist-expr)
+                      runtime-arglist-expr)))
+      (let ((static-args (%php-call-lowering-result-static-args lowering-result)))
+        (values nil (if receiver-arg
+                        (cons receiver-arg static-args)
+                        static-args)))))
+
+(defun %php-static-call-lowering-result (static-args)
+  "Create a lowering result that already has a static argument list."
+  (make-%php-call-lowering-result :static-args static-args))
+
+(defun %php-runtime-call-lowering-result (runtime-arglist-expr)
+  "Create a lowering result that must be evaluated at runtime."
+  (make-%php-call-lowering-result
+   :runtime-arglist-expr runtime-arglist-expr
+   :runtime-p t))
+
+(defun %php-emit-lowered-call (func lowering-result &key receiver-arg by-ref-indices)
+  "Emit an AST call form from LOWERING-RESULT.
+
+When the lowering result stays dynamic we preserve the runtime arglist and use
+`ast-apply'. Otherwise we emit a normal call unless the lowered argument list
+still contains a spread or the call needs by-reference lowering."
+  (multiple-value-bind (runtime-p call-args)
+      (%php-call-lowering-result-args lowering-result receiver-arg)
+    (cond
+      (runtime-p
+       (make-ast-apply :func func :args (list call-args)))
+      ((%php-args-have-spread-p call-args)
+       (make-ast-apply :func func
+                       :args (list (%php-spread-arglist-expr call-args))))
+      (by-ref-indices
+       (%php-lower-by-ref-call func call-args by-ref-indices))
+      (t
+       (make-ast-call :func func :args call-args)))))
 
 (defun %php-yield-call-p (node)
   "T when NODE is a lowered PHP yield / yield-from call (see %php-parse-yield-

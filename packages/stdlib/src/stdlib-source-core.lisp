@@ -67,9 +67,13 @@
     "(defun reduce (fn lst &optional initial-value has-init)
    (if has-init
        (reduce-init fn lst initial-value)
-       (if (null (cdr lst)) (car lst)
-         (reduce-init fn (cdr (cdr lst))
-                      (funcall fn (car lst) (car (cdr lst)))))))"
+       (cond ((null lst)
+              (error \"REDUCE of empty list with no initial value\"))
+             ((null (cdr lst))
+              (car lst))
+             (t
+              (reduce-init fn (cddr lst)
+                           (funcall fn (car lst) (cadr lst)))))))"
 
     "(defun count-if (pred lst)
    (if (null lst) 0

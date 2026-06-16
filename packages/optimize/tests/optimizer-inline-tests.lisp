@@ -12,6 +12,11 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+(defmacro assert-inline-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── opt-max-reg-index ───────────────────────────────────────────────────────
 
 (deftest-each opt-max-reg-index-cases
@@ -436,9 +441,9 @@
                                         (make-vm-ret  :reg :r0))
                                   t))
   (insts expected)
-  (if expected
-      (assert-true  (cl-cc/optimize::opt-can-safely-rename-p insts))
-      (assert-false (cl-cc/optimize::opt-can-safely-rename-p insts))))
+  (assert-inline-boolean-case expected
+    (assert-true  (cl-cc/optimize::opt-can-safely-rename-p insts))
+    (assert-false (cl-cc/optimize::opt-can-safely-rename-p insts))))
 
 ;;; ─── opt-body-has-global-refs-p ──────────────────────────────────────────────
 
@@ -447,6 +452,6 @@
   :cases (("no-globals" (list (make-vm-add :dst :R2 :lhs :R0 :rhs :R1) (make-vm-ret :reg :R2)) '(:R0 :R1) nil)
           ("detects"    (list (make-vm-move :dst :R2 :src :R99) (make-vm-ret :reg :R2))         '(:R0)     t))
   (insts params expected)
-  (if expected
-      (assert-true (cl-cc/optimize::opt-body-has-global-refs-p insts params))
-      (assert-null (cl-cc/optimize::opt-body-has-global-refs-p insts params))))
+  (assert-inline-boolean-case expected
+    (assert-true (cl-cc/optimize::opt-body-has-global-refs-p insts params))
+    (assert-null (cl-cc/optimize::opt-body-has-global-refs-p insts params))))

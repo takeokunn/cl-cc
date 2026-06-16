@@ -1,10 +1,8 @@
 ;;;; tests/conformance/package-conformance-tests.lisp
-;;;; ANSI CL Package System Conformance Tests (expected-fail for known gaps)
+;;;; ANSI CL Package System Conformance Tests
 ;;;;
-;;;; Tests package operations that SHOULD work per ANSI CL but currently
-;;;; rely on host SBCL fallback or are not implemented in the runtime
-;;;; package registry. Each test is tagged :expected-fail until the
-;;;; corresponding gap is closed.
+;;;; Tests package operations that should work per ANSI CL. These run as
+;;;; regular conformance tests against the runtime package registry.
 
 (in-package :cl-cc/test)
 
@@ -34,10 +32,9 @@ return the printed representation of the primary result."
           value))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Basic Package Operations (self-host gaps)
+;;; Basic Package Operations
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; These test operations that work when bridged to host SBCL but
-;;; fail in self-host mode or are incomplete in the runtime registry.
+;;; These test core package registry operations through the cl-cc runtime.
 
 (deftest pkg-find-package-self-host
   "find-package should work without host SBCL fallback in self-host mode."
@@ -141,7 +138,7 @@ return the printed representation of the primary result."
         (assert-eq :internal status)))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Package Name Operations
+;;; Package Name Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-package-name-self-host
@@ -165,7 +162,7 @@ return the printed representation of the primary result."
       (assert-true (member "N2" nicks :test #'equal)))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Symbol Operations in Self-Host Mode
+;;; Symbol Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-make-symbol-self-host
@@ -191,7 +188,7 @@ return the printed representation of the primary result."
       (assert-false (eq g1 g2)))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: defpackage Macro (E2E via run-string)
+;;; defpackage Macro (E2E via run-string)
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-defpackage-e2e
@@ -228,7 +225,7 @@ return the printed representation of the primary result."
     (assert-equal "CONFLICT-DETECTED" result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Package Iteration
+;;; Package Iteration
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-do-symbols-self-host
@@ -259,7 +256,7 @@ return the printed representation of the primary result."
                          :key #'cl-cc/vm::vm-package-name)))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: delete-package / rename-package
+;;; delete-package / rename-package
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-delete-package-self-host
@@ -285,7 +282,7 @@ return the printed representation of the primary result."
       (assert-true (cl-cc/vm::vm-find-package "NEW-NAME" nil)))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: unintern
+;;; unintern
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest pkg-unintern-self-host

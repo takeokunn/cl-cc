@@ -110,33 +110,57 @@ Emits instructions and returns RESULT-REG."
   "Parse a small, safe subset of static FORMAT CONTROL strings.
 Returns a list of pieces or NIL when CONTROL contains a directive that must
 fall back to the runtime FORMAT instruction. Supported directives are ~A, ~S,
-~%, and ~~ without parameters, colon modifiers, or at-sign modifiers."
+and literal-output directives ~%, ~~, and ~| with optional decimal repeat
+parameters. Other parameters, colon modifiers, and at-sign modifiers fall back
+to the runtime FORMAT instruction."
   (let ((pieces nil)
         (start 0)
         (len (length control)))
     (labels ((push-literal (end)
                (when (< start end)
-                 (push (list :literal (subseq control start end)) pieces))))
+                 (push (list :literal (subseq control start end)) pieces)))
+             (push-repeat-literal (char count)
+               (when (plusp count)
+                 (push (list :literal (make-string count :initial-element char)) pieces))))
       (block unsupported
         (loop with i = 0
               while (< i len)
               do (if (char= (char control i) #\~)
                      (progn
                        (push-literal i)
-                       (when (>= (1+ i) len)
-                         (return-from unsupported nil))
-                       (let ((directive (char control (1+ i))))
-                         (case (char-upcase directive)
-                           (#\A (push '(:arg :a) pieces))
-                           (#\S (push '(:arg :s) pieces))
-                           (#\% (push (list :literal (string #\Newline)) pieces))
-                           (#\~ (push '(:literal "~") pieces))
-                           (otherwise (return-from unsupported nil))))
-                       (incf i 2)
-                       (setf start i))
+                       (let ((param-start (1+ i))
+                             (directive-index (1+ i)))
+                         (loop while (and (< directive-index len)
+                                          (digit-char-p (char control directive-index)))
+                               do (incf directive-index))
+                         (when (>= directive-index len)
+                           (return-from unsupported nil))
+                         (let* ((has-repeat (< param-start directive-index))
+                                (repeat (if has-repeat
+                                            (parse-integer control
+                                                           :start param-start
+                                                           :end directive-index)
+                                            1))
+                                (directive (char-upcase (char control directive-index))))
+                           (case directive
+                             (#\A
+                              (when has-repeat
+                                (return-from unsupported nil))
+                              (push '(:arg :a) pieces))
+                             (#\S
+                              (when has-repeat
+                                (return-from unsupported nil))
+                              (push '(:arg :s) pieces))
+                             (#\% (push-repeat-literal #\Newline repeat))
+                             (#\~ (push-repeat-literal #\~ repeat))
+                             (#\| (push-repeat-literal #\Page repeat))
+                             (otherwise (return-from unsupported nil))))
+                         (setf i (1+ directive-index))
+                         (setf start i)))
                      (incf i)))
         (push-literal len)
-        (nreverse pieces)))))
+        (or (nreverse pieces)
+            (list (list :literal "")))))))
 
 (defun %static-format-required-args (pieces)
   (count :arg pieces :key #'first))

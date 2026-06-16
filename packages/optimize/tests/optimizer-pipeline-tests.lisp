@@ -123,6 +123,16 @@ max-iterations of 30 to actually exercise the cap clamping (35 → 30)."
   (assert-signals error
     (cl-cc/optimize:opt-verify-instructions insts)))
 
+;;; ─── opt-delimited-continuations-form ───────────────────────────────────────
+
+(deftest delimited-continuations-reset-unwrapped
+  "opt-delimited-continuations-form returns the lowered body, not the original RESET wrapper."
+  (let* ((input '(cl-cc/optimize::reset (+ 1 2)))
+         (once  (cl-cc/optimize::opt-delimited-continuations-form input))
+         (twice (cl-cc/optimize::opt-delimited-continuations-form once)))
+    (assert-equal '(+ 1 2) once)
+    (assert-equal once twice)))
+
 ;;; ─── opt-resolve-pass-pipeline ───────────────────────────────────────────
 
 (deftest resolve-pass-pipeline-nil-returns-convergence-passes

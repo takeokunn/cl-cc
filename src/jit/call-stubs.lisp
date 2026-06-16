@@ -85,7 +85,6 @@ The interpreter continues executing while compilation happens."
 (defun allocate-executable-memory (size)
   "Allocate SIZE bytes of executable memory for code stubs.
 Uses mmap with PROT_READ | PROT_WRITE | PROT_EXEC."
-  #+sbcl
   (sb-posix:mmap nil size
                  (logior sb-posix:prot-read
                          sb-posix:prot-write
@@ -93,13 +92,8 @@ Uses mmap with PROT_READ | PROT_WRITE | PROT_EXEC."
                  (logior sb-posix:map-private
                          sb-posix:map-anonymous)
                  -1 0)
-  #-sbcl
-  (error "allocate-executable-memory requires SBCL"))
 
 (defun get-compile-stub-address ()
   "Return the address of the compile-stub-handler entry point."
-  #+sbcl
   (sb-sys:sap-int (sb-sys:vector-sap
                    (sb-sys:make-array 1 :element-type '(unsigned-byte 8))))
-  #-sbcl
-  0

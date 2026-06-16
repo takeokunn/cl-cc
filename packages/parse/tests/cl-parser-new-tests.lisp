@@ -9,6 +9,16 @@
 
 (in-suite cl-cc-unit-suite)
 
+(defun %parser-symbol-name-tree (form)
+  (cond
+    ((null form) nil)
+    ((symbolp form) (symbol-name form))
+    ((consp form)
+     (cons (%parser-symbol-name-tree (car form))
+           (%parser-symbol-name-tree (cdr form))))
+    ((vectorp form) (map 'vector #'%parser-symbol-name-tree form))
+    (t form)))
+
 ;;; ─── NEW: parse-source atom parsing ────────────────────────────────────────
 
 (deftest-each parser-atom-types
@@ -55,9 +65,10 @@
   "parse-source: quasiquoted list and quasiquoted atom both produce cons cells."
   (let ((result (parse-one "`(a b)")))
     (assert-true (consp result))
-    (assert-true (symbolp (first result))))
+    (assert-equal "QUASIQUOTE" (symbol-name (first result))))
   (let ((result (parse-one "`,x")))
-    (assert-true (consp result))))
+    (assert-equal '("QUASIQUOTE" ("UNQUOTE" "X"))
+                  (%parser-symbol-name-tree result))))
 
 (deftest parser-parse-source-long-symbol-name-preserved
   "parse-source preserves a 200-character symbol name exactly."
@@ -214,6 +225,24 @@
     (assert-true (cl-cc/ast:ast-setq-p node))
     (assert-eq 'x (cl-cc/ast:ast-setq-var node))))
 
+(deftest lower-quasiquote-expands-unquote
+  "lower-sexp-to-ast: quasiquote expands list structure and unquoted forms."
+  (let ((result (cl-cc/ast:ast-to-sexp
+                 (lower '(quasiquote (a (unquote x) b))))))
+    (assert-equal '("CONS" ("QUOTE" "A")
+                    ("CONS" "X"
+                     ("CONS" ("QUOTE" "B") ("QUOTE" NIL))))
+                  (%parser-symbol-name-tree result))))
+
+(deftest lower-quasiquote-expands-unquote-splicing
+  "lower-sexp-to-ast: unquote-splicing expands through append in list context."
+  (let ((result (cl-cc/ast:ast-to-sexp
+                 (lower '(quasiquote (a (unquote-splicing xs) b))))))
+    (assert-equal '("CONS" ("QUOTE" "A")
+                    ("APPEND" "XS"
+                     ("CONS" ("QUOTE" "B") ("QUOTE" NIL))))
+                  (%parser-symbol-name-tree result))))
+
 ;;; ─── NEW: lower-sexp-to-ast error cases ───────────────────────────────────
 
 (deftest-each lower-sexp-body-errors
@@ -236,4 +265,3 @@
           ("defmacro-no-body"  '(defmacro m ())))
   (form)
   (assert-signals error (lower form)))
-

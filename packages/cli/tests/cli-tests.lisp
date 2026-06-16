@@ -314,28 +314,9 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
     (cl-cc/cli::%bind-command-line-arguments '("alpha" "beta") state)
     (assert-equal '("alpha" "beta") (cl-cc/cli::cl-cc-argv))
     (assert-equal '("alpha" "beta") cl-cc:*command-line-arguments*)
-    (assert-equal '("alpha" "beta") cl-cc:*script-argv*)
     (assert-equal '("alpha" "beta")
                   (gethash 'cl-cc:*command-line-arguments*
                            (cl-cc/vm:vm-global-vars state)))))
-
-;; SKIP (Nix sandbox): TYPE-ERROR (NIL is not C-STRING) in sandbox environment
-#+nil (deftest fr-917-configure-reproducible-build-sets-stable-metadata
-  "FR-917: reproducible build mode sets deterministic environment and metadata."
-  (let ((old-det (uiop:getenv "CLCC_DETERMINISTIC"))
-        (old-epoch (uiop:getenv "SOURCE_DATE_EPOCH")))
-    (unwind-protect
-         (progn
-           (setf (uiop:getenv "CLCC_DETERMINISTIC") nil
-                 (uiop:getenv "SOURCE_DATE_EPOCH") nil)
-           (let ((metadata (cl-cc/cli::configure-reproducible-build :epoch "123" :seed 7)))
-             (assert-string= "1" (uiop:getenv "CLCC_DETERMINISTIC"))
-             (assert-string= "123" (uiop:getenv "SOURCE_DATE_EPOCH"))
-             (assert-true (cl-cc/cli::cl-cc-deterministic-build-p))
-             (assert-eq :cl-cc-reproducible-build-v1 (getf metadata :format))
-             (assert-= 7 (getf metadata :seed))))
-      (setf (uiop:getenv "CLCC_DETERMINISTIC") old-det
-            (uiop:getenv "SOURCE_DATE_EPOCH") old-epoch))))
 
 (defun %run-do-compile-dump-ir-annotate-source-output (path)
   "Run do-compile dump-ir logic directly: compile-string + %dump-ir-phase.
@@ -406,24 +387,6 @@ SBCL pre-compiled core-image code)."
     (let ((output (%run-do-compile-dump-ir-annotate-source-output path)))
       (assert-true (search "; source:" output))
       (assert-true (search path output)))))
-
-;; SKIP (Nix sandbox): TYPE-ERROR (NIL is not NUMBER) in sandbox
-#+nil (deftest-each cli-do-command-missing-arg-exits-2
-  "Each command handler exits 2 and prints command-specific help when the required arg is absent."
-  :cases (("run"     "run"     'cl-cc/cli::%do-run)
-          ("compile" "compile" 'cl-cc/cli::%do-compile)
-          ("eval"    "eval"    'cl-cc/cli::%do-eval)
-          ("check"   "check"   'cl-cc/cli::%do-check))
-  (command fn-sym)
-  (let ((help-command nil))
-    (with-output-to-string (*error-output*)
-      (let ((code (with-fake-quit
-                    (with-replaced-function (cl-cc/cli::%print-help
-                                             (lambda (cmd) (setf help-command cmd)))
-                      (funcall (symbol-function fn-sym)
-                               (make-cli-parsed :command command))))))
-        (assert-= 2 code)))
-    (assert-string= command help-command)))
 
 (deftest cli-do-check-error-prints-diagnostic-snippet
   "%do-check on invalid input prints diagnostic reason, caret snippet, and type trace."

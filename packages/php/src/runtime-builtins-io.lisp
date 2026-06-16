@@ -51,7 +51,7 @@
   (declare (ignore use-include-path context))
   (let ((content (%php-file-get-contents filename)))
     (when content
-      (write-string content)
+      (%php-output-write content)
       (length content))))
 
 (defun %php-file-exists (filename)
@@ -251,6 +251,28 @@
 ;;; ─── fopen/fclose/fread/fwrite family ────────────────────────────────────────
 ;;; We represent file handles as a hash table with stream/mode/path metadata.
 
+(defun %php-standard-stream-handle (stream path mode)
+  "Return a PHP stream handle for a dynamically bound CL standard stream."
+  (let ((handle (%php-make-array)))
+    (%php-array-set handle "__stream__" stream)
+    (%php-array-set handle "__mode__" mode)
+    (%php-array-set handle "__path__" path)
+    (%php-array-set handle "__standard__" t)
+    (%php-array-set handle "__eof__" nil)
+    handle))
+
+(defun %php-stdin ()
+  "PHP STDIN stream resource."
+  (%php-standard-stream-handle *standard-input* "php://stdin" "r"))
+
+(defun %php-stdout ()
+  "PHP STDOUT stream resource."
+  (%php-standard-stream-handle *standard-output* "php://stdout" "w"))
+
+(defun %php-stderr ()
+  "PHP STDERR stream resource."
+  (%php-standard-stream-handle *error-output* "php://stderr" "w"))
+
 (defun %php-fopen (filename mode &optional use-include-path context)
   "PHP fopen: open a file and return a file handle."
   (declare (ignore use-include-path context))
@@ -282,7 +304,8 @@
   (handler-case
       (let ((stream (%php-array-ref handle "__stream__")))
         (when (and stream (streamp stream))
-          (close stream))
+          (unless (%php-array-ref handle "__standard__")
+            (close stream)))
         t)
     (error () nil)))
 
@@ -416,7 +439,6 @@
     (if eq-pos
         (handler-case
             (progn
-              #+sbcl
               (when (find-package :sb-posix)
                 (funcall (intern "SETENV" :sb-posix) (subseq s 0 eq-pos) (subseq s (1+ eq-pos)) 1))
               t)
@@ -456,40 +478,159 @@
   "PHP PHP_FLOAT_EPSILON constant."
   2.220446049250313d-16)
 
+(defparameter *php-ini-defaults*
+  '(("display_errors" . "1")
+    ("error_reporting" . "32767")
+    ("html_errors" . "0")
+    ("log_errors" . "0")
+    ("max_execution_time" . "0")
+    ("memory_limit" . "-1")
+    ("default_charset" . "UTF-8")
+    ("date.timezone" . "UTC")
+    ("precision" . "14")
+    ("serialize_precision" . "-1"))
+  "Default INI values modelled by the PHP runtime.")
+
+(defvar *php-ini-settings* nil
+  "Mutable PHP INI settings for the current Lisp image.")
+
+(defvar *php-error-reporting-level* 32767
+  "Current PHP error_reporting() level.")
+
+(defvar *php-error-handler-stack* nil
+  "Stack of active PHP error handlers as (CALLBACK . ERROR-MASK).")
+
+(defvar *php-exception-handler-stack* nil
+  "Stack of active PHP exception handlers.")
+
+(defun %php-current-error-handler ()
+  "Return the active PHP error handler entry, or NIL."
+  (first *php-error-handler-stack*))
+
+(defun %php-current-exception-handler ()
+  "Return the active PHP exception handler, or NIL."
+  (first *php-exception-handler-stack*))
+
+(defun %php-get-error-handler ()
+  "PHP get_error_handler: return the active custom error handler, or null."
+  (let ((entry (%php-current-error-handler)))
+    (if entry
+        (car entry)
+        +php-null+)))
+
+(defun %php-get-exception-handler ()
+  "PHP get_exception_handler: return the active custom exception handler, or null."
+  (or (%php-current-exception-handler) +php-null+))
+
+(defun %php-valid-callback-or-throw (callback function-name)
+  "Return CALLBACK when it is callable, otherwise signal a PHP TypeError."
+  (if (%php-callable-function callback)
+      callback
+      (%php-throw 'type-error
+                  (format nil "~A(): Argument #1 ($callback) must be a valid callback"
+                          function-name))))
+
+(defun %php-ensure-ini-settings ()
+  (or *php-ini-settings*
+      (setf *php-ini-settings*
+            (let ((table (make-hash-table :test 'equal)))
+              (dolist (entry *php-ini-defaults* table)
+                (setf (gethash (car entry) table) (cdr entry)))))))
+
+(defun %php-ini-key (varname)
+  (string-downcase (%php-stringify varname)))
+
+(defun %php-parse-integer-setting (value fallback)
+  (handler-case
+      (parse-integer (%php-stringify value) :junk-allowed t)
+    (error () fallback)))
+
 (defun %php-ini-get (varname)
-  "PHP ini_get: get INI configuration value (stub)."
-  (declare (ignore varname))
-  nil)
+  "PHP ini_get: get an INI configuration value."
+  (let* ((key (%php-ini-key varname))
+         (table (%php-ensure-ini-settings)))
+    (if (string= key "date.timezone")
+        (%php-date-default-timezone-get)
+        (multiple-value-bind (value present-p) (gethash key table)
+          (if present-p value nil)))))
 
 (defun %php-ini-set (varname newvalue)
-  "PHP ini_set: set INI configuration value (stub)."
-  (declare (ignore varname newvalue))
-  nil)
+  "PHP ini_set: set an INI configuration value and return the previous value."
+  (let* ((key (%php-ini-key varname))
+         (table (%php-ensure-ini-settings))
+         (old (%php-ini-get key)))
+    (cond
+      ((string= key "date.timezone")
+       (when (%php-date-default-timezone-set newvalue)
+         (setf (gethash key table) (%php-date-default-timezone-get))
+         old))
+      (t
+       (setf (gethash key table) (%php-stringify newvalue))
+       (when (string= key "error_reporting")
+         (setf *php-error-reporting-level*
+               (%php-parse-integer-setting newvalue *php-error-reporting-level*)))
+       old))))
 
 (defun %php-set-error-handler (callback &optional error-types)
-  "PHP set_error_handler: set custom error handler (stub)."
-  (declare (ignore callback error-types))
-  nil)
+  "PHP set_error_handler: install CALLBACK and return the previous handler."
+  (let* ((old (car (%php-current-error-handler)))
+         (mask (%php-parse-integer-setting
+                (if (and error-types (not (%php-null-p error-types)))
+                    error-types
+                    *php-error-reporting-level*)
+                *php-error-reporting-level*))
+         (cb (%php-valid-callback-or-throw callback "set_error_handler")))
+    (push (cons cb mask) *php-error-handler-stack*)
+    old))
+
+(defun %php-restore-error-handler ()
+  "PHP restore_error_handler: restore the previous custom error handler."
+  (when *php-error-handler-stack*
+    (pop *php-error-handler-stack*))
+  t)
 
 (defun %php-set-exception-handler (callback)
-  "PHP set_exception_handler: set custom exception handler (stub)."
-  (declare (ignore callback))
-  nil)
+  "PHP set_exception_handler: install CALLBACK and return the previous handler."
+  (let ((old (%php-current-exception-handler))
+        (cb (%php-valid-callback-or-throw callback "set_exception_handler")))
+    (push cb *php-exception-handler-stack*)
+    old))
+
+(defun %php-restore-exception-handler ()
+  "PHP restore_exception_handler: restore the previous custom exception handler."
+  (when *php-exception-handler-stack*
+    (pop *php-exception-handler-stack*))
+  t)
 
 (defun %php-error-reporting (&optional level)
   "PHP error_reporting: set/get error reporting level."
-  (declare (ignore level))
-  32767)
+  (let ((old *php-error-reporting-level*))
+    (when level
+      (setf *php-error-reporting-level*
+            (%php-parse-integer-setting level *php-error-reporting-level*))
+      (setf (gethash "error_reporting" (%php-ensure-ini-settings))
+            (%php-stringify *php-error-reporting-level*)))
+    old))
 
 (defun %php-trigger-error (message &optional (error-type 256))
   "PHP trigger_error: generate a user-level error."
-  (declare (ignore error-type))
-  (format t "~A~%" (%php-stringify message))
+  (let* ((errno (%php-parse-integer-setting error-type 256))
+         (handler-entry (%php-current-error-handler))
+         (reportable-p (logtest errno *php-error-reporting-level*))
+         (handled-p nil))
+    (when (and reportable-p handler-entry (logtest errno (cdr handler-entry)))
+      (let ((fn (%php-callable-function (car handler-entry))))
+        (when fn
+          (setf handled-p
+                (%php-truthy
+                 (funcall fn errno (%php-stringify message) nil nil))))))
+    (unless (or handled-p (not reportable-p))
+      (format t "~A~%" (%php-stringify message))))
   t)
 
 (defun %php-exit (&optional (status 0))
   "PHP exit/die: terminate execution."
-  (when (stringp status) (write-string status))
+  (when (stringp status) (%php-output-write status))
   (sb-ext:exit :code (if (numberp status) status 0)))
 
 (defun %php-die (&optional (status 0))
@@ -506,32 +647,173 @@
   (sleep (/ microseconds 1000000.0))
   nil)
 
+(defun %php-nl-langinfo (item)
+  "PHP nl_langinfo: return deterministic locale metadata for ITEM."
+  (let* ((entry (if (stringp item)
+                    (find (string-upcase item) +php-nl-langinfo-items+
+                          :test #'string= :key #'first)
+                    (find (%php-to-integer item) +php-nl-langinfo-items+
+                          :test #'= :key #'second))))
+    (if entry
+        (third entry)
+        "")))
+
+(defun %php-locale-normalized-id (locale)
+  "Return a lowercase BCP-47-ish locale id without encoding/modifier suffixes."
+  (let* ((raw (%php-stringify locale))
+         (cut (reduce #'min
+                      (remove nil (list (position #\. raw) (position #\@ raw)))
+                      :initial-value (length raw))))
+    (string-downcase (substitute #\- #\_ (subseq raw 0 cut)))))
+
+(defun %php-locale-subtags (locale-id)
+  (loop with start = 0
+        for pos = (position #\- locale-id :start start)
+        collect (subseq locale-id start pos)
+        while pos
+        do (setf start (1+ pos))))
+
+(defun %php-locale-is-right-to-left (locale)
+  "PHP 8.5 locale_is_right_to_left / Locale::isRightToLeft helper."
+  (let* ((id (%php-locale-normalized-id locale))
+         (subtags (%php-locale-subtags id))
+         (primary (first subtags)))
+    (and primary
+         (or (member primary
+                     '("ar" "arc" "ckb" "dv" "fa" "he" "iw" "ks" "lrc"
+                       "mzn" "nqo" "pnb" "ps" "sd" "syr" "ug" "ur" "yi")
+                     :test #'string=)
+             (some (lambda (subtag)
+                     (member subtag '("arab" "hebr" "nkoo" "syrc" "thaa")
+                             :test #'string=))
+                   subtags)))))
+
+(defvar *php-output-buffer-stack* nil
+  "Stack of active PHP output buffers.")
+
+(defvar *php-output-started-p* nil
+  "Whether unbuffered PHP output has been emitted.")
+
+(defvar *php-http-response-code* 200
+  "Current PHP HTTP response code for CLI response modelling.")
+
+(defvar *php-http-headers* nil
+  "Headers queued by PHP header(), newest first.")
+
+(defun %php-make-output-buffer ()
+  (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
+
+(defun %php-output-buffer-string (buffer)
+  (coerce buffer 'string))
+
+(defun %php-output-write (value)
+  "Write VALUE through PHP output buffering and return nil."
+  (let* ((text (%php-stringify value))
+         (buffer (first *php-output-buffer-stack*)))
+    (if buffer
+        (loop for ch across text do (vector-push-extend ch buffer))
+        (progn
+          (setf *php-output-started-p* t)
+          (write-string text)))
+    nil))
+
+(defun %php-echo (&rest args)
+  "PHP echo builtin: write each argument and return nil."
+  (dolist (arg args)
+    (%php-output-write arg))
+  nil)
+
+(defun %php-print (arg)
+  "PHP print builtin: write ARG and return 1."
+  (%php-output-write arg)
+  1)
+
 (defun %php-ob-start (&optional callback chunk-size flags)
-  "PHP ob_start: start output buffering (stub)."
+  "PHP ob_start: start output buffering."
   (declare (ignore callback chunk-size flags))
+  (push (%php-make-output-buffer) *php-output-buffer-stack*)
   t)
 
 (defun %php-ob-end-clean ()
-  "PHP ob_end_clean: clean output buffer (stub)."
-  t)
+  "PHP ob_end_clean: discard the current output buffer."
+  (if *php-output-buffer-stack*
+      (progn
+        (pop *php-output-buffer-stack*)
+        t)
+      nil))
 
 (defun %php-ob-get-clean ()
-  "PHP ob_get_clean: get current buffer contents and clean (stub)."
-  "")
+  "PHP ob_get_clean: get current buffer contents and discard it."
+  (if *php-output-buffer-stack*
+      (%php-output-buffer-string (pop *php-output-buffer-stack*))
+      nil))
 
 (defun %php-ob-get-contents ()
-  "PHP ob_get_contents: get current output buffer (stub)."
-  "")
-
-(defun %php-header (string &optional replace response-code)
-  "PHP header: send HTTP header (stub — outputs as comment)."
-  (declare (ignore replace response-code string))
-  nil)
+  "PHP ob_get_contents: get current output buffer contents."
+  (if *php-output-buffer-stack*
+      (%php-output-buffer-string (first *php-output-buffer-stack*))
+      nil))
 
 (defun %php-http-response-code (&optional response-code)
   "PHP http_response_code: set/get HTTP response code."
-  (declare (ignore response-code))
-  200)
+  (if (or (null response-code) (%php-null-p response-code))
+      *php-http-response-code*
+      (let ((old *php-http-response-code*))
+        (setf *php-http-response-code* (%php-to-integer response-code))
+        old)))
+
+(defun %php-string-prefix-p (prefix string)
+  "Return true when STRING starts with PREFIX, ignoring case."
+  (and (>= (length string) (length prefix))
+       (string-equal prefix string :end2 (length prefix))))
+
+(defun %php-header-name (line)
+  "Return the normalized field name for a header line, or nil."
+  (let* ((text (%php-stringify line))
+         (pos (position #\: text)))
+    (when pos
+      (string-downcase (string-trim '(#\Space #\Tab) (subseq text 0 pos))))))
+
+(defun %php-status-line-code (line)
+  "Return an HTTP status code encoded in LINE, or nil."
+  (let* ((text (%php-stringify line))
+         (trimmed (string-trim '(#\Space #\Tab) text)))
+    (cond
+      ((%php-string-prefix-p "HTTP/" trimmed)
+       (let* ((space (position #\Space trimmed))
+              (start (and space (1+ space)))
+              (end (and start (position #\Space trimmed :start start))))
+         (when start
+           (parse-integer trimmed :start start :end end :junk-allowed t))))
+      ((%php-string-prefix-p "Status:" trimmed)
+       (parse-integer trimmed :start (length "Status:") :junk-allowed t))
+      (t nil))))
+
+(defun %php-header (header &optional (replace t) response-code)
+  "PHP header: queue a response header in the CLI response model."
+  (let* ((line (%php-stringify header))
+         (code (%php-status-line-code line))
+         (name (%php-header-name line)))
+    (when (and response-code (not (%php-null-p response-code)))
+      (setf *php-http-response-code* (%php-to-integer response-code)))
+    (when code
+      (setf *php-http-response-code* code))
+    (when (and name (%php-truthy replace))
+      (setf *php-http-headers*
+            (remove name *php-http-headers*
+                    :test #'string=
+                    :key #'%php-header-name)))
+    (push line *php-http-headers*)
+    nil))
+
+(defun %php-headers-list ()
+  "PHP headers_list: return queued response headers in insertion order."
+  (%php-list-to-array (reverse *php-http-headers*)))
+
+(defun %php-headers-sent (&optional file line)
+  "PHP headers_sent: report whether unbuffered output has started."
+  (declare (ignore file line))
+  *php-output-started-p*)
 
 ;;; ─── String misc ─────────────────────────────────────────────────────────────
 
@@ -561,10 +843,6 @@
                            (%php-urlencode (%php-stringify (cdr pair))))
               parts)))
     (format nil "~{~A~^~A~}" (list (car (nreverse parts)) sep))))
-
-(defun %php-number-format-alias (&rest args)
-  "Alias to existing %php-number-format."
-  (apply #'%php-number-format args))
 
 ;;; ─── Type / class helpers ─────────────────────────────────────────────────────
 
@@ -634,6 +912,420 @@
   (declare (ignore class-name))
   (%php-make-array))
 
+(defun %php-reflection-class-descriptor-p (value)
+  (and (hash-table-p value)
+       (nth-value 1 (gethash :__name__ value))))
+
+(defun %php-reflection-class-symbol-from-name (name)
+  (let* ((upcased (string-upcase (%php-stringify name)))
+         (found (find-symbol upcased :cl-cc/php)))
+    (or found (intern upcased :cl-cc/php))))
+
+(defun %php-reflection-class-symbol (class)
+  (cond
+    ((symbolp class) class)
+    ((%php-reflection-class-descriptor-p class)
+     (gethash :__name__ class))
+    ((and (cl-cc/vm::%vm-vector-instance-p class)
+          (%php-reflection-class-descriptor-p (aref class 0)))
+     (gethash :__name__ (aref class 0)))
+    ((hash-table-p class)
+     (let ((cls (or (gethash :__class__ class)
+                    (%php-array-ref class "__class__"))))
+       (unless (%php-null-p cls)
+         (%php-reflection-class-symbol cls))))
+    (t
+     (%php-reflection-class-symbol-from-name class))))
+
+(defun %php-reflection-symbol-name (name)
+  (cond
+    ((symbolp name) (symbol-name name))
+    ((stringp name) name)
+    (t (%php-stringify name))))
+
+(defun %php-reflection-class-descriptor-from-table (symbol table)
+  (when (and symbol (hash-table-p table))
+    (let ((target (%php-reflection-symbol-name symbol)))
+      (or (gethash symbol table)
+          (loop for key being the hash-keys of table
+                using (hash-value value)
+                when (and (%php-reflection-class-descriptor-p value)
+                          (string-equal (%php-reflection-symbol-name key) target))
+                  return value)))))
+
+(defun %php-reflection-class-descriptor-from-state (symbol)
+  (when (and symbol cl-cc/vm:*vm-current-state*)
+    (or (%php-reflection-class-descriptor-from-table
+         symbol
+         (cl-cc/vm:vm-class-registry cl-cc/vm:*vm-current-state*))
+        (%php-reflection-class-descriptor-from-table
+         symbol
+         (cl-cc/vm:vm-global-vars cl-cc/vm:*vm-current-state*)))))
+
+(defun %php-reflection-class-descriptor (class)
+  (cond
+    ((%php-reflection-class-descriptor-p class) class)
+    ((and (cl-cc/vm::%vm-vector-instance-p class)
+          (%php-reflection-class-descriptor-p (aref class 0)))
+     (aref class 0))
+    ((hash-table-p class)
+     (let ((cls (or (gethash :__class__ class)
+                    (%php-array-ref class "__class__"))))
+       (unless (%php-null-p cls)
+         (%php-reflection-class-descriptor cls))))
+    (t
+     (let ((sym (%php-reflection-class-symbol class)))
+       (%php-reflection-class-descriptor-from-state sym)))))
+
+(defun %php-reflection-interface-p (name)
+  (not (null (gethash name *php-interface-registry*))))
+
+(defun %php-reflection-unique-symbols (symbols)
+  (let ((seen (make-hash-table :test #'equal))
+        (result nil))
+    (dolist (symbol symbols (nreverse result))
+      (let ((name (%php-reflection-symbol-name symbol)))
+        (unless (gethash name seen)
+          (setf (gethash name seen) t)
+          (push symbol result))))))
+
+(defun %php-reflection-symbols-to-array (symbols)
+  (let ((result (%php-make-array)))
+    (dolist (symbol symbols result)
+      (let ((name (%php-reflection-symbol-name symbol)))
+        (%php-array-set result name name)))))
+
+(defun %php-reflection-interface-tree (interface)
+  (let ((record (gethash interface *php-interface-registry*)))
+    (cons interface
+          (loop for parent in (getf record :parents)
+                append (%php-reflection-interface-tree parent)))))
+
+(defun %php-reflection-class-parent-symbols (class)
+  (labels ((walk (descriptor)
+             (loop for super in (and descriptor (gethash :__superclasses__ descriptor))
+                   unless (%php-reflection-interface-p super)
+                     append (cons super
+                                  (walk (%php-reflection-class-descriptor super))))))
+    (%php-reflection-unique-symbols
+     (walk (%php-reflection-class-descriptor class)))))
+
+(defun %php-reflection-class-interface-symbols (class)
+  (labels ((walk (descriptor)
+             (loop for super in (and descriptor (gethash :__superclasses__ descriptor))
+                   append (if (%php-reflection-interface-p super)
+                              (%php-reflection-interface-tree super)
+                              (walk (%php-reflection-class-descriptor super))))))
+    (%php-reflection-unique-symbols
+     (walk (%php-reflection-class-descriptor class)))))
+
+(defun %php-reflection-trait-applications (symbol)
+  (when symbol
+    (let ((target (%php-reflection-symbol-name symbol)))
+      (or (gethash target *php-trait-applications*)
+          (loop for key being the hash-keys of *php-trait-applications*
+                using (hash-value value)
+                when (string-equal (%php-reflection-symbol-name key) target)
+                  return value)))))
+
+(defun %php-reflection-class-trait-symbols (class)
+  (let* ((symbol (%php-reflection-class-symbol class))
+         (applications (%php-reflection-trait-applications symbol)))
+    (%php-reflection-unique-symbols
+     (loop for application in (reverse applications)
+           append (getf application :trait-names)))))
+
+;;; ─── SPL data structures ────────────────────────────────────────────────────
+
+(defun %php-spl-class-name (name)
+  (let ((s (%php-stringify name)))
+    (cond
+      ((string-equal s "SplStack") "SplStack")
+      ((string-equal s "SplQueue") "SplQueue")
+      ((string-equal s "SplDoublyLinkedList") "SplDoublyLinkedList")
+      ((string-equal s "SplMinHeap") "SplMinHeap")
+      ((string-equal s "SplMaxHeap") "SplMaxHeap")
+      ((string-equal s "SplFixedArray") "SplFixedArray")
+      (t s))))
+
+(defun %php-spl-index (value)
+  (truncate (if (numberp value)
+                value
+                (%php-to-number (%php-stringify value)))))
+
+(defun %php-spl-number (value)
+  (if (numberp value)
+      value
+      (%php-to-number (%php-stringify value))))
+
+(defun %php-spl-make-methods (&rest names)
+  (let ((methods (%php-make-array)))
+    (dolist (name names methods)
+      (%php-array-set methods name name))))
+
+(defun %php-spl-method-symbol (name)
+  (intern (string-upcase name) :cl-cc/php))
+
+(defun %php-spl-set-method (object name function)
+  (setf (gethash name object) function
+        (gethash (%php-spl-method-symbol name) object) function)
+  function)
+
+(defun %php-spl-install-methods (object specs)
+  (dolist (spec specs object)
+    (%php-spl-set-method object (first spec) (symbol-function (second spec)))))
+
+(defun %php-spl-object (class-name methods)
+  (let ((obj (make-hash-table :test #'equal)))
+    (setf (gethash "__class__" obj) class-name)
+    (setf (gethash "__methods__" obj) methods)
+    obj))
+
+(defun %php-spl-items (object)
+  (or (gethash "__items__" object) '()))
+
+(defun %php-spl-set-items (object items)
+  (setf (gethash "__items__" object) items))
+
+(defun %php-spl-list-count (self)
+  (length (%php-spl-items self)))
+
+(defun %php-spl-list-empty-p (self)
+  (zerop (%php-spl-list-count self)))
+
+(defun %php-spl-list-push (self value)
+  (%php-spl-set-items self (append (%php-spl-items self) (list value)))
+  +php-null+)
+
+(defun %php-spl-list-unshift (self value)
+  (%php-spl-set-items self (cons value (%php-spl-items self)))
+  +php-null+)
+
+(defun %php-spl-list-pop (self)
+  (let ((items (%php-spl-items self)))
+    (if items
+        (prog1 (car (last items))
+          (%php-spl-set-items self (butlast items)))
+        +php-null+)))
+
+(defun %php-spl-list-shift (self)
+  (let ((items (%php-spl-items self)))
+    (if items
+        (prog1 (first items)
+          (%php-spl-set-items self (rest items)))
+        +php-null+)))
+
+(defun %php-spl-list-top (self)
+  (let ((items (%php-spl-items self)))
+    (if items (car (last items)) +php-null+)))
+
+(defun %php-spl-list-bottom (self)
+  (let ((items (%php-spl-items self)))
+    (if items (first items) +php-null+)))
+
+(defun %php-spl-list-queue-pop (self)
+  (%php-spl-list-shift self))
+
+(defparameter +php-spl-list-methods+
+  '(("push" %php-spl-list-push)
+    ("pop" %php-spl-list-pop)
+    ("unshift" %php-spl-list-unshift)
+    ("shift" %php-spl-list-shift)
+    ("top" %php-spl-list-top)
+    ("bottom" %php-spl-list-bottom)
+    ("count" %php-spl-list-count)
+    ("isEmpty" %php-spl-list-empty-p)))
+
+(defparameter +php-spl-queue-methods+
+  '(("push" %php-spl-list-push)
+    ("pop" %php-spl-list-queue-pop)
+    ("unshift" %php-spl-list-unshift)
+    ("shift" %php-spl-list-shift)
+    ("top" %php-spl-list-top)
+    ("bottom" %php-spl-list-bottom)
+    ("count" %php-spl-list-count)
+    ("isEmpty" %php-spl-list-empty-p)
+    ("enqueue" %php-spl-list-push)
+    ("dequeue" %php-spl-list-shift)))
+
+(defun %php-spl-install-list-methods (object &key queue-p)
+  (%php-spl-install-methods object
+                            (if queue-p
+                                +php-spl-queue-methods+
+                                +php-spl-list-methods+)))
+
+(defun %php-spl-doubly-linked-list ()
+  (let ((object (%php-spl-object
+                 "SplDoublyLinkedList"
+                 (%php-spl-make-methods "push" "pop" "unshift" "shift"
+                                        "top" "bottom" "count" "isEmpty"))))
+    (%php-spl-set-items object '())
+    (%php-spl-install-list-methods object)))
+
+(defun %php-spl-stack ()
+  (let ((object (%php-spl-object
+                 "SplStack"
+                 (%php-spl-make-methods "push" "pop" "unshift" "shift"
+                                        "top" "bottom" "count" "isEmpty"))))
+    (%php-spl-set-items object '())
+    (%php-spl-install-list-methods object)))
+
+(defun %php-spl-queue ()
+  (let ((object (%php-spl-object
+                 "SplQueue"
+                 (%php-spl-make-methods "enqueue" "dequeue" "push" "pop"
+                                        "top" "bottom" "count" "isEmpty"))))
+    (%php-spl-set-items object '())
+    (%php-spl-install-list-methods object :queue-p t)))
+
+(defun %php-spl-value< (left right)
+  (let ((ln (%php-spl-number left))
+        (rn (%php-spl-number right)))
+    (cond
+      ((or (/= ln 0) (/= rn 0)
+           (member left '(0 0.0) :test #'eql)
+           (member right '(0 0.0) :test #'eql))
+       (< ln rn))
+      (t (string< (%php-stringify left) (%php-stringify right))))))
+
+(defun %php-spl-heap-best (items min-p)
+  (reduce (lambda (best value)
+            (if (if min-p
+                    (%php-spl-value< value best)
+                    (%php-spl-value< best value))
+                value
+                best))
+          items))
+
+(defun %php-spl-heap-remove-one (items target)
+  (let ((removed nil))
+    (loop for value in items
+          unless (and (not removed) (equal value target))
+            collect value
+          else do (setf removed t))))
+
+(defun %php-spl-heap-min-p (self)
+  (gethash "__min_heap__" self))
+
+(defun %php-spl-heap-insert (self value)
+  (%php-spl-list-push self value))
+
+(defun %php-spl-heap-top (self)
+  (let ((items (%php-spl-items self)))
+    (if items
+        (%php-spl-heap-best items (%php-spl-heap-min-p self))
+        +php-null+)))
+
+(defun %php-spl-heap-extract (self)
+  (let ((items (%php-spl-items self)))
+    (if items
+        (let ((best (%php-spl-heap-best items (%php-spl-heap-min-p self))))
+          (%php-spl-set-items self (%php-spl-heap-remove-one items best))
+          best)
+        +php-null+)))
+
+(defparameter +php-spl-heap-methods+
+  '(("insert" %php-spl-heap-insert)
+    ("extract" %php-spl-heap-extract)
+    ("top" %php-spl-heap-top)
+    ("count" %php-spl-list-count)
+    ("isEmpty" %php-spl-list-empty-p)))
+
+(defun %php-spl-heap (class-name min-p)
+  (let ((object (%php-spl-object
+                 class-name
+                 (%php-spl-make-methods "insert" "extract" "top" "count" "isEmpty"))))
+    (%php-spl-set-items object '())
+    (setf (gethash "__min_heap__" object) min-p)
+    (%php-spl-install-methods object +php-spl-heap-methods+)
+    object))
+
+(defun %php-spl-min-heap ()
+  (%php-spl-heap "SplMinHeap" t))
+
+(defun %php-spl-max-heap ()
+  (%php-spl-heap "SplMaxHeap" nil))
+
+(defun %php-spl-fixed-values (self)
+  (or (gethash "__values__" self) '()))
+
+(defun %php-spl-fixed-set-values (self values)
+  (setf (gethash "__values__" self) values))
+
+(defun %php-spl-fixed-normalize-size (size)
+  (max 0 (%php-spl-index size)))
+
+(defun %php-spl-fixed-resize-list (values size)
+  (let ((current (length values)))
+    (cond
+      ((= current size) values)
+      ((> current size) (subseq values 0 size))
+      (t (append values (make-list (- size current) :initial-element +php-null+))))))
+
+(defun %php-spl-fixed-ref (self index)
+  (let* ((values (%php-spl-fixed-values self))
+         (i (%php-spl-index index)))
+    (if (and (>= i 0) (< i (length values)))
+        (nth i values)
+        +php-null+)))
+
+(defun %php-spl-fixed-set (self index value)
+  (let* ((values (%php-spl-fixed-values self))
+         (i (%php-spl-index index)))
+    (when (and (>= i 0) (< i (length values)))
+      (setf (nth i values) value)
+      (%php-spl-fixed-set-values self values))
+    +php-null+))
+
+(defun %php-spl-fixed-size (self)
+  (length (%php-spl-fixed-values self)))
+
+(defun %php-spl-fixed-set-size (self new-size)
+  (%php-spl-fixed-set-values
+   self
+   (%php-spl-fixed-resize-list
+    (%php-spl-fixed-values self)
+    (%php-spl-fixed-normalize-size new-size)))
+  +php-null+)
+
+(defun %php-spl-fixed-offset-exists-p (self index)
+  (let ((i (%php-spl-index index)))
+    (and (>= i 0) (< i (%php-spl-fixed-size self)))))
+
+(defun %php-spl-fixed-unset (self index)
+  (%php-spl-fixed-set self index +php-null+))
+
+(defparameter +php-spl-fixed-array-methods+
+  '(("getSize" %php-spl-fixed-size)
+    ("setSize" %php-spl-fixed-set-size)
+    ("offsetGet" %php-spl-fixed-ref)
+    ("offsetSet" %php-spl-fixed-set)
+    ("offsetExists" %php-spl-fixed-offset-exists-p)
+    ("offsetUnset" %php-spl-fixed-unset)
+    ("count" %php-spl-fixed-size)))
+
+(defun %php-spl-fixed-array (&optional size)
+  (let ((object (%php-spl-object
+                 "SplFixedArray"
+                 (%php-spl-make-methods "getSize" "setSize" "offsetGet"
+                                        "offsetSet" "offsetExists" "offsetUnset"
+                                        "count"))))
+    (%php-spl-fixed-set-values object
+                               (make-list (%php-spl-fixed-normalize-size (or size 0))
+                                          :initial-element +php-null+))
+    (%php-spl-install-methods object +php-spl-fixed-array-methods+)
+    object))
+
+(defun %php-spl-new (class-name &rest args)
+  (case (intern (string-upcase (%php-spl-class-name class-name)) :keyword)
+    (:SPLSTACK (%php-spl-stack))
+    (:SPLQUEUE (%php-spl-queue))
+    (:SPLDOUBLYLINKEDLIST (%php-spl-doubly-linked-list))
+    (:SPLMINHEAP (%php-spl-min-heap))
+    (:SPLMAXHEAP (%php-spl-max-heap))
+    (:SPLFIXEDARRAY (apply #'%php-spl-fixed-array args))
+    (otherwise (error "Unknown SPL class: ~A" class-name))))
+
 ;;; ─── Misc utility ────────────────────────────────────────────────────────────
 
 (defun %php-array-map-keys (callback array)
@@ -652,19 +1344,6 @@
 (defun %php-list-assign (&rest values)
   "PHP list() — returns the values as a PHP array for destructuring."
   (%php-list-to-array values))
-
-(defun %php-each (array)
-  "PHP each: return current key/value pair and advance internal pointer (deprecated)."
-  (when (hash-table-p array)
-    (let ((pairs (%php-array-pairs array)))
-      (when pairs
-        (let* ((pair (first pairs))
-               (result (%php-make-array)))
-          (%php-array-set result 0 (cdr pair))
-          (%php-array-set result 1 (car pair))
-          (%php-array-set result "key" (car pair))
-          (%php-array-set result "value" (cdr pair))
-          result)))))
 
 (defun %php-reset (array)
   "PHP reset: reset array pointer to first element."
@@ -705,42 +1384,346 @@
 ;;; ─── Non-CL-named builtins that must be registered by SYMBOL ────────────────
 ;;; A PHP builtin call lowers to a function symbol the VM resolves only if it is
 ;;; fbound; a lambda registration leaves no fbound symbol, so these all hit
-;;; "Undefined function: <NAME>".  Named helpers fix that.  (Several remain
-;;; deliberate stubs — full reflection / scope-mutation is not modelled.)
+;;; "Undefined function: <NAME>".  Named helpers fix that.
 
 (defun %php-class-implements (class &optional autoload)
-  "PHP class_implements (stub: full interface reflection NYI)."
-  (declare (ignore class autoload)) (%php-make-array))
+  "PHP class_implements: return implemented interfaces keyed by interface name."
+  (declare (ignore autoload))
+  (%php-reflection-symbols-to-array
+   (%php-reflection-class-interface-symbols class)))
 (defun %php-class-parents (class &optional autoload)
-  "PHP class_parents (stub: full class reflection NYI)."
-  (declare (ignore class autoload)) (%php-make-array))
+  "PHP class_parents: return parent classes keyed by class name."
+  (declare (ignore autoload))
+  (%php-reflection-symbols-to-array
+   (%php-reflection-class-parent-symbols class)))
 (defun %php-class-uses (class &optional autoload)
-  "PHP class_uses (stub: full trait reflection NYI)."
-  (declare (ignore class autoload)) (%php-make-array))
-(defun %php-spl-autoload-register (&rest ignored)
-  "PHP spl_autoload_register (stub — autoloading not modelled)."
-  (declare (ignore ignored)) t)
-(defun %php-spl-autoload-unregister (&rest ignored)
-  "PHP spl_autoload_unregister (stub)."
-  (declare (ignore ignored)) t)
+  "PHP class_uses: return traits used directly by a class keyed by trait name."
+  (declare (ignore autoload))
+  (%php-reflection-symbols-to-array
+   (%php-reflection-class-trait-symbols class)))
+
+(defvar *php-spl-autoload-functions* nil
+  "Registered PHP SPL autoload callbacks in call order.")
+
+(defun %php-spl-autoload-callback-equal-p (left right)
+  "Return true when two PHP callable values identify the same autoload entry."
+  (or (eq left right)
+      (equal left right)
+      (and (stringp left) (stringp right) (string= left right))))
+
+(defun %php-spl-autoload-callback-valid-p (callback)
+  "Return true when CALLBACK is acceptable for spl_autoload_register."
+  (or (stringp callback)
+      (functionp callback)
+      (cl-cc/vm::%vm-closure-object-p callback)
+      (and (hash-table-p callback)
+           (plusp (%php-count callback)))))
+
+(defun %php-spl-autoload-register (&optional callback throw prepend)
+  "PHP spl_autoload_register: add CALLBACK to the SPL autoload queue.
+
+The runtime does not model file loading yet, but it now preserves PHP-visible
+autoload state for spl_autoload_functions/unregister and class_exists($c, true)
+plumbing."
+  (let ((entry (if (or (null callback) (%php-null-p callback))
+                   "spl_autoload"
+                   callback)))
+    (cond
+      ((not (%php-spl-autoload-callback-valid-p entry))
+       (if (%php-truthy throw)
+           (%php-throw 'type-error
+                       "spl_autoload_register(): Argument #1 ($callback) must be a valid callback")
+           nil))
+      ((some (lambda (registered)
+               (%php-spl-autoload-callback-equal-p registered entry))
+             *php-spl-autoload-functions*)
+       t)
+      ((%php-truthy prepend)
+       (push entry *php-spl-autoload-functions*)
+       t)
+      (t
+       (setf *php-spl-autoload-functions*
+             (append *php-spl-autoload-functions* (list entry)))
+       t))))
+
+(defun %php-spl-autoload-unregister (&optional callback)
+  "PHP spl_autoload_unregister: remove CALLBACK from the SPL autoload queue."
+  (let* ((entry (if (or (null callback) (%php-null-p callback))
+                    "spl_autoload"
+                    callback))
+         (before *php-spl-autoload-functions*))
+    (setf *php-spl-autoload-functions*
+          (remove-if (lambda (registered)
+                       (%php-spl-autoload-callback-equal-p registered entry))
+                     *php-spl-autoload-functions*))
+    (not (= (length before) (length *php-spl-autoload-functions*)))))
+
 (defun %php-spl-autoload-functions ()
-  "PHP spl_autoload_functions (stub)."
-  (%php-make-array))
-(defun %php-extract (array &optional flags prefix)
-  "PHP extract (stub — returns the count; the calling scope cannot be mutated
-from a host builtin)."
-  (declare (ignore flags prefix))
-  (if (hash-table-p array) (%php-count array) 0))
+  "PHP spl_autoload_functions: return registered autoload callbacks."
+  (%php-list-to-array *php-spl-autoload-functions*))
+
 (defun %php-lcg-value ()
   "PHP lcg_value: a pseudo-random float in [0,1)."
   (random 1.0d0))
+
+(defun %php-settype-array-value (value)
+  "Return VALUE converted with PHP's `(array)` cast shape."
+  (let ((result (%php-make-array)))
+    (unless (%php-null-p value)
+      (%php-array-set result 0 value))
+    result))
+
+(defun %php-settype-object-value (value)
+  "Return VALUE converted with PHP's `(object)` cast shape."
+  (let ((object (%php-make-array)))
+    (%php-array-set object "__class__" "stdClass")
+    (cond
+      ((%php-null-p value))
+      ((hash-table-p value)
+       (dolist (pair (%php-array-pairs value))
+         (%php-array-set object (car pair) (cdr pair))))
+      (t
+       (%php-array-set object "scalar" value)))
+    object))
+
 (defun %php-settype (v &optional type)
-  "PHP settype (stub — scalar by-reference mutation is not modelled)."
-  (declare (ignore type)) v)
+  "PHP settype: mutate the referenced value and return success."
+  (let* ((target (%php-deref v))
+         (type-name (string-downcase (%php-stringify type)))
+         (converted
+           (cond ((or (string= type-name "boolean") (string= type-name "bool"))
+                  (%php-boolval target))
+                 ((or (string= type-name "integer") (string= type-name "int"))
+                  (%php-intval target))
+                 ((or (string= type-name "float") (string= type-name "double"))
+                  (%php-floatval target))
+                 ((string= type-name "string")
+                  (%php-strval target))
+                 ((string= type-name "array")
+                  (if (hash-table-p target) target (%php-settype-array-value target)))
+                 ((string= type-name "object")
+                  (if (or (%php-object-table-p target)
+                          (and (not (%php-null-p target))
+                               (not (null target))
+                               (not (eq target t))
+                               (not (numberp target))
+                               (not (stringp target))
+                               (not (hash-table-p target))))
+                      target
+                      (%php-settype-object-value target)))
+                 ((string= type-name "null")
+                  +php-null+)
+                 (t :php-invalid-settype))))
+    (if (eq converted :php-invalid-settype)
+        nil
+        (progn
+          (%php-ref-set! v converted)
+          t))))
+(defun %php-scan-whitespace-char-p (ch)
+  (member ch '(#\Space #\Tab #\Newline #\Return #\Page) :test #'char=))
+
+(defun %php-sscanf-digit-value (ch)
+  (cond ((and (char>= ch #\0) (char<= ch #\9))
+         (- (char-code ch) (char-code #\0)))
+        ((and (char>= ch #\a) (char<= ch #\f))
+         (+ 10 (- (char-code ch) (char-code #\a))))
+        ((and (char>= ch #\A) (char<= ch #\F))
+         (+ 10 (- (char-code ch) (char-code #\A))))
+        (t nil)))
+
+(defun %php-sscanf-skip-ws (s pos)
+  (loop while (and (< pos (length s))
+                   (%php-scan-whitespace-char-p (char s pos)))
+        do (incf pos)
+        finally (return pos)))
+
+(defun %php-sscanf-scan-int (s pos width radix &key auto-radix unsigned)
+  (let* ((start-limit pos)
+         (end-limit (if width (min (length s) (+ pos width)) (length s)))
+         (sign 1)
+         (base radix))
+    (when (and (< pos end-limit)
+               (not unsigned)
+               (member (char s pos) '(#\+ #\-) :test #'char=))
+      (when (char= (char s pos) #\-) (setf sign -1))
+      (incf pos))
+    (when auto-radix
+      (cond
+        ((and (<= (+ pos 2) end-limit)
+              (char= (char s pos) #\0)
+              (member (char s (1+ pos)) '(#\x #\X) :test #'char=))
+         (setf base 16)
+         (incf pos 2))
+        ((and (< pos end-limit) (char= (char s pos) #\0))
+         (setf base 8))
+        (t (setf base 10))))
+    (let ((digits-start pos)
+          (value 0))
+      (loop while (< pos end-limit)
+            for digit = (%php-sscanf-digit-value (char s pos))
+            while (and digit (< digit base))
+            do (setf value (+ (* value base) digit))
+               (incf pos))
+      (if (= pos digits-start)
+          (values nil start-limit nil)
+          (values (* sign value) pos t)))))
+
+(defun %php-sscanf-scan-float (s pos width)
+  (let* ((start pos)
+         (end-limit (if width (min (length s) (+ pos width)) (length s)))
+         (saw-digit nil))
+    (when (and (< pos end-limit) (member (char s pos) '(#\+ #\-) :test #'char=))
+      (incf pos))
+    (loop while (and (< pos end-limit) (digit-char-p (char s pos)))
+          do (setf saw-digit t)
+             (incf pos))
+    (when (and (< pos end-limit) (char= (char s pos) #\.))
+      (incf pos)
+      (loop while (and (< pos end-limit) (digit-char-p (char s pos)))
+            do (setf saw-digit t)
+               (incf pos)))
+    (when (and saw-digit (< pos end-limit) (member (char s pos) '(#\e #\E) :test #'char=))
+      (let ((exp-start pos)
+            (exp-digits nil))
+        (incf pos)
+        (when (and (< pos end-limit) (member (char s pos) '(#\+ #\-) :test #'char=))
+          (incf pos))
+        (loop while (and (< pos end-limit) (digit-char-p (char s pos)))
+              do (setf exp-digits t)
+                 (incf pos))
+        (unless exp-digits
+          (setf pos exp-start))))
+    (if saw-digit
+        (handler-case
+            (let ((*read-default-float-format* 'double-float))
+              (values (coerce (read-from-string (subseq s start pos)) 'double-float)
+                      pos t))
+          (error () (values nil start nil)))
+        (values nil start nil))))
+
+(defun %php-sscanf-values (str fmt)
+  "Return sscanf parsed values as a PHP array."
+  (let* ((input (%php-stringify str))
+         (format-string (%php-stringify fmt))
+         (i 0)
+         (j 0)
+         (values nil)
+         (failed nil))
+    (labels ((emit (value)
+               (push value values))
+             (parse-width ()
+               (let ((start j))
+                 (loop while (and (< j (length format-string))
+                                  (digit-char-p (char format-string j)))
+                       do (incf j))
+                 (when (< start j)
+                   (parse-integer format-string :start start :end j)))))
+      (loop while (and (< j (length format-string)) (not failed))
+            for fch = (char format-string j)
+            do (cond
+                 ((%php-scan-whitespace-char-p fch)
+                  (setf i (%php-sscanf-skip-ws input i))
+                  (loop while (and (< j (length format-string))
+                                   (%php-scan-whitespace-char-p
+                                    (char format-string j)))
+                        do (incf j)))
+                 ((char/= fch #\%)
+                  (if (and (< i (length input)) (char= (char input i) fch))
+                      (progn (incf i) (incf j))
+                      (setf failed t)))
+                 (t
+                  (incf j)
+                  (cond
+                    ((>= j (length format-string))
+                     (setf failed t))
+                    ((char= (char format-string j) #\%)
+                     (if (and (< i (length input)) (char= (char input i) #\%))
+                         (progn (incf i) (incf j))
+                         (setf failed t)))
+                    (t
+                     (let ((suppress nil))
+                       (when (and (< j (length format-string))
+                                  (char= (char format-string j) #\*))
+                         (setf suppress t)
+                         (incf j))
+                       (let ((width (parse-width)))
+                         (when (>= j (length format-string))
+                           (setf failed t))
+                         (unless failed
+                           (let ((spec (char-downcase (char format-string j))))
+                             (incf j)
+                             (multiple-value-bind (value new-pos ok)
+                                 (case spec
+                                   ((#\d #\u)
+                                    (%php-sscanf-scan-int
+                                     input (%php-sscanf-skip-ws input i) width 10
+                                     :unsigned (char= spec #\u)))
+                                   (#\i
+                                    (%php-sscanf-scan-int
+                                     input (%php-sscanf-skip-ws input i) width 10
+                                     :auto-radix t))
+                                   (#\x
+                                    (%php-sscanf-scan-int
+                                     input (%php-sscanf-skip-ws input i) width 16
+                                     :unsigned t))
+                                   (#\o
+                                    (%php-sscanf-scan-int
+                                     input (%php-sscanf-skip-ws input i) width 8
+                                     :unsigned t))
+                                   ((#\f #\e #\g)
+                                    (%php-sscanf-scan-float
+                                     input (%php-sscanf-skip-ws input i) width))
+                                   (#\s
+                                    (let* ((start (%php-sscanf-skip-ws input i))
+                                           (end-limit (if width
+                                                          (min (length input)
+                                                               (+ start width))
+                                                          (length input)))
+                                           (end start))
+                                      (loop while (and (< end end-limit)
+                                                       (not (%php-scan-whitespace-char-p
+                                                             (char input end))))
+                                            do (incf end))
+                                      (if (= start end)
+                                          (values nil i nil)
+                                          (values (subseq input start end) end t))))
+                                   (#\c
+                                    (let* ((count (or width 1))
+                                           (end (+ i count)))
+                                      (if (<= end (length input))
+                                          (values (subseq input i end) end t)
+                                          (values nil i nil))))
+                                   (otherwise
+                                    (values nil i nil)))
+                               (if ok
+                                   (progn
+                                     (setf i new-pos)
+                                     (unless suppress (emit value)))
+                                   (setf failed t))))))))))))
+      (%php-list-to-array (nreverse values)))))
+
 (defun %php-sscanf (str fmt &rest ignored)
-  "PHP sscanf (stub — format parsing / out-params NYI; returns a PHP array)."
-  (declare (ignore ignored))
-  (%php-list-to-array (list (%php-stringify str) (%php-stringify fmt))))
+  "PHP sscanf: parse STR with FMT. Without out-params this returns a PHP array;
+the parser lowers out-param calls through `%php-sscanf-values` and returns the
+number of assigned values."
+  (let ((values (%php-sscanf-values str fmt)))
+    (if ignored (%php-count values) values)))
+
+(defun %php-read-standard-input-string ()
+  "Read the remaining dynamically bound standard input as a string."
+  (with-output-to-string (out)
+    (loop for ch = (read-char *standard-input* nil nil)
+          while ch
+          do (write-char ch out))))
+
+(defun %php-scanf-values (fmt)
+  "Return scanf parsed values from standard input as a PHP array."
+  (%php-sscanf-values (%php-read-standard-input-string) fmt))
+
+(defun %php-scanf (fmt &rest ignored)
+  "PHP scanf: parse the remaining standard input with FMT."
+  (let ((values (%php-scanf-values fmt)))
+    (if ignored (%php-count values) values)))
 
 (defun %php-iterator-to-array (iter &optional (preserve-keys t))
   "PHP iterator_to_array: drain a Generator into a PHP array."

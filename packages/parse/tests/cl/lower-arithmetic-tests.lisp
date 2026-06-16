@@ -161,9 +161,75 @@
     (assert-true (cl-cc::ast-setq-p node))
     (assert-eq 'x (cl-cc::ast-setq-var node))))
 
+(deftest lower-empty-setf-returns-nil-quote
+  "(setf) lowers to (quote nil)."
+  (let ((node (lower '(setf))))
+    (assert-true (cl-cc::ast-quote-p node))
+    (assert-null (cl-cc::ast-quote-value node))))
+
+(deftest lower-setf-multiple-symbol-places-produces-progn
+  "(setf a 1 b 2) lowers to ast-progn of two assignments."
+  (let ((node (lower '(setf a 1 b 2))))
+    (assert-true (cl-cc::ast-progn-p node))
+    (assert-= 2 (length (cl-cc::ast-progn-forms node)))
+    (assert-true (every #'cl-cc::ast-setq-p (cl-cc::ast-progn-forms node)))))
+
 (deftest-each lower-setf-compound-place-cases
   "setf compound places: gethash → ast-set-gethash; slot-value → ast-set-slot-value."
   :cases (("gethash"    '(setf (gethash :k ht) v)      #'cl-cc::ast-set-gethash-p)
           ("slot-value" '(setf (slot-value obj 'x) 5)  #'cl-cc::ast-set-slot-value-p))
   (form pred)
   (assert-true (funcall pred (lower form))))
+
+(deftest-each lower-setf-list-accessor-rewrites
+  "setf list accessors lower to the corresponding destructive list update call."
+  :cases (("first"  '(setf (first xs) v)  '(rplaca xs v))
+          ("rest"   '(setf (rest xs) v)   '(rplacd xs v))
+          ("second" '(setf (second xs) v) '(rplaca (cdr xs) v))
+          ("tenth"  '(setf (tenth xs) v)  '(rplaca (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr xs))))))))) v))
+          ("cadr"   '(setf (cadr xs) v)   '(rplaca (cdr xs) v))
+          ("cddr"   '(setf (cddr xs) v)   '(rplacd (cdr xs) v))
+          ("caddr"  '(setf (caddr xs) v)  '(rplaca (cdr (cdr xs)) v)))
+  (form expected)
+  (assert-equal expected (cl-cc::ast-to-sexp (lower form))))
+
+(deftest lower-setf-multiple-compound-places-produces-progn
+  "(setf (gethash :a ht) 1 (slot-value obj 'x) 2) lowers both places."
+  (let* ((node (lower '(setf (gethash :a ht) 1 (slot-value obj 'x) 2)))
+         (forms (cl-cc::ast-progn-forms node)))
+    (assert-true (cl-cc::ast-progn-p node))
+    (assert-= 2 (length forms))
+    (assert-true (cl-cc::ast-set-gethash-p (first forms)))
+    (assert-true (cl-cc::ast-set-slot-value-p (second forms)))))
+
+(deftest lower-incf-symbol-place-produces-setq-update
+  "(incf x) lowers through setf into x := (+ x 1)."
+  (let* ((node (lower '(incf x)))
+         (value (cl-cc::ast-setq-value node)))
+    (assert-true (cl-cc::ast-setq-p node))
+    (assert-eq 'x (cl-cc::ast-setq-var node))
+    (assert-true (cl-cc::ast-binop-p value))
+    (assert-eq '+ (cl-cc::ast-binop-op value))
+    (assert-eq 'x (cl-cc::ast-var-name (cl-cc::ast-binop-lhs value)))
+    (assert-= 1 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs value)))))
+
+(deftest lower-decf-symbol-place-with-delta-produces-setq-update
+  "(decf x 3) lowers through setf into x := (- x 3)."
+  (let* ((node (lower '(decf x 3)))
+         (value (cl-cc::ast-setq-value node)))
+    (assert-true (cl-cc::ast-setq-p node))
+    (assert-eq 'x (cl-cc::ast-setq-var node))
+    (assert-true (cl-cc::ast-binop-p value))
+    (assert-eq '- (cl-cc::ast-binop-op value))
+    (assert-eq 'x (cl-cc::ast-var-name (cl-cc::ast-binop-lhs value)))
+    (assert-= 3 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs value)))))
+
+(deftest lower-incf-gethash-place-produces-set-gethash-update
+  "(incf (gethash k ht) 2) lowers through the existing gethash setf place."
+  (let* ((node (lower '(incf (gethash k ht) 2)))
+         (value (cl-cc::ast-set-gethash-value node)))
+    (assert-true (cl-cc::ast-set-gethash-p node))
+    (assert-true (cl-cc::ast-binop-p value))
+    (assert-eq '+ (cl-cc::ast-binop-op value))
+    (assert-true (cl-cc::ast-call-p (cl-cc::ast-binop-lhs value)))
+    (assert-= 2 (cl-cc::ast-int-value (cl-cc::ast-binop-rhs value)))))

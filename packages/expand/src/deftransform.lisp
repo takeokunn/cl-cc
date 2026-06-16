@@ -142,7 +142,7 @@ otherwise returns (VALUES FORM NIL)."
         (if known-p
             (let* ((transform (lookup-deftransform (car form) arg-types))
                    (expanded (and transform (invoke-deftransform transform form env))))
-              (if (and expanded (not (equal expanded form)))
+              (if (and expanded (not (%same-expansion-p expanded form)))
                   (values expanded t)
                   (values form nil)))
             (values form nil)))

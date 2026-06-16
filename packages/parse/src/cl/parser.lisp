@@ -113,51 +113,68 @@ Uses the hand-written CL lexer and recursive-descent parser (no host reader)."
                    :source-column source-column))))
 
 (defun parse-compiler-lambda-list (params)
-  "Parse a lambda list into required, optional, rest, and key parameters.
-Returns (values required optional rest key) where:
+  "Parse a lambda list into required, optional, rest, key, and aux parameters.
+Returns (values required optional rest key aux) where:
   required = list of symbols
   optional = list of (name default-sexp) pairs
   rest = symbol or nil
-  key = list of (name default-sexp supplied-p explicit-keyword) entries"
+  key = list of (name default-sexp supplied-p explicit-keyword) entries
+  aux = list of (name init-sexp) entries"
   (let ((required nil) (optional nil) (rest-param nil) (key-params nil)
+        (aux-params nil)
         (state :required))
-    (dolist (p params)
-      (cond
-        ((eq p '&optional) (setf state :optional))
-        ((eq p '&rest)     (setf state :rest))
-        ((eq p '&body)     (setf state :rest))
-        ((eq p '&key)      (setf state :key))
-        ((eq p '&allow-other-keys) nil)  ; skip
-        (t (case state
-             (:required (unless (symbolp p)
-                          (error "Required parameter must be a symbol: ~S" p))
-                        (push p required))
-             (:optional (if (listp p)
-                            (push (list (first p) (second p) (third p)) optional)
-                            (push (list p nil nil) optional)))
-             (:rest     (unless (symbolp p)
-                          (error "&rest parameter must be a symbol: ~S" p))
-                        (setf rest-param p)
-                        (setf state :post-rest))
-              (:post-rest (error "Unexpected parameter after &rest: ~S" p))
-              (:key      (if (listp p)
-                             (let* ((head (first p))
-                                    (explicit-keyword (and (listp head) (first head)))
-                                    (name (if (listp head) (second head) head))
-                                    (default (second p))
-                                    (supplied-p (third p)))
-                               (unless (symbolp name)
-                                 (error "Invalid &key parameter variable: ~S" p))
-                               (when (and explicit-keyword (not (symbolp explicit-keyword)))
-                                 (error "Invalid &key parameter keyword: ~S" p))
-                               (push (list name default supplied-p explicit-keyword) key-params))
-                             (push (list p nil nil nil) key-params)))))))
-    (values (nreverse required) (nreverse optional) rest-param (nreverse key-params))))
+    (labels ((parse-aux-param (param)
+               (cond
+                 ((symbolp param) (list param nil))
+                 ((and (consp param)
+                       (or (= (length param) 1)
+                           (= (length param) 2))
+                       (symbolp (first param)))
+                  (list (first param) (second param)))
+                 (t (error "Invalid &aux parameter: ~S" param)))))
+      (dolist (p params)
+        (cond
+          ((eq p '&optional) (setf state :optional))
+          ((eq p '&rest)     (setf state :rest))
+          ((eq p '&body)     (setf state :rest))
+          ((eq p '&key)      (setf state :key))
+          ((eq p '&aux)      (setf state :aux))
+          ((eq p '&allow-other-keys) nil)  ; skip
+          (t (case state
+               (:required (unless (symbolp p)
+                            (error "Required parameter must be a symbol: ~S" p))
+                          (push p required))
+               (:optional (if (listp p)
+                              (push (list (first p) (second p) (third p)) optional)
+                              (push (list p nil nil) optional)))
+               (:rest     (unless (symbolp p)
+                            (error "&rest parameter must be a symbol: ~S" p))
+                          (setf rest-param p)
+                          (setf state :post-rest))
+               (:post-rest (error "Unexpected parameter after &rest: ~S" p))
+               (:key      (if (listp p)
+                              (let* ((head (first p))
+                                     (explicit-keyword (and (listp head) (first head)))
+                                     (name (if (listp head) (second head) head))
+                                     (default (second p))
+                                     (supplied-p (third p)))
+                                (unless (symbolp name)
+                                  (error "Invalid &key parameter variable: ~S" p))
+                                (when (and explicit-keyword (not (symbolp explicit-keyword)))
+                                  (error "Invalid &key parameter keyword: ~S" p))
+                                (push (list name default supplied-p explicit-keyword) key-params))
+                              (push (list p nil nil nil) key-params)))
+               (:aux (push (parse-aux-param p) aux-params))))))
+      (values (nreverse required)
+              (nreverse optional)
+              rest-param
+              (nreverse key-params)
+              (nreverse aux-params)))))
 
 (defun lambda-list-has-extended-p (params)
-  "Return T if PARAMS contains &optional, &rest, &body, or &key."
+  "Return T if PARAMS contains &optional, &rest, &body, &key, or &aux."
   (and (listp params)
-       (some (lambda (p) (member p '(&optional &rest &body &key &allow-other-keys)))
+       (some (lambda (p) (member p '(&optional &rest &body &key &aux &allow-other-keys)))
              params)))
 
 (defun parse-slot-spec (spec)

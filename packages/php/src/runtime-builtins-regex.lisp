@@ -266,22 +266,31 @@ to a group that did not match expands to the empty string."
             when end
               return (values (subseq subject i end) i end)))))
 
+(defun %php-preg-offset (offset subject-length)
+  "Normalize preg_* OFFSET into an in-bounds subject index."
+  (let ((i (%php-to-integer offset)))
+    (cond
+      ((minusp i) (max 0 (+ subject-length i)))
+      ((> i subject-length) subject-length)
+      (t i))))
+
 ;;; -----------------------------------------------------------------------
 ;;;  preg_match
 ;;; -----------------------------------------------------------------------
 
-(defun %php-preg-match (pattern subject &optional matches)
+(defun %php-preg-match (pattern subject &optional matches flags offset)
   "PHP preg_match: return 1 if pattern matches, 0 if not, store matches."
-  (declare (ignore matches))  ; matches capture NYI
+  (declare (ignore matches flags))  ; matches are handled by lowering when present.
   (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
-    (let ((ic (find #\i flags))
-          (ml (find #\m flags))
-          (str (%php-stringify subject)))
-      (multiple-value-bind (match-str _start _end) (%php-regex-exec pat str :ic ic :ml ml)
+    (let* ((ic (find #\i flags))
+           (ml (find #\m flags))
+           (str (%php-stringify subject))
+           (start (%php-preg-offset offset (length str))))
+      (multiple-value-bind (match-str _start _end) (%php-regex-exec pat str :start start :ic ic :ml ml)
         (declare (ignore _start _end))
         (if match-str 1 0)))))
 
-(defun %php-preg-match-all (pattern subject)
+(defun %php-preg-match-all (pattern subject &optional matches flags offset)
   "PHP preg_match_all: return the number of full matches.
 
 The matcher is anchored at the position it is given, so we must SCAN forward to
@@ -289,13 +298,14 @@ the next match rather than only testing the current position — the previous lo
 tested fn at successive positions and stopped at the first gap, so it counted
 only matches that happened to be consecutive from index 0 (e.g. '1a2b3' / \\d
 returned 1 instead of 3)."
+  (declare (ignore matches flags))
   (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
     (let* ((ic (find #\i flags))
            (ml (find #\m flags))
            (str (%php-stringify subject))
            (fn (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () nil)))
            (count 0)
-           (pos 0))
+           (pos (%php-preg-offset offset (length str))))
       (when fn
         (loop while (<= pos (length str))
               do (let ((match-start nil) (match-end nil))
@@ -307,20 +317,23 @@ returned 1 instead of 3)."
                        (return)))))
       count)))
 
-(defun %php-preg-match-matches (pattern subject)
+(defun %php-preg-match-matches (pattern subject &optional flags offset)
   "Return the $matches array for preg_match($pattern,$subject): index 0 = the
 full match, k = capture group k (empty string if the group did not match), or an
 empty array when PATTERN does not match.  Returned BY VALUE and assigned to the
 caller's $matches at the call site — the VM copies host structs across the
 bridge, so a mutable ref box would not propagate."
+  (declare (ignore flags))
   (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
-    (let ((ic (find #\i flags)) (ml (find #\m flags))
-          (str (%php-stringify subject))
-          (arr (%php-make-array)))
+    (let* ((ic (find #\i flags))
+           (ml (find #\m flags))
+           (str (%php-stringify subject))
+           (arr (%php-make-array))
+           (start (%php-preg-offset offset (length str))))
       (multiple-value-bind (fn gcount)
           (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () (values nil 0)))
         (when fn
-          (loop for i from 0 to (length str)
+          (loop for i from start to (length str)
                 do (multiple-value-bind (end groups) (%php-regex-match-at fn gcount str i)
                      (when end
                        (loop for k from 0 to gcount
@@ -328,15 +341,18 @@ bridge, so a mutable ref box would not propagate."
                        (return))))))
       arr)))
 
-(defun %php-preg-match-all-matches (pattern subject)
+(defun %php-preg-match-all-matches (pattern subject &optional flags offset)
   "Return the $matches array for preg_match_all in PREG_PATTERN_ORDER: index 0 is
 an array of every full match, k an array of every capture-group-k match."
+  (declare (ignore flags))
   (multiple-value-bind (pat flags) (%php-strip-pattern pattern)
-    (let ((ic (find #\i flags)) (ml (find #\m flags))
-          (str (%php-stringify subject)))
+    (let* ((ic (find #\i flags))
+           (ml (find #\m flags))
+           (str (%php-stringify subject))
+           (start (%php-preg-offset offset (length str))))
       (multiple-value-bind (fn gcount)
           (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () (values nil 0)))
-        (let ((per-group (make-array (1+ gcount))) (count 0) (pos 0))
+        (let ((per-group (make-array (1+ gcount))) (count 0) (pos start))
           (dotimes (k (1+ gcount)) (setf (aref per-group k) (%php-make-array)))
           (when fn
             (loop while (<= pos (length str))
@@ -463,6 +479,56 @@ an array of every full match, k an array of every capture-group-k match."
 (defconstant +php-epoch-offset+ 2208988800
   "Seconds from CL universal-time epoch (1900) to Unix epoch (1970).")
 
+(defvar *php-default-timezone* "UTC"
+  "Current default timezone name used by PHP date/time builtins.")
+
+(defparameter *php-timezone-offsets*
+  '(("UTC" . 0)
+    ("Etc/UTC" . 0)
+    ("GMT" . 0)
+    ("Z" . 0)
+    ("Asia/Tokyo" . 32400)
+    ("Asia/Seoul" . 32400)
+    ("Asia/Shanghai" . 28800)
+    ("Asia/Hong_Kong" . 28800)
+    ("Asia/Singapore" . 28800)
+    ("Asia/Kolkata" . 19800)
+    ("Asia/Dubai" . 14400)
+    ("Europe/London" . 0)
+    ("Europe/Berlin" . 3600)
+    ("Europe/Paris" . 3600)
+    ("Europe/Rome" . 3600)
+    ("Europe/Madrid" . 3600)
+    ("Europe/Amsterdam" . 3600)
+    ("Europe/Zurich" . 3600)
+    ("Europe/Stockholm" . 3600)
+    ("Europe/Warsaw" . 3600)
+    ("America/New_York" . -18000)
+    ("America/Chicago" . -21600)
+    ("America/Denver" . -25200)
+    ("America/Los_Angeles" . -28800)
+    ("America/Phoenix" . -25200)
+    ("America/Anchorage" . -32400)
+    ("America/Toronto" . -18000)
+    ("America/Vancouver" . -28800)
+    ("America/Sao_Paulo" . -10800)
+    ("America/Mexico_City" . -21600)
+    ("Australia/Sydney" . 36000)
+    ("Australia/Melbourne" . 36000)
+    ("Australia/Perth" . 28800)
+    ("Pacific/Auckland" . 43200))
+  "Fixed UTC offsets in seconds for supported PHP timezone identifiers.
+DST transitions are not modelled by this compact runtime table.")
+
+(defun %php-timezone-name (tz)
+  (string-trim '(#\Space #\Tab #\Newline #\Return) (%php-stringify tz)))
+
+(defun %php-timezone-offset-seconds (&optional (tz *php-default-timezone*))
+  (cdr (assoc (%php-timezone-name tz) *php-timezone-offsets* :test #'string=)))
+
+(defun %php-default-timezone-offset-seconds ()
+  (or (%php-timezone-offset-seconds *php-default-timezone*) 0))
+
 (defun %php-time ()
   "PHP time() — current Unix timestamp."
   (- (get-universal-time) +php-epoch-offset+))
@@ -476,7 +542,8 @@ an array of every full match, k an array of every capture-group-k match."
 
 (defun %php-mktime (&optional hour minute second month day year)
   "PHP mktime — create Unix timestamp from date components."
-  (let* ((now (multiple-value-list (decode-universal-time (get-universal-time) 0)))
+  (let* ((offset (%php-default-timezone-offset-seconds))
+         (now (multiple-value-list (decode-universal-time (+ (get-universal-time) offset) 0)))
          (h   (or hour   (nth 2 now)))
          (min (or minute (nth 1 now)))
          (sec (or second (nth 0 now)))
@@ -484,7 +551,7 @@ an array of every full match, k an array of every capture-group-k match."
          (d   (or day    (nth 3 now)))
          (y   (or year   (nth 5 now)))
          (ut  (encode-universal-time sec min h d m y 0)))
-    (- ut +php-epoch-offset+)))
+    (- ut +php-epoch-offset+ offset)))
 
 (defun %php-strtotime (str &optional (base-ts nil))
   "PHP strtotime — simplified: parse 'YYYY-MM-DD' and common relative formats."
@@ -503,7 +570,7 @@ an array of every full match, k an array of every capture-group-k match."
                   (min   (if (>= (length s) 16) (parse-integer (subseq s 14 16)) 0))
                   (sec   (if (>= (length s) 19) (parse-integer (subseq s 17 19)) 0))
                   (ut    (encode-universal-time sec min hour day month year 0)))
-             (- ut +php-epoch-offset+)))
+             (- ut +php-epoch-offset+ (%php-default-timezone-offset-seconds))))
           (t nil))
       (error () nil))))
 
@@ -513,11 +580,12 @@ an array of every full match, k an array of every capture-group-k match."
       "th"
       (case (mod day 10) (1 "st") (2 "nd") (3 "rd") (t "th"))))
 
-(defun %php-date (format &optional (timestamp nil))
+(defun %php-date (format &optional (timestamp nil) timezone-offset)
   "PHP date — format a timestamp. Supports d D j N w S m n M F Y y L t z H G g h
 i s A a U and \\-escapes."
   (let* ((ts (or timestamp (%php-time)))
-         (ut (+ ts +php-epoch-offset+))
+         (offset (if timezone-offset timezone-offset (%php-default-timezone-offset-seconds)))
+         (ut (+ ts +php-epoch-offset+ offset))
          (decoded (multiple-value-list (decode-universal-time ut 0))))
     (destructuring-bind (sec min hour day month year dow dst tz) decoded
       (declare (ignore dst tz))
@@ -621,10 +689,9 @@ gave 1,234 instead of PHP's 3 and 1,235."
 (defun %php-preg-replace-callback (pattern callback subject &optional (limit -1) count-var)
   "PHP preg_replace_callback: replace regex matches in SUBJECT using CALLBACK.
 The callback receives a PHP array whose [0] element is the full match and
-returns the replacement string.  Scans like %php-preg-replace (strip the
-/.../ delimiters + flags, compile with ic/ml, then scan forward); the NFA
-matcher used here exposes only the full match, so the callback's array carries
-$matches[0] (the engine does not yet thread capture groups through this path).
+whose [1..N] elements are capture groups, then returns the replacement string.
+Scans like %php-preg-replace (strip the /.../ delimiters + flags, compile with
+ic/ml, then scan forward).
 
 The previous implementation called the non-existent %php-regex-search and never
 stripped the pattern delimiters, so every call raised
@@ -635,28 +702,37 @@ stripped the pattern delimiters, so every call raised
            (ml (find #\m flags))
            (str (%php-stringify subject))
            (cb (%php-callable-function callback))
-           (fn (handler-case (%php-compile-regex pat :ic ic :ml ml) (error () nil)))
            (max-replacements (if (and (numberp limit) (> limit 0)) limit most-positive-fixnum)))
-      (if (and fn cb)
-          (with-output-to-string (out)
-            (let ((pos 0) (replacements 0))
-              (loop while (<= pos (length str))
-                    do (if (>= replacements max-replacements)
-                           (progn (write-string (subseq str pos) out) (return))
-                           (let ((match-start nil) (match-end nil))
-                             ;; Scan forward for the next match position.
-                             (loop for i from pos to (length str)
-                                   for e = (funcall fn str i nil)
-                                   when e do (setf match-start i match-end e) (return))
-                             (if match-start
-                                 (let ((match-arr (%php-make-array)))
-                                   (write-string (subseq str pos match-start) out)
-                                   (%php-array-set match-arr 0 (subseq str match-start match-end))
-                                   (write-string (%php-stringify (funcall cb match-arr)) out)
-                                   (incf replacements)
-                                   (setf pos (max (1+ match-start) match-end)))
-                                 (progn (write-string (subseq str pos) out) (return))))))))
-          str))))
+      (multiple-value-bind (fn group-count)
+          (handler-case (%php-compile-regex pat :ic ic :ml ml)
+            (error () (values nil 0)))
+        (if (and fn cb)
+            (with-output-to-string (out)
+              (let ((pos 0) (replacements 0))
+                (loop while (<= pos (length str))
+                      do (if (>= replacements max-replacements)
+                             (progn (write-string (subseq str pos) out) (return))
+                             (let ((match-start nil) (match-end nil) (match-groups nil))
+                               ;; Scan forward for the next match position.
+                               (loop for i from pos to (length str)
+                                     do (multiple-value-bind (e groups)
+                                            (%php-regex-match-at fn group-count str i)
+                                          (when e
+                                            (setf match-start i
+                                                  match-end e
+                                                  match-groups groups)
+                                            (return))))
+                               (if match-start
+                                   (let ((match-arr (%php-make-array)))
+                                     (write-string (subseq str pos match-start) out)
+                                     (loop for k from 0 to group-count
+                                           do (%php-array-set match-arr k
+                                                              (%php-regex-group-string match-groups k str)))
+                                     (write-string (%php-stringify (funcall cb match-arr)) out)
+                                     (incf replacements)
+                                     (setf pos (max (1+ match-start) match-end)))
+                                   (progn (write-string (subseq str pos) out) (return))))))))
+            str)))))
 
 (defun %php-preg-replace-callback-array (pattern-map subject &optional (limit -1) count)
   "PHP preg_replace_callback_array: PATTERN-MAP is a single PHP array mapping
@@ -713,16 +789,20 @@ arguments."
 
 (defun %php-gmdate (format &optional (timestamp nil))
   "PHP gmdate: same as date() but always UTC."
-  (%php-date format timestamp))
+  (%php-date format timestamp 0))
 
 (defun %php-date-default-timezone-set (tz)
-  "PHP date_default_timezone_set (stub)."
-  (declare (ignore tz))
-  t)
+  "PHP date_default_timezone_set: set the default timezone."
+  (let ((name (%php-timezone-name tz)))
+    (if (%php-timezone-offset-seconds name)
+        (progn
+          (setf *php-default-timezone* name)
+          t)
+        nil)))
 
 (defun %php-date-default-timezone-get ()
-  "PHP date_default_timezone_get (stub)."
-  "UTC")
+  "PHP date_default_timezone_get: return the current default timezone."
+  *php-default-timezone*)
 
 ;;; ─── Array extra ─────────────────────────────────────────────────────────────
 

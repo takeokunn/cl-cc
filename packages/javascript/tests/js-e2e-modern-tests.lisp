@@ -2,12 +2,13 @@
 ;;;;
 ;;;; Private class fields, Promise chaining, WeakMap/WeakSet, Object static
 ;;;; methods, ES2021 strings, ES2023 arrays, ES2025 Set/Iterator, ES2025/2026
-;;;; static built-ins (Math.sumPrecise, Error.isError, RegExp.escape, Map.groupBy).
+;;;; static built-ins (Math.sumPrecise, Error.isError, RegExp.escape, Map.groupBy),
+;;;; AbortController/AbortSignal, crypto.
 ;;;;
 ;;;; Depends on: js-e2e-core-tests.lisp (%js-run-capture, deftest-js-run).
 
 (in-package :cl-cc/test)
-(in-suite cl-cc-unit-suite)
+(in-suite cl-cc-javascript-e2e-serial-suite)
 
 ;;; ─── ES2022: Private class fields ────────────────────────────────────────────
 
@@ -39,7 +40,23 @@ console.log(new C(7).get());")))
   ("6"          "Promise.resolve(3).then(x=>x*2).then(x=>console.log(x));")
   ("caught: oops" "Promise.reject('oops').catch(e=>console.log('caught: '+e));")
   ("1,2,3"      "Promise.all([Promise.resolve(1),Promise.resolve(2),Promise.resolve(3)]).then(vs=>console.log(vs.join(',')));")
-  ("done"       "async function f(){return 'done';} f().then(v=>console.log(v));"))
+  ("done"       "async function f(){return 'done';} f().then(v=>console.log(v));")
+  ("10,21"      "Array.fromAsync([Promise.resolve(10),Promise.resolve(20)],(x,i)=>Promise.resolve(x+i)).then(vs=>console.log(vs.join(',')));"))
+
+(deftest-js-run js-e2e-promise-static-builtins
+  "Promise.try and Promise.withResolvers compile through static built-in dispatch."
+  ("42" "Promise.try(()=>21*2).then(x=>console.log(x));")
+  ("7"  "const r=Promise.withResolvers(); r.resolve(7); r.promise.then(x=>console.log(x));"))
+
+(deftest-js-run js-e2e-import-meta
+  "import.meta exposes host metadata and a resolve function."
+  ("string function" "console.log((typeof import.meta.url)+' '+(typeof import.meta.resolve));")
+  ("./dep.js"       "console.log(import.meta.resolve('./dep.js'));"))
+
+(deftest-js-run js-e2e-dynamic-import-namespace
+  "Dynamic import resolves to a host module namespace object."
+  ("./dep.js ./dep.js function" "import('./dep.js').then(m=>console.log(m.__moduleName__+' '+m.url+' '+(typeof m.resolve)));")
+  ("./child.js"                 "import('./dep.js').then(m=>console.log(m.resolve('./child.js')));"))
 
 ;;; ─── WeakMap and WeakSet ─────────────────────────────────────────────────────
 
@@ -71,18 +88,24 @@ console.log(new C(7).get());")))
 
 ;;; ─── ES2023 array methods ────────────────────────────────────────────────────
 
-(deftest-js-run js-e2e-array-methods-es2023
-  "Array ES2023: toReversed/toSorted (non-mutating), at (negative index), findLast/findLastIndex."
+(deftest-js-run-isolated-batch js-e2e-array-methods-es2023
+  "Array ES2023: non-mutating array copy helpers, at, findLast/findLastIndex."
   ("3,2,1" "const a=[1,2,3]; console.log(a.toReversed().join(','));")
   ("1,2,3" "const a=[1,2,3]; a.toReversed(); console.log(a.join(','));")
   ("1,2,3" "console.log([3,1,2].toSorted().join(','));")
   ("3"     "console.log([1,2,3].at(-1));")
   ("4"     "console.log([1,2,3,4].findLast(x=>x%2===0));")
-  ("3"     "console.log([1,2,3,4].findLastIndex(x=>x%2===0));"))
+  ("3"     "console.log([1,2,3,4].findLastIndex(x=>x%2===0));")
+  ("10,99,30" "console.log([10,20,30].with(1,99).join(','));")
+  ("10,20,30" "const a=[10,20,30]; a.with(1,99); console.log(a.join(','));")
+  ("1,9,9,4" "console.log([1,2,3,4].toSpliced(1,2,9,9).join(','));")
+  ("1,2,3,4" "const a=[1,2,3,4]; a.toSpliced(1,2,9,9); console.log(a.join(','));")
+  ("0:a|1:b" "console.log([...['a','b'].entries()].map(x=>x.join(':')).join('|'));")
+  ("0,1,2" "console.log([...['a','b','c'].keys()].join(','));"))
 
 ;;; ─── ES2025 Set composition methods ─────────────────────────────────────────
 
-(deftest-js-run js-e2e-set-methods-es2025
+(deftest-js-run-isolated-batch js-e2e-set-methods-es2025
   "ES2025 Set composition: union/intersection/difference/symmetricDifference/isSubsetOf/isSupersetOf/isDisjointFrom."
   ("1,2,3,4" "const a=new Set([1,2,3]),b=new Set([2,3,4]); console.log([...a.union(b)].join(','));")
   ("2,3"     "const a=new Set([1,2,3]),b=new Set([2,3,4]); console.log([...a.intersection(b)].join(','));")
@@ -97,9 +120,10 @@ console.log(new C(7).get());")))
 
 ;;; ─── ES2025 Iterator.prototype helpers ───────────────────────────────────────
 
-(deftest-js-run js-e2e-iterator-helpers-es2025
+(deftest-js-run-isolated-batch js-e2e-iterator-helpers-es2025
   "ES2025 Iterator.prototype: map/filter/take/drop/flatMap/reduce/toArray/forEach/some/every/find."
   ("1,2,3"    "console.log([1,2,3].values().toArray().join(','));")
+  ("2,3,4"    "console.log(Iterator.from([1,2,3]).map(x=>x+1).toArray().join(','));")
   ("2,4,6,8,10" "console.log([1,2,3,4,5].values().map(x=>x*2).toArray().join(','));")
   ("2,4,6"    "console.log([1,2,3,4,5,6].values().filter(x=>x%2===0).toArray().join(','));")
   ("1,2,3"    "console.log([1,2,3,4,5].values().take(3).toArray().join(','));")
@@ -139,13 +163,42 @@ console.log(new C(7).get());")))
   ("no"  "console.log(Error.isError(null)?'yes':'no');"))
 
 (deftest-js-run js-e2e-es2024-regexp-escape
-  "ES2024 RegExp.escape: escapes regex metacharacters with a backslash."
-  ("Hello\\.World" "console.log(RegExp.escape('Hello.World'));")
-  ("hello"         "console.log(RegExp.escape('hello'));")
-  ("what\\?"       "console.log(RegExp.escape('what?'));"))
+  "ES2025 RegExp.escape: escapes strings for literal use in RegExp patterns."
+  ("\\x48ello\\.World" "console.log(RegExp.escape('Hello.World'));")
+  ("\\x68ello"         "console.log(RegExp.escape('hello'));")
+  ("\\x77hat\\?"       "console.log(RegExp.escape('what?'));")
+  ("\\x66oo\\x2Dbar"   "console.log(RegExp.escape('foo-bar'));"))
 
 (deftest-js-run js-e2e-es2024-map-group-by
   "ES2024 Map.groupBy: groups iterable elements by a key function into a Map."
   ("2,4,6" "const g=Map.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd'); console.log(g.get('even').join(','));")
   ("1,3,5" "const g=Map.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd'); console.log(g.get('odd').join(','));")
   ("none"  "const g=Map.groupBy([1,3,5],x=>'odd'); const v=g.get('even'); console.log(v===undefined?'none':v.join(','));"))
+
+(deftest-js-run js-e2e-es2024-object-group-by
+  "ES2024 Object.groupBy: groups iterable elements into object properties."
+  ("2,4,6" "const g=Object.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd'); console.log(g.even.join(','));")
+  ("1,3,5" "const g=Object.groupBy([1,2,3,4,5,6],x=>x%2===0?'even':'odd'); console.log(g.odd.join(','));")
+  ("none"  "const g=Object.groupBy([1,3,5],x=>'odd'); console.log(g.even===undefined?'none':g.even.join(','));"))
+
+(deftest-js-run js-e2e-es2024-array-grouping
+  "ES2024 Array.prototype.group/groupToMap: groups array values through prototype dispatch."
+  ("1,3,5|2,4,6" "const g=[1,2,3,4,5,6].group(x=>x%2===0?'even':'odd'); console.log(g.odd.join(',')+'|'+g.even.join(','));")
+  ("1,3,5" "const g=[1,2,3,4,5,6].groupToMap(x=>x%2===0?'even':'odd'); console.log(g.get('odd').join(','));")
+  ("none" "const g=[2,4,6].groupToMap(x=>x%2===0?'even':'odd'); const v=g.get('odd'); console.log(v===undefined?'none':v.join(','));"))
+
+(deftest-js-run js-e2e-abort-controller
+  "AbortController/AbortSignal globals work through the prelude."
+  ("true why 1"
+   "const c=new AbortController(); let n=0; c.signal.addEventListener('abort',()=>n++); c.abort('why'); c.abort('again'); console.log(c.signal.aborted+' '+c.signal.reason+' '+n);")
+  ("true stop"
+   "const s=AbortSignal.abort('stop'); console.log(s.aborted+' '+s.reason);")
+  ("caught"
+   "const s=AbortSignal.abort('caught'); try{s.throwIfAborted();}catch(e){console.log(e);}"))
+
+(deftest-js-run js-e2e-crypto
+  "crypto globals work through the prelude."
+  ("true 8"
+   "const bytes=new Uint8Array(8); const ret=crypto.getRandomValues(bytes); console.log((ret===bytes)+' '+bytes.length);")
+  ("true"
+   "const u=crypto.randomUUID(); const ok=u.length===36&&u===u.toLowerCase()&&u[8]==='-'&&u[13]==='-'&&u[18]==='-'&&u[23]==='-'&&u[14]==='4'&&'89ab'.indexOf(u[19])>=0; console.log(ok);"))

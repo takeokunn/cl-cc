@@ -1,8 +1,8 @@
 ;;;; tests/conformance/format-conformance-tests.lisp
-;;;; ANSI CL FORMAT Directive Conformance Tests (expected-fail for known gaps)
+;;;; ANSI CL FORMAT Directive Conformance Tests
 ;;;;
-;;;; Tests FORMAT directives that should work per ANSI CL but currently
-;;;; rely on host SBCL fallback or fail in self-host/native mode.
+;;;; Tests FORMAT directives that should work per ANSI CL. These run as
+;;;; regular conformance tests; native binary parity is tracked separately.
 
 (in-package :cl-cc/test)
 
@@ -30,7 +30,7 @@
     (get-output-stream-string out)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Basic Output Directives
+;;; Basic Output Directives
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-tilde-a-self-host
@@ -73,7 +73,7 @@
     (assert-equal "~" (fmt-run "~~"))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Numeric Directives
+;;; Numeric Directives
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-tilde-d-self-host
@@ -121,7 +121,7 @@
     (assert-equal "3.14" (fmt-run "~F" 3.14))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Control Flow Directives
+;;; Control Flow Directives
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-tilde-asterisk-self-host
@@ -167,7 +167,7 @@
                   (fmt-run "~{~A~^, ~}" '("a" "b" "c")))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: format nil (return as string) in self-host
+;;; format nil (return as string)
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-nil-self-host
@@ -179,7 +179,7 @@
     (assert-equal "hello world" result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Format Edge Cases
+;;; Format Edge Cases
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-tilde-t-self-host
@@ -188,7 +188,16 @@
   :tags '(:format :tilde-t :self-host)
   (let ((cl-cc/vm::*vm-self-host-mode* t))
     ;; ~4T should tab to column 4
-    (assert-equal "   x" (fmt-run "~4Tx"))))
+    (assert-equal "    x" (fmt-run "~4Tx"))))
+
+(deftest format-tab-after-rendered-directives-self-host
+  "~T should use the current output column after other native directives."
+  :timeout 30
+  :tags '(:format :tilde-t :self-host)
+  (let ((cl-cc/vm::*vm-self-host-mode* t))
+    (assert-equal "12  !" (fmt-run "~D~4T!" 12))
+    (assert-equal "A   !" (fmt-run "~C~4T!" #\A))
+    (assert-equal "1.5   !" (fmt-run "~F~6T!" 1.5))))
 
 (deftest format-tilde-p-self-host
   "~P should pluralize without host CL."
@@ -204,6 +213,16 @@
   :tags '(:format :tilde-c :self-host)
   (let ((cl-cc/vm::*vm-self-host-mode* t))
     (assert-equal "A" (fmt-run "~C" #\A))))
+
+(deftest format-case-conversion-self-host
+  "~(...~) should apply ANSI case conversion without host CL fallback."
+  :timeout 30
+  :tags '(:format :case-conversion :self-host)
+  (let ((cl-cc/vm::*vm-self-host-mode* t))
+    (assert-equal "hello world" (fmt-run "~(~A~)" "HELLO WORLD"))
+    (assert-equal "Hello World" (fmt-run "~:(~A~)" "hello world"))
+    (assert-equal "Hello world" (fmt-run "~@(~A~)" "hello world"))
+    (assert-equal "HELLO WORLD" (fmt-run "~:@(~A~)" "hello world"))))
 
 (deftest format-at-modifier-self-host
   "~@D should always print sign."
@@ -221,7 +240,7 @@
     (assert-equal "1,000" (fmt-run "~:D" 1000))))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Native Binary FORMAT (format not available in native)
+;;; Native Binary FORMAT
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest format-native-binary-e2e

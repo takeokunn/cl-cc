@@ -1,10 +1,9 @@
 ;;;; tests/conformance/native-io-conformance-tests.lisp
 ;;;; ANSI CL Native I/O / Stream / Pathname Conformance Tests
-;;;; (expected-fail for known gaps)
 ;;;;
-;;;; Tests I/O operations that work in the VM interpreter (via host SBCL)
-;;;; but are NOT available in native x86-64 binaries. Per ANSI CL, these
-;;;; must work regardless of compilation mode.
+;;;; Tests I/O operations that must work across VM and native execution. These
+;;;; are tagged :e2e and remain outside the canonical fast plan while native
+;;;; binary parity is validated end-to-end.
 
 (in-package :cl-cc/test)
 
@@ -24,7 +23,7 @@
   (cl-cc:run-string form-string))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: String Streams
+;;; String Streams
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-string-output-stream
@@ -57,7 +56,7 @@
     (assert-eql #\h result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Character I/O
+;;; Character I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-read-char-write-char
@@ -92,7 +91,7 @@
     (assert-equal '(#\h #\e) result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Line I/O
+;;; Line I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-read-line
@@ -115,7 +114,7 @@
     (assert-equal (format nil "hello~%") result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Print Functions
+;;; Print Functions
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-print-prin1-princ
@@ -137,7 +136,7 @@
     (assert-equal "2A" result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Stream Predicates
+;;; Stream Predicates
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-stream-predicates
@@ -153,7 +152,7 @@
     (assert-equal '(t t nil t) result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: File I/O
+;;; File I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-open-close
@@ -201,7 +200,7 @@
     (assert-= 6 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Stream Control
+;;; Stream Control
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-force-finish-output
@@ -226,7 +225,7 @@
     (assert-equal '(t #\h t) result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Pathname Operations
+;;; Pathname Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-make-pathname
@@ -291,7 +290,7 @@
     (assert-equal :deleted result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: File System Operations
+;;; File System Operations
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-directory-listing
@@ -319,7 +318,7 @@
     (assert-true result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: LOAD (loading files at runtime)
+;;; LOAD (loading files at runtime)
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-load-file
@@ -339,7 +338,7 @@
     (assert-= 42 result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Compound Streams
+;;; Compound Streams
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-broadcast-stream
@@ -382,7 +381,7 @@
     (assert-equal '(#\h #\e "he") result)))
 
 ;;; ──────────────────────────────────────────────────────────────────────
-;;; Expected-Fail: Sequence I/O
+;;; Sequence I/O
 ;;; ──────────────────────────────────────────────────────────────────────
 
 (deftest io-read-sequence

@@ -47,6 +47,17 @@ Stores into *php-trait-applications* and copies method slot-defs from
             (setf (getf record :methods)
                   (append (getf record :methods) methods))))))))
 
+(defun %php-record-class-trait-uses (class-name slots)
+  "Record every trait-use metadata slot found in SLOTS for CLASS-NAME."
+  (dolist (slot slots)
+    (when (ast-slot-def-p slot)
+      (let ((imports (ast-imports slot)))
+        (when (getf imports :php-trait-use)
+          (%php-apply-traits class-name
+                             (getf imports :php-trait-names)
+                             (getf imports :php-insteadof)
+                             (getf imports :php-alias)))))))
+
 ;;; ─── Conflict Resolution Block Parser ───────────────────────────────────────
 ;;;
 ;;; Parses the optional `{ insteadof/as clauses }` block that follows a

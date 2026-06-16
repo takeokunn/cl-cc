@@ -23,21 +23,19 @@
     result))
 
 (defun %js-array-to-sorted (arr &optional compare-fn)
-  "Array.prototype.toSorted([compareFn]) — return sorted copy."
-  (let ((result (copy-seq arr)))
-    (if (and compare-fn (not (eq compare-fn +js-undefined+)))
-        (sort result (lambda (a b) (%js-truthy (%js-funcall compare-fn a b))))
-        (sort result (lambda (a b) (string< (%js-to-string a) (%js-to-string b)))))
-    result))
+  "Array.prototype.toSorted([compareFn]) — return sorted copy (stable, non-mutating)."
+  (stable-sort (copy-seq arr) (%js-sort-comparator compare-fn)))
 
-(defun %js-array-to-spliced (arr start delete-count &rest items)
+(defun %js-array-to-spliced (arr start &optional (delete-count nil delete-count-supplied-p) &rest items)
   "Array.prototype.toSpliced(start, deleteCount, ...items) — return modified copy."
   (let* ((n (length arr))
-         (st (if (< start 0) (max 0 (+ n start)) (min start n)))
-         (dc (max 0 (min (or delete-count n) (- n st))))
+         (st (%js-array-relative-start start n))
+         (dc (if delete-count-supplied-p
+                 (max 0 (min (%js-array-to-integer delete-count) (- n st)))
+                 (- n st)))
          (before (subseq arr 0 st))
          (after  (subseq arr (+ st dc)))
-         (result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+         (result (%js-make-vec)))
     (loop for x across before do (vector-push-extend x result))
     (dolist (item items) (vector-push-extend item result))
     (loop for x across after  do (vector-push-extend x result))
@@ -46,28 +44,31 @@
 (defun %js-array-with (arr index value)
   "Array.prototype.with(index, value) — return copy with element replaced."
   (let* ((n (length arr))
-         (idx (if (< index 0) (+ n index) index))
+         (i (%js-array-to-integer index))
+         (idx (if (< i 0) (+ n i) i))
          (result (copy-seq arr)))
-    (when (and (>= idx 0) (< idx n))
-      (setf (aref result idx) value))
+    (unless (and (>= idx 0) (< idx n))
+      (%js-throw
+       (%js-make-error-instance
+        *js-range-error-class*
+        (format nil "Invalid array index ~A" index))))
+    (setf (aref result idx) value)
     result))
 
-(defun %js-array-find-last-index (arr pred)
-  "Array.prototype.findLastIndex(pred) — index of last matching element, or -1."
-  (loop for i from (1- (length arr)) downto 0
-        when (%js-truthy (%js-funcall pred (aref arr i) i arr))
-          return i
-        finally (return -1)))
+(define-js-array-find-index %js-array-find-last-index
+  :reverse
+  "Array.prototype.findLastIndex(pred) -- index of last matching element, or -1.")
 
 (defun %js-array-find-last (arr pred)
-  "Array.prototype.findLast(pred) — last element satisfying PRED, or undefined."
+  "Array.prototype.findLast(pred) -- last element satisfying PRED, or undefined."
   (let ((idx (%js-array-find-last-index arr pred)))
     (if (= idx -1) +js-undefined+ (aref arr idx))))
 
 (defun %js-array-at (arr index)
   "Array.prototype.at(index) — supports negative indices."
   (let* ((n (length arr))
-         (i (if (< index 0) (+ n index) index)))
+         (idx (%js-array-to-integer index))
+         (i (if (< idx 0) (+ n idx) idx)))
     (if (and (>= i 0) (< i n))
         (aref arr i)
         +js-undefined+)))
@@ -93,9 +94,7 @@
           do (multiple-value-bind (bucket found) (gethash key result)
                (if found
                    (vector-push-extend el bucket)
-                   (let ((new-bucket (make-array 1 :element-type t :adjustable t :fill-pointer 1
-                                                   :initial-element el)))
-                     (setf (gethash key result) new-bucket)))))
+                   (setf (gethash key result) (%js-make-array el)))))
     result))
 
 (defun %js-array-group-to-map (arr key-fn)
@@ -106,7 +105,6 @@
           for key = (%js-funcall key-fn el i arr)
           do (let ((bucket (%js-map-get result key)))
                (if (eq bucket +js-undefined+)
-                   (%js-map-set result key (make-array 1 :element-type t :adjustable t
-                                                         :fill-pointer 1 :initial-element el))
+                   (%js-map-set result key (%js-make-array el))
                    (vector-push-extend el bucket))))
     result))

@@ -162,11 +162,11 @@ when their old-space header was marked by the major collector."
           (let ((h (rt-heap-object-header heap addr)))
             (cond
               ((header-forwarding-p h) (incf addr 1))
-              ((or (not (integerp h)) (zerop (header-size h))) (return))
+              ((or (not (integerp h)) (zerop (rt-header-size h))) (return))
               (t
                (when (funcall predicate h)
                  (setf (gethash addr marked-set) t))
-               (incf addr (header-size h))))))
+               (incf addr (rt-header-size h))))))
   marked-set)
 
 (defun %rt-gc-build-marked-set (heap)
@@ -283,20 +283,6 @@ sweep clears those bits."
   (%rt-gc-process-soft-references heap marked-set)
   (%rt-gc-process-weak-references heap marked-set)
   (%rt-gc-process-weak-hash-tables heap marked-set))
-
-;;; ------------------------------------------------------------
-;;; Finalizer Support (FR-337, FR-459, FR-460, FR-471)
-;;; ------------------------------------------------------------
-
-(defun rt-register-stream-finalizer (stream-obj)
-  "Register a finalizer that closes STREAM-OBJ when it becomes unreachable.
-   This is a safety net; explicit WITH-OPEN-FILE is preferred."
-  (rt-register-finalizer stream-obj
-                         (lambda (obj)
-                           (declare (ignore obj))
-                            (format *error-output*
-                                    "WARNING: GC finalized unclosed stream ~S~%"
-                                    stream-obj))))
 
 ;;; ------------------------------------------------------------
 ;;; Weak Hash Table Support (FR-448, FR-449)

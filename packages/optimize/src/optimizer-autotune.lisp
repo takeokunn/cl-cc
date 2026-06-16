@@ -117,7 +117,3 @@ With *AUTOTUNE-SIMD-ENABLED* NIL this is a no-op."
                                   inst))
                             tiled)))
           (if changed out tiled)))))
-
-(unless (fboundp 'opt-pass-autotune-simd)
-  (defun opt-pass-autotune-simd (instructions)
-    instructions))

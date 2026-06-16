@@ -2,77 +2,86 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; Prolog — Solver and Query Interface
 ;;;
-;;; Contains: solve-goal, solve-conjunction, subst-for-eval,
-;;; eval-lisp-condition, %solve-goal-with-cut, %collect-query-solutions,
+;;; Contains: solve-goal, solve-conjunction, %with-prolog-cut-handler,
+;;; %solve-goal-with-cut, %collect-query-solutions,
 ;;; query-all/one/first-n.
 ;;;
-;;; Core terms/unification live in prolog.lisp. Built-in predicate dispatch and
-;;; rule application helpers live in prolog-builtins.lisp. Peephole rewriting
-;;; lives in prolog-peephole.lisp.
+;;; Core terms/unification live in prolog-unification.lisp. Built-in predicate
+;;; dispatch and Lisp-condition evaluation live in prolog-builtins.lisp. Rule
+;;; application helpers live here.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+(declaim (ftype function solve-goal solve-conjunction
+                %solve-prolog-cut-handler
+                %solve-prolog-rule
+                %goal-operator-and-args
+                %bare-cut-goal-p
+                %solve-registered-rules))
+
+(defun %solve-prolog-cut-handler (thunk)
+  "Call THUNK and convert PROLOG-CUT into the keyword :CUT."
+  (handler-case
+      (funcall thunk)
+    (prolog-cut ()
+      :cut)))
+
+(defun %goal-operator-and-args (goal)
+  "Return GOAL's predicate symbol and argument list."
+  (values (car goal) (cdr goal)))
+
+(defun %bare-cut-goal-p (goal)
+  "Return true when GOAL is the bare cut atom !."
+  (and (symbolp goal)
+       (string= (symbol-name goal) "!")))
+
+(defun %solve-registered-rules (predicate args env k)
+  "Try every registered rule for PREDICATE with ARGS."
+  (dolist (rule (gethash predicate *prolog-rules*))
+    (when (eq (%solve-prolog-rule rule args env k) :cut)
+      (return-from %solve-registered-rules :cut))))
 
 (defun solve-goal (goal env k)
   "Solve GOAL in environment ENV, call continuation K with each solution.
-   GOAL can be a prolog-goal object, a list (predicate arg1 arg2 ...), or a
-   bare atom like ! (cut).
+   GOAL should be a list (predicate arg1 arg2 ...) or a bare atom like ! (cut).
    K is a continuation function that receives the new environment."
-  (when (%atomic-cut-goal-p goal)
-    (funcall k env)
-    (signal 'prolog-cut)
-    (return-from solve-goal))
-  (multiple-value-bind (predicate args)
-      (%goal-predicate-and-args goal)
-    (when (%invoke-builtin-goal predicate args env k)
-      (return-from solve-goal))
-    (dolist (rule (gethash predicate *prolog-rules*))
-      (when (eq (%solve-prolog-rule rule args env k) :cut)
-        (return-from solve-goal)))))
+  (cond
+    ((%bare-cut-goal-p goal)
+     (funcall k env)
+     (signal 'prolog-cut)
+     (return-from solve-goal))
+    (t
+     (multiple-value-bind (predicate args) (%goal-operator-and-args goal)
+       (when (%invoke-builtin-goal predicate args env k)
+         (return-from solve-goal))
+       (when (eq (%solve-registered-rules predicate args env k) :cut)
+         (return-from solve-goal))))))
 
 (defun solve-conjunction (goals env k)
   "Solve a conjunction of goals (AND). Call K when all goals succeed."
   (if (null goals)
       (funcall k env)
-      (handler-case
-          (let ((result (solve-goal (car goals) env
-                                    (lambda (new-env)
-                                      (solve-conjunction (cdr goals) new-env k)))))
-            (when (eq result :cut)
-              (return-from solve-conjunction :cut)))
-        (prolog-cut ()
-          (return-from solve-conjunction :cut)))))
+      (%solve-prolog-cut-handler
+       (lambda ()
+         (solve-goal (car goals) env
+                     (lambda (new-env)
+                       (solve-conjunction (cdr goals) new-env k)))))))
 
-(defun subst-for-eval (form env)
-  "Like substitute-variables, but wraps substituted non-self-evaluating
-   symbols in (quote ...) so they survive CL eval, and skips (quote ...) forms."
-  (cond
-    ((logic-var-p form)
-     (let ((val (logic-substitute form env)))
-       (if (logic-var-p val)
-           val
-           (if (and (symbolp val) val (not (keywordp val)))
-               `(quote ,val)
-               val))))
-    ((and (consp form) (eq (car form) 'quote))
-     form)
-    ((consp form)
-     (cons (subst-for-eval (car form) env)
-           (subst-for-eval (cdr form) env)))
-    (t form)))
-
-(defun eval-lisp-condition (condition env)
-  "Evaluate a Lisp condition embedded in Prolog rules."
-  (handler-case
-      (let ((substituted (subst-for-eval condition env)))
-        (typecase substituted
-          (cons (our-eval substituted))
-          (t substituted)))
-    (error () nil)))
+(defun %solve-prolog-rule (rule args env k)
+  "Attempt to solve RULE against ARGS and call K for each matching environment."
+  (let* ((fresh-rule (rename-variables rule))
+         (head (rule-head fresh-rule))
+         (body (rule-body fresh-rule))
+         (new-env (unify args (cdr head) env)))
+    (unless (unify-failed-p new-env)
+      (%solve-prolog-cut-handler
+       (lambda ()
+         (if body
+             (solve-conjunction body new-env k)
+             (funcall k new-env)))))))
 
 (defun %solve-goal-with-cut (goal continuation)
   "Run GOAL with CONTINUATION and swallow PROLOG-CUT exits."
-  (handler-case
-      (solve-goal goal nil continuation)
-    (prolog-cut ())))
+  (%solve-prolog-cut-handler (lambda () (solve-goal goal nil continuation))))
 
 (defun %collect-query-solutions (goal &optional limit)
   "Collect substituted solutions for GOAL, optionally stopping after LIMIT."
@@ -82,7 +91,7 @@
      goal
      (lambda (env)
        (when (or (null limit) (< count limit))
-         (push (substitute-variables goal env) solutions)
+         (push (logic-substitute goal env) solutions)
          (incf count)
          (when (and limit (>= count limit))
            (signal 'prolog-cut)))))

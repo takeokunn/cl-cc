@@ -18,37 +18,51 @@
     ((or (eq test 'equalp) (eq test #'equalp)) 'equalp)
     (t test)))
 
+(defun %parse-persistent-map-args (args)
+  (if (and args (eq (first args) :test))
+      (values (%persistent-map-test-name (second args)) (cddr args))
+      (values 'eql args)))
+
+(defun %ensure-even-key-values (operation entries)
+  (when (oddp (length entries))
+    (error "~A: expected an even number of key/value entries, got ~D"
+           operation
+           (length entries)))
+  entries)
+
+(defun %ensure-persistent-map (object operation)
+  (unless (persistent-map-p object)
+    (error "~A: expected persistent-map, got ~S" operation object))
+  object)
+
 (defun %copy-hash-table (table &key test)
   (let ((copy (make-hash-table :test (or test (hash-table-test table)))))
-    (maphash (lambda (k v) (setf (gethash k copy) v)) table)
+    (loop for key being the hash-keys of table using (hash-value value)
+          do (setf (gethash key copy) value))
     copy))
 
 (defun persistent-map (&rest args)
   "Create a persistent hash map. Accepts optional leading :TEST TEST."
-  (let ((test 'eql))
-    (when (and args (eq (first args) :test))
-      (setf test (%persistent-map-test-name (second args))
-            args (cddr args)))
+  (multiple-value-bind (test entries) (%parse-persistent-map-args args)
+    (%ensure-even-key-values "persistent-map" entries)
     (let ((table (make-hash-table :test test)))
-      (loop for (k v) on args by #'cddr
-            while k
-            do (setf (gethash k table) v))
+      (loop for (key value) on entries by #'cddr
+            do (setf (gethash key table) value))
       (%make-persistent-map table (hash-table-count table) test))))
 
-(defun pmap-assoc (&rest args)
+(defun pmap-assoc (m k v)
   "Persistent-map assoc: (PMAP-ASSOC MAP KEY VALUE) returns new map with association."
-  (if (and (first args) (persistent-map-p (first args)) (>= (length args) 3))
-      (destructuring-bind (m k v &rest ignored) args
-        (declare (ignore ignored))
-        (let ((table (%copy-hash-table (persistent-map-table m)
-                                       :test (persistent-map-test m))))
-          (setf (gethash k table) v)
-          (%make-persistent-map table (hash-table-count table)
-                                (persistent-map-test m))))
-      (apply #'cl:assoc args)))
+  (%ensure-persistent-map m "pmap-assoc")
+  (let ((table (%copy-hash-table (persistent-map-table m)
+                                 :test (persistent-map-test m))))
+    (setf (gethash k table) v)
+    (%make-persistent-map table
+                          (hash-table-count table)
+                          (persistent-map-test m))))
 
 (defun dissoc (m k)
   "Return a persistent map like M without K."
+  (%ensure-persistent-map m "dissoc")
   (let ((table (%copy-hash-table (persistent-map-table m)
                                  :test (persistent-map-test m))))
     (remhash k table)
@@ -56,13 +70,12 @@
                           (persistent-map-test m))))
 
 (defun pmap-get (m k &optional default)
-  "Persistent-map lookup when M is a persistent map; otherwise CL:GET."
-  (if (persistent-map-p m)
-      (multiple-value-bind (value found-p) (gethash k (persistent-map-table m))
-        (if found-p
-            (values value t)
-            (values default nil)))
-      (cl:get m k default)))
+  "Persistent-map lookup for key K in M."
+  (%ensure-persistent-map m "pmap-get")
+  (multiple-value-bind (value found-p) (gethash k (persistent-map-table m))
+    (if found-p
+        (values value t)
+        (values default nil))))
 
 (defun pget (m k &optional default)
   (pmap-get m k default))
@@ -195,17 +208,71 @@
        result))
     (t (error "persistent!: expected transient collection, got ~S" tc))))
 
-(defstruct lazy-seq (thunk nil :type function) (realized nil) (cached-first nil) (cached-rest nil))
+(defstruct (lazy-seq (:constructor make-lazy-seq (&key thunk)))
+  (thunk (lambda () nil) :type function)
+  (realized nil :type boolean)
+  cached-value)
+
 (defmacro lazy-seq (&body body)
-  `(make-lazy-seq :thunk ,(if (and (= (length body) 1)
-                                   (consp (first body))
-                                   (eq (first (first body)) 'lambda))
-                              (first body)
-                              `(lambda () ,@body))))
+  (let ((thunk (if (and (= (length body) 1)
+                        (consp (first body))
+                        (eq (first (first body)) 'lambda))
+                   (first body)
+                   `(lambda () ,@body))))
+    `(make-lazy-seq :thunk ,thunk)))
+
+(defun %lazy-realize (ls)
+  (unless (lazy-seq-realized ls)
+    (setf (lazy-seq-cached-value ls) (funcall (lazy-seq-thunk ls))
+          (lazy-seq-realized ls) t))
+  (lazy-seq-cached-value ls))
+
 (defun lazy-force (ls)
-  (when ls (unless (lazy-seq-realized ls) (let ((r (funcall (lazy-seq-thunk ls)))) (if (consp r) (setf (lazy-seq-cached-first ls) (car r) (lazy-seq-cached-rest ls) (cdr r)) (setf (lazy-seq-cached-first ls) nil (lazy-seq-cached-rest ls) nil)) (setf (lazy-seq-realized ls) t))) (if (lazy-seq-cached-first ls) (cons (lazy-seq-cached-first ls) (lazy-seq-cached-rest ls)) nil)))
-(defun lazy-take-seq (n ls) (loop repeat n for p = (lazy-force ls) while p collect (car p) do (setf ls (cdr p))))
-(defun lazy-map (f ls) (lazy-seq (let ((p (lazy-force ls))) (when p (cons (funcall f (car p)) (lazy-map f (cdr p)))))))
-(defun lazy-filter (pred ls) (lazy-seq (loop for p = (lazy-force ls) while p when (funcall pred (car p)) return (cons (car p) (lazy-filter pred (cdr p))) do (setf ls (cdr ls)))))
-(defun iterate (f init) (lazy-seq (cons init (iterate f (funcall f init)))))
-(defun lazy-range (&key (start 0) end (step 1)) (if (and end (>= start end)) nil (lazy-seq (cons start (lazy-range :start (+ start step) :end end :step step)))))
+  (when ls
+    (let ((value (%lazy-realize ls)))
+      (when (consp value)
+        (cons (car value) (cdr value))))))
+
+(defun lazy-take-seq (n ls)
+  (loop repeat n
+        for pair = (lazy-force ls)
+        while pair
+        collect (car pair)
+        do (setf ls (cdr pair))))
+
+(defun lazy-map (f ls)
+  (lazy-seq
+    (let ((pair (lazy-force ls)))
+      (when pair
+        (cons (funcall f (car pair))
+              (lazy-map f (cdr pair)))))))
+
+(defun lazy-filter (pred ls)
+  (lazy-seq
+    (loop with cursor = ls
+          for pair = (lazy-force cursor)
+          while pair
+          when (funcall pred (car pair))
+            return (cons (car pair)
+                         (lazy-filter pred (cdr pair)))
+          do (setf cursor (cdr pair)))))
+
+(defun iterate (f init)
+  (lazy-seq
+    (cons init (iterate f (funcall f init)))))
+
+(defun %lazy-range-finished-p (start end step)
+  (and end
+       (if (plusp step)
+           (>= start end)
+           (<= start end))))
+
+(defun lazy-range (&key (start 0) end (step 1))
+  (when (zerop step)
+    (error "lazy-range: step must not be zero"))
+  (unless (%lazy-range-finished-p start end step)
+    (lazy-seq
+      (cons start
+            (lazy-range :start (+ start step)
+                        :end end
+                        :step step)))))

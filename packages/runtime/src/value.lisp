@@ -97,8 +97,7 @@
           +compressed-heap-region-bytes+ +compressed-heap-region-words+
           *compressed-pointers-enabled* *heap-base-address*
           val-compressed-pointer-p compressed-pointer-enabled-p
-          encode-compressed-pointer decode-compressed-pointer
-          val-encode-pointer val-decode-pointer)
+          encode-compressed-pointer decode-compressed-pointer)
         :cl-cc/runtime)
 
 ;;; 3-bit pointer sub-tags (shifted to bits[50:48])

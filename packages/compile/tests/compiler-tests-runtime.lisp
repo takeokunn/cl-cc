@@ -60,6 +60,7 @@
           ("apply-builtin"    6 "(apply (quote +) (list 1 2 3))")
           ("apply-user"       7 "(defun my-add3 (a b) (+ a b)) (apply (quote my-add3) (list 3 4))")
           ("apply-lambda"     6 "(apply (lambda (a b c) (+ a b c)) (list 1 2 3))")
+          ("funcall-function-lambda" 42 "(funcall #'(lambda (x) (+ x 1)) 41)")
           ("funcall-hash-ref" 7 "(funcall #'+ 3 4)"))
   (expected form)
   (assert-= expected (run-string form :stdlib t)))

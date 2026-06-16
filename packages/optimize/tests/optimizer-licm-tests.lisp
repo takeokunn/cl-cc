@@ -8,6 +8,11 @@
 (in-package :cl-cc/test)
 (in-suite cl-cc-unit-suite)
 
+(defmacro assert-licm-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 ;;; ─── opt-inst-loop-invariant-p ───────────────────────────────────────────
 
 (deftest-each licm-invariant-p-cases
@@ -21,9 +26,9 @@
         (def-sites     (make-hash-table :test #'eq)))
     (when def-reg
       (setf (gethash def-reg loop-def-regs) t))
-    (if expected
-        (assert-true  (cl-cc/optimize::opt-inst-loop-invariant-p inst loop-def-regs loop-members def-sites))
-        (assert-false (cl-cc/optimize::opt-inst-loop-invariant-p inst loop-def-regs loop-members def-sites)))))
+    (assert-licm-boolean-case expected
+      (assert-true  (cl-cc/optimize::opt-inst-loop-invariant-p inst loop-def-regs loop-members def-sites))
+      (assert-false (cl-cc/optimize::opt-inst-loop-invariant-p inst loop-def-regs loop-members def-sites)))))
 
 ;;; ─── %opt-pre-expression-key ─────────────────────────────────────────────
 
@@ -132,9 +137,9 @@
           ("in-neither" nil nil  nil))
   (in1 in2 expected)
   (let ((preds (%pre-envs-with-key '(:const 1) in1 in2)))
-    (if expected
-        (assert-true  (cl-cc/optimize::%opt-pre-available-in-any-p '(:const 1) preds))
-        (assert-false (cl-cc/optimize::%opt-pre-available-in-any-p '(:const 1) preds)))))
+    (assert-licm-boolean-case expected
+      (assert-true  (cl-cc/optimize::%opt-pre-available-in-any-p '(:const 1) preds))
+      (assert-false (cl-cc/optimize::%opt-pre-available-in-any-p '(:const 1) preds)))))
 
 ;;; ─── %licm-collect-def-sites ────────────────────────────────────────────
 

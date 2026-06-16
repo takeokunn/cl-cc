@@ -400,7 +400,6 @@ MOP extensions, compiler macros, GC tuning, parallel compilation, error messages
   - `(compile name &optional definition)` — 単一関数のコンパイル
   - `(disassemble fn)` — コンパイル済み関数の逆アセンブル出力
   - `*compile-verbose*` / `*compile-print*` — コンパイル時出力制御
-  - `(with-compilation-unit (:override t) body)` — 警告を集約してから出力
   - Environment オブジェクト: `(environment-p env)` / `(make-null-environment)`
   - `(variable-information name env)` → `(values kind local-p decls)`
   - `(function-information name env)` → `(values kind local-p decls)`

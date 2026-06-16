@@ -19,6 +19,14 @@
 ;;;;   cl-cc/expand   — (:use :cl :cl-cc/bootstrap)       [references our-eval, our-load, run-string-repl]
 ;;;;   cl-cc          — (:use ... :cl-cc/bootstrap)       [re-exports all]
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Selfhost code can consult the umbrella package name before the full
+  ;; umbrella definition is loaded. Create a minimal placeholder early so
+  ;; package lookups succeed during bootstrap and Prolog loading.
+  (unless (find-package :cl-cc)
+    (defpackage :cl-cc
+      (:use :cl))))
+
 (defpackage :cl-cc/bootstrap
   (:use :cl)
   (:export

@@ -108,7 +108,6 @@
 (defun rt-expt (base exp) (expt base exp))
 (defun rt-sqrt (x) (sqrt x))
 (defun rt-exp (x) (exp x))
-(defun rt-log (x) (log x))
 (defun rt-sin (x) (sin x))
 (defun rt-cos (x) (cos x))
 (defun rt-tan (x) (tan x))

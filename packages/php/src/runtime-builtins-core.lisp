@@ -24,6 +24,44 @@
   (declare (ignore value))
   +php-null+)
 
+(defun %php-compact (&rest names)
+  "Fallback for dynamic compact(); static string names are lowered by parser."
+  (declare (ignore names))
+  (%php-array))
+
+(defun %php-extract (array &rest options)
+  "Fallback for dynamic extract(); static array literals are lowered by parser."
+  (declare (ignore array options))
+  0)
+
+(defun %php-opcache-is-script-cached-in-file-cache (filename)
+  "PHP 8.5 opcache_is_script_cached_in_file_cache().
+
+cl-cc does not maintain an OPCache file cache, so scripts are never reported as
+cached by this runtime helper."
+  (declare (ignore filename))
+  nil)
+
+(defvar *php-curl-persistent-share-handles* (make-hash-table :test #'equal)
+  "Persistent cURL share handles keyed by user-provided identifier.")
+
+(defun %php-curl-share-init-persistent (&optional (id "default"))
+  "PHP 8.5 curl_share_init_persistent() helper.
+
+cl-cc models the persistent share handle as a stable PHP object-like
+hash-table. Repeated calls with the same ID return the same handle."
+  (let ((key (%php-stringify id)))
+    (multiple-value-bind (handle foundp)
+        (gethash key *php-curl-persistent-share-handles*)
+      (if foundp
+          handle
+          (let ((new-handle (make-hash-table :test #'equal)))
+            (setf (gethash "__class__" new-handle) "CurlSharePersistentHandle"
+                  (gethash "id" new-handle) key
+                  (gethash "persistent" new-handle) t)
+            (setf (gethash key *php-curl-persistent-share-handles*) new-handle)
+            new-handle)))))
+
 (defun %php-gettype (value)
   "Return VALUE's PHP type name as a string."
   ;; (%php-gettype 1) => "integer"
@@ -57,6 +95,75 @@
   (check-type array hash-table)
   (loop for key in (%php-array-ordered-keys array)
         collect (gethash key array)))
+
+(defvar *php-missing-call-arg* (list :php-missing-call-arg))
+
+(defun %php-call-args-with-named-spread
+    (fn-name param-names default-present default-values &rest descriptors)
+  "Return a runtime positional argument list for calls that mix ...spread and
+named arguments when the spread width is not statically known."
+  (let ((positional nil)
+        (named (make-hash-table :test #'equal))
+        (seen-named nil)
+        (highest-named-index -1))
+    (labels ((param-index (name)
+               (position name param-names :test #'string-equal))
+             (push-positional (value)
+               (when seen-named
+                 (error "PHP positional argument after named argument in call to ~A"
+                        fn-name))
+               (push value positional)))
+      (dolist (descriptor descriptors)
+        (destructuring-bind (kind &rest values) descriptor
+          (case kind
+            (:pos
+             (push-positional (first values)))
+            (:spread
+             (when seen-named
+               (error "PHP spread argument after named argument in call to ~A"
+                      fn-name))
+             (dolist (value (%php-array-values-list (first values)))
+               (push value positional)))
+            (:named
+             (setf seen-named t)
+             (destructuring-bind (name value) values
+               (let ((index (param-index name)))
+                 (unless index
+                   (error "Unknown named argument ~A for PHP function ~A"
+                          name fn-name))
+                 (multiple-value-bind (old present-p) (gethash name named)
+                   (declare (ignore old))
+                   (when present-p
+                     (error "Duplicate named argument ~A for PHP function ~A"
+                            name fn-name)))
+                 (setf (gethash name named) value
+                       highest-named-index (max highest-named-index index)))))
+            (otherwise
+              (error "Unknown PHP call argument descriptor ~S" kind)))))
+      (let* ((positional (nreverse positional))
+             (positional-count (length positional))
+             (result-size (max positional-count (1+ highest-named-index)))
+             (result (make-array result-size
+                                 :initial-element *php-missing-call-arg*)))
+        (loop for value in positional
+              for index from 0
+              do (setf (aref result index) value))
+        (maphash (lambda (name value)
+                   (let ((index (param-index name)))
+                     (when (< index positional-count)
+                       (error "Duplicate PHP argument for parameter ~A in call to ~A"
+                              name fn-name))
+                     (setf (aref result index) value)))
+                 named)
+        (loop for index below result-size
+              for value = (aref result index)
+              collect (cond
+                        ((not (eq value *php-missing-call-arg*)) value)
+                        ((nth index default-present)
+                         (nth index default-values))
+                        (t
+                         (error "Missing PHP argument ~A for function ~A"
+                                (nth index param-names) fn-name))))))))
 
 (defun %php-list-to-array (values)
   "Return a PHP ordered array containing VALUES at numeric keys."

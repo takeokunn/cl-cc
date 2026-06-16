@@ -48,12 +48,13 @@
                (executable-forms (if docstring (rest body-forms) body-forms))
                (block-body (list (lower-sexp-to-ast (list* 'block name executable-forms)))))
           (if (lambda-list-has-extended-p raw-params)
-              (multiple-value-bind (required optional rest-param key-params)
+              (multiple-value-bind (required optional rest-param key-params aux-params)
                   (%lower-extended-params raw-params)
                 (make-ast-defun :name name
                                  :params (%apply-type-bindings-to-params required type-bindings)
                                  :optional-params optional :rest-param rest-param
-                                 :key-params key-params   :body block-body
+                                 :key-params key-params
+                                 :body (%wrap-body-with-aux-bindings aux-params block-body sf sl sc)
                                  :declarations declarations
                                  :documentation docstring
                                  :source-file sf :source-line sl :source-column sc))
@@ -178,12 +179,73 @@
      :clauses clauses
      :source-file sf :source-line sl :source-column sc)))
 
-;;; ── Quote / The / Funcall ────────────────────────────────────────────────────
+;;; ── Quote / Quasiquote / The / Funcall ───────────────────────────────────────
 
 (define-list-lowerer (quote) (node sf sl sc)
   (unless (= (length node) 2) (error "quote takes exactly one argument"))
   (make-ast-quote :value (second node)
                   :source-file sf :source-line sl :source-column sc))
+
+(defun %qq-symbol-p (symbol name)
+  (and (symbolp symbol) (string= (symbol-name symbol) name)))
+
+(defun %qq-form-p (form name)
+  (and (consp form) (%qq-symbol-p (first form) name)))
+
+(defun %expand-quasiquote-cons (form depth)
+  (cond
+    ((null form) (list 'quote nil))
+    ((consp form)
+     (let ((head (first form)))
+       (if (and (zerop depth) (%qq-form-p head "UNQUOTE-SPLICING"))
+           (progn
+             (unless (= (length head) 2)
+               (error "unquote-splicing takes exactly one argument"))
+             (list 'append (second head) (%expand-quasiquote-cons (rest form) depth)))
+           (list 'cons
+                 (%expand-quasiquote head depth)
+                 (%expand-quasiquote-cons (rest form) depth)))))
+    (t (%expand-quasiquote form depth))))
+
+(defun %expand-quasiquote-vector (vector depth)
+  (list 'coerce
+        (%expand-quasiquote-cons (coerce vector 'list) depth)
+        (list 'quote 'vector)))
+
+(defun %expand-quasiquote (form &optional (depth 0))
+  (cond
+    ((%qq-form-p form "UNQUOTE")
+     (unless (= (length form) 2)
+       (error "unquote takes exactly one argument"))
+     (if (zerop depth)
+         (second form)
+         (list 'cons
+               (list 'quote 'unquote)
+               (%expand-quasiquote-cons (list (second form)) (1- depth)))))
+    ((%qq-form-p form "UNQUOTE-SPLICING")
+     (if (zerop depth)
+         (error "unquote-splicing is only valid inside a quasiquoted list")
+         (progn
+           (unless (= (length form) 2)
+             (error "unquote-splicing takes exactly one argument"))
+           (list 'cons
+                 (list 'quote 'unquote-splicing)
+                 (%expand-quasiquote-cons (list (second form)) (1- depth))))))
+    ((%qq-form-p form "QUASIQUOTE")
+     (unless (= (length form) 2)
+       (error "quasiquote takes exactly one argument"))
+     (list 'cons
+           (list 'quote 'quasiquote)
+           (%expand-quasiquote-cons (list (second form)) (1+ depth))))
+    ((consp form) (%expand-quasiquote-cons form depth))
+    ((vectorp form) (%expand-quasiquote-vector form depth))
+    (t (list 'quote form))))
+
+(define-list-lowerer (quasiquote) (node sf sl sc)
+  (declare (ignore sf sl sc))
+  (unless (= (length node) 2) (error "quasiquote takes exactly one argument"))
+  (let ((expanded (%expand-quasiquote (second node))))
+    (lower-sexp-to-ast expanded)))
 
 (define-list-lowerer (the) (node sf sl sc)
   (unless (= (length node) 3) (error "the requires type and value"))

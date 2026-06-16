@@ -45,12 +45,9 @@
   (let ((name (and (>= (length form) 2)
                    (%quoted-function-designator-symbol (second form)))))
     (if name
-        (let ((compiler-macro (lookup-compiler-macro name)))
-          (if compiler-macro
-              (let ((expanded (invoke-registered-expander compiler-macro form nil)))
-                (if (equal expanded form)
-                    (compiler-macroexpand-all (cons name (cddr form)))
-                    (compiler-macroexpand-all expanded)))
+        (let ((expanded (%expand-compiler-macro-call name form)))
+          (if expanded
+              (compiler-macroexpand-all expanded)
               (compiler-macroexpand-all (cons name (cddr form)))))
         (cons 'funcall (mapcar #'compiler-macroexpand-all (cdr form))))))
 

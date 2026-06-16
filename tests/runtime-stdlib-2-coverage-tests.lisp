@@ -2,7 +2,7 @@
 
 (defsuite runtime-stdlib-2-coverage-suite
   :description "Runtime-stdlib-2 FR evidence registry coverage tests"
-  :parent cl-cc-unit-suite)
+  :parent cl-cc-documentation-suite)
 
 (in-suite runtime-stdlib-2-coverage-suite)
 

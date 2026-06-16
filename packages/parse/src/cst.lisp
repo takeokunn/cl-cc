@@ -103,7 +103,7 @@
            (children (cst-interior-children node)))
        (case kind
          (:quote             (list 'quote (cst-to-sexp (first children))))
-         (:quasiquote        (list 'backquote (cst-to-sexp (first children))))
+         (:quasiquote        (list 'quasiquote (cst-to-sexp (first children))))
          (:unquote           (list 'unquote (cst-to-sexp (first children))))
          (:unquote-splicing  (list 'unquote-splicing (cst-to-sexp (first children))))
          (:function          (list 'function (cst-to-sexp (first children))))

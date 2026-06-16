@@ -3,10 +3,6 @@
 
 ;;; ─── Class Body Parser ───────────────────────────────────────────────────────
 
-(defun %php-skip-visibility-modifiers (stream)
-  "Consume zero or more visibility/modifier keywords (public, private, etc.)."
-  (nth-value 1 (%php-parse-visibility-modifiers stream)))
-
 (defun %php-parse-visibility-modifiers (stream)
   "Consume zero or more visibility/modifier keywords and return them as metadata."
   (let ((modifiers nil))
@@ -23,43 +19,79 @@
                            ;; than parsed with a bogus `static` type hint and left
                            ;; instance-allocated (which broke C::$prop and C::m()).
                            (and (eq type :T-TYPE) (eq val :STATIC)))))
-          do (push (php-peek-value stream) modifiers)
-             (setf stream (cdr stream)))
+          do (let ((type (php-peek-type stream))
+                   (val  (php-peek-value stream)))
+               (cond
+                 ;; PHP 8.4 asymmetric property visibility:
+                 ;; public private(set) Type $prop;
+                 ((and (eq type :T-KEYWORD)
+                       (member val '(:public :protected :private) :test #'eq)
+                       (cdr stream)
+                       (eq (php-peek-type (cdr stream)) :T-KEYWORD)
+                       (member (php-peek-value (cdr stream)) '(:private :protected) :test #'eq)
+                       (cddr stream)
+                       (eq (php-peek-type (cddr stream)) :T-LPAREN)
+                       (cdddr stream)
+                       (eq (php-peek-type (cdddr stream)) :T-IDENT)
+                       (string-equal (php-peek-value (cdddr stream)) "set")
+                       (cddddr stream)
+                       (eq (php-peek-type (cddddr stream)) :T-RPAREN))
+                  (push val modifiers)
+                  (push (cons :set-visibility (php-peek-value (cdr stream))) modifiers)
+                  (setf stream (cdr (cddddr stream))))
+                 (t
+                  (push val modifiers)
+                  (setf stream (cdr stream))))))
     (values (nreverse modifiers) stream)))
 
 (defun %php-slot-metadata (modifiers &key class-constant-p attributes target-type)
   "Build AST node metadata for PHP class members."
-  (append (when modifiers (list :php-modifiers modifiers))
+  (let ((set-visibility (cdr (find :set-visibility modifiers
+                                   :key (lambda (modifier)
+                                          (when (consp modifier) (car modifier)))
+                                   :test #'eq)))
+        (plain-modifiers (remove-if #'consp modifiers)))
+  (append (when plain-modifiers (list :php-modifiers plain-modifiers))
+          (when set-visibility (list :php-set-visibility set-visibility))
           (when class-constant-p (list :php-class-constant t))
-          (%php-attribute-metadata attributes target-type)))
+          (%php-attribute-metadata attributes target-type))))
 
 (defun %php-parse-class-constant (stream modifiers known-vars attributes)
-  "Parse const [TYPE] NAME = VALUE; as a class-scoped slot metadata node."
+  "Parse const [TYPE] NAME = VALUE[, NAME = VALUE]*; as class-scoped slots."
   (declare (ignore known-vars))
   (let ((current (cdr stream))
-        (constant-type nil))
+        (constant-type nil)
+        (slots nil))
     (multiple-value-bind (parsed-type after-type) (php-parse-type-annotation current)
       (when (and parsed-type (eq (php-peek-type after-type) :T-IDENT))
         (setf constant-type parsed-type
               current after-type)))
-    (multiple-value-bind (name-tok rest) (php-expect :T-IDENT current)
-      (let ((initform nil)
-            (current rest))
-        (when (and current (eq (php-peek-type current) :T-OP)
-                   (equal "=" (php-peek-value current)))
-          (multiple-value-bind (expr rest2 _) (php-parse-expr (cdr current) nil)
-            (declare (ignore _))
-            (setf initform expr
-                  current rest2)))
-        (values (make-ast-slot-def :name (php-ident-sym (php-tok-value name-tok))
+    (loop
+      (multiple-value-bind (name-tok rest) (php-expect :T-IDENT current)
+        (let ((initform nil))
+          (setf current rest)
+          (when (and current (eq (php-peek-type current) :T-OP)
+                     (equal "=" (php-peek-value current)))
+            (multiple-value-bind (expr rest2 _) (php-parse-expr (cdr current) nil)
+              (declare (ignore _))
+              (setf initform expr
+                    current rest2)))
+          (push (make-ast-slot-def :name (php-ident-sym (php-tok-value name-tok))
                                    :type constant-type
                                    :initform initform
-                                    :allocation :class
-                                    :imports (%php-slot-metadata modifiers
-                                                                :class-constant-p t
-                                                                :attributes attributes
-                                                                :target-type :constant))
-                 (php-skip-semis current))))))
+                                   :allocation :class
+                                   :imports (%php-slot-metadata modifiers
+                                                               :class-constant-p t
+                                                               :attributes attributes
+                                                               :target-type :constant))
+                slots)))
+      (unless (and current (eq (php-peek-type current) :T-COMMA))
+        (return))
+      (setf current (cdr current)))
+    (let ((ordered-slots (nreverse slots)))
+      (values (first ordered-slots)
+              (php-skip-semis current)
+              (rest ordered-slots)))))
 
 (defun %php-parse-trait-use-member (stream)
   "Parse use TraitName[, OtherTrait]; as class/enum metadata slots."
@@ -119,16 +151,6 @@
                                                                       :target-type :property))))
             (values slot (php-skip-semis rest))))))))
 
-(defun %php-skip-legacy-visibility-modifiers (stream)
-  "Legacy modifier skipper retained for callers that only need the stream."
-  (loop while (and stream
-                   (eq (php-peek-type stream) :T-KEYWORD)
-                   (member (php-peek-value stream)
-                           '(:public :private :protected :static
-                             :abstract :final :readonly)))
-        do (setf stream (cdr stream)))
-  stream)
-
 (defun %php-promoted-param-assignments (param-attributes)
   "Build (ast-set-slot-value $this->prop $param) nodes for each promoted param.
 PARAM-ATTRIBUTES is the :php-param-attributes plist value from an ast-defun."
@@ -153,7 +175,7 @@ PHP 8.0 constructor promotion both declares AND initializes the property."
                    :allocation (if (member :static mods :test #'eq) :class :instance)
                    :imports   (%php-slot-metadata mods :target-type :property))))
 
-(defun %php-parse-class-body-member (stream known-vars)
+(defun %php-parse-class-body-member (stream known-vars &optional class-name)
   "Parse one class body member: a property declaration or a method definition.
 Returns (values slot-def-or-nil remaining-stream extra-slots).
 EXTRA-SLOTS is a list of additional slots to inject (used for constructor promotion)."
@@ -163,13 +185,18 @@ EXTRA-SLOTS is a list of additional slots to inject (used for constructor promot
     (cond
       ;; $var [= default];  — direct property
       ((eq (php-peek-type stream) :T-VAR)
-       (%php-parse-property-slot stream modifiers attributes))
-      ;; type $var;  — typed property, including nullable/union/intersection types
+       (multiple-value-bind (slots rest)
+           (%php-parse-property-slot-with-hooks stream modifiers attributes class-name)
+         (values (first slots) rest (rest slots))))
+      ;; type $var;  — typed property, including nullable/union/intersection/DNF types
       ((or (%php-type-atom-token-p stream)
+           (eq (php-peek-type stream) :T-LPAREN)
            (eq (php-peek-type stream) :T-NULLABLE))
         (multiple-value-bind (property-type rest) (php-parse-type-annotation stream)
           (if (and property-type (eq (php-peek-type rest) :T-VAR))
-              (%php-parse-property-slot stream modifiers attributes)
+              (multiple-value-bind (slots rest2)
+                  (%php-parse-property-slot-with-hooks stream modifiers attributes class-name)
+                (values (first slots) rest2 (rest slots)))
               (values nil rest))))
       ;; const [TYPE] NAME = value; — class constants as class-scoped metadata slots.
        ((and (eq (php-peek-type stream) :T-KEYWORD)
@@ -255,7 +282,30 @@ Returns (values superclass-list remaining-stream)."
         (setf current (cdr current))))
     (values (nreverse supers) current)))
 
-(define-php-stmt-parser :class (rest known-vars)
+(defun %php-readonly-class-slots (slots)
+  "Mark instance property slots as readonly for PHP 8.2 readonly classes."
+  (mapcar (lambda (slot)
+            (if (and (ast-slot-def-p slot)
+                     (eq (ast-slot-allocation slot) :instance)
+                     (not (ast-defun-p (ast-slot-initform slot))))
+                (let* ((copy (copy-structure slot))
+                       (imports (ast-imports copy))
+                       (base-imports (loop for (key value) on imports by #'cddr
+                                           unless (member key '(:php-modifiers :readonly-p)
+                                                          :test #'eq)
+                                             append (list key value)))
+                       (modifiers (copy-list (getf imports :php-modifiers))))
+                  (unless (member :readonly modifiers :test #'eq)
+                    (setf modifiers (append modifiers (list :readonly))))
+                  (setf (ast-imports copy)
+                        (append base-imports
+                                (list :php-modifiers modifiers
+                                      :readonly-p t)))
+                  copy)
+                slot))
+          slots))
+
+(defun %php-parse-class-decl (rest known-vars &key readonly-p)
   (multiple-value-bind (name-tok rest) (php-expect :T-IDENT rest)
     (let ((class-name (php-ident-sym
                        (php-resolve-qualified-name (php-tok-value name-tok) :class))))
@@ -270,16 +320,31 @@ Returns (values superclass-list remaining-stream)."
             (setf current (php-skip-semis current))
             (when (or (php-at-eof-p current) (eq (php-peek-type current) :T-RBRACE))
               (return))
-            (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars)
+            (multiple-value-bind (slot rest2 extra-slots) (%php-parse-class-body-member current known-vars class-name)
               (when slot (push slot slots))
               (dolist (es extra-slots) (push es slots))
               (setf current rest2)))
+          (setf slots (nreverse slots))
+          (when readonly-p
+            (setf slots (%php-readonly-class-slots slots)))
+          (%php-record-class-trait-uses class-name slots)
           (values (make-ast-defclass :name class-name
                                       :superclasses supers
-                                      :slots (nreverse slots)
+                                      :slots slots
                                       :php-kind :class)
                   (%php-consume-expected :T-RBRACE current)
                   known-vars))))))
+
+(define-php-stmt-parser :class (rest known-vars)
+  (%php-parse-class-decl rest known-vars))
+
+(define-php-stmt-parser :readonly (rest known-vars)
+  (unless (and rest
+               (eq (php-peek-type rest) :T-KEYWORD)
+               (eq (php-peek-value rest) :class))
+    (error "PHP readonly modifier is only supported before class declarations near token ~S"
+           (php-peek rest)))
+  (%php-parse-class-decl (cdr rest) known-vars :readonly-p t))
 
 ;;; ─── Interface Statement Parser (overrides parser-stmt entry) ───────────────
 
@@ -298,10 +363,11 @@ to %php-parse-expr-stmt for expression statements."
   (cond
     ((eq (php-peek-type stream) :T-INLINE-HTML)
       (multiple-value-bind (tok rest) (php-consume stream)
-        ;; Inline HTML is emitted verbatim with NO trailing newline; lower to a
-        ;; princ call (vm-princ), not ast-print (vm-print, which appends ~%).
+        ;; Inline HTML is emitted verbatim with NO trailing newline and must
+        ;; participate in PHP output buffering.
         (values (%php-attach-attributes-to-node
-                 (%php-call 'princ (make-ast-quote :value (php-tok-value tok)))
+                 (%php-call 'cl-cc/php::%php-output-write
+                            (make-ast-quote :value (php-tok-value tok)))
                  attributes)
                 rest known-vars)))
     (t
@@ -310,14 +376,20 @@ to %php-parse-expr-stmt for expression statements."
         (if handler
             (multiple-value-bind (_ rest) (php-consume stream)
               (multiple-value-bind (stmt rest2 kv2) (funcall handler rest known-vars)
-                (values (%php-attach-attributes-to-node
-                         stmt attributes
-                         (case (php-tok-value _)
-                           (:class :class)
-                           (:function :function)
-                           ((:trait :interface :enum) :class)
-                           (otherwise nil)))
-                        rest2 kv2)))
+                (let ((target-type (case (php-tok-value _)
+                                     ((:class :readonly) :class)
+                                     (:const :constant)
+                                     (:function :function)
+                                     ((:trait :interface :enum) :class)
+                                     (otherwise nil))))
+                  (when (and attributes
+                             (eq (php-tok-value _) :const)
+                             (ast-progn-p stmt))
+                    (dolist (form (ast-progn-forms stmt))
+                      (%php-attach-attributes-to-node form attributes target-type)))
+                  (values (%php-attach-attributes-to-node
+                           stmt attributes target-type)
+                          rest2 kv2))))
             (multiple-value-bind (stmt rest2 kv2) (%php-parse-expr-stmt stream known-vars)
               (values (%php-attach-attributes-to-node stmt attributes)
                       rest2 kv2))))))))
@@ -334,9 +406,9 @@ its body, so `$x = 10; echo $x;' becomes (let (($x 10)) (echo $x)) rather than t
 siblings where echo sees an unbound $x. Statements that are not empty-bodied lets
 (including lets that already carry a body) pass through as siblings.
 
-Previously a no-op stub, so every PHP variable was bound in a let with an empty
-body and was invisible to the rest of the block — `$x = 1; echo $x;' printed
-nothing. Applied at top level and in every braced block (see php-parse-block)."
+This pass is applied at top level and in every braced block (see
+php-parse-block), keeping each first assignment visible to the later statements
+that share the same PHP block scope."
   (let ((tail nil))
     (dolist (stmt (reverse stmts) tail)
       (if (and (ast-let-p stmt) (null (ast-let-body stmt)))
@@ -352,7 +424,9 @@ Analogous to parse-all-forms for CL."
         (stmts nil) (kv nil)
         (*php-current-namespace* nil)
         (*php-current-imports* nil)
-        (*php-pending-top-level-forms* nil))
+        (*php-pending-top-level-forms* nil)
+        (*php-by-ref-param-registry* (%php-seed-by-ref-param-registry))
+        (*php-named-param-registry* (make-hash-table :test #'equal)))
     (loop
       (setf stream (php-skip-semis stream))
       (when (php-at-eof-p stream) (return))
@@ -365,4 +439,5 @@ Analogous to parse-all-forms for CL."
           (stmt
            (push (php-annotate-top-level-node stmt) stmts)))
         (setf stream rest2 kv kv2)))
-    (php-finish-let-bindings (nreverse stmts))))
+    (php-finish-let-bindings
+     (%php-lower-reference-assignments (nreverse stmts) nil))))

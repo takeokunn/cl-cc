@@ -58,95 +58,162 @@ rest parameter's collected &rest list into a real JS array."
           do (setf (aref arr i) item))
     new-len))
 
+;;; -----------------------------------------------------------------------
+;;;  Array index coercion
+;;; -----------------------------------------------------------------------
+
+(defun %js-array-to-integer (value)
+  "Coerce VALUE like ECMAScript ToIntegerOrInfinity for array indices."
+  (let ((n (%js-to-number value)))
+    (cond
+      ((%js-nan-p n) 0)
+      ((%js-float-infinity-p n)
+       (if (plusp n) most-positive-fixnum most-negative-fixnum))
+      (t (truncate n)))))
+
+(defun %js-array-relative-start (index length)
+  "Clamp a relative array INDEX into the inclusive range [0, LENGTH]."
+  (let ((i (%js-array-to-integer index)))
+    (if (< i 0)
+        (max 0 (+ length i))
+        (min i length))))
+
+(defun %js-array-relative-end (index length)
+  "Clamp an optional relative end INDEX into the inclusive range [0, LENGTH]."
+  (if (or (null index) (eq index +js-undefined+))
+      length
+      (%js-array-relative-start index length)))
+
+;;; -----------------------------------------------------------------------
+;;;  Array callback iteration
+;;; -----------------------------------------------------------------------
+
+(defmacro %js-do-array-elements ((element index array &key result) &body body)
+  "Iterate ARRAY once, binding ELEMENT and INDEX for callback-style methods."
+  (let ((array-var (gensym "ARRAY-"))
+        (length-var (gensym "LENGTH-")))
+    `(let* ((,array-var ,array)
+            (,length-var (length ,array-var)))
+       (loop for ,index below ,length-var
+             for ,element = (aref ,array-var ,index)
+             do (progn ,@body)
+             finally (return ,result)))))
+
+(defmacro %js-array-callback (fn element index array)
+  "Call a JS array callback with the standard (element, index, array) shape."
+  `(%js-funcall ,fn ,element ,index ,array))
+
 (defun %js-array-map (arr fn)
   "Map FN over ARR, returning new array."
   (let* ((n (length arr))
          (result (%js-make-vec n)))
-    (loop for i below n
-          do (setf (aref result i)
-                   (%js-funcall fn (aref arr i) i arr)))
-    result))
+    (%js-do-array-elements (element i arr :result result)
+      (setf (aref result i) (%js-array-callback fn element i arr)))))
 
 (defun %js-array-for-each (arr fn)
   "Call FN(element, index, arr) for each element of ARR; returns undefined
 (JS Array.prototype.forEach)."
-  (loop for i below (length arr)
-        do (%js-funcall fn (aref arr i) i arr))
-  +js-undefined+)
+  (%js-do-array-elements (element i arr :result +js-undefined+)
+    (%js-array-callback fn element i arr)))
 
 (defun %js-array-filter (arr fn)
   "Filter ARR by predicate FN."
-  (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-    (loop for i below (length arr)
-          when (%js-truthy (%js-funcall fn (aref arr i) i arr))
-            do (vector-push-extend (aref arr i) result))
-    result))
+  (let ((result (%js-make-vec)))
+    (%js-do-array-elements (element i arr :result result)
+      (when (%js-truthy (%js-array-callback fn element i arr))
+        (vector-push-extend element result)))))
 
-(defun %js-array-reduce (arr fn &optional (init +js-undefined+))
-  "Reduce ARR with FN and optional INIT."
-  (let ((acc init)
-        (start 0))
-    (when (eq acc +js-undefined+)
-      (when (zerop (length arr))
-        (error "JS TypeError: Reduce of empty array with no initial value"))
-      (setf acc (aref arr 0)
-            start 1))
-    (loop for i from start below (length arr)
-          do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
-    acc))
+(defmacro define-js-array-reducer (name direction docstring)
+  "Define reduce/reduceRight from the shared accumulator prolog."
+  (let ((initial-index (if (eq direction :forward) 0 '(1- (length arr))))
+        (next-index (if (eq direction :forward) 1 '(- i 1)))
+        (loop-clause (if (eq direction :forward)
+                         '(loop for i from start below (length arr)
+                                do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
+                         '(loop for i from start downto 0
+                                do (setf acc (%js-funcall fn acc (aref arr i) i arr))))))
+    `(defun ,name (arr fn &optional (init +js-undefined+))
+       ,docstring
+       (let ((acc init)
+             (start ,initial-index))
+         (when (eq acc +js-undefined+)
+           (when (zerop (length arr))
+             (error "JS TypeError: Reduce of empty array with no initial value"))
+           (let ((i start))
+             (setf acc (aref arr i)
+                   start ,next-index)))
+         ,loop-clause
+         acc))))
 
-(defun %js-array-reduce-right (arr fn &optional (init +js-undefined+))
-  "Reduce ARR from right with FN."
-  (let ((acc init)
-        (end (1- (length arr))))
-    (when (eq acc +js-undefined+)
-      (when (zerop (length arr))
-        (error "JS TypeError: Reduce of empty array with no initial value"))
-      (setf acc (aref arr end)
-            end (- end 1)))
-    (loop for i from end downto 0
-          do (setf acc (%js-funcall fn acc (aref arr i) i arr)))
-    acc))
+(define-js-array-reducer %js-array-reduce
+  :forward
+  "Reduce ARR with FN and optional INIT.")
 
-(defun %js-array-find-index (arr fn)
-  "Return index of first element satisfying FN, or -1."
-  (loop for i below (length arr)
-        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
-          return i
-        finally (return -1)))
+(define-js-array-reducer %js-array-reduce-right
+  :reverse
+  "Reduce ARR from right with FN.")
+
+(defmacro define-js-array-find-index (name direction docstring)
+  "Define forward or reverse Array find-index variants."
+  (let ((loop-clause (if (eq direction :forward)
+                         '(loop for i below (length arr)
+                                for element = (aref arr i)
+                                when (%js-truthy (%js-array-callback pred element i arr))
+                                  return i
+                                finally (return -1))
+                         '(loop for i from (1- (length arr)) downto 0
+                                for element = (aref arr i)
+                                when (%js-truthy (%js-array-callback pred element i arr))
+                                  return i
+                                finally (return -1)))))
+    `(defun ,name (arr pred)
+       ,docstring
+       ,loop-clause)))
+
+(define-js-array-find-index %js-array-find-index
+  :forward
+  "Return index of first element satisfying FN, or -1.")
 
 (defun %js-array-find (arr fn)
   "Return first element satisfying FN, or undefined."
   (let ((idx (%js-array-find-index arr fn)))
     (if (= idx -1) +js-undefined+ (aref arr idx))))
 
-(defun %js-array-some (arr fn)
-  "True if any element satisfies FN."
-  (loop for i below (length arr)
-        when (%js-truthy (%js-funcall fn (aref arr i) i arr))
-          return t
-        finally (return nil)))
+(defmacro define-js-array-predicate-test (name clause early-result final-result docstring)
+  "Define a JS Array predicate-test (some/every) from the shared loop pattern."
+  `(defun ,name (arr fn)
+     ,docstring
+     (loop for i below (length arr)
+           for element = (aref arr i)
+           ,clause (%js-truthy (%js-array-callback fn element i arr))
+             return ,early-result
+           finally (return ,final-result))))
 
-(defun %js-array-every (arr fn)
-  "True if all elements satisfy FN."
-  (loop for i below (length arr)
-        unless (%js-truthy (%js-funcall fn (aref arr i) i arr))
-          return nil
-        finally (return t)))
+(define-js-array-predicate-test %js-array-some
+  when
+  t
+  nil
+  "True if any element satisfies FN.")
+
+(define-js-array-predicate-test %js-array-every
+  unless
+  nil
+  t
+  "True if all elements satisfy FN.")
 
 (defun %js-array-includes (arr val &optional (from 0))
   "True if ARR contains VAL starting from FROM."
   (let* ((n (length arr))
-         (start (if (< from 0) (max 0 (+ n from)) from)))
+         (start (%js-array-relative-start from n)))
     (loop for i from start below n
-          when (%js-strict-eq (aref arr i) val)
+          when (%js-same-value-zero (aref arr i) val)
             return t
           finally (return nil))))
 
 (defun %js-array-index-of (arr val &optional (from 0))
   "Return first index of VAL in ARR, or -1."
   (let* ((n (length arr))
-         (start (if (< from 0) (max 0 (+ n from)) from)))
+         (start (%js-array-relative-start from n)))
     (loop for i from start below n
           when (%js-strict-eq (aref arr i) val)
             return i
@@ -156,12 +223,15 @@ rest parameter's collected &rest list into a real JS array."
   "Return last index of VAL in ARR, or -1."
   (let* ((n (length arr))
          (end (if from
-                  (if (< from 0) (+ n from) (min from (1- n)))
+                  (let ((i (%js-array-to-integer from)))
+                    (if (< i 0) (+ n i) (min i (1- n))))
                   (1- n))))
-    (loop for i from end downto 0
-          when (%js-strict-eq (aref arr i) val)
-            return i
-          finally (return -1))))
+    (if (< end 0)
+        -1
+        (loop for i from end downto 0
+              when (%js-strict-eq (aref arr i) val)
+                return i
+              finally (return -1)))))
 
 (defun %js-array-join (arr &optional (sep ","))
   "Join array elements with separator."
@@ -176,10 +246,8 @@ rest parameter's collected &rest list into a real JS array."
 (defun %js-array-slice (arr &optional (start 0) (end nil))
   "Return a new array slice."
   (let* ((n (length arr))
-         (s (if (< start 0) (max 0 (+ n start)) (min start n)))
-         (e (if (null end)
-                n
-                (if (< end 0) (max 0 (+ n end)) (min end n))))
+         (s (%js-array-relative-start start n))
+         (e (%js-array-relative-end end n))
          (len (max 0 (- e s)))
          (result (%js-make-vec len)))
     (loop for i from s below (+ s len)
@@ -187,13 +255,13 @@ rest parameter's collected &rest list into a real JS array."
           do (setf (aref result j) (aref arr i)))
     result))
 
-(defun %js-array-splice (arr start &optional (delete-count nil) &rest items)
+(defun %js-array-splice (arr start &optional (delete-count nil delete-count-supplied-p) &rest items)
   "Splice: remove DELETE-COUNT elements at START, insert ITEMS."
   (let* ((n (length arr))
-         (s (if (< start 0) (max 0 (+ n start)) (min start n)))
-         (dc (if (null delete-count)
+         (s (%js-array-relative-start start n))
+         (dc (if (not delete-count-supplied-p)
                  (- n s)
-                 (min (max 0 delete-count) (- n s))))
+                 (min (max 0 (%js-array-to-integer delete-count)) (- n s))))
          (removed (%js-make-vec dc)))
     ;; collect removed
     (loop for i from s below (+ s dc)
@@ -217,7 +285,7 @@ rest parameter's collected &rest list into a real JS array."
 
 (defun %js-array-concat (arr &rest others)
   "Concatenate ARR with OTHERS."
-  (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+  (let ((result (%js-make-vec)))
     (flet ((extend (x)
              (if (%js-vec-p x)
                  (loop for i below (length x)
@@ -234,22 +302,22 @@ rest parameter's collected &rest list into a real JS array."
           do (rotatef (aref arr i) (aref arr (- n 1 i)))))
   arr)
 
+;;; Shared sort predicate builder — used by both mutating sort and toSorted.
+;;; Handles nil (no compareFn supplied) and +js-undefined+ (passed from JS).
+(defun %js-sort-comparator (compare-fn)
+  "Build a CL sort predicate from an optional JS compareFn."
+  (if (and compare-fn (not (eq compare-fn +js-undefined+)))
+      (lambda (a b) (< (%js-funcall compare-fn a b) 0))
+      (lambda (a b) (string< (%js-to-string a) (%js-to-string b)))))
+
 (defun %js-array-sort (arr &optional compare-fn)
-  "Sort ARR in place."
-  (let ((vec (coerce arr 'list)))
-    (let ((sorted (if compare-fn
-                      (stable-sort vec (lambda (a b)
-                                         (< (%js-funcall compare-fn a b) 0)))
-                      (stable-sort vec (lambda (a b)
-                                         (string< (%js-to-string a)
-                                                  (%js-to-string b)))))))
-      (loop for el in sorted for i from 0
-            do (setf (aref arr i) el))))
+  "Sort ARR in place; return ARR."
+  (replace arr (stable-sort (copy-seq arr) (%js-sort-comparator compare-fn)))
   arr)
 
 (defun %js-array-flat (arr &optional (depth 1))
   "Flatten ARR up to DEPTH levels."
-  (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
+  (let ((result (%js-make-vec)))
     (labels ((flatten (x d)
                (if (and (%js-vec-p x) (> d 0))
                    (loop for i below (length x)
@@ -266,8 +334,8 @@ rest parameter's collected &rest list into a real JS array."
 (defun %js-array-fill (arr value &optional (start 0) (end nil))
   "Fill ARR[start..end] with VALUE."
   (let* ((n (length arr))
-         (s (if (< start 0) (max 0 (+ n start)) (min start n)))
-         (e (if (null end) n (if (< end 0) (max 0 (+ n end)) (min end n)))))
+         (s (%js-array-relative-start start n))
+         (e (%js-array-relative-end end n)))
     (loop for i from s below e
           do (setf (aref arr i) value)))
   arr)
@@ -275,39 +343,104 @@ rest parameter's collected &rest list into a real JS array."
 (defun %js-array-copy-within (arr target &optional (start 0) (end nil))
   "Copy elements within ARR."
   (let* ((n (length arr))
-         (to   (if (< target 0) (max 0 (+ n target)) (min target n)))
-         (from (if (< start 0)  (max 0 (+ n start))  (min start n)))
-         (fin  (if (null end) n (if (< end 0) (max 0 (+ n end)) (min end n))))
-         (count (min (- fin from) (- n to)))
+         (to (%js-array-relative-start target n))
+         (from (%js-array-relative-start start n))
+         (fin (%js-array-relative-end end n))
+         (count (max 0 (min (- fin from) (- n to))))
          (tmp (make-array count)))
     (loop for i below count do (setf (aref tmp i) (aref arr (+ from i))))
     (loop for i below count do (setf (aref arr (+ to i)) (aref tmp i))))
   arr)
 
-(defun %js-array-entries (arr)
-  "Return vector of [index, value] pairs."
-  (let* ((n (length arr))
-         (result (%js-make-vec n)))
-    (loop for i below n
-          do (setf (aref result i) (%js-make-array i (aref arr i))))
+(defmacro define-js-array-iterator (name docstring value-form)
+  `(defun ,name (arr)
+     ,docstring
+     (let ((i 0)
+           (n (length arr)))
+       (%js-make-cl-iterator
+        (lambda ()
+          (if (>= i n)
+              :done
+              (let ((value ,value-form))
+                (incf i)
+                (cons value nil))))))))
+
+(define-js-array-iterator %js-array-entries
+  "Return an Array Iterator yielding [index, value] pairs."
+  (%js-make-array i (aref arr i)))
+
+(define-js-array-iterator %js-array-keys
+  "Return an Array Iterator yielding indices."
+  i)
+
+(defun %js-array-from-map-fn-p (map-fn)
+  (and map-fn (not (eq map-fn +js-undefined+)) (not (eq map-fn +js-null+))))
+
+(defun %js-array-from-map-value (map-fn this-arg value index)
+  (if (%js-array-from-map-fn-p map-fn)
+      (%js-call-with-this this-arg map-fn (list value index))
+      value))
+
+(defun %js-array-to-length (value)
+  "Coerce VALUE like ECMAScript ToLength."
+  (let ((n (%js-to-number value)))
+    (cond
+      ((or (%js-nan-p n) (<= n 0)) 0)
+      ((%js-float-infinity-p n) 9007199254740991)
+      (t (min (floor n) 9007199254740991)))))
+
+(defun %js-array-iterable-p (value)
+  (or (%js-vec-p value)
+      (stringp value)
+      (typep value 'js-map)
+      (typep value 'js-set)
+      (functionp value)
+      (and (%js-ht-p value)
+           (or (gethash "next" value)
+               (gethash "@@iterator" value)))))
+
+(defun %js-array-from (items &optional (map-fn +js-undefined+) (this-arg +js-undefined+))
+  "JS Array.from — collects an iterable or array-like object into a fresh array."
+  (let ((result (%js-make-vec))
+        (index 0))
+    (if (%js-array-iterable-p items)
+        (%js-for-of
+         items
+         (lambda (el)
+           (vector-push-extend
+            (%js-array-from-map-value map-fn this-arg el index)
+            result)
+           (incf index)))
+        (let ((length (%js-array-to-length (%js-get-prop items "length"))))
+          (loop for i below length
+                do (vector-push-extend
+                    (%js-array-from-map-value map-fn this-arg (%js-get-prop items i) i)
+                    result))))
     result))
 
-(defun %js-array-keys (arr)
-  "Return vector of indices."
-  (let* ((n (length arr))
-         (result (%js-make-vec n)))
-    (loop for i below n do (setf (aref result i) i))
-    result))
-
-
-(defun %js-array-from (iterable &optional map-fn)
-  "JS Array.from — collects any iterable into a fresh array, with optional map."
-  (let ((result (make-array 0 :element-type t :adjustable t :fill-pointer 0)))
-    (%js-for-of iterable (lambda (el) (vector-push-extend el result)))
-    (if map-fn (%js-array-map result map-fn) result)))
+(defun %js-array-from-async (items &optional (map-fn +js-undefined+) (this-arg +js-undefined+))
+  "ES2024 Array.fromAsync in the runtime's synchronous Promise model."
+  (handler-case
+      (let ((result (%js-make-vec))
+            (index 0))
+        (if (%js-array-iterable-p items)
+            (%js-for-of
+             items
+             (lambda (el)
+               (let* ((value (%js-await el))
+                      (mapped (%js-array-from-map-value map-fn this-arg value index)))
+                 (vector-push-extend (%js-await mapped) result)
+                 (incf index))))
+            (let ((length (%js-array-to-length (%js-get-prop items "length"))))
+              (loop for i below length
+                    do (let* ((value (%js-await (%js-get-prop items i)))
+                              (mapped (%js-array-from-map-value map-fn this-arg value i)))
+                         (vector-push-extend (%js-await mapped) result)))))
+        (%js-promise-resolve result))
+    (js-exception (c)
+      (%js-promise-reject (js-exception-value c)))))
 
 
 (defun %js-array-is-array (x)
   "True if X is a JS array."
   (%js-vec-p x))
-

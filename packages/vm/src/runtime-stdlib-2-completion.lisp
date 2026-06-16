@@ -83,8 +83,7 @@
       (setf *build-seed* seed
             *deterministic-hash-table-seed* seed
             cl:*gensym-counter* 0
-            *random-state* (%vm-mt-seed seed)
-            *vm-random-state* *random-state*)
+            *random-state* (%vm-mt-seed seed))
       (setf cl:*random-state* (sb-ext:seed-random-state seed))
       seed)))
 
@@ -157,22 +156,3 @@
               (warn "Unresolved forward reference: ~S" name)))))
     (setf *vm-unresolved-forward-refs* (nreverse remaining))
     (values (nreverse resolved) (nreverse unresolved))))
-
-(defun declare-forward-reference (name)
-  "Compatibility wrapper: declare NAME in the current VM state."
-  (if *vm-current-state*
-      (vm-declare-forward-reference *vm-current-state* name)
-      name))
-
-(defun resolve-forward-reference (name fn)
-  "Compatibility wrapper: resolve NAME's cell to FN in the current VM state."
-  (when *vm-current-state*
-    (let ((entry (gethash name (vm-function-registry *vm-current-state*))))
-      (when (vm-forward-reference-cell-p entry)
-        (setf (vm-forward-reference-cell-ref entry) fn))))
-  name)
-
-(defun resolve-all-forward-references (&optional env)
-  "Compatibility wrapper for VM-RESOLVE-FORWARD-REFERENCES."
-  (declare (ignore env))
-  (vm-resolve-forward-references *vm-current-state*))

@@ -8,6 +8,11 @@
 
 ;;; ─── Effect Inference ─────────────────────────────────────────────────────
 
+(defmacro assert-inference-boolean-case (expected then-form else-form)
+  `(if ,expected
+       ,then-form
+       ,else-form))
+
 (deftest-each infer-effects-single-forms
   "infer-effects: setq produces STATE; lambda is pure (no effects)."
   :cases (("setq-state"  '(setq x 42)    "STATE")
@@ -16,11 +21,12 @@
   (let* ((ast (cl-cc:lower-sexp-to-ast sexp))
          (row (cl-cc/type:infer-effects ast (type-env-empty))))
     (assert-true (cl-cc/type:type-effect-row-p row))
-    (if expected-effect
+    (assert-inference-boolean-case
+        expected-effect
         (let* ((effects (cl-cc/type:type-effect-row-effects row))
                (names (mapcar #'cl-cc/type:type-effect-op-name effects)))
           (assert-true (member expected-effect names :key #'symbol-name :test #'string=)))
-        (assert-null (cl-cc/type:type-effect-row-effects row)))))
+      (assert-null (cl-cc/type:type-effect-row-effects row)))))
 
 (deftest-each infer-effects-multi-form-unions
   "infer-effects unions IO and STATE effects across all sub-forms for if and progn."
@@ -43,11 +49,12 @@
   (fn-name expected-effect-name)
   (let ((row (cl-cc/type:lookup-effect-signature fn-name)))
     (assert-true (cl-cc/type:type-effect-row-p row))
-    (if expected-effect-name
+    (assert-inference-boolean-case
+        expected-effect-name
         (let ((names (mapcar #'cl-cc/type:type-effect-op-name
                              (cl-cc/type:type-effect-row-effects row))))
           (assert-true (member expected-effect-name names :key #'symbol-name :test #'string=)))
-        (assert-null (cl-cc/type:type-effect-row-effects row)))))
+      (assert-null (cl-cc/type:type-effect-row-effects row)))))
 
 (deftest infer-custom-effect-signature-register-and-lookup
   "register-effect-signature stores a row and lookup-effect-signature returns it."
@@ -208,9 +215,10 @@
           ("progn"    '(progn 1 2)       nil))
   (sexp expected)
   (let ((ast (cl-cc:lower-sexp-to-ast sexp)))
-    (if expected
-        (assert-true  (cl-cc/type:syntactic-value-p ast))
-        (assert-false (cl-cc/type:syntactic-value-p ast)))))
+    (assert-inference-boolean-case
+        expected
+        (assert-true (cl-cc/type:syntactic-value-p ast))
+      (assert-false (cl-cc/type:syntactic-value-p ast)))))
 
 (deftest infer-value-restriction-lambda-binding-generalizes
   "Value restriction: let binding a lambda generalizes to polymorphic type; applying at int yields int."
@@ -244,9 +252,10 @@
                          nil      nil))
   (decls name expected)
   (let ((spec (cl-cc/type::%find-fn-type-declaration name decls)))
-    (if expected
+    (assert-inference-boolean-case
+        expected
         (assert-equal expected spec)
-        (assert-null spec))))
+      (assert-null spec))))
 
 ;;; ─── %infer-effects-union ────────────────────────────────────────────────
 

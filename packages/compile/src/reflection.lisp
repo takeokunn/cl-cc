@@ -19,15 +19,47 @@
     (t (type-of type))))
 
 ;;; ──── Function reflection ────
+(defun %sb-kernel-fbound-symbol (name)
+  "Return the SB-KERNEL symbol named NAME when available and fbound."
+  (let ((package (find-package "SB-KERNEL")))
+    (when package
+      (let ((symbol (find-symbol name package)))
+        (when (and symbol (fboundp symbol))
+          symbol)))))
+
+(defun %sb-introspect-function-lambda-list (fn)
+  "Return FN's lambda list when SB-INTROSPECT is available."
+  (let ((package (find-package "SB-INTROSPECT")))
+    (when package
+      (let ((symbol (find-symbol "FUNCTION-LAMBDA-LIST" package)))
+        (when (and symbol (fboundp symbol))
+          (funcall symbol fn))))))
+
 (defun reflect-function-arity (fn)
   "Return the arity of function FN."
-  (let ((info (sb-introspect:function-lambda-list fn)))
-    (length (remove-if (lambda (x) (member x '(&optional &rest &key &allow-other-keys)))
-                       info))))
+  (let ((info (%sb-introspect-function-lambda-list fn)))
+    (if info
+        (length (remove-if (lambda (x) (member x '(&optional &rest &key &allow-other-keys)))
+                           info))
+        (multiple-value-bind (lambda-expression closure-p name)
+            (function-lambda-expression fn)
+          (declare (ignore closure-p name))
+          (if (and (consp lambda-expression)
+                   (eq (first lambda-expression) 'lambda))
+              (let ((lambda-list (second lambda-expression)))
+                (length (remove-if (lambda (x) (member x '(&optional &rest &key &allow-other-keys)))
+                                   lambda-list)))
+              0)))))
 
 (defun reflect-function-name (fn)
   "Return the name of function FN."
-  (sb-kernel:%fun-name fn))
+  (let ((symbol (%sb-kernel-fbound-symbol "%FUN-NAME")))
+    (if symbol
+        (funcall symbol fn)
+        (multiple-value-bind (lambda-expression closure-p name)
+            (function-lambda-expression fn)
+          (declare (ignore lambda-expression closure-p))
+          name))))
 
 ;;; ──── Slot reflection ────
 (defun reflect-class-slots (class-name)
@@ -42,13 +74,17 @@
 ;;; ──── Compiler reflection ────
 (defun reflect-optimization-settings ()
   "Return current optimization settings as an alist."
-  (warn "reflect-optimization-settings returns hard-coded values; TODO: query *optimize-qualities*")
-  `((speed . 3) (safety . 0) (debug . 0)
-    (compilation-speed . 0) (space . 0)))
+  (let* ((policy (symbol-value (find-symbol "*POLICY*" "SB-C")))
+         (policy-quality (find-symbol "POLICY-QUALITY" "SB-C")))
+    (loop for quality in '(speed safety debug compilation-speed space)
+          collect (cons quality (funcall policy-quality policy quality)))))
 
 (defun reflect-compiled-function-p (fn)
   "Return T if FN has been compiled to native code."
-  (sb-kernel:%simple-fun-p fn))
+  (let ((symbol (%sb-kernel-fbound-symbol "%SIMPLE-FUN-P")))
+    (if symbol
+        (funcall symbol fn)
+        (typep fn 'compiled-function))))
 
 ;;; ──── Meta-object protocol extension ────
 (defun reflect-generic-function-methods (gf-name)

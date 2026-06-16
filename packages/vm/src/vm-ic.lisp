@@ -1,10 +1,10 @@
 ;;;; packages/vm/src/vm-ic.lisp - Inline Caching for Generic Functions (FR-009)
 ;;;;
 ;;;; Monomorphic inline cache: each generic-call site caches the last
-;;;; (specializer-key . method-closure) pair.  SPECIALIZER-KEY is the list of
-;;;; argument class names.  Cache hits bypass full method resolution.  Cache
-;;;; invalidation clears registered generic-call site caches when methods are
-;;;; registered.
+;;;; (specializer-key generation . method-closure) entry.  SPECIALIZER-KEY is
+;;;; the list of argument class names, and GENERATION mirrors GF method cache
+;;;; versions.  Cache hits bypass full method resolution.  Cache invalidation
+;;;; clears registered generic-call site caches when methods are registered.
 
 (in-package :cl-cc/vm)
 
@@ -39,13 +39,25 @@ so method ordering and combination semantics are preserved."
     (and (not has-qualified)
          (or (null combination) (eq combination 'standard)))))
 
-(defun %ic-cache-hit-p (cache key)
-  "T if CACHE is a monomorphic inline-cache entry matching KEY.
-CACHE = (specializer-key . method-closure)."
+(defun %ic-gf-generation (gf-ht)
+  "Return the generation tuple used to invalidate GF-HT inline-cache entries."
+  (list (or (gethash '__ic-gen__ gf-ht) 0)
+        (or (gethash :__cache-version__ gf-ht) 0)))
+
+(defun %ic-cache-entry (key generation method)
+  "Build a monomorphic inline-cache entry for KEY at GENERATION."
+  (cons key (cons generation method)))
+
+(defun %ic-cache-hit-method (cache key generation)
+  "Return the cached method when CACHE matches KEY and GENERATION.
+CACHE = (specializer-key generation . method-closure)."
   (and cache
        (consp cache)
-        (equal (car cache) key)
-        (cdr cache)))
+       (equal (car cache) key)
+       (let ((payload (cdr cache)))
+         (and (consp payload)
+              (equal (car payload) generation)
+              (cdr payload)))))
 
 (defun %ic-type-counter-table (inst)
   "Return INST's mutable type counter table, creating it on demand."
@@ -142,7 +154,8 @@ call-next-method context."
   "FR-009: Check monomorphic inline cache for GF-HT.  On hit, bypass full
    dispatch.  On miss, perform dispatch and update cache.  INST, when supplied,
    must be the vm-generic-call instruction that owns the cache slot."
-  (let* ((cache (when (typep inst 'vm-generic-call)
+  (let* ((generation (%ic-gf-generation gf-ht))
+         (cache (when (typep inst 'vm-generic-call)
                    (%ic-register-site gf-ht inst)
                    (vm-ic-cache inst)))
           (key (%ic-specializer-key arg-regs state)))
@@ -154,15 +167,16 @@ call-next-method context."
       (let ((primary (%ic-primary-method-for-key gf-ht state arg-regs)))
         (when primary
           (%ic-record-cache-hit inst state pc key :pgo-hit)
-          (setf (vm-ic-cache inst) (cons key primary))
+          (setf (vm-ic-cache inst) (%ic-cache-entry key generation primary))
           (return-from %ic-lookup-or-dispatch
             (%ic-direct-call primary state pc labels dst-reg arg-regs gf-ht)))))
     ;; Check cache
-    (when (and (%ic-cacheable-gf-p gf-ht)
-                 (%ic-cache-hit-p cache key))
-      (%ic-record-cache-hit inst state pc key)
-      (return-from %ic-lookup-or-dispatch
-        (%ic-direct-call (cdr cache) state pc labels dst-reg arg-regs gf-ht)))
+    (let ((cached-method (and (%ic-cacheable-gf-p gf-ht)
+                              (%ic-cache-hit-method cache key generation))))
+      (when cached-method
+        (%ic-record-cache-hit inst state pc key)
+        (return-from %ic-lookup-or-dispatch
+          (%ic-direct-call cached-method state pc labels dst-reg arg-regs gf-ht))))
     (%ic-record-cache-miss inst state pc key)
     ;; Full dispatch
     (multiple-value-bind (next-pc halt-p result)
@@ -174,7 +188,7 @@ call-next-method context."
                (methods (vm-get-all-applicable-methods gf-ht state vals))
                (primary (car methods)))
           (when primary
-             (setf (vm-ic-cache inst) (cons key primary)))))
+             (setf (vm-ic-cache inst) (%ic-cache-entry key generation primary)))))
       (values next-pc halt-p result))))
 
 (defun vm-type-profile-alist (state)

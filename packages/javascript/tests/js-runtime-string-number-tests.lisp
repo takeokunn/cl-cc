@@ -23,6 +23,14 @@
   (assert-=  2  (cl-cc/javascript::%js-string-index-of  "hello" "l"))
   (assert-= -1  (cl-cc/javascript::%js-string-index-of  "hello" "z")))
 
+(deftest js-rt-string-index-of-position-coercion
+  "indexOf/includes coerce position via JS integer conversion."
+  (assert-= 2 (cl-cc/javascript::%js-string-index-of "ababa" "a" "2"))
+  (assert-= 3 (cl-cc/javascript::%js-string-index-of "abcabc" "a" 2.8d0))
+  (assert-= 0 (cl-cc/javascript::%js-string-index-of
+               "abc" "a" cl-cc/javascript::+js-undefined+))
+  (assert-false (cl-cc/javascript::%js-string-includes "abc" "a" 1)))
+
 (deftest-each js-rt-string-case
   "toUpperCase and toLowerCase normalize character case."
   :cases (("upper" #'cl-cc/javascript::%js-string-to-upper-case "hello" "HELLO")
@@ -85,6 +93,15 @@
   (s sub expected)
   (assert-= expected (cl-cc/javascript::%js-string-last-index-of s sub)))
 
+(deftest js-rt-string-last-index-of-position-bounds
+  "lastIndexOf clamps position bounds and treats undefined as omitted."
+  (assert-= 4 (cl-cc/javascript::%js-string-last-index-of "ababa" "a" cl-cc/javascript::+js-undefined+))
+  (assert-= 2 (cl-cc/javascript::%js-string-last-index-of "ababa" "a" "2"))
+  (assert-= 0 (cl-cc/javascript::%js-string-last-index-of "abcabc" "a" 2.8d0))
+  (assert-= 0 (cl-cc/javascript::%js-string-last-index-of "ababa" "a" -99))
+  (assert-= -1 (cl-cc/javascript::%js-string-last-index-of "ababa" "b" -99))
+  (assert-= 5 (cl-cc/javascript::%js-string-last-index-of "ababa" "" 99)))
+
 (deftest js-rt-string-concat
   "concat joins strings without modifying originals."
   (assert-string= "hello world"
@@ -141,6 +158,16 @@
           ("sqrt"  #'cl-cc/javascript::%js-math-sqrt '(9)     3.0d0))
   (fn args expected)
   (assert-= expected (apply fn args)))
+
+(deftest js-rt-math-f16round
+  "Math.f16round rounds numbers to IEEE binary16 precision."
+  (assert-= 1.3369140625d0
+            (cl-cc/javascript::%js-math-f16round 1.337d0))
+  (assert-= 5.05078125d0
+            (cl-cc/javascript::%js-math-f16round 5.05d0))
+  (assert-true
+   (cl-cc/javascript::%js-float-infinity-p
+    (cl-cc/javascript::%js-math-f16round 65520.0d0))))
 
 (deftest-each js-rt-math-extended-unary
   "Math hyperbolic and transcendental unaries map numeric inputs correctly."
@@ -307,9 +334,23 @@
   (assert-= expected (cl-cc/javascript::%js-string-search s pat)))
 
 (deftest js-rt-string-normalize
-  "%js-string-normalize is a stub that returns the string unchanged."
-  (assert-string= "cafe" (cl-cc/javascript::%js-string-normalize "cafe"))
-  (assert-string= "cafe" (cl-cc/javascript::%js-string-normalize "cafe" "NFD")))
+  "%js-string-normalize supports canonical and compatibility forms."
+  (let* ((acute (string (code-char #x0301)))
+         (composed-e (string (code-char #x00E9)))
+         (decomposed-e (concatenate 'string "e" acute))
+         (angstrom-sign (string (code-char #x212B)))
+         (angstrom-letter (string (code-char #x00C5)))
+         (fi-ligature (string (code-char #xFB01))))
+    (assert-string= composed-e
+                    (cl-cc/javascript::%js-string-normalize decomposed-e))
+    (assert-string= decomposed-e
+                    (cl-cc/javascript::%js-string-normalize composed-e "NFD"))
+    (assert-string= angstrom-letter
+                    (cl-cc/javascript::%js-string-normalize angstrom-sign "NFKC"))
+    (assert-string= "fi"
+                    (cl-cc/javascript::%js-string-normalize fi-ligature "NFKD"))
+    (assert-signals error
+      (cl-cc/javascript::%js-string-normalize "cafe" "BAD"))))
 
 (deftest-each js-rt-string-locale-compare-order
   "localeCompare returns -1.0, 0.0, or 1.0 based on lexicographic ordering."

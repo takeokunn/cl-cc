@@ -335,4 +335,3 @@ Returns (values ast rest)."
              (values (%js-call '%js-import spec-ast) rest4)))))
       (t
        (error "JS parse error: unexpected token after 'import': ~S" (js-peek rest))))))
-

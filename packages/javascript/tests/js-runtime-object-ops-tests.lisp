@@ -31,11 +31,29 @@
     (let ((keys (sort (coerce (cl-cc/javascript::%js-object-keys obj) 'list) #'string<)))
       (assert-equal '("a" "b") keys))))
 
+(deftest js-rt-object-keys-includes-accessor-property-name
+  "Object.keys exposes accessor properties by public name, not internal slots."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (getter (lambda () 42))
+         (desc (cl-cc/javascript::%js-make-object "get" getter)))
+    (cl-cc/javascript::%js-object-define-property obj "answer" desc)
+    (let ((keys (coerce (cl-cc/javascript::%js-object-keys obj) 'list)))
+      (assert-equal '("answer") keys))))
+
 (deftest js-rt-object-values
   "Object.values returns the enumerable values in insertion order."
   (let* ((obj    (cl-cc/javascript::%js-make-object "x" 10 "y" 20))
          (values (sort (coerce (cl-cc/javascript::%js-object-values obj) 'list) #'<)))
     (assert-equal '(10 20) values)))
+
+(deftest js-rt-object-values-reads-accessor
+  "Object.values reads accessor properties through %js-get-prop."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (getter (lambda () 123))
+         (desc (cl-cc/javascript::%js-make-object "get" getter)))
+    (cl-cc/javascript::%js-object-define-property obj "answer" desc)
+    (let ((values (coerce (cl-cc/javascript::%js-object-values obj) 'list)))
+      (assert-equal '(123) values))))
 
 (deftest js-rt-object-entries
   "Object.entries returns [key, value] pairs as two-element arrays."
@@ -45,6 +63,33 @@
     (let ((pair (aref entries 0)))
       (assert-string= "k"  (aref pair 0))
       (assert-=       99   (aref pair 1)))))
+
+(deftest js-rt-object-own-keys-includes-accessor-property-name
+  "Reflect.ownKeys/Object.getOwnPropertyNames backend exposes accessor names."
+  (let* ((obj (cl-cc/javascript::%js-make-object "data" 1))
+         (getter (lambda () 7))
+         (desc (cl-cc/javascript::%js-make-object "get" getter)))
+    (cl-cc/javascript::%js-object-define-property obj "computed" desc)
+    (let ((keys (sort (coerce (cl-cc/javascript::%js-object-own-keys obj) 'list) #'string<)))
+      (assert-equal '("computed" "data") keys)
+      (assert-false (member "__get_computed" keys :test #'string=)))))
+
+(deftest js-rt-object-symbol-own-property-keys
+  "Symbol-keyed own properties are hidden from string enumerators and exposed by symbol APIs."
+  (let* ((obj (cl-cc/javascript::%js-make-object "name" "visible"))
+         (sym (cl-cc/javascript::%js-make-symbol "secret")))
+    (cl-cc/javascript::%js-set-prop obj sym 99)
+    (assert-= 99 (cl-cc/javascript::%js-get-prop obj sym))
+    (assert-equal '("name")
+                  (coerce (cl-cc/javascript::%js-object-keys obj) 'list))
+    (assert-equal '("name")
+                  (coerce (cl-cc/javascript::%js-object-get-own-property-names obj) 'list))
+    (let ((symbols (coerce (cl-cc/javascript::%js-object-get-own-property-symbols obj) 'list))
+          (own-keys (coerce (cl-cc/javascript::%js-object-own-keys obj) 'list)))
+      (assert-equal 1 (length symbols))
+      (assert-eq sym (first symbols))
+      (assert-true (member "name" own-keys :test #'equal))
+      (assert-true (member sym own-keys :test #'eq)))))
 
 ;;; ─── Object.assign ───────────────────────────────────────────────────────────
 
@@ -58,6 +103,32 @@
     (assert-= 1 (gethash "a" target))
     (assert-= 2 (gethash "b" target))
     (assert-= 3 (gethash "c" target))))
+
+(deftest js-rt-object-assign-skips-internal-slots
+  "Object.assign copies public own keys without leaking prototype internals."
+  (let* ((proto (cl-cc/javascript::%js-make-object "inherited" 9))
+         (src (cl-cc/javascript::%js-object-create proto))
+         (target (cl-cc/javascript::%js-make-object)))
+    (cl-cc/javascript::%js-set-prop src "a" 10)
+    (cl-cc/javascript::%js-object-assign target src)
+    (assert-= 10 (cl-cc/javascript::%js-get-prop target "a"))
+    (assert-eq cl-cc/javascript::+js-null+
+               (cl-cc/javascript::%js-object-get-prototype-of target))
+    (assert-false (nth-value 1 (gethash "__proto__" target)))))
+
+(deftest js-rt-object-assign-copies-symbol-properties
+  "Object.assign copies enumerable own Symbol properties."
+  (let* ((sym (cl-cc/javascript::%js-make-symbol "copy"))
+         (src (cl-cc/javascript::%js-make-object "name" "source"))
+         (target (cl-cc/javascript::%js-make-object)))
+    (cl-cc/javascript::%js-set-prop src sym 77)
+    (cl-cc/javascript::%js-object-assign target src)
+    (assert-string= "source" (cl-cc/javascript::%js-get-prop target "name"))
+    (assert-= 77 (cl-cc/javascript::%js-get-prop target sym))
+    (let ((symbols (coerce (cl-cc/javascript::%js-object-get-own-property-symbols target)
+                           'list)))
+      (assert-equal 1 (length symbols))
+      (assert-eq sym (first symbols)))))
 
 (deftest js-rt-object-spread-set-returns-obj
   "%js-object-spread-set sets a key and returns the object."
@@ -87,6 +158,36 @@
     (cl-cc/javascript::%js-object-set-prototype-of obj proto2)
     (assert-eq proto2 (cl-cc/javascript::%js-object-get-prototype-of obj))))
 
+(deftest js-rt-object-extensibility-seal-freeze
+  "Object extensibility helpers affect prototype, writes, and deletes."
+  (let* ((proto (cl-cc/javascript::%js-make-object "p" 1))
+         (obj   (cl-cc/javascript::%js-object-create proto)))
+    (assert-true (cl-cc/javascript::%js-object-extensible-p obj))
+    (assert-eq proto (cl-cc/javascript::%js-object-get-prototype-of obj))
+    (assert-= 1 (cl-cc/javascript::%js-get-prop obj "p"))
+    (cl-cc/javascript::%js-object-prevent-extensions obj)
+    (assert-false (cl-cc/javascript::%js-object-extensible-p obj))
+    (cl-cc/javascript::%js-set-prop obj "new-key" 2)
+    (assert-false (nth-value 1 (gethash "new-key" obj)))
+    (let ((next-proto (cl-cc/javascript::%js-make-object "q" 2)))
+      (assert-false (cl-cc/javascript::%js-reflect-set-prototype-of obj next-proto))
+      (assert-eq proto (cl-cc/javascript::%js-object-get-prototype-of obj)))))
+
+(deftest js-rt-object-seal-and-freeze-mutations
+  "Sealed objects keep properties from deletion; frozen objects reject writes."
+  (let ((sealed (cl-cc/javascript::%js-make-object "a" 1)))
+    (assert-eq sealed (cl-cc/javascript::%js-object-seal sealed))
+    (assert-true (cl-cc/javascript::%js-object-sealed-p sealed))
+    (assert-false (cl-cc/javascript::%js-delete sealed "a"))
+    (assert-= 1 (gethash "a" sealed)))
+  (let ((frozen (cl-cc/javascript::%js-make-object "x" 10)))
+    (assert-eq frozen (cl-cc/javascript::%js-object-freeze frozen))
+    (assert-true (cl-cc/javascript::%js-object-frozen-p frozen))
+    (cl-cc/javascript::%js-set-prop frozen "x" 99)
+    (assert-= 10 (gethash "x" frozen))
+    (assert-false (cl-cc/javascript::%js-delete frozen "x"))
+    (assert-= 10 (gethash "x" frozen))))
+
 ;;; ─── Object.hasOwn ───────────────────────────────────────────────────────────
 
 (deftest-each js-rt-object-has-own
@@ -97,6 +198,24 @@
   (let ((obj (cl-cc/javascript::%js-make-object "a" 1)))
     (assert-equal expected (cl-cc/javascript::%js-object-has-own obj key))))
 
+(deftest js-rt-object-has-own-symbol-key
+  "Object.hasOwn recognizes own Symbol properties."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (sym (cl-cc/javascript::%js-make-symbol "owned")))
+    (cl-cc/javascript::%js-set-prop obj sym 42)
+    (assert-true (cl-cc/javascript::%js-object-has-own obj sym))
+    (assert-false (cl-cc/javascript::%js-object-has-own
+                   obj
+                   (cl-cc/javascript::%js-make-symbol "owned")))))
+
+(deftest js-rt-object-has-own-accessor-property
+  "Object.hasOwn recognizes accessor properties as own properties."
+  (let* ((obj (cl-cc/javascript::%js-make-object))
+         (getter (lambda () 42))
+         (desc (cl-cc/javascript::%js-make-object "get" getter)))
+    (cl-cc/javascript::%js-object-define-property obj "answer" desc)
+    (assert-true (cl-cc/javascript::%js-object-has-own obj "answer"))))
+
 ;;; ─── Object.fromEntries ──────────────────────────────────────────────────────
 
 (deftest js-rt-object-from-entries
@@ -106,6 +225,17 @@
          (obj   (cl-cc/javascript::%js-object-from-entries pairs)))
     (assert-= 10 (gethash "x" obj))
     (assert-= 20 (gethash "y" obj))))
+
+(deftest js-rt-object-from-entries-preserves-symbol-keys
+  "Object.fromEntries preserves Symbol keys instead of stringifying them."
+  (let* ((sym (cl-cc/javascript::%js-make-symbol "entry"))
+         (pairs (cl-cc/javascript::%js-make-array (%jr-arr sym 88)))
+         (obj (cl-cc/javascript::%js-object-from-entries pairs)))
+    (assert-= 88 (cl-cc/javascript::%js-get-prop obj sym))
+    (let ((symbols (coerce (cl-cc/javascript::%js-object-get-own-property-symbols obj)
+                           'list)))
+      (assert-equal 1 (length symbols))
+      (assert-eq sym (first symbols)))))
 
 ;;; ─── Object.withoutKeys ──────────────────────────────────────────────────────
 
@@ -124,10 +254,39 @@
 (deftest js-rt-object-group-by
   "%js-object-group-by partitions an iterable by key-fn result."
   (let* ((items  (%jr-arr 1 2 3 4))
-         (key-fn (lambda (x) (if (evenp x) "even" "odd")))
+         (key-fn (lambda (x index)
+                   (declare (ignore index))
+                   (if (evenp x) "even" "odd")))
          (grouped (cl-cc/javascript::%js-object-group-by items key-fn)))
     (assert-= 2 (length (gethash "even" grouped)))
     (assert-= 2 (length (gethash "odd"  grouped)))))
+
+(deftest js-rt-object-group-by-passes-index
+  "%js-object-group-by passes the zero-based element index to key-fn."
+  (let* ((seen '())
+         (items (%jr-arr "a" "b" "c"))
+         (grouped (cl-cc/javascript::%js-object-group-by
+                   items
+                   (lambda (item index)
+                     (push (list item index) seen)
+                     (if (evenp index) "even-index" "odd-index")))))
+    (assert-equal '(("c" 2) ("b" 1) ("a" 0)) seen)
+    (assert-equal '("a" "c") (%jr-list (gethash "even-index" grouped)))
+    (assert-equal '("b") (%jr-list (gethash "odd-index" grouped)))))
+
+(deftest js-rt-object-group-by-null-prototype
+  "%js-object-group-by returns a null-prototype object."
+  (let* ((items (%jr-arr 1))
+         (grouped (cl-cc/javascript::%js-object-group-by
+                   items
+                   (lambda (item index)
+                     (declare (ignore item index))
+                     "all"))))
+    (assert-eq cl-cc/javascript::+js-null+
+               (cl-cc/javascript::%js-object-get-prototype-of grouped))
+    (assert-false (member "__proto__"
+                          (coerce (cl-cc/javascript::%js-object-keys grouped) 'list)
+                          :test #'string=))))
 
 ;;; ─── Destructuring helpers ───────────────────────────────────────────────────
 
@@ -300,12 +459,6 @@
   "%js-new-target returns +js-undefined+ outside a constructor."
   (assert-eq cl-cc/javascript::+js-undefined+
              (cl-cc/javascript::%js-new-target)))
-
-(deftest js-rt-import-meta-stub
-  "%js-import-meta returns a stub object with a 'url' key."
-  (let ((meta (cl-cc/javascript::%js-import-meta)))
-    (assert-true (cl-cc/javascript::%js-ht-p meta))
-    (assert-string= "" (gethash "url" meta))))
 
 (deftest js-rt-using-register-identity
   "%js-using-register returns its argument unchanged."

@@ -44,10 +44,10 @@
                               ((header-forwarding-p h)
                                (let* ((fwd-addr  (header-forwarding-ptr h))
                                       (fwd-h     (rt-heap-object-header heap fwd-addr))
-                                      (fwd-size  (if (integerp fwd-h) (header-size fwd-h) 1)))
+                                      (fwd-size  (if (integerp fwd-h) (rt-header-size fwd-h) 1)))
                                  (incf addr (max 1 fwd-size))))
-                              ((and (integerp h) (> (header-size h) 0))
-                               (let ((size (header-size h)))
+                              ((and (integerp h) (> (rt-header-size h) 0))
+                               (let ((size (rt-header-size h)))
                                   (dolist (offset (rt-object-pointer-slots heap addr))
                                     (let* ((slot-addr (+ addr offset))
                                            (val (rt-heap-ref heap slot-addr))
@@ -78,8 +78,8 @@
            ;; A forwarding cons at this position — should not appear in to-space,
            ;; but skip 1 word defensively.
            (incf scan 1))
-          ((and (integerp h) (> (header-size h) 0))
-            (let ((size (header-size h)))
+          ((and (integerp h) (> (rt-header-size h) 0))
+            (let ((size (rt-header-size h)))
               ;; Pinned objects are not expected in the active Cheney to-space:
               ;; pinned young objects are promoted by %GC-COPY-OBJECT.  If a
               ;; caller pins an already-copied object defensively skip tracing it
@@ -108,7 +108,7 @@
    Also update any remaining stale source-space pointers via the forwarding header."
   (dolist (old-addr promoted-addrs)
     (let ((h (rt-heap-object-header heap old-addr)))
-      (when (and (integerp h) (> (header-size h) 0))
+      (when (and (integerp h) (> (rt-header-size h) 0))
         (dolist (offset (rt-object-pointer-slots heap old-addr))
           (let ((val (rt-heap-ref heap (+ old-addr offset))))
             (cond
@@ -255,8 +255,7 @@
           ;; copying graph is closed, either retarget them to the forwarding
           ;; address of a live referent or clear/drop them when the referent was
           ;; left behind in the evacuation source.
-          (when (fboundp 'rt-gc-process-weak-after-minor)
-            (rt-gc-process-weak-after-minor heap #'in-source-p))
+          (rt-gc-process-weak-after-minor heap #'in-source-p)
           ;; Step 6: Commit new young-free
           (setf (rt-heap-young-free heap) (cdr to-free-cell))
           ;; Step 7: Statistics — words collected = semi-size - live words in new from-space

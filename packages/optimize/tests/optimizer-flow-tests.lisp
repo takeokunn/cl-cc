@@ -506,7 +506,7 @@
 (deftest-each loop-transforms-noop-on-nonmatching-shape
   "Loop rotation and peeling are no-ops on non-matching control-flow shapes."
   :cases (("rotation" #'cl-cc/optimize::opt-pass-loop-rotation)
-          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peeling))
+          ("peeling"  #'cl-cc/optimize::opt-pass-loop-peel))
   (pass)
   (let* ((insts (list (make-vm-label :name "A")
                       (make-vm-const :dst :r0 :value 1)
@@ -697,7 +697,7 @@
                  (make-vm-ret :reg :i))
            0 1)
           ("peeling"
-           #'cl-cc/optimize::opt-pass-loop-peeling
+           #'cl-cc/optimize::opt-pass-loop-peel
            (list (make-vm-const :dst :one :value 1)
                  (make-vm-jump :label "Lh")
                  (make-vm-label :name "Lh")
@@ -709,7 +709,7 @@
                  (make-vm-ret :reg :i))
            1 2)
           ("peeling-plain-while"
-           #'cl-cc/optimize::opt-pass-loop-peeling
+           #'cl-cc/optimize::opt-pass-loop-peel
            (list (make-vm-label :name "Lh")
                  (cl-cc:make-vm-integer-p :dst :r1 :src :r0)
                  (make-vm-jump-zero :reg :r1 :label "Lexit")

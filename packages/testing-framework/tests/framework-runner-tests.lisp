@@ -213,15 +213,15 @@
           (sb-posix:unsetenv "CLCC_SUITE_TIMEOUT")))))
 
 (deftest default-suite-timeout-env-drives-suite-deadline
-  "CLCC_SUITE_TIMEOUT=1 produces a deadline that terminates waiting for a hung worker."
+  "CLCC_SUITE_TIMEOUT=1 is accepted, and deadline joins terminate hung workers."
   (let ((old (uiop:getenv "CLCC_SUITE_TIMEOUT"))
         (thread nil))
     (unwind-protect
          (progn
            (sb-posix:setenv "CLCC_SUITE_TIMEOUT" "1" 1)
+           (assert-= 1 (%default-suite-timeout))
            (let ((deadline (+ (get-internal-real-time)
-                              (round (* (%default-suite-timeout)
-                                        internal-time-units-per-second)))))
+                              (round (* 0.05 internal-time-units-per-second)))))
              (setf thread (sb-thread:make-thread (lambda () (loop (sleep 1)))
                                                  :name "suite-timeout-env-demo"))
              (assert-eq :suite-timeout

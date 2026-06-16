@@ -34,6 +34,17 @@
       (cl-cc::prolog-cut ()))
     (nreverse results)))
 
+(defun all-prolog-substitutions (goal term)
+  "Collect TERM after substituting each environment yielded while solving GOAL."
+  (let ((results nil))
+    (handler-case
+        (cl-cc:solve-goal goal nil
+                          (lambda (env)
+                            (push (cl-cc:logic-substitute term env)
+                                  results)))
+      (cl-cc/prolog:prolog-cut ()))
+    (nreverse results)))
+
 (defun prolog-solution-count (goal)
   "Return the number of solutions for GOAL."
   (length (all-envs goal)))
@@ -51,7 +62,7 @@
 
 (defmacro assert-prolog-binding= (goal var expected)
   `(with-prolog-single-solution (env ,goal)
-     (assert-= ,expected (cl-cc:substitute-variables ,var env))))
+     (assert-= ,expected (cl-cc:logic-substitute ,var env))))
 
 ;;;; Invariant tests for with-fresh-prolog (framework-fixtures.lisp).
 ;;;;
@@ -85,7 +96,7 @@
      (with-fresh-prolog
        (cl-cc/prolog:add-rule
          'prolog-fixture-invariant-dummy
-         (cl-cc/prolog:make-prolog-rule
+         (cl-cc/prolog::make-prolog-rule
            :head '(prolog-fixture-invariant-dummy ?x)
            :body nil))
        ;; Inside the fixture, the DB is isolated and only our dummy key lives.
@@ -113,7 +124,7 @@
          (with-fresh-prolog
            (cl-cc/prolog:add-rule
              'prolog-fixture-invariant-nle
-             (cl-cc/prolog:make-prolog-rule
+             (cl-cc/prolog::make-prolog-rule
                :head '(prolog-fixture-invariant-nle ?x)
                :body nil))
            (error "intentional non-local exit from with-fresh-prolog body"))

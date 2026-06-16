@@ -37,9 +37,9 @@
 (deftest fr-791-logging-exists
   "FR-791: Structured logging functions are defined."
   :timeout 5
-  (assert-true (fboundp 'cl-cc/runtime::rt-log-error))
-  (assert-true (fboundp 'cl-cc/runtime::rt-log-warn))
-  (assert-true (fboundp 'cl-cc/runtime::rt-log-info)))
+  (assert-true (fboundp 'cl-cc/runtime::log-error))
+  (assert-true (fboundp 'cl-cc/runtime::log-warn))
+  (assert-true (fboundp 'cl-cc/runtime::log-info)))
 
 (deftest fr-792-metrics-exists
   "FR-792: Runtime metrics API is defined."

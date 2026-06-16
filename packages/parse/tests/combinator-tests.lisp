@@ -22,6 +22,11 @@
   (loop for (type val) on specs by #'cddr
         collect (make-tok type val)))
 
+(defmacro assert-combinator-boolean-case (expected form)
+  `(if ,expected
+       (assert-true ,form)
+       (assert-false ,form)))
+
 ;;; ─── Token Stream Protocol ──────────────────────────────────────────────────
 
 (deftest-each comb-stream-empty-p-behavior
@@ -29,9 +34,9 @@
   :cases (("nil-stream"      nil          t)
           ("non-empty-stream" (toks :T-INT 1) nil))
   (stream expected)
-  (if expected
-      (assert-true  (cl-cc/parse::stream-empty-p stream))
-      (assert-false (cl-cc/parse::stream-empty-p stream))))
+  (assert-combinator-boolean-case
+      expected
+    (cl-cc/parse::stream-empty-p stream)))
 
 (deftest comb-stream-peek
   "Peek returns first token without consuming."
@@ -80,9 +85,9 @@
           ("list"    '(1 2 3) t)
           ("fail"    :fail    nil))
   (value expected)
-  (if expected
-      (assert-true  (cl-cc/parse:parse-ok-p value))
-      (assert-false (cl-cc/parse:parse-ok-p value))))
+  (assert-combinator-boolean-case
+      expected
+    (cl-cc/parse:parse-ok-p value)))
 
 ;;; ─── parse-token* ───────────────────────────────────────────────────────────
 
@@ -190,4 +195,3 @@
           (assert-equal expected-ast ast)
           (assert-= expected-rest-len (length rest)))
         (assert-equal :fail ast))))
-

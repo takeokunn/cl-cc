@@ -294,11 +294,55 @@ saves/restores it instead of clobbering it."
           (emit ctx (funcall ctor :dst result-reg :lhs lhs-reg :rhs rhs-reg))
           result-reg)))))
 
+(defparameter *vm-falsey-predicate-call-names*
+  '("EQ" "EQL" "EQUAL" "EQUALP" "=" "/=" "<" "<=" ">" ">="
+    "NULL" "TYPEP" "NUMBERP" "STRINGP" "SYMBOLP" "CONSP" "ATOM"
+    "LISTP" "VECTORP" "ARRAYP" "HASH-TABLE-P" "FUNCTIONP"
+    "CHARACTERP" "INTEGERP" "FLOATP" "BOUNDP" "FBOUNDP"
+    "SLOT-BOUNDP" "SLOT-EXISTS-P" "STRING=" "STRING/=" "STRING<"
+    "STRING>" "STRING<=" "STRING>=" "CHAR=" "CHAR/=" "CHAR<"
+    "CHAR>" "CHAR<=" "CHAR>=")
+  "Predicate calls whose compiled VM result follows the VM 0/NIL falsey convention.")
+
+(defun %vm-falsey-predicate-call-p (node)
+  "Return T when NODE is a predicate call lowered to a VM falsey result."
+  (and (typep node 'ast-call)
+       (let ((func (ast-call-func node)))
+         (and (typep func 'ast-var)
+              (member (symbol-name (ast-var-name func))
+                      *vm-falsey-predicate-call-names*
+                      :test #'string=)))))
+
+(defun %try-compile-common-lisp-not (func-sym args result-reg ctx)
+  "Lower Common Lisp NOT with generalized boolean semantics.
+VM boolean primitives keep numeric-zero falsey behavior for legacy predicate
+interoperability.  Plain values therefore test exactly for NIL, while known
+VM-style predicate calls use VM-NOT to invert their 0/NIL falsey result."
+  (when (and (eq func-sym 'not) (= (length args) 1))
+    (let ((arg-reg (compile-ast (first args) ctx)))
+      (if (%vm-falsey-predicate-call-p (first args))
+          (progn
+            (emit ctx (make-vm-not :dst result-reg :src arg-reg))
+            result-reg)
+          (let ((nil-p-reg (make-register ctx))
+                (false-label (make-label ctx "not_false"))
+                (end-label (make-label ctx "not_end")))
+            (emit ctx (make-vm-null-p :dst nil-p-reg :src arg-reg))
+            (emit ctx (make-vm-jump-zero :reg nil-p-reg :label false-label))
+            (%emit-constant ctx t :dst result-reg)
+            (emit ctx (make-vm-jump :label end-label))
+            (emit ctx (make-vm-label :name false-label))
+            (%emit-constant ctx nil :dst result-reg)
+            (emit ctx (make-vm-label :name end-label))
+            result-reg)))))
+
 (defun %try-compile-builtin (func-sym args result-reg ctx)
   "Phase-1 (table-driven) + Phase-2 (Prolog-style) builtin dispatch."
   (when (and func-sym
              (not (%ast-var-function-value-p func-sym ctx)))
     (let ((sname (symbol-name func-sym)))
+      (let ((result (%try-compile-common-lisp-not func-sym args result-reg ctx)))
+        (when result (return-from %try-compile-builtin result)))
       (let ((result (%try-compile-equality-predicate func-sym args result-reg ctx)))
         (when result (return-from %try-compile-builtin result)))
       ;; Phase 1: ~160 calling conventions via registry hash-table

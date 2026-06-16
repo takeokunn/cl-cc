@@ -62,8 +62,7 @@
 
 (declaim (inline compressed-pointer-enabled-p
                  encode-compressed-pointer decode-compressed-pointer
-                 encode-pointer decode-pointer pointer-tag
-                 val-encode-pointer val-decode-pointer))
+                 encode-pointer decode-pointer pointer-tag))
 
 (defun compressed-pointer-enabled-p ()
   "Return true when NaN-boxed pointer payloads should use 32-bit offsets."
@@ -111,16 +110,6 @@ from *HEAP-BASE-ADDRESS* and sets +COMPRESSED-POINTER-FLAG+.
   (if (val-compressed-pointer-p v)
       (decode-compressed-pointer (logand v +compressed-pointer-offset-mask+))
       (logand v +addr-mask+)))
-
-(defun val-encode-pointer (addr tag)
-  "Compatibility alias for ENCODE-POINTER."
-  (declare (type (unsigned-byte 64) addr tag))
-  (encode-pointer addr tag))
-
-(defun val-decode-pointer (v)
-  "Compatibility alias for DECODE-POINTER."
-  (declare (type (unsigned-byte 64) v))
-  (decode-pointer v))
 
 (defun pointer-tag (v)
   "Return the 3-bit sub-tag word from a pointer-tagged NaN-boxed value."

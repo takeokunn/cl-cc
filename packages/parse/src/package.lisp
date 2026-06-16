@@ -10,8 +10,9 @@
 ;;;; intentionally excluded from exports to avoid NAME-CONFLICT errors. They
 ;;;; remain exported from :cl-cc via package-exports-1.lisp.
 ;;;;
-;;;; DCG symbols (def-dcg-rule, phrase, phrase-rest, phrase-all, dcg-fresh-var,
-;;;; dcg-reset-counter) are already exported by :cl-cc/prolog and excluded here.
+;;;; DCG public symbols (def-dcg-rule, phrase, phrase-all) come from
+;;;; :cl-cc/prolog. The internal DCG helpers (dcg-fresh-var, dcg-reset-counter)
+;;;; remain unexported on purpose and are not re-exported here.
 
 (defpackage :cl-cc/parse
   (:use :cl :cl-cc/ast :cl-cc/bootstrap)

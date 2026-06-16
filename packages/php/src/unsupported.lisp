@@ -19,11 +19,10 @@
 
 (defun %php-unsupported-classlike-message (kind)
   "Return a diagnostic for unsupported PHP class-like declaration KIND.
-Returns NIL when the kind is supported (:trait, :interface are both supported)."
+Returns NIL when the kind is supported (:class, :trait, :interface, :enum)."
   (case kind
-    (:trait     nil)                    ; traits are now supported via parser-trait.lisp
-    (:interface nil)                    ; interfaces are now supported
-    (otherwise nil)))
+    ((:class :trait :interface :enum) nil)
+    (otherwise "PHP class-like declaration is not yet supported in cl-cc")))
 
 (defun php-check-supported-forms (forms)
   "Signal an error if FORMS contains PHP AST markers for unsupported constructs."

@@ -243,6 +243,19 @@
       (assert-eq (find-package :cl-cc/compile) *package*))
     (assert-eq original-package *package*)))
 
+(deftest framework-meta-with-cleared-hash-table-restores-state
+  "with-cleared-hash-table clears a hash table during BODY and restores it afterward."
+  (let ((table (make-hash-table :test 'eq)))
+    (setf (gethash 'a table) 1
+          (gethash 'b table) 2)
+    (with-cleared-hash-table (table)
+      (assert-= 0 (hash-table-count table))
+      (setf (gethash 'c table) 3))
+    (assert-= 2 (hash-table-count table))
+    (assert-= 1 (gethash 'a table))
+    (assert-= 2 (gethash 'b table))
+    (assert-null (gethash 'c table))))
+
 (deftest framework-meta-deftest-compile-stdlib-expands-to-shared-assertion
   "deftest-compile stdlib cases macroexpand into assert-evaluates-to instead of duplicating boilerplate."
   (let ((expanded (macroexpand-1

@@ -17,8 +17,9 @@ cl-cc compile file.lisp -o out --arch x86-64
 ```
 
 `nix run .#test` maps to `cl-cc/test:run-tests` and executes the canonical
-fast unit plan. Integration and self-hosting E2E suites are selected by suite
-taxonomy and run explicitly; they no longer depend on `slow` names.
+fast unit plan. Integration, E2E, conformance, and documentation/evidence
+suites are selected by suite taxonomy and run explicitly; they no longer depend
+on `slow` names.
 `nix flake check` invokes the same fast plan via `checks.tests`.
 
 Timeouts are explicit for test execution. Set `CLCC_TEST_TIMEOUT` to override
@@ -402,7 +403,7 @@ $ cl-cc repl
 
 ## PHP Frontend
 
-cl-cc includes a PHP frontend that compiles PHP source to the same CL AST and then through the same bytecode/native backend as Common Lisp programs. `.php` files are auto-detected; the `--lang php` flag selects it explicitly for any command.
+cl-cc includes a PHP 8.0-8.5 frontend that compiles PHP source to the same CL AST and then through the same bytecode/native backend as Common Lisp programs. `.php` files are auto-detected; the `--lang php` flag selects it explicitly for any command.
 
 ```bash
 cl-cc run file.php
@@ -447,6 +448,10 @@ cl-cc check file.php --strict
 | `$a <=> $b`                                 | `%php-spaceship`                                             |
 | `$a >> $n`                                  | `%php-shift-right`                                           |
 | `$a instanceof C`                           | `%php-instanceof`                                            |
+| `$value |> f(...)`                          | PHP 8.5 pipe helper with first-class callable lowering        |
+| `(void) $expr`                              | side-effect evaluation followed by PHP null                   |
+| `clone($obj, ["prop" => $value])`           | PHP 8.5 clone-with helper after `__clone` dispatch            |
+| `Closure::getCurrent()`                     | currently executing Closure or PHP null                      |
 
 **Type annotations** — parameter and return type annotations (`int`, `?string`, `int\|string`, `void`, `never`, `mixed`, `static`, nullable/union/intersection types) are preserved as `:php-param-types` / `:php-return-type` in the `ast-defun` declarations. Class properties and constants preserve their declared PHP types on `ast-slot-def` nodes.
 
@@ -461,6 +466,8 @@ PHP's semantics (ordered arrays, loose equality, truthiness, exceptions) are bri
 %php-array-unset      Array element delete (preserving order)
 %php-array-pairs      Ordered (key . value) pair list
 %php-array-key-exists Array key presence check
+%php-array-first / %php-array-last
+                      PHP 8.5 array_first() / array_last()
 %php-eq-loose         PHP == (type-coercing) equality
 %php-eq-strict        PHP === (type-strict) equality
 %php-truthy           PHP truthiness (0, "", "0", [], null → false)
@@ -476,27 +483,34 @@ PHP's semantics (ordered arrays, loose equality, truthiness, exceptions) are bri
 %php-match-error      Unhandled match arm signal
 %php-list-bind        PHP list() destructuring representation
 %php-yield / %php-yield-from  Generator yield representation (runtime data)
+%php-fiber-make / %php-fiber-start / %php-fiber-suspend
+                       Fiber object construction, start, state queries, and first suspension
+%php-pipe             PHP 8.5 pipe operator dispatch
+%php-clone-with       PHP 8.5 clone-with property override application
 ```
+
+PHP 8.5 predefined constants include `PHP_VERSION` / `PHP_VERSION_ID`,
+`PHP_BUILD_DATE`, and `PHP_BUILD_PROVIDER`.
 
 ### Unsupported
 
 - Full generator coroutine object/resumption semantics — `yield` / `yield from` parse to runtime data representations, but coroutine execution lowering is not yet implemented.
-- Named arguments, first-class callables (`strlen(...)` syntax), fibers.
-- PHP-specific standard library (`array_map`, `implode`, etc.) — calls are compiled as generic function calls; provide a prelude file with CL implementations as needed.
+- Full stackful Fiber continuation/resumption semantics after `Fiber::suspend()`; construction, `start`, `getReturn`, state queries, and the first suspend value lower to runtime helpers.
+- Remaining PHP-specific standard library surface beyond the registered runtime helper set.
 
 ## Known Limitations
 
-Fast test plan status: **8319 tests pass, 0 failures, 6 xfail (expected-fail for known native-backend gaps)**. The `nix run .#test` fast plan now includes the ANSI conformance suite. Previous 65 pre-existing regressions are all resolved.
+Fast test plan status: **9184 tests pass, 0 failures** in the local 2026-06-14 run (`nix run .#test -- --no-warm-stdlib`). The `nix run .#test` fast plan excludes integration, E2E, conformance, and documentation/evidence suites by taxonomy. Native I/O parity tests remain in the E2E taxonomy while native binary behavior is validated end-to-end.
 
-### ANSI CL Conformance Suite (included in fast plan)
+### ANSI CL Conformance Suite
 
-All ANSI CL conformance suites are now part of the `nix run .#test` fast plan. The only remaining expected-fail tests are the 6 native-backend gaps below.
+ANSI CL conformance suites run explicitly via the conformance taxonomy instead of the default fast plan. Remaining native-backend parity work is tracked by the native I/O E2E tests below.
 
 - **Package system** (Ch.11): 18 conformance tests pass as `deftest`. Package registry metadata, symbol operations (`intern`, `export`, `import`, `shadow`, `unintern`), `defpackage`, `make-package`/nicknames, `delete-package`, `rename-package`, `do-symbols`, `list-all-packages`, `gensym`, `make-symbol` are implemented.
 - **`format` directives** (Ch.22): 23/23 conformance tests pass as `deftest`. Self-host `%vm-format-render` handles `~A`, `~S`, `~D`, `~B`, `~O`, `~X`, `~R`, `~F`, `~%`, `~~`, `~&`, `~T`, `~C`, `~P`, `~*`, `~?`, `~[`, `~{`, `~^` with column tracking and section parsing. Native x86-64 binary FORMAT still depends on host SBCL fallback.
 - **Number tower** (Ch.12): 24/24 conformance tests pass as `deftest`. Bignum, ratio, complex type predicates and arithmetic VM helpers are implemented. Native x86-64 backend is fixnum-only (`*x86-64-bignum-calls-enabled*` default `nil`).
 - **Native backend parity**: `load`, host-backed FFI, host-backed `format`, and host stream bridges not yet available in native binaries. 21 pathname/file/compound-stream/LOAD runtime functions added (Wave 4).
-- **I/O and streams** (Ch.19-21): 23/29 conformance tests pass as `deftest` (string-stream, predicates, read/write-char/line, read/write-sequence, namestring, merge-pathnames, probe-file, delete-file, directory, ensure-directories-exist, broadcast-stream, concatenated-stream). 6 remain as `defexpected` (expected-fail): `unread-char`, `write-to-string`, `listen`, `make-pathname`, `load`, `echo-stream` — these require native backend or concrete implementation effort.
+- **I/O and streams** (Ch.19-21): native/e2e conformance tests cover string streams, predicates, read/write-char/line, read/write-sequence, namestring/pathname/file operations, `load`, and compound streams. Native binary parity for `unread-char`, `write-to-string`, `listen`, `make-pathname`, `load`, and `echo-stream` remains outside the fast plan until validated end-to-end.
 - **Unicode normalization**: NFC/NFD is implemented for Latin-1 characters. Full Unicode 15 normalization (NFKC/NFKD, UCA collation) requires the complete Unicode Character Database.
 - **Concurrency**: Green threads, channels, actors, STM, lock-free structures, and EBR/RCU/QSBR are implemented as pure-CL primitives suitable for cooperative multitasking. Native OS thread scheduling and M:N threading are not yet integrated.
 - **Distributed systems**: Raft consensus and CRDTs have proof-of-concept implementations. They lack full RPC integration, log persistence, and network transport layers needed for production use.

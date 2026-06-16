@@ -13,10 +13,6 @@
 (defvar *log-json-output* nil)
 (defvar *log-context*     nil)
 
-;;; Legacy aliases (internal)
-(defvar *rt-log-level* +log-level-info+)
-(defvar *rt-log-out*   *standard-output*)
-
 ;;; JSON helpers
 (defun %log-escape-string (s)
   (with-output-to-string (out)
@@ -67,23 +63,16 @@
     (if *log-json-output*
         (%log-emit-json level msg attrs)
         (%log-emit-text level msg attrs)))
-  (when (>= level *rt-log-level*)
-    (unless *log-json-output*
-      (format *rt-log-out* "[~D] ~A~%" level msg)
-      (force-output *rt-log-out*))))
+  (when (and (>= level *log-level*)
+             (not *log-json-output*))
+    (format *log-output* "[~D] ~A~%" level msg)
+    (force-output *log-output*)))
 
 (defun log-trace (message &rest attrs) (when (<= *log-level* +log-level-trace+) (rt-log +log-level-trace+ message :attrs attrs)))
 (defun log-debug (message &rest attrs) (when (<= *log-level* +log-level-debug+) (rt-log +log-level-debug+ message :attrs attrs)))
 (defun log-info  (message &rest attrs) (when (<= *log-level* +log-level-info+)  (rt-log +log-level-info+  message :attrs attrs)))
 (defun log-warn  (message &rest attrs) (when (<= *log-level* +log-level-warn+)  (rt-log +log-level-warn+  message :attrs attrs)))
 (defun log-error (message &rest attrs) (when (<= *log-level* +log-level-error+) (rt-log +log-level-error+ message :attrs attrs)))
-
-;;; Legacy wrappers
-(defun rt-log-info  (m &key a) (rt-log +log-level-info+  m :attrs a))
-(defun rt-log-warn  (m &key a) (rt-log +log-level-warn+  m :attrs a))
-(defun rt-log-error (m &key a) (rt-log +log-level-error+ m :attrs a))
-(defun rt-log-set-level (l) (setf *log-level* l *rt-log-level* l))
-(defun rt-log-init () (setf *log-level* +log-level-info+ *rt-log-level* +log-level-info+) t)
 
 (defmacro with-log-context (bindings &body body)
   "Bind logging context entries for the duration of BODY.

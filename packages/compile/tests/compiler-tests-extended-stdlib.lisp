@@ -6,7 +6,7 @@
       (declare (ignore _))
       (setf expr `(+ ,expr 1)))))
 
-;;; ─── FR-502/507: fill/replace/copy-seq vector support ───────────────────────
+;;; ─── FR-502/507: fill/replace/copy-seq sequence support ────────────────────
 
 (deftest compile-fill-vector
   "fill works on a vector; with :start/:end it modifies only the specified range."
@@ -32,6 +32,19 @@
   :timeout 180
   (let ((r (run-string "(let ((d (make-array 3 :initial-contents '(0 0 0)))
                               (s (make-array 3 :initial-contents '(1 2 3))))
+                           (replace d s)
+                           d)" :stdlib t)))
+    (assert-true (vectorp r))
+    (assert-= 1 (aref r 0))
+    (assert-= 2 (aref r 1))
+    (assert-= 3 (aref r 2)))
+  (let ((r (run-string "(let ((d (list 0 0 0))
+                              (s (make-array 3 :initial-contents '(1 2 3))))
+                           (replace d s)
+                           d)" :stdlib t)))
+    (assert-equal '(1 2 3) r))
+  (let ((r (run-string "(let ((d (make-array 3 :initial-contents '(0 0 0)))
+                              (s '(1 2 3)))
                            (replace d s)
                            d)" :stdlib t)))
     (assert-true (vectorp r))

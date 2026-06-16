@@ -105,10 +105,7 @@ RSP and RBP are the current stack/frame pointers."
 (defun read-stack-slot (rsp slot-offset)
   "Read a value from stack at RSP + SLOT-OFFSET.
 Uses SBCL's SAP (System Area Pointer) for native memory access."
-  #+sbcl
   (sb-sys:sap-ref-word (sb-sys:int-sap rsp) slot-offset)
-  #-sbcl
-  0)
 
 ;;; ──── Integration with codegen ────
 (defmacro with-stack-map-tracking ((func-label) &body body)

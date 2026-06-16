@@ -85,7 +85,6 @@ or other shapes that could make the first iteration semantically distinct are
 left unchanged."
   (let* ((vec (coerce instructions 'vector))
          (n (length vec))
-         (result nil)
          (i 0))
     (loop while (< i n) do
       (let ((candidate (%opt-counted-loop-candidate-at vec i)))
@@ -93,11 +92,6 @@ left unchanged."
             (let ((replacement (%opt-loop-peel-apply-candidate instructions candidate)))
               (if replacement
                   (return-from opt-pass-loop-peel replacement)
-                  (progn (push (aref vec i) result) (incf i))))
-            (progn (push (aref vec i) result) (incf i)))))
-    (nreverse result)))
-
-(unless (fboundp 'opt-pass-loop-peeling)
-  (defun opt-pass-loop-peeling (instructions)
-    "Compatibility alias for the FR-682 loop peeling pass."
-    (opt-pass-loop-peel instructions)))
+                  (incf i)))
+            (incf i))))
+    (opt-pass-loop-peeling instructions)))

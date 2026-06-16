@@ -75,7 +75,6 @@
         (cons "trimEnd" #'%js-string-trim-end)
         (cons "codePointAt" #'%js-string-code-point-at)
         (cons "normalize" #'%js-string-normalize)
-        (cons "substr" #'%js-string-slice)         ; deprecated alias
         (cons "substring" #'%js-string-substring)
         (cons "valueOf" (lambda (s) s))
         (cons "toString" (lambda (s) s))
@@ -129,6 +128,11 @@
         (cons "has"    #'%js-weak-set-has)
         (cons "delete" #'%js-weak-set-delete))
   "Alist: JS WeakSet.prototype method name -> host helper.")
+
+(defparameter *js-finalization-registry-method-table*
+  (list (cons "register"   #'%js-finreg-register)
+        (cons "unregister" #'%js-finreg-unregister))
+  "Alist: JS FinalizationRegistry.prototype method name -> host helper.")
 
 ;;; -----------------------------------------------------------------------
 ;;;  Number.prototype helpers
@@ -245,6 +249,8 @@ the table lookup. OBJ and KEY are bound in value-forms."
 
 (define-js-type-resolver %js-resolve-weak-map-method *js-weak-map-method-table*)
 (define-js-type-resolver %js-resolve-weak-set-method *js-weak-set-method-table*)
+(define-js-type-resolver %js-resolve-finalization-registry-method
+    *js-finalization-registry-method-table*)
 (define-js-type-resolver %js-resolve-date-method     *js-date-method-table*)
 
 ;;; Object.prototype fallback methods — table of (name . (lambda (obj) -> bound-method))
@@ -377,6 +383,8 @@ the table lookup. OBJ and KEY are bound in value-forms."
         (cons #'js-set-p              #'%js-resolve-set-method)
         (cons #'js-weak-map-p         #'%js-resolve-weak-map-method)
         (cons #'js-weak-set-p         #'%js-resolve-weak-set-method)
+        (cons #'js-finalization-registry-p
+              #'%js-resolve-finalization-registry-method)
         (cons #'hash-table-p          #'%js-resolve-object-method)
         (cons #'numberp               #'%js-resolve-number-method)
         (cons #'js-symbol-p           #'%js-resolve-symbol-method)

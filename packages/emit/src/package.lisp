@@ -37,7 +37,7 @@
     #:open #:*load-pathname* #:*load-truename* #:*compile-file-pathname*
     #:*compile-file-truename* #:*compile-print* #:*compile-verbose*
     #:*load-print* #:*load-verbose*
-    #:quit #:exit
+    #:exit
     #:getenv #:setenv
     #:*command-line-args* #:*default-external-format*
     #:read-preserving-whitespace #:read-delimited-list

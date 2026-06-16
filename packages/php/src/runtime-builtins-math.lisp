@@ -105,6 +105,31 @@ INF approximation used elsewhere) rather than signalling an error."
 ;;; no fbound symbol and the call hits `Undefined function'. See
 ;;; runtime-builtins-register.lisp.
 
+(defmacro define-php-unary-double-math (name operator docstring)
+  "Define a PHP math helper that coerces its argument to a double-float."
+  `(defun ,name (x)
+     ,docstring
+     (,operator (coerce (%php-numeric x) 'double-float))))
+
+(define-php-unary-double-math %php-sin sin "PHP sin.")
+(define-php-unary-double-math %php-cos cos "PHP cos.")
+(define-php-unary-double-math %php-tan tan "PHP tan.")
+(define-php-unary-double-math %php-exp exp "PHP exp.")
+(define-php-unary-double-math %php-asin asin "PHP asin.")
+(define-php-unary-double-math %php-acos acos "PHP acos.")
+(define-php-unary-double-math %php-atan atan "PHP atan.")
+(define-php-unary-double-math %php-sinh sinh "PHP sinh.")
+(define-php-unary-double-math %php-cosh cosh "PHP cosh.")
+(define-php-unary-double-math %php-tanh tanh "PHP tanh.")
+
+(defun %php-log (x &optional base)
+  "PHP log: natural logarithm, or logarithm of X in BASE."
+  (let ((value (coerce (%php-numeric x) 'double-float)))
+    (if base
+        (/ (log value)
+           (log (coerce (%php-numeric base) 'double-float)))
+        (log value))))
+
 (defun %php-fmod (x y)
   "PHP fmod: floating-point remainder of X / Y (sign follows the dividend)."
   ;; (%php-fmod 7 3) => 1.0d0
@@ -186,6 +211,23 @@ as PHP does — its 64-bit two's-complement representation."
   "PHP is_infinite: true when X is the INF approximation used elsewhere."
   (let ((v (%php-numeric x)))
     (if (and (floatp v) (= v v) (>= (abs v) most-positive-double-float)) t nil)))
+
+(defun %php-is-nan (x)
+  "PHP is_nan: true when X is a floating-point NaN."
+  (let ((v (%php-numeric x)))
+    (and (floatp v) (not (= v v)))))
+
+(defun %php-srand (&optional seed)
+  "PHP srand: seed the shared random state.
+
+The portable Common Lisp random-state API does not expose PHP-compatible seeded
+states, so a provided seed currently selects a fresh implementation state."
+  (when seed
+    (setf *random-state* (make-random-state t))))
+
+(defun %php-mt-srand (&optional seed)
+  "PHP mt_srand alias for the shared random-state seeding helper."
+  (%php-srand seed))
 
 (defun %php-base-convert (number from-base to-base)
   "PHP base_convert: convert a string NUMBER from FROM-BASE to TO-BASE (2..36),

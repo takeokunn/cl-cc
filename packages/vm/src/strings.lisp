@@ -8,11 +8,8 @@
 
 ;;; String Comparison Instructions
 
-(defvar *runtime-string-table* nil
-  "Weak runtime string interning table mapping string contents to canonical strings.")
-
 (defvar *rt-string-dedup-table* nil
-  "Compatibility alias for the runtime string interning table.")
+  "Weak runtime string interning table mapping string contents to canonical strings.")
 
 (defparameter *taint-mode* nil
   "When true, warn when tainted strings reach SQL, shell, or pathname sinks.")
@@ -151,11 +148,10 @@
 
 (defun %rt-ensure-string-dedup-table ()
   "Return the runtime string interning table, creating it lazily."
-  (or *runtime-string-table*
+  (or *rt-string-dedup-table*
       (let ((table (make-hash-table :test 'equal
                                     :weakness :key-and-value)))
-        (setf *runtime-string-table* table
-              *rt-string-dedup-table* table))))
+        (setf *rt-string-dedup-table* table))))
 
 (defun rt-string-dedup (string)
   "Return the canonical VM string with the same contents as STRING."

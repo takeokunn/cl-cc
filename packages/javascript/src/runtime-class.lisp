@@ -194,7 +194,23 @@ Example: (define-js-error-subclasses (\"TypeError\" type-error)  ...)
   ("ReferenceError" reference-error)
   ("SyntaxError"    syntax-error)
   ("EvalError"      eval-error)
-  ("URIError"       uri-error))
+  ("URIError"       uri-error)
+  ("AggregateError" aggregate-error))
+
+(setf (gethash "__constructor__" *js-aggregate-error-class*)
+      (lambda (&optional errors message opts)
+        (let ((msg (if (or (null message) (eq message +js-undefined+))
+                       ""
+                       (%js-to-string message))))
+          (when (%js-ht-p %js-this)
+            (setf (gethash "message" %js-this) msg
+                  (gethash "name"    %js-this) "AggregateError"
+                  (gethash "stack"   %js-this) (format nil "AggregateError: ~A" msg)
+                  (gethash "errors"  %js-this) (or errors (%js-make-array)))
+            (when (%js-ht-p opts)
+              (multiple-value-bind (cause present-p) (gethash "cause" opts)
+                (when present-p
+                  (setf (gethash "cause" %js-this) cause))))))))
 
 (defun %js-make-error-instance (class msg)
   "Create an Error instance with the given CLASS and message MSG."
@@ -221,15 +237,95 @@ Example: (define-js-error-subclasses (\"TypeError\" type-error)  ...)
   "JS debugger statement — no-op."
   +js-undefined+)
 
-(defun %js-import (module-name &optional with-opts)
-  "Dynamic import (stub — returns empty namespace object)."
-  (declare (ignore with-opts))
-  (%js-promise-resolve
-   (%js-make-object "default" +js-undefined+ "__moduleName__" module-name)))
+(defun %js-module-namespace (module-name &optional with-opts)
+  "Create the host module namespace object used by dynamic import."
+  (let ((specifier (%js-to-string module-name)))
+    (%js-make-object
+     "default" +js-undefined+
+     "__moduleName__" specifier
+     "url" specifier
+     "with" (or with-opts +js-undefined+)
+     "resolve" (lambda (next-specifier)
+                 (%js-to-string next-specifier)))))
 
-(defun %js-export (kind value)
-  "Mark a value as exported (stub — returns value)."
-  (declare (ignore kind))
+(defun %js-import (module-name &optional with-opts)
+  "Dynamic import host hook returning a resolved module namespace promise."
+  (%js-promise-resolve
+   (%js-module-namespace module-name with-opts)))
+
+(defun %js-import-meta ()
+  "Return host metadata for import.meta."
+  (%js-make-object
+   "url" "file://cl-cc/javascript/module"
+   "resolve" (lambda (specifier)
+               (%js-to-string specifier))))
+
+(defvar *js-module-exports* (%js-make-object)
+  "Current module export namespace accumulated while evaluating a module.")
+
+(defun %js-reset-module-exports ()
+  "Reset and return the current module export namespace."
+  (setf *js-module-exports* (%js-make-object)))
+
+(defun %js-current-module-exports ()
+  "Return the current module export namespace object."
+  *js-module-exports*)
+
+(defun %js-export-reexports ()
+  "Return the mutable re-export metadata array for the current module."
+  (let ((existing (%js-get-prop *js-module-exports* "__reexports__")))
+    (if (%js-vec-p existing)
+        existing
+        (let ((fresh (%js-make-array)))
+          (%js-set-prop *js-module-exports* "__reexports__" fresh)
+          fresh))))
+
+(defun %js-export-specifier-object (spec)
+  "Convert a parsed export specifier plist into a JS metadata object."
+  (%js-make-object
+   "local" (getf spec :local)
+   "exported" (getf spec :exported)))
+
+(defun %js-export-kind-name (kind)
+  "Return a stable metadata name for export KIND."
+  (if (keywordp kind)
+      (string-downcase (symbol-name kind))
+      (%js-to-string kind)))
+
+(defun %js-record-reexport (kind value from-module)
+  "Record unresolved re-export metadata for the host module loader."
+  (%js-array-push
+   (%js-export-reexports)
+   (%js-make-object
+    "kind" (%js-export-kind-name kind)
+    "from" (or from-module +js-undefined+)
+    "value" value)))
+
+(defun %js-export (kind value &optional from-module declaration-names)
+  "Record a module export and return VALUE.
+Declaration exports receive DECLARATION-NAMES from the parser so named function,
+class, and lexical exports are visible in the module namespace object."
+  (case kind
+    (:default
+     (%js-set-prop *js-module-exports* "default" value))
+    (:declaration
+     (dolist (name declaration-names)
+       (%js-set-prop *js-module-exports* name value)))
+    (:named
+     (dolist (spec value)
+       (let ((exported (getf spec :exported)))
+         (%js-set-prop *js-module-exports* exported +js-undefined+)))
+     (%js-set-prop *js-module-exports*
+                   "__namedExports__"
+                   (apply #'%js-make-array
+                          (mapcar #'%js-export-specifier-object value))))
+    (:re-export
+     (%js-record-reexport :named
+                          (apply #'%js-make-array
+                                 (mapcar #'%js-export-specifier-object value))
+                          from-module))
+    (:star
+     (%js-record-reexport :star value from-module)))
   value)
 
 (defun %js-spread (iterable)

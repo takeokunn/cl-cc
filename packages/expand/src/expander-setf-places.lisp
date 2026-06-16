@@ -62,6 +62,7 @@
 ;; All cons-cell accessors share the same expansion logic — hoist the closure once
 (%register-shared-setf-place-handler
  '(car first cdr rest nth
+   second third fourth fifth sixth seventh eighth ninth tenth
    caar cadr cdar cddr
    caaar cdaar cadar cddar caadr cdadr caddr cdddr
    caaaar cadaar caadar caddar cdaaar cddaar cdadar cdddar

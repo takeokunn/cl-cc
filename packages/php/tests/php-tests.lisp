@@ -102,7 +102,7 @@
     (assert-true (find :fn tokens :key #'php-tok-value :test #'eq))))
 
 (deftest php-parser-array-gap-lexer-tokens
-  "Characterization: short/associative/legacy array syntax tokens must all survive lexing."
+  "Characterization: short/associative/function-style array syntax tokens must all survive lexing."
   (let ((tokens (cl-cc/php:tokenize-php-source
                  "<?php [1,2,3]; [\"a\"=>1,\"b\"=>2]; array(1,2,3);")))
     (assert-true (find :T-LBRACKET tokens :key #'php-tok-type :test #'eq))

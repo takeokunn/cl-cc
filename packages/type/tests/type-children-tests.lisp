@@ -6,6 +6,9 @@
 
 (in-package :cl-cc/test)
 
+(defmacro assert-when-present (value form)
+  `(when ,value ,form))
+
 (defsuite type-children-suite
   :description "type-children / type-bound-var data layer tests"
   :parent cl-cc-unit-suite)
@@ -71,9 +74,10 @@
          (ch (cl-cc/type:type-children r)))
     (assert-equal expected-count (length ch))
     (assert-true (type-equal-p type-int (first ch)))
-    (if open-p
-        (assert-true  (type-var-p (second ch)))
-        (assert-true  (type-equal-p second-type-or-nil (second ch))))))
+    (assert-when-present open-p
+      (assert-true (type-var-p (second ch))))
+    (assert-when-present (not open-p)
+      (assert-true (type-equal-p second-type-or-nil (second ch))))))
 
 (deftest-each type-children-variant-variants
   "Variant children: closed → case values; open → cases + row variable."
@@ -87,7 +91,8 @@
          (v  (make-type-variant :cases cases :row-var rv))
          (ch (cl-cc/type:type-children v)))
     (assert-equal 2 (length ch))
-    (when open-p (assert-true (type-var-p (second ch))))))
+    (assert-when-present open-p
+      (assert-true (type-var-p (second ch))))))
 
 (deftest-each type-children-quantifier-return-body
   "Forall and exists return only the body (1 child)."
@@ -136,7 +141,8 @@
          (ch  (cl-cc/type:type-children row)))
     (assert-equal expected-count (length ch))
     (assert-true (cl-cc/type:type-effect-op-p (first ch)))
-    (when open-p (assert-true (type-var-p (second ch))))))
+    (assert-when-present open-p
+      (assert-true (type-var-p (second ch))))))
 
 (deftest-each type-children-effect-op-cases
   "Effect op: no args → nil children; with args → children list matching the args."
@@ -145,10 +151,11 @@
   (name args expected-count)
   (let* ((eff (make-type-effect-op :name name :args args))
          (ch  (cl-cc/type:type-children eff)))
-    (if expected-count
-        (progn (assert-equal expected-count (length ch))
-               (assert-true (type-equal-p type-int (first ch))))
-        (assert-null ch))))
+    (assert-when-present expected-count
+      (progn (assert-equal expected-count (length ch))
+             (assert-true (type-equal-p type-int (first ch)))))
+    (assert-when-present (not expected-count)
+      (assert-null ch))))
 
 (deftest type-children-handler-has-three-children
   "Handler type has 3 children: effect, input, output."

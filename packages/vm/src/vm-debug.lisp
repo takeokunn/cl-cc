@@ -65,10 +65,10 @@
        (if (vm-traced-p ,name)
            (progn
              (vm-format-trace-call ,name ,args)
-             (let ((*vm-trace-depth* (1+ *vm-trace-depth*)))
-               (let ((,values (multiple-value-list (progn ,@body))))
-                 (vm-format-trace-return ,name ,values)
-                 (values-list ,values))))
+             (let ((,values (let ((*vm-trace-depth* (1+ *vm-trace-depth*)))
+                              (multiple-value-list (progn ,@body)))))
+               (vm-format-trace-return ,name ,values)
+               (values-list ,values)))
            (progn ,@body)))))
 
 (defun vm-step (form &optional env)

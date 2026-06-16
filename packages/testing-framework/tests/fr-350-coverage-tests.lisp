@@ -180,6 +180,8 @@
     (error () nil))
   (assert-false (coverage-enabled-p)))
 
+(in-suite cl-cc-serial-suite)
+
 (deftest fr-350-run-suite-coverage-mode-is-sequential-and-reports
   "FR-350: run-suite :coverage t disables parallel execution and invokes coverage reporting without changing quit behavior."
   :tags '(:fr-350)
@@ -237,3 +239,5 @@
       (setf *test-registry* (persist-remove *test-registry* test-name))
       (setf *suite-registry* (persist-remove *suite-registry* root))
       (disable-coverage))))
+
+(in-suite cl-cc-unit-suite)

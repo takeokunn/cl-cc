@@ -174,8 +174,11 @@ descriptor already carries its effective inherited initforms."
 
 (defun %vm-class-slots-of (obj-ht)
   "Return (values class-ht class-slots) for class-allocation routing."
-  (let ((class-ht (%vm-obj-class-ht obj-ht)))
-    (values class-ht (when class-ht (%vm-hashlike-gethash :__class-slots__ class-ht)))))
+  (let ((own-class-slots (%vm-hashlike-gethash :__class-slots__ obj-ht)))
+    (if own-class-slots
+        (values obj-ht own-class-slots)
+        (let ((class-ht (%vm-obj-class-ht obj-ht)))
+          (values class-ht (when class-ht (%vm-hashlike-gethash :__class-slots__ class-ht)))))))
 
 (defun %vm-apply-initarg (initarg-key value initarg-map class-slots class-ht obj-ht)
   "Write VALUE to the slot for INITARG-KEY, routing class-allocated slots to CLASS-HT."
@@ -435,13 +438,21 @@ VM primitives that need protocol hooks without introducing new instructions."
               (error "The slot ~S is missing from the object~@[ of class ~S~]"
                      slot-name (and class-ht (%vm-hashlike-gethash :__name__ class-ht))))
             (setf (aref obj-ht index) value))
-          ;; Try string key for PHP/JS objects that use string property names
-          (let ((str-key (string-downcase (symbol-name slot-name))))
-            (multiple-value-bind (_ found-p) (gethash str-key obj-ht)
+          (let ((obj-storage (%vm-hashlike-storage obj-ht)))
+            (unless obj-storage
+              (error "The slot ~S is missing from non-object ~S" slot-name obj-ht))
+            (multiple-value-bind (_ sym-found-p) (gethash slot-name obj-storage)
               (declare (ignore _))
-              (if found-p
-                  (setf (gethash str-key obj-ht) value)
-                  (%vm-hashlike-sethash slot-name obj-ht value)))))))
+              (if sym-found-p
+                  (%vm-hashlike-sethash slot-name obj-ht value)
+                  ;; PHP/JS objects may store property names as strings.  Only
+                  ;; use that path when the canonical symbol slot is absent.
+                  (let ((str-key (string-downcase (symbol-name slot-name))))
+                    (multiple-value-bind (_ str-found-p) (gethash str-key obj-storage)
+                      (declare (ignore _))
+                      (if str-found-p
+                          (%vm-hashlike-sethash str-key obj-ht value)
+                          (%vm-hashlike-sethash slot-name obj-ht value))))))))))
 
 (defun %vm-raw-slot-boundp (class-ht class-slots obj-ht slot-name)
   "Return whether SLOT-NAME is bound using direct OBJ-HT/CLASS-HT storage."

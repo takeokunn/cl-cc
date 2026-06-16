@@ -85,28 +85,17 @@
   (declare (ignore lhs))
   rhs)
 
-;;; ─── Class field initializer placeholder ─────────────────────────────────────
-
-(defun %js-field-init (&rest token-values)
-  "Placeholder for a class field initializer (full parse not yet wired)."
-  (declare (ignore token-values))
-  +js-undefined+)
-
 ;;; ─── ES2025 explicit resource management ─────────────────────────────────────
 
 (defun %js-using-register (resource)
   "Register RESOURCE for disposal at scope exit (simplified: identity)."
   resource)
 
-;;; ─── new.target / import.meta stubs ──────────────────────────────────────────
+;;; ─── new.target ──────────────────────────────────────────────────────────────
 
 (defun %js-new-target ()
   "Return new.target — undefined outside a constructor."
   +js-undefined+)
-
-(defun %js-import-meta ()
-  "Return import.meta stub object."
-  (%js-make-object "url" "" "resolve" +js-undefined+))
 
 ;;; ─── BigInt (ES2020) ─────────────────────────────────────────────────────────
 ;;; js-bigint struct is declared in runtime.lisp (loads before this file).
@@ -256,36 +245,87 @@ JS always returns lowercase hex digits, so we normalise via string-downcase."
                    (unless (char= (char s (+ i 3)) #\=)
                      (write-char (code-char (logior (ash (logand g2 3) 6) g3)) out))))))))
 
-;;; ─── TextEncoder / TextDecoder stubs ─────────────────────────────────────────
+;;; ─── TextEncoder / TextDecoder ───────────────────────────────────────────────
+
+(defun %js-utf8-octets (value)
+  (sb-ext:string-to-octets (%js-to-string value) :external-format :utf-8))
+
+(defun %js-text-decoder-encoding (encoding)
+  (let ((name (string-downcase
+               (%js-to-string
+                (if (or (null encoding)
+                        (eq encoding +js-undefined+)
+                        (eq encoding +js-null+))
+                    "utf-8"
+                    encoding)))))
+    (cond
+      ((or (string= name "utf8") (string= name "unicode-1-1-utf-8"))
+       "utf-8")
+      (t name))))
+
+(defun %js-text-decode-octets (bytes)
+  (handler-case
+      (sb-ext:octets-to-string bytes :external-format :utf-8)
+    (error () "")))
+
+(defun %js-text-buffer-octets (buf)
+  (cond
+    ((js-typed-array-p buf)
+     (let* ((len (js-ta-length buf))
+            (bytes (make-array len :element-type '(unsigned-byte 8))))
+       (dotimes (i len bytes)
+         (setf (aref bytes i) (logand #xFF (truncate (%js-ta-get buf i)))))))
+    ((vectorp buf)
+     (let* ((len (length buf))
+            (bytes (make-array len :element-type '(unsigned-byte 8))))
+       (dotimes (i len bytes)
+         (setf (aref bytes i) (logand #xFF (truncate (aref buf i)))))))
+    (t nil)))
+
+(defun %js-text-encode-into (str dest)
+  (let* ((s (%js-to-string str))
+         (dest-len (if (js-typed-array-p dest) (js-ta-length dest) 0))
+         (read 0)
+         (written 0))
+    (when (js-typed-array-p dest)
+      (loop for ch across s
+            for ch-str = (string ch)
+            for bytes = (sb-ext:string-to-octets ch-str :external-format :utf-8)
+            for byte-count = (length bytes)
+            while (<= (+ written byte-count) dest-len)
+            do (progn
+                 (dotimes (i byte-count)
+                   (%js-ta-set dest (+ written i) (aref bytes i)))
+                 (incf written byte-count)
+                 (incf read (if (> (char-code ch) #xFFFF) 2 1)))))
+    (%js-make-object "read" (coerce read 'double-float)
+                     "written" (coerce written 'double-float))))
 
 (defun %js-make-text-encoder ()
-  "JS TextEncoder stub (UTF-8 encoding)."
+  "JS TextEncoder (UTF-8 encoding)."
   (%js-make-object
    "encoding" "utf-8"
    "encode"   (lambda (str)
-                (let* ((s (%js-to-string str))
-                       (bytes (sb-ext:string-to-octets s :external-format :utf-8))
+                (let* ((bytes (%js-utf8-octets str))
                        (vec (%js-make-typed-array "Uint8Array" (length bytes))))
                   (loop for i below (length bytes)
-                        do (setf (aref (js-ta-buffer vec) i) (aref bytes i)))
+                        do (%js-ta-set vec i (aref bytes i)))
                   vec))
-   "encodeInto" (lambda (str _buf) (declare (ignore _buf))
-                  (%js-make-object "read" (coerce (length (%js-to-string str)) 'double-float)
-                                   "written" (coerce (length (%js-to-string str)) 'double-float)))))
+   "encodeInto" #'%js-text-encode-into))
 
 (defun %js-make-text-decoder (&optional (encoding "utf-8"))
-  "JS TextDecoder stub."
-  (declare (ignore encoding))
-  (%js-make-object
-   "encoding" "utf-8"
-   "decode"   (lambda (&optional buf)
-                (if (or (null buf) (eq buf +js-undefined+))
-                    ""
-                    (if (js-typed-array-p buf)
-                        (handler-case
-                            (sb-ext:octets-to-string
-                             (map '(vector (unsigned-byte 8)) #'identity
-                                  (coerce (subseq (js-ta-buffer buf) 0 (js-ta-length buf)) 'vector))
-                             :external-format :utf-8)
-                          (error () ""))
-                        (%js-to-string buf))))))
+  "JS TextDecoder for UTF-8 byte inputs."
+  (let ((normalized (%js-text-decoder-encoding encoding)))
+    (%js-make-object
+     "encoding" normalized
+     "fatal" nil
+     "ignoreBOM" nil
+     "decode"   (lambda (&optional buf _options)
+                  (declare (ignore _options))
+                  (cond
+                    ((or (null buf) (eq buf +js-undefined+)) "")
+                    (t
+                     (let ((bytes (%js-text-buffer-octets buf)))
+                       (if bytes
+                           (%js-text-decode-octets bytes)
+                           (%js-to-string buf)))))))))

@@ -8,13 +8,18 @@
   ((name :initarg :name :accessor serialize-test-node-name)
    (next :initarg :next :accessor serialize-test-node-next)))
 
+(defun assert-runtime-serialization-roundtrip (value &key (test #'equalp))
+  (let ((copy (cl-cc/runtime:deserialize (cl-cc/runtime:serialize value))))
+    (assert-true (funcall test value copy))
+    copy))
+
 (deftest runtime-serialize-basic-types-roundtrip
   "serialize/deserialize roundtrips primitive and collection values."
   (let* ((table (make-hash-table :test #'equal))
          (value (list 42 3.5 "x" :kw #(1 2))))
     (setf (gethash "value" table) value)
-    (let ((copy (cl-cc/runtime:deserialize (cl-cc/runtime:serialize table))))
-      (assert-equal value (gethash "value" copy)))))
+    (let ((copy (assert-runtime-serialization-roundtrip table)))
+      (assert-true (equalp value (gethash "value" copy))))))
 
 (deftest runtime-serialize-circular-cons-roundtrip
   "serialize/deserialize preserves circular references."
@@ -26,9 +31,12 @@
 
 (deftest runtime-serialize-clos-instance-roundtrip
   "serialize/deserialize preserves standard CLOS instance slots."
-  (let* ((node (make-instance 'serialize-test-node :name "root"))
-         (copy nil))
+  (let ((node (make-instance 'serialize-test-node :name "root")))
     (setf (serialize-test-node-next node) node)
-    (setf copy (cl-cc/runtime:deserialize (cl-cc/runtime:serialize node)))
-    (assert-equal "root" (serialize-test-node-name copy))
-    (assert-eq copy (serialize-test-node-next copy))))
+    (assert-runtime-serialization-roundtrip
+     node
+     :test (lambda (expected copy)
+             (and (not (eq expected copy))
+                  (typep copy 'serialize-test-node)
+                  (equal "root" (serialize-test-node-name copy))
+                  (eq copy (serialize-test-node-next copy)))))))

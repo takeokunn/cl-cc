@@ -29,10 +29,17 @@
   (sum 0d0 :type double-float)
   (count 0 :type fixnum))
 
-(defun rt-make-histogram (name &key buckets)
-  (let ((sorted (sort (copy-list buckets) #'<)))
-    (make-rt-histogram :name name :buckets sorted
-                       :counts (make-list (length sorted) :initial-element 0))))
+(defun rt-make-histogram (name &rest args)
+  (let ((buckets (cond
+                   ((and args (keywordp (first args)))
+                    (getf args :buckets))
+                   ((<= (length args) 1)
+                    (first args))
+                   (t
+                    (error "Invalid rt-make-histogram arguments: ~S" args)))))
+    (let ((sorted (sort (copy-list buckets) #'<)))
+      (make-rt-histogram :name name :buckets sorted
+                         :counts (make-list (length sorted) :initial-element 0)))))
 
 (defun rt-histogram-observe! (histogram value)
   (incf (rt-histogram-count histogram))
@@ -103,15 +110,6 @@
                         (rt-gauge-value metric)))))
            *rt-metrics-registry*))
 
-;; ── Public API aliases ─────────────────────────────────────────────────
-
-(defun make-counter (name &key labels)
-  (rt-make-counter name :labels labels))
-(defun make-gauge (name) (rt-make-gauge name))
-(defun make-histogram (name buckets) (rt-make-histogram name :buckets buckets))
-(defun increment! (counter &optional (n 1)) (rt-counter-increment! counter n))
-(defun set-gauge! (gauge val) (rt-gauge-set! gauge val))
-(defun observe! (histogram value) (rt-histogram-observe! histogram value))
 (defun %metric-name-string (name)
   "Return NAME as a lowercase string suitable for Prometheus metric names."
   (string-downcase (format nil "~A" name)))

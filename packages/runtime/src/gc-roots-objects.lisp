@@ -2,8 +2,8 @@
 
 (defun %rt-gc-valid-header-p (header)
   (and (integerp header)
-       (> (header-size header) 0)
-       (<= 0 (header-tag header) 7)))
+       (> (rt-header-size header) 0)
+       (<= 0 (rt-header-type-tag header) 7)))
 
 (defun %rt-gc-object-start-p (heap addr)
   "Return true when ADDR appears to designate a live heap object header."
@@ -257,7 +257,7 @@ storage and are traced via the global/runtime registries instead."
                          ((not (%rt-gc-valid-header-p h))
                           (error "GC verify: invalid header at ~D: ~S" addr h))
                           (t
-                           (let ((size (header-size h)))
+                           (let ((size (rt-header-size h)))
                              (when (> (+ addr size) end)
                                (error "GC verify: object at ~D exceeds range" addr))
                              (when (or (header-marked-p h) (header-gray-p h))
@@ -314,7 +314,7 @@ storage and are traced via the global/runtime registries instead."
 (defun rt-gc-alloc (heap type-tag size-words)
   "Allocate SIZE-WORDS words in young from-space and return the word address.
    TYPE-TAG selects allocation policy/slab class.  Object headers are FR-266
-   compressed one-word headers built with MAKE-HEADER/MAKE-RT-HEADER, but the
+   compressed one-word headers built with MAKE-RT-HEADER, but the
    header is NOT written here; the caller is responsible for writing it
    immediately after allocation, optionally embedding an FR-214 shape id.
    Automatically triggers a minor GC if from-space is exhausted.

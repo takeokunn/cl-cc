@@ -226,6 +226,8 @@ Restores captured environment, then handles required, &optional, &rest, and &key
         (key-params (vm-closure-key-params closure))
         (captured-regs (vm-closure-captured-regs closure))
         (captured-vals (vm-closure-captured-vals closure)))
+    (push (cons (length (vm-call-stack state)) closure)
+          (vm-current-closure-stack state))
     ;; Restore captured environment into registers
     (dotimes (i (min (length captured-regs) (length captured-vals)))
       (vm-reg-set state (aref captured-regs i) (aref captured-vals i)))

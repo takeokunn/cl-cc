@@ -341,11 +341,3 @@ single-purpose loops without changing loops with unknown state or memory effects
                                (dolist (inst (%loop-fr514-loop-seq vec lp)) (emit inst))
                                (setf i (1+ (opt-loop-exit-index lp))))))))))
       (if changed (nreverse out) instructions))))
-
-(unless (fboundp 'opt-pass-loop-fusion)
-  (defun opt-pass-loop-fusion (instructions)
-    instructions))
-
-(unless (fboundp 'opt-pass-loop-fission)
-  (defun opt-pass-loop-fission (instructions)
-    instructions))

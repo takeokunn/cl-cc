@@ -35,10 +35,6 @@ working."
   "Return all old-space free blocks from the canonical free-list mirror."
   (copy-list (rt-heap-free-list heap)))
 
-(defun %rt-free-list-sync-mirror (heap)
-  "Compatibility hook: the heap free-list is the canonical mirror in FR-156."
-  (rt-heap-free-list heap))
-
 (defun %rt-free-list-ensure-bins (heap)
   (or (rt-heap-free-bins heap)
       (setf (rt-heap-free-bins heap)
@@ -72,7 +68,7 @@ working."
     ;; not index outside the heap vector for those blocks.
     (when (and (<= 0 addr)
                (< addr (length (rt-heap-words heap))))
-      (rt-heap-set-header heap addr (make-header size-words 0 0)))
+      (rt-heap-set-header heap addr (make-rt-header size-words 0 :gc-bits 0)))
     (%rt-free-list-insert-block heap (cons size-words addr))))
 
 (defun %rt-free-list-rebuild-bins (heap blocks)
@@ -186,7 +182,7 @@ to old-space bump allocation without scanning larger bins.  Returns
          (limit (+ addr page-words))
          (free nil))
     (loop for slot from addr below limit by class-size do
-      (rt-heap-set-header heap slot (make-header class-size 0 0))
+      (rt-heap-set-header heap slot (make-rt-header class-size 0 :gc-bits 0))
       (push slot free))
     (%make-rt-slab :class-size class-size
                    :free-list free
@@ -224,6 +220,6 @@ to old-space bump allocation without scanning larger bins.  Returns
       (error "cl-cc/runtime: address ~D is not in slab class ~S" addr size-class))
     (loop for i from addr below (+ addr class-size) do
       (rt-heap-set heap i 0))
-    (rt-heap-set-header heap addr (make-header class-size 0 0))
+    (rt-heap-set-header heap addr (make-rt-header class-size 0 :gc-bits 0))
     (pushnew addr (rt-slab-free-list slab) :test #'eql)
     addr))

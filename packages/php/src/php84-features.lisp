@@ -72,11 +72,11 @@
               (equal "=>" (php-peek-value current)))
          (multiple-value-bind (body-expr rest2)
              (%php-parse-property-hook-short current known-vars)
-           (values (intern hook-kind :keyword) param-sym body-expr rest2)))
+           (values (intern (string-upcase hook-kind) :keyword) param-sym body-expr rest2)))
         ((eq (php-peek-type current) :T-LBRACE)
          (multiple-value-bind (body-stmts rest2)
              (%php-parse-property-hook-long current known-vars)
-           (values (intern hook-kind :keyword) param-sym body-stmts rest2)))
+           (values (intern (string-upcase hook-kind) :keyword) param-sym body-stmts rest2)))
         (t
          (error "PHP 8.4 property hook error: expected => or { after hook name, got ~S"
                 (php-peek current)))))))
@@ -108,13 +108,13 @@ Returns plist (:get getter-ast :set setter-ast :set-param set-param-sym) or nil.
                                        &key (setter-param nil))
   "Generate getter __get_PropName and setter __set_PropName method ASTs.
 Returns a list of ast-defun nodes."
+  (declare (ignore class-name))
   (let* ((prop-str (symbol-name prop-name))
          (getter-name (php-ident-sym (format nil "__GET_~A" prop-str)))
          (setter-name (php-ident-sym (format nil "__SET_~A" prop-str)))
          (this-sym (php-var-sym "$this"))
          (value-sym (or setter-param (php-var-sym "$value")))
          (result nil))
-    (declare (ignore class-name))
     (when getter-ast
       (let ((body (if (listp getter-ast)
                       getter-ast
@@ -182,6 +182,19 @@ Distinguishes from ternary ? : because the token type is :T-COLON not :T-NULLABL
        (cdr stream)
        (eq (php-peek-type (cdr stream)) :T-COLON)))
 
+(defun %php-arg-descriptor-expression (descriptor)
+  "Return the AST expression carried by a parsed PHP call argument DESCRIPTOR."
+  (ecase (first descriptor)
+    (:positional (second descriptor))
+    (:named (third descriptor))
+    (:spread (second descriptor))))
+
+(defun %php-named-arg-pair-ast (pair)
+  "Return an AST list representing one runtime named-argument PAIR."
+  (make-ast-list
+   :elements (list (make-ast-quote :value (car pair))
+                   (cdr pair))))
+
 (defun %php-parse-named-args (stream known-vars)
   "Parse mixed positional and named args up to T-RPAREN (exclusive).
 Returns (values arg-list rest known-vars) where each arg is
@@ -194,7 +207,7 @@ The opening T-LPAREN must already have been consumed by the caller."
             (kv known-vars))
         (loop
           (cond
-            ;; Spread operator: ...$args — treat as positional unsupported
+            ;; Spread operator: ...$args
             ((and (eq (php-peek-type current) :T-ELLIPSIS))
              (multiple-value-bind (_tok rest) (php-consume current)
                (declare (ignore _tok))
@@ -222,12 +235,7 @@ The opening T-LPAREN must already have been consumed by the caller."
   "Lower named args to positional ast expressions for the call AST.
 Named args appear as :positional after reordering since the call AST only
 holds a flat list. Unknown name order is preserved in declaration order."
-  (mapcar (lambda (descriptor)
-            (ecase (first descriptor)
-              (:positional (second descriptor))
-              (:named (third descriptor))
-              (:spread (second descriptor))))
-          arg-descriptors))
+  (mapcar #'%php-arg-descriptor-expression arg-descriptors))
 
 (defun %php-apply-named-args (func positional named-alist)
   "Build a PHP function call AST applying NAMED-ALIST overrides after POSITIONAL args.
@@ -236,11 +244,7 @@ call so the callee can do keyword-style dispatch."
   ;; For now we lower named args to a flat positional call with named args spliced
   ;; in the order they appear. A future pass could reorder by parameter name.
   (let* ((named-ast-pairs
-           (mapcar (lambda (pair)
-                     (make-ast-list
-                      :elements (list (make-ast-quote :value (car pair))
-                                      (cdr pair))))
-                   named-alist))
+           (mapcar #'%php-named-arg-pair-ast named-alist))
          (all-args (append positional named-ast-pairs)))
     (make-ast-call :func func :args all-args)))
 
@@ -278,7 +282,7 @@ expression (named args are interleaved as positional for now)."
 
 (defun %php-callable-ref (func-name-ast)
   "Create a callable reference AST. Returns a lambda that calls FUNC-NAME-AST."
-  ;; Lower strlen(...) to #'strlen equivalent: (lambda (&rest args) (apply strlen args))
+  ;; Lower strlen(...) to a callable trampoline that applies the PHP function.
   (let ((args-sym (gensym "CALLABLE-ARGS-")))
     (make-ast-lambda
      :params (list args-sym)
@@ -306,8 +310,9 @@ STREAM must begin with T-LPAREN. Returns (values callable-ref rest known-vars)."
 ;;;   $value = $fiber->start();
 ;;;   $fiber->resume('test');
 ;;;
-;;; We lower Fibers to a struct-based runtime simulation using CL's
-;;; call/cc or a simple continuation trampoline.
+;;; We keep Fiber state in a struct, wrapped in a PHP object hash-table so
+;;; ordinary `$fiber->start()` style method dispatch uses the existing runtime
+;;; slot-value path.
 
 (defstruct php-fiber
   "Runtime representation of a PHP 8.1 Fiber."
@@ -319,21 +324,97 @@ STREAM must begin with T-LPAREN. Returns (values callable-ref rest known-vars)."
   send-value
   (resume-fn nil))
 
+(defvar *current-fiber* nil
+  "Dynamically bound to the currently executing PHP Fiber, or NIL.")
+
+(defun %php-fiber-state (fiber)
+  "Return the internal Fiber state struct stored in FIBER."
+  (cond
+    ((php-fiber-p fiber) fiber)
+    ((and (hash-table-p fiber)
+          (php-fiber-p (gethash "__fiber__" fiber)))
+     (gethash "__fiber__" fiber))
+    (t
+     (error "PHP Fiber error: expected Fiber object"))))
+
+(defun %php-fiber-method-symbol (name)
+  "Return the hash-table key used by VM slot lookup for Fiber method NAME."
+  (php-ident-sym name))
+
+(defun %php-fiber-set-method (object name function)
+  "Install Fiber method FUNCTION under PHP and VM lookup keys."
+  (setf (gethash name object) function
+        (gethash (%php-fiber-method-symbol name) object) function)
+  object)
+
+(defun %php-fiber-install-methods (object method-specs)
+  "Install Fiber methods described by METHOD-SPECS on OBJECT."
+  (dolist (spec method-specs object)
+    (%php-fiber-set-method object (first spec) (symbol-function (second spec)))))
+
+(defun %php-fiber-started-p (fiber)
+  "Return true when FIBER has been started."
+  (php-fiber-started-p (%php-fiber-state fiber)))
+
+(defun %php-fiber-suspended-p (fiber)
+  "Return true when FIBER is suspended."
+  (php-fiber-suspended-p (%php-fiber-state fiber)))
+
+(defun %php-fiber-start-method (self &rest args)
+  (apply #'%php-fiber-start self args))
+
+(defun %php-fiber-resume-method (self &optional (value nil))
+  (%php-fiber-resume self value))
+
+(defun %php-fiber-get-return-method (self)
+  (%php-fiber-get-return self))
+
+(defun %php-fiber-is-started-method (self)
+  (%php-fiber-started-p self))
+
+(defun %php-fiber-is-suspended-method (self)
+  (%php-fiber-suspended-p self))
+
+(defun %php-fiber-is-running-method (self)
+  (%php-fiber-running-p self))
+
+(defun %php-fiber-is-terminated-method (self)
+  (%php-fiber-terminated-p self))
+
+(defparameter +php-fiber-methods+
+  '(("start"        %php-fiber-start-method)
+    ("resume"       %php-fiber-resume-method)
+    ("getReturn"    %php-fiber-get-return-method)
+    ("isStarted"    %php-fiber-is-started-method)
+    ("isSuspended"  %php-fiber-is-suspended-method)
+    ("isRunning"    %php-fiber-is-running-method)
+    ("isTerminated" %php-fiber-is-terminated-method))
+  "PHP Fiber object method names and their Common Lisp implementations.")
+
 (defun %php-fiber-make (callback)
   "Create a new PHP Fiber with CALLBACK as its body."
-  (make-php-fiber :callback callback))
+  (let ((object (make-hash-table :test 'equal))
+        (state (make-php-fiber :callback callback)))
+    (setf (gethash "__class__" object) "Fiber"
+          (gethash "__fiber__" object) state)
+    (%php-fiber-install-methods object +php-fiber-methods+)
+    object))
 
 (defun %php-fiber-start (fiber &rest args)
   "Start FIBER, passing ARGS to its callback.
 Returns the first suspended value or the final return value."
+  (setf fiber (%php-fiber-state fiber))
   (when (php-fiber-started-p fiber)
     (error "PHP Fiber error: cannot start a Fiber that has already been started"))
   (setf (php-fiber-started-p fiber) t)
   ;; Run the callback; any calls to %php-fiber-suspend will throw a continuation tag.
-  (let ((result
-          (catch '%php-fiber-suspend-tag
-            (let ((*current-fiber* fiber))
-              (apply (php-fiber-callback fiber) args)))))
+  (let* ((callback (%php-callable-function (php-fiber-callback fiber)))
+         (result
+           (catch '%php-fiber-suspend-tag
+             (let ((*current-fiber* fiber))
+               (if callback
+                   (apply callback args)
+                   (error "PHP Fiber error: callback is not callable"))))))
     (cond
       ((and (consp result) (eq (first result) '%php-fiber-suspend-payload))
        (setf (php-fiber-suspended-p fiber) t
@@ -347,6 +428,7 @@ Returns the first suspended value or the final return value."
 (defun %php-fiber-resume (fiber &optional (value nil))
   "Resume a suspended FIBER, passing VALUE as the return from Fiber::suspend().
 Returns the next suspended value or the final return value."
+  (setf fiber (%php-fiber-state fiber))
   (unless (php-fiber-suspended-p fiber)
     (error "PHP Fiber error: cannot resume a Fiber that is not suspended"))
   (setf (php-fiber-suspended-p fiber) nil
@@ -370,9 +452,6 @@ Returns the next suspended value or the final return value."
           (setf (php-fiber-terminated-p fiber) t)
           +php-null+))))
 
-(defvar *current-fiber* nil
-  "Dynamically bound to the currently executing PHP Fiber, or NIL.")
-
 (defun %php-fiber-suspend (value)
   "Suspend the current PHP Fiber, returning VALUE to the caller.
 Must be called from within a running Fiber body."
@@ -382,19 +461,21 @@ Must be called from within a running Fiber body."
 
 (defun %php-fiber-get-return (fiber)
   "Return the final return value of a terminated FIBER."
+  (setf fiber (%php-fiber-state fiber))
   (unless (php-fiber-terminated-p fiber)
     (error "PHP Fiber error: cannot get return value of a Fiber that has not terminated"))
   (php-fiber-result fiber))
 
 (defun %php-fiber-running-p (fiber)
   "Return true when FIBER is currently executing."
+  (setf fiber (%php-fiber-state fiber))
   (and (php-fiber-started-p fiber)
        (not (php-fiber-suspended-p fiber))
        (not (php-fiber-terminated-p fiber))))
 
 (defun %php-fiber-terminated-p (fiber)
   "Return true when FIBER has finished execution."
-  (php-fiber-terminated-p fiber))
+  (php-fiber-terminated-p (%php-fiber-state fiber)))
 
 ;;; ─── PHP 8.4 Array Functions ────────────────────────────────────────────────
 ;;;
@@ -407,21 +488,22 @@ Must be called from within a running Fiber body."
 ;;; constructor property as readonly. We lower this by post-processing the
 ;;; parsed slot list.
 
+(defun %php-mark-prop-readonly (member)
+  "Return MEMBER with readonly metadata when it is an instance property slot."
+  (if (and (ast-slot-def-p member)
+           (eq (ast-slot-allocation member) :instance)
+           (not (ast-defun-p (ast-slot-initform member))))
+      (let ((copy (copy-structure member)))
+        (setf (ast-imports copy)
+              (append (ast-imports copy)
+                      (list :readonly-p t)))
+        copy)
+      member))
+
 (defun %php-mark-all-props-readonly (class-members)
   "Mark every property slot in CLASS-MEMBERS as readonly.
 Only :instance allocation slots are affected; methods and constants are skipped."
-  (mapcar (lambda (member)
-            (if (and (ast-slot-def-p member)
-                     (eq (ast-slot-allocation member) :instance)
-                     ;; Only mark property slots, not method slots
-                     (not (ast-defun-p (ast-slot-initform member))))
-                (let ((copy (copy-structure member)))
-                  (setf (ast-imports copy)
-                        (append (ast-imports copy)
-                                (list :readonly-p t)))
-                  copy)
-                member))
-          class-members))
+  (mapcar #'%php-mark-prop-readonly class-members))
 
 ;;; ─── PHP 8.1 Intersection Types ─────────────────────────────────────────────
 ;;;
@@ -492,6 +574,15 @@ When no & follows, returns FIRST-TYPE and STREAM unchanged."
        (let ((imports (ast-imports slot)))
          (member :readonly (getf imports :php-modifiers) :test #'eq))))
 
+(defun %php-hook-method-slot (method-defun modifiers)
+  "Wrap generated property hook METHOD-DEFUN in a method slot."
+  (make-ast-slot-def
+   :name (ast-defun-name method-defun)
+   :initform method-defun
+   :imports (%php-slot-metadata modifiers
+                                :attributes nil
+                                :target-type :method)))
+
 ;;; ─── PHP 8.x Union Types — already handled ───────────────────────────────────
 ;;; The existing php-parse-type-annotation handles `A|B` union types as strings.
 ;;; %php-parse-intersection-type above extends this for `A&B` structured descriptors.
@@ -514,10 +605,16 @@ When no hooks are present, the list contains only the original property slot."
           (slot-type (when (and property-type (eq (php-peek-type after-type) :T-VAR))
                        property-type)))
       (multiple-value-bind (var-tok rest) (php-consume current)
-        (let* ((prop-sym (php-var-sym (php-tok-value var-tok)))
+        (let* ((raw (php-tok-value var-tok))
+               (bare (if (and (stringp raw) (plusp (length raw)) (char= (char raw 0) #\$))
+                         (subseq raw 1)
+                         raw))
+               (prop-sym (php-ident-sym bare))
+               (initform (make-ast-quote :value +php-null+))
                (base-slot (make-ast-slot-def
                            :name prop-sym
                            :type slot-type
+                           :initform initform
                            :allocation (if (member :static modifiers :test #'eq) :class :instance)
                            :imports (%php-slot-metadata modifiers
                                                         :attributes attributes
@@ -525,7 +622,9 @@ When no hooks are present, the list contains only the original property slot."
           ;; Check for optional default value
           (when (and rest (eq (php-peek-type rest) :T-OP)
                      (equal "=" (php-peek-value rest)))
-            (setf rest (%php-skip-expression-like (cdr rest) '(:T-SEMI :T-LBRACE) nil)))
+            (multiple-value-bind (default-ast rest2) (php-parse-expr (cdr rest) nil)
+              (setf (ast-slot-initform base-slot) default-ast
+                    rest rest2)))
           ;; Check for property hooks { get ... set ... }
           (if (and rest (eq (php-peek-type rest) :T-LBRACE))
               (multiple-value-bind (hooks-plist rest2)
@@ -535,16 +634,11 @@ When no hooks are present, the list contains only the original property slot."
                            (setter-ast (getf hooks-plist :set))
                            (setter-param (getf hooks-plist :set-param))
                            (method-slots
-                             (mapcar (lambda (method-defun)
-                                       (make-ast-slot-def
-                                        :name (ast-defun-name method-defun)
-                                        :initform method-defun
-                                        :imports (%php-slot-metadata modifiers
-                                                                      :attributes nil
-                                                                      :target-type :method)))
-                                     (%php-lower-property-with-hooks
-                                      prop-sym getter-ast setter-ast class-name
-                                      :setter-param setter-param))))
+                             (loop for method-defun in
+                                   (%php-lower-property-with-hooks
+                                    prop-sym getter-ast setter-ast class-name
+                                    :setter-param setter-param)
+                                   collect (%php-hook-method-slot method-defun modifiers))))
                       (values (cons base-slot method-slots)
                               (php-skip-semis rest2)))
                     (values (list base-slot) (php-skip-semis rest2))))

@@ -33,7 +33,7 @@
   "Write an object header at ADDR with SIZE words and TYPE-TAG."
   (cl-cc/runtime:rt-heap-set-header
    heap addr
-   (cl-cc/runtime:make-header size tag 0)))
+   (cl-cc/runtime:make-rt-header size tag :gc-bits 0)))
 
 ;;; ------------------------------------------------------------
 ;;; Card Table: rt-card-index

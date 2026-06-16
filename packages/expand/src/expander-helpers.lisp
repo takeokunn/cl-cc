@@ -33,6 +33,10 @@ Prevents concurrent tests from mutating shared global hash tables."
   "Build a source form without mentioning the selfhost LIST macro at call sites."
   args)
 
+(defun %same-expansion-p (expanded form)
+  "Return T when EXPANDED is structurally the same as FORM."
+  (equal expanded form))
+
 (defun expand-make-array-form (size rest-args)
   "Preserve MAKE-ARRAY keyword calls for the compiler backend.
 Keyword handling belongs in codegen/VM, not in bootstrap macro expansion; keeping

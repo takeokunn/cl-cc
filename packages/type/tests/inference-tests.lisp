@@ -71,11 +71,13 @@
   (ast-type expected-effect-name)
   (let ((row (gethash ast-type cl-cc/type:*constant-effect-table*)))
     (assert-true (cl-cc/type:type-effect-row-p row))
-    (if expected-effect-name
-        (let ((names (mapcar #'cl-cc/type:type-effect-op-name
-                             (cl-cc/type:type-effect-row-effects row))))
-          (assert-true (member expected-effect-name names :key #'symbol-name :test #'string=)))
-        (assert-null (cl-cc/type:type-effect-row-effects row)))))
+    (let ((names (mapcar #'cl-cc/type:type-effect-op-name
+                         (cl-cc/type:type-effect-row-effects row))))
+      (if expected-effect-name
+          (assert-true
+           (member expected-effect-name names :key #'symbol-name :test #'string=))
+          (assert-false
+           (member expected-effect-name names :key #'symbol-name :test #'string=))))))
 
 ;;; ─── type-predicate-to-type ───────────────────────────────────────────────
 

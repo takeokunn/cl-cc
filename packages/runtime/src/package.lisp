@@ -157,7 +157,8 @@
     #:rt-stream-element-type
     #:rt-fboundp #:rt-intern #:rt-gensym
     #:rt-symbol-value
-    #:rt-find-package #:rt-make-package #:rt-export #:rt-package-name
+    #:rt-find-package #:rt-make-package #:rt-use-package #:rt-unuse-package
+    #:rt-export #:rt-package-name
     #:*rt-package-registry*
     #:rt-write-to-string
    ;; ---------------------------------------------------------------
@@ -217,10 +218,10 @@
    ;; Object header helpers
     #:make-rt-header
     #:rt-header-type-tag #:rt-header-gc-bits #:rt-header-shape-id #:rt-header-size
-    #:make-header #:header-size #:header-tag #:header-age
+    #:rt-header-age #:rt-header-increment-age
    #:header-marked-p #:header-gray-p #:header-forwarding-p
    #:header-set-mark #:header-clear-mark #:header-set-gray #:header-clear-gray
-   #:header-make-forwarding-ptr #:header-forwarding-ptr #:header-increment-age
+   #:header-make-forwarding-ptr #:header-forwarding-ptr
    ;; rt-heap structure
    #:rt-heap #:make-rt-heap
    #:rt-heap-words #:rt-heap-young-from-base #:rt-heap-young-to-base
@@ -237,6 +238,7 @@
       #:*rt-stack-guard-registry*
        ;; Compressed object references (FR-347)
        #:rt-compress-object-ref #:rt-decompress-object-ref
+       #:serialize #:deserialize
       ;; Heap growth/shrink policy (FR-391, FR-392)
       #:rt-heap-maybe-grow #:rt-heap-maybe-shrink
     ;; Sanitizer runtime controls (FR-489..493)
@@ -334,7 +336,6 @@
      #:rt-soft-ref #:rt-weak-ref #:rt-phantom-ref
      #:rt-make-soft-ref #:rt-make-weak-ref #:rt-make-phantom-ref
      #:rt-make-weak-pointer #:rt-weak-pointer-p #:rt-weak-pointer-value
-      #:make-weak-pointer #:weak-pointer-value #:*weak-references*
      #:rt-soft-ref-referent #:rt-weak-ref-referent #:%rt-phantom-ref-referent
      #:rt-ref-get #:rt-ref-clear-p #:rt-reference-queue-process
     ;; Ephemerons (FR-246)
@@ -343,9 +344,7 @@
     ;; GC reference processing (FR-381-384, FR-246)
     #:rt-gc-process-references
     ;; Finalization (FR-459/460/471)
-     #:rt-register-finalizer #:rt-unregister-finalizer #:rt-register-stream-finalizer
      #:register-finalizer #:*pending-finalizers* #:rt-run-pending-finalizers
-     #:rt-finalize #:rt-cancel-finalization
      #:header-finalized-p #:header-set-finalized #:header-clear-finalized
      #:*rt-finalizer-registry* #:*rt-finalization-queue*
      #:*large-object-threshold* #:rt-los-alloc #:rt-large-object-size-p
@@ -408,7 +407,7 @@
      #:rt-future-then
      ;; ── Async / async generators (async.lisp, async-generators.lisp) ──
      #:rt-async #:rt-await #:rt-await* #:rt-async-submit
-     #:rt-async-lambda #:rt-async-defun #:async #:await #:async-lambda #:async-defun
+     #:rt-async-lambda #:rt-async-defun
      #:rt-async-cps-transform #:rt-async-cps
      #:rt-async-channel #:rt-async-send #:rt-async-recv
     #:rt-aiter #:rt-aiter-p #:make-rt-aiter
@@ -479,21 +478,20 @@
     #:rt-mmap-region #:rt-mmap-region-p #:rt-mmap-region-length
     #:rt-mmap-region-address #:rt-mmap-region-released-p
     #:mmap-file #:mmap-array #:mmap-close #:with-mmap #:mmap-sync #:mmap-advice
-    #:rt-mmap-file #:rt-mmap-array #:rt-mmap-close #:rt-mmap-sync #:rt-mmap-advice
    ;; ── GC safe-region depth table (gc-data.lisp) ────────────────────
    #:*rt-gc-safe-region-depths*
-   ;; ── TLAB public API (exported; functions added in gc-tlab.lisp) ──
-   #:rt-tlab-alloc #:rt-tlab-retire
    ;; ── Context propagation (context.lisp) ───────────────────────────
    #:rt-context-cancel #:rt-context-cancelled-p
    ;; ── SPSC ring buffer (spsc.lisp) ─────────────────────────────────
    #:rt-make-spsc-queue #:rt-spsc-try-push #:rt-spsc-try-pop
     ;; ── Performance counters (perf.lisp) ─────────────────────────────
-    #:rt-perf-init #:rt-perf-enable-counter
-    #:rdtsc #:rdtscp #:with-perf-counters #:perf-counters-unsupported
+    #:rt-perf-init #:rt-perf-enable-counter #:rt-with-perf-counters
+    #:rdtsc #:rdtscp #:perf-counters-unsupported
     ;; ── Metrics (metrics.lisp) ────────────────────────────────────────
-    #:make-counter #:make-gauge #:make-histogram
-    #:increment! #:set-gauge! #:observe! #:prometheus-text-format
+    #:rt-make-counter #:rt-counter-increment! #:rt-make-histogram
+    #:rt-histogram-observe! #:rt-make-gauge #:rt-gauge-set!
+    #:rt-register-metric #:rt-metrics-format-prometheus
+    #:prometheus-text-format
      ;; ── OpenTelemetry (otel.lisp) ────────────────────────────────────
      #:rt-otel-start-span #:rt-otel-end-span
      ;; ── Continuous profiling (continuous-profile.lisp) ───────────────
@@ -537,7 +535,7 @@
      #:detect-cpu-cores #:detect-numa-topology
      #:get-cpu-affinity-mask #:set-cpu-affinity-mask
      #:memory-tier-info
-     #:rt-cpu-count #:rt-cpu-topology
+     #:rt-cpu-topology
      #:rt-thread-set-affinity #:rt-thread-get-affinity
      ;; ── GPU compute (gpu.lisp) ────────────────────────────────────────
      #:rt-gpu-buffer #:rt-gpu-kernel
@@ -566,7 +564,6 @@
     #:*log-level* #:*log-output* #:*log-json-output* #:*log-context*
     #:with-log-context
     #:log-trace #:log-debug #:log-info #:log-warn #:log-error
-    #:rt-log-info #:rt-log-warn #:rt-log-error
     ;; ── Arena allocator (allocator.lisp) ────────────────────────────────
     #:rt-arena #:make-arena #:with-arena
     #:arena-alloc #:arena-reset
@@ -589,9 +586,19 @@
     #:rt-make-lock #:rt-with-lock #:rt-lock #:rt-unlock #:rt-try-lock
     #:rt-thread-yield
     #:rt-atomic-compare-and-swap-symbol
-    #:rt-getenv #:rt-quit #:rt-with-timeout))
+    #:rt-getenv #:rt-with-timeout))
 
 (in-package :cl-cc/runtime)
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; These specials are defined later in the ASDF source order, but multiple
+  ;; earlier runtime files refer to them during compilation.
+  (declaim (special *gc-major-threshold*
+                    *gc-max-pause-ms*
+                    *gc-worker-count*
+                    *rt-current-context*
+                    *rt-current-gc-heap*
+                    *rt-weak-hash-table-registry*)))
 
 (defun make-hash-table (&rest args)
   "Bootstrap wrapper for CL:MAKE-HASH-TABLE; hash-weak.lisp adds :WEAKNESS."

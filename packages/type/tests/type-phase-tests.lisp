@@ -136,7 +136,7 @@
   (let ((sub (apply #'%make-effect-row sub-names))
         (sup (apply #'%make-effect-row sup-names)))
     (if expected
-        (assert-true  (cl-cc/type:effect-row-subset-p sub sup))
+        (assert-true (cl-cc/type:effect-row-subset-p sub sup))
         (assert-false (cl-cc/type:effect-row-subset-p sub sup)))))
 
 ;;; Phase E: Rank-N Polymorphism

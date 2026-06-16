@@ -161,6 +161,102 @@ the compiler/runtime currently names directly during selfhost and test flows.")
               (setf (gethash key *rt-package-registry*) descriptor)
               descriptor)))))
 
+(defun %rt-designator-list (designator)
+  "Return DESIGNATOR as a proper list, preserving NIL as an empty set."
+  (if (listp designator) designator (list designator)))
+
+(defun %rt-package-metadata-list (packages)
+  "Resolve package designators to package metadata descriptors."
+  (loop for package in (%rt-designator-list packages)
+        collect (%rt-package-metadata package)))
+
+(defun %rt-package-keys (packages)
+  "Return registry keys for package metadata descriptors."
+  (loop for package in packages collect (%rt-package-key package)))
+
+(defun %rt-package-key-list (designators)
+  "Return registry keys for package designators."
+  (loop for designator in (%rt-designator-list designators)
+        collect (%rt-package-key designator)))
+
+(defun %rt-package-use-list-without-keys (use-list keys)
+  "Return USE-LIST without descriptors whose package key is in KEYS."
+  (loop for used-package in use-list
+        unless (member (%rt-package-key used-package) keys :test #'equal)
+        collect used-package))
+
+(defun %rt-merge-package-use-list (use-list new-packages)
+  "Return USE-LIST with NEW-PACKAGES moved to the front and de-duplicated by key."
+  (append new-packages
+          (%rt-package-use-list-without-keys use-list
+                                             (%rt-package-keys new-packages))))
+
+(defun %rt-package-inherited-table (package)
+  "Return PACKAGE's inherited-symbol table, creating it when absent."
+  (or (gethash :inherited package)
+      (setf (gethash :inherited package) (make-hash-table :test #'equal))))
+
+(defun %rt-rebuild-package-inherited-table (package)
+  "Rebuild inherited symbols from PACKAGE's use-list and return the table."
+  (let ((inherited (%rt-package-inherited-table package)))
+    (clrhash inherited)
+    (dolist (used-package (gethash :use-list package))
+      (dolist (external-symbol (gethash :exports used-package))
+        (setf (gethash (%rt-symbol-name-key external-symbol) inherited)
+              external-symbol)))
+    inherited))
+
+(defun %rt-package-export-conflict-name (packages)
+  "Return the first conflicting external-symbol name among PACKAGES."
+  (let ((exports-by-name (make-hash-table :test #'equal)))
+    (dolist (used-package packages)
+      (dolist (external-symbol (gethash :exports used-package))
+        (let* ((name (%rt-symbol-name-key external-symbol))
+               (previous (gethash name exports-by-name)))
+          (when (and previous (not (eq previous external-symbol)))
+            (return-from %rt-package-export-conflict-name name))
+          (setf (gethash name exports-by-name) external-symbol))))
+    nil))
+
+(defun %rt-package-present-symbol-conflict (package used-packages)
+  "Return the first present-symbol conflict between PACKAGE and USED-PACKAGES."
+  (loop with symbols = (gethash :symbols package)
+        for used-package in used-packages
+        thereis
+        (loop for external-symbol in (gethash :exports used-package)
+              for name = (%rt-symbol-name-key external-symbol)
+              for existing = (gethash name symbols)
+              when (and existing (not (eq existing external-symbol)))
+                return name)))
+
+(defun %rt-registry-unique-packages ()
+  "Return unique package descriptors from the runtime registry."
+  (loop with seen = (make-hash-table :test #'eq)
+        for package being the hash-values of *rt-package-registry*
+        unless (gethash package seen)
+          collect package
+          and do (setf (gethash package seen) t)))
+
+(defun %rt-find-present-symbol-package (symbol)
+  "Return the registered package whose present-symbol table contains SYMBOL."
+  (loop with key = (%rt-symbol-name-key symbol)
+        for package in (%rt-registry-unique-packages)
+        for table = (gethash :symbols package)
+        thereis
+        (multiple-value-bind (present foundp) (gethash key table)
+          (and foundp (eq present symbol) package))))
+
+(defun %rt-do-unique-symbols-in-table (fn table seen)
+  "Call FN on each unique symbol in TABLE, recording visits in SEEN."
+  (loop for symbol being the hash-values of table
+        unless (gethash symbol seen)
+          do (setf (gethash symbol seen) t)
+             (funcall fn symbol)))
+
+(defun %rt-package-registry-provider ()
+  "Return the current runtime package registry."
+  *rt-package-registry*)
+
 (defun %rt-register-package (package)
   "Ensure PACKAGE designator is present in the runtime package registry and return its descriptor."
   (when package
@@ -286,11 +382,11 @@ host package universe."
                    (%rt-register-package key)))))
     (setf (gethash key *rt-package-registry*) pkg)
     (when nicknames
-      (setf (gethash :nicknames pkg) (mapcar #'%rt-package-key nicknames))
+      (setf (gethash :nicknames pkg) (%rt-package-key-list nicknames))
       (dolist (nickname (gethash :nicknames pkg))
         (setf (gethash nickname *rt-package-registry*) pkg)))
     (when use
-      (rt-use-package (mapcar #'%rt-package-metadata use) pkg))
+      (rt-use-package use pkg))
     pkg))
 
 (defun rt-export (symbols package)
@@ -337,59 +433,38 @@ host package universe."
   "Make PACKAGES-TO-USE accessible to PACKAGE."
   (let* ((pkg (%rt-package-metadata (or package *package*)))
          (use-list (gethash :use-list pkg))
-         (inherited (or (gethash :inherited pkg)
-                        (setf (gethash :inherited pkg) (make-hash-table :test #'equal))))
-         (pkgs (if (listp packages-to-use) packages-to-use (list packages-to-use))))
+         (pkgs (%rt-package-metadata-list packages-to-use)))
     (labels ((conflict (control &rest args)
                (if errorp
                    (apply #'error control args)
                    (return-from rt-use-package :conflict))))
       ;; Check for name conflicts among packages to use and with present symbols.
-      (let ((exports-by-name (make-hash-table :test #'equal)))
-        (dolist (used-pkg pkgs)
-          (let ((used-meta (%rt-package-metadata used-pkg)))
-            (dolist (ext-sym (gethash :exports used-meta))
-              (let* ((name (%rt-symbol-name-key ext-sym))
-                     (previous (gethash name exports-by-name)))
-                (when (and previous (not (eq previous ext-sym)))
-                  (conflict "Name conflict: ~S is exported by multiple used packages" name))
-                (setf (gethash name exports-by-name) ext-sym))))))
-      (dolist (used-pkg pkgs)
-        (let ((used-meta (%rt-package-metadata used-pkg)))
-          (dolist (ext-sym (gethash :exports used-meta))
-            (let* ((name (%rt-symbol-name-key ext-sym))
-                   (existing (gethash name (gethash :symbols pkg))))
-              (when (and existing (not (eq existing ext-sym)))
-                (conflict "Name conflict: ~S is already present in ~A" name (rt-package-name pkg)))))))
+      (let ((export-conflict (%rt-package-export-conflict-name pkgs)))
+        (when export-conflict
+          (conflict "Name conflict: ~S is exported by multiple used packages"
+                    export-conflict)))
+      (let ((present-conflict (%rt-package-present-symbol-conflict pkg pkgs)))
+        (when present-conflict
+          (conflict "Name conflict: ~S is already present in ~A"
+                    present-conflict
+                    (rt-package-name pkg))))
       ;; Merge use-list
-      (let ((new-use (append (mapcar #'%rt-package-metadata pkgs)
-                             (remove-if (lambda (u) (member (%rt-package-key u)
-                                                            (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))
-                                                            :test #'equal))
-                                        use-list))))
-        (setf (gethash :use-list pkg) new-use))
+      (setf (gethash :use-list pkg)
+            (%rt-merge-package-use-list use-list pkgs))
       ;; Populate inherited symbols
-      (clrhash inherited)
-      (dolist (used-meta (gethash :use-list pkg))
-        (dolist (ext-sym (gethash :exports used-meta))
-          (setf (gethash (%rt-symbol-name-key ext-sym) inherited) ext-sym)))
+      (%rt-rebuild-package-inherited-table pkg)
       t)))
 
 (defun rt-unuse-package (packages-to-unuse &optional package)
   "Remove PACKAGES-TO-UNUSE from the use-list of PACKAGE."
   (let* ((pkg (%rt-package-metadata (or package *package*)))
-         (pkgs (if (listp packages-to-unuse) packages-to-unuse (list packages-to-unuse)))
-         (keys-to-remove (mapcar #'%rt-package-key (mapcar #'%rt-package-metadata pkgs))))
+         (keys-to-remove (%rt-package-keys
+                          (%rt-package-metadata-list packages-to-unuse))))
     (setf (gethash :use-list pkg)
-          (remove-if (lambda (u) (member (%rt-package-key u) keys-to-remove :test #'equal))
-                     (gethash :use-list pkg)))
+          (%rt-package-use-list-without-keys (gethash :use-list pkg)
+                                             keys-to-remove))
     ;; Rebuild inherited table
-    (let ((inherited (or (gethash :inherited pkg)
-                         (setf (gethash :inherited pkg) (make-hash-table :test #'equal)))))
-      (clrhash inherited)
-      (dolist (used-meta (gethash :use-list pkg))
-        (dolist (ext-sym (gethash :exports used-meta))
-          (setf (gethash (%rt-symbol-name-key ext-sym) inherited) ext-sym))))
+    (%rt-rebuild-package-inherited-table pkg)
     t))
 
 (defun rt-shadow (symbol-names &optional package)
@@ -463,11 +538,9 @@ host package universe."
   "Return all present symbols named NAME across registered packages."
   (let ((key (string name))
         (symbols nil))
-    (maphash (lambda (_ pkg)
-               (declare (ignore _))
-               (let ((sym (gethash key (gethash :symbols pkg))))
-                 (when sym (pushnew sym symbols :test #'eq))))
-             *rt-package-registry*)
+    (dolist (pkg (%rt-registry-unique-packages))
+      (let ((sym (gethash key (gethash :symbols pkg))))
+        (when sym (pushnew sym symbols :test #'eq))))
     (nreverse symbols)))
 
 (defun rt-rename-package (package new-name &optional new-nicknames)
@@ -476,9 +549,9 @@ host package universe."
          (old-name (gethash :name pkg)))
     ;; Remove old entry, add new
     (remhash old-name *rt-package-registry*)
-     (setf (gethash :name pkg) (%rt-package-key new-name))
+    (setf (gethash :name pkg) (%rt-package-key new-name))
     (when new-nicknames
-      (setf (gethash :nicknames pkg) (mapcar #'%rt-package-key new-nicknames)))
+      (setf (gethash :nicknames pkg) (%rt-package-key-list new-nicknames)))
      (setf (gethash (gethash :name pkg) *rt-package-registry*) pkg)
     ;; Register nicknames
     (when new-nicknames
@@ -498,28 +571,12 @@ host package universe."
 
 (defun rt-list-all-packages ()
   "Return a list of all registered runtime packages."
-  (let ((pkgs '())
-        (seen (make-hash-table :test #'eq)))
-    (maphash (lambda (key pkg)
-               (declare (ignore key))
-               (unless (gethash pkg seen)
-                 (setf (gethash pkg seen) t)
-                 (push pkg pkgs)))
-             *rt-package-registry*)
-    pkgs))
+  (%rt-registry-unique-packages))
 
 (defun rt-symbol-package (symbol)
   "Return the home package of SYMBOL, or NIL if uninterned.
 In runtime registry, search all package symbol tables."
-  (maphash (lambda (key pkg)
-             (declare (ignore key))
-             (let ((table (gethash :symbols pkg)))
-                (multiple-value-bind (present foundp)
-                    (gethash (%rt-symbol-name-key symbol) table)
-                  (when (and foundp (eq present symbol))
-                    (return-from rt-symbol-package pkg)))))
-           *rt-package-registry*)
-  nil)
+  (%rt-find-present-symbol-package symbol))
 
 (defun rt-do-symbols (fn &optional package)
   "Call FN on each symbol in PACKAGE (present and inherited)."
@@ -527,19 +584,9 @@ In runtime registry, search all package symbol tables."
          (table (gethash :symbols pkg))
          (inherited (gethash :inherited pkg))
          (seen (make-hash-table :test #'eq)))
-    (maphash (lambda (key sym)
-               (declare (ignore key))
-               (unless (gethash sym seen)
-                 (setf (gethash sym seen) t)
-                 (funcall fn sym)))
-             table)
+    (%rt-do-unique-symbols-in-table fn table seen)
     (when inherited
-      (maphash (lambda (key sym)
-                 (declare (ignore key))
-                 (unless (gethash sym seen)
-                   (setf (gethash sym seen) t)
-                   (funcall fn sym)))
-                inherited))))
+      (%rt-do-unique-symbols-in-table fn inherited seen))))
 
 (defun rt-do-external-symbols (fn &optional package)
   "Call FN on each external symbol in PACKAGE."
@@ -549,15 +596,8 @@ In runtime registry, search all package symbol tables."
 (defun rt-do-all-symbols (fn)
   "Call FN on every present symbol in every registered package."
   (let ((seen (make-hash-table :test #'eq)))
-    (maphash (lambda (_ pkg)
-               (declare (ignore _))
-               (maphash (lambda (_ sym)
-                          (declare (ignore _))
-                          (unless (gethash sym seen)
-                            (setf (gethash sym seen) t)
-                            (funcall fn sym)))
-                        (gethash :symbols pkg)))
-             *rt-package-registry*)))
+    (dolist (pkg (%rt-registry-unique-packages))
+      (%rt-do-unique-symbols-in-table fn (gethash :symbols pkg) seen))))
 
 (defun rt-symbol-name (symbol)
   "Return the name string of SYMBOL."
@@ -578,7 +618,7 @@ In runtime registry, search all package symbol tables."
 #-cl-cc-self-hosting
 (eval-when (:load-toplevel :execute)
   (%rt-install-bootstrap-hook :register-hook #'%rt-register-vm-runtime-callables)
-  (%rt-install-bootstrap-hook :registry-provider (lambda () *rt-package-registry*))
+  (%rt-install-bootstrap-hook :registry-provider #'%rt-package-registry-provider)
   (%rt-install-bootstrap-hook :find-package-fn #'rt-find-package)
   (%rt-install-bootstrap-hook :intern-fn #'rt-intern)
   (%rt-install-bootstrap-hook :set-symbol-value-fn #'rt-set-symbol-value)

@@ -56,6 +56,43 @@
          (sig  (first sigs)))
     (assert-true (stringp (getf sig :return-type)))))
 
+(deftest php-interface-method-signature-captures-return-by-reference
+  "Interface method signatures preserve PHP's function &name() return marker."
+  (let* ((ast (first (cl-cc/php:parse-php-source
+                      "<?php interface RefSourceIface { public function &current(): mixed; }")))
+         (iface-sym (cl-cc:ast-defclass-name ast))
+         (sigs (getf (gethash iface-sym cl-cc/php:*php-interface-registry*) :methods))
+         (sig (first sigs)))
+    (assert-true sig)
+    (assert-string= "CURRENT" (symbol-name (getf sig :name)))
+    (assert-equal "mixed" (getf sig :return-type))
+    (assert-true (getf sig :returns-by-ref))))
+
+(deftest php-interface-method-signature-captures-parameter-metadata
+  "Interface method signatures preserve modern PHP parameter metadata."
+  (let* ((ast (first (cl-cc/php:parse-php-source
+                      "<?php interface SinkIface { #[Trace] public function write(#[Sensitive] string &$message, int $limit = 10, ...$rest): void; }")))
+         (iface-sym (cl-cc:ast-defclass-name ast))
+         (sigs (getf (gethash iface-sym cl-cc/php:*php-interface-registry*) :methods))
+         (sig (first sigs))
+         (params (getf sig :params))
+         (param-types (getf sig :param-types))
+         (param-defaults (getf sig :param-defaults))
+         (default-ast (cdr (assoc (second params) param-defaults :test #'eq))))
+    (assert-true sig)
+    (assert-equal '(:public) (getf sig :modifiers))
+    (assert-= 2 (length params))
+    (assert-equal '(0) (getf sig :by-ref-indices))
+    (assert-string= "message" (symbol-name (first params)))
+    (assert-string= "rest" (symbol-name (getf sig :variadic-param)))
+    (assert-equal "string" (cdr (assoc (first params) param-types :test #'eq)))
+    (assert-equal "int" (cdr (assoc (second params) param-types :test #'eq)))
+    (assert-true (cl-cc:ast-int-p default-ast))
+    (assert-= 10 (cl-cc:ast-int-value default-ast))
+    (assert-eq (first params) (first (first (getf sig :param-attributes))))
+    (assert-true (getf (rest (first (getf sig :param-attributes))) :php-attributes))
+    (assert-string= "Trace" (cl-cc/php:php-attribute-name (first (getf sig :attributes))))))
+
 (deftest php-interface-empty-body-has-no-methods
   "An interface with an empty body registers with an empty methods list."
   (let* ((ast (first (cl-cc/php:parse-php-source "<?php interface EmptyIfaceX { }")))
@@ -91,6 +128,21 @@
                         "<?php interface Spec { const int LIMIT = 100; }")))
          (slot  (first (cl-cc:ast-defclass-slots ast))))
     (assert-true (stringp (cl-cc:ast-slot-type slot)))))
+
+(deftest php-interface-multiple-constants-in-one-declaration
+  "Interface const declarations may contain several constants sharing one optional type."
+  (let* ((ast   (first (cl-cc/php:parse-php-source
+                        "<?php interface SpecMulti { const int MIN = 1, MAX = 10; }")))
+         (slots (cl-cc:ast-defclass-slots ast))
+         (record (gethash (cl-cc/php::php-ident-sym "SpecMulti")
+                          cl-cc/php:*php-interface-registry*)))
+    (assert-= 2 (length slots))
+    (assert-equal '("MIN" "MAX")
+                  (mapcar (lambda (slot)
+                            (symbol-name (cl-cc:ast-slot-name slot)))
+                          slots))
+    (assert-equal '("int" "int") (mapcar #'cl-cc:ast-slot-type slots))
+    (assert-= 2 (length (getf record :constants)))))
 
 ;;; ─── Interface Extends ───────────────────────────────────────────────────────
 

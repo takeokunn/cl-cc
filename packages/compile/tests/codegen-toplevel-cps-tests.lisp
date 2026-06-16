@@ -75,18 +75,18 @@ Accept either a raw (lambda (k) ...) form or a singleton list containing it."
            ("defun-optional" '(defun cps-safe-opt-fn (x &optional y) x))
            ("defun-key" '(defun cps-safe-key-fn (&key x) x))
            ("defclass" '(defclass cps-safe-class () ((slot :initarg :slot))))
-           ("defmethod" '(defmethod cps-safe-generic ((x integer)) x)))
+           ("defmethod" '(defmethod cps-safe-generic ((x integer)) x))
+           ("set-slot-value" '(setf (slot-value obj 'slot) 1)))
   (form)
   (let* ((expanded (cl-cc/expand:compiler-macroexpand-all form))
          (ast (cl-cc/compile::%lower-toplevel-form-to-ast expanded)))
     (assert-false (cl-cc/compile:%cps-vm-compile-safe-ast-p ast))))
 
-(deftest-each codegen-toplevel-safe-subset-still-allows-simple-definition-and-clos-forms
-  "Simple top-level defvar/CLOS helper forms remain inside the current VM CPS-safe subset."
+(deftest-each codegen-toplevel-safe-subset-still-allows-simple-clos-forms
+  "Simple top-level CLOS helper forms remain inside the current VM CPS-safe subset."
   :cases (("defgeneric" '(defgeneric cps-safe-generic (x)))
            ("make-instance" '(make-instance 'cps-safe-class))
-           ("slot-value" '(slot-value obj 'slot))
-           ("set-slot-value" '(setf (slot-value obj 'slot) 1)))
+           ("slot-value" '(slot-value obj 'slot)))
   (form)
   (let* ((expanded (cl-cc/expand:compiler-macroexpand-all form))
          (ast (cl-cc/compile::%lower-toplevel-form-to-ast expanded)))

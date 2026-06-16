@@ -48,8 +48,8 @@ choosing sliding addresses."
    Installs a forwarding pointer (cons :forwarded dest) at FROM-ADDR slot 0.
    Returns (values new-addr new-to-free)."
   (let* ((header    (rt-heap-object-header heap from-addr))
-         (size      (header-size header))
-         (age       (header-age header))
+         (size      (rt-header-size header))
+         (age       (rt-header-age header))
          (pinned-p  (rt-object-pinned-p heap from-addr))
           ;; Header age is a 2-bit saturating field (0..3).  Dynamic tenure may
           ;; temporarily raise the threshold above that representable maximum; in
@@ -74,8 +74,8 @@ choosing sliding addresses."
                      (rt-heap-ref heap (+ from-addr i))))
       ;; Increment age in the destination header
       (rt-heap-set-header heap dest-addr
-                           (header-increment-age header))
-      (let ((new-age (header-age (rt-heap-object-header heap dest-addr))))
+                           (rt-header-increment-age header))
+      (let ((new-age (rt-header-age (rt-heap-object-header heap dest-addr))))
         (incf (svref (rt-heap-age-hist heap) new-age)))
       ;; Install forwarding pointer in source slot 0
       (rt-heap-set-header heap from-addr
@@ -249,7 +249,7 @@ invariants and minimize waste for concurrent marking."
         ;; Write a dummy header (type-tag 0 = fixnum-like) over the unused
         ;; region so concurrent markers observe a valid object boundary.
         (rt-heap-set-header heap free-pos
-                            (make-header remaining 0 0)))))
+                            (make-rt-header remaining 0 :gc-bits 0)))))
   tlab)
 
 (defun rt-gc-tlab-alloc (heap thread-id size-words)
@@ -343,16 +343,3 @@ buffers are flushed to the heap, allowing the collector to observe the full
 ;;; Each policy adjusts *gc-young-size-words*, *gc-old-size-words*,
 ;;; and *gc-tenuring-threshold*.
 ;;; ------------------------------------------------------------
-
-;;; ------------------------------------------------------------
-;;; TLAB Public API aliases (FR-550)
-;;; ------------------------------------------------------------
-(defun rt-tlab-alloc (heap thread-id size-words)
-  "Public alias for rt-gc-tlab-alloc (FR-550)."
-  (rt-gc-tlab-alloc heap thread-id size-words))
-
-(defun rt-tlab-retire (heap thread-id)
-  "Public alias: retire the TLAB for THREAD-ID (FR-550)."
-  (let ((tlab (rt-tlab-retire-all heap)))
-    (declare (ignore thread-id))
-    tlab))

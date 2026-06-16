@@ -128,7 +128,8 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
         (setf current rest2 kv kv2)))
     ;; Nest empty-bodied variable lets over the rest of the block so locals are
     ;; visible to later statements (function bodies, loop/if blocks all flow here).
-    (values (php-finish-let-bindings (nreverse stmts))
+    (values (php-finish-let-bindings
+             (%php-lower-reference-assignments (nreverse stmts) known-vars))
             (%php-consume-expected :T-RBRACE current) kv)))
 
 (defun %php-parse-namespace-block-body (stream known-vars namespace-name)
@@ -152,7 +153,8 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
           (stmt
            (push (php-annotate-top-level-node stmt) stmts)))
         (setf current rest2 kv kv2)))
-    (values (php-finish-let-bindings (nreverse stmts))
+    (values (php-finish-let-bindings
+             (%php-lower-reference-assignments (nreverse stmts) known-vars))
             (%php-consume-expected :T-RBRACE current) kv)))
 
 (defun %php-parse-statement-body (stream known-vars)
@@ -160,7 +162,10 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
   (if (eq (php-peek-type stream) :T-LBRACE)
       (php-parse-block stream known-vars)
       (multiple-value-bind (stmt rest kv) (php-parse-statement stream known-vars)
-        (values (if stmt (list stmt) nil) rest kv))))
+        (values (%php-lower-reference-assignments
+                 (if stmt (list stmt) nil)
+                 known-vars)
+                rest kv))))
 
 (defun %php-type-keyword-token-p (stream)
   "Return true when STREAM starts with a keyword valid in PHP type position."
@@ -184,27 +189,66 @@ the current tag, matching the core CL lowerer's ast-tagbody representation."
        (symbol (symbol-name value))
        (string value)))))
 
+(defun %php-parse-parenthesized-type (stream)
+  "Parse a parenthesized PHP type group, used by PHP 8.2 DNF types."
+  (let ((current (cdr stream))
+        (parts nil))
+    (multiple-value-bind (first-part rest) (%php-parse-type-term current)
+      (unless first-part
+        (return-from %php-parse-parenthesized-type (values nil stream)))
+      (push first-part parts)
+      (setf current rest))
+    (loop while (and current
+                     (eq (php-peek-type current) :T-OP)
+                     (member (php-peek-value current) '("|" "&") :test #'equal))
+          for op = (php-peek-value current)
+          do (multiple-value-bind (part rest) (%php-parse-type-term (cdr current))
+               (unless part
+                 (return-from %php-parse-parenthesized-type (values nil stream)))
+               (push op parts)
+               (push part parts)
+               (setf current rest)))
+    (unless (eq (php-peek-type current) :T-RPAREN)
+      (return-from %php-parse-parenthesized-type (values nil stream)))
+    (values (format nil "(~A)" (apply #'concatenate 'string (nreverse parts)))
+            (cdr current))))
+
+(defun %php-parse-type-term (stream)
+  "Parse one PHP type atom or parenthesized type group."
+  (cond
+    ((%php-type-atom-token-p stream)
+     (values (%php-type-token-string (php-peek stream)) (cdr stream)))
+    ((eq (php-peek-type stream) :T-LPAREN)
+     (%php-parse-parenthesized-type stream))
+    (t
+     (values nil stream))))
+
 (defun php-parse-type-annotation (stream)
   "Parse a PHP type annotation from STREAM.
-Returns (values type-string remaining-stream). Handles nullable, union, and
-intersection type syntax as metadata only."
+Returns (values type-string remaining-stream). Handles nullable, union,
+intersection, and PHP 8.2 DNF type syntax as metadata only."
   (let ((current stream)
         (parts nil))
     (when (eq (php-peek-type current) :T-NULLABLE)
       (push "?" parts)
       (setf current (cdr current)))
-    (unless (%php-type-atom-token-p current)
-      (return-from php-parse-type-annotation (values nil stream)))
-    (push (%php-type-token-string (php-peek current)) parts)
-    (setf current (cdr current))
+    (multiple-value-bind (first-part rest) (%php-parse-type-term current)
+      (unless first-part
+        (return-from php-parse-type-annotation (values nil stream)))
+      (push first-part parts)
+      (setf current rest))
     (loop while (and current
                      (eq (php-peek-type current) :T-OP)
                      (member (php-peek-value current) '("|" "&") :test #'equal)
-                     (%php-type-atom-token-p (cdr current)))
-          do (push (php-peek-value current) parts)
-             (setf current (cdr current))
-             (push (%php-type-token-string (php-peek current)) parts)
-             (setf current (cdr current)))
+                     (multiple-value-bind (part _rest)
+                         (%php-parse-type-term (cdr current))
+                       (declare (ignore _rest))
+                       part))
+          for op = (php-peek-value current)
+          do (multiple-value-bind (part rest) (%php-parse-type-term (cdr current))
+               (push op parts)
+               (push part parts)
+               (setf current rest)))
     (values (apply #'concatenate 'string (nreverse parts)) current)))
 
 (defun %php-skip-type-annotation (stream)
@@ -239,9 +283,6 @@ Returns (values param-sym rest param-type param-attr-plist by-ref-p variadic-p).
                                     (when by-ref-p
                                       (list :php-by-ref t)))))))
               (values param rest param-type attr-plist by-ref-p variadic-p))))))))
-
-(defparameter *php-by-ref-param-registry* (make-hash-table :test #'equal)
-  "Maps PHP function name strings to lists of by-reference parameter indices (0-based).")
 
 (defun php-parse-param-list (stream)
   "Parse (attribute* type? &? ..? $param [= default], ...).
@@ -345,14 +386,16 @@ with no explicit default defaults to PHP null."
       (php-parse-type-annotation (cdr stream))
       (values nil stream)))
 
-(defun %php-function-type-declarations (param-types return-type)
+(defun %php-function-type-declarations (param-types return-type &optional returns-by-ref)
   "Build PHP type metadata plist for AST callable declarations."
   (append (when param-types (list :php-param-types param-types))
-          (when return-type (list :php-return-type return-type))))
+          (when return-type (list :php-return-type return-type))
+          (when returns-by-ref (list :php-returns-by-ref t))))
 
-(defun %php-function-declarations (param-types return-type param-attributes attributes target-type)
+(defun %php-function-declarations (param-types return-type param-attributes attributes target-type
+                                   &optional returns-by-ref)
   "Build PHP callable metadata including types and attributes."
-  (append (%php-function-type-declarations param-types return-type)
+  (append (%php-function-type-declarations param-types return-type returns-by-ref)
           (when param-attributes (list :php-param-attributes param-attributes))
           (%php-attribute-metadata attributes target-type)))
 

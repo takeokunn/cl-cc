@@ -2,7 +2,7 @@
 ;;;
 ;;; Contains: rt-symbol-*, rt-intern, rt-make-hash-table, rt-gethash/sethash/remhash/clrhash/maphash,
 ;;; rt-signal-error, rt-signal, rt-warn-fn, rt-cerror, rt-boundp/fboundp,
-;;; rt-random, rt-coerce, rt-read-from-string, rt-read-sexp, rt-write-to-string.
+;;; rt-random, rt-coerce, rt-read-from-string, rt-read-sexp.
 ;;;
 ;;; Strings/characters are in runtime-strings.lisp; CLOS/generic dispatch in runtime-clos.lisp.
 ;;; Depends on runtime.lisp. Load order: after runtime-ops.lisp.
@@ -13,7 +13,6 @@
 ;;; Symbols
 ;;; ------------------------------------------------------------
 
-(defun rt-symbol-name (sym) (symbol-name sym))
 (defun rt-make-symbol (name) (make-symbol name))
 (defvar *rt-global-var-registry* (make-hash-table :test #'eq)
   "Runtime global variable registry used instead of host symbol-value cells.")
@@ -187,9 +186,8 @@ than by host weak tables, so the backing table is always strong."
 (defun rt-hash-table-p (x)
   (if (or (hash-table-p x) (rt-weak-hash-table-p x)) 1 0))
 
-(defun rt-make-hash-table (&rest args &key (test #'eql) size weakness &allow-other-keys)
+(defun rt-make-hash-table (&key (test #'eql) size weakness &allow-other-keys)
   "Create a runtime hash table with optional weak-key/value semantics."
-  (declare (ignore args))
   (unless (%rt-valid-hash-weakness-p weakness)
     (error "Unsupported hash-table weakness mode: ~S" weakness))
   (let ((table (%rt-make-backing-hash-table test size weakness)))
@@ -197,11 +195,8 @@ than by host weak tables, so the backing table is always strong."
         (let ((weak-table (%make-rt-weak-hash-table
                            :table table
                            :weakness weakness
-                           :entries (make-hash-table :test test))))
-          (when (boundp '*rt-weak-hash-table-registry*)
-            (pushnew weak-table *rt-weak-hash-table-registry* :test #'eq))
-          (when (boundp '*weak-hash-tables*)
-            (pushnew weak-table *weak-hash-tables* :test #'eq))
+                           :entries (cl:make-hash-table :test test))))
+          (pushnew weak-table *rt-weak-hash-table-registry* :test #'eq)
           weak-table)
         table)))
 
@@ -342,5 +337,3 @@ than by host weak tables, so the backing table is always strong."
 (defun rt-read-from-string (s) (read-from-string s))
 (defun rt-read-sexp (stream) (read stream))
 (defun rt-coerce (x type) (coerce x type))
-(defun rt-write-to-string (x &rest args)
-  (apply #'write-to-string x args))
