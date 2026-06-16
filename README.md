@@ -12,8 +12,10 @@ nix run .#test       # canonical fast unit plan
 cl-cc repl           # interactive REPL
 cl-cc run file.lisp
 cl-cc run file.php   # PHP frontend (auto-detected by extension)
+cl-cc run file.js    # JavaScript frontend (auto-detected by .js/.mjs)
 cl-cc eval "(+ 1 2)"
 cl-cc compile file.lisp -o out --arch x86-64
+cl-cc compile file.js -o out --arch x86-64
 ```
 
 `nix run .#test` maps to `cl-cc/test:run-tests` and executes the canonical
@@ -492,6 +494,20 @@ PHP's semantics (ordered arrays, loose equality, truthiness, exceptions) are bri
 PHP 8.5 predefined constants include `PHP_VERSION` / `PHP_VERSION_ID`,
 `PHP_BUILD_DATE`, and `PHP_BUILD_PROVIDER`.
 
+## JavaScript Frontend
+
+cl-cc includes a JavaScript frontend that lowers JavaScript source through the
+same CL AST and backend pipeline used by the other frontends. `.js` and `.mjs`
+files are auto-detected; `--lang js` and `--lang javascript` select it
+explicitly for any command.
+
+```bash
+cl-cc run file.js
+cl-cc run file.mjs
+cl-cc compile file.js -o out --arch x86-64
+cl-cc check file.js --strict
+```
+
 ### Unsupported
 
 - Full generator coroutine object/resumption semantics — `yield` / `yield from` parse to runtime data representations, but coroutine execution lowering is not yet implemented.
@@ -541,12 +557,12 @@ rm -rf ~/.cache/common-lisp/ && mkdir -p ~/.cache/common-lisp/
 ## CLI Reference
 
 ```
-cl-cc run <file>          Compile and run a .lisp or .php file
-  --lang lisp|php         Source language (auto-detected from extension)
+cl-cc run <file>          Compile and run a .lisp, .php, .js, or .mjs file
+  --lang lisp|elisp|php|js|javascript Source language (auto-detected from extension)
   --timeout <seconds>     Maximum execution time (default: 30)
   --no-timeout            Disable CLI timeout for debugging
 cl-cc compile <file>      Compile to native Mach-O binary
-  --lang lisp|php         Source language (auto-detected from extension)
+  --lang lisp|elisp|php|js|javascript Source language (auto-detected from extension)
   --arch x86-64|arm64
   -o <output>
   --timeout <seconds>     Maximum execution time (default: 30)
@@ -559,7 +575,7 @@ cl-cc repl                Interactive REPL (definitions persist)
   --timeout <seconds>     Per-form execution timeout (default: 30)
   --no-timeout            Disable REPL form timeout for debugging
 cl-cc check <file>        Type-check without executing
-  --lang lisp|php         Source language (auto-detected from extension)
+  --lang lisp|elisp|php|js|javascript Source language (auto-detected from extension)
   --strict                Treat type warnings as errors
   --timeout <seconds>     Maximum execution time (default: 30)
   --no-timeout            Disable CLI timeout for debugging

@@ -373,49 +373,49 @@ Returns two values: result register and CPS form used for the AST."
 
 (defmethod compile-ast ((node ast-handler-case) ctx)
   "Compile handler-case with a PC→handler side table instead of push/pop ops."
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((clauses           (ast-handler-case-clauses node))
-         (result-reg        (make-register ctx))
-         (normal-exit-label (make-label ctx "handler_case_exit"))
-         (handler-infos     (loop repeat (length clauses)
-                                   collect (list (make-label ctx "handler")
-                                                 (make-register ctx))))
-         (protected-form    (ast-handler-case-form node))
-         (prefix            (ctx-instructions ctx))
-         (form-result       (compile-ast protected-form ctx))
-         (body-rev          (ldiff (ctx-instructions ctx) prefix))
-         (body-instructions (nreverse (copy-list body-rev))))
-    (emit ctx (make-vm-move :dst result-reg :src form-result))
-    (when body-instructions
+  (%with-no-tail-position ctx
+    (let* ((clauses           (ast-handler-case-clauses node))
+           (result-reg        (make-register ctx))
+           (normal-exit-label (make-label ctx "handler_case_exit"))
+           (handler-infos     (loop repeat (length clauses)
+                                    collect (list (make-label ctx "handler")
+                                                  (make-register ctx))))
+           (protected-form    (ast-handler-case-form node))
+           (prefix            (ctx-instructions ctx))
+           (form-result       (compile-ast protected-form ctx))
+           (body-rev          (ldiff (ctx-instructions ctx) prefix))
+           (body-instructions (nreverse (copy-list body-rev))))
+      (emit ctx (make-vm-move :dst result-reg :src form-result))
+      (when body-instructions
+        (loop for clause in clauses
+              for info in handler-infos
+              do (%record-exception-table-entry
+                  (first body-instructions)
+                  (car (last body-instructions))
+                  (first info)
+                  (first clause)
+                  (second info))))
+      (emit ctx (make-vm-jump :label normal-exit-label))
       (loop for clause in clauses
-            for info in handler-infos
-            do (%record-exception-table-entry
-                (first body-instructions)
-                (car (last body-instructions))
-                (first info)
-                (first clause)
-                (second info))))
-    (emit ctx (make-vm-jump :label normal-exit-label))
-    (loop for clause in clauses
-          for info   in handler-infos
-          do (let* ((var           (second clause))
-                    (body          (cddr clause))
-                    (handler-label (first info))
-                    (error-reg     (second info))
-                    (old-env       (ctx-env ctx)))
-               (emit ctx (make-vm-label :name handler-label))
-               (when var
-                 (setf (ctx-env ctx) (cons (cons var error-reg) (ctx-env ctx))))
-               (let ((last-reg (if body
-                                   (loop for form in body
-                                         for r = (compile-ast form ctx)
-                                         finally (return r))
-                                   error-reg)))
-                 (emit ctx (make-vm-move :dst result-reg :src last-reg)))
-               (setf (ctx-env ctx) old-env)
-               (emit ctx (make-vm-jump :label normal-exit-label))))
-    (emit ctx (make-vm-label :name normal-exit-label))
-    result-reg))
+            for info   in handler-infos
+            do (let* ((var           (second clause))
+                      (body          (cddr clause))
+                      (handler-label (first info))
+                      (error-reg     (second info))
+                      (old-env       (ctx-env ctx)))
+                 (emit ctx (make-vm-label :name handler-label))
+                 (when var
+                   (setf (ctx-env ctx) (cons (cons var error-reg) (ctx-env ctx))))
+                 (let ((last-reg (if body
+                                     (loop for form in body
+                                           for r = (compile-ast form ctx)
+                                           finally (return r))
+                                     error-reg)))
+                   (emit ctx (make-vm-move :dst result-reg :src last-reg)))
+                 (setf (ctx-env ctx) old-env)
+                 (emit ctx (make-vm-jump :label normal-exit-label))))
+      (emit ctx (make-vm-label :name normal-exit-label))
+      result-reg)))
 
 (defun %process-toplevel-form (form ctx target type-env type-check safety opts compiled-asts)
   "Compile one top-level FORM and return updated compilation state.

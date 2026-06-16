@@ -309,10 +309,10 @@ Runtime system, data structure operations, string/symbol handling, and sequence 
 
 #### FR-339: Hash Table Size/Rehash Control ✅ (ハッシュテーブルサイズ/再ハッシュ制御)
 
-- **対象**: `packages/vm/src/hash.lisp`
-- **現状**: `vm-make-hash-table`（`hash.lisp:132-140`）は`:test`のみ受理。`:size`/`:rehash-size`/`:rehash-threshold`未サポート。ANSI CL必須のアクセサ（`hash-table-size`等）もなし
-- **内容**: `:size`ヒントを`make-hash-table`に伝達。`hash-table-size`/`hash-table-rehash-size`/`hash-table-rehash-threshold`/`hash-table-count`アクセサ追加。ANSI CL 18.1準拠
-- **根拠**: ANSI CL 18.1必須仕様。大規模テーブルの初期再ハッシュ回避
+- **対象**: `packages/vm/src/hash.lisp`, `packages/vm/src/hash-execute.lisp`, `packages/compile/src/codegen-hash-table.lisp`
+- **現状**: 実装済み。`vm-make-hash-table` は `:test` / `:size` / `:rehash-size` / `:rehash-threshold` / `:weakness` を受理し、`hash-table-size` / `hash-table-rehash-size` / `hash-table-rehash-threshold` / `hash-table-count` も VM 命令として実装済み
+- **内容**: 既存の hash-table 支援を維持しつつ、`make-hash-table` のサイズヒントと各アクセサが ANSI CL 18.1 相当として利用できることを明記
+- **根拠**: `packages/compile/src/builtin-registry-data-ext.lisp` で対応する builtin が登録済み。`docs/ansi-cl-stdlib.md` の hash-table support matrix と整合
 - **難易度**: Easy
 
 #### FR-340: Compile-Time Sequence/String Folding ✅ (コンパイル時シーケンス/文字列畳み込み)

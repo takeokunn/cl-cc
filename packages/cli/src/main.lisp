@@ -1,10 +1,10 @@
 ;;;; cli/src/main.lisp — CL-CC CLI Entry Point
 ;;;;
 ;;;; Subcommands:
-;;;;   run     <file> [--lang lisp|php] [--stdlib] [--verbose]
-;;;;   compile <file> [-o out] [--arch x86-64|arm64] [--lang lisp|php] [--verbose]
+;;;;   run     <file> [--lang lisp|elisp|php|js|javascript] [--stdlib] [--verbose]
+;;;;   compile <file> [-o out] [--arch x86-64|arm64] [--lang lisp|elisp|php|js|javascript] [--verbose]
 ;;;;   eval    <expr> [--stdlib] [--verbose]
-;;;;   check   <file> [--lang lisp|php] [--strict] [--verbose]
+;;;;   check   <file> [--lang lisp|elisp|php|js|javascript] [--strict] [--verbose]
 ;;;;   selfhost [file] [--profile]
 ;;;;   help    [command]
 
@@ -57,7 +57,7 @@ Commands:
 Options:
   -o, --output <file>     Output file (compile only)
   --arch x86-64|arm64|wasm32 Target architecture (default: x86-64)
-  --lang lisp|php         Source language (auto-detect from file extension)
+  --lang lisp|elisp|php|js|javascript Source language (auto-detect from file extension)
   --dump-ir <phase>       Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source       Add source-location comments when available
   --debug                 Keep frame pointers for native compile debugging
@@ -119,7 +119,7 @@ Version: ~A~%" *version*))
   Compile and run a source file using the CL-CC VM.
 
 Options:
-  --lang lisp|php   Source language (auto-detect from .php extension)
+  --lang lisp|elisp|php|js|javascript Source language (auto-detect from extension)
   --dump-ir <phase>  Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source  Add source-location comments when available
   --stdlib          Prepend standard library eagerly
@@ -157,7 +157,7 @@ Options:
   -o, --output <file>   Output file (default: input without extension)
   --system <name>       Compile ASDF system NAME instead of a single file
   --arch x86-64|arm64|wasm32 Target architecture (default: x86-64)
-  --lang lisp|php       Source language (auto-detect from .php extension)
+  --lang lisp|elisp|php|js|javascript Source language (auto-detect from extension)
   --dump-ir <phase>     Dump IR for phase: ast, cps, ssa, vm, opt, asm
   --annotate-source     Add source-location comments when available
   --debug               Keep frame pointers for native compile debugging
@@ -260,7 +260,7 @@ Examples:
   Run type inference on a source file without executing it.
 
  Options:
-  --lang lisp|php   Source language
+  --lang lisp|elisp|php|js|javascript Source language
   --strict          Treat type warnings as errors (exit 1)
   --verbose         Show type-inference details on stderr
   --timeout <seconds>     Maximum execution time (default: 30 seconds)

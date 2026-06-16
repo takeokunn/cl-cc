@@ -269,38 +269,38 @@ failing at compile time."
 
 (defmethod compile-ast ((node ast-binop) ctx)
   ;; binop is never in tail position itself; clear to prevent sub-expression leakage
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((lhs-ast (ast-binop-lhs node))
-         (rhs-ast (ast-binop-rhs node))
-         (lhs-reg (compile-ast lhs-ast ctx))
-         ;; Protect LHS-REG across RHS: if RHS contains a call (e.g.
-         ;; `(+ (* n n) (f x))'), the call must save/restore the LHS temp instead
-         ;; of clobbering it — incremental liveness can't see LHS's future use here.
-         (rhs-reg (%compile-operand-protecting rhs-ast ctx (list lhs-reg)))
-         (dst (make-register ctx))
-         (kind (%numeric-binop-specialization-kind lhs-ast rhs-ast ctx))
-         (guard-type (%guard-type-for-numeric-kind kind))
-         (ctor (%numeric-binop-constructor (ast-binop-op node) lhs-ast rhs-ast ctx)))
-    (if (and (eq (ctx-target ctx) :vm)
-             kind guard-type (> (ctx-safety ctx) 0))
-        (let ((deopt-label (make-label ctx "deopt_binop"))
-              (slow-label (make-label ctx "deopt_binop_slow"))
-              (done-label (make-label ctx "deopt_binop_done"))
-              (deopt-id (make-label ctx "deopt_guard")))
-          (emit ctx (cl-cc/vm::make-vm-type-check
-                     :src lhs-reg :type-name guard-type :label deopt-label :id deopt-id))
-          (emit ctx (cl-cc/vm::make-vm-type-check
-                     :src rhs-reg :type-name guard-type :label deopt-label :id deopt-id))
-          (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg))
-          (emit ctx (make-vm-jump :label done-label))
-          (emit ctx (make-vm-label :name deopt-label))
-          (emit ctx (cl-cc/vm::make-vm-deopt
-                     :label slow-label :id deopt-id :reason (list :type-check guard-type)))
-          (emit ctx (make-vm-label :name slow-label))
-          (emit ctx (funcall (binop-ctor (ast-binop-op node)) :dst dst :lhs lhs-reg :rhs rhs-reg))
-          (emit ctx (make-vm-label :name done-label)))
-        (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg)))
-    dst))
+  (%with-no-tail-position ctx
+    (let* ((lhs-ast (ast-binop-lhs node))
+           (rhs-ast (ast-binop-rhs node))
+           (lhs-reg (compile-ast lhs-ast ctx))
+           ;; Protect LHS-REG across RHS: if RHS contains a call (e.g.
+           ;; `(+ (* n n) (f x))'), the call must save/restore the LHS temp instead
+           ;; of clobbering it — incremental liveness can't see LHS's future use here.
+           (rhs-reg (%compile-operand-protecting rhs-ast ctx (list lhs-reg)))
+           (dst (make-register ctx))
+           (kind (%numeric-binop-specialization-kind lhs-ast rhs-ast ctx))
+           (guard-type (%guard-type-for-numeric-kind kind))
+           (ctor (%numeric-binop-constructor (ast-binop-op node) lhs-ast rhs-ast ctx)))
+      (if (and (eq (ctx-target ctx) :vm)
+               kind guard-type (> (ctx-safety ctx) 0))
+          (let ((deopt-label (make-label ctx "deopt_binop"))
+                (slow-label (make-label ctx "deopt_binop_slow"))
+                (done-label (make-label ctx "deopt_binop_done"))
+                (deopt-id (make-label ctx "deopt_guard")))
+            (emit ctx (cl-cc/vm::make-vm-type-check
+                       :src lhs-reg :type-name guard-type :label deopt-label :id deopt-id))
+            (emit ctx (cl-cc/vm::make-vm-type-check
+                       :src rhs-reg :type-name guard-type :label deopt-label :id deopt-id))
+            (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg))
+            (emit ctx (make-vm-jump :label done-label))
+            (emit ctx (make-vm-label :name deopt-label))
+            (emit ctx (cl-cc/vm::make-vm-deopt
+                       :label slow-label :id deopt-id :reason (list :type-check guard-type)))
+            (emit ctx (make-vm-label :name slow-label))
+            (emit ctx (funcall (binop-ctor (ast-binop-op node)) :dst dst :lhs lhs-reg :rhs rhs-reg))
+            (emit ctx (make-vm-label :name done-label)))
+          (emit ctx (funcall ctor :dst dst :lhs lhs-reg :rhs rhs-reg)))
+      dst)))
 
 (defmethod compile-ast ((node ast-progn) ctx)
   (let ((forms (ast-progn-forms node)))
@@ -314,10 +314,10 @@ failing at compile time."
         (%emit-constant ctx nil))))
 
 (defmethod compile-ast ((node ast-print) ctx)
-  (setf (ctx-tail-position ctx) nil)
-  (let ((reg (compile-ast (ast-print-expr node) ctx)))
-    (emit ctx (make-vm-print :reg reg))
-    reg))
+  (%with-no-tail-position ctx
+    (let ((reg (compile-ast (ast-print-expr node) ctx)))
+      (emit ctx (make-vm-print :reg reg))
+      reg)))
 
 (defun %branch-type-env (ctx guard-var guard-type branch)
   "Return a branch-specialized type environment for GUARD-VAR/GUARD-TYPE."
@@ -362,10 +362,10 @@ Emits a move from the branch result into DST; optionally emits a jump to JUMP-LA
          (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
            (setf (ctx-type-env ctx) (%branch-type-env ctx guard-var guard-type branch))
            (let ((result-reg (compile-ast ast ctx)))
-             (setf (ctx-tail-position ctx) nil)
-             (emit ctx (make-vm-move :dst dst :src result-reg))
-             (when jump-label
-               (emit ctx (make-vm-jump :label jump-label)))))
+             (%with-no-tail-position ctx
+               (emit ctx (make-vm-move :dst dst :src result-reg))
+               (when jump-label
+                 (emit ctx (make-vm-jump :label jump-label))))))
       (setf (ctx-type-env ctx) saved-type-env))))
 
 (defmethod compile-ast ((node ast-if) ctx)
@@ -376,8 +376,8 @@ Emits a move from the branch result into DST; optionally emits a jump to JUMP-LA
          (guard-info (multiple-value-list (extract-type-guard cond-ast)))
          (guard-var  (first guard-info))
          (guard-type (second guard-info))
-         (cond-reg   (progn (setf (ctx-tail-position ctx) nil)
-                            (compile-ast cond-ast ctx)))
+         (cond-reg   (%with-no-tail-position ctx
+                       (compile-ast cond-ast ctx)))
          (dst        (make-register ctx))
          (else-label (make-label ctx "else"))
          (end-label  (make-label ctx "ifend")))

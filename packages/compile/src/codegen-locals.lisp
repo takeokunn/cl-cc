@@ -2,8 +2,9 @@
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; Codegen — Local Function Bindings and Assembly Utilities
 ;;;
-;;; Contains: %compile-body-with-tail, %compile-inline-lambda-call,
-;;; %emit-noescape-array-read/write, %compile-closure-body,
+;;; Contains: %compile-inline-lambda-call,
+;;; %emit-noescape-array-read/write, %compile-body-with-tail-ret,
+;;; %compile-closure-body,
 ;;; compile-ast methods for ast-function/ast-flet/ast-labels,
 ;;; target-instance, emit-assembly, type-check-ast.
 ;;;
@@ -15,29 +16,18 @@
 
 ;;; ── Function references and local function bindings ──────────────────────
 
-(defun %compile-body-with-tail (body tail ctx)
-  "Compile BODY forms with tail-position tracking. Returns the last result register."
-  (labels ((scan (forms last-reg)
-             (if (consp forms)
-                 (progn
-                   (setf (ctx-tail-position ctx)
-                         (if (null (cdr forms)) tail nil))
-                   (scan (cdr forms) (compile-ast (car forms) ctx)))
-                 last-reg)))
-    (scan body nil)))
-
 (defun %compile-inline-lambda-call (lambda-node arg-asts tail ctx)
   "Compile a direct call to a non-escaping lambda without emitting vm-closure."
-  (let ((old-env  (ctx-env ctx))
-        (old-tail (ctx-tail-position ctx)))
+  (let ((old-env (ctx-env ctx)))
     (unwind-protect
          (let ((arg-bindings (mapcar (lambda (p a) (cons p (compile-ast a ctx)))
                                      (ast-lambda-params lambda-node)
                                      arg-asts)))
            (setf (ctx-env ctx) (append arg-bindings old-env))
-           (%compile-body-with-tail (ast-lambda-body lambda-node) tail ctx))
+           (%with-restored-tail-position ctx
+             (%compile-body-with-tail (ast-lambda-body lambda-node) tail ctx)))
       (setf (ctx-env ctx) old-env)
-      (setf (ctx-tail-position ctx) old-tail))))
+      )))
 
 (defun %emit-noescape-dispatch-loop (size index-reg label-prefix end-label hit-fn ctx)
   "Emit a runtime index-dispatch loop for a noescape array.
@@ -92,35 +82,33 @@ Falls through to an oob error when no index matches."
    Binds PARAMS to PARAM-REGS in CTX-ENV under base ENV, compiles BODY-FORMS
    in tail position, emits vm-ret with the last result register.
    Restores CTX-ENV on exit."
-  (let ((old-env (ctx-env ctx))
-        (old-tail (ctx-tail-position ctx)))
+  (let ((old-env (ctx-env ctx)))
     (unwind-protect
          (let ((*string-literal-pool* (%copy-string-literal-pool *string-literal-pool*)))
            (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
-           (let ((last-reg (%compile-body-with-tail body-forms t ctx)))
-             (setf (ctx-tail-position ctx) nil)
-             (emit ctx (make-vm-ret :reg last-reg))))
+           (%with-restored-tail-position ctx
+             (%compile-body-with-tail-ret body-forms t ctx)))
       (setf (ctx-env ctx) old-env)
-      (setf (ctx-tail-position ctx) old-tail))))
+      )))
 
 (defmethod compile-ast ((node ast-function) ctx)
   "Compile #'name — look up function by name, returning a closure reference."
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((name (ast-function-name node))
-         (dst  (make-register ctx)))
-    (if (symbolp name)
-        (let ((entry (assoc name (ctx-env ctx) :test #'eq)))
-          (if entry
-              (if (assoc name *labels-boxed-fns* :test #'eq)
-                  (emit ctx (make-vm-car  :dst dst :src (cdr entry)))
-                  (emit ctx (make-vm-move :dst dst :src (cdr entry))))
-              (if (gethash name (ctx-global-generics ctx))
-                  (emit ctx (make-vm-get-global :dst dst :name name))
-                  (emit ctx (make-vm-func-ref   :dst dst :label (format nil "~A" name))))))
-        (if (and (consp name) (eq (car name) 'setf))
-            (emit ctx (make-vm-func-ref :dst dst :label (format nil "SETF_~A" (second name))))
-            (error "Invalid function name: ~S" name)))
-    dst))
+  (%with-no-tail-position ctx
+    (let* ((name (ast-function-name node))
+           (dst  (make-register ctx)))
+      (if (symbolp name)
+          (let ((entry (assoc name (ctx-env ctx) :test #'eq)))
+            (if entry
+                (if (assoc name *labels-boxed-fns* :test #'eq)
+                    (emit ctx (make-vm-car  :dst dst :src (cdr entry)))
+                    (emit ctx (make-vm-move :dst dst :src (cdr entry))))
+                (if (gethash name (ctx-global-generics ctx))
+                    (emit ctx (make-vm-get-global :dst dst :name name))
+                    (emit ctx (make-vm-func-ref   :dst dst :label (format nil "~A" name))))))
+          (if (and (consp name) (eq (car name) 'setf))
+              (emit ctx (make-vm-func-ref :dst dst :label (format nil "SETF_~A" (second name))))
+              (error "Invalid function name: ~S" name)))
+      dst)))
 
 ;;; ── flet ─────────────────────────────────────────────────────────────────
 
@@ -319,9 +307,7 @@ Falls through to an oob error when no index matches."
            (progn
              (emit ctx (make-vm-label :name func-label))
              (setf (ctx-env ctx) (append (mapcar #'cons params param-regs) env))
-             (let ((last-reg (%compile-body-with-tail binding t ctx)))
-               (setf (ctx-tail-position ctx) nil)
-               (emit ctx (make-vm-ret :reg last-reg))))
+             (%compile-body-with-tail-ret binding t ctx))
         (setf (ctx-env ctx) old-env)))))
 
 (defun %labels-tail-jump-entries (infos bindings)

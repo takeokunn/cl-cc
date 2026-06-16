@@ -44,7 +44,7 @@
 
 (defun %wasm-compile-source-to-vm-result (source file language kwargs)
   "Compile SOURCE to a VM compilation-result for wasm sidecar metadata."
-  (if (eq (or language :lisp) :lisp)
+  (if (member (or language :lisp) '(:lisp :elisp))
       (apply #'compile-string source :source-file file :language :lisp :target :vm kwargs)
       (apply #'compile-string source :language language :target :vm kwargs)))
 

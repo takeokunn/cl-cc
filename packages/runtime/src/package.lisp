@@ -96,7 +96,9 @@
    #:rt-keywordp #:rt-parse-integer
    ;; Hash tables
    #:rt-make-hash-table #:rt-gethash #:rt-sethash #:rt-remhash #:rt-clrhash
-   #:rt-hash-count #:rt-hash-test #:rt-maphash #:rt-hash-keys #:rt-hash-values
+   #:rt-hash-count #:rt-hash-test #:rt-hash-size
+   #:rt-hash-rehash-size #:rt-hash-rehash-threshold
+   #:rt-maphash #:rt-hash-keys #:rt-hash-values
     #:rt-hash-table-p #:rt-hash-table-weakness
      ;; Weak hash tables (FR-448, FR-449)
      #:rt-weak-hash-table #:rt-weak-hash-table-p

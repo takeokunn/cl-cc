@@ -97,7 +97,7 @@ these defaults ensure every registry entry carries useful metadata.")
                                  :ctor ctor
                                  :properties (%builtin-entry-properties cl-sym convention)))
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
-        (cl-cc/prolog::register-prolog-rule (list pred cl-sym ctor)))))))
+        (cl-cc/prolog::register-prolog-rule (list pred cl-sym ctor))))))
 
 (defun %register-slots-builtins (entries convention)
   "Register parametric entries under CONVENTION in *builtin-registry*.

@@ -26,7 +26,7 @@
     #:prolog-cut
    ;; Data tables & builtins
     #:*builtin-predicate-specs* #:*builtin-predicates*
-    #:*peephole-rules* #:*enable-prolog-peephole*
+    #:*peephole-rules*
     ;; Solver
     #:solve-goal
     #:query-all #:query-one #:query-first-n

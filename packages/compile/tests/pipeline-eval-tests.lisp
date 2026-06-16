@@ -175,9 +175,13 @@
   (funcall verify (cl-cc::%prescan-in-package source)))
 
 (deftest-each pipeline-parse-source-for-language
-  "parse-source-for-language: :lisp parses one/multiple forms; unknown signals error."
+  "parse-source-for-language: :lisp/:elisp parses one/multiple forms; unknown signals error."
   :cases (("single-form"
            "(+ 1 2)" :lisp 1
+           (lambda (forms)
+             (assert-equal '(+ 1 2) (first forms))))
+          ("single-form-elisp"
+           "(+ 1 2)" :elisp 1
            (lambda (forms)
              (assert-equal '(+ 1 2) (first forms))))
           ("multiple-forms"

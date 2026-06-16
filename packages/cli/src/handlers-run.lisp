@@ -6,7 +6,7 @@
 (defun %do-run (parsed)
   "Handle the `cl-cc run' subcommand using PARSED command-line arguments.
 
-Reads the required input file, detects Lisp or PHP mode, compiles to the VM,
+Reads the required input file, detects Lisp/Emacs Lisp or PHP mode, compiles to the VM,
 executes the program, optionally emits trace/flamegraph/PGO artifacts, and
 exits with status 0 on success."
   (let* ((file (%required-file-arg parsed "run"))
@@ -35,7 +35,7 @@ exits with status 0 on success."
                                  (cl-cc/vm:make-vm-state :output-stream *standard-output*)))
                    (kwargs (%compile-opts-kwargs opts stream)))
               (cond
-                ((eq language :lisp)
+                ((member language '(:lisp :elisp))
                   (let ((result (%compile-lisp-with-auto-stdlib source kwargs stdlib no-stdlib)))
                     (%bind-command-line-arguments (%script-argv-from-parsed parsed) vm-state)
                     (let ((ret (%run-compiled-result result vm-state opts)))

@@ -40,6 +40,8 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   "detect-language: auto-detects language from the file extension"
   :cases (("php ext"   "foo.php"  "" :php)
           ("lisp ext"  "foo.lisp" "" :lisp)
+          ("elisp ext" "foo.el"   "" :elisp)
+          ("elisp alias ext" "foo.elisp" "" :elisp)
           ("cl ext"    "foo.cl"   "" :lisp)
           ("txt ext"   "foo.txt"  "" :lisp))
   (file lang-flag expected)
@@ -74,6 +76,7 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   "detect-language: explicit --lang flag wins over file extension"
   :cases (("php flag beats lisp ext"  "foo.lisp" "php"  :php)
           ("lisp flag beats php ext"  "foo.php"  "lisp" :lisp)
+          ("elisp flag beats lisp ext" "foo.lisp" "elisp" :elisp)
           ("php flag with no ext"     "Makefile" "php"  :php))
   (file lang-flag expected)
 (assert-eq expected (cl-cc/cli::%detect-language file lang-flag)))
@@ -82,6 +85,7 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
   "detect-language: unknown lang flag falls through to extension detection."
   :cases (("php-ext"  "foo.php"  :php)
           ("lisp-ext" "foo.lisp" :lisp)
+          ("elisp-ext" "foo.el" :elisp)
           ("no-ext"   "foo"      :lisp))
   (file expected)
   ;; 'ruby' is not a known lang, so extension check runs next

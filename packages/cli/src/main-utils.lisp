@@ -54,17 +54,18 @@ Signals an error when the file does not exist."
         text)))
 
 (defparameter *lang-flag-map*
-  '(("php" . :php) ("lisp" . :lisp)
+  '(("php" . :php) ("lisp" . :lisp) ("elisp" . :elisp)
     ("js" . :javascript) ("javascript" . :javascript))
   "Alist mapping --lang flag strings to language keywords.")
 
 (defparameter *lang-ext-map*
-  '(("php" . :php) ("js" . :javascript) ("mjs" . :javascript))
+  '(("php" . :php) ("el" . :elisp) ("elisp" . :elisp)
+    ("js" . :javascript) ("mjs" . :javascript))
   "Alist mapping file extensions to non-default language keywords.")
 
 (defun %detect-language (file lang-flag)
   "Determine source language from LANG-FLAG string or FILE extension.
-Returns :lisp, :php, or :javascript."
+Returns :lisp, :elisp, :php, or :javascript."
   (or (cdr (assoc lang-flag *lang-flag-map* :test #'string=))
       (let ((ext (and file (pathname-type file))))
         (and ext (cdr (assoc ext *lang-ext-map* :test #'string=))))

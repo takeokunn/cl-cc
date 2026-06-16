@@ -31,9 +31,8 @@
   "T when NAME is declared dynamic-extent in DECLARATIONS."
   (dynamic-extent-declared-p declarations name))
 
-(defun %let-dynamic-extent-direct-use-p (body-forms binding-name call-ok-p)
-  "T when BODY-FORMS use BINDING-NAME only in CALL-OK-P approved call shapes,
-while still permitting those shapes through captured lambdas/local forms."
+(defun %let-dynamic-extent-body-forms-ok-p (body-forms binding-name call-ok-p)
+  "Shared recursive walker for dynamic-extent body analysis."
   (labels ((ok-list (forms)
              (and (listp forms) (every #'okp forms)))
            (shadowed-body-ok-p (bound-names body)
@@ -92,6 +91,11 @@ while still permitting those shapes through captured lambdas/local forms."
                (ast-call (funcall call-ok-p node #'okp))
                (t (ok-list (ast-children node))))))
     (ok-list body-forms)))
+
+(defun %let-dynamic-extent-direct-use-p (body-forms binding-name call-ok-p)
+  "T when BODY-FORMS use BINDING-NAME only in CALL-OK-P approved call shapes,
+while still permitting those shapes through captured lambdas/local forms."
+  (%let-dynamic-extent-body-forms-ok-p body-forms binding-name call-ok-p))
 
 (defun %let-dynamic-extent-cons-direct-consumers-p (body-forms binding-name)
   "T when BODY-FORMS only use BINDING-NAME as the direct argument to CAR/CDR,

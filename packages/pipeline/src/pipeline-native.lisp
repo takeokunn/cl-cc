@@ -252,7 +252,7 @@ Returns two values: the compilation result and whether the CPS-native path was u
 (defun %compile-native-source (source target language opts)
   "Compile SOURCE for native emission, choosing the narrowest readable entrypoint."
   (if (stringp source)
-      (if (eq language :lisp)
+      (if (member language '(:lisp :elisp))
           (%compile-native-lisp-forms (parse-all-forms source) target opts)
           (%compile-native-string source target language opts))
       (multiple-value-bind (cps-result cps-used)
@@ -538,7 +538,7 @@ don't accept as keyword arguments."
 SOURCE can be a string (single expression) or a list of forms.
 ARCH is :X86-64 or :ARM64.
 OUTPUT-FILE is the path for the executable.
-LANGUAGE is :LISP (default) or :PHP.
+LANGUAGE is :LISP (default), :ELISP, or :PHP.
 TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-detected
 from the host OS. The binary format is derived from TARGET-OS: Mach-O on Darwin,
 ELF on Linux, PE on Windows.
@@ -618,9 +618,11 @@ Returns the output file path on success."
       language
       (let ((file-type (pathname-type input-file)))
         (if file-type
-            (if (string= file-type "php")
-                :php
-                :lisp)
+            (cond ((string= file-type "php") :php)
+                  ((or (string= file-type "el")
+                       (string= file-type "elisp"))
+                   :elisp)
+                  (t :lisp))
             :lisp))))
 
 (defun %native-output-file (input-file output-file)
@@ -695,7 +697,7 @@ Returns the output file path on success."
   "Compile a CL-CC source file to a native executable.
 INPUT-FILE is the path to the source file.
 OUTPUT-FILE defaults to INPUT-FILE with no extension.
-LANGUAGE is :LISP or :PHP. When nil, auto-detected from the file extension.
+LANGUAGE is :LISP, :ELISP, or :PHP. When nil, auto-detected from the file extension.
 TARGET-OS is :DARWIN (default on macOS), :LINUX, or :WINDOWS. When NIL, auto-detected."
   (let* ((effective-language (%native-file-language input-file language))
          (output (%native-output-file input-file output-file))

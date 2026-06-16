@@ -13,13 +13,6 @@
      (lambda (,registers)
        ,@body)))
 
-(defun %compile-body/k (forms ctx continuation)
-  "Compile FORMS as a body, then call CONTINUATION with the last register."
-  (let ((last nil))
-    (dolist (form forms)
-      (setf last (compile-ast form ctx)))
-    (funcall continuation last)))
-
 (defun %emit-nil-register (ctx)
   "Emit NIL into a fresh register and return it."
   (let ((nil-reg (make-register ctx)))
@@ -150,6 +143,45 @@ bindings named LIST must continue through the dynamic apply path."
             (not (%codegen-call-assoc 'list (ctx-env ctx))))
       (values t (ast-call-args spread-arg))
       (values nil nil)))
+
+(defun %apply-spread-plan (args ctx)
+  "Return a plist describing APPLY's leading args and final spread arg.
+
+The :kind entry is one of :literal, :list-call, or :dynamic.  When the spread
+is statically known, the plan also includes :values or :forms for the chosen
+lowering path."
+  (let* ((plan (%apply-argument-plan args))
+         (leading-args (getf plan :leading))
+         (spread-arg (getf plan :spread)))
+    (multiple-value-bind (literal-spread-p spread-values)
+        (%literal-apply-spread-values spread-arg)
+      (when literal-spread-p
+        (return-from %apply-spread-plan
+          (list :leading leading-args
+                :spread spread-arg
+                :kind :literal
+                :values spread-values))))
+    (multiple-value-bind (list-spread-p spread-forms)
+        (%list-call-apply-spread-forms spread-arg ctx)
+      (when list-spread-p
+        (return-from %apply-spread-plan
+          (list :leading leading-args
+                :spread spread-arg
+                :kind :list-call
+                :forms spread-forms))))
+    (list :leading leading-args
+          :spread spread-arg
+          :kind :dynamic)))
+
+(defmacro %with-apply-spread-dispatch ((plan leading-args) &key literal list-call dynamic)
+  "Dispatch APPLY lowering from a shared spread PLAN."
+  (let ((plan-var (gensym "APPLY-PLAN-")))
+    `(let ((,plan-var ,plan))
+       (let ((,leading-args (getf ,plan-var :leading)))
+         (case (getf ,plan-var :kind)
+           (:literal ,literal)
+           (:list-call ,list-call)
+           (t ,dynamic))))))
 
 (defun %quoted-value-forms (values)
   "Convert literal VALUES into AST quote forms."

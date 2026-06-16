@@ -101,6 +101,28 @@
           (assert-true helper-called)
           (assert-true compile-toplevel-called)))))
 
+(deftest pipeline-native-compile-to-native-string-single-form-elisp-uses-direct-path
+  "compile-to-native routes single-form Elisp strings through the direct native compile path while native CPS is disabled."
+  (let ((helper-called nil)
+         (compile-toplevel-called nil))
+    (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
+                              (lambda (form &rest args)
+                                (declare (ignore form args))
+                                (setf helper-called t)
+                                (values nil nil)))
+      (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                (lambda (&rest args)
+                                  (declare (ignore args))
+                                  (setf compile-toplevel-called t)
+                                  (cl-cc/compile:make-compilation-result :program :fallback)))
+          (with-native-build-stubs ()
+            (assert-equal #P"out.bin"
+                          (cl-cc::compile-to-native "(+ 1 2)"
+                                                    :output-file #P"out.bin"
+                                                    :language :elisp))
+          (assert-true helper-called)
+          (assert-true compile-toplevel-called)))))
+
 (deftest pipeline-native-compile-file-single-safe-form-uses-direct-path
   "compile-file-to-native routes a single Lisp top-level form through the direct native top-level path while native CPS is disabled."
   (uiop:with-temporary-file (:pathname input :type "lisp" :keep t)
@@ -120,10 +142,35 @@
                                     (setf compile-toplevel-called t)
                                     (cl-cc/compile:make-compilation-result :program :fallback)))
            (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
-             (assert-equal #P"out.bin"
-                           (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
+            (assert-equal #P"out.bin"
+                          (cl-cc::compile-file-to-native input :output-file #P"out.bin" :language :lisp))
             (assert-equal '(+ 1 2) helper-form)
             (assert-true compile-toplevel-called)))))
+       (ignore-errors (delete-file input)))))
+
+(deftest pipeline-native-compile-file-elisp-single-safe-form-auto-detects-extension
+  "compile-file-to-native auto-detects .el files as Elisp and routes them through the direct native top-level path while native CPS is disabled."
+  (uiop:with-temporary-file (:pathname input :type "el" :keep t)
+    (let ((helper-form nil)
+          (compile-toplevel-called nil))
+      (with-open-file (stream input :direction :output :if-exists :supersede)
+        (write-line "(in-package :cl-user)" stream)
+        (write-line "(+ 1 2)" stream))
+      (with-replaced-function (cl-cc::%maybe-compile-native-via-cps
+                               (lambda (form &rest args)
+                                 (declare (ignore args))
+                                 (setf helper-form form)
+                                 (values nil nil)))
+        (with-replaced-function (cl-cc/compile:compile-toplevel-forms
+                                 (lambda (&rest args)
+                                   (declare (ignore args))
+                                   (setf compile-toplevel-called t)
+                                   (cl-cc/compile:make-compilation-result :program :fallback)))
+          (with-native-build-stubs (:cache-path #P"./tmp-native-cache.bin")
+            (assert-equal #P"out.bin"
+                          (cl-cc::compile-file-to-native input :output-file #P"out.bin"))
+            (assert-equal '(+ 1 2) helper-form)
+            (assert-true compile-toplevel-called))))
        (ignore-errors (delete-file input)))))
 
 (deftest pipeline-native-compile-file-multi-form-uses-cps-aware-toplevel

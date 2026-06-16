@@ -98,6 +98,26 @@
       (assert-= 2 (length collected)))
     (assert-equal 'equal (cl-cc/runtime:rt-hash-test ht))))
 
+(deftest rt-hash-table-resizing-accessors
+  "rt-make-hash-table accepts ANSI resizing keys and exposes them."
+  (let ((ht (cl-cc/runtime:rt-make-hash-table :test #'equal
+                                              :size 4
+                                              :rehash-size 2.0
+                                              :rehash-threshold 0.75))
+        (weak (cl-cc/runtime:rt-make-hash-table :test #'equal
+                                                :size 4
+                                                :rehash-size 3.0
+                                                :rehash-threshold 0.6
+                                                :weakness :key)))
+    (assert-equal 'equal (cl-cc/runtime:rt-hash-test ht))
+    (assert-true (>= (cl-cc/runtime:rt-hash-size ht) 4))
+    (assert-= 2.0 (cl-cc/runtime:rt-hash-rehash-size ht))
+    (assert-= 0.75 (cl-cc/runtime:rt-hash-rehash-threshold ht))
+    (assert-equal :key (cl-cc/runtime:rt-hash-table-weakness weak))
+    (assert-true (>= (cl-cc/runtime:rt-hash-size weak) 4))
+    (assert-= 3.0 (cl-cc/runtime:rt-hash-rehash-size weak))
+    (assert-= 0.6 (cl-cc/runtime:rt-hash-rehash-threshold weak))))
+
 ;;; ─── Conditions ────────────────────────────────────────────────────────────
 
 (deftest rt-signal-error-signals

@@ -1,6 +1,7 @@
 ;;;; packages/runtime/src/runtime-math-io.lisp - CL-CC Runtime: Symbols, Hash Tables, Conditions, Misc
 ;;;
 ;;; Contains: rt-symbol-*, rt-intern, rt-make-hash-table, rt-gethash/sethash/remhash/clrhash/maphash,
+;;;            rt-hash-count/test/size/rehash-size/rehash-threshold,
 ;;; rt-signal-error, rt-signal, rt-warn-fn, rt-cerror, rt-boundp/fboundp,
 ;;; rt-random, rt-coerce, rt-read-from-string, rt-read-sexp.
 ;;;
@@ -162,15 +163,20 @@ kept in *RT-GLOBAL-VAR-REGISTRY* rather than in thread-local dynamic frames."
 (defun %rt-valid-hash-weakness-p (weakness)
   (member weakness +rt-hash-table-weakness-modes+ :test #'eq))
 
-(defun %rt-make-backing-hash-table (test size weakness)
+(defun %rt-make-backing-hash-table (test size rehash-size rehash-threshold weakness)
   "Create a strong host hash table for RT hash-table wrappers.
 
 Weakness is represented by RT-WEAK-HASH-TABLE metadata and GC cleanup rather
 than by host weak tables, so the backing table is always strong."
   (declare (ignore weakness))
-  (if size
-      (cl:make-hash-table :test test :size size)
-      (cl:make-hash-table :test test)))
+  (let ((args (list :test test)))
+    (when size
+      (setf args (append args (list :size size))))
+    (when rehash-size
+      (setf args (append args (list :rehash-size rehash-size))))
+    (when rehash-threshold
+      (setf args (append args (list :rehash-threshold rehash-threshold))))
+    (apply #'cl:make-hash-table args)))
 
 (defun %rt-hash-table-backing (ht)
   (etypecase ht
@@ -186,16 +192,18 @@ than by host weak tables, so the backing table is always strong."
 (defun rt-hash-table-p (x)
   (if (or (hash-table-p x) (rt-weak-hash-table-p x)) 1 0))
 
-(defun rt-make-hash-table (&key (test #'eql) size weakness &allow-other-keys)
+(defun rt-make-hash-table (&key (test #'eql) size rehash-size rehash-threshold weakness &allow-other-keys)
   "Create a runtime hash table with optional weak-key/value semantics."
   (unless (%rt-valid-hash-weakness-p weakness)
     (error "Unsupported hash-table weakness mode: ~S" weakness))
-  (let ((table (%rt-make-backing-hash-table test size weakness)))
+  (let ((table (%rt-make-backing-hash-table test size rehash-size rehash-threshold weakness)))
     (if weakness
         (let ((weak-table (%make-rt-weak-hash-table
                            :table table
                            :weakness weakness
-                           :entries (cl:make-hash-table :test test))))
+                           :entries (cl:make-hash-table :test test
+                                                        :rehash-size rehash-size
+                                                        :rehash-threshold rehash-threshold))))
           (pushnew weak-table *rt-weak-hash-table-registry* :test #'eq)
           weak-table)
         table)))
@@ -249,6 +257,18 @@ than by host weak tables, so the backing table is always strong."
 (defun rt-hash-count (ht)
   (when (rt-weak-hash-table-p ht) (%rt-sweep-weak-hash-table ht))
   (hash-table-count (%rt-hash-table-backing ht)))
+
+(defun rt-hash-size (ht)
+  (when (rt-weak-hash-table-p ht) (%rt-sweep-weak-hash-table ht))
+  (hash-table-size (%rt-hash-table-backing ht)))
+
+(defun rt-hash-rehash-size (ht)
+  (when (rt-weak-hash-table-p ht) (%rt-sweep-weak-hash-table ht))
+  (hash-table-rehash-size (%rt-hash-table-backing ht)))
+
+(defun rt-hash-rehash-threshold (ht)
+  (when (rt-weak-hash-table-p ht) (%rt-sweep-weak-hash-table ht))
+  (hash-table-rehash-threshold (%rt-hash-table-backing ht)))
 
 (defun rt-hash-test (ht) (hash-table-test (%rt-hash-table-backing ht)))
 

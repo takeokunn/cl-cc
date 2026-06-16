@@ -274,7 +274,6 @@ bodies are compiled/cached independently."
   (let ((old-env (ctx-env ctx))
         (old-type-env (ctx-type-env ctx))
         (old-global-var-cache (ctx-global-var-cache ctx))
-        (old-tail (ctx-tail-position ctx))
         (old-current-function-name (ctx-current-function-name ctx))
         (old-current-function-label (ctx-current-function-label ctx))
         (old-current-function-params (ctx-current-function-params ctx))
@@ -305,18 +304,11 @@ bodies are compiled/cached independently."
                (emit-supplied-p-checks ctx supplied-p-entries))
            (if non-constant-defaults
                (emit-non-constant-defaults ctx non-constant-defaults))
-           (let ((last-reg (loop with r = nil
-                                  for rest on body
-                                  do (setf (ctx-tail-position ctx)
-                                           (if (null (cdr rest)) t nil))
-                                     (setf r (compile-ast (car rest) ctx))
-                                  finally (return r))))
-             (setf (ctx-tail-position ctx) nil)
-             (emit ctx (make-vm-ret :reg last-reg))))
+           (%with-restored-tail-position ctx
+             (%compile-body-with-tail-ret body t ctx))))
       (setf (ctx-env ctx) old-env)
       (setf (ctx-type-env ctx) old-type-env)
       (setf (ctx-global-var-cache ctx) old-global-var-cache)
-      (setf (ctx-tail-position ctx) old-tail)
       (setf (ctx-current-function-name ctx) old-current-function-name)
       (setf (ctx-current-function-label ctx) old-current-function-label)
       (setf (ctx-current-function-params ctx) old-current-function-params)

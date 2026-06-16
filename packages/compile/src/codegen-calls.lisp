@@ -138,33 +138,41 @@ saves/restores it instead of clobbering it."
            (apply-args (rest args))
            (local-func-name (and (typep func-arg 'ast-var) (ast-var-name func-arg)))
            (raw-func-reg (cond
-                            ((typep func-arg 'ast-function)
-                             (compile-ast func-arg ctx))
+                           ((typep func-arg 'ast-function)
+                            (compile-ast func-arg ctx))
                            ((typep func-arg 'ast-var)
                             (compile-ast func-arg ctx))
                            ((symbolp func-arg)
                             (%resolve-func-sym-reg func-arg ctx))
                            (t
                             (compile-ast func-arg ctx))))
-           (func-reg0 (if (and local-func-name (%codegen-call-assoc local-func-name *labels-boxed-fns*))
+           (func-reg0 (if (and local-func-name
+                               (%codegen-call-assoc local-func-name *labels-boxed-fns*))
                           (let ((unboxed (make-register ctx)))
                             (emit ctx (make-vm-car :dst unboxed :src raw-func-reg))
                             unboxed)
-                           raw-func-reg))
-            (func-reg (make-register ctx)))
+                          raw-func-reg))
+           (func-reg (make-register ctx)))
       (emit ctx (make-vm-move :dst func-reg :src func-reg0))
-      (let* ((plan (%apply-argument-plan apply-args))
-             (leading-args (getf plan :leading))
-             (spread-arg (getf plan :spread)))
-        (multiple-value-bind (literal-spread-p spread-values)
-            (%literal-apply-spread-values spread-arg)
-          (if literal-spread-p
-               (%compile-apply-literal-spread leading-args spread-values func-reg result-reg tail ctx)
-               (multiple-value-bind (list-spread-p spread-forms)
-                   (%list-call-apply-spread-forms spread-arg ctx)
-                 (if list-spread-p
-                     (%compile-apply-list-call-spread leading-args spread-forms func-reg result-reg tail ctx)
-                    (%compile-apply-dynamic-spread apply-args func-reg result-reg tail ctx)))))))))
+      (let ((spread-plan (%apply-spread-plan apply-args ctx)))
+        (%with-apply-spread-dispatch (spread-plan leading-args)
+          :literal (%compile-apply-literal-spread leading-args
+                                                   (getf spread-plan :values)
+                                                   func-reg
+                                                   result-reg
+                                                   tail
+                                                   ctx)
+          :list-call (%compile-apply-list-call-spread leading-args
+                                                       (getf spread-plan :forms)
+                                                       func-reg
+                                                       result-reg
+                                                       tail
+                                                       ctx)
+            :dynamic (%compile-apply-dynamic-spread apply-args
+                                                     func-reg
+                                                     result-reg
+                                                     tail
+                                                       ctx))))))
 
 (defun %try-compile-noescape-closure (func-expr args tail ctx)
   "Inline a noescape lambda closure — no vm-closure emitted."
@@ -428,7 +436,7 @@ Each handler form must return RESULT-REG on success or NIL to continue."
   "Compile a function call via priority-ordered fast-path dispatch.
    Each %try-compile-* returns RESULT-REG on success, NIL to fall through."
   (let* ((tail      (ctx-tail-position ctx))
-         (func-expr (progn (setf (ctx-tail-position ctx) nil) (ast-call-func node)))
+         (func-expr (%with-no-tail-position ctx (ast-call-func node)))
          (func-sym  (cond ((symbolp func-expr) func-expr)
                           ((and (typep func-expr 'ast-var)
                                 (not (%ast-var-function-value-p (ast-var-name func-expr) ctx)))

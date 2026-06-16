@@ -265,7 +265,7 @@ Returns SOURCE."
   "Recompile SOURCE (language detected from FILE) and run it in VM-STATE.
 Lisp sources use the auto-stdlib fallback; other languages compile directly."
   (let* ((language (%detect-language file ""))
-         (result (if (eq language :lisp)
+         (result (if (member language '(:lisp :elisp))
                      (%compile-lisp-with-auto-stdlib source nil nil nil)
                      (compile-string source :target :vm :language language))))
     (run-compiled (compilation-result-program result) :state vm-state)))

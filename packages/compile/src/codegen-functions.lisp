@@ -16,8 +16,8 @@
   "Compile a top-level macro definition.
 Registers the macro expander at compile time so subsequent forms can use it.
 At runtime, defmacro evaluates to the macro name."
-  (setf (ctx-tail-position ctx) nil)
-  (let ((name (ast-defmacro-name node))
+  (%with-no-tail-position ctx
+    (let ((name (ast-defmacro-name node))
         (lambda-list (ast-defmacro-lambda-list node))
         (body (ast-defmacro-body node)))
     (cl-cc/expand:register-macro name (cl-cc/expand:make-macro-expander lambda-list body))

@@ -10,8 +10,9 @@
 ;;;       %instance-binding-static-slot-only-p
 ;;;       %closure-binding-direct-call-only-p
 ;;;
-;;; Classification predicates, binding emitters, and compile-ast (ast-let)
-;;; are in codegen-core-let-emit.lisp (loads after).
+;;; Classification predicates and binding emitters live in
+;;; codegen-core-let-emit.lisp.
+;;; compile-ast (ast-let) lives in codegen-core-let-emit-pass.lisp.
 ;;;
 ;;; Load order: after codegen-core.lisp, before codegen-core-let-emit.lisp.
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

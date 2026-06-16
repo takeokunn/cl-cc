@@ -1,8 +1,47 @@
 (in-package :cl-cc/compile)
+
+(defun %compile-body/k (forms ctx continuation)
+  "Compile FORMS as a body, then call CONTINUATION with the last register."
+  (let ((last nil))
+    (dolist (form forms)
+      (setf last (compile-ast form ctx)))
+    (funcall continuation last)))
+
+(defun %compile-body-with-tail (body tail ctx)
+  "Compile BODY forms with tail-position tracking and return the last result register."
+  (labels ((scan (forms last-reg)
+             (if (consp forms)
+                 (progn
+                   (setf (ctx-tail-position ctx)
+                         (if (null (cdr forms)) tail nil))
+                   (scan (cdr forms) (compile-ast (car forms) ctx)))
+                 last-reg)))
+    (scan body nil)))
+
+(defun %compile-body-with-tail-ret (body tail ctx)
+  "Compile BODY with tail tracking and emit a return from the last result."
+  (let ((last-reg (%compile-body-with-tail body tail ctx)))
+    (%with-no-tail-position ctx
+      (emit ctx (make-vm-ret :reg last-reg)))))
+
+(defmacro %with-no-tail-position (ctx &body body)
+  "Clear tail-position tracking for BODY without restoring the prior value."
+  `(progn
+     (setf (ctx-tail-position ,ctx) nil)
+     ,@body))
+
+(defmacro %with-restored-tail-position (ctx &body body)
+  "Run BODY with CTX tail-position restored afterward."
+  `(let ((old-tail (ctx-tail-position ,ctx)))
+     (unwind-protect
+          (progn ,@body)
+       (setf (ctx-tail-position ,ctx) old-tail))))
 ;;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;; Codegen — Control Flow, Assignment, and Type Assertions
 ;;;
-;;; Contains: lookup-block, compile-ast for ast-block/ast-return-from,
+;;; Contains: %compile-body/k, %compile-body-with-tail, %compile-body-with-tail-ret,
+;;; %with-no-tail-position, %with-restored-tail-position,
+;;; lookup-block, compile-ast for ast-block/ast-return-from,
 ;;; lookup-tag, compile-ast for ast-tagbody/ast-go,
 ;;; compile-ast for ast-setq/ast-quote/ast-the,
 ;;; type-error-message-from-mismatch, %emit-the-runtime-assertion.
@@ -24,33 +63,32 @@
         (error "Unknown block: ~S" name))))
 
 (defmethod compile-ast ((node ast-block) ctx)
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((block-name (ast-block-name node))
-         (exit-label (make-label ctx "block_exit"))
-         (result-reg (make-register ctx))
-         (old-block-env (ctx-block-env ctx)))
-    (unwind-protect
-         (progn
-           (setf (ctx-block-env ctx)
-                 (cons (cons block-name (cons exit-label result-reg))
-                       (ctx-block-env ctx)))
-           (let ((last nil))
-             (dolist (form (ast-block-body node))
-               (setf last (compile-ast form ctx)))
-             (emit ctx (make-vm-move :dst result-reg :src last))))
-      (setf (ctx-block-env ctx) old-block-env))
-    (emit ctx (make-vm-label :name exit-label))
-    result-reg))
+  (%with-no-tail-position ctx
+    (let* ((block-name (ast-block-name node))
+           (exit-label (make-label ctx "block_exit"))
+           (result-reg (make-register ctx))
+           (old-block-env (ctx-block-env ctx)))
+      (unwind-protect
+           (progn
+             (setf (ctx-block-env ctx)
+                   (cons (cons block-name (cons exit-label result-reg))
+                         (ctx-block-env ctx)))
+             (emit ctx (make-vm-move
+                        :dst result-reg
+                        :src (%compile-body/k (ast-block-body node) ctx #'identity))))
+        (setf (ctx-block-env ctx) old-block-env))
+      (emit ctx (make-vm-label :name exit-label))
+      result-reg)))
 
 (defmethod compile-ast ((node ast-return-from) ctx)
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((block-info (lookup-block ctx (ast-return-from-name node)))
-         (exit-label (car block-info))
-         (result-reg (cdr block-info))
-         (value-reg (compile-ast (ast-return-from-value node) ctx)))
-    (emit ctx (make-vm-move :dst result-reg :src value-reg))
-    (emit ctx (make-vm-jump :label exit-label))
-    result-reg))
+  (%with-no-tail-position ctx
+    (let* ((block-info (lookup-block ctx (ast-return-from-name node)))
+           (exit-label (car block-info))
+           (result-reg (cdr block-info))
+           (value-reg (compile-ast (ast-return-from-value node) ctx)))
+      (emit ctx (make-vm-move :dst result-reg :src value-reg))
+      (emit ctx (make-vm-jump :label exit-label))
+      result-reg)))
 
 ;;; ── Control flow: tagbody / go ───────────────────────────────────────────
 
@@ -62,32 +100,32 @@
         (error "Unknown tag: ~S" tag))))
 
 (defmethod compile-ast ((node ast-tagbody) ctx)
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((*string-literal-pool* nil)
-         (tags (ast-tagbody-tags node))
-         (end-label (make-label ctx "tagbody_end"))
-         (result-reg (make-register ctx))
-         (old-tagbody-env (ctx-tagbody-env ctx))
-         (tag-labels nil))
-    (setq tag-labels (loop for tag-entry in tags
-                           collect (cons (car tag-entry) (make-label ctx "tag"))))
-    (unwind-protect
-         (progn
-           (setf (ctx-tagbody-env ctx) (append tag-labels (ctx-tagbody-env ctx)))
-           (if tag-labels
-               (emit ctx (make-vm-jump :label (cdr (car tag-labels))))
-               (emit ctx (make-vm-const :dst result-reg :value nil)))
-           (loop for tag-entry in tags
-                 do (let* ((tag   (car tag-entry))
-                           (forms (cdr tag-entry))
-                           (label (cdr (%assoc-eq tag tag-labels))))
-                      (emit ctx (make-vm-label :name label))
-                      (dolist (form forms) (compile-ast form ctx))
-                      (when forms (emit ctx (make-vm-jump :label end-label))))))
-      (setf (ctx-tagbody-env ctx) old-tagbody-env))
-    (emit ctx (make-vm-label :name end-label))
-    (emit ctx (make-vm-const :dst result-reg :value nil))
-    result-reg))
+  (%with-no-tail-position ctx
+    (let* ((*string-literal-pool* nil)
+           (tags (ast-tagbody-tags node))
+           (end-label (make-label ctx "tagbody_end"))
+           (result-reg (make-register ctx))
+           (old-tagbody-env (ctx-tagbody-env ctx))
+           (tag-labels nil))
+      (setq tag-labels (loop for tag-entry in tags
+                             collect (cons (car tag-entry) (make-label ctx "tag"))))
+      (unwind-protect
+           (progn
+             (setf (ctx-tagbody-env ctx) (append tag-labels (ctx-tagbody-env ctx)))
+             (if tag-labels
+                 (emit ctx (make-vm-jump :label (cdr (car tag-labels))))
+                 (emit ctx (make-vm-const :dst result-reg :value nil)))
+             (loop for tag-entry in tags
+                   do (let* ((tag   (car tag-entry))
+                             (forms (cdr tag-entry))
+                             (label (cdr (%assoc-eq tag tag-labels))))
+                        (emit ctx (make-vm-label :name label))
+                        (dolist (form forms) (compile-ast form ctx))
+                        (when forms (emit ctx (make-vm-jump :label end-label))))))
+        (setf (ctx-tagbody-env ctx) old-tagbody-env))
+      (emit ctx (make-vm-label :name end-label))
+      (emit ctx (make-vm-const :dst result-reg :value nil))
+      result-reg)))
 
 (defmethod compile-ast ((node ast-go) ctx)
   (let ((label (lookup-tag ctx (ast-go-tag node))))
@@ -97,33 +135,33 @@
 ;;; ── Assignment: setq / quote / the ──────────────────────────────────────
 
 (defmethod compile-ast ((node ast-setq) ctx)
-  (setf (ctx-tail-position ctx) nil)
-  (let* ((var-name (ast-setq-var node))
-         (value-reg (compile-ast (ast-setq-value node) ctx))
-         (local-entry (%assoc-eq var-name (ctx-env ctx))))
-    (cond
-      ((and local-entry (%member-eq-p var-name (ctx-boxed-vars ctx)))
-       ;; Boxed variable: write via (rplaca box new-val)
-       (emit ctx (make-vm-rplaca :cons (cdr local-entry) :val value-reg))
-       value-reg)
-      (local-entry
-       (emit ctx (make-vm-move :dst (cdr local-entry) :src value-reg))
-       (cdr local-entry))
-      ((gethash var-name (ctx-global-variables ctx))
-        (let ((cache-reg (%global-cache-reg ctx var-name)))
-          (when cache-reg
-            (emit ctx (make-vm-move :dst cache-reg :src value-reg)))
-          (emit ctx (make-vm-set-global :name var-name :src (or cache-reg value-reg))))
-        value-reg)
-      (t
-       ;; Assigning to an as-yet-unknown variable creates it as a global. This
-       ;; matches the dynamic-language semantics of the PHP/JS frontends (a fresh
-       ;; `$x = …' / `x = …' defines the variable) and lets a programmatically
-       ;; built setq node — e.g. the preg_match($s,$m) $matches out-param
-       ;; lowering — target a variable the parser never declared.
-       (setf (gethash var-name (ctx-global-variables ctx)) t)
-       (emit ctx (make-vm-set-global :name var-name :src value-reg))
-       value-reg))))
+  (%with-no-tail-position ctx
+    (let* ((var-name (ast-setq-var node))
+           (value-reg (compile-ast (ast-setq-value node) ctx))
+           (local-entry (%assoc-eq var-name (ctx-env ctx))))
+      (cond
+        ((and local-entry (%member-eq-p var-name (ctx-boxed-vars ctx)))
+         ;; Boxed variable: write via (rplaca box new-val)
+         (emit ctx (make-vm-rplaca :cons (cdr local-entry) :val value-reg))
+         value-reg)
+        (local-entry
+         (emit ctx (make-vm-move :dst (cdr local-entry) :src value-reg))
+         (cdr local-entry))
+        ((gethash var-name (ctx-global-variables ctx))
+         (let ((cache-reg (%global-cache-reg ctx var-name)))
+           (when cache-reg
+             (emit ctx (make-vm-move :dst cache-reg :src value-reg)))
+           (emit ctx (make-vm-set-global :name var-name :src (or cache-reg value-reg))))
+         value-reg)
+        (t
+         ;; Assigning to an as-yet-unknown variable creates it as a global. This
+         ;; matches the dynamic-language semantics of the PHP/JS frontends (a fresh
+         ;; `$x = …' / `x = …' defines the variable) and lets a programmatically
+         ;; built setq node — e.g. the preg_match($s,$m) $matches out-param
+         ;; lowering — target a variable the parser never declared.
+         (setf (gethash var-name (ctx-global-variables ctx)) t)
+         (emit ctx (make-vm-set-global :name var-name :src value-reg))
+         value-reg)))))
 
 (defmethod compile-ast ((node ast-quote) ctx)
   (%emit-constant ctx (ast-quote-value node)))

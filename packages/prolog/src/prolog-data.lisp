@@ -112,8 +112,6 @@
     ((:ret ?reg1) (:halt ?reg2) ((:ret ?reg1)))
     ((:halt ?reg1) (:ret ?reg2) ((:halt ?reg1)))))
 
-(defparameter *enable-prolog-peephole* t)
-
 (defparameter *prolog-integer-binop-type-operators*
   '(+ - * / mod)
   "Arithmetic operators whose binop forms always infer INTEGER-TYPE in Prolog rules.")

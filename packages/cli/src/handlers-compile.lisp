@@ -50,7 +50,7 @@ For files: compiles a single source file to native binary or IR dump."
        (%call-with-cli-timeout timeout
         (lambda ()
            (flet ((compile-source (source &rest kwargs)
-                    (if (eq (or language :lisp) :lisp)
+                    (if (member (or language :lisp) '(:lisp :elisp))
                         (apply #'compile-string source
                                :source-file (if (compile-opts-deterministic opts)
                                                 (normalize-build-path file)

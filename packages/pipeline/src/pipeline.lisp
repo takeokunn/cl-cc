@@ -536,12 +536,13 @@ takes the top-level path) caught correctly."
 
 (defun parse-source-for-language (source language &key source-file)
   "Parse SOURCE according to LANGUAGE, returning top-level forms for compilation.
-:LISP always returns normal s-expressions; when SOURCE-FILE is provided, a second
-value carries top-level source locations for later AST annotation.
+:LISP and :ELISP always return normal s-expressions; when SOURCE-FILE is
+provided, a second value carries top-level source locations for later AST
+annotation.
 :PHP calls parse-php-source and :JAVASCRIPT calls js-program-forms, both of
 which return shared AST nodes directly (the latter prepends a runtime prelude)."
   (cond
-    ((eq language :lisp)
+    ((member language '(:lisp :elisp))
      (let ((clean-source (%pipeline-strip-shebang-line source)))
        (if source-file
            (%lisp-top-level-source-forms-and-locations clean-source source-file)
@@ -854,10 +855,11 @@ Uses max(current-speed, local-speed) when local speed is an integer."
                                         &allow-other-keys)
   "Compile SOURCE text and return a compilation-result object.
 
-LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
-Lisp input, enables source-location annotations on top-level AST nodes and host
-macro evaluation for real file compilation. TARGET and the remaining keyword
-arguments are forwarded to the expression, top-level, and optimization stages."
+LANGUAGE selects the parser (:LISP, :ELISP, or :PHP). SOURCE-FILE, when
+supplied for Lisp-family input, enables source-location annotations on
+top-level AST nodes and host macro evaluation for real file compilation.
+TARGET and the remaining keyword arguments are forwarded to the expression,
+top-level, and optimization stages."
   (multiple-value-bind (forms source-locations)
       (parse-source-for-language source language :source-file source-file)
     (when (eq language :php)
@@ -899,9 +901,9 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                     :werror-categories werror-categories
                     :compilation-tier (normalize-compilation-tier compilation-tier)))
            (result (%call-with-source-file-macro-eval
-                    (and (eq language :lisp) source-file)
+                    (and (member language '(:lisp :elisp)) source-file)
                     (lambda ()
-                      (if (eq language :lisp)
+                      (if (member language '(:lisp :elisp))
                           (%compile-string-forms forms opts)
                            (%call-with-tiered-optimizer-policy
                             opts
@@ -911,7 +913,7 @@ arguments are forwarded to the expression, top-level, and optimization stages."
       (setf (cl-cc/vm:vm-program-compilation-tier
              (cl-cc/compile:compilation-result-program result))
             (pipeline-opts-compilation-tier opts))
-      (if (and (eq language :lisp) source-locations)
+      (if (and (member language '(:lisp :elisp)) source-locations)
           (%attach-source-locations-to-result result
                                              (%non-in-package-form-locations forms source-locations))
           result))))
@@ -930,9 +932,9 @@ arguments are forwarded to the expression, top-level, and optimization stages."
                                         (compilation-tier *compilation-tier*)
                                         &allow-other-keys)
  "Compile SOURCE text and return a compilation-result object.
- 
-LANGUAGE selects the parser (:LISP or :PHP). SOURCE-FILE, when supplied for
-Lisp input, enables source-location annotations on top-level AST nodes and host
+
+LANGUAGE selects the parser (:LISP, :ELISP, or :PHP). SOURCE-FILE, when supplied for
+Lisp-family input, enables source-location annotations on top-level AST nodes and host
 macro evaluation for real file compilation. TARGET and the remaining keyword
 arguments are forwarded to the expression, top-level, and optimization stages."
    (multiple-value-bind (forms source-locations)

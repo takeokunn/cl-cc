@@ -38,6 +38,11 @@
           (*opt-loop-unroll-max-trip* max-trip))
       (opt-pass-loop-unrolling instructions))))
 
+(defvar *enable-prolog-peephole* t
+  "When non-NIL, run the Prolog peephole and e-graph rewrite stages.
+
+This is an optimizer policy gate, not Prolog engine state.")
+
 (defun %maybe-apply-prolog-rewrite (instructions)
   "Apply the Prolog rewrite stage when enabled, preserving INSTRUCTIONS otherwise.
 The stage first applies the instruction-level Prolog peephole rules and then runs
