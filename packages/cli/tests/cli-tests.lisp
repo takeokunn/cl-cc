@@ -249,12 +249,12 @@ execute BODY, then delete the file.  The file is written as UTF-8 text."
     (expect (cl-boundary-kit:test-system-exit-codes system) :to-equal '(2 0))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
-;;; cl-dataflow integration — dependency graph modeling
+;;; cl-dataflow-kit integration — dependency graph modeling
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(it-sequential "cli-dep-graph-backed-by-cl-dataflow"
+(it-sequential "cli-dep-graph-backed-by-cl-dataflow-kit"
   (let ((graph (cl-cc/cli::%build-dependency-graph)))
-    (expect (member "cl-cc" (cl-dataflow:graph-node-names graph)
+    (expect (member "cl-cc" (cl-dataflow-kit:graph-node-names graph)
                          :test #'string=) :to-be-truthy)
     ;; every renderer produces non-empty output mentioning cl-cc systems
     (dolist (fmt '(:dot :json :mermaid :topo))

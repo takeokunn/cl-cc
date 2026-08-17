@@ -30,8 +30,8 @@
     # locking its own nixpkgs and inflating flake.lock; taking source trees
     # achieves that outcome more completely, since no second nixpkgs enters the
     # lock at all. treefmt-nix, the one real flake input, carries `follows`.
-    cl-prolog = {
-      url = "github:nerima-lisp/cl-prolog/v1.2.0";
+    cl-prolog-kit = {
+      url = "github:nerima-lisp/cl-prolog-kit/v1.5.0";
       flake = false;
     };
     cl-weave = {
@@ -39,7 +39,7 @@
       flake = false;
     };
     # cl-parser-kit backs packages/parse's tokenizer/combinator/Pratt layer,
-    # cl-dataflow backs the packages/pipeline pass-graph orchestration,
+    # cl-dataflow-kit backs the packages/pipeline pass-graph orchestration,
     # cl-boundary-kit provides the testable I/O boundaries used by
     # packages/cli + packages/repl, cl-cli is the declarative argument parser
     # behind packages/cli, and cl-tty-kit provides the ANSI/screen/input
@@ -48,8 +48,8 @@
       url = "github:nerima-lisp/cl-parser-kit/v1.0.0";
       flake = false;
     };
-    cl-dataflow = {
-      url = "github:nerima-lisp/cl-dataflow/v1.0.0";
+    cl-dataflow-kit = {
+      url = "github:nerima-lisp/cl-dataflow-kit/v1.2.0";
       flake = false;
     };
     cl-boundary-kit = {
@@ -120,7 +120,7 @@
       flake = false;
     };
     cl-cc-optimize = {
-      url = "github:nerima-lisp/cl-cc-optimize/5414f773e8fb54855e12f9639b9cb79109a2dbbb";
+      url = "github:nerima-lisp/cl-cc-optimize/51c0db63ff125413568ec08c79e33dcf34f00fbf";
       flake = false;
     };
     cl-cc-codegen-native = {
@@ -254,13 +254,13 @@
 
           # Sibling toolkits, built from the pinned source trees. The `version`
           # of each mirrors the tag or commit its input is pinned to.
-          clProlog = sbcl.buildASDFSystem {
-            pname = "cl-prolog";
-            version = siblingVersion "cl-prolog";
-            src = inputs.cl-prolog;
+          clPrologKit = sbcl.buildASDFSystem {
+            pname = "cl-prolog-kit";
+            version = siblingVersion "cl-prolog-kit";
+            src = inputs.cl-prolog-kit;
             systems = [
-              "cl-prolog"
-              "cl-prolog/callgraph"
+              "cl-prolog-kit"
+              "cl-prolog-kit/callgraph"
             ];
           };
           clWeave = sbcl.buildASDFSystem {
@@ -270,8 +270,8 @@
             systems = [ "cl-weave" ];
           };
           # cl-parser-kit is self-contained. cl-boundary-kit pulls cl-log-kit.
-          # cl-dataflow, cl-cli and cl-tty-kit all depend on the external
-          # cl-prolog engine in production, so clProlog is threaded into their
+          # cl-dataflow-kit, cl-cli and cl-tty-kit all depend on the external
+          # cl-prolog-kit engine in production, so clPrologKit is threaded into their
           # lispLibs and thereby reaches any cl-cc package consuming them.
           clParserKit = sbcl.buildASDFSystem {
             pname = "cl-parser-kit";
@@ -279,12 +279,15 @@
             src = inputs.cl-parser-kit;
             systems = [ "cl-parser-kit" ];
           };
-          clDataflow = sbcl.buildASDFSystem {
-            pname = "cl-dataflow";
-            version = siblingVersion "cl-dataflow";
-            src = inputs.cl-dataflow;
-            systems = [ "cl-dataflow" ];
-            lispLibs = [ clProlog ];
+          clDataflowKit = sbcl.buildASDFSystem {
+            pname = "cl-dataflow-kit";
+            version = siblingVersion "cl-dataflow-kit";
+            src = inputs.cl-dataflow-kit;
+            systems = [ "cl-dataflow-kit" ];
+            lispLibs = [
+              clPrologKit
+              clConcurrentKit
+            ];
           };
           clLogKit = sbcl.buildASDFSystem {
             pname = "cl-log-kit";
@@ -304,14 +307,14 @@
             version = siblingVersion "cl-cli";
             src = inputs.cl-cli;
             systems = [ "cl-cli" ];
-            lispLibs = [ clProlog ];
+            lispLibs = [ clPrologKit ];
           };
           clTtyKit = sbcl.buildASDFSystem {
             pname = "cl-tty-kit";
             version = siblingVersion "cl-tty-kit";
             src = inputs.cl-tty-kit;
             systems = [ "cl-tty-kit" ];
-            lispLibs = [ clProlog ];
+            lispLibs = [ clPrologKit ];
           };
           clRegexKit = sbcl.buildASDFSystem {
             pname = "cl-regex-kit";
@@ -450,7 +453,7 @@
               clCcVm
               clCcType
               clCcAst
-              clProlog
+              clPrologKit
               clParserKit
             ];
           };
@@ -548,10 +551,10 @@
               pkgs
               lib
               sbcl
-              clProlog
+              clPrologKit
               clWeave
               clParserKit
-              clDataflow
+              clDataflowKit
               clBoundaryKit
               clCli
               clTtyKit
@@ -650,7 +653,7 @@
               version
               sbclWithJitTests
               sbclWithTests
-              clProlog
+              clPrologKit
               clWeave
               clCcAst
               ;

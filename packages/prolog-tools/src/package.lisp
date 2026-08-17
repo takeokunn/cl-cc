@@ -4,19 +4,18 @@
 ;;;; nodes to collect caller/callee edges, then delegates the actual
 ;;;; call-graph construction and every generic analysis (reachability,
 ;;;; dead-code, mutual-recursion, FD-constraint graph coloring, the edge-spec
-;;;; DCG grammar) to the external, AST-independent :cl-prolog/callgraph
+;;;; DCG grammar) to the external, AST-independent :cl-prolog-kit/callgraph
 ;;;; system.
 ;;;;
 ;;;; Every generic symbol below (CALL-GRAPH, REACHABLE-P, ...) is
-;;;; IMPORT-FROM'd from :cl-prolog/callgraph and re-exported here rather
-;;;; than requiring callers to write CL-PROLOG/CALLGRAPH: prefixes — this is
+;;;; IMPORT-FROM'd from :cl-prolog-kit/callgraph and re-exported here rather
+;;;; than requiring callers to write CL-PROLOG-KIT/CALLGRAPH: prefixes — this is
 ;;;; a facade so existing call sites (this package's own tests included)
 ;;;; keep working unqualified after the split.
 (defpackage :cl-cc/prolog-tools
   (:use :cl)
-  (:import-from :cl-prolog/callgraph
+  (:import-from :cl-prolog-kit/callgraph
     #:call-graph
-    #:call-graph-p
     #:call-graph-rulebase
     #:call-graph-defined
     #:call-graph-entry-points
@@ -31,9 +30,8 @@
     #:color-call-graph
     #:valid-coloring-p)
   (:export
-    ;; re-exported from cl-prolog/callgraph
+    ;; re-exported from cl-prolog-kit/callgraph
     #:call-graph
-    #:call-graph-p
     #:call-graph-rulebase
     #:call-graph-defined
     #:call-graph-entry-points

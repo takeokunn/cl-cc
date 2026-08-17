@@ -10,7 +10,7 @@
   sbclWithTests,
   sbclWithJitTests,
   apps,
-  clProlog,
+  clPrologKit,
   clWeave,
   clCcAst,
 }:
@@ -53,16 +53,16 @@
     touch $out
   '';
 
-  # Standalone cl-weave suite for packages/prolog-tools (the cl-prolog based
+  # Standalone cl-weave suite for packages/prolog-tools (the cl-prolog-kit based
   # call-graph analysis tools). Independent of `default` above: that one
   # drives cl-cc's own runner via `nix run .#test`, while this package's tests
   # are cl-weave DESCRIBE/IT specs run through
-  # `(asdf:test-system :cl-cc-prolog-tools)`. clProlog and clWeave are plain
+  # `(asdf:test-system :cl-cc-prolog-tools)`. clPrologKit and clWeave are plain
   # `sbcl.buildASDFSystem` derivations built from source (see flake.nix) —
   # their installPhase mirrors the source tree directly into $out (e.g.
-  # $out/cl-prolog.asd), unlike nixpkgs' curated sbclPackages set which nests
+  # $out/cl-prolog-kit.asd), unlike nixpkgs' curated sbclPackages set which nests
   # under /share/common-lisp/source/, so the registry entry is just
-  # "${clProlog}//", not a share/ subpath.
+  # "${clPrologKit}//", not a share/ subpath.
   prologToolsTests =
     pkgs.runCommand "cl-cc-prolog-tools-tests"
       {
@@ -84,7 +84,7 @@
         # cl-cc-prolog-tools :depends-on :cl-cc-ast, which used to be satisfied
         # by packages/ast in this tree. That copy is gone and the standalone
         # repository is authoritative, so the derivation supplies it.
-        export CL_SOURCE_REGISTRY="${clProlog}//:${clWeave}//:${clCcAst}//:$PWD//:"
+        export CL_SOURCE_REGISTRY="${clPrologKit}//:${clWeave}//:${clCcAst}//:$PWD//:"
         sbcl --non-interactive \
           --eval '(require :asdf)' \
           --eval '(asdf:load-asd (truename "packages/prolog-tools/cl-cc-prolog-tools.asd"))' \

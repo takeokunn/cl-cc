@@ -139,7 +139,7 @@
 
 (it-sequential "egraph-builtin-rules-consults-prolog-facts"
   (let ((called nil))
-    (with-replaced-function (cl-prolog:query-prolog
+    (with-replaced-function (cl-prolog-kit:query-prolog
                              (lambda (rulebase goal)
                                (declare (ignore rulebase))
                                (setf called goal)

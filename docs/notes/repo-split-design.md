@@ -2,8 +2,8 @@
 
 > ステータス: ドラフト（全体設計のみ／実装は未着手）
 > 対象: cl-cc モノレポの「良い単位」でのリポジトリ切り出し
-> 前提: 直近で `cl-prolog` `cl-weave` `cl-cli` `cl-tty-kit` `cl-boundary-kit`
-> `cl-dataflow` `cl-parser-kit` を外部化した「切り出しの型」を踏襲する。
+> 前提: 直近で `cl-prolog-kit` `cl-weave` `cl-cli` `cl-tty-kit` `cl-boundary-kit`
+> `cl-dataflow-kit` `cl-parser-kit` を外部化した「切り出しの型」を踏襲する。
 
 ## 1. 目的と原則
 
@@ -63,7 +63,7 @@ Tier0 (依存ゼロ):  bootstrap  ast  binary  runtime  mir  target  ir
                    bytecode  docgen  formatter
 Tier1:             vm(bootstrap,runtime)  parse(ast,bootstrap)
                    type(ast)  cps(ast,bootstrap)  stdlib(bootstrap)
-Tier2:             optimize(vm,type,ast +cl-prolog,cl-parser-kit)
+Tier2:             optimize(vm,type,ast +cl-prolog-kit,cl-parser-kit)
                    expand(type,vm)  debug(vm)
 Tier3:             regalloc(vm,mir,target,optimize)
                    codegen(vm,mir,target,binary,optimize,regalloc)
@@ -127,7 +127,7 @@ cl-cc/runtime  44
 > **formatter/docgen/prolog-tools を切らない理由**: ①は満点(侵入0)だが②で落第。
 > 221〜473 loc に repo 1 個ぶんの配管が付くと *コードより配管が重い*。docgen /
 > prolog-tools はそもそも汎用ライブラリではなく cl-cc の構造に依存した内製ツール
-> （cl-prolog が汎用エンジンなのとは別物）。既に `maybe-load-asd` の probe-file
+> （cl-prolog-kit が汎用エンジンなのとは別物）。既に `maybe-load-asd` の probe-file
 > ガードで疎結合なので、monorepo 内モジュールのままで隔離の恩恵は得られている。
 
 ## 4. 提案するリポジトリ境界（最終ターゲット）
@@ -632,7 +632,7 @@ optimize/php/javascript/runtime/prolog-tools の 16）実際に読ませた。
 | type | ~10,125 | ast | ○ 6テストが`parse`の`lower-sexp-to-ast`待ち（parseは抽出済みなので**今すぐ解消可能**）。`inference-effects.lisp`がVM opcode名をハードコード |
 | parse | 3,573 | ast+bootstrap | ◎ 境界テストが vm/optimize/codegen/compile/expand/type 不在を自己検証 |
 | vm | 25,463 | bootstrap+runtime+cl-regex-kit+cl-tty-kit | ○ 自己ホスト結合(`VM-EVAL`命令・`*vm-self-host-mode*`)は正当。ただし**"Phase 129-160"一式**(v8-objects/JIT hardening/stack-thread)とOSR/tiering/deoptが**codegen-native寄りの内容**でVMに同居 |
-| optimize | 27,528 | vm+type+ast+cl-prolog+cl-parser-kit | ○ vm内部`::`参照0（境界テストで強制）。ただし**約2,000loc(7%)が"roadmap"/FR文書追跡というcl-cc-project固有の管理ツール**でoptimizerパッケージに同居 |
+| optimize | 27,528 | vm+type+ast+cl-prolog-kit+cl-parser-kit | ○ vm内部`::`参照0（境界テストで強制）。ただし**約2,000loc(7%)が"roadmap"/FR文書追跡というcl-cc-project固有の管理ツール**でoptimizerパッケージに同居 |
 | codegen-native(regalloc+codegen+emit) | 23,001 | mir+target(+binaryは子systemのみ) | ○ | ルート`.asd`の`:depends-on`に`cl-cc-binary`が**抜けている**（子systemのcodegenは使うのに宣言漏れ） |
 | binary | 4,622 | cl-log-kit+cl-process-kit | ◎ 純粋なELF/Mach-O/PEライタ。codegen-nativeとの重複は無し |
 | mir | 697 | ゼロ | ○ codegen-nativeの実consumer有り |
@@ -642,7 +642,7 @@ optimize/php/javascript/runtime/prolog-tools の 16）実際に読ませた。
 | php | 19,736 | ast+bootstrap+parse+vm+cl-json-kit | ◎ backend登録プロトコル(`register-backend-bridge-provider`/`-parser`)がクリーンに機能 |
 | javascript | 16,263 | ast+bootstrap+parse+vm+cl-date-kit+cl-json-kit+cl-concurrent-kit | ○ VMクロージャの双方向結合は本質的に残るが、`register-backend-vm-integration-installer`/`-global-seeder`でプロトコル化済み。素朴な特別扱いではない |
 | runtime | 18,244(+test 10,734) | cl-log-kit+cl-process-kit+cl-json-kit | ○ `include/cl-cc.h`は**どこからもビルドされない死んだCヘッダ**。§旧知の19個のorphan並行性モジュールは**個別テストは付いたが依然クロスモジュール利用ゼロ**のまま |
-| **prolog-tools** | 288 | ast+cl-prolog | ✕✕ **§10-6と同じ「宣言はあるが実体は本体側」の罠が再発**。GitHubにrepoはあるが`flake.nix`は未参照、`packages/prolog-tools/src`も`.asd`も削除されておらず、README自身が「これを切り出しても本体はほぼ縮まない」と書いている。本文書の§3判定（切らない）を無視して作業だけ進み、後始末されていない |
+| **prolog-tools** | 288 | ast+cl-prolog-kit | ✕✕ **§10-6と同じ「宣言はあるが実体は本体側」の罠が再発**。GitHubにrepoはあるが`flake.nix`は未参照、`packages/prolog-tools/src`も`.asd`も削除されておらず、README自身が「これを切り出しても本体はほぼ縮まない」と書いている。本文書の§3判定（切らない）を無視して作業だけ進み、後始末されていない |
 
 ### 11-2. 見つかった実害と対処（切り出し方の議論より優先度が高い）
 
@@ -717,10 +717,10 @@ prolog-toolsの後始末——どちらも「壊れているものを直す」�
 2. **`cl-cc-target`を`cl-cc-mir`へ統合完了** — `cl-cc-mir`にファイル移設・
    push・`nix flake check`緑を確認済み。`cl-cc-target`はarchive。
    `cl-cc-codegen-native`・`cl-cc`双方のflake入力をmir単独に統合。
-3. **`prolog-tools`を`cl-prolog`へ分割**——288行のうち約230行（call-graph
+3. **`prolog-tools`を`cl-prolog-kit`へ分割**——288行のうち約230行（call-graph
    構造体・reachability・dead-code・mutual-recursion・graph-coloring・
-   edge-DCG）はcl-cc-ast非依存と判明したため`cl-prolog/callgraph`
-   （cl-prolog v1.2.0）へ移設。`build-call-graph`をAST→edgesの薄い
+   edge-DCG）はcl-cc-ast非依存と判明したため`cl-prolog-kit/callgraph`
+   （cl-prolog-kit v1.2.0）へ移設。`build-call-graph`をAST→edgesの薄い
    アダプタに再設計し、`packages/prolog-tools`はこのアダプタのみに縮小。
    ストレイrepo`cl-cc-prolog-tools`はarchive。
 4. **`cl-cc-type`の宙ぶらりんテスト5本を復活** — `cl-cc-parse`が既に

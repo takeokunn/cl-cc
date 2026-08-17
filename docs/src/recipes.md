@@ -174,7 +174,7 @@ cl-cc check file.js --strict
 ## Inspecting the build
 
 `dep-graph` renders the ASDF dependency graph, modelled with
-[cl-dataflow](https://github.com/nerima-lisp/cl-dataflow):
+[cl-dataflow-kit](https://github.com/nerima-lisp/cl-dataflow-kit):
 
 ```sh
 cl-cc dep-graph --format mermaid
