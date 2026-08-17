@@ -289,20 +289,20 @@
         "type": "github"
       }
     },
-    "cl-dataflow": {
+    "cl-dataflow-kit": {
       "flake": false,
       "locked": {
-        "lastModified": 1784997635,
-        "narHash": "sha256-rsDn/kjFD8XTjLgr36nsnsvlT032/QuiMCI+SCmf+mU=",
+        "lastModified": 1786949793,
+        "narHash": "sha256-26KT1QL7KJ2soRppDDoYwgXyzLKOZjPu0Un0eJBL5M4=",
         "owner": "nerima-lisp",
-        "repo": "cl-dataflow",
-        "rev": "1ad6da80d166f3f8329a5bb670ec6cc0e923f6c3",
+        "repo": "cl-dataflow-kit",
+        "rev": "c4770c3b757bc40a9d5ecfc5de53871ec5da26c8",
         "type": "github"
       },
       "original": {
         "owner": "nerima-lisp",
-        "ref": "v1.0.0",
-        "repo": "cl-dataflow",
+        "ref": "v1.2.0",
+        "repo": "cl-dataflow-kit",
         "type": "github"
       }
     },
@@ -408,20 +408,20 @@
         "type": "github"
       }
     },
-    "cl-prolog": {
+    "cl-prolog-kit": {
       "flake": false,
       "locked": {
-        "lastModified": 1785573228,
-        "narHash": "sha256-bihPczcEz3WovpEQALfq+6lr6q3x1tdFZN3o0YH0XGk=",
+        "lastModified": 1786948477,
+        "narHash": "sha256-3qn9W1Jmbxnr0Si77J7Klo26oX/zjgBVwb5ye74NsTY=",
         "owner": "nerima-lisp",
-        "repo": "cl-prolog",
-        "rev": "ef798f9f669546acb4dfe75492fbd7658909571a",
+        "repo": "cl-prolog-kit",
+        "rev": "239368e1001bc3a8576d45770c9e91da11515d09",
         "type": "github"
       },
       "original": {
         "owner": "nerima-lisp",
-        "ref": "v1.2.0",
-        "repo": "cl-prolog",
+        "ref": "v1.5.0",
+        "repo": "cl-prolog-kit",
         "type": "github"
       }
     },
@@ -511,14 +511,14 @@
         "cl-cc-vm": "cl-cc-vm",
         "cl-cli": "cl-cli",
         "cl-concurrent-kit": "cl-concurrent-kit",
-        "cl-dataflow": "cl-dataflow",
+        "cl-dataflow-kit": "cl-dataflow-kit",
         "cl-date-kit": "cl-date-kit",
         "cl-host-kit": "cl-host-kit",
         "cl-json-kit": "cl-json-kit",
         "cl-log-kit": "cl-log-kit",
         "cl-parser-kit": "cl-parser-kit",
         "cl-process-kit": "cl-process-kit",
-        "cl-prolog": "cl-prolog",
+        "cl-prolog-kit": "cl-prolog-kit",
         "cl-regex-kit": "cl-regex-kit",
         "cl-tty-kit": "cl-tty-kit",
         "cl-weave": "cl-weave",

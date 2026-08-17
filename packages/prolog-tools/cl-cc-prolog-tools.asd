@@ -3,20 +3,20 @@
 ;;;; This package used to hold BOTH the generic call-graph/reachability/
 ;;;; dead-code/FD-coloring/edge-DCG logic AND the small adapter that walks
 ;;;; :cl-cc/ast nodes to build one. The generic ~90% carried no cl-cc
-;;;; knowledge at all, so it moved to the external `cl-prolog/callgraph`
-;;;; system (github:nerima-lisp/cl-prolog); this package is now just the
+;;;; knowledge at all, so it moved to the external `cl-prolog-kit/callgraph`
+;;;; system (github:nerima-lisp/cl-prolog-kit); this package is now just the
 ;;;; thin AST-adapter layer (BUILD-CALL-GRAPH and its two helpers) that
 ;;;; delegates graph construction to it, plus a package.lisp facade that
 ;;;; re-exports the generic analysis functions so existing call sites need
-;;;; no CL-PROLOG/CALLGRAPH: prefix.
+;;;; no CL-PROLOG-KIT/CALLGRAPH: prefix.
 ;;;;
-;;;; Built on the external `cl-prolog` engine (github:nerima-lisp/cl-prolog),
+;;;; Built on the external `cl-prolog-kit` engine (github:nerima-lisp/cl-prolog-kit),
 ;;;; not on cl-cc's own homegrown Prolog engine in packages/prolog
 ;;;; (:cl-cc-prolog, used internally for peephole-optimization rules). The
 ;;;; two are unrelated.
 ;;;;
 ;;;; Leaf system at the cl-cc-ast tier: depends only on :cl-cc-ast and the
-;;;; external :cl-prolog / :cl-prolog/callgraph systems. Its test system
+;;;; external :cl-prolog-kit / :cl-prolog-kit/callgraph systems. Its test system
 ;;;; additionally depends on the external :cl-weave testing framework and is
 ;;;; intentionally NOT folded into the umbrella cl-cc-test.asd aggregate,
 ;;;; since that aggregate is driven by cl-cc's own testing-framework runner
@@ -24,12 +24,12 @@
 ;;;; via `(asdf:test-system :cl-cc-prolog-tools)`.
 
 (asdf:defsystem :cl-cc-prolog-tools
-  :description "cl-cc AST adapter for Prolog-based call-graph analysis, built on the external cl-prolog/callgraph system"
+  :description "cl-cc AST adapter for Prolog-based call-graph analysis, built on the external cl-prolog-kit/callgraph system"
   :author "takeokunn"
   :license "MIT"
   :homepage "https://github.com/nerima-lisp/cl-cc"
   :version "0.1.0"
-  :depends-on (:cl-cc-ast :cl-prolog :cl-prolog/callgraph)
+  :depends-on (:cl-cc-ast :cl-prolog-kit :cl-prolog-kit/callgraph)
   :pathname "src"
   :serial t
   :components
@@ -43,7 +43,7 @@
   :license "MIT"
   :homepage "https://github.com/nerima-lisp/cl-cc"
   :version "0.1.0"
-  :depends-on (:cl-cc-prolog-tools :cl-prolog :cl-prolog/callgraph :cl-weave)
+  :depends-on (:cl-cc-prolog-tools :cl-prolog-kit :cl-prolog-kit/callgraph :cl-weave)
   :pathname "tests"
   :serial t
   :components

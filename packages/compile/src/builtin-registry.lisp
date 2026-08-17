@@ -84,7 +84,7 @@ these defaults ensure every registry entry carries useful metadata.")
            (list :registered-builtin))
    :test #'eq))
 
-(defparameter *builtin-rulebase* (cl-prolog:make-rulebase)
+(defparameter *builtin-rulebase* (cl-prolog-kit:make-rulebase)
   "Fact database of BUILTIN-<CONVENTION>(CL-SYM, VM-CTOR, ...SLOTS) facts,
 one per entry registered via %REGISTER-BUILTINS / %REGISTER-SLOTS-BUILTINS.
 Mirrors *BUILTIN-REGISTRY* as genuine Prolog facts rather than a second,
@@ -104,9 +104,9 @@ but it is asserted for inspection the same way it always has been.")
                                  :ctor ctor
                                  :properties (%builtin-entry-properties cl-sym convention)))
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
-        (cl-prolog:query-prolog-first
+        (cl-prolog-kit:query-prolog-first
          *builtin-rulebase*
-         `(cl-prolog:assertz (,pred ,cl-sym ,ctor)))))))
+         `(cl-prolog-kit:assertz (,pred ,cl-sym ,ctor)))))))
 
 (defun %register-slots-builtins (entries convention)
   "Register parametric entries under CONVENTION in *builtin-registry*.
@@ -124,9 +124,9 @@ but it is asserted for inspection the same way it always has been.")
                                  :slots slots
                                  :properties (%builtin-entry-properties cl-sym convention)))
       (let ((pred (intern (format nil "BUILTIN-~A" (symbol-name convention)))))
-        (cl-prolog:query-prolog-first
+        (cl-prolog-kit:query-prolog-first
          *builtin-rulebase*
-         `(cl-prolog:assertz (,pred ,cl-sym ,ctor ,@slots)))))))
+         `(cl-prolog-kit:assertz (,pred ,cl-sym ,ctor ,@slots)))))))
 
 ;; Populate at load time with direct table references.
 ;; Avoid SYMBOL-VALUE here: during strict selfhost bootstrap, quoted-symbol

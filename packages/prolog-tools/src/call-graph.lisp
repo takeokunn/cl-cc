@@ -2,7 +2,7 @@
 ;;;;
 ;;;; The generic call-graph construction and every analysis over it
 ;;;; (reachability, dead-code, mutual-recursion, FD-constraint coloring, the
-;;;; edge-spec DCG grammar) now live in the external :cl-prolog/callgraph
+;;;; edge-spec DCG grammar) now live in the external :cl-prolog-kit/callgraph
 ;;;; system, re-exported through this package's package.lisp facade. All
 ;;;; that remains here is walking :cl-cc/ast nodes to collect the
 ;;;; (caller . callee) edges that system needs.
@@ -30,7 +30,7 @@
 
 (defun build-call-graph (defuns &key entry-points)
   "Build a CALL-GRAPH from a list of AST-DEFUN nodes by delegating the
-generic graph construction to cl-prolog/callgraph.
+generic graph construction to cl-prolog-kit/callgraph.
 
 ENTRY-POINTS is a list of function-name symbols treated as always-reachable
 roots (e.g. a program's toplevel entry function)."
@@ -39,4 +39,4 @@ roots (e.g. a program's toplevel entry function)."
                      for caller = (cl-cc/ast:ast-defun-name defun-node)
                      nconc (mapcar (lambda (callee) (cons caller callee))
                                    (%collect-call-targets defun-node)))))
-    (cl-prolog/callgraph:build-call-graph-from-edges names edges :entry-points entry-points)))
+    (cl-prolog-kit/callgraph:build-call-graph-from-edges names edges :entry-points entry-points)))

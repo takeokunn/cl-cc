@@ -49,7 +49,7 @@ Commands:
   macrostep <file>        Step through macro expansion (FR-836)
   bisect    [range]       Find regression commit (FR-809)
   features                List feature flags (FR-812)
-  dep-graph [--format F]  ASDF dependency graph via cl-dataflow: dot|json|mermaid|topo (FR-361)
+  dep-graph [--format F]  ASDF dependency graph via cl-dataflow-kit: dot|json|mermaid|topo (FR-361)
   generate  <schema>      Build-time code generation (FR-815)
   update    [pkg]         Update dependencies (FR-813)
   completion <shell>      Print a shell completion script (bash/zsh/fish/…)

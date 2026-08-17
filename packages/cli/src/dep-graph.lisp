@@ -1,9 +1,9 @@
 ;;;; cli/src/dep-graph.lisp — FR-361 Dependency Graph Visualization
 ;;;;
-;;;; The ASDF dependency graph is modeled with the external cl-dataflow library:
-;;;; systems and their dependencies become a real cl-dataflow graph, and the
+;;;; The ASDF dependency graph is modeled with the external cl-dataflow-kit library:
+;;;; systems and their dependencies become a real cl-dataflow-kit graph, and the
 ;;;; DOT / Mermaid renderings and the topological build order come straight from
-;;;; cl-dataflow (graph->dot, graph->mermaid, topological-sort, graph-acyclic-p)
+;;;; cl-dataflow-kit (graph->dot, graph->mermaid, topological-sort, graph-acyclic-p)
 ;;;; rather than hand-assembled output.
 
 (in-package :cl-cc/cli)
@@ -45,30 +45,30 @@ identically everywhere in the CLI rather than duplicating the logic here."
   (%normalize-system-name name))
 
 (defun %build-dependency-graph ()
-  "Build a cl-dataflow graph of registered ASDF systems: every system and
+  "Build a cl-dataflow-kit graph of registered ASDF systems: every system and
 dependency becomes a node, and each dependency becomes a directed edge."
-  (let ((graph (cl-dataflow:make-graph))
+  (let ((graph (cl-dataflow-kit:make-graph))
         (added (make-hash-table :test #'equal)))
     (flet ((ensure-node (name)
              (unless (gethash name added)
                (setf (gethash name added) t)
-               (cl-dataflow:add-node graph (cl-dataflow:make-node name)))))
+               (cl-dataflow-kit:add-node graph (cl-dataflow-kit:make-node name)))))
       (dolist (edge (%collect-asdf-dependency-edges))
         (let ((from (%dep-node-name (car edge)))
               (to   (%dep-node-name (cdr edge))))
           (ensure-node from)
           (ensure-node to)
-          (ignore-errors (cl-dataflow:add-edge graph from to)))))
+          (ignore-errors (cl-dataflow-kit:add-edge graph from to)))))
     graph))
 
 (defun %dep-graph-json (graph)
-  "Render GRAPH as a simple JSON adjacency list, sourced from the cl-dataflow
+  "Render GRAPH as a simple JSON adjacency list, sourced from the cl-dataflow-kit
 graph's edges."
-  ;; cl-dataflow's edge-from / edge-to already return the endpoint node name.
+  ;; cl-dataflow-kit's edge-from / edge-to already return the endpoint node name.
   (let ((nodes (make-hash-table :test #'equal)))
-    (dolist (edge (cl-dataflow:graph-edges graph))
-      (push (cl-dataflow:edge-to edge)
-            (gethash (cl-dataflow:edge-from edge) nodes)))
+    (dolist (edge (cl-dataflow-kit:graph-edges graph))
+      (push (cl-dataflow-kit:edge-to edge)
+            (gethash (cl-dataflow-kit:edge-from edge) nodes)))
     (format t "{~%")
     (let ((first t))
       (maphash (lambda (node deps)
@@ -79,14 +79,14 @@ graph's edges."
     (format t "~%}~%")))
 
 (defun %dep-graph-topo (graph)
-  "Print the topological build order of GRAPH (a genuine cl-dataflow query),
+  "Print the topological build order of GRAPH (a genuine cl-dataflow-kit query),
 noting whether the dependency graph is acyclic."
-  (if (cl-dataflow:graph-acyclic-p graph)
+  (if (cl-dataflow-kit:graph-acyclic-p graph)
       (progn
         (format t "; topological build order (~:[has cycles~;acyclic~]):~%"
-                (cl-dataflow:graph-acyclic-p graph))
-        (dolist (node (cl-dataflow:topological-sort graph))
-          (format t "~A~%" (cl-dataflow:node-name node))))
+                (cl-dataflow-kit:graph-acyclic-p graph))
+        (dolist (node (cl-dataflow-kit:topological-sort graph))
+          (format t "~A~%" (cl-dataflow-kit:node-name node))))
       (format t "; dependency graph has cycles; no topological order~%")))
 
 (defun dep-graph (&key (output-format :dot))
@@ -94,9 +94,9 @@ noting whether the dependency graph is acyclic."
 OUTPUT-FORMAT is :dot, :json, :mermaid, or :topo."
   (let ((graph (%build-dependency-graph)))
     (ecase output-format
-      (:dot     (princ (cl-dataflow:graph->dot graph :name "ASDF_Dependencies"))
+      (:dot     (princ (cl-dataflow-kit:graph->dot graph :name "ASDF_Dependencies"))
                 (terpri))
-      (:mermaid (princ (cl-dataflow:graph->mermaid graph))
+      (:mermaid (princ (cl-dataflow-kit:graph->mermaid graph))
                 (terpri))
       (:topo    (%dep-graph-topo graph))
       (:json    (%dep-graph-json graph)))))

@@ -202,13 +202,13 @@
 ;;; ─── Prolog Fact Tests ─────────────────────────────────────────────────────
 
 (it-sequential "builtin-prolog-facts-registered"
-  (let ((unary-rules (cl-prolog:query-prolog cl-cc/compile::*builtin-rulebase*
+  (let ((unary-rules (cl-prolog-kit:query-prolog cl-cc/compile::*builtin-rulebase*
                                              '(cl-cc/compile::builtin-unary ?sym ?ctor)))
-        (binary-rules (cl-prolog:query-prolog cl-cc/compile::*builtin-rulebase*
+        (binary-rules (cl-prolog-kit:query-prolog cl-cc/compile::*builtin-rulebase*
                                               '(cl-cc/compile::builtin-binary ?sym ?ctor)))
-        (string-cmp-rules (cl-prolog:query-prolog cl-cc/compile::*builtin-rulebase*
+        (string-cmp-rules (cl-prolog-kit:query-prolog cl-cc/compile::*builtin-rulebase*
                                                    '(cl-cc/compile::builtin-string-cmp ?sym ?ctor)))
-        (nullary-rules (cl-prolog:query-prolog cl-cc/compile::*builtin-rulebase*
+        (nullary-rules (cl-prolog-kit:query-prolog cl-cc/compile::*builtin-rulebase*
                                                '(cl-cc/compile::builtin-nullary ?sym ?ctor))))
     (expect (> (length unary-rules) 50) :to-be-truthy)
     (expect (> (length binary-rules) 15) :to-be-truthy)
@@ -216,11 +216,11 @@
     (expect (> (length nullary-rules) 3) :to-be-truthy)))
 
 (it-sequential "builtin-prolog-fact-structure"
-  (let ((car-solution (cl-prolog:query-prolog-first
+  (let ((car-solution (cl-prolog-kit:query-prolog-first
                        cl-cc/compile::*builtin-rulebase*
                        '(cl-cc/compile::builtin-unary car ?ctor))))
     (expect car-solution :to-be-truthy)
-    (expect (cl-prolog:solution-binding '?ctor car-solution) :to-be 'cl-cc/vm:make-vm-car)))
+    (expect (cl-prolog-kit:solution-binding '?ctor car-solution) :to-be 'cl-cc/vm:make-vm-car)))
 
 ;;; ─── Emitter Dispatch Tests ────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@
   :license "MIT"
   :homepage "https://github.com/nerima-lisp/cl-cc"
   :version "0.1.0"
-  :depends-on (:cl-cc :cl-cc-docgen :cl-cli :cl-boundary-kit :cl-tty-kit :cl-dataflow)
+  :depends-on (:cl-cc :cl-cc-docgen :cl-cli :cl-boundary-kit :cl-tty-kit :cl-dataflow-kit)
   :pathname "src"
   :serial t
   :components

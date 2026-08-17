@@ -1,6 +1,6 @@
 ;;;; tests/pbt/prolog-pbt-tests.lisp - Property-Based Tests for Prolog Engine
 ;;;
-;;; Property-based tests for the external cl-prolog unification engine's
+;;; Property-based tests for the external cl-prolog-kit unification engine's
 ;;; UNIFY / LOGIC-SUBSTITUTE / LOGIC-VAR-P (imported in pbt/package.lisp).
 ;;; UNIFY returns (VALUES ENV OK) rather than a single :UNIFY-FAIL sentinel.
 ;;;
@@ -17,7 +17,7 @@
 (in-package :cl-cc/pbt)
 
 
-(cl-weave:describe "cl-prolog unification properties"
+(cl-weave:describe "cl-prolog-kit unification properties"
   (cl-weave:it-property "unify binds a logic variable to an integer"
       ((n (cl-weave:gen-integer :min -1000 :max 1000)))
     (multiple-value-bind (env ok) (unify '?x n)

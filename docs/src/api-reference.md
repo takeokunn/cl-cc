@@ -105,7 +105,7 @@ cl-cc dep-graph
 ```
 
 Renders the ASDF dependency graph, modelled with
-[cl-dataflow](https://github.com/nerima-lisp/cl-dataflow).
+[cl-dataflow-kit](https://github.com/nerima-lisp/cl-dataflow-kit).
 
 ### `cl-cc completion`
 
@@ -151,7 +151,7 @@ Several sibling nerima-lisp libraries back the CLI surface:
 | [cl-cli](https://github.com/nerima-lisp/cl-cli) | argument parsing, `completion` / `docs` / `version` |
 | [cl-tty-kit](https://github.com/nerima-lisp/cl-tty-kit) | terminal styling for the REPL and IR dumps |
 | [cl-boundary-kit](https://github.com/nerima-lisp/cl-boundary-kit) | process-exit I/O, so tests can capture exit codes |
-| [cl-dataflow](https://github.com/nerima-lisp/cl-dataflow) | the `dep-graph` command |
+| [cl-dataflow-kit](https://github.com/nerima-lisp/cl-dataflow-kit) | the `dep-graph` command |
 | [cl-parser-kit](https://github.com/nerima-lisp/cl-parser-kit) | tokenizing the optimizer `--pass-pipeline` spec |
 
 Terminal styling is gated on an interactive TTY, so captured or piped output

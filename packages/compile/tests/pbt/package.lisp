@@ -54,7 +54,7 @@
                 :instruction->sexp :sexp->instruction :vm-dst :vm-src :vm-lhs :vm-rhs
                 :vm-value :vm-car-reg :vm-cdr-reg :vm-cons-reg :vm-val-reg
                 :vm-closure-reg :vm-closure-index)
-  (:import-from :cl-prolog
+  (:import-from :cl-prolog-kit
                 :unify
                 :logic-substitute :logic-var-p))
 

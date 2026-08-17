@@ -1,10 +1,10 @@
 {
   lib,
   sbcl,
-  clProlog,
+  clPrologKit,
   clWeave,
   clParserKit,
-  clDataflow,
+  clDataflowKit,
   clBoundaryKit,
   clCli,
   clTtyKit,
@@ -51,7 +51,7 @@ let
 
   # Build an ASDF system via sbcl.buildASDFSystem with shared boilerplate.
   # extraLispLibs threads in external (non cl-cc-*) derivations -- e.g. the
-  # external cl-prolog engine -- alongside deps, which only resolves names
+  # external cl-prolog-kit engine -- alongside deps, which only resolves names
   # against allSystems (internal cl-cc-* systems).
   mkAsdfSystem =
     {
@@ -82,10 +82,10 @@ let
         "cl-cc-vm"
         "cl-cc-type"
       ];
-      # clProlog backs the peephole/e-graph rewrite rules; clParserKit tokenizes
+      # clPrologKit backs the peephole/e-graph rewrite rules; clParserKit tokenizes
       # and parses the `--pass-pipeline` spec string.
       extraLispLibs = [
-        clProlog
+        clPrologKit
         clParserKit
       ];
     };
@@ -105,7 +105,7 @@ let
         "cl-cc-target"
         "cl-cc-regalloc"
       ];
-      extraLispLibs = [ clProlog ];
+      extraLispLibs = [ clPrologKit ];
     };
     cl-cc-stdlib = {
       src = "packages/stdlib";
@@ -232,13 +232,13 @@ let
       # cl-cli is the declarative argument parser behind the cl-cc command
       # tree; cl-boundary-kit models console/args/system-exit as testable I/O
       # boundaries at the CLI edge; cl-tty-kit provides the ANSI/style helpers
-      # for the interactive REPL and colored IR dumps; cl-dataflow backs the
+      # for the interactive REPL and colored IR dumps; cl-dataflow-kit backs the
       # `dep-graph` command's graph model + DOT/Mermaid/topological export.
       extraLispLibs = [
         clCli
         clBoundaryKit
         clTtyKit
-        clDataflow
+        clDataflowKit
       ];
     };
     cl-cc-testing-framework = {
@@ -304,7 +304,7 @@ let
   );
 
   # Prolog-based call-graph analysis tools (packages/prolog-tools), built on
-  # the external cl-prolog engine — a standalone leaf package registered via
+  # the external cl-prolog-kit engine — a standalone leaf package registered via
   # `maybe-load-asd` in cl-cc.asd rather than folded into the `:cl-cc`
   # dependency closure, so it is exposed here rather than through
   # `mkAsdfSystem`'s internal-only `deps` lookup (which only resolves names
@@ -316,7 +316,7 @@ let
     systems = [ "cl-cc-prolog-tools" ];
     lispLibs = [
       productionAsdfSystems.cl-cc-ast
-      clProlog
+      clPrologKit
     ];
   };
 
@@ -330,7 +330,7 @@ let
     systems = [ "cl-cc-prolog-tools/tests" ];
     lispLibs = [
       productionAsdfSystems.cl-cc-ast
-      clProlog
+      clPrologKit
       clWeave
     ];
   };
