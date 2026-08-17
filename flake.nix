@@ -284,7 +284,10 @@
             version = siblingVersion "cl-dataflow-kit";
             src = inputs.cl-dataflow-kit;
             systems = [ "cl-dataflow-kit" ];
-            lispLibs = [ clPrologKit clConcurrentKit ];
+            lispLibs = [
+              clPrologKit
+              clConcurrentKit
+            ];
           };
           clLogKit = sbcl.buildASDFSystem {
             pname = "cl-log-kit";
