@@ -16,7 +16,6 @@
   (:use :cl)
   (:import-from :cl-prolog-kit/callgraph
     #:call-graph
-    #:call-graph-p
     #:call-graph-rulebase
     #:call-graph-defined
     #:call-graph-entry-points
@@ -33,7 +32,6 @@
   (:export
     ;; re-exported from cl-prolog-kit/callgraph
     #:call-graph
-    #:call-graph-p
     #:call-graph-rulebase
     #:call-graph-defined
     #:call-graph-entry-points
